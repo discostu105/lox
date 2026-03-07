@@ -1,6 +1,7 @@
 mod config;
 mod ws;
 mod daemon;
+mod token;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -103,9 +104,44 @@ impl LoxClient {
 
     fn get_structure(&mut self) -> Result<&Value> {
         if self.structure.is_none() {
-            self.structure = Some(self.get_json("/data/LoxApp3.json")?);
+            self.structure = Some(Self::load_or_fetch_structure(&self.cfg, &self.client)?);
         }
         Ok(self.structure.as_ref().unwrap())
+    }
+
+    fn cache_path(cfg: &Config) -> PathBuf {
+        Config::dir().join("cache").join("structure.json")
+    }
+
+    fn load_or_fetch_structure(cfg: &Config, client: &Client) -> Result<Value> {
+        let cache = Self::cache_path(cfg);
+        // Check cache age: valid for 24h
+        if let Ok(meta) = cache.metadata() {
+            if let Ok(modified) = meta.modified() {
+                let age = std::time::SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or_default();
+                if age.as_secs() < 86400 {
+                    if let Ok(data) = fs::read_to_string(&cache) {
+                        if let Ok(v) = serde_json::from_str::<Value>(&data) {
+                            return Ok(v);
+                        }
+                    }
+                }
+            }
+        }
+        // Fetch fresh
+        let url = format!("{}/data/LoxApp3.json", cfg.host);
+        let resp = client.get(&url)
+            .basic_auth(&cfg.user, Some(&cfg.pass))
+            .send()?.bytes()?;
+        let v: Value = serde_json::from_slice(&resp)?;
+        // Save cache
+        if let Some(parent) = cache.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&cache, &resp);
+        Ok(v)
     }
 
     fn send_cmd(&self, uuid: &str, cmd: &str) -> Result<Value> {
@@ -284,6 +320,10 @@ enum Cmd {
     },
     /// Manage systemd daemon service
     Service { #[command(subcommand)] action: ServiceCmd },
+    /// Manage local cache
+    Cache { #[command(subcommand)] action: CacheCmd },
+    /// Manage auth token (more secure than Basic Auth)
+    Token { #[command(subcommand)] action: TokenCmd },
 }
 
 #[derive(Subcommand)]
@@ -296,6 +336,26 @@ enum ServiceCmd {
     Logs,
     /// Uninstall service
     Uninstall,
+}
+
+#[derive(Subcommand)]
+enum TokenCmd {
+    /// Fetch and save a new token (valid 20 days)
+    Fetch,
+    /// Show current token status
+    Info,
+    /// Delete saved token (revert to Basic Auth)
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum CacheCmd {
+    /// Show cache info
+    Info,
+    /// Clear structure cache (forces fresh fetch)
+    Clear,
+    /// Refresh structure cache now
+    Refresh,
 }
 
 #[derive(Subcommand)]
@@ -734,6 +794,96 @@ User service written to: {:?}", user_path);
                         println!("  sudo systemctl disable --now lox-daemon");
                         println!("  sudo rm /etc/systemd/system/lox-daemon.service");
                     }
+                }
+            }
+        },
+        Cmd::Token { action } => {
+            match action {
+                TokenCmd::Fetch => {
+                    let cfg = Config::load()?;
+                    println!("Fetching token from Miniserver...");
+                    let rt = tokio::runtime::Runtime::new()?;
+                    match rt.block_on(token::acquire_token(&cfg)) {
+                        Ok(ts) => {
+                            let exp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts.valid_until);
+                            let days = ts.valid_until.saturating_sub(
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                            ) / 86400;
+                            println!("✓ Token saved to {:?}", token::TokenStore::path());
+                            println!("  Valid for: {} days", days);
+                        }
+                        Err(e) => bail!("Token fetch failed: {}", e),
+                    }
+                }
+                TokenCmd::Info => {
+                    match token::TokenStore::load() {
+                        Some(ts) => {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                            let days_left = ts.valid_until.saturating_sub(now) / 86400;
+                            println!("Token: {}...{}", &ts.token[..8], &ts.token[ts.token.len()-4..]);
+                            if ts.is_valid() {
+                                println!("Status: ✓ valid ({} days remaining)", days_left);
+                            } else {
+                                println!("Status: ⚠ expired — run: lox token fetch");
+                            }
+                        }
+                        None => println!("No token saved. Using Basic Auth. Run: lox token fetch"),
+                    }
+                }
+                TokenCmd::Clear => {
+                    let path = token::TokenStore::path();
+                    if path.exists() {
+                        fs::remove_file(&path)?;
+                        println!("✓ Token cleared (reverting to Basic Auth)");
+                    } else {
+                        println!("No token to clear");
+                    }
+                }
+            }
+        },
+        Cmd::Cache { action } => {
+            let cfg = Config::load()?;
+            let cache = LoxClient::cache_path(&cfg);
+            match action {
+                CacheCmd::Info => {
+                    if cache.exists() {
+                        let meta = cache.metadata()?;
+                        let age = std::time::SystemTime::now()
+                            .duration_since(meta.modified()?).unwrap_or_default();
+                        let size = meta.len();
+                        println!("Cache: {:?}", cache);
+                        println!("Size:  {:.1} KB", size as f64 / 1024.0);
+                        println!("Age:   {}m {}s", age.as_secs() / 60, age.as_secs() % 60);
+                        if age.as_secs() < 86400 {
+                            println!("Status: ✓ valid ({} until refresh)", {
+                                let remaining = 86400u64.saturating_sub(age.as_secs());
+                                format!("{}h {}m", remaining / 3600, (remaining % 3600) / 60)
+                            });
+                        } else {
+                            println!("Status: ⚠ stale (will refresh on next command)");
+                        }
+                    } else {
+                        println!("No cache. Will be created on first command.");
+                    }
+                }
+                CacheCmd::Clear => {
+                    if cache.exists() {
+                        fs::remove_file(&cache)?;
+                        println!("✓ Cache cleared");
+                    } else {
+                        println!("No cache to clear");
+                    }
+                }
+                CacheCmd::Refresh => {
+                    let client = Client::builder()
+                        .danger_accept_invalid_certs(true)
+                        .timeout(Duration::from_secs(15))
+                        .build()?;
+                    if cache.exists() { let _ = fs::remove_file(&cache); }
+                    LoxClient::load_or_fetch_structure(&cfg, &client)?;
+                    println!("✓ Structure cache refreshed ({:?})", cache);
                 }
             }
         },

@@ -126,6 +126,26 @@ impl LoxWsClient {
             .to_string() + "/ws/rfc6455"
     }
 
+    pub async fn connect_raw(&self) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::http::Response<Option<Vec<u8>>>)> {
+        let url = self.ws_url();
+        let tls_cfg = make_tls_config();
+        let basic = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            format!("{}:{}", self.cfg.user, self.cfg.pass)
+        );
+        let req = tokio_tungstenite::tungstenite::http::Request::builder()
+            .uri(&url)
+            .header("Authorization", format!("Basic {}", basic))
+            .header("Host", url.split("wss://").nth(1).unwrap_or("").split('/').next().unwrap_or(""))
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", generate_ws_key())
+            .body(())?;
+        connect_async_tls_with_config(req, None, false, Some(Connector::Rustls(tls_cfg)))
+            .await.map_err(|e| anyhow::anyhow!("WS connect: {}", e))
+    }
+
     pub async fn run(&self, on_events: impl Fn(Vec<StateEvent>) + Send + Sync + 'static) -> Result<()> {
         let url = self.ws_url();
         let tls_cfg = make_tls_config();

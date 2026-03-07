@@ -29,3 +29,10 @@ notify = "6"
 rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
 base64 = "0.22"
+rsa = { version = "0.9", features = ["sha2"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+x509-cert = "0.2"
+der = "0.7"
