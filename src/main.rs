@@ -285,8 +285,14 @@ enum Cmd {
     Off { name_or_uuid: String },
     /// Momentary pulse
     Pulse { name_or_uuid: String },
-    /// Control blind: up | down | stop | shade | full-up | full-down
-    Blind { name_or_uuid: String, action: String },
+    /// Control blind: up | down | stop | shade | full-up | full-down | pos <0-100>
+    Blind { name_or_uuid: String, action: String, #[arg(allow_hyphen_values = true)] pos: Option<f64> },
+    /// Control light moods: plus | minus | off | <mood-id>
+    Mood {
+        name_or_uuid: String,
+        /// Mood action: plus, minus, off, or numeric mood ID
+        action: String,
+    },
     /// Watch state changes
     Watch { name_or_uuid: String, #[arg(long, default_value = "2")] interval: u64 },
     /// Check state (exit 0=match, 1=no match)
@@ -540,30 +546,82 @@ fn main() -> Result<()> {
             print_resp(&resp, cli.json, &name_or_uuid, "pulse");
         },
 
-        Cmd::Blind { name_or_uuid, action } => {
+        Cmd::Blind { name_or_uuid, action, pos } => {
             let mut lox = LoxClient::new(Config::load()?);
             let ctrl = lox.find_control(&name_or_uuid)?;
             if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
                 bail!("'{}' is type '{}', not a Jalousie", ctrl.name, ctrl.typ);
             }
-            let cmd = match action.to_lowercase().as_str() {
+            let cmd_owned: String;
+            let cmd: &str = match action.to_lowercase().as_str() {
                 "up"   | "open"  => "PulseUp",
                 "down" | "close" => "PulseDown",
                 "stop"           => "off",
                 "shade" | "auto" => "AutomaticDown",
                 "full-up"        => "FullUp",
                 "full-down"      => "FullDown",
-                other => bail!("Unknown action '{}'. Use: up down stop shade full-up full-down", other),
+                "pos" | "position" => {
+                    let pct = pos.ok_or_else(|| anyhow::anyhow!("pos requires a value 0-100"))?;
+                    if !(0.0..=100.0).contains(&pct) { bail!("Position must be 0-100"); }
+                    cmd_owned = format!("manualPosition/{:.4}", pct / 100.0);
+                    &cmd_owned
+                },
+                other => {
+                    // Try numeric mood-style: pos 50
+                    if let Ok(pct) = other.parse::<f64>() {
+                        if (0.0..=100.0).contains(&pct) {
+                            cmd_owned = format!("manualPosition/{:.4}", pct / 100.0);
+                            &cmd_owned
+                        } else { bail!("Position must be 0-100"); }
+                    } else {
+                        bail!("Unknown action '{}'. Use: up down stop shade full-up full-down pos <0-100>", other)
+                    }
+                },
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
             if !cli.json {
-                thread::sleep(Duration::from_millis(400));
+                thread::sleep(Duration::from_millis(800));
                 let xml = lox.get_all(&ctrl.uuid)?;
-                if let Some(pos) = xml_attr(&xml, "StatePos") {
-                    let p: f64 = pos.parse().unwrap_or(0.0);
+                if let Some(pos_str) = xml_attr(&xml, "StatePos") {
+                    let p: f64 = pos_str.parse().unwrap_or(0.0);
                     println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
                 }
+            }
+        },
+
+        Cmd::Mood { name_or_uuid, action } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let ctrl = lox.find_control(&name_or_uuid)?;
+            if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
+                bail!("'{}' is type '{}', not a LightController", ctrl.name, ctrl.typ);
+            }
+            let cmd_owned: String;
+            let cmd: &str = match action.to_lowercase().as_str() {
+                "plus" | "next" | "+" => "plus",
+                "minus" | "prev" | "-" => "minus",
+                "off"  => "setMood/778",
+                other => {
+                    if let Ok(id) = other.parse::<u32>() {
+                        cmd_owned = format!("setMood/{}", id);
+                        &cmd_owned
+                    } else {
+                        bail!("Unknown mood action '{}'. Use: plus, minus, off, or a numeric mood ID", other)
+                    }
+                },
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
+            if cli.json {
+                print_resp(&resp, true, &ctrl.name, cmd);
+            } else {
+                println!("✓  {} → mood {}", ctrl.name, action);
+                thread::sleep(Duration::from_millis(400));
+                let xml = lox.get_all(&ctrl.uuid)?;
+                let state = xml_attr(&xml, "value").unwrap_or_default();
+                // State encodes active moods as a packed integer
+                // 200002700 = off, other values = mood active
+                let is_off = state.starts_with("200002700") || state == "0";
+                println!("   State: {}  ({})", state, if is_off { "off" } else { "active" });
             }
         },
 

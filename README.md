@@ -1,6 +1,62 @@
 # lox — Loxone Miniserver CLI
 
-Fast, scriptable CLI for the Loxone Miniserver. Single binary, no runtime.
+**Fast, scriptable command-line interface for Loxone Miniserver.**  
+Single binary. No runtime. No cloud. Works in scripts, cron jobs, and AI agent pipelines.
+
+---
+
+## Why this exists
+
+The Loxone app is great for humans tapping on phones. It's useless for everything else.
+
+`lox` gives you a proper CLI so you can:
+
+- **Script your home** — bash, Python, cron, whatever
+- **Connect AI agents** — Claude, GPT, or any LLM tool can control your home via shell commands
+- **Build automations** — rule engine with conditions, time windows, edge detection
+- **Chain commands** — `lox if "Temperatur" gt 25 && lox blind "Südseite" pos 80`
+- **Integrate with anything** — exit codes, JSON output, stdin/stdout
+
+```bash
+# Turn off all lights when leaving
+lox off "Licht Wohnzimmer Zentral" && lox blind "Südseite" full-up
+
+# AI agent can call these:
+lox ls --type LightControllerV2 --json | jq '.[].name'
+lox mood "Wohnzimmer" off
+lox status --json | jq '.plc_running'
+
+# Conditionally close blinds
+lox if "Temperatur Außen" gt 28 && lox blind "Beschattung Süd" pos 70
+```
+
+---
+
+## For AI Agents
+
+This CLI was designed for AI agent integration. Every command:
+
+- Exits `0` on success, non-zero on error
+- Has `--json` flag for structured output
+- Uses fuzzy name matching — agents don't need UUIDs
+- Returns readable errors with suggestions
+
+**Example: give an LLM a shell tool**
+```json
+{
+  "name": "lox",
+  "description": "Control Loxone smart home. Returns JSON on --json flag.",
+  "parameters": {
+    "command": { "type": "string", "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'status --json'" }
+  }
+}
+```
+
+The agent calls `lox <command>` as a shell tool and reads stdout. That's it.
+
+An agent can discover your home (`lox ls --json`), read sensor values (`lox get "Temperatur Außen"`), control devices, and check conditions — all without any custom integration layer.
+
+---
 
 ## Install
 
@@ -11,103 +67,195 @@ cargo build --release
 cp target/release/lox ~/.local/bin/
 ```
 
+**Requirements:** Rust 1.75+. No OpenSSL. No runtime dependencies.
+
 ## Setup
 
 ```bash
-# Basic
 lox config set --host https://192.168.1.100 --user USER --pass PASS
 
-# With serial for proper TLS (avoids cert warning)
+# With serial for correct TLS hostname (avoids cert warnings)
 lox config set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
 ```
 
 Config: `~/.lox/config.yaml`
 
+---
+
 ## Commands
 
 ```bash
-# System
-lox status                              # Miniserver health (firmware, PLC, memory, connections)
-
-# Discovery
-lox rooms
-lox ls
-lox ls --room "Wohnzimmer"
-lox ls --type Jalousie
-
-# Read state
-lox get "Fenster Ost Groß"             # value + position for blinds, outputs for lights
-
-# Control
-lox on  "Licht Wohnzimmer Zentral"
-lox off "Licht Wohnzimmer Zentral"
-lox pulse "Tür öffnen"
-lox send "Lichtsteuerung" 778          # raw Loxone command
-
-# Blinds / Jalousie
-lox blind "Fenster Ost Groß" up        # PulseUp
-lox blind "Fenster Ost Groß" down      # PulseDown
-lox blind "Fenster Ost Groß" stop
-lox blind "Fenster Ost Groß" shade     # automatic shading
-lox blind "Fenster Ost Groß" full-up
-lox blind "Fenster Ost Groß" full-down
-
-# Scenes
-lox scene list
-lox scene new abend
-lox run abend
-
-# Watch state (polling loop)
-lox watch "Lichtsteuerung" --interval 2
-
-# Shell scripting — exit 0 = match, exit 1 = no match
-lox if "Fenster Ost Groß" eq 0         # closed?
-lox if "Temperatur"       gt 22.5      # hot?
-lox if "Zustand"          contains "an"
-
-# JSON output (pipe to jq)
+# ── System ────────────────────────────────────────────────────────
+lox status                              # Miniserver health: firmware, PLC, memory
 lox status --json
-lox ls --json | jq '.[] | select(.type == "Jalousie") | .name'
-lox get "Fenster Ost Groß" --json
+
+# ── Discovery ─────────────────────────────────────────────────────
+lox ls                                  # All controls
+lox ls --type Jalousie                  # Filter by type
+lox ls --type LightControllerV2 --json  # JSON for agents/scripts
+lox rooms                               # List all rooms
+lox get "Lichtsteuerung Wohnzimmer"     # Full state of one control
+
+# ── Lights ────────────────────────────────────────────────────────
+lox on  "Lichtsteuerung Wohnzimmer"
+lox off "Lichtsteuerung Wohnzimmer"
+lox mood "Lichtsteuerung Wohnzimmer" plus     # Next mood
+lox mood "Lichtsteuerung Wohnzimmer" minus    # Previous mood
+lox mood "Lichtsteuerung Wohnzimmer" off      # Turn off (mood 778)
+lox mood "Lichtsteuerung Wohnzimmer" 704      # Set by numeric mood ID
+
+# ── Blinds ────────────────────────────────────────────────────────
+lox blind "Beschattung Süd" up
+lox blind "Beschattung Süd" down
+lox blind "Beschattung Süd" stop
+lox blind "Beschattung Süd" pos 50      # Position 0-100%
+lox blind "Beschattung Süd" full-up
+lox blind "Beschattung Süd" full-down
+lox blind "Beschattung Süd" shade       # Automatic shading
+
+# ── Conditions & Logic ────────────────────────────────────────────
+lox if "Temperatur Außen" gt 25         # Exit 0=true, 1=false
+lox if "Schalter" eq 1 && lox on "Licht"
+
+# ── Analog / Virtual Inputs ───────────────────────────────────────
+lox set "Sollwert Heizung" 21.5
+lox pulse "Taster"
+
+# ── Scenes ────────────────────────────────────────────────────────
+lox run abend
+lox scene list
+lox scene show abend
+lox scene new abend
+
+# ── Automation Daemon ─────────────────────────────────────────────
+lox daemon                              # WebSocket (needs Monitor rights)
+lox daemon --poll                       # HTTP polling fallback
+lox automation list
+
+# ── Cache ─────────────────────────────────────────────────────────
+lox cache info
+lox cache refresh
+lox cache clear
+
+# ── Token Auth ────────────────────────────────────────────────────
+lox token fetch                         # Fetch & save token (valid 20 days)
+lox token info
+lox token clear
+
+# ── Raw ───────────────────────────────────────────────────────────
+lox send <uuid> <command>
+lox watch "Temperatur Außen"
+lox log                                 # Miniserver log (needs admin)
 ```
 
-## Scenes (`~/.lox/scenes/*.yaml`)
+---
+
+## Scenes
+
+YAML files in `~/.lox/scenes/`:
 
 ```yaml
-name: "Abend Wohnzimmer"
-description: "Gemütliches Abendlicht"
+# ~/.lox/scenes/abend.yaml
+name: Abend
 steps:
-  - control: "Lichtsteuerung"
-    cmd: "on"
-  - control: "Mitte Wohnzimmer Licht"
-    cmd: "off"
-    delay_ms: 200
+  - control: "Lichtsteuerung Wohnzimmer"
+    command: on
+  - control: "Beschattung Südseite"
+    command: "pos 70"
+  - delay: 500
+  - control: "LED Küche"
+    command: off
 ```
 
-## Shell Automation Examples
+---
+
+## Automation Rules
+
+`~/.lox/automations.yaml` — evaluated by the daemon:
+
+```yaml
+rules:
+  - name: "Sonnenschutz bei Hitze"
+    when:
+      control: "Temperatur Außen"
+      op: gt
+      value: 28
+    also:
+      - control: "Windgeschwindigkeit"
+        op: lt
+        value: 10
+    only_between: "10:00-18:00"
+    then:
+      - control: "Beschattung Süd"
+        command: "pos 80"
+```
+
+**Operators:** `eq`, `ne`, `gt`, `lt`, `gte`, `lte`, `changes`  
+**Conditions:** `also` (AND), `only_between` (time window)
+
+---
+
+## Performance
+
+Structure cache at `~/.lox/cache/structure.json` (24h TTL):
+
+| Operation | Cold | Warm |
+|-----------|------|------|
+| `lox on "Licht"` | ~1.2s | ~80ms |
+| `lox ls` | ~1.2s | ~80ms |
+| `lox status` | ~120ms | ~120ms |
+
+---
+
+## Supported Control Types
+
+| Type | Commands |
+|------|----------|
+| `LightControllerV2` | `on`, `off`, `mood plus/minus/off/<id>` |
+| `Jalousie` / `CentralJalousie` | `up`, `down`, `stop`, `pos <0-100>`, `shade`, `full-up`, `full-down` |
+| `Switch` | `on`, `off`, `pulse` |
+| `Dimmer` | `on`, `off`, `set <0-100>` |
+| `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
+| Any | `send <raw-command>` |
+
+---
+
+## Architecture
+
+```
+~/.lox/
+  config.yaml          # Host, credentials, serial
+  cache/
+    structure.json     # LoxApp3.json (24h TTL, ~150KB)
+  token.json           # Token auth (optional)
+  scenes/*.yaml        # Your scenes
+  automations.yaml     # Automation rules
+```
+
+Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted.
+
+---
+
+## Systemd Service
 
 ```bash
-# Cron: alle Jalousien runter bei Sonnenuntergang
-0 20 * * * lox blind "Beschattung Zentral EG" full-down
-
-# Conditional in script
-if lox if "Schalter Küchenstrom Links" eq 1; then
-  lox off "Schalter Küchenstrom Links"
-fi
-
-# JSON + jq pipeline
-lox ls --json | jq '.[] | select(.type == "Jalousie") | .name' | \
-  xargs -I{} lox blind "{}" shade
+lox service install    # Install automation daemon as systemd user service
+lox service status
+lox service logs
+lox service uninstall
 ```
 
-## Operators for `lox if`
+---
 
-| Op | Meaning |
-|----|---------|
-| `eq` / `==` | equal |
-| `ne` / `!=` | not equal |
-| `gt` / `>` | greater than (numeric) |
-| `lt` / `<` | less than (numeric) |
-| `ge` / `>=` | ≥ (numeric) |
-| `le` / `<=` | ≤ (numeric) |
-| `contains` | substring match |
+## Requirements
+
+- Loxone Miniserver Gen 1/2, firmware 12.0+
+- Local network access (or DynDNS)
+- For `lox daemon` (WebSocket): Monitor rights enabled in Loxone Config
+- For `lox log`: Admin user
+
+---
+
+## License
+
+MIT
