@@ -1,6 +1,11 @@
+mod config;
+mod ws;
+mod daemon;
+
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use dirs::home_dir;
+use config::Config;
+use daemon::Automations;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,51 +14,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
-
-// ── Config ────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Config {
-    host: String,
-    user: String,
-    pass: String,
-    /// Serial number for TLS (e.g. 504f94a26236). Auto-detected if empty.
-    #[serde(default)]
-    serial: String,
-}
-
-impl Config {
-    fn dir() -> PathBuf { home_dir().unwrap_or_default().join(".lox") }
-    fn path() -> PathBuf { Self::dir().join("config.yaml") }
-
-    fn load() -> Result<Self> {
-        let path = Self::path();
-        let content = fs::read_to_string(&path)
-            .with_context(|| "Config not found. Run: lox config set --host ... --user ... --pass ...")?;
-        Ok(serde_yaml::from_str(&content)?)
-    }
-
-    fn save(&self) -> Result<()> {
-        let path = Self::path();
-        fs::create_dir_all(path.parent().unwrap())?;
-        fs::write(&path, serde_yaml::to_string(self)?)?;
-        println!("✓  Config saved to {:?}", path);
-        Ok(())
-    }
-
-    /// Build a TLS-valid host URL using dyndns hostname (avoids cert mismatch)
-    fn tls_host(&self) -> String {
-        if !self.serial.is_empty() {
-            // Extract IP from host, build dyndns URL
-            let ip_part = self.host
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .replace('.', "-");
-            return format!("https://{}.{}.dyndns.loxonecloud.com", ip_part, self.serial.to_lowercase());
-        }
-        self.host.clone()
-    }
-}
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
@@ -78,7 +38,7 @@ impl Scene {
     fn load(name: &str) -> Result<Self> {
         let path = Self::scenes_dir().join(format!("{}.yaml", name));
         let content = fs::read_to_string(&path)
-            .with_context(|| format!("Scene '{}' not found at {:?}", name, path))?;
+            .with_context(|| format!("Scene '{}' not found", name))?;
         Ok(serde_yaml::from_str(&content)?)
     }
 
@@ -99,7 +59,7 @@ impl Scene {
     }
 }
 
-// ── Loxone API ────────────────────────────────────────────────────────────────
+// ── HTTP Client ───────────────────────────────────────────────────────────────
 
 struct LoxClient {
     cfg: Config,
@@ -113,7 +73,6 @@ struct Control {
     uuid: String,
     typ: String,
     room: Option<String>,
-    states: HashMap<String, Value>,
 }
 
 impl LoxClient {
@@ -128,19 +87,16 @@ impl LoxClient {
         }
     }
 
-    fn get(&self, path: &str) -> Result<String> {
+    fn get_text(&self, path: &str) -> Result<String> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
-        let resp = self.client
-            .get(&url)
+        Ok(self.client.get(&url)
             .basic_auth(&self.cfg.user, Some(&self.cfg.pass))
-            .send()?.text()?;
-        Ok(resp)
+            .send()?.text()?)
     }
 
     fn get_json(&self, path: &str) -> Result<Value> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
-        Ok(self.client
-            .get(&url)
+        Ok(self.client.get(&url)
             .basic_auth(&self.cfg.user, Some(&self.cfg.pass))
             .send()?.json::<Value>()?)
     }
@@ -157,12 +113,11 @@ impl LoxClient {
     }
 
     fn get_all(&self, uuid: &str) -> Result<String> {
-        self.get(&format!("/dev/sps/io/{}/all", uuid))
+        self.get_text(&format!("/dev/sps/io/{}/all", uuid))
     }
 
     fn list_controls(&mut self, type_filter: Option<&str>, room_filter: Option<&str>) -> Result<Vec<Control>> {
         let structure = self.get_structure()?;
-
         let mut rooms: HashMap<String, String> = HashMap::new();
         if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
             for (uuid, room) in map {
@@ -171,7 +126,6 @@ impl LoxClient {
                 }
             }
         }
-
         let mut controls = Vec::new();
         if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
             for (uuid, ctrl) in ctrl_map {
@@ -179,21 +133,13 @@ impl LoxClient {
                 let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?").to_string();
                 let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("").to_string();
                 let room = rooms.get(&room_uuid).cloned();
-
-                let mut states: HashMap<String, Value> = HashMap::new();
-                if let Some(s) = ctrl.get("states").and_then(|s| s.as_object()) {
-                    for (k, v) in s { states.insert(k.clone(), v.clone()); }
-                }
-
                 if let Some(tf) = type_filter {
                     if !typ.to_lowercase().contains(&tf.to_lowercase()) { continue; }
                 }
                 if let Some(rf) = room_filter {
-                    let room_name = room.as_deref().unwrap_or("");
-                    if !room_name.to_lowercase().contains(&rf.to_lowercase()) { continue; }
+                    if !room.as_deref().unwrap_or("").to_lowercase().contains(&rf.to_lowercase()) { continue; }
                 }
-
-                controls.push(Control { name, uuid: uuid.clone(), typ, room, states });
+                controls.push(Control { name, uuid: uuid.clone(), typ, room });
             }
         }
         controls.sort_by(|a, b| a.name.cmp(&b.name));
@@ -201,54 +147,43 @@ impl LoxClient {
     }
 
     fn resolve(&mut self, name_or_uuid: &str) -> Result<String> {
-        if looks_like_uuid(name_or_uuid) { return Ok(name_or_uuid.to_string()); }
+        if is_uuid(name_or_uuid) { return Ok(name_or_uuid.to_string()); }
         let controls = self.list_controls(None, None)?;
         let matches: Vec<&Control> = controls.iter()
             .filter(|c| c.name.to_lowercase().contains(&name_or_uuid.to_lowercase()))
             .collect();
         match matches.len() {
-            0 => bail!("No control found matching '{}'", name_or_uuid),
+            0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches[0].uuid.clone()),
             _ => {
-                eprintln!("Multiple matches for '{}', be more specific:", name_or_uuid);
                 for c in &matches {
-                    eprintln!("  {:40} [{}]  {}", c.name,
-                        c.room.as_deref().unwrap_or("-"), c.uuid);
+                    eprintln!("  {:40} [{}]  {}", c.name, c.room.as_deref().unwrap_or("-"), c.uuid);
                 }
-                bail!("Ambiguous name")
+                bail!("Ambiguous: '{}'", name_or_uuid)
             }
         }
     }
 
     fn find_control(&mut self, name_or_uuid: &str) -> Result<Control> {
         let controls = self.list_controls(None, None)?;
-        if looks_like_uuid(name_or_uuid) {
-            return controls.into_iter().find(|c| c.uuid == name_or_uuid)
-                .context("UUID not found");
+        if is_uuid(name_or_uuid) {
+            return controls.into_iter().find(|c| c.uuid == name_or_uuid).context("UUID not found");
         }
         let matches: Vec<Control> = controls.into_iter()
             .filter(|c| c.name.to_lowercase().contains(&name_or_uuid.to_lowercase()))
             .collect();
         match matches.len() {
-            0 => bail!("No control found matching '{}'", name_or_uuid),
+            0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches.into_iter().next().unwrap()),
             _ => {
-                eprintln!("Multiple matches for '{}':", name_or_uuid);
-                for c in &matches {
-                    eprintln!("  {:40} [{}]  {}", c.name,
-                        c.room.as_deref().unwrap_or("-"), c.uuid);
-                }
-                bail!("Ambiguous name")
+                for c in &matches { eprintln!("  {:40} [{}]", c.name, c.room.as_deref().unwrap_or("-")); }
+                bail!("Ambiguous: '{}'", name_or_uuid)
             }
         }
     }
 }
 
-fn looks_like_uuid(s: &str) -> bool {
-    s.contains('-') && s.len() > 20
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+fn is_uuid(s: &str) -> bool { s.contains('-') && s.len() > 20 }
 
 fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     let key = format!("{}=\"", attr);
@@ -257,21 +192,30 @@ fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     Some(&xml[start..end])
 }
 
-fn print_cmd_response(resp: &Value, json: bool, name: &str, cmd: &str) {
+fn print_resp(resp: &Value, json: bool, name: &str, cmd: &str) {
     if json {
         println!("{}", serde_json::to_string_pretty(resp).unwrap());
     } else {
         let val = resp.pointer("/LL/value").and_then(|v| v.as_str()).unwrap_or("?");
         let code = resp.pointer("/LL/Code").and_then(|v| v.as_str()).unwrap_or("?");
-        let icon = if code == "200" { "✓" } else { "✗" };
-        println!("{icon}  {name} → {cmd} = {val}");
+        println!("{}  {} → {} = {}", if code == "200" { "✓" } else { "✗" }, name, cmd, val);
     }
 }
 
-fn pct_bar(v: f64, max: f64) -> String {
-    let pct = (v / max * 20.0) as usize;
-    let pct = pct.min(20);
-    format!("[{}{}] {:.0}%", "█".repeat(pct), "░".repeat(20 - pct), v / max * 100.0)
+fn bar(v: f64, max: f64) -> String {
+    let n = ((v / max * 20.0) as usize).min(20);
+    format!("[{}{}] {:.0}%", "█".repeat(n), "░".repeat(20 - n), v / max * 100.0)
+}
+
+fn kb_fmt(kb: f64) -> String {
+    if kb > 1024.0 { format!("{:.0} MB", kb / 1024.0) }
+    else { format!("{:.0} kB", kb) }
+}
+
+fn now_hms() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let s = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    format!("{:02}:{:02}:{:02}", (s%86400)/3600, (s%3600)/60, s%60)
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -288,60 +232,43 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Configure connection
-    Config {
-        #[command(subcommand)]
-        action: ConfigCmd,
-    },
-    /// Miniserver health & status
+    Config { #[command(subcommand)] action: ConfigCmd },
+    /// Miniserver health
     Status,
     /// List controls
-    Ls {
-        #[arg(long)] r#type: Option<String>,
-        #[arg(long)] room: Option<String>,
-    },
+    Ls { #[arg(long)] r#type: Option<String>, #[arg(long)] room: Option<String> },
     /// List rooms
     Rooms,
     /// Get full state of a control
     Get { name_or_uuid: String },
-    /// Send a raw command
+    /// Send raw command
     Send { name_or_uuid: String, command: String },
     /// Turn on
     On { name_or_uuid: String },
     /// Turn off
     Off { name_or_uuid: String },
-    /// Pulse (momentary trigger)
+    /// Momentary pulse
     Pulse { name_or_uuid: String },
-    /// Control a blind/jalousie: up | down | open | close | shade | stop
-    Blind {
-        name_or_uuid: String,
-        /// up | down | open | close | shade | stop | full-up | full-down
-        action: String,
-    },
-    /// Watch state changes (polling)
-    Watch {
-        name_or_uuid: String,
-        #[arg(long, default_value = "2")]
-        interval: u64,
-    },
-    /// Check state — exits 0 if condition matches, 1 if not
-    If {
-        name_or_uuid: String,
-        /// eq | ne | gt | lt | ge | le | contains
-        op: String,
-        value: String,
-    },
+    /// Control blind: up | down | stop | shade | full-up | full-down
+    Blind { name_or_uuid: String, action: String },
+    /// Watch state changes
+    Watch { name_or_uuid: String, #[arg(long, default_value = "2")] interval: u64 },
+    /// Check state (exit 0=match, 1=no match)
+    If { name_or_uuid: String, op: String, value: String },
     /// Run a scene
     Run { scene: String },
     /// Manage scenes
-    Scene {
-        #[command(subcommand)]
-        action: SceneCmd,
+    Scene { #[command(subcommand)] action: SceneCmd },
+    /// Start the automation daemon (WebSocket)
+    Daemon {
+        /// Print all state changes
+        #[arg(long)]
+        verbose: bool,
     },
-    /// Fetch Miniserver system log
-    Log {
-        #[arg(long, default_value = "50")]
-        lines: usize,
-    },
+    /// Manage automation rules
+    Automation { #[command(subcommand)] action: AutomationCmd },
+    /// Fetch Miniserver log
+    Log { #[arg(long, default_value = "50")] lines: usize },
 }
 
 #[derive(Subcommand)]
@@ -362,13 +289,22 @@ enum SceneCmd {
     New { name: String },
 }
 
+#[derive(Subcommand)]
+enum AutomationCmd {
+    /// List loaded rules
+    List,
+    /// Create/show the automations file
+    Edit,
+    /// Test: print what events would trigger (dry run, no WS)
+    Check,
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        // ── Config ──────────────────────────────────────────────────────────
         Cmd::Config { action } => match action {
             ConfigCmd::Set { host, user, pass, serial } => {
                 Config { host, user, pass, serial }.save()?;
@@ -378,62 +314,46 @@ fn main() -> Result<()> {
                 println!("host:   {}", cfg.host);
                 println!("user:   {}", cfg.user);
                 println!("pass:   {}", "*".repeat(cfg.pass.len()));
-                if !cfg.serial.is_empty() {
-                    println!("serial: {}", cfg.serial);
-                    println!("tls:    {}", cfg.tls_host());
-                }
+                if !cfg.serial.is_empty() { println!("serial: {}", cfg.serial); }
             }
         },
 
-        // ── Status ──────────────────────────────────────────────────────────
         Cmd::Status => {
             let lox = LoxClient::new(Config::load()?);
+            let version = lox.get_text("/dev/cfg/version")?;
+            let heap    = lox.get_text("/dev/sys/heap")?;
+            let sps     = lox.get_text("/dev/sps/state")?;
+            let check   = lox.get_text("/dev/sys/check")?;
+            let status  = lox.get_text("/data/status")?;
 
-            let version  = lox.get("/dev/cfg/version")?;
-            let heap     = lox.get("/dev/sys/heap")?;
-            let sps      = lox.get("/dev/sps/state")?;
-            let check    = lox.get("/dev/sys/check")?;
-            let status   = lox.get("/data/status")?;
-
-            let ver = xml_attr(&version, "value").unwrap_or("?");
+            let ver  = xml_attr(&version, "value").unwrap_or("?");
             let heap_val = xml_attr(&heap, "value").unwrap_or("?");
-            let sps_code = xml_attr(&sps, "value").unwrap_or("?");
+            let sps_num  = xml_attr(&sps, "value").unwrap_or("?");
             let conn = xml_attr(&check, "value").unwrap_or("?");
 
-            let sps_label = match sps_code {
-                "5" => "✓ Running",
-                "3" => "Started",
-                "7" => "⚠ Error",
-                "1" => "Booting",
-                "8" => "Updating",
-                n   => n,
+            let sps_label = match sps_num {
+                "5" => "✓ Running", "3" => "Started", "7" => "⚠ Error",
+                "1" => "Booting",   "8" => "Updating", n => n,
             };
-
-            // Parse heap: "381236/1016404kB"
             let heap_display = if let Some((used, total)) = heap_val.split_once('/') {
-                let total_str = total.trim_end_matches("kB");
-                let used_f: f64 = used.parse().unwrap_or(0.0);
-                let total_f: f64 = total_str.parse().unwrap_or(1.0);
-                format!("{} / {}  {}", used_val_fmt(used_f), used_val_fmt(total_f),
-                    pct_bar(used_f, total_f))
+                let t_str = total.trim_end_matches("kB");
+                let u: f64 = used.parse().unwrap_or(0.0);
+                let t: f64 = t_str.parse().unwrap_or(1.0);
+                format!("{} / {}  {}", kb_fmt(u), kb_fmt(t), bar(u, t))
             } else { heap_val.to_string() };
 
-            // Parse Miniserver name from status XML
-            let ms_name = xml_attr(&status, "Name").unwrap_or("Loxone Miniserver");
+            let ms_name = xml_attr(&status, "Name").unwrap_or("Loxone");
             let ms_ip   = xml_attr(&status, "IP").unwrap_or("?");
-            let offline = xml_attr(&status, "Offline").unwrap_or("false");
-            let online  = if offline == "false" { "✓ Online" } else { "✗ Offline" };
+            let online  = if xml_attr(&status, "Offline").unwrap_or("false") == "false" { "✓ Online" } else { "✗ Offline" };
 
             if cli.json {
                 println!("{}", serde_json::json!({
                     "name": ms_name, "ip": ms_ip, "version": ver,
-                    "plc": sps_label, "heap": heap_val,
-                    "connections": conn, "online": offline == "false"
+                    "plc": sps_label, "heap": heap_val, "connections": conn,
                 }));
             } else {
                 println!("┌─ Loxone Miniserver ─────────────────────────────────");
-                println!("│  Name:        {}", ms_name);
-                println!("│  IP:          {}  ({})", ms_ip, online);
+                println!("│  Name:        {} ({} {})", ms_name, ms_ip, online);
                 println!("│  Firmware:    {}", ver);
                 println!("│  PLC:         {}", sps_label);
                 println!("│  Memory:      {}", heap_display);
@@ -442,15 +362,13 @@ fn main() -> Result<()> {
             }
         },
 
-        // ── Ls ──────────────────────────────────────────────────────────────
         Cmd::Ls { r#type, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let controls = lox.list_controls(r#type.as_deref(), room.as_deref())?;
             if cli.json {
-                let out: Vec<Value> = controls.iter().map(|c| serde_json::json!({
+                println!("{}", serde_json::to_string_pretty(&controls.iter().map(|c| serde_json::json!({
                     "name": c.name, "uuid": c.uuid, "type": c.typ, "room": c.room
-                })).collect();
-                println!("{}", serde_json::to_string_pretty(&out)?);
+                })).collect::<Vec<_>>())?);
             } else {
                 println!("{:<40} {:<24} {:<22} {}", "NAME", "ROOM", "TYPE", "UUID");
                 println!("{}", "─".repeat(120));
@@ -462,35 +380,29 @@ fn main() -> Result<()> {
             }
         },
 
-        // ── Rooms ───────────────────────────────────────────────────────────
         Cmd::Rooms => {
             let mut lox = LoxClient::new(Config::load()?);
             let structure = lox.get_structure()?;
             if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
                 let mut names: Vec<&str> = rooms.values()
-                    .filter_map(|r| r.get("name").and_then(|n| n.as_str()))
-                    .collect();
+                    .filter_map(|r| r.get("name").and_then(|n| n.as_str())).collect();
                 names.sort();
-                for name in names { println!("{}", name); }
+                for n in names { println!("{}", n); }
             }
         },
 
-        // ── Get ─────────────────────────────────────────────────────────────
         Cmd::Get { name_or_uuid } => {
             let mut lox = LoxClient::new(Config::load()?);
             let ctrl = lox.find_control(&name_or_uuid)?;
             let xml = lox.get_all(&ctrl.uuid)?;
+            let val = xml_attr(&xml, "value").unwrap_or("?");
+            let code = xml_attr(&xml, "Code").unwrap_or("?");
 
             if cli.json {
-                // Parse XML attributes into a map
                 let mut result = serde_json::json!({
-                    "name": ctrl.name,
-                    "uuid": ctrl.uuid,
-                    "type": ctrl.typ,
-                    "room": ctrl.room,
-                    "value": xml_attr(&xml, "value"),
+                    "name": ctrl.name, "uuid": ctrl.uuid,
+                    "type": ctrl.typ, "room": ctrl.room, "value": val,
                 });
-                // Extract known state attrs
                 for attr in &["StateUp","StateDown","StatePos","StateShade","StateAutoShade","StateSafety"] {
                     if let Some(v) = xml_attr(&xml, attr) {
                         result[attr] = Value::String(v.to_string());
@@ -498,132 +410,98 @@ fn main() -> Result<()> {
                 }
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
-                let val = xml_attr(&xml, "value").unwrap_or("?");
-                let code = xml_attr(&xml, "Code").unwrap_or("?");
                 println!("Control:  {} ({})", ctrl.name, ctrl.uuid);
-                println!("Type:     {}   Room: {}", ctrl.typ,
-                    ctrl.room.as_deref().unwrap_or("─"));
+                println!("Type:     {}   Room: {}", ctrl.typ, ctrl.room.as_deref().unwrap_or("─"));
                 println!("Value:    {}  [Code {}]", val, code);
-
-                // Jalousie extra states
                 for attr in &["StateUp","StateDown","StatePos","StateShade","StateAutoShade"] {
                     if let Some(v) = xml_attr(&xml, attr) {
-                        println!("{:10}{}", attr.trim_start_matches("State"), v);
+                        println!("  {:<12} {}", attr.trim_start_matches("State"), v);
                     }
                 }
-
-                // Output list
-                let mut out_num = 1;
+                let mut i = 1;
                 loop {
-                    let name_attr = format!("n{}", out_num);
-                    let val_attr  = format!("v{}", out_num);
-                    let Some(oname) = xml_attr(&xml, &name_attr) else { break; };
-                    let oval = xml_attr(&xml, &val_attr).unwrap_or("?");
-                    if !oname.is_empty() {
-                        println!("  {:30} = {}", oname, oval);
-                    }
-                    out_num += 1;
+                    let Some(n) = xml_attr(&xml, &format!("n{}", i)) else { break; };
+                    let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
+                    if !n.is_empty() { println!("  {:<30} = {}", n, v); }
+                    i += 1;
                 }
             }
         },
 
-        // ── Send / On / Off / Pulse ──────────────────────────────────────────
         Cmd::Send { name_or_uuid, command } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve(&name_or_uuid)?;
             let resp = lox.send_cmd(&uuid, &command)?;
-            print_cmd_response(&resp, cli.json, &name_or_uuid, &command);
+            print_resp(&resp, cli.json, &name_or_uuid, &command);
         },
         Cmd::On { name_or_uuid } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve(&name_or_uuid)?;
             let resp = lox.send_cmd(&uuid, "on")?;
-            print_cmd_response(&resp, cli.json, &name_or_uuid, "on");
+            print_resp(&resp, cli.json, &name_or_uuid, "on");
         },
         Cmd::Off { name_or_uuid } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve(&name_or_uuid)?;
             let resp = lox.send_cmd(&uuid, "off")?;
-            print_cmd_response(&resp, cli.json, &name_or_uuid, "off");
+            print_resp(&resp, cli.json, &name_or_uuid, "off");
         },
         Cmd::Pulse { name_or_uuid } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve(&name_or_uuid)?;
             let resp = lox.send_cmd(&uuid, "pulse")?;
-            print_cmd_response(&resp, cli.json, &name_or_uuid, "pulse");
+            print_resp(&resp, cli.json, &name_or_uuid, "pulse");
         },
 
-        // ── Blind ───────────────────────────────────────────────────────────
         Cmd::Blind { name_or_uuid, action } => {
             let mut lox = LoxClient::new(Config::load()?);
             let ctrl = lox.find_control(&name_or_uuid)?;
-
             if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
                 bail!("'{}' is type '{}', not a Jalousie", ctrl.name, ctrl.typ);
             }
-
             let cmd = match action.to_lowercase().as_str() {
-                "up"       | "open"  => "PulseUp",
-                "down"     | "close" => "PulseDown",
-                "stop"               => "off",
-                "shade"              => "AutomaticDown",
-                "full-up"            => "FullUp",
-                "full-down"          => "FullDown",
-                "auto"               => "AutomaticDown",
-                other => bail!("Unknown blind action '{}'. Use: up down stop shade full-up full-down auto", other),
+                "up"   | "open"  => "PulseUp",
+                "down" | "close" => "PulseDown",
+                "stop"           => "off",
+                "shade" | "auto" => "AutomaticDown",
+                "full-up"        => "FullUp",
+                "full-down"      => "FullDown",
+                other => bail!("Unknown action '{}'. Use: up down stop shade full-up full-down", other),
             };
-
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_cmd_response(&resp, cli.json, &ctrl.name, cmd);
-
-            // Show position after command
+            print_resp(&resp, cli.json, &ctrl.name, cmd);
             if !cli.json {
-                thread::sleep(Duration::from_millis(300));
+                thread::sleep(Duration::from_millis(400));
                 let xml = lox.get_all(&ctrl.uuid)?;
                 if let Some(pos) = xml_attr(&xml, "StatePos") {
-                    let pos_f: f64 = pos.parse().unwrap_or(0.0);
-                    println!("   Position: {:.0}%  {}", pos_f * 100.0,
-                        pct_bar(pos_f, 1.0));
+                    let p: f64 = pos.parse().unwrap_or(0.0);
+                    println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
                 }
             }
         },
 
-        // ── Watch ───────────────────────────────────────────────────────────
         Cmd::Watch { name_or_uuid, interval } => {
             let mut lox = LoxClient::new(Config::load()?);
             let ctrl = lox.find_control(&name_or_uuid)?;
             println!("Watching '{}' every {}s  (Ctrl+C to stop)", ctrl.name, interval);
-
             let mut last = String::new();
             loop {
-                match lox.get_all(&ctrl.uuid) {
-                    Ok(xml) => {
-                        let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-                        if val != last {
-                            let ts = now_hms();
-                            if cli.json {
-                                println!("{}", serde_json::json!({
-                                    "time": ts, "control": ctrl.name, "value": val
-                                }));
-                            } else {
-                                println!("[{}]  {}  =  {}", ts, ctrl.name, val);
-                            }
-                            last = val;
-                        }
+                if let Ok(xml) = lox.get_all(&ctrl.uuid) {
+                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
+                    if val != last {
+                        println!("[{}]  {} = {}", now_hms(), ctrl.name, val);
+                        last = val;
                     }
-                    Err(e) => eprintln!("Error: {}", e),
                 }
                 thread::sleep(Duration::from_secs(interval));
             }
         },
 
-        // ── If ──────────────────────────────────────────────────────────────
         Cmd::If { name_or_uuid, op, value } => {
             let mut lox = LoxClient::new(Config::load()?);
             let ctrl = lox.find_control(&name_or_uuid)?;
             let xml = lox.get_all(&ctrl.uuid)?;
             let current = xml_attr(&xml, "value").unwrap_or("").to_string();
-
             let matches = eval_op(&current, &op, &value)?;
             if !cli.json {
                 println!("{} = {}  →  {} {} {}  →  {}",
@@ -638,74 +516,102 @@ fn main() -> Result<()> {
             std::process::exit(if matches { 0 } else { 1 });
         },
 
-        // ── Run ─────────────────────────────────────────────────────────────
         Cmd::Run { scene } => {
             let s = Scene::load(&scene)?;
             let mut lox = LoxClient::new(Config::load()?);
             println!("▶  {}", s.name.as_deref().unwrap_or(&scene));
-            if let Some(desc) = &s.description { println!("   {}", desc); }
+            if let Some(d) = &s.description { println!("   {}", d); }
             println!();
-
             for (i, step) in s.steps.iter().enumerate() {
                 let uuid = match lox.resolve(&step.control) {
                     Ok(u) => u,
-                    Err(e) => { eprintln!("Step {}: {}", i + 1, e); continue; }
+                    Err(e) => { eprintln!("Step {}: {}", i+1, e); continue; }
                 };
                 let resp = lox.send_cmd(&uuid, &step.cmd)?;
-                print_cmd_response(&resp, cli.json, &step.control, &step.cmd);
-                if step.delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(step.delay_ms));
-                }
+                print_resp(&resp, cli.json, &step.control, &step.cmd);
+                if step.delay_ms > 0 { thread::sleep(Duration::from_millis(step.delay_ms)); }
             }
         },
 
-        // ── Scene ───────────────────────────────────────────────────────────
         Cmd::Scene { action } => match action {
             SceneCmd::List => {
                 let names = Scene::list()?;
-                if names.is_empty() {
-                    println!("No scenes. Create one: lox scene new <name>");
-                } else {
+                if names.is_empty() { println!("No scenes. Create: lox scene new <name>"); }
+                else {
                     for name in &names {
-                        let desc = Scene::load(name).ok()
-                            .and_then(|s| s.description)
-                            .unwrap_or_default();
+                        let desc = Scene::load(name).ok().and_then(|s| s.description).unwrap_or_default();
                         println!("  {:<20}  {}", name, desc);
                     }
                 }
             },
             SceneCmd::Show { name } => {
-                let path = Scene::scenes_dir().join(format!("{}.yaml", name));
-                println!("{}", fs::read_to_string(&path)
+                println!("{}", fs::read_to_string(Scene::scenes_dir().join(format!("{}.yaml", name)))
                     .with_context(|| format!("Scene '{}' not found", name))?);
             },
             SceneCmd::New { name } => {
                 let dir = Scene::scenes_dir();
                 fs::create_dir_all(&dir)?;
                 let path = dir.join(format!("{}.yaml", name));
-                if path.exists() { bail!("Scene '{}' already exists", name); }
+                if path.exists() { bail!("Already exists"); }
                 fs::write(&path, format!(
-r#"name: "{name}"
-description: "Describe your scene"
-steps:
-  - control: "Control Name or UUID"
-    cmd: "on"
-  - control: "Another Control"
-    cmd: "off"
-    delay_ms: 500
-"#))?;
-                println!("✓  Created {:?}", path);
-                println!("   Edit it and run: lox run {}", name);
+                    "name: \"{name}\"\ndescription: \"\"\nsteps:\n  - control: \"\"\n    cmd: \"on\"\n"))?;
+                println!("✓  {:?}", path);
             },
         },
 
-        // ── Log ─────────────────────────────────────────────────────────────
+        Cmd::Daemon { verbose } => {
+            let cfg = Config::load()?;
+            println!("🏠 lox daemon starting...");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(daemon::run_daemon(cfg, verbose))?;
+        },
+
+        Cmd::Automation { action } => match action {
+            AutomationCmd::List => {
+                let auto = Automations::load()?;
+                if auto.rules.is_empty() {
+                    println!("No rules. Edit: {:?}", Automations::path());
+                } else {
+                    println!("{} rule(s) in {:?}:", auto.rules.len(), Automations::path());
+                    for (i, r) in auto.rules.iter().enumerate() {
+                        let cond = if r.op == "changes" {
+                            format!("changes")
+                        } else {
+                            format!("{} {} {}", r.op, r.value.as_deref().unwrap_or("?"), "")
+                        };
+                        println!("  {}. when '{}' {}→ {}", i+1, r.when, cond, r.run);
+                        if let Some(d) = &r.description { println!("     ({})", d); }
+                    }
+                }
+            },
+            AutomationCmd::Edit => {
+                let path = Automations::path();
+                if !path.exists() {
+                    fs::create_dir_all(path.parent().unwrap())?;
+                    fs::write(&path, Automations::template())?;
+                    println!("✓  Created {:?}", path);
+                }
+                println!("Edit: {}", path.display());
+            },
+            AutomationCmd::Check => {
+                let auto = Automations::load()?;
+                println!("Checking {} rule(s)...", auto.rules.len());
+                let mut lox = LoxClient::new(Config::load()?);
+                for rule in &auto.rules {
+                    let uuid = lox.resolve(&rule.when);
+                    match uuid {
+                        Ok(u) => println!("  ✓  '{}' → {}", rule.when, u),
+                        Err(e) => println!("  ✗  '{}' → {}", rule.when, e),
+                    }
+                }
+            },
+        },
+
         Cmd::Log { lines } => {
             let lox = LoxClient::new(Config::load()?);
-            let log = lox.get("/dev/fsget/log/def.log")?;
+            let log = lox.get_text("/dev/fsget/log/def.log")?;
             let all: Vec<&str> = log.lines().collect();
-            let start = all.len().saturating_sub(lines);
-            for line in &all[start..] {
+            for line in &all[all.len().saturating_sub(lines)..] {
                 println!("{}", line);
             }
         },
@@ -716,28 +622,17 @@ steps:
 
 fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
     Ok(match op {
-        "eq" | "==" => current == target,
-        "ne" | "!=" => current != target,
-        "contains"  => current.contains(target),
-        "gt" | ">"  => parse_f(current)? > parse_f(target)?,
-        "lt" | "<"  => parse_f(current)? < parse_f(target)?,
-        "ge" | ">=" => parse_f(current)? >= parse_f(target)?,
-        "le" | "<=" => parse_f(current)? <= parse_f(target)?,
-        _ => bail!("Unknown op '{}'. Use: eq ne gt lt ge le contains", op),
+        "eq"|"==" => current == target,
+        "ne"|"!=" => current != target,
+        "contains" => current.contains(target),
+        "gt"|">" => parse_f(current)? > parse_f(target)?,
+        "lt"|"<" => parse_f(current)? < parse_f(target)?,
+        "ge"|">=" => parse_f(current)? >= parse_f(target)?,
+        "le"|"<=" => parse_f(current)? <= parse_f(target)?,
+        _ => bail!("Unknown op '{}'", op),
     })
 }
 
 fn parse_f(s: &str) -> Result<f64> {
-    s.parse::<f64>().with_context(|| format!("Cannot parse '{}' as number", s))
-}
-
-fn now_hms() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let s = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    format!("{:02}:{:02}:{:02}", (s % 86400) / 3600, (s % 3600) / 60, s % 60)
-}
-
-fn used_val_fmt(kb: f64) -> String {
-    if kb > 1024.0 { format!("{:.0} MB", kb / 1024.0) }
-    else { format!("{:.0} kB", kb) }
+    s.parse::<f64>().with_context(|| format!("Not a number: '{}'", s))
 }
