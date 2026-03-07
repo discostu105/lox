@@ -15,14 +15,26 @@ use crate::ws::{LoxWsClient, StateEvent};
 // ── Automation rule ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Condition {
+    pub control: String,
+    pub op: String,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Rule {
-    /// Control name or UUID to watch
+    /// Primary control name or UUID to watch
     pub when: String,
     /// Operator: eq ne gt lt ge le changes
     #[serde(default = "default_op")]
     pub op: String,
     /// Value to compare against (omit for "changes")
     pub value: Option<String>,
+    /// Additional conditions that must also be true (AND)
+    #[serde(default)]
+    pub also: Vec<Condition>,
+    /// Only fire between these hours (e.g. "08:00-22:00")
+    pub only_between: Option<String>,
     /// Shell command to run
     pub run: String,
     /// Optional description
@@ -82,6 +94,25 @@ rules:
   # - when: "Lichtsteuerung"
   #   op: changes
   #   run: "echo 'Light changed' >> /tmp/lox.log"
+
+  # Example: multi-condition (AND) — shade only if hot AND not already shaded
+  # - when: "Temperatur Wohnzimmer"
+  #   op: gt
+  #   value: "25"
+  #   also:
+  #     - control: "Beschattung"
+  #       op: eq
+  #       value: "0"
+  #   run: "lox blind 'Beschattung' shade"
+  #   cooldown_secs: 600
+
+  # Example: time window — only ring alert during day
+  # - when: "Türklingel"
+  #   op: eq
+  #   value: "1"
+  #   only_between: "08:00-22:00"
+  #   run: "notify-send 'Doorbell!'"
+  #   cooldown_secs: 10
 "#
     }
 }
@@ -148,10 +179,8 @@ impl StateRegistry {
 
 // ── Rule engine ───────────────────────────────────────────────────────────────
 
-fn eval_rule(rule: &Rule, old: Option<f64>, new: f64) -> bool {
-    let target = rule.value.as_deref().unwrap_or("0");
-    match rule.op.as_str() {
-        "changes" => old.map(|o| (o - new).abs() > 1e-9).unwrap_or(true),
+fn cmp_value(op: &str, target: &str, new: f64) -> bool {
+    match op {
         "eq" | "==" => {
             if let Ok(t) = target.parse::<f64>() { (new - t).abs() < 1e-9 }
             else { new.to_string() == target }
@@ -166,6 +195,53 @@ fn eval_rule(rule: &Rule, old: Option<f64>, new: f64) -> bool {
         "le" | "<=" => target.parse::<f64>().map(|t| new <= t).unwrap_or(false),
         _ => false,
     }
+}
+
+fn in_time_window(window: &str) -> bool {
+    // Format: "HH:MM-HH:MM"
+    let parts: Vec<&str> = window.split('-').collect();
+    if parts.len() != 2 { return true; }
+    fn parse_hm(s: &str) -> Option<u32> {
+        let mut p = s.splitn(2, ':');
+        let h: u32 = p.next()?.parse().ok()?;
+        let m: u32 = p.next()?.parse().ok()?;
+        Some(h * 60 + m)
+    }
+    let (start, end) = match (parse_hm(parts[0]), parse_hm(parts[1])) {
+        (Some(s), Some(e)) => (s, e),
+        _ => return true,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let local_min = ((secs % 86400) / 60) as u32; // UTC min — good enough for ±1h tz
+    if start <= end { local_min >= start && local_min <= end }
+    else { local_min >= start || local_min <= end }  // overnight window
+}
+
+fn eval_rule(rule: &Rule, old: Option<f64>, new: f64, registry: &StateRegistry) -> bool {
+    // Time window check
+    if let Some(window) = &rule.only_between {
+        if !in_time_window(window) { return false; }
+    }
+
+    // Primary condition
+    let primary = match rule.op.as_str() {
+        "changes" => old.map(|o| (o - new).abs() > 1e-9).unwrap_or(true),
+        op => cmp_value(op, rule.value.as_deref().unwrap_or("0"), new),
+    };
+    if !primary { return false; }
+
+    // Additional AND conditions
+    for cond in &rule.also {
+        let uuid = registry.resolve_name(&cond.control)
+            .unwrap_or_else(|| cond.control.clone());
+        let cur = registry.values.get(&uuid).copied().unwrap_or(f64::NAN);
+        if !cmp_value(&cond.op, cond.value.as_deref().unwrap_or("0"), cur) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn fire_rule(rule: &Rule) {
@@ -229,6 +305,7 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
 
     // Cooldown tracking: rule_index → last_fired unix secs
     let cooldowns: Arc<RwLock<HashMap<usize, u64>>> = Arc::new(RwLock::new(HashMap::new()));
+    // Track previous match state per rule (for non-"changes" rules: only fire on transition)
 
     println!("\n🔌 Connecting to Miniserver...");
 
@@ -271,7 +348,7 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
                 let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
                 if rule_uuid != &ev.uuid { continue; }
 
-                if !eval_rule(rule, old, ev.value) { continue; }
+                if !eval_rule(rule, old, ev.value, &registry2.read().unwrap()) { continue; }
 
                 // Cooldown check
                 let last = cooldowns2.read().unwrap().get(&i).copied().unwrap_or(0);
@@ -339,6 +416,8 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
     };
 
     let cooldowns: Arc<RwLock<HashMap<usize, u64>>> = Arc::new(RwLock::new(HashMap::new()));
+    // Track previous match state per rule (for non-"changes" rules: only fire on transition)
+    let prev_matched: Arc<RwLock<HashMap<usize, bool>>> = Arc::new(RwLock::new(HashMap::new()));
     let rules = Arc::new(automations.rules);
 
     // Collect all UUIDs we need to poll
@@ -395,7 +474,12 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
             for (i, rule) in rules.iter().enumerate() {
                 let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
                 if rule_uuid != uuid { continue; }
-                if !eval_rule(rule, old_val, new_val) { continue; }
+                let matches = eval_rule(rule, old_val, new_val, &registry.read().unwrap());
+                // For non-"changes" rules: only trigger on false→true transition
+                let was_matched = *prev_matched.read().unwrap().get(&i).unwrap_or(&false);
+                let is_edge = if rule.op == "changes" { matches } else { matches && !was_matched };
+                prev_matched.write().unwrap().insert(i, matches);
+                if !is_edge { continue; }
                 let last = cooldowns.read().unwrap().get(&i).copied().unwrap_or(0);
                 if now_secs - last < rule.cooldown_secs { continue; }
                 cooldowns.write().unwrap().insert(i, now_secs);

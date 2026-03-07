@@ -275,6 +275,27 @@ enum Cmd {
     Automation { #[command(subcommand)] action: AutomationCmd },
     /// Fetch Miniserver log
     Log { #[arg(long, default_value = "50")] lines: usize },
+    /// Set analog/virtual input value
+    Set {
+        /// Control name or UUID
+        name_or_uuid: String,
+        /// Value to send (numeric or text)
+        value: String,
+    },
+    /// Manage systemd daemon service
+    Service { #[command(subcommand)] action: ServiceCmd },
+}
+
+#[derive(Subcommand)]
+enum ServiceCmd {
+    /// Install systemd service
+    Install,
+    /// Show service status
+    Status,
+    /// Show service logs
+    Logs,
+    /// Uninstall service
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -617,6 +638,105 @@ fn main() -> Result<()> {
             },
         },
 
+        Cmd::Set { name_or_uuid, value } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve(&name_or_uuid)?;
+            let url = format!("{}/jdev/sps/io/{}/{}", lox.cfg.host, uuid, value);
+            let resp: Value = lox.client.get(&url)
+                .basic_auth(&lox.cfg.user, Some(&lox.cfg.pass))
+                .send()?.json()?;
+            let code = resp.pointer("/LL/Code").and_then(|v| v.as_str()).unwrap_or("?");
+            let val  = resp.pointer("/LL/value").and_then(|v| v.as_str()).unwrap_or("?");
+            if code == "200" {
+                println!("✓  {} = {}", name_or_uuid, val);
+            } else {
+                bail!("Error {}: {}", code, val);
+            }
+        },
+        Cmd::Service { action } => {
+            let binary = std::env::current_exe()
+                .unwrap_or_else(|_| PathBuf::from("lox"));
+            match action {
+                ServiceCmd::Install => {
+                    let unit = format!(r#"[Unit]
+Description=Loxone Automation Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart={bin} daemon --poll
+Restart=always
+RestartSec=5
+Environment=HOME={home}
+
+[Install]
+WantedBy=multi-user.target
+"#,
+                        bin = binary.display(),
+                        home = dirs::home_dir().unwrap_or_default().display(),
+                    );
+                    let unit_path = PathBuf::from("/etc/systemd/system/lox-daemon.service");
+                    if unit_path.exists() {
+                        bail!("Service already installed at {:?}. Remove first with: lox service uninstall", unit_path);
+                    }
+                    // Write to tmp, then ask to move with sudo
+                    let tmp = PathBuf::from("/tmp/lox-daemon.service");
+                    fs::write(&tmp, &unit)?;
+                    println!("Service file written to {:?}", tmp);
+                    println!("
+To install (requires sudo):");
+                    println!("  sudo mv /tmp/lox-daemon.service /etc/systemd/system/");
+                    println!("  sudo systemctl daemon-reload");
+                    println!("  sudo systemctl enable --now lox-daemon");
+                    println!("
+Or run as user service:");
+                    let user_dir = dirs::home_dir().unwrap_or_default().join(".config/systemd/user");
+                    fs::create_dir_all(&user_dir)?;
+                    let user_path = user_dir.join("lox-daemon.service");
+                    fs::write(&user_path, &unit)?;
+                    println!("  systemctl --user daemon-reload");
+                    println!("  systemctl --user enable --now lox-daemon");
+                    println!("
+User service written to: {:?}", user_path);
+                }
+                ServiceCmd::Status => {
+                    let out = std::process::Command::new("systemctl")
+                        .args(["--user", "status", "lox-daemon"])
+                        .output();
+                    match out {
+                        Ok(o) => print!("{}", String::from_utf8_lossy(&o.stdout)),
+                        Err(_) => println!("systemctl not available"),
+                    }
+                }
+                ServiceCmd::Logs => {
+                    let out = std::process::Command::new("journalctl")
+                        .args(["--user", "-u", "lox-daemon", "-n", "50", "--no-pager"])
+                        .output();
+                    match out {
+                        Ok(o) => print!("{}", String::from_utf8_lossy(&o.stdout)),
+                        Err(_) => println!("journalctl not available"),
+                    }
+                }
+                ServiceCmd::Uninstall => {
+                    let user_path = dirs::home_dir().unwrap_or_default()
+                        .join(".config/systemd/user/lox-daemon.service");
+                    if user_path.exists() {
+                        let _ = std::process::Command::new("systemctl")
+                            .args(["--user", "stop", "lox-daemon"]).status();
+                        let _ = std::process::Command::new("systemctl")
+                            .args(["--user", "disable", "lox-daemon"]).status();
+                        fs::remove_file(&user_path)?;
+                        let _ = std::process::Command::new("systemctl")
+                            .args(["--user", "daemon-reload"]).status();
+                        println!("✓ User service removed");
+                    } else {
+                        println!("No user service found. For system service, remove manually:");
+                        println!("  sudo systemctl disable --now lox-daemon");
+                        println!("  sudo rm /etc/systemd/system/lox-daemon.service");
+                    }
+                }
+            }
+        },
         Cmd::Log { lines } => {
             let lox = LoxClient::new(Config::load()?);
             let log = lox.get_text("/dev/fsget/log/def.log")?;
