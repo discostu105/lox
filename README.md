@@ -15,10 +15,10 @@ cp target/release/lox ~/.local/bin/
 
 ```bash
 # Basic
-lox config set --host https://192.168.20.24 --user USER --pass PASS
+lox config set --host https://192.168.1.100 --user USER --pass PASS
 
 # With serial for proper TLS (avoids cert warning)
-lox config set --host https://192.168.20.24 --user USER --pass PASS --serial 504f94a26236
+lox config set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
 ```
 
 Config: `~/.lox/config.yaml`
