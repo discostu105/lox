@@ -156,6 +156,9 @@ enum Cmd {
         command: String,
         #[arg(long)]
         room: Option<String>,
+        /// Send as secured command (requires visualization password hash)
+        #[arg(long)]
+        secured: Option<String>,
     },
     /// Turn on
     On {
@@ -191,6 +194,42 @@ enum Cmd {
         action: String,
         #[arg(long)]
         room: Option<String>,
+    },
+    /// Set dimmer level (0-100)
+    Dimmer {
+        name_or_uuid: String,
+        /// Brightness level 0-100
+        level: f64,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Control gate: open | close | stop
+    Gate {
+        name_or_uuid: String,
+        /// Action: open, close, stop
+        action: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Set color on ColorPickerV2 (hex RGB e.g. #FF0000 or hsv(h,s,v))
+    Color {
+        name_or_uuid: String,
+        /// Color value: hex RGB (#FF0000) or hsv(h,s,v)
+        value: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Show weather data
+    Weather {
+        /// Show 7-day forecast
+        #[arg(long)]
+        forecast: bool,
+    },
+    /// Discover Miniservers on the local network (UDP broadcast)
+    Discover {
+        /// Timeout in seconds
+        #[arg(long, default_value = "3")]
+        timeout: u64,
     },
     /// Control thermostat (IRoomControllerV2)
     Thermostat {
@@ -978,10 +1017,15 @@ fn main() -> Result<()> {
             name_or_uuid,
             command,
             room,
+            secured,
         } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = lox.send_cmd(&uuid, &command)?;
+            let resp = if let Some(hash) = secured {
+                lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
+            } else {
+                lox.send_cmd(&uuid, &command)?
+            };
             print_resp(&resp, cli.json, &name_or_uuid, &command);
         }
         Cmd::On { name_or_uuid, room } => {
@@ -1105,6 +1149,164 @@ fn main() -> Result<()> {
                     state,
                     if is_off { "off" } else { "active" }
                 );
+            }
+        }
+
+        Cmd::Dimmer {
+            name_or_uuid,
+            level,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            if !(0.0..=100.0).contains(&level) {
+                bail!("Dimmer level must be 0-100");
+            }
+            let resp = lox.send_cmd(&ctrl.uuid, &format!("{}", level))?;
+            print_resp(&resp, cli.json, &ctrl.name, &format!("dim={}", level));
+        }
+
+        Cmd::Gate {
+            name_or_uuid,
+            action,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            if !matches!(ctrl.typ.as_str(), "Gate" | "CentralGate") {
+                bail!("'{}' is type '{}', not a Gate", ctrl.name, ctrl.typ);
+            }
+            let cmd = match action.to_lowercase().as_str() {
+                "open" => "open",
+                "close" => "close",
+                "stop" => "stop",
+                other => bail!(
+                    "Unknown gate action '{}'. Use: open, close, stop",
+                    other
+                ),
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
+            print_resp(&resp, cli.json, &ctrl.name, cmd);
+        }
+
+        Cmd::Color {
+            name_or_uuid,
+            value,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
+                bail!(
+                    "'{}' is type '{}', not a ColorPicker",
+                    ctrl.name,
+                    ctrl.typ
+                );
+            }
+            // Parse color: #RRGGBB → "hsv(h,s,v)" or pass through hsv() format
+            let cmd = if value.starts_with('#') {
+                // Convert hex RGB to Loxone-compatible format
+                let hex = value.trim_start_matches('#');
+                if hex.len() != 6 {
+                    bail!("Hex color must be 6 digits: #RRGGBB");
+                }
+                let r = u8::from_str_radix(&hex[0..2], 16)
+                    .context("Invalid red component")?;
+                let g = u8::from_str_radix(&hex[2..4], 16)
+                    .context("Invalid green component")?;
+                let b = u8::from_str_radix(&hex[4..6], 16)
+                    .context("Invalid blue component")?;
+                // Convert RGB to HSV
+                let (h, s, v) = rgb_to_hsv(r, g, b);
+                format!("hsv({},{},{})", h, s, v)
+            } else {
+                value.clone()
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, &cmd)?;
+            print_resp(&resp, cli.json, &ctrl.name, &cmd);
+        }
+
+        Cmd::Weather { forecast } => {
+            let lox = LoxClient::new(Config::load()?);
+            let data = lox.get_bytes("/data/weatheru.bin")?;
+            if data.is_empty() {
+                println!("No weather data available on the Miniserver.");
+            } else {
+                // Parse 108-byte weather entries
+                let entry_size = 108;
+                let num_entries = data.len() / entry_size;
+                let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap()
+                    .and_local_timezone(chrono::Local)
+                    .unwrap();
+
+                let max_display = if forecast { num_entries } else { 1.min(num_entries) };
+
+                if cli.json {
+                    let mut arr = Vec::new();
+                    for i in 0..max_display {
+                        let offset = i * entry_size;
+                        let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
+                        if let Some(entry) = parse_weather_entry(&mut cursor, &lox_epoch) {
+                            arr.push(entry);
+                        }
+                    }
+                    println!("{}", serde_json::to_string_pretty(&arr)?);
+                } else {
+                    println!(
+                        "{:<20} {:>8} {:>8} {:>8} {:>8} {:>10}",
+                        "TIME", "TEMP°C", "HUM%", "WIND", "RAIN", "CLOUDS"
+                    );
+                    println!("{}", "─".repeat(72));
+                    for i in 0..max_display {
+                        let offset = i * entry_size;
+                        let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
+                        if let Some(entry) = parse_weather_entry(&mut cursor, &lox_epoch) {
+                            println!(
+                                "{:<20} {:>8.1} {:>8.0} {:>8.1} {:>8.1} {:>10.0}",
+                                entry["timestamp"].as_str().unwrap_or("?"),
+                                entry["temperature"].as_f64().unwrap_or(0.0),
+                                entry["humidity"].as_f64().unwrap_or(0.0),
+                                entry["wind_speed"].as_f64().unwrap_or(0.0),
+                                entry["rain"].as_f64().unwrap_or(0.0),
+                                entry["clouds"].as_f64().unwrap_or(0.0),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Cmd::Discover { timeout } => {
+            use std::net::UdpSocket;
+            println!("Scanning for Loxone Miniservers...");
+            let socket = UdpSocket::bind("0.0.0.0:0")?;
+            socket.set_broadcast(true)?;
+            socket.set_read_timeout(Some(Duration::from_secs(timeout)))?;
+            // Send discovery packet (single null byte) to port 7070
+            socket.send_to(&[0x00], "255.255.255.255:7070")?;
+            let mut buf = [0u8; 1024];
+            let mut found = Vec::new();
+            while let Ok((len, addr)) = socket.recv_from(&mut buf) {
+                let msg = String::from_utf8_lossy(&buf[..len]);
+                if cli.json {
+                    found.push(serde_json::json!({
+                        "address": addr.to_string(),
+                        "response": msg.to_string(),
+                    }));
+                } else {
+                    println!("  Found: {} — {}", addr, msg.trim());
+                }
+            }
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&found)?);
+            } else if found.is_empty() {
+                println!("No Miniservers found. (Timeout: {}s)", timeout);
             }
         }
 
@@ -1854,6 +2056,66 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
+    let rf = r as f64 / 255.0;
+    let gf = g as f64 / 255.0;
+    let bf = b as f64 / 255.0;
+    let max = rf.max(gf).max(bf);
+    let min = rf.min(gf).min(bf);
+    let delta = max - min;
+    let h = if delta == 0.0 {
+        0.0
+    } else if max == rf {
+        60.0 * (((gf - bf) / delta) % 6.0)
+    } else if max == gf {
+        60.0 * (((bf - rf) / delta) + 2.0)
+    } else {
+        60.0 * (((rf - gf) / delta) + 4.0)
+    };
+    let h = if h < 0.0 { h + 360.0 } else { h };
+    let s = if max == 0.0 { 0.0 } else { delta / max * 100.0 };
+    let v = max * 100.0;
+    (h.round() as u16, s.round() as u16, v.round() as u16)
+}
+
+fn parse_weather_entry(
+    cursor: &mut Cursor<&[u8]>,
+    lox_epoch: &chrono::DateTime<chrono::Local>,
+) -> Option<serde_json::Value> {
+    let ts = cursor.read_u32::<LittleEndian>().ok()?;
+    // Weather entry: 108 bytes total
+    // Bytes 0-3: timestamp (u32)
+    // Bytes 4-11: temperature (f64)
+    // Bytes 12-19: humidity (f64)
+    // Bytes 20-27: wind speed (f64)
+    // Bytes 28-35: wind direction (f64)
+    // Bytes 36-43: rain (f64)
+    // Bytes 44-51: barometric pressure (f64)
+    // ... remaining fields
+    let temperature = cursor.read_f64::<LittleEndian>().ok()?;
+    let humidity = cursor.read_f64::<LittleEndian>().ok()?;
+    let wind_speed = cursor.read_f64::<LittleEndian>().ok()?;
+    let wind_dir = cursor.read_f64::<LittleEndian>().ok()?;
+    let rain = cursor.read_f64::<LittleEndian>().ok()?;
+    let pressure = cursor.read_f64::<LittleEndian>().ok()?;
+    // Skip to cloud cover at offset 68 (read 2 more f64s = 16 bytes)
+    let _solar = cursor.read_f64::<LittleEndian>().ok()?;
+    let _dewpoint = cursor.read_f64::<LittleEndian>().ok()?;
+    let clouds = cursor.read_f64::<LittleEndian>().ok()?;
+    // Skip remaining bytes to complete 108
+    let dt = *lox_epoch + chrono::Duration::seconds(ts as i64);
+    Some(serde_json::json!({
+        "timestamp": dt.format("%Y-%m-%d %H:%M").to_string(),
+        "temperature": temperature,
+        "humidity": humidity,
+        "wind_speed": wind_speed,
+        "wind_direction": wind_dir,
+        "rain": rain,
+        "pressure": pressure,
+        "clouds": clouds,
+    }))
+}
+
 fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
     Ok(match op {
         "eq" | "==" => current == target,
@@ -1951,6 +2213,82 @@ mod tests {
     #[test]
     fn test_encode_path_value_plus() {
         assert_eq!(encode_path_value("a+b"), "a%2Bb");
+    }
+
+    // ── rgb_to_hsv ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_rgb_to_hsv_red() {
+        let (h, s, v) = rgb_to_hsv(255, 0, 0);
+        assert_eq!(h, 0);
+        assert_eq!(s, 100);
+        assert_eq!(v, 100);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_green() {
+        let (h, s, v) = rgb_to_hsv(0, 255, 0);
+        assert_eq!(h, 120);
+        assert_eq!(s, 100);
+        assert_eq!(v, 100);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_blue() {
+        let (h, s, v) = rgb_to_hsv(0, 0, 255);
+        assert_eq!(h, 240);
+        assert_eq!(s, 100);
+        assert_eq!(v, 100);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_white() {
+        let (h, s, v) = rgb_to_hsv(255, 255, 255);
+        assert_eq!(h, 0);
+        assert_eq!(s, 0);
+        assert_eq!(v, 100);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_black() {
+        let (h, s, v) = rgb_to_hsv(0, 0, 0);
+        assert_eq!(h, 0);
+        assert_eq!(s, 0);
+        assert_eq!(v, 0);
+    }
+
+    // ── weather parsing ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_weather_entry() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap();
+        let mut data = Vec::new();
+        data.write_u32::<LittleEndian>(3600).unwrap(); // 1 hour after epoch
+        data.write_f64::<LittleEndian>(21.5).unwrap(); // temp
+        data.write_f64::<LittleEndian>(65.0).unwrap(); // humidity
+        data.write_f64::<LittleEndian>(10.0).unwrap(); // wind
+        data.write_f64::<LittleEndian>(180.0).unwrap(); // wind dir
+        data.write_f64::<LittleEndian>(0.0).unwrap(); // rain
+        data.write_f64::<LittleEndian>(1013.0).unwrap(); // pressure
+        data.write_f64::<LittleEndian>(500.0).unwrap(); // solar
+        data.write_f64::<LittleEndian>(15.0).unwrap(); // dewpoint
+        data.write_f64::<LittleEndian>(50.0).unwrap(); // clouds
+        // Pad to 108 bytes
+        while data.len() < 108 {
+            data.push(0);
+        }
+        let mut cursor = Cursor::new(data.as_slice());
+        let entry = parse_weather_entry(&mut cursor, &lox_epoch).unwrap();
+        assert_eq!(entry["temperature"].as_f64().unwrap(), 21.5);
+        assert_eq!(entry["humidity"].as_f64().unwrap(), 65.0);
+        assert_eq!(entry["wind_speed"].as_f64().unwrap(), 10.0);
+        assert_eq!(entry["clouds"].as_f64().unwrap(), 50.0);
     }
 
     // ── is_uuid ──────────────────────────────────────────────────────────────
