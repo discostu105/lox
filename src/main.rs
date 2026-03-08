@@ -95,6 +95,21 @@ enum Cmd {
     Status {
         #[arg(long)]
         energy: bool,
+        /// Show CPU, tasks, context switches, SD card health
+        #[arg(long)]
+        diag: bool,
+        /// Show network configuration (IP, MAC, DNS, DHCP, NTP)
+        #[arg(long)]
+        net: bool,
+        /// Show CAN bus statistics
+        #[arg(long)]
+        bus: bool,
+        /// Show LAN packet statistics
+        #[arg(long)]
+        lan: bool,
+        /// Show all diagnostic sections
+        #[arg(long)]
+        all: bool,
     },
     /// List controls
     Ls {
@@ -104,9 +119,27 @@ enum Cmd {
         room: Option<String>,
         #[arg(long)]
         values: bool,
+        /// Filter by category name
+        #[arg(long)]
+        cat: Option<String>,
+        /// Show only favorites
+        #[arg(long)]
+        favorites: bool,
     },
     /// List all rooms in the structure
     Rooms,
+    /// List all categories
+    Categories,
+    /// Show detailed control info (sub-controls, states, moods, flags)
+    Info {
+        name_or_uuid: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Show global states (operating mode, sunrise/sunset, wind/rain warnings)
+    Globals,
+    /// List operating modes
+    Modes,
     /// Get full state of a control
     Get {
         name_or_uuid: String,
@@ -216,6 +249,8 @@ enum CacheCmd {
     Clear,
     /// Refresh structure cache now
     Refresh,
+    /// Check if cache is current (without full download)
+    Check,
 }
 
 #[derive(Subcommand)]
@@ -339,7 +374,11 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Status { energy } => {
+        Cmd::Status { energy, diag, net, bus, lan, all } => {
+            let show_diag = diag || all;
+            let show_net = net || all;
+            let show_bus = bus || all;
+            let show_lan = lan || all;
             let lox = LoxClient::new(Config::load()?);
             let version = lox.get_text("/dev/cfg/version")?;
             let heap = lox.get_text("/dev/sys/heap")?;
@@ -429,15 +468,134 @@ fn main() -> Result<()> {
                     println!("└─────────────────────────────────────────────────────");
                 }
             }
+            if show_diag {
+                let cpu = lox.get_text("/jdev/sys/lastcpu").unwrap_or_default();
+                let tasks = lox.get_text("/jdev/sys/numtasks").unwrap_or_default();
+                let ctx = lox.get_text("/jdev/sys/contextswitches").unwrap_or_default();
+                let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
+                let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
+                let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
+                let ctx_val = xml_attr(&ctx, "value").unwrap_or("?");
+                let sd_val = xml_attr(&sd, "value").unwrap_or("?");
+                if cli.json {
+                    println!("{}", serde_json::json!({
+                        "cpu": cpu_val, "tasks": tasks_val,
+                        "context_switches": ctx_val, "sd_health": sd_val,
+                    }));
+                } else {
+                    println!("┌─ Diagnostics ───────────────────────────────────────");
+                    println!("│  CPU:              {}", cpu_val);
+                    println!("│  Tasks:            {}", tasks_val);
+                    println!("│  Context switches: {}", ctx_val);
+                    println!("│  SD card:          {}", sd_val);
+                    println!("└─────────────────────────────────────────────────────");
+                }
+            }
+            if show_net {
+                let ip = lox.get_text("/jdev/cfg/ip").unwrap_or_default();
+                let mac = lox.get_text("/jdev/cfg/mac").unwrap_or_default();
+                let mask = lox.get_text("/jdev/cfg/mask").unwrap_or_default();
+                let gw = lox.get_text("/jdev/cfg/gateway").unwrap_or_default();
+                let dns1 = lox.get_text("/jdev/cfg/dns1").unwrap_or_default();
+                let dhcp = lox.get_text("/jdev/cfg/dhcp").unwrap_or_default();
+                let ntp = lox.get_text("/jdev/cfg/ntp").unwrap_or_default();
+                let ip_val = xml_attr(&ip, "value").unwrap_or("?");
+                let mac_val = xml_attr(&mac, "value").unwrap_or("?");
+                let mask_val = xml_attr(&mask, "value").unwrap_or("?");
+                let gw_val = xml_attr(&gw, "value").unwrap_or("?");
+                let dns1_val = xml_attr(&dns1, "value").unwrap_or("?");
+                let dhcp_val = xml_attr(&dhcp, "value").unwrap_or("?");
+                let ntp_val = xml_attr(&ntp, "value").unwrap_or("?");
+                if cli.json {
+                    println!("{}", serde_json::json!({
+                        "ip": ip_val, "mac": mac_val, "mask": mask_val,
+                        "gateway": gw_val, "dns": dns1_val,
+                        "dhcp": dhcp_val, "ntp": ntp_val,
+                    }));
+                } else {
+                    println!("┌─ Network ───────────────────────────────────────────");
+                    println!("│  IP:      {}", ip_val);
+                    println!("│  MAC:     {}", mac_val);
+                    println!("│  Mask:    {}", mask_val);
+                    println!("│  Gateway: {}", gw_val);
+                    println!("│  DNS:     {}", dns1_val);
+                    println!("│  DHCP:    {}", dhcp_val);
+                    println!("│  NTP:     {}", ntp_val);
+                    println!("└─────────────────────────────────────────────────────");
+                }
+            }
+            if show_bus {
+                let sent = lox.get_text("/jdev/bus/packetssent").unwrap_or_default();
+                let recv = lox.get_text("/jdev/bus/packetsreceived").unwrap_or_default();
+                let rerr = lox.get_text("/jdev/bus/receiveerrors").unwrap_or_default();
+                let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
+                let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
+                let sent_val = xml_attr(&sent, "value").unwrap_or("?");
+                let recv_val = xml_attr(&recv, "value").unwrap_or("?");
+                let rerr_val = xml_attr(&rerr, "value").unwrap_or("?");
+                let ferr_val = xml_attr(&ferr, "value").unwrap_or("?");
+                let over_val = xml_attr(&over, "value").unwrap_or("?");
+                if cli.json {
+                    println!("{}", serde_json::json!({
+                        "packets_sent": sent_val, "packets_received": recv_val,
+                        "receive_errors": rerr_val, "frame_errors": ferr_val,
+                        "overruns": over_val,
+                    }));
+                } else {
+                    println!("┌─ CAN Bus ───────────────────────────────────────────");
+                    println!("│  Packets sent:     {}", sent_val);
+                    println!("│  Packets received: {}", recv_val);
+                    println!("│  Receive errors:   {}", rerr_val);
+                    println!("│  Frame errors:     {}", ferr_val);
+                    println!("│  Overruns:         {}", over_val);
+                    println!("└─────────────────────────────────────────────────────");
+                }
+            }
+            if show_lan {
+                let txp = lox.get_text("/jdev/lan/txp").unwrap_or_default();
+                let txe = lox.get_text("/jdev/lan/txe").unwrap_or_default();
+                let txc = lox.get_text("/jdev/lan/txc").unwrap_or_default();
+                let rxp = lox.get_text("/jdev/lan/rxp").unwrap_or_default();
+                let rxo = lox.get_text("/jdev/lan/rxo").unwrap_or_default();
+                let eof = lox.get_text("/jdev/lan/eof").unwrap_or_default();
+                let txp_val = xml_attr(&txp, "value").unwrap_or("?");
+                let txe_val = xml_attr(&txe, "value").unwrap_or("?");
+                let txc_val = xml_attr(&txc, "value").unwrap_or("?");
+                let rxp_val = xml_attr(&rxp, "value").unwrap_or("?");
+                let rxo_val = xml_attr(&rxo, "value").unwrap_or("?");
+                let eof_val = xml_attr(&eof, "value").unwrap_or("?");
+                if cli.json {
+                    println!("{}", serde_json::json!({
+                        "tx_packets": txp_val, "tx_errors": txe_val, "tx_collisions": txc_val,
+                        "rx_packets": rxp_val, "rx_overflow": rxo_val, "eof_errors": eof_val,
+                    }));
+                } else {
+                    println!("┌─ LAN Statistics ────────────────────────────────────");
+                    println!("│  TX packets:    {}", txp_val);
+                    println!("│  TX errors:     {}", txe_val);
+                    println!("│  TX collisions: {}", txc_val);
+                    println!("│  RX packets:    {}", rxp_val);
+                    println!("│  RX overflow:   {}", rxo_val);
+                    println!("│  EOF errors:    {}", eof_val);
+                    println!("└─────────────────────────────────────────────────────");
+                }
+            }
         }
 
         Cmd::Ls {
             r#type,
             room,
             values,
+            cat,
+            favorites,
         } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let controls = lox.list_controls(r#type.as_deref(), room.as_deref())?;
+            let controls = lox.list_controls_ext(
+                r#type.as_deref(),
+                room.as_deref(),
+                cat.as_deref(),
+                favorites,
+            )?;
             if cli.json {
                 println!(
                     "{}",
@@ -499,6 +657,178 @@ fn main() -> Result<()> {
                 names.sort();
                 for n in names {
                     println!("{}", n);
+                }
+            }
+        }
+
+        Cmd::Categories => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let cats = lox.list_categories()?;
+            if cli.json {
+                let arr: Vec<_> = cats
+                    .iter()
+                    .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&arr)?);
+            } else {
+                println!("{:<36} NAME", "UUID");
+                println!("{}", "─".repeat(60));
+                for (uuid, name) in &cats {
+                    println!("{:<36} {}", uuid, name);
+                }
+                println!("\n{} categories", cats.len());
+            }
+        }
+
+        Cmd::Info { name_or_uuid, room } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid_resolved)?;
+            let ctrl_json = lox.get_control_json(&ctrl.uuid)?;
+            let xml = lox.get_all(&ctrl.uuid).unwrap_or_default();
+
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&ctrl_json)?);
+            } else {
+                println!("Control:    {} ({})", ctrl.name, ctrl.uuid);
+                println!(
+                    "Type:       {}   Room: {}   Cat: {}",
+                    ctrl.typ,
+                    ctrl.room.as_deref().unwrap_or("─"),
+                    ctrl.cat.as_deref().unwrap_or("─"),
+                );
+                println!(
+                    "Favorite:   {}   Secured: {}",
+                    if ctrl.is_favorite { "yes" } else { "no" },
+                    if ctrl.is_secured { "yes" } else { "no" },
+                );
+                let val = xml_attr(&xml, "value").unwrap_or("?");
+                println!("Value:      {}", val);
+
+                // Sub-controls
+                if let Some(subs) = ctrl_json.get("subControls").and_then(|s| s.as_object()) {
+                    println!("\nSub-controls:");
+                    for (sub_uuid, sub) in subs {
+                        let sub_name = sub
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("?");
+                        let sub_type = sub
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("?");
+                        println!("  {:<30} {:<20} {}", sub_name, sub_type, sub_uuid);
+                    }
+                }
+
+                // States
+                if let Some(states) = ctrl_json.get("states").and_then(|s| s.as_object()) {
+                    println!("\nStates:");
+                    let mut state_list: Vec<_> = states.iter().collect();
+                    state_list.sort_by_key(|(k, _)| k.as_str());
+                    for (state_name, state_uuid) in &state_list {
+                        let uuid_str = state_uuid.as_str().unwrap_or("?");
+                        println!("  {:<30} {}", state_name, uuid_str);
+                    }
+                }
+
+                // Details (moods for LightControllerV2)
+                if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object()) {
+                    if let Some(moods) = details.get("moods").and_then(|m| m.as_array()) {
+                        println!("\nMoods:");
+                        for mood in moods {
+                            let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+                            let name = mood
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("?");
+                            println!("  {:<6} {}", id, name);
+                        }
+                    }
+                }
+
+                // Statistics config
+                if let Some(stat) = ctrl_json.get("statistic") {
+                    if !stat.is_null() {
+                        println!("\nStatistics: enabled");
+                        if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
+                            for (k, v) in outputs {
+                                let name = v
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("?");
+                                println!("  {:<30} {}", name, k);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Cmd::Globals => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let globals = lox.get_global_states()?;
+            if cli.json {
+                let mut map = serde_json::Map::new();
+                for (name, uuid) in &globals {
+                    let val = lox
+                        .get_all(uuid)
+                        .ok()
+                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
+                        .unwrap_or_else(|| "?".to_string());
+                    map.insert(
+                        name.clone(),
+                        serde_json::json!({"uuid": uuid, "value": val}),
+                    );
+                }
+                println!("{}", serde_json::to_string_pretty(&Value::Object(map))?);
+            } else {
+                println!("{:<30} {:<36} VALUE", "STATE", "UUID");
+                println!("{}", "─".repeat(90));
+                for (name, uuid) in &globals {
+                    let val = lox
+                        .get_all(uuid)
+                        .ok()
+                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
+                        .unwrap_or_else(|| "?".to_string());
+                    println!("{:<30} {:<36} {}", name, uuid, val);
+                }
+            }
+        }
+
+        Cmd::Modes => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let modes = lox.get_operating_modes()?;
+            // Try to get the current operating mode
+            let globals = lox.get_global_states().unwrap_or_default();
+            let current_mode = globals
+                .iter()
+                .find(|(name, _)| name == "operatingMode")
+                .and_then(|(_, uuid)| {
+                    lox.get_all(uuid)
+                        .ok()
+                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
+                });
+            if cli.json {
+                let arr: Vec<_> = modes
+                    .iter()
+                    .map(|(id, name)| {
+                        let active = current_mode.as_deref() == Some(id.as_str());
+                        serde_json::json!({"id": id, "name": name, "active": active})
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&arr)?);
+            } else {
+                println!("{:<6} {:<30} STATUS", "ID", "MODE");
+                println!("{}", "─".repeat(50));
+                for (id, name) in &modes {
+                    let active = current_mode.as_deref() == Some(id.as_str());
+                    println!(
+                        "{:<6} {:<30} {}",
+                        id,
+                        name,
+                        if active { "← active" } else { "" }
+                    );
                 }
             }
         }
@@ -914,6 +1244,30 @@ fn main() -> Result<()> {
                         println!("✓ Cache cleared");
                     } else {
                         println!("No cache to clear");
+                    }
+                }
+                CacheCmd::Check => {
+                    let lox = LoxClient::new(cfg);
+                    let resp = lox.get_json("/jdev/sps/LoxAPPversion3")?;
+                    let remote_ver = resp
+                        .pointer("/LL/value")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "remote_version": remote_ver,
+                                "cache_exists": cache.exists(),
+                            })
+                        );
+                    } else {
+                        println!("Remote structure version: {}", remote_ver);
+                        if cache.exists() {
+                            println!("Cache: exists at {:?}", cache);
+                        } else {
+                            println!("Cache: not present");
+                        }
                     }
                 }
                 CacheCmd::Refresh => {
