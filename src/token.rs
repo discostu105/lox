@@ -81,7 +81,6 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
             pem.push('\n');
         }
         pem.push_str("-----END PUBLIC KEY-----");
-        eprintln!("[debug] normalized pem[..80]: {:?}", &pem[..pem.len().min(80)]);
         RsaPublicKey::from_public_key_pem(&pem)
             .map_err(|e| anyhow::anyhow!("RSA parse: {}", e))?
     };

@@ -12,6 +12,8 @@ use tokio_tungstenite::Connector;
 use rustls::{ClientConfig, crypto::ring};
 use std::sync::Arc;
 
+use rand::RngCore as _;
+
 use crate::config::Config;
 
 // ── State event ───────────────────────────────────────────────────────────────
@@ -254,10 +256,7 @@ impl LoxWsClient {
 }
 
 fn generate_ws_key() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos();
-    base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        format!("{:016x}", t as u64 ^ 0xdeadbeef_cafebabe_u64)
-    )
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
 }

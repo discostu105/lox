@@ -426,7 +426,12 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Config { action } => match action {
             ConfigCmd::Set { host, user, pass, serial } => {
-                Config { host, user, pass, serial, aliases: Default::default() }.save()?;
+                let mut cfg = Config::load().unwrap_or_default();
+                cfg.host = host;
+                cfg.user = user;
+                cfg.pass = pass;
+                if !serial.is_empty() { cfg.serial = serial; }
+                cfg.save()?;
             }
             ConfigCmd::Show => {
                 let cfg = Config::load()?;
@@ -822,10 +827,7 @@ fn main() -> Result<()> {
         Cmd::Set { name_or_uuid, value } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve(&name_or_uuid)?;
-            let url = format!("{}/jdev/sps/io/{}/{}", lox.cfg.host, uuid, value);
-            let resp: Value = lox.client.get(&url)
-                .basic_auth(&lox.cfg.user, Some(&lox.cfg.pass))
-                .send()?.json()?;
+            let resp = lox.send_cmd(&uuid, &encode_path_value(&value))?;
             let code = resp.pointer("/LL/Code").and_then(|v| v.as_str()).unwrap_or("?");
             let val  = resp.pointer("/LL/value").and_then(|v| v.as_str()).unwrap_or("?");
             if code == "200" {
@@ -1036,4 +1038,17 @@ fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
 
 fn parse_f(s: &str) -> Result<f64> {
     s.parse::<f64>().with_context(|| format!("Not a number: '{}'", s))
+}
+
+/// Percent-encode characters that would corrupt an HTTP path segment.
+/// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/0.5") pass through.
+fn encode_path_value(s: &str) -> String {
+    s.chars().flat_map(|c| match c {
+        '%' => vec!['%', '2', '5'],
+        ' ' => vec!['%', '2', '0'],
+        '#' => vec!['%', '2', '3'],
+        '?' => vec!['%', '3', 'F'],
+        '+' => vec!['%', '2', 'B'],
+        c   => vec![c],
+    }).collect()
 }
