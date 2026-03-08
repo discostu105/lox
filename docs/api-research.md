@@ -54,7 +54,26 @@
 
 ---
 
-### 3. System & Diagnose
+### 3. Control-Erweiterungen
+
+| Endpoint | Beschreibung |
+|----------|-------------|
+| `GET /jdev/sps/io/{uuid}/controlnotes` | Notizen/Hilfetext eines Controls (Plaintext) |
+| `GET /jdev/sps/io/{uuid}/lockcontrol/{0,1}/{reason}` | Control sperren mit Grund (Admin, ab v11.3.2.11) |
+| `GET /jdev/sps/io/{uuid}/unlockcontrol` | Control entsperren (Admin) |
+| `GET /jdev/sps/io/{uuid}/securedDetails` | Verschlüsselte Details (Intercom, Kamera-URLs) |
+| `GET /jdev/sps/ios/{hash}/{uuid}/{cmd}` | Gesicherter Befehl (Visualisierungspasswort) |
+| `GET /jdev/sps/io/{name}/I1/on` | Spezifische Inputs von Funktionsblöcken setzen |
+| `GET /jdev/sps/io/{name}/R` | Light Controller zurücksetzen |
+
+**CLI-Ideen:**
+- `lox lock <control> --reason "Wartung"` / `lox unlock <control>` — Controls sperren
+- `lox get` könnte `controlnotes` mit anzeigen
+- `lox send --secured` — Passwortgeschützte Controls bedienen
+
+---
+
+### 4. System & Diagnose
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -65,15 +84,20 @@
 | `GET /dev/sys/numtasks` | Anzahl System-Tasks |
 | `GET /dev/sys/date` | System-Datum/Uhrzeit |
 | `GET /dev/sps/changes` | PLC-Änderungen abfragen (Polling-Alternative) |
+| `GET /jdev/sps/LoxAPPversion3` | Structure-File Version prüfen ohne volles Download |
+| `GET /jdev/sys/checktoken/{hash}/{user}` | Token validieren ohne Verwendung |
+| `GET /jdev/sys/killtoken/{hash}/{user}` | Token widerrufen |
 
 **CLI-Ideen:**
 - `lox status --extended` / `lox info` — Erweiterte Infos (MAC, Config-Version, TZ, Tasks)
 - `lox reboot` — Miniserver neustarten (mit Bestätigung!)
 - `lox time` — Systemzeit des Miniservers anzeigen
+- `lox cache check` — Prüfen ob Cache aktuell ist ohne volles Download
+- `lox token check` / `lox token revoke` — Token-Management erweitern
 
 ---
 
-### 4. Structure File — Ungenutzte Daten
+### 5. Structure File — Ungenutzte Daten
 
 Die `LoxApp3.json` enthält weit mehr als aktuell genutzt wird:
 
@@ -100,7 +124,7 @@ Die `LoxApp3.json` enthält weit mehr als aktuell genutzt wird:
 
 ---
 
-### 5. Task Recorder
+### 6. Task Recorder
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -115,7 +139,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 6. Extensions & Geräte-Management
+### 7. Extensions & Geräte-Management
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -128,7 +152,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 7. Discovery & Netzwerk
+### 8. Discovery & Netzwerk
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -142,7 +166,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 8. Notifications & Services
+### 9. Notifications & Services
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -156,7 +180,38 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 9. Filesystem
+### 10. Music Server (Port 7091, inoffiziell)
+
+| Endpoint | Beschreibung |
+|----------|-------------|
+| `GET /zone/{zone}/play` | Play/Pause/Stop Transport-Kontrolle |
+| `GET /zone/{zone}/volume/{0-100}` | Lautstärke setzen |
+| `GET /zone/{zone}/repeat/{0,1,2}` | Repeat-Modus (off/one/all) |
+| `GET /zone/{zone}/shuffle/{0,1}` | Shuffle ein/aus |
+
+**Achtung:** Nicht offiziell dokumentiert, aus Community Reverse-Engineering.
+
+**CLI-Ideen:**
+- `lox music play/pause/stop [zone]`
+- `lox music volume <zone> <level>`
+
+---
+
+### 11. Firmware Updates
+
+| Endpoint | Beschreibung |
+|----------|-------------|
+| `GET update.loxone.com/updatecheck.xml?serial={}&version={}` | Verfügbare Updates prüfen |
+| `GET /jdev/sys/autoupdate` | Auto-Update triggern |
+| `GET /jdev/sys/updatetolatestrelease` | Update auf neueste Version |
+
+**CLI-Ideen:**
+- `lox update check` — Prüfen ob neues Firmware verfügbar
+- `lox update install` — Update triggern (mit Bestätigung)
+
+---
+
+### 12. Filesystem
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -171,16 +226,34 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ## Priorisierte Empfehlung
 
-| Priorität | Feature | Aufwand | Nutzen |
-|-----------|---------|---------|--------|
-| 🥇 1 | `lox history` / `lox stats` | Mittel (Binärformat parsen) | Sehr hoch — Energiedaten, Temperaturen |
-| 🥈 2 | `lox weather` | Mittel (Binärformat) | Hoch — Oft nachgefragt |
-| 🥉 3 | `lox categories` + `ls --cat` | Gering | Mittel — Bessere Navigation |
-| 4 | `lox discover` | Gering (UDP) | Mittel — Setup vereinfachen |
-| 5 | Extended `lox info` (Sub-Controls, Details) | Gering | Mittel — Tiefere Einblicke |
-| 6 | `lox globals` | Gering | Mittel — Betriebsmodus etc. |
-| 7 | `lox reboot` | Minimal | Gering — Selten gebraucht |
-| 8 | `lox notify` | Mittel (HMAC) | Gering — Nischennutzung |
+### High Value, Low Effort (Quick Wins)
+
+| Feature | Aufwand | Nutzen |
+|---------|---------|--------|
+| `lox categories` + `lox ls --cat` | Gering (Daten schon in LoxApp3.json) | Bessere Navigation |
+| `lox globals` (Betriebsmodus, Sonnenaufgang) | Gering (Daten schon in LoxApp3.json) | Nützliche Infos |
+| `lox cache check` (LoxAPPversion3) | Minimal | Smartere Cache-Validierung |
+| Extended `lox info` (Sub-Controls, Notes) | Gering | Tiefere Einblicke |
+| `lox status --extended` (MAC, TZ, Tasks) | Gering | Mehr System-Infos |
+
+### High Value, Medium Effort
+
+| Feature | Aufwand | Nutzen |
+|---------|---------|--------|
+| `lox history` / `lox stats` | Mittel (Binärformat parsen) | Sehr hoch — Energiedaten, Temperaturen |
+| `lox weather` | Mittel (Binärformat 108B Chunks) | Hoch — Wettervorhersage |
+| `lox discover` | Mittel (UDP Broadcast) | Setup vereinfachen |
+| `lox lock` / `lox unlock` | Gering-Mittel | Admin-Funktionalität |
+| `lox update check` | Gering | Firmware-Management |
+
+### Lower Priority / Nische
+
+| Feature | Aufwand | Nutzen |
+|---------|---------|--------|
+| `lox music` (inoffiziell) | Mittel | Music Server Steuerung |
+| `lox reboot` | Minimal | Selten gebraucht |
+| `lox notify` (Push/Mail) | Mittel (HMAC) | Nische |
+| `lox files` (Filesystem) | Gering | Nische |
 
 ---
 
