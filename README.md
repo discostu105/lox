@@ -116,16 +116,31 @@ Then use short names directly: `lox on wz`, `lox off kueche`
 # ── System ────────────────────────────────────────────────────────
 lox status                              # Miniserver health: firmware, PLC, memory
 lox status --energy                     # + live energy panel (PV, grid, battery, consumption)
+lox status --diag                       # CPU, tasks, context switches, SD card
+lox status --net                        # Network config (IP, MAC, DNS, DHCP, NTP)
+lox status --bus                        # CAN bus statistics
+lox status --lan                        # LAN packet statistics
+lox status --all                        # All diagnostic sections
 lox status --json
+lox time                                # Miniserver system date/time
 
 # ── Discovery ─────────────────────────────────────────────────────
 lox ls                                  # All controls
 lox ls --type Jalousie                  # Filter by type
 lox ls --room "Wohnzimmer"              # Filter by room
+lox ls --cat "Beleuchtung"              # Filter by category
+lox ls --favorites                      # Only favorites
 lox ls --values                         # Include current values (slower)
 lox ls --type LightControllerV2 --json  # JSON for agents/scripts
 lox rooms                               # List all rooms
+lox categories                          # List all categories
 lox get "Lichtsteuerung Wohnzimmer"     # Full state of one control
+lox info "Lichtsteuerung Wohnzimmer"    # Detailed info (sub-controls, states, moods)
+lox globals                             # Global states (operating mode, sunrise, etc.)
+lox modes                               # Operating modes
+lox discover                            # Find Miniservers on local network (UDP)
+lox discover --timeout 5               # Custom timeout in seconds
+lox extensions                          # Connected extensions and devices
 
 # ── Resolving ambiguous names ─────────────────────────────────────
 # When multiple controls share the same name (e.g. "Temperatur"):
@@ -140,6 +155,8 @@ lox mood "Lichtsteuerung Wohnzimmer" plus     # Next mood
 lox mood "Lichtsteuerung Wohnzimmer" minus    # Previous mood
 lox mood "Lichtsteuerung Wohnzimmer" off      # Turn off (mood 778)
 lox mood "Lichtsteuerung Wohnzimmer" 704      # Set by numeric mood ID
+lox dimmer "Stehlampe" 75                     # Set dimmer 0-100%
+lox color "LED Strip" "#FF0000"               # Set color (hex RGB or hsv())
 
 # ── Blinds ────────────────────────────────────────────────────────
 lox blind "Beschattung Süd" up
@@ -150,6 +167,32 @@ lox blind "Beschattung Süd" full-up
 lox blind "Beschattung Süd" full-down
 lox blind "Beschattung Süd" shade       # Automatic shading
 
+# ── Gates ────────────────────────────────────────────────────────
+lox gate "Garagentor" open
+lox gate "Garagentor" close
+lox gate "Garagentor" stop
+
+# ── Climate ──────────────────────────────────────────────────────
+lox thermostat "Heizung Wohnzimmer" --temp 22.5     # Set comfort temp
+lox thermostat "Heizung Wohnzimmer" --mode auto     # auto|manual|comfort|eco
+lox thermostat "Heizung" --override 24 --duration 120  # Override for N minutes
+lox weather                             # Current weather data
+lox weather --forecast                  # 7-day forecast
+
+# ── Security ─────────────────────────────────────────────────────
+lox alarm "Alarmanlage" arm             # Arm alarm
+lox alarm "Alarmanlage" arm --no-motion # Arm without motion detection
+lox alarm "Alarmanlage" disarm          # Disarm
+lox alarm "Alarmanlage" quit            # Acknowledge/silence
+lox lock "Heizung" --reason "Wartung"   # Lock a control
+lox unlock "Heizung"                    # Unlock a control
+
+# ── Statistics & History ──────────────────────────────────────────
+lox stats                               # Controls with statistics enabled
+lox history "Temperatur" --month 2025-01  # Monthly statistics
+lox history "Temperatur" --day 2025-01-15 # Daily statistics
+lox history "Temperatur" --csv          # CSV output
+
 # ── Conditions & Logic ────────────────────────────────────────────
 lox if "Temperatur Außen" gt 25         # Exit 0=true, 1=false
 lox if "Schalter" eq 1 && lox on "Licht"
@@ -158,26 +201,44 @@ lox if "Schalter" eq 1 && lox on "Licht"
 lox set "Sollwert Heizung" 21.5
 lox pulse "Taster"
 
+# ── Music Server ─────────────────────────────────────────────────
+lox music play                          # Play zone 1
+lox music pause 2                       # Pause zone 2
+lox music stop                          # Stop zone 1
+lox music volume 50                     # Set volume 0-100
+
 # ── Scenes ────────────────────────────────────────────────────────
 lox run abend
 lox scene list
 lox scene show abend
 lox scene new abend
 
+# ── System Administration ────────────────────────────────────────
+lox update check                        # Check for firmware updates
+lox update install --confirm            # Install firmware update
+lox reboot --confirm                    # Reboot the Miniserver
+lox files ls /                          # Browse Miniserver filesystem
+lox files get /log/def.log              # Download a file
+lox log                                 # Miniserver log (needs admin)
+
 # ── Cache ─────────────────────────────────────────────────────────
 lox cache info
+lox cache check                         # Check if cache is current
 lox cache refresh
 lox cache clear
 
 # ── Token Auth ────────────────────────────────────────────────────
 lox token fetch                         # Fetch & save token (valid 20 days)
 lox token info
-lox token clear
+lox token check                         # Verify token on Miniserver
+lox token refresh                       # Extend token validity
+lox token revoke                        # Revoke token on Miniserver
+lox token clear                         # Delete local token file
 
 # ── Raw ───────────────────────────────────────────────────────────
 lox send <uuid> <command>
+lox send <uuid> <command> --secured <hash>  # Secured command
 lox watch "Temperatur Außen"
-lox log                                 # Miniserver log (needs admin)
 ```
 
 ---
@@ -221,9 +282,13 @@ Structure cache at `~/.lox/cache/structure.json` (24h TTL):
 | `LightControllerV2` | `on`, `off`, `mood plus/minus/off/<id>` |
 | `Jalousie` / `CentralJalousie` | `up`, `down`, `stop`, `pos <0-100>`, `shade`, `full-up`, `full-down` |
 | `Switch` | `on`, `off`, `pulse` |
-| `Dimmer` | `on`, `off`, `set <0-100>` |
+| `Dimmer` | `dimmer <name> <0-100>` |
+| `Gate` / `CentralGate` | `gate <name> open/close/stop` |
+| `ColorPickerV2` | `color <name> #RRGGBB` or `color <name> "hsv(h,s,v)"` |
+| `IRoomControllerV2` | `thermostat <name> --temp/--mode/--override` |
+| `Alarm` | `alarm <name> arm/disarm/quit` |
 | `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
-| Any | `send <raw-command>` |
+| Any | `send <uuid> <raw-command>`, `lock`, `unlock` |
 
 ---
 

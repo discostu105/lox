@@ -31,10 +31,12 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | All CLI commands, clap argument parsing, `LoxClient` (HTTP), control resolution, scenes |
+| `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing) |
+| `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes |
 | `src/config.rs` | `Config` struct — loads/saves `~/.lox/config.yaml`, provides `Config::dir()` path |
+| `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/ws.rs` | `LoxWsClient` — async WebSocket connection used by token auth (RSA+AES key exchange handshake) |
-| `src/token.rs` | Token auth flow: RSA key exchange, AES-encrypted credential exchange, token storage at `~/.lox/token.json` |
+| `src/token.rs` | Token auth flow: RSA key exchange, AES-encrypted credential exchange, token storage, HMAC token hashing |
 
 ### Key design points
 
@@ -60,12 +62,26 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 ### Loxone HTTP API used
 
 ```
-GET /data/LoxApp3.json              → full structure (controls, rooms)
+GET /data/LoxApp3.json              → full structure (controls, rooms, categories, globalStates)
 GET /jdev/sps/io/{uuid}/{cmd}       → send command → JSON response
 GET /dev/sps/io/{uuid}/all          → XML: all state outputs for a control
 GET /dev/sps/io/{name}/state        → input state by name
 GET /dev/sys/heap, /dev/sps/state, /dev/cfg/version, /data/status  → status info
-WSS /ws/rfc6455                     → WebSocket for real-time state push
+GET /jdev/sys/lastcpu, numtasks, contextswitches, sdtest           → diagnostics
+GET /jdev/cfg/ip, mac, mask, gateway, dns1, dhcp, ntp              → network config
+GET /jdev/bus/packetssent, packetsreceived, ...                    → CAN bus stats
+GET /jdev/lan/txp, txe, rxp, ...                                  → LAN stats
+GET /jdev/sys/date, /jdev/sys/time                                 → system clock
+GET /jdev/sps/LoxAPPversion3        → structure file version check
+GET /binstatisticdata/{uuid}/{period} → binary statistics (u32 ts + f64[] values)
+GET /data/weatheru.bin              → binary weather data (108-byte entries)
+GET /dev/fsget/{path}               → filesystem access
+GET /jdev/sys/checktoken, refreshtoken, killtoken                  → token management
+GET /jdev/sys/reboot                → reboot Miniserver
+GET /jdev/sys/updatetolatestrelease → firmware update
+WSS /ws/rfc6455                     → WebSocket for token auth key exchange
+UDP :7070                           → Miniserver discovery (broadcast)
+HTTP :7091/zone/{n}/{cmd}           → Music server API (unofficial)
 ```
 
 TLS: `danger_accept_invalid_certs(true)` is used throughout (Miniserver uses self-signed certs). When `serial` is set in config, `Config::tls_host()` generates the DynDNS hostname for valid cert matching.
