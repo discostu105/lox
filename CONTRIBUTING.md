@@ -4,7 +4,7 @@
 
 ```bash
 # Clone
-git clone https://github.com/chrisb/lox
+git clone https://github.com/discostu105/lox
 cd lox
 
 # Build (debug)

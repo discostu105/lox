@@ -99,3 +99,66 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Update formula with checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          export SHA_MACOS_ARM=$(awk '{print $1}' artifacts/lox-macos-aarch64.sha256)
+          export SHA_MACOS_X86=$(awk '{print $1}' artifacts/lox-macos-x86_64.sha256)
+          export SHA_LINUX_ARM=$(awk '{print $1}' artifacts/lox-linux-aarch64.sha256)
+          export SHA_LINUX_X86=$(awk '{print $1}' artifacts/lox-linux-x86_64.sha256)
+
+          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" Formula/lox.rb
+
+          # Update SHA256 values in order of appearance:
+          # 1st = macos-aarch64, 2nd = macos-x86_64,
+          # 3rd = linux-aarch64, 4th = linux-x86_64
+          python3 - <<'PYEOF'
+          import re, os
+
+          sha_map = [
+              os.environ["SHA_MACOS_ARM"],
+              os.environ["SHA_MACOS_X86"],
+              os.environ["SHA_LINUX_ARM"],
+              os.environ["SHA_LINUX_X86"],
+          ]
+
+          with open("Formula/lox.rb") as f:
+              content = f.read()
+
+          idx = [0]
+          def replacer(m):
+              i = idx[0]
+              idx[0] += 1
+              return f'sha256 "{sha_map[i]}"'
+
+          content = re.sub(r'sha256 "[^"]*"', replacer, content)
+
+          with open("Formula/lox.rb", "w") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Commit updated formula
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/lox.rb
+          git commit -m "brew: update formula to ${GITHUB_REF_NAME}"
+          git push origin main
