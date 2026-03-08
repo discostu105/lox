@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+See [AGENTS.md](AGENTS.md) for issue tracking workflow (beads/bd).
 
 ## Commands
 
@@ -72,3 +73,36 @@ WSS /ws/rfc6455                     → WebSocket for real-time state push
 ```
 
 TLS: `danger_accept_invalid_certs(true)` is used throughout (Miniserver uses self-signed certs). When `serial` is set in config, `Config::tls_host()` generates the DynDNS hostname for valid cert matching.
+
+## Agent Workflow
+
+### Non-Interactive Shell Commands
+
+**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
+
+Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
+
+```bash
+cp -f source dest    # NOT: cp source dest
+mv -f source dest    # NOT: mv source dest
+rm -f file           # NOT: rm file
+rm -rf directory     # NOT: rm -r directory
+```
+
+Other commands that may prompt: `scp`/`ssh` — use `-o BatchMode=yes`; `apt-get` — use `-y`; `brew` — set `HOMEBREW_NO_AUTO_UPDATE=1`.
+
+### Session Completion
+
+**Work is NOT complete until `git push` succeeds.**
+
+1. File issues for remaining work (`bd create`)
+2. Run quality gates — `cargo test`, `cargo clippy`
+3. Update issue status — close finished work
+4. Push:
+   ```bash
+   git pull --rebase
+   bd backup        # export issues to .beads/backup/ and commit
+   git push
+   git status       # must show "up to date with origin"
+   ```
+5. Verify all changes committed and pushed before ending the session

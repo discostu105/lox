@@ -24,18 +24,22 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn scenes_dir() -> PathBuf { Config::dir().join("scenes") }
+    pub fn scenes_dir() -> PathBuf {
+        Config::dir().join("scenes")
+    }
 
     pub fn load(name: &str) -> Result<Self> {
         let path = Self::scenes_dir().join(format!("{}.yaml", name));
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Scene '{}' not found", name))?;
+        let content =
+            fs::read_to_string(&path).with_context(|| format!("Scene '{}' not found", name))?;
         Ok(serde_yaml::from_str(&content)?)
     }
 
     pub fn list() -> Result<Vec<String>> {
         let dir = Self::scenes_dir();
-        if !dir.exists() { return Ok(vec![]); }
+        if !dir.exists() {
+            return Ok(vec![]);
+        }
         let mut names = vec![];
         for entry in fs::read_dir(&dir)? {
             let path = entry?.path();

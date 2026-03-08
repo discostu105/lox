@@ -1,13 +1,13 @@
 //! Automation daemon — watches state events and fires rules
 
 use anyhow::Result;
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::token::TokenStore;
@@ -45,8 +45,12 @@ pub struct Rule {
     pub cooldown_secs: u64,
 }
 
-fn default_op() -> String { "changes".into() }
-fn default_cooldown() -> u64 { 5 }
+fn default_op() -> String {
+    "changes".into()
+}
+fn default_cooldown() -> u64 {
+    5
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Automations {
@@ -68,7 +72,7 @@ impl Automations {
     }
 
     pub fn template() -> &'static str {
-r#"# ~/.lox/automations.yaml
+        r#"# ~/.lox/automations.yaml
 # Rules are evaluated on every state change from the Miniserver.
 #
 # Operators: eq ne gt lt ge le changes
@@ -153,7 +157,9 @@ impl StateRegistry {
             return Some(uuid.clone());
         }
         // Substring match
-        let matches: Vec<&str> = self.name_to_uuid.keys()
+        let matches: Vec<&str> = self
+            .name_to_uuid
+            .keys()
             .filter(|k| k.contains(&lower))
             .map(|k| k.as_str())
             .collect();
@@ -164,7 +170,10 @@ impl StateRegistry {
     }
 
     pub fn name_for(&self, uuid: &str) -> String {
-        self.uuid_to_name.get(uuid).cloned().unwrap_or_else(|| uuid.to_string())
+        self.uuid_to_name
+            .get(uuid)
+            .cloned()
+            .unwrap_or_else(|| uuid.to_string())
     }
 
     pub fn update(&mut self, uuid: &str, value: f64) -> Option<f64> {
@@ -173,6 +182,7 @@ impl StateRegistry {
         old
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, uuid: &str) -> Option<f64> {
         self.values.get(uuid).copied()
     }
@@ -183,15 +193,21 @@ impl StateRegistry {
 fn cmp_value(op: &str, target: &str, new: f64) -> bool {
     match op {
         "eq" | "==" => {
-            if let Ok(t) = target.parse::<f64>() { (new - t).abs() < 1e-9 }
-            else { new.to_string() == target }
-        },
+            if let Ok(t) = target.parse::<f64>() {
+                (new - t).abs() < 1e-9
+            } else {
+                new.to_string() == target
+            }
+        }
         "ne" | "!=" => {
-            if let Ok(t) = target.parse::<f64>() { (new - t).abs() > 1e-9 }
-            else { new.to_string() != target }
-        },
-        "gt" | ">"  => target.parse::<f64>().map(|t| new > t).unwrap_or(false),
-        "lt" | "<"  => target.parse::<f64>().map(|t| new < t).unwrap_or(false),
+            if let Ok(t) = target.parse::<f64>() {
+                (new - t).abs() > 1e-9
+            } else {
+                new.to_string() != target
+            }
+        }
+        "gt" | ">" => target.parse::<f64>().map(|t| new > t).unwrap_or(false),
+        "lt" | "<" => target.parse::<f64>().map(|t| new < t).unwrap_or(false),
         "ge" | ">=" => target.parse::<f64>().map(|t| new >= t).unwrap_or(false),
         "le" | "<=" => target.parse::<f64>().map(|t| new <= t).unwrap_or(false),
         _ => false,
@@ -201,7 +217,9 @@ fn cmp_value(op: &str, target: &str, new: f64) -> bool {
 fn in_time_window(window: &str, timezone: Option<&str>) -> bool {
     // Format: "HH:MM-HH:MM"
     let parts: Vec<&str> = window.split('-').collect();
-    if parts.len() != 2 { return true; }
+    if parts.len() != 2 {
+        return true;
+    }
     fn parse_hm(s: &str) -> Option<u32> {
         let mut p = s.splitn(2, ':');
         let h: u32 = p.next()?.parse().ok()?;
@@ -225,14 +243,25 @@ fn in_time_window(window: &str, timezone: Option<&str>) -> bool {
         let now = chrono::Local::now();
         now.hour() * 60 + now.minute()
     };
-    if start <= end { local_min >= start && local_min <= end }
-    else { local_min >= start || local_min <= end }  // overnight window
+    if start <= end {
+        local_min >= start && local_min <= end
+    } else {
+        local_min >= start || local_min <= end
+    } // overnight window
 }
 
-fn eval_rule(rule: &Rule, old: Option<f64>, new: f64, registry: &StateRegistry, timezone: Option<&str>) -> bool {
+fn eval_rule(
+    rule: &Rule,
+    old: Option<f64>,
+    new: f64,
+    registry: &StateRegistry,
+    timezone: Option<&str>,
+) -> bool {
     // Time window check
     if let Some(window) = &rule.only_between {
-        if !in_time_window(window, timezone) { return false; }
+        if !in_time_window(window, timezone) {
+            return false;
+        }
     }
 
     // Primary condition
@@ -240,11 +269,14 @@ fn eval_rule(rule: &Rule, old: Option<f64>, new: f64, registry: &StateRegistry, 
         "changes" => old.map(|o| (o - new).abs() > 1e-9).unwrap_or(true),
         op => cmp_value(op, rule.value.as_deref().unwrap_or("0"), new),
     };
-    if !primary { return false; }
+    if !primary {
+        return false;
+    }
 
     // Additional AND conditions
     for cond in &rule.also {
-        let uuid = registry.resolve_name(&cond.control)
+        let uuid = registry
+            .resolve_name(&cond.control)
             .unwrap_or_else(|| cond.control.clone());
         let cur = registry.values.get(&uuid).copied().unwrap_or(f64::NAN);
         if !cmp_value(&cond.op, cond.value.as_deref().unwrap_or("0"), cur) {
@@ -260,15 +292,15 @@ fn fire_rule(rule: &Rule) {
     if let Some(desc) = &rule.description {
         println!("     ({})", desc);
     }
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(&rule.run)
-        .output();
+    let output = Command::new("sh").arg("-c").arg(&rule.run).output();
     match output {
         Ok(o) => {
             if !o.status.success() {
-                eprintln!("  ✗  Command failed (exit {}): {}", o.status,
-                    String::from_utf8_lossy(&o.stderr).trim());
+                eprintln!(
+                    "  ✗  Command failed (exit {}): {}",
+                    o.status,
+                    String::from_utf8_lossy(&o.stderr).trim()
+                );
             }
         }
         Err(e) => eprintln!("  ✗  Failed to run command: {}", e),
@@ -279,7 +311,11 @@ fn fire_rule(rule: &Rule) {
 
 pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
     let automations = Automations::load()?;
-    println!("Loaded {} rule(s) from {:?}", automations.rules.len(), Automations::path());
+    println!(
+        "Loaded {} rule(s) from {:?}",
+        automations.rules.len(),
+        Automations::path()
+    );
 
     // Fetch structure for name→uuid mapping
     let structure = {
@@ -292,10 +328,13 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
             .filter(|t| t.is_valid())
             .map(|t| t.token)
             .unwrap_or_else(|| cfg.pass.clone());
-        client.get(&url)
+        client
+            .get(&url)
             .basic_auth(&cfg.user, Some(&pass))
-            .send().await?
-            .json::<serde_json::Value>().await?
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?
     };
 
     let registry = Arc::new(RwLock::new(StateRegistry::default()));
@@ -339,52 +378,67 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
         let cooldowns3 = cooldowns2.clone();
         let verbose2 = verbose;
         let timezone2 = timezone.clone();
-        let result = ws.run(move |events: Vec<StateEvent>| {
-        let rules = &rules2;
-        let rule_uuids = &rule_uuids2;
-        let registry2 = &registry3;
-        let cooldowns2 = &cooldowns3;
-        let verbose = verbose2;
-        let tz = timezone2.as_deref();
-        for ev in events {
-            let old = {
-                let mut reg = registry2.write().unwrap();
-                reg.update(&ev.uuid, ev.value)
-            };
+        let result = ws
+            .run(move |events: Vec<StateEvent>| {
+                let rules = &rules2;
+                let rule_uuids = &rule_uuids2;
+                let registry2 = &registry3;
+                let cooldowns2 = &cooldowns3;
+                let verbose = verbose2;
+                let tz = timezone2.as_deref();
+                for ev in events {
+                    let old = {
+                        let mut reg = registry2.write().unwrap();
+                        reg.update(&ev.uuid, ev.value)
+                    };
 
-            if verbose {
-                let reg = registry2.read().unwrap();
-                let name = reg.name_for(&ev.uuid);
-                println!("[state] {} = {}", name, ev.value);
-            }
+                    if verbose {
+                        let reg = registry2.read().unwrap();
+                        let name = reg.name_for(&ev.uuid);
+                        println!("[state] {} = {}", name, ev.value);
+                    }
 
-            // Check rules
-            let now_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    // Check rules
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
 
-            for (i, rule) in rules.iter().enumerate() {
-                let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
-                if rule_uuid != &ev.uuid { continue; }
+                    for (i, rule) in rules.iter().enumerate() {
+                        let Some(ref rule_uuid) = rule_uuids[i] else {
+                            continue;
+                        };
+                        if rule_uuid != &ev.uuid {
+                            continue;
+                        }
 
-                if !eval_rule(rule, old, ev.value, &registry2.read().unwrap(), tz) { continue; }
+                        if !eval_rule(rule, old, ev.value, &registry2.read().unwrap(), tz) {
+                            continue;
+                        }
 
-                // Cooldown check
-                let last = cooldowns2.read().unwrap().get(&i).copied().unwrap_or(0);
-                if now_secs - last < rule.cooldown_secs { continue; }
-                cooldowns2.write().unwrap().insert(i, now_secs);
+                        // Cooldown check
+                        let last = cooldowns2.read().unwrap().get(&i).copied().unwrap_or(0);
+                        if now_secs - last < rule.cooldown_secs {
+                            continue;
+                        }
+                        cooldowns2.write().unwrap().insert(i, now_secs);
 
-                let reg = registry2.read().unwrap();
-                let name = reg.name_for(&ev.uuid);
-                println!("\n⚡ Rule triggered: {} = {}", name, ev.value);
-                fire_rule(rule);
-            }
-        }
-        }).await;
+                        let reg = registry2.read().unwrap();
+                        let name = reg.name_for(&ev.uuid);
+                        println!("\n⚡ Rule triggered: {} = {}", name, ev.value);
+                        fire_rule(rule);
+                    }
+                }
+            })
+            .await;
         match result {
             Ok(_) => break,
             Err(e) => {
                 let msg = e.to_string();
-                if msg.contains("reconnect") || msg.contains("close_notify") || msg.contains("closed") {
+                if msg.contains("reconnect")
+                    || msg.contains("close_notify")
+                    || msg.contains("closed")
+                {
                     retry += 1;
                     let delay = (retry * 2).min(30);
                     eprintln!("⚠  Disconnected, reconnecting in {}s... ({})", delay, msg);
@@ -414,10 +468,13 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
             .timeout(std::time::Duration::from_secs(15))
             .build()?;
         let url = format!("{}/data/LoxApp3.json", cfg.host);
-        client.get(&url)
+        client
+            .get(&url)
             .basic_auth(&cfg.user, Some(&pass))
-            .send().await?
-            .json::<serde_json::Value>().await?
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?
     };
 
     let registry = Arc::new(RwLock::new(StateRegistry::default()));
@@ -430,11 +487,17 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
     // Pre-resolve rule UUIDs
     let rule_uuids: Vec<Option<String>> = {
         let reg = registry.read().unwrap();
-        automations.rules.iter().map(|rule| {
-            let uuid = reg.resolve_name(&rule.when);
-            if uuid.is_none() { eprintln!("  ⚠  Not found: '{}'", rule.when); }
-            uuid
-        }).collect()
+        automations
+            .rules
+            .iter()
+            .map(|rule| {
+                let uuid = reg.resolve_name(&rule.when);
+                if uuid.is_none() {
+                    eprintln!("  ⚠  Not found: '{}'", rule.when);
+                }
+                uuid
+            })
+            .collect()
     };
 
     let cooldowns: Arc<RwLock<HashMap<usize, u64>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -443,13 +506,18 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
     let rules = Arc::new(automations.rules);
 
     // Collect all UUIDs we need to poll
-    let watch_uuids: Vec<String> = rule_uuids.iter()
+    let watch_uuids: Vec<String> = rule_uuids
+        .iter()
         .filter_map(|u| u.clone())
         .collect::<std::collections::HashSet<_>>()
-        .into_iter().collect();
+        .into_iter()
+        .collect();
 
-    println!("\n🔄 Polling {} controls every {}s  (Ctrl+C to stop)\n",
-        watch_uuids.len(), interval_secs);
+    println!(
+        "\n🔄 Polling {} controls every {}s  (Ctrl+C to stop)\n",
+        watch_uuids.len(),
+        interval_secs
+    );
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -459,15 +527,23 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
     loop {
         for uuid in &watch_uuids {
             let url = format!("{}/dev/sps/io/{}/all", cfg.host, uuid);
-            let xml = match client.get(&url)
+            let xml = match client
+                .get(&url)
                 .basic_auth(&cfg.user, Some(&pass))
-                .send().await.and_then(|r| Ok(r))
+                .send()
+                .await
             {
                 Ok(resp) => match resp.text().await {
                     Ok(x) => x,
-                    Err(e) => { eprintln!("Poll error {}: {}", &uuid[..8], e); continue; }
+                    Err(e) => {
+                        eprintln!("Poll error {}: {}", &uuid[..8], e);
+                        continue;
+                    }
                 },
-                Err(e) => { eprintln!("Poll error {}: {}", &uuid[..8], e); continue; }
+                Err(e) => {
+                    eprintln!("Poll error {}: {}", &uuid[..8], e);
+                    continue;
+                }
             };
 
             // Extract value from XML attr
@@ -478,7 +554,9 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
                 xml[start..end].parse().ok()
             }
 
-            let Some(new_val) = xml_val(&xml) else { continue; };
+            let Some(new_val) = xml_val(&xml) else {
+                continue;
+            };
 
             let old_val = {
                 let mut reg = registry.write().unwrap();
@@ -491,19 +569,39 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
             }
 
             let now_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
 
             for (i, rule) in rules.iter().enumerate() {
-                let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
-                if rule_uuid != uuid { continue; }
-                let matches = eval_rule(rule, old_val, new_val, &registry.read().unwrap(), cfg.timezone.as_deref());
+                let Some(ref rule_uuid) = rule_uuids[i] else {
+                    continue;
+                };
+                if rule_uuid != uuid {
+                    continue;
+                }
+                let matches = eval_rule(
+                    rule,
+                    old_val,
+                    new_val,
+                    &registry.read().unwrap(),
+                    cfg.timezone.as_deref(),
+                );
                 // For non-"changes" rules: only trigger on false→true transition
                 let was_matched = *prev_matched.read().unwrap().get(&i).unwrap_or(&false);
-                let is_edge = if rule.op == "changes" { matches } else { matches && !was_matched };
+                let is_edge = if rule.op == "changes" {
+                    matches
+                } else {
+                    matches && !was_matched
+                };
                 prev_matched.write().unwrap().insert(i, matches);
-                if !is_edge { continue; }
+                if !is_edge {
+                    continue;
+                }
                 let last = cooldowns.read().unwrap().get(&i).copied().unwrap_or(0);
-                if now_secs - last < rule.cooldown_secs { continue; }
+                if now_secs - last < rule.cooldown_secs {
+                    continue;
+                }
                 cooldowns.write().unwrap().insert(i, now_secs);
                 let reg = registry.read().unwrap();
                 println!("\n⚡ Rule triggered: {} = {}", reg.name_for(uuid), new_val);
@@ -525,7 +623,9 @@ fn now_ts() -> String {
 mod tests {
     use super::*;
 
-    fn empty_registry() -> StateRegistry { StateRegistry::default() }
+    fn empty_registry() -> StateRegistry {
+        StateRegistry::default()
+    }
 
     fn rule(op: &str, value: Option<&str>, only_between: Option<&str>) -> Rule {
         Rule {
