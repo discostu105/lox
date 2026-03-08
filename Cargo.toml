@@ -1,6 +1,6 @@
 [package]
 name = "lox"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Loxone Miniserver CLI — control lights, blinds, and more from your terminal"
 repository = "https://github.com/discostu105/lox"
@@ -39,6 +39,7 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 rand = "0.8"
 chrono = { version = "0.4", features = ["clock"] }
+byteorder = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
