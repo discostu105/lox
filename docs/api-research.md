@@ -80,24 +80,93 @@
 | `GET /jdev/cfg/api` | API-Info: MAC-Adresse, Config-Version, httpsStatus, hasEventSlots |
 | `GET /jdev/cfg/apiKey` | API-Key für Hashing + httpsStatus |
 | `GET /jdev/cfg/timezoneoffset` | Timezone-Offset des Miniservers |
-| `GET /dev/sys/reboot` | Miniserver neustarten (⚠ braucht System-Rechte) |
-| `GET /dev/sys/numtasks` | Anzahl System-Tasks |
-| `GET /dev/sys/date` | System-Datum/Uhrzeit |
-| `GET /dev/sps/changes` | PLC-Änderungen abfragen (Polling-Alternative) |
+| `GET /jdev/cfg/mac` | MAC-Adresse |
+| `GET /jdev/cfg/ip` | IP-Adresse |
+| `GET /jdev/cfg/mask` | Netzwerkmaske |
+| `GET /jdev/cfg/gateway` | Default Gateway |
+| `GET /jdev/cfg/dns1` / `dns2` | DNS-Server |
+| `GET /jdev/cfg/dhcp` | DHCP-Einstellung |
+| `GET /jdev/cfg/ntp` | NTP-Server |
+| `GET /jdev/sys/date` | System-Datum |
+| `GET /jdev/sys/time` | System-Uhrzeit |
+| `GET /jdev/sys/lastcpu` | CPU-Auslastung |
+| `GET /jdev/sys/numtasks` | Anzahl laufender Tasks |
+| `GET /jdev/sys/ints` | System-Interrupts |
+| `GET /jdev/sys/comints` | Kommunikations-Interrupts |
+| `GET /jdev/sys/contextswitches` | Context-Switch-Zähler |
+| `GET /jdev/sys/sdtest` | SD-Karten Gesundheit/Speichertest |
+| `GET /jdev/sys/reboot` | Miniserver neustarten (⚠ braucht System-Rechte) |
 | `GET /jdev/sps/LoxAPPversion3` | Structure-File Version prüfen ohne volles Download |
+| `GET /jdev/sps/status` | PLC Frequenz/Status |
+| `GET /jdev/sps/changes` | PLC-Änderungen abfragen (Polling-Alternative) |
 | `GET /jdev/sys/checktoken/{hash}/{user}` | Token validieren ohne Verwendung |
 | `GET /jdev/sys/killtoken/{hash}/{user}` | Token widerrufen |
+| `GET /jdev/sys/refreshtoken/{hash}/{user}` | Token erneuern |
+| `GET /jdev/sys/getcertificate` | TLS-Zertifikat des Miniservers |
 
 **CLI-Ideen:**
-- `lox status --extended` / `lox info` — Erweiterte Infos (MAC, Config-Version, TZ, Tasks)
+- `lox status --diag` — CPU, Tasks, Interrupts, Context-Switches, SD-Karte
+- `lox status --net` — Netzwerk-Konfiguration (IP/MAC/DNS/DHCP/NTP)
 - `lox reboot` — Miniserver neustarten (mit Bestätigung!)
 - `lox time` — Systemzeit des Miniservers anzeigen
 - `lox cache check` — Prüfen ob Cache aktuell ist ohne volles Download
-- `lox token check` / `lox token revoke` — Token-Management erweitern
+- `lox token check` / `lox token revoke` / `lox token refresh`
 
 ---
 
-### 5. Structure File — Ungenutzte Daten
+### 4b. Netzwerk- & Bus-Statistiken
+
+| Endpoint | Beschreibung |
+|----------|-------------|
+| `GET /jdev/lan/txp` | Gesendete Pakete |
+| `GET /jdev/lan/txe` | Sendefehler |
+| `GET /jdev/lan/txc` | Kollisionen |
+| `GET /jdev/lan/rxp` | Empfangene Pakete |
+| `GET /jdev/lan/rxo` | Empfangs-Overflow |
+| `GET /jdev/lan/eof` | EOF-Fehler |
+| `GET /jdev/bus/packetssent` | CAN-Bus gesendete Pakete |
+| `GET /jdev/bus/packetsreceived` | CAN-Bus empfangene Pakete |
+| `GET /jdev/bus/receiveerrors` | CAN-Bus Empfangsfehler |
+| `GET /jdev/bus/frameerrors` | CAN-Bus Frame-Fehler |
+| `GET /jdev/bus/overruns` | CAN-Bus Buffer-Overruns |
+| `GET /jdev/sys/ExtStatistics/{serial}` | Extension-Statistiken |
+
+**CLI-Ideen:**
+- `lox status --bus` — CAN-Bus Statistiken (Fehler erkennen!)
+- `lox status --lan` — LAN-Paketstatistiken
+
+---
+
+### 5. Control-spezifische Commands (via `/jdev/sps/io/{uuid}/`)
+
+Bereits implementiert: `on`, `off`, `pulse`, `PulseUp`, `PulseDown`, `FullUp`, `FullDown`, `AutomaticDown`, `manualPosition/{pct}`, `plus`, `minus`, `setMood/{id}`
+
+**Neue Commands für dedizierte CLI-Subcommands:**
+
+| Control-Typ | Command | Beschreibung |
+|-------------|---------|-------------|
+| **Dimmer** | `{0-100}` | Dimmer-Prozent setzen |
+| **IRoomControllerV2** | `setComfortTemperature/{value}` | Komfort-Temperatur setzen |
+| **IRoomControllerV2** | `override/{value}/{duration}` | Temperatur-Override (Grad/Dauer) |
+| **IRoomControllerV2** | `setOperatingMode/{0-4}` | 0=auto, 1=manuell, etc. |
+| **Gate** | `open` / `close` / `stop` | Tor steuern |
+| **Alarm** | `delayedon/{0,1}` | Scharf schalten (0=ohne, 1=mit Bewegung) |
+| **Alarm** | `off` / `quit` | Entschärfen / Alarm quittieren |
+| **Alarm** | `dismv/{0,1}` | Bewegungsmelder ein/aus |
+| **Sauna** | `{0-6}` | Modus: 0=aus, 1=Finnisch, 2=Feucht, etc. |
+| **ColorPickerV2** | `{color}` | Farbe setzen (RGB/HSV) |
+| **Ventilation** | `{mode}` | Lüftungsmodus setzen |
+
+**CLI-Ideen:**
+- `lox thermostat <name> [--temp 22] [--mode auto]` — Raumregler steuern
+- `lox gate <name> open/close/stop` — Tor steuern
+- `lox alarm <name> arm/disarm/quit` — Alarm steuern
+- `lox dimmer <name> <0-100>` — Dimmer setzen
+- `lox color <name> <rgb>` — Farbe setzen
+
+---
+
+### 6. Structure File — Ungenutzte Daten
 
 Die `LoxApp3.json` enthält weit mehr als aktuell genutzt wird:
 
@@ -108,8 +177,11 @@ Die `LoxApp3.json` enthält weit mehr als aktuell genutzt wird:
 | `controls[].states` | State-UUIDs für Sub-States (z.B. `activeMoods`, `colorList`) |
 | `controls[].subControls` | Sub-Controls bei komplexen Typen (z.B. einzelne Dimmer in LightController) |
 | `controls[].statistic` | Statistik-Konfiguration (Häufigkeit, Outputs) |
-| `controls[].hasHistory` | Flag ob Control History unterstützt |
-| `globalStates` | Globale States (Betriebsmodus, Sunrise/Sunset, etc.) |
+| `controls[].isFavorite` | Favorit-Flag |
+| `controls[].isSecured` | Braucht Visualisierungspasswort |
+| `globalStates` | Globale States (Betriebsmodus, Sunrise/Sunset, Windwarnung, etc.) |
+| `operatingModes` | Betriebsmodus-Definitionen |
+| `msInfo` | Miniserver-Metadaten (Seriennummer, Standort, Sprache) |
 | `weatherServer` | Wetter-Konfiguration (Koordinaten, Höhe) |
 | `autopilot` | Autopilot-Regeln |
 | `caller` | Caller-Service Konfiguration |
@@ -118,13 +190,15 @@ Die `LoxApp3.json` enthält weit mehr als aktuell genutzt wird:
 
 **CLI-Ideen:**
 - `lox ls --cat <category>` — Controls nach Kategorie filtern
+- `lox ls --favorites` — Nur Favoriten anzeigen
 - `lox categories` — Alle Kategorien auflisten
-- `lox info <control>` — Detailansicht mit Sub-Controls, States, Moods
+- `lox info <control>` — Detailansicht mit Sub-Controls, States, Moods, Notes
 - `lox globals` — Globale States anzeigen (Betriebsmodus, Sonnenaufgang etc.)
+- `lox modes` — Betriebsmodi auflisten/setzen
 
 ---
 
-### 6. Task Recorder
+### 7. Task Recorder
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -139,7 +213,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 7. Extensions & Geräte-Management
+### 8. Extensions & Geräte-Management
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -152,7 +226,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 8. Discovery & Netzwerk
+### 9. Discovery & Netzwerk
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -166,7 +240,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 9. Notifications & Services
+### 10. Notifications & Services
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -180,7 +254,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 10. Music Server (Port 7091, inoffiziell)
+### 11. Music Server (Port 7091, inoffiziell)
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -197,7 +271,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 11. Firmware Updates
+### 12. Firmware Updates
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -211,7 +285,7 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 
 ---
 
-### 12. Filesystem
+### 13. Filesystem
 
 | Endpoint | Beschreibung |
 |----------|-------------|
@@ -231,10 +305,12 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 | Feature | Aufwand | Nutzen |
 |---------|---------|--------|
 | `lox categories` + `lox ls --cat` | Gering (Daten schon in LoxApp3.json) | Bessere Navigation |
+| `lox ls --favorites` | Minimal (nur `isFavorite` Flag) | Schneller Überblick |
 | `lox globals` (Betriebsmodus, Sonnenaufgang) | Gering (Daten schon in LoxApp3.json) | Nützliche Infos |
 | `lox cache check` (LoxAPPversion3) | Minimal | Smartere Cache-Validierung |
 | Extended `lox info` (Sub-Controls, Notes) | Gering | Tiefere Einblicke |
-| `lox status --extended` (MAC, TZ, Tasks) | Gering | Mehr System-Infos |
+| `lox status --diag` (CPU, Tasks, SD) | Gering (einfache GET-Requests) | Diagnose-Infos |
+| `lox status --net` (IP/MAC/DNS/NTP + LAN stats) | Gering | Netzwerk-Überblick |
 
 ### High Value, Medium Effort
 
@@ -242,15 +318,20 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 |---------|---------|--------|
 | `lox history` / `lox stats` | Mittel (Binärformat parsen) | Sehr hoch — Energiedaten, Temperaturen |
 | `lox weather` | Mittel (Binärformat 108B Chunks) | Hoch — Wettervorhersage |
+| `lox thermostat` (IRoomController) | Gering-Mittel | Direkte Heizungssteuerung |
+| `lox alarm arm/disarm` | Gering-Mittel | Alarm-Steuerung |
 | `lox discover` | Mittel (UDP Broadcast) | Setup vereinfachen |
 | `lox lock` / `lox unlock` | Gering-Mittel | Admin-Funktionalität |
 | `lox update check` | Gering | Firmware-Management |
+| `lox status --bus` (CAN-Bus Statistiken) | Gering | Fehlerdiagnose bei Extensions |
 
 ### Lower Priority / Nische
 
 | Feature | Aufwand | Nutzen |
 |---------|---------|--------|
 | `lox music` (inoffiziell) | Mittel | Music Server Steuerung |
+| `lox gate open/close` | Minimal | Tor-Steuerung |
+| `lox dimmer` | Minimal | Dedizierter Dimmer-Befehl |
 | `lox reboot` | Minimal | Selten gebraucht |
 | `lox notify` (Push/Mail) | Mittel (HMAC) | Nische |
 | `lox files` (Filesystem) | Gering | Nische |
@@ -260,9 +341,14 @@ Tasks = zeitgesteuerte Kommandos, die der Miniserver selbst ausführt. Jeder Tas
 ## Quellen
 
 - [Loxone Web Services Doku](https://www.loxone.com/enen/kb/web-services/)
-- [Communicating with the Miniserver (PDF)](https://www.loxone.com/wp-content/uploads/datasheets/CommunicatingWithMiniserver.pdf)
+- [Loxone API Doku](https://www.loxone.com/enen/kb/api/)
+- [Communicating with the Miniserver (PDF, 2025)](https://www.loxone.com/wp-content/uploads/datasheets/CommunicatingWithMiniserver.pdf)
 - [Structure File Doku (PDF)](https://www.loxone.com/wp-content/uploads/datasheets/StructureFile.pdf)
 - [Inside-The-Loxone-Miniserver (Reverse Engineering)](https://github.com/sarnau/Inside-The-Loxone-Miniserver)
-- [Statistik-Download Script](https://gist.github.com/sarnau/e859f2d7beae882476ce6b78a8ab59f1)
+- [Statistik-Download Script (sarnau)](https://gist.github.com/sarnau/e859f2d7beae882476ce6b78a8ab59f1)
 - [LoxWiki REST Webservice](https://loxwiki.atlassian.net/wiki/spaces/LOX/pages/1517355410/REST+Webservice)
+- [LoxWiki API-Sammlung](https://loxwiki.atlassian.net/wiki/spaces/LOX/pages/1542816653)
 - [XciD/loxone-ws (Go Library)](https://github.com/XciD/loxone-ws)
+- [ioBroker.loxone Adapter (Control-Type Referenz)](https://github.com/UncleSamSwiss/ioBroker.loxone)
+- [loxberry-music-server-gateway (Audio Endpoints)](https://github.com/mjesun/loxberry-music-server-gateway)
+- [netdata-be/loxone (Monitoring, /jdev/sys/ /jdev/bus/ /jdev/lan/ Endpoints)](https://github.com/netdata-be/loxone)
