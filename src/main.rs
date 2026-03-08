@@ -297,6 +297,26 @@ enum Cmd {
         #[command(subcommand)]
         action: UpdateCmd,
     },
+    /// Control music server zones
+    Music {
+        #[command(subcommand)]
+        action: MusicCmd,
+    },
+    /// Reboot the Miniserver
+    Reboot {
+        /// Skip confirmation
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Browse Miniserver filesystem
+    Files {
+        #[command(subcommand)]
+        action: FilesCmd,
+    },
+    /// List connected extensions and devices
+    Extensions,
+    /// Show Miniserver system date/time
+    Time,
     /// Poll a control's state and print changes (Ctrl+C to stop)
     Watch {
         name_or_uuid: String,
@@ -360,6 +380,60 @@ enum TokenCmd {
 enum UpdateCmd {
     /// Check for available firmware updates
     Check,
+    /// Install firmware update (requires confirmation)
+    Install {
+        /// Skip confirmation
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MusicCmd {
+    /// Play in a zone
+    Play {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Pause in a zone
+    Pause {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Stop in a zone
+    Stop {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Set volume in a zone
+    Volume {
+        /// Volume level 0-100
+        level: u32,
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+}
+
+#[derive(Subcommand)]
+enum FilesCmd {
+    /// List files at a path
+    Ls {
+        /// Path on the Miniserver filesystem
+        #[arg(default_value = "/")]
+        path: String,
+    },
+    /// Download a file
+    Get {
+        /// Path on the Miniserver filesystem
+        path: String,
+        /// Local output path (defaults to filename)
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1684,7 +1758,156 @@ fn main() -> Result<()> {
                     println!("Set serial number for update checks: lox config set --serial <serial>");
                 }
             }
+            UpdateCmd::Install { confirm } => {
+                if !confirm {
+                    bail!("Firmware update requires --confirm flag. This will reboot your Miniserver!");
+                }
+                let lox = LoxClient::new(Config::load()?);
+                let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
+                let val = xml_attr(&resp, "value").unwrap_or("?");
+                println!("Update triggered: {}", val);
+                println!("The Miniserver will reboot during the update process.");
+            }
         },
+
+        Cmd::Music { action } => {
+            let cfg = Config::load()?;
+            let music_base = format!(
+                "{}:7091",
+                cfg.host
+                    .trim_end_matches('/')
+                    .replace("https://", "http://")
+            );
+            let client = Client::builder()
+                .danger_accept_invalid_certs(true)
+                .timeout(Duration::from_secs(10))
+                .build()?;
+            let (zone, cmd_path) = match action {
+                MusicCmd::Play { zone } => (zone, "play".to_string()),
+                MusicCmd::Pause { zone } => (zone, "pause".to_string()),
+                MusicCmd::Stop { zone } => (zone, "stop".to_string()),
+                MusicCmd::Volume { level, zone } => {
+                    if level > 100 {
+                        bail!("Volume must be 0-100");
+                    }
+                    (zone, format!("volume/{}", level))
+                }
+            };
+            let url = format!("{}/zone/{}/{}", music_base, zone, cmd_path);
+            match client.get(&url).send() {
+                Ok(resp) => {
+                    let body = resp.text().unwrap_or_default();
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({"zone": zone, "command": cmd_path, "response": body})
+                        );
+                    } else {
+                        println!("✓ Zone {} → {}", zone, cmd_path);
+                    }
+                }
+                Err(e) => bail!("Music server error: {}", e),
+            }
+        }
+
+        Cmd::Reboot { confirm } => {
+            if !confirm {
+                bail!(
+                    "Reboot requires --confirm flag. This will restart your Miniserver!"
+                );
+            }
+            let lox = LoxClient::new(Config::load()?);
+            let resp = lox.get_text("/jdev/sys/reboot")?;
+            let val = xml_attr(&resp, "value").unwrap_or("ok");
+            println!("Reboot initiated: {}", val);
+        }
+
+        Cmd::Files { action } => match action {
+            FilesCmd::Ls { path } => {
+                let lox = LoxClient::new(Config::load()?);
+                let listing = lox.get_text(&format!(
+                    "/dev/fsget/{}",
+                    path.trim_start_matches('/')
+                ))?;
+                println!("{}", listing);
+            }
+            FilesCmd::Get { path, output } => {
+                let lox = LoxClient::new(Config::load()?);
+                let data = lox.get_bytes(&format!(
+                    "/dev/fsget/{}",
+                    path.trim_start_matches('/')
+                ))?;
+                let out_path = output.unwrap_or_else(|| {
+                    path.rsplit('/')
+                        .next()
+                        .unwrap_or("download")
+                        .to_string()
+                });
+                fs::write(&out_path, &data)?;
+                println!(
+                    "✓ Downloaded {} bytes → {}",
+                    data.len(),
+                    out_path
+                );
+            }
+        },
+
+        Cmd::Extensions => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let structure = lox.get_structure()?.clone();
+            // Check for extensions in msInfo
+            if let Some(ms_info) = structure.get("msInfo").and_then(|m| m.as_object()) {
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!(ms_info))?);
+                } else {
+                    println!("Miniserver Info:");
+                    for (key, val) in ms_info {
+                        println!(
+                            "  {:<24} {}",
+                            key,
+                            val.as_str()
+                                .unwrap_or(&val.to_string())
+                        );
+                    }
+                }
+            }
+            // List controls with extension-like types
+            let ext_types = ["Extension", "TreeDevice", "AirDevice"];
+            let all_controls = lox.list_controls(None, None)?;
+            let extensions: Vec<_> = all_controls
+                .iter()
+                .filter(|c| ext_types.iter().any(|t| c.typ.contains(t)))
+                .collect();
+            if !extensions.is_empty() {
+                if !cli.json {
+                    println!("\nExtension Controls:");
+                    println!("{:<40} {:<22} UUID", "NAME", "TYPE");
+                    println!("{}", "─".repeat(100));
+                }
+                for c in &extensions {
+                    if !cli.json {
+                        println!("{:<40} {:<22} {}", c.name, c.typ, c.uuid);
+                    }
+                }
+            }
+        }
+
+        Cmd::Time => {
+            let lox = LoxClient::new(Config::load()?);
+            let date = lox.get_text("/jdev/sys/date")?;
+            let time = lox.get_text("/jdev/sys/time")?;
+            let date_val = xml_attr(&date, "value").unwrap_or("?");
+            let time_val = xml_attr(&time, "value").unwrap_or("?");
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({"date": date_val, "time": time_val})
+                );
+            } else {
+                println!("Miniserver date: {}", date_val);
+                println!("Miniserver time: {}", time_val);
+            }
+        }
 
         Cmd::Watch {
             name_or_uuid,
