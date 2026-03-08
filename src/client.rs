@@ -202,3 +202,174 @@ impl LoxClient {
 }
 
 pub fn is_uuid(s: &str) -> bool { s.contains('-') && s.len() > 20 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+
+    fn mock_config(server: &MockServer) -> Config {
+        Config {
+            host: server.base_url(),
+            user: "test".into(),
+            pass: "test".into(),
+            ..Default::default()
+        }
+    }
+
+    // ── list_controls ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_list_controls_parses_structure() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": { "r1": { "name": "Living Room" } },
+                "controls": {
+                    "u1": { "name": "Main Light", "type": "LightControllerV2", "room": "r1" },
+                    "u2": { "name": "Roller Blind", "type": "Jalousie", "room": "r1" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let controls = client.list_controls(None, None).unwrap();
+        assert_eq!(controls.len(), 2);
+        let light = controls.iter().find(|c| c.name == "Main Light").unwrap();
+        assert_eq!(light.room.as_deref(), Some("Living Room"));
+    }
+
+    #[test]
+    fn test_list_controls_type_filter() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": {},
+                "controls": {
+                    "u1": { "name": "Light", "type": "LightControllerV2", "room": "" },
+                    "u2": { "name": "Blind", "type": "Jalousie", "room": "" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let lights = client.list_controls(Some("light"), None).unwrap();
+        assert_eq!(lights.len(), 1);
+        assert_eq!(lights[0].name, "Light");
+    }
+
+    // ── send_cmd ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_send_cmd_success() {
+        let server = MockServer::start();
+        let _s = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({ "rooms": {}, "controls": {} }));
+        });
+        let _c = server.mock(|when, then| {
+            when.method(GET).path("/jdev/sps/io/test-uuid/on");
+            then.status(200).json_body(serde_json::json!({
+                "LL": { "Code": "200", "value": "1" }
+            }));
+        });
+        let client = LoxClient::new(mock_config(&server));
+        let resp = client.send_cmd("test-uuid", "on").unwrap();
+        assert_eq!(
+            resp.pointer("/LL/Code").and_then(|v| v.as_str()),
+            Some("200")
+        );
+    }
+
+    // ── cache ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_structure_fetched_only_once_per_client() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": {},
+                "controls": { "c1": { "name": "Light", "type": "Switch", "room": "" } }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let _ = client.list_controls(None, None).unwrap();
+        let _ = client.list_controls(None, None).unwrap();
+        mock.assert_hits(1);
+    }
+
+    // ── resolve_with_room ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_exact_match() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": {},
+                "controls": { "uuid-abc": { "name": "Kitchen Light", "type": "Switch", "room": "" } }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let uuid = client.resolve_with_room("Kitchen Light", None).unwrap();
+        assert_eq!(uuid, "uuid-abc");
+    }
+
+    #[test]
+    fn test_resolve_uuid_passthrough() {
+        let server = MockServer::start();
+        // No mock needed — UUID bypasses HTTP lookup
+        let mut client = LoxClient::new(mock_config(&server));
+        let uuid = "1fbc668c-005c-7471-ffffed57184a04d2";
+        assert_eq!(client.resolve_with_room(uuid, None).unwrap(), uuid);
+    }
+
+    #[test]
+    fn test_resolve_ambiguous_returns_err() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": { "r1": { "name": "Kitchen" }, "r2": { "name": "Bedroom" } },
+                "controls": {
+                    "u1": { "name": "Light", "type": "Switch", "room": "r1" },
+                    "u2": { "name": "Light", "type": "Switch", "room": "r2" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        assert!(client.resolve_with_room("Light", None).is_err());
+    }
+
+    #[test]
+    fn test_resolve_room_qualifier_disambiguates() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": { "r1": { "name": "Kitchen" }, "r2": { "name": "Bedroom" } },
+                "controls": {
+                    "u1": { "name": "Light", "type": "Switch", "room": "r1" },
+                    "u2": { "name": "Light", "type": "Switch", "room": "r2" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let uuid = client.resolve_with_room("Light [Kitchen]", None).unwrap();
+        assert_eq!(uuid, "u1");
+    }
+
+    // ── alias ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_alias() {
+        let server = MockServer::start();
+        // No HTTP call expected — alias resolves immediately
+        let mut cfg = mock_config(&server);
+        cfg.aliases.insert("mylight".into(), "alias-uuid-1234567890".into());
+        let mut client = LoxClient::new(cfg);
+        let uuid = client.resolve_with_room("mylight", None).unwrap();
+        assert_eq!(uuid, "alias-uuid-1234567890");
+    }
+}

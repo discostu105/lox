@@ -45,3 +45,7 @@ chrono-tz = "0.9"
 uuid = { version = "1", features = ["v4"] }
 x509-cert = "0.2"
 der = "0.7"
+
+[dev-dependencies]
+httpmock = "0.7"
+tokio-test = "0.4"
