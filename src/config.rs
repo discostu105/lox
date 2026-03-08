@@ -34,7 +34,14 @@ impl Config {
         let content = fs::read_to_string(&path).with_context(|| {
             "Config not found. Run: lox config set --host ... --user ... --pass ..."
         })?;
-        Ok(serde_yaml::from_str(&content)?)
+        let mut cfg: Self = serde_yaml::from_str(&content)?;
+        if !cfg.host.is_empty()
+            && !cfg.host.starts_with("http://")
+            && !cfg.host.starts_with("https://")
+        {
+            cfg.host = format!("https://{}", cfg.host);
+        }
+        Ok(cfg)
     }
 
     pub fn save(&self) -> Result<()> {

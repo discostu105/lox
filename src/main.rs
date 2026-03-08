@@ -322,7 +322,11 @@ fn main() -> Result<()> {
             } => {
                 let mut cfg = Config::load().unwrap_or_default();
                 if let Some(h) = host {
-                    cfg.host = h;
+                    cfg.host = if h.starts_with("http://") || h.starts_with("https://") {
+                        h
+                    } else {
+                        format!("https://{}", h)
+                    };
                 }
                 if let Some(u) = user {
                     cfg.user = u;
