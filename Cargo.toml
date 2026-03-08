@@ -2,6 +2,13 @@
 name = "lox"
 version = "0.1.0"
 edition = "2021"
+description = "Loxone Miniserver CLI — control lights, blinds, and automations from your terminal"
+repository = "https://github.com/chrisb/lox"
+homepage = "https://github.com/chrisb/lox"
+keywords = ["loxone", "smarthome", "home-automation", "cli", "miniserver"]
+categories = ["command-line-utilities", "network-programming"]
+license = "MIT"
+readme = "README.md"
 
 [[bin]]
 name = "lox"
