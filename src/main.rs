@@ -72,7 +72,7 @@ enum Cmd {
     Status { #[arg(long)] energy: bool },
     /// List controls
     Ls { #[arg(long)] r#type: Option<String>, #[arg(long)] room: Option<String>, #[arg(long)] values: bool },
-    /// List rooms
+    /// List all rooms in the structure
     Rooms,
     /// Get full state of a control
     Get { name_or_uuid: String, #[arg(long)] room: Option<String> },
@@ -93,8 +93,8 @@ enum Cmd {
         action: String,
         #[arg(long)] room: Option<String>,
     },
-    /// Watch state changes
-    Watch { name_or_uuid: String, #[arg(long, default_value = "2")] interval: u64 },
+    /// Poll a control's state and print changes (Ctrl+C to stop)
+    Watch { name_or_uuid: String, #[arg(long, default_value = "2", help = "Poll interval in seconds")] interval: u64 },
     /// Check state (exit 0=match, 1=no match)
     If { name_or_uuid: String, op: String, value: String },
     /// Run a scene
@@ -115,8 +115,8 @@ enum Cmd {
     },
     /// Manage automation rules
     Automation { #[command(subcommand)] action: AutomationCmd },
-    /// Fetch Miniserver log
-    Log { #[arg(long, default_value = "50")] lines: usize },
+    /// Fetch the Miniserver system log (tail)
+    Log { #[arg(long, default_value = "50", help = "Number of lines to show")] lines: usize },
     /// Set analog/virtual input value
     Set {
         /// Control name or UUID
@@ -176,6 +176,7 @@ enum ConfigCmd {
         /// IANA timezone (e.g. Europe/Vienna) for automation time windows
         #[arg(long)] timezone: Option<String>,
     },
+    /// Show current config (password redacted)
     Show,
 }
 
@@ -191,8 +192,11 @@ enum AliasCmd {
 
 #[derive(Subcommand)]
 enum SceneCmd {
+    /// List all saved scenes
     List,
+    /// Print a scene's YAML definition
     Show { name: String },
+    /// Create a new empty scene file
     New { name: String },
 }
 
