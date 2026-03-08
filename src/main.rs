@@ -312,12 +312,13 @@ enum Cmd {
     /// Momentary pulse
     Pulse { name_or_uuid: String, #[arg(long)] room: Option<String> },
     /// Control blind: up | down | stop | shade | full-up | full-down | pos <0-100>
-    Blind { name_or_uuid: String, action: String, #[arg(allow_hyphen_values = true)] pos: Option<f64> },
+    Blind { name_or_uuid: String, action: String, #[arg(allow_hyphen_values = true)] pos: Option<f64>, #[arg(long)] room: Option<String> },
     /// Control light moods: plus | minus | off | <mood-id>
     Mood {
         name_or_uuid: String,
         /// Mood action: plus, minus, off, or numeric mood ID
         action: String,
+        #[arg(long)] room: Option<String>,
     },
     /// Watch state changes
     Watch { name_or_uuid: String, #[arg(long, default_value = "2")] interval: u64 },
@@ -485,28 +486,27 @@ fn main() -> Result<()> {
                 println!("└─────────────────────────────────────────────────────");
             }
             if energy {
-                let energy_meters = [
-                    ("PV-Strom",      "1fbc668c-005c-7471-ffffed57184a04d2"),
-                    ("Netzbezug",     "1fbc68d8-01e9-a417-ffffed57184a04d2"),
-                    ("Speicher",      "1fbc6b89-006b-d72f-ffffed57184a04d2"),
-                    ("Stromverbrauch","1fbc6901-03cb-6c41-ffffed57184a04d2"),
-                ];
-                println!("┌─ Energie ───────────────────────────────────────────");
-                for (label, uuid) in &energy_meters {
-                    let val = lox.get_json(&format!("/jdev/sps/io/{}/all", uuid))
-                        .ok()
-                        .and_then(|v| v.pointer("/LL/value").and_then(|x| x.as_str()).map(|s| s.to_string()))
-                        .unwrap_or_else(|| "-".to_string());
-                    let v: f64 = val.parse().unwrap_or(0.0);
-                    let suffix = if *label == "Speicher" {
-                        if v < 0.0 { " (lädt)" } else if v > 0.0 { " (gibt ab)" } else { "" }
-                    } else { "" };
-                    println!("│  {:<16} {:>8.3} kW{}", label, v, suffix);
+                let mut lox_mut = LoxClient::new(Config::load()?);
+                let meters = lox_mut.list_controls(Some("meter"), None)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(lox_mut.list_controls(Some("energymanager"), None).unwrap_or_default())
+                    .collect::<Vec<_>>();
+                if meters.is_empty() {
+                    println!("No energy meters found in structure (type 'Meter' or 'EnergyManager').");
+                } else {
+                    println!("┌─ Energy Meters ─────────────────────────────────────");
+                    for ctrl in &meters {
+                        let val = lox_mut.get_all(&ctrl.uuid)
+                            .ok()
+                            .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
+                            .unwrap_or_else(|| "-".to_string());
+                        let v: f64 = val.parse().unwrap_or(0.0);
+                        println!("│  {:<24} {:>8.3} kW  [{}]",
+                            ctrl.name, v, ctrl.room.as_deref().unwrap_or("─"));
+                    }
+                    println!("└─────────────────────────────────────────────────────");
                 }
-                println!("└─────────────────────────────────────────────────────");
-            } else {
-                // dummy block — real closing handled above
-                let _ = ();
             }
         },
 
@@ -614,9 +614,10 @@ fn main() -> Result<()> {
             print_resp(&resp, cli.json, &name_or_uuid, "pulse");
         },
 
-        Cmd::Blind { name_or_uuid, action, pos } => {
+        Cmd::Blind { name_or_uuid, action, pos, room } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let ctrl = lox.find_control(&name_or_uuid)?;
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
                 bail!("'{}' is type '{}', not a Jalousie", ctrl.name, ctrl.typ);
             }
@@ -658,9 +659,10 @@ fn main() -> Result<()> {
             }
         },
 
-        Cmd::Mood { name_or_uuid, action } => {
+        Cmd::Mood { name_or_uuid, action, room } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let ctrl = lox.find_control(&name_or_uuid)?;
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
                 bail!("'{}' is type '{}', not a LightController", ctrl.name, ctrl.typ);
             }
