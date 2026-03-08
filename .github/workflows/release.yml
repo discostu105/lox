@@ -101,15 +101,15 @@ jobs:
           generate_release_notes: true
 
   update-homebrew:
-    name: Update Homebrew Formula
+    name: Update Homebrew Tap
     needs: release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout homebrew-lox tap
+        uses: actions/checkout@v4
         with:
-          ref: main
+          repository: discostu105/homebrew-lox
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
