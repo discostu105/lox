@@ -36,12 +36,16 @@ impl LoxClient {
             client: Client::builder()
                 .danger_accept_invalid_certs(true)
                 .timeout(Duration::from_secs(10))
-                .build().unwrap(),
+                .build()
+                .unwrap(),
             structure: None,
         }
     }
 
-    pub fn apply_auth(&self, rb: reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder {
+    pub fn apply_auth(
+        &self,
+        rb: reqwest::blocking::RequestBuilder,
+    ) -> reqwest::blocking::RequestBuilder {
         if let Some(ts) = TokenStore::load().filter(|t| t.is_valid()) {
             rb.basic_auth(&self.cfg.user, Some(&ts.token))
         } else {
@@ -56,7 +60,10 @@ impl LoxClient {
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
-        Ok(self.apply_auth(self.client.get(&url)).send()?.json::<Value>()?)
+        Ok(self
+            .apply_auth(self.client.get(&url))
+            .send()?
+            .json::<Value>()?)
     }
 
     pub fn get_structure(&mut self) -> Result<&Value> {
@@ -95,9 +102,11 @@ impl LoxClient {
             .filter(|t| t.is_valid())
             .map(|t| t.token)
             .unwrap_or_else(|| cfg.pass.clone());
-        let resp = client.get(&url)
+        let resp = client
+            .get(&url)
             .basic_auth(&cfg.user, Some(&pass))
-            .send()?.bytes()?;
+            .send()?
+            .bytes()?;
         let v: Value = serde_json::from_slice(&resp)?;
         if use_cache {
             if let Some(parent) = cache.parent() {
@@ -116,7 +125,11 @@ impl LoxClient {
         self.get_text(&format!("/dev/sps/io/{}/all", uuid))
     }
 
-    pub fn list_controls(&mut self, type_filter: Option<&str>, room_filter: Option<&str>) -> Result<Vec<Control>> {
+    pub fn list_controls(
+        &mut self,
+        type_filter: Option<&str>,
+        room_filter: Option<&str>,
+    ) -> Result<Vec<Control>> {
         let structure = self.get_structure()?;
         let mut rooms: HashMap<String, String> = HashMap::new();
         if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
@@ -129,17 +142,43 @@ impl LoxClient {
         let mut controls = Vec::new();
         if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
             for (uuid, ctrl) in ctrl_map {
-                let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?").to_string();
-                let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?").to_string();
-                let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("").to_string();
+                let name = ctrl
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let typ = ctrl
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let room_uuid = ctrl
+                    .get("room")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let room = rooms.get(&room_uuid).cloned();
                 if let Some(tf) = type_filter {
-                    if !typ.to_lowercase().contains(&tf.to_lowercase()) { continue; }
+                    if !typ.to_lowercase().contains(&tf.to_lowercase()) {
+                        continue;
+                    }
                 }
                 if let Some(rf) = room_filter {
-                    if !room.as_deref().unwrap_or("").to_lowercase().contains(&rf.to_lowercase()) { continue; }
+                    if !room
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&rf.to_lowercase())
+                    {
+                        continue;
+                    }
                 }
-                controls.push(Control { name, uuid: uuid.clone(), typ, room });
+                controls.push(Control {
+                    name,
+                    uuid: uuid.clone(),
+                    typ,
+                    room,
+                });
             }
         }
         controls.sort_by(|a, b| a.name.cmp(&b.name));
@@ -150,15 +189,21 @@ impl LoxClient {
         self.resolve_with_room(name_or_uuid, None)
     }
 
-    pub fn resolve_with_room(&mut self, name_or_uuid: &str, room_filter: Option<&str>) -> Result<String> {
-        if is_uuid(name_or_uuid) { return Ok(name_or_uuid.to_string()); }
+    pub fn resolve_with_room(
+        &mut self,
+        name_or_uuid: &str,
+        room_filter: Option<&str>,
+    ) -> Result<String> {
+        if is_uuid(name_or_uuid) {
+            return Ok(name_or_uuid.to_string());
+        }
         if let Some(uuid) = self.cfg.aliases.get(name_or_uuid) {
             return Ok(uuid.clone());
         }
         let (name_part, room_part) = if let Some(idx) = name_or_uuid.rfind('[') {
             if name_or_uuid.ends_with(']') {
                 let name = name_or_uuid[..idx].trim();
-                let room = &name_or_uuid[idx+1..name_or_uuid.len()-1];
+                let room = &name_or_uuid[idx + 1..name_or_uuid.len() - 1];
                 (name, Some(room))
             } else {
                 (name_or_uuid, None)
@@ -168,12 +213,19 @@ impl LoxClient {
         };
         let effective_room = room_part.or(room_filter);
         let controls = self.list_controls(None, None)?;
-        let matches: Vec<&Control> = controls.iter()
+        let matches: Vec<&Control> = controls
+            .iter()
             .filter(|c| c.name.to_lowercase().contains(&name_part.to_lowercase()))
             .filter(|c| {
                 if let Some(rf) = effective_room {
-                    c.room.as_deref().unwrap_or("").to_lowercase().contains(&rf.to_lowercase())
-                } else { true }
+                    c.room
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&rf.to_lowercase())
+                } else {
+                    true
+                }
             })
             .collect();
         match matches.len() {
@@ -181,9 +233,17 @@ impl LoxClient {
             1 => Ok(matches[0].uuid.clone()),
             _ => {
                 for c in &matches {
-                    eprintln!("  {:40} [{}]  {}", c.name, c.room.as_deref().unwrap_or("-"), c.uuid);
+                    eprintln!(
+                        "  {:40} [{}]  {}",
+                        c.name,
+                        c.room.as_deref().unwrap_or("-"),
+                        c.uuid
+                    );
                 }
-                bail!("Ambiguous: '{}'. Use [Room] qualifier or --room flag.", name_or_uuid)
+                bail!(
+                    "Ambiguous: '{}'. Use [Room] qualifier or --room flag.",
+                    name_or_uuid
+                )
             }
         }
     }
@@ -191,23 +251,31 @@ impl LoxClient {
     pub fn find_control(&mut self, name_or_uuid: &str) -> Result<Control> {
         let controls = self.list_controls(None, None)?;
         if is_uuid(name_or_uuid) {
-            return controls.into_iter().find(|c| c.uuid == name_or_uuid).context("UUID not found");
+            return controls
+                .into_iter()
+                .find(|c| c.uuid == name_or_uuid)
+                .context("UUID not found");
         }
-        let matches: Vec<Control> = controls.into_iter()
+        let matches: Vec<Control> = controls
+            .into_iter()
             .filter(|c| c.name.to_lowercase().contains(&name_or_uuid.to_lowercase()))
             .collect();
         match matches.len() {
             0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches.into_iter().next().unwrap()),
             _ => {
-                for c in &matches { eprintln!("  {:40} [{}]", c.name, c.room.as_deref().unwrap_or("-")); }
+                for c in &matches {
+                    eprintln!("  {:40} [{}]", c.name, c.room.as_deref().unwrap_or("-"));
+                }
                 bail!("Ambiguous: '{}'", name_or_uuid)
             }
         }
     }
 }
 
-pub fn is_uuid(s: &str) -> bool { s.contains('-') && s.len() > 20 }
+pub fn is_uuid(s: &str) -> bool {
+    s.contains('-') && s.len() > 20
+}
 
 #[cfg(test)]
 mod tests {
@@ -271,7 +339,8 @@ mod tests {
         let server = MockServer::start();
         let _s = server.mock(|when, then| {
             when.method(GET).path("/data/LoxApp3.json");
-            then.status(200).json_body(serde_json::json!({ "rooms": {}, "controls": {} }));
+            then.status(200)
+                .json_body(serde_json::json!({ "rooms": {}, "controls": {} }));
         });
         let _c = server.mock(|when, then| {
             when.method(GET).path("/jdev/sps/io/test-uuid/on");
@@ -373,7 +442,8 @@ mod tests {
         let server = MockServer::start();
         // No HTTP call expected — alias resolves immediately
         let mut cfg = mock_config(&server);
-        cfg.aliases.insert("mylight".into(), "alias-uuid-1234567890".into());
+        cfg.aliases
+            .insert("mylight".into(), "alias-uuid-1234567890".into());
         let mut client = LoxClient::new(cfg);
         let uuid = client.resolve_with_room("mylight", None).unwrap();
         assert_eq!(uuid, "alias-uuid-1234567890");

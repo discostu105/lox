@@ -3,14 +3,14 @@
 use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use futures_util::{SinkExt, StreamExt};
+use rustls::{crypto::ring, ClientConfig};
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::Connector;
-use rustls::{ClientConfig, crypto::ring};
-use std::sync::Arc;
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 
 use rand::RngCore as _;
 
@@ -32,7 +32,10 @@ fn parse_lox_uuid(buf: &[u8]) -> String {
     let b = c.read_u16::<LittleEndian>().unwrap_or(0);
     let d = c.read_u16::<LittleEndian>().unwrap_or(0);
     let pos = c.position() as usize;
-    let tail: String = buf[pos..pos+8].iter().map(|b| format!("{:02x}", b)).collect();
+    let tail: String = buf[pos..pos + 8]
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     format!("{:08x}-{:04x}-{:04x}-{}", a, b, d, tail)
 }
 
@@ -49,14 +52,16 @@ enum MsgType {
 }
 
 fn parse_header(buf: &[u8]) -> Option<(MsgType, u32)> {
-    if buf.len() < 8 || buf[0] != 0x03 { return None; }
+    if buf.len() < 8 || buf[0] != 0x03 {
+        return None;
+    }
     let typ = match buf[1] {
         0x00 => MsgType::Text,
         0x01 => MsgType::BinaryFile,
         0x02 => MsgType::ValueEventTable,
         0x03 => MsgType::TextEventTable,
         0x06 => MsgType::Keepalive,
-        n    => MsgType::Other(n),
+        n => MsgType::Other(n),
     };
     let len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
     Some((typ, len))
@@ -66,8 +71,8 @@ fn parse_value_table(buf: &[u8]) -> Vec<StateEvent> {
     let mut events = Vec::new();
     let mut i = 0;
     while i + 24 <= buf.len() {
-        let uuid = parse_lox_uuid(&buf[i..i+16]);
-        let value = f64::from_le_bytes(buf[i+16..i+24].try_into().unwrap_or([0;8]));
+        let uuid = parse_lox_uuid(&buf[i..i + 16]);
+        let value = f64::from_le_bytes(buf[i + 16..i + 24].try_into().unwrap_or([0; 8]));
         events.push(StateEvent { uuid, value });
         i += 24;
     }
@@ -83,7 +88,8 @@ fn make_tls_config() -> Arc<ClientConfig> {
     let mut cfg = ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
-    cfg.dangerous().set_certificate_verifier(Arc::new(NoCertVerifier));
+    cfg.dangerous()
+        .set_certificate_verifier(Arc::new(NoCertVerifier));
     cfg.enable_early_data = true;
     // Allow servers that don't send close_notify (Loxone Miniserver)
     Arc::new(cfg)
@@ -92,22 +98,36 @@ fn make_tls_config() -> Arc<ClientConfig> {
 #[derive(Debug)]
 struct NoCertVerifier;
 impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
-    fn verify_server_cert(&self, _: &rustls::pki_types::CertificateDer,
-        _: &[rustls::pki_types::CertificateDer], _: &rustls::pki_types::ServerName,
-        _: &[u8], _: rustls::pki_types::UnixTime,
+    fn verify_server_cert(
+        &self,
+        _: &rustls::pki_types::CertificateDer,
+        _: &[rustls::pki_types::CertificateDer],
+        _: &rustls::pki_types::ServerName,
+        _: &[u8],
+        _: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
-    fn verify_tls12_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer,
-        _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &rustls::pki_types::CertificateDer,
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
-    fn verify_tls13_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer,
-        _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &rustls::pki_types::CertificateDer,
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        ring::default_provider().signature_verification_algorithms.supported_schemes()
+        ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -118,49 +138,80 @@ pub struct LoxWsClient {
 }
 
 impl LoxWsClient {
-    pub fn new(cfg: Config) -> Self { Self { cfg } }
+    pub fn new(cfg: Config) -> Self {
+        Self { cfg }
+    }
 
     fn ws_url(&self) -> String {
-        self.cfg.host
+        self.cfg
+            .host
             .replace("https://", "wss://")
             .replace("http://", "ws://")
             .trim_end_matches('/')
-            .to_string() + "/ws/rfc6455"
+            .to_string()
+            + "/ws/rfc6455"
     }
 
-    pub async fn connect_raw(&self) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::http::Response<Option<Vec<u8>>>)> {
+    pub async fn connect_raw(
+        &self,
+    ) -> Result<(
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        tokio_tungstenite::tungstenite::http::Response<Option<Vec<u8>>>,
+    )> {
         let url = self.ws_url();
         let tls_cfg = make_tls_config();
         let basic = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            format!("{}:{}", self.cfg.user, self.cfg.pass)
+            format!("{}:{}", self.cfg.user, self.cfg.pass),
         );
         let req = tokio_tungstenite::tungstenite::http::Request::builder()
             .uri(&url)
             .header("Authorization", format!("Basic {}", basic))
-            .header("Host", url.split("wss://").nth(1).unwrap_or("").split('/').next().unwrap_or(""))
+            .header(
+                "Host",
+                url.split("wss://")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split('/')
+                    .next()
+                    .unwrap_or(""),
+            )
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
             .header("Sec-WebSocket-Key", generate_ws_key())
             .body(())?;
         connect_async_tls_with_config(req, None, false, Some(Connector::Rustls(tls_cfg)))
-            .await.map_err(|e| anyhow::anyhow!("WS connect: {}", e))
+            .await
+            .map_err(|e| anyhow::anyhow!("WS connect: {}", e))
     }
 
-    pub async fn run(&self, on_events: impl Fn(Vec<StateEvent>) + Send + Sync + 'static) -> Result<()> {
+    pub async fn run(
+        &self,
+        on_events: impl Fn(Vec<StateEvent>) + Send + Sync + 'static,
+    ) -> Result<()> {
         let url = self.ws_url();
         let tls_cfg = make_tls_config();
 
         // Build request with Basic Auth header
         let basic = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            format!("{}:{}", self.cfg.user, self.cfg.pass)
+            format!("{}:{}", self.cfg.user, self.cfg.pass),
         );
         let req = Request::builder()
             .uri(&url)
             .header("Authorization", format!("Basic {}", basic))
-            .header("Host", url.split("wss://").nth(1).unwrap_or("").split('/').next().unwrap_or(""))
+            .header(
+                "Host",
+                url.split("wss://")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split('/')
+                    .next()
+                    .unwrap_or(""),
+            )
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
@@ -169,7 +220,8 @@ impl LoxWsClient {
 
         let connector = Connector::Rustls(tls_cfg);
         let (mut ws, resp) = connect_async_tls_with_config(req, None, false, Some(connector))
-            .await.map_err(|e| anyhow::anyhow!("WS connect failed: {}", e))?;
+            .await
+            .map_err(|e| anyhow::anyhow!("WS connect failed: {}", e))?;
 
         println!("  ✓ Connected (HTTP {})", resp.status());
 
@@ -177,7 +229,8 @@ impl LoxWsClient {
         println!("  ✓ Authenticated (Basic Auth)");
 
         // Subscribe to all state updates
-        ws.send(Message::Text("jdev/sps/enablestatusupdate".into())).await?;
+        ws.send(Message::Text("jdev/sps/enablestatusupdate".into()))
+            .await?;
         println!("  ✓ Subscribed to state updates\n");
 
         // Main event loop
@@ -217,7 +270,6 @@ impl LoxWsClient {
             }
         }
     }
-
 }
 
 fn generate_ws_key() -> String {

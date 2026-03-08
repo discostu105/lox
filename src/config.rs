@@ -3,9 +3,9 @@ use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
@@ -22,13 +22,18 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn dir() -> PathBuf { home_dir().unwrap_or_default().join(".lox") }
-    pub fn path() -> PathBuf { Self::dir().join("config.yaml") }
+    pub fn dir() -> PathBuf {
+        home_dir().unwrap_or_default().join(".lox")
+    }
+    pub fn path() -> PathBuf {
+        Self::dir().join("config.yaml")
+    }
 
     pub fn load() -> Result<Self> {
         let path = Self::path();
-        let content = fs::read_to_string(&path)
-            .with_context(|| "Config not found. Run: lox config set --host ... --user ... --pass ...")?;
+        let content = fs::read_to_string(&path).with_context(|| {
+            "Config not found. Run: lox config set --host ... --user ... --pass ..."
+        })?;
         Ok(serde_yaml::from_str(&content)?)
     }
 
