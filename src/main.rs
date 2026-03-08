@@ -569,7 +569,14 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Status { energy, diag, net, bus, lan, all } => {
+        Cmd::Status {
+            energy,
+            diag,
+            net,
+            bus,
+            lan,
+            all,
+        } => {
             let show_diag = diag || all;
             let show_net = net || all;
             let show_bus = bus || all;
@@ -666,17 +673,22 @@ fn main() -> Result<()> {
             if show_diag {
                 let cpu = lox.get_text("/jdev/sys/lastcpu").unwrap_or_default();
                 let tasks = lox.get_text("/jdev/sys/numtasks").unwrap_or_default();
-                let ctx = lox.get_text("/jdev/sys/contextswitches").unwrap_or_default();
+                let ctx = lox
+                    .get_text("/jdev/sys/contextswitches")
+                    .unwrap_or_default();
                 let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
                 let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
                 let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
                 let ctx_val = xml_attr(&ctx, "value").unwrap_or("?");
                 let sd_val = xml_attr(&sd, "value").unwrap_or("?");
                 if cli.json {
-                    println!("{}", serde_json::json!({
-                        "cpu": cpu_val, "tasks": tasks_val,
-                        "context_switches": ctx_val, "sd_health": sd_val,
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "cpu": cpu_val, "tasks": tasks_val,
+                            "context_switches": ctx_val, "sd_health": sd_val,
+                        })
+                    );
                 } else {
                     println!("┌─ Diagnostics ───────────────────────────────────────");
                     println!("│  CPU:              {}", cpu_val);
@@ -702,11 +714,14 @@ fn main() -> Result<()> {
                 let dhcp_val = xml_attr(&dhcp, "value").unwrap_or("?");
                 let ntp_val = xml_attr(&ntp, "value").unwrap_or("?");
                 if cli.json {
-                    println!("{}", serde_json::json!({
-                        "ip": ip_val, "mac": mac_val, "mask": mask_val,
-                        "gateway": gw_val, "dns": dns1_val,
-                        "dhcp": dhcp_val, "ntp": ntp_val,
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ip": ip_val, "mac": mac_val, "mask": mask_val,
+                            "gateway": gw_val, "dns": dns1_val,
+                            "dhcp": dhcp_val, "ntp": ntp_val,
+                        })
+                    );
                 } else {
                     println!("┌─ Network ───────────────────────────────────────────");
                     println!("│  IP:      {}", ip_val);
@@ -721,7 +736,9 @@ fn main() -> Result<()> {
             }
             if show_bus {
                 let sent = lox.get_text("/jdev/bus/packetssent").unwrap_or_default();
-                let recv = lox.get_text("/jdev/bus/packetsreceived").unwrap_or_default();
+                let recv = lox
+                    .get_text("/jdev/bus/packetsreceived")
+                    .unwrap_or_default();
                 let rerr = lox.get_text("/jdev/bus/receiveerrors").unwrap_or_default();
                 let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
                 let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
@@ -731,11 +748,14 @@ fn main() -> Result<()> {
                 let ferr_val = xml_attr(&ferr, "value").unwrap_or("?");
                 let over_val = xml_attr(&over, "value").unwrap_or("?");
                 if cli.json {
-                    println!("{}", serde_json::json!({
-                        "packets_sent": sent_val, "packets_received": recv_val,
-                        "receive_errors": rerr_val, "frame_errors": ferr_val,
-                        "overruns": over_val,
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "packets_sent": sent_val, "packets_received": recv_val,
+                            "receive_errors": rerr_val, "frame_errors": ferr_val,
+                            "overruns": over_val,
+                        })
+                    );
                 } else {
                     println!("┌─ CAN Bus ───────────────────────────────────────────");
                     println!("│  Packets sent:     {}", sent_val);
@@ -760,10 +780,13 @@ fn main() -> Result<()> {
                 let rxo_val = xml_attr(&rxo, "value").unwrap_or("?");
                 let eof_val = xml_attr(&eof, "value").unwrap_or("?");
                 if cli.json {
-                    println!("{}", serde_json::json!({
-                        "tx_packets": txp_val, "tx_errors": txe_val, "tx_collisions": txc_val,
-                        "rx_packets": rxp_val, "rx_overflow": rxo_val, "eof_errors": eof_val,
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "tx_packets": txp_val, "tx_errors": txe_val, "tx_collisions": txc_val,
+                            "rx_packets": rxp_val, "rx_overflow": rxo_val, "eof_errors": eof_val,
+                        })
+                    );
                 } else {
                     println!("┌─ LAN Statistics ────────────────────────────────────");
                     println!("│  TX packets:    {}", txp_val);
@@ -904,14 +927,8 @@ fn main() -> Result<()> {
                 if let Some(subs) = ctrl_json.get("subControls").and_then(|s| s.as_object()) {
                     println!("\nSub-controls:");
                     for (sub_uuid, sub) in subs {
-                        let sub_name = sub
-                            .get("name")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("?");
-                        let sub_type = sub
-                            .get("type")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("?");
+                        let sub_name = sub.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                        let sub_type = sub.get("type").and_then(|t| t.as_str()).unwrap_or("?");
                         println!("  {:<30} {:<20} {}", sub_name, sub_type, sub_uuid);
                     }
                 }
@@ -933,10 +950,7 @@ fn main() -> Result<()> {
                         println!("\nMoods:");
                         for mood in moods {
                             let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-                            let name = mood
-                                .get("name")
-                                .and_then(|n| n.as_str())
-                                .unwrap_or("?");
+                            let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                             println!("  {:<6} {}", id, name);
                         }
                     }
@@ -948,10 +962,7 @@ fn main() -> Result<()> {
                         println!("\nStatistics: enabled");
                         if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
                             for (k, v) in outputs {
-                                let name = v
-                                    .get("name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("?");
+                                let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                                 println!("  {:<30} {}", name, k);
                             }
                         }
@@ -1256,10 +1267,7 @@ fn main() -> Result<()> {
                 "open" => "open",
                 "close" => "close",
                 "stop" => "stop",
-                other => bail!(
-                    "Unknown gate action '{}'. Use: open, close, stop",
-                    other
-                ),
+                other => bail!("Unknown gate action '{}'. Use: open, close, stop", other),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
@@ -1274,11 +1282,7 @@ fn main() -> Result<()> {
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
-                bail!(
-                    "'{}' is type '{}', not a ColorPicker",
-                    ctrl.name,
-                    ctrl.typ
-                );
+                bail!("'{}' is type '{}', not a ColorPicker", ctrl.name, ctrl.typ);
             }
             // Parse color: #RRGGBB → "hsv(h,s,v)" or pass through hsv() format
             let cmd = if value.starts_with('#') {
@@ -1287,12 +1291,9 @@ fn main() -> Result<()> {
                 if hex.len() != 6 {
                     bail!("Hex color must be 6 digits: #RRGGBB");
                 }
-                let r = u8::from_str_radix(&hex[0..2], 16)
-                    .context("Invalid red component")?;
-                let g = u8::from_str_radix(&hex[2..4], 16)
-                    .context("Invalid green component")?;
-                let b = u8::from_str_radix(&hex[4..6], 16)
-                    .context("Invalid blue component")?;
+                let r = u8::from_str_radix(&hex[0..2], 16).context("Invalid red component")?;
+                let g = u8::from_str_radix(&hex[2..4], 16).context("Invalid green component")?;
+                let b = u8::from_str_radix(&hex[4..6], 16).context("Invalid blue component")?;
                 // Convert RGB to HSV
                 let (h, s, v) = rgb_to_hsv(r, g, b);
                 format!("hsv({},{},{})", h, s, v)
@@ -1319,7 +1320,11 @@ fn main() -> Result<()> {
                     .and_local_timezone(chrono::Local)
                     .unwrap();
 
-                let max_display = if forecast { num_entries } else { 1.min(num_entries) };
+                let max_display = if forecast {
+                    num_entries
+                } else {
+                    1.min(num_entries)
+                };
 
                 if cli.json {
                     let mut arr = Vec::new();
@@ -1418,8 +1423,7 @@ fn main() -> Result<()> {
                     "building-protection" | "building" => "4",
                     other => other,
                 };
-                let resp =
-                    lox.send_cmd(&ctrl.uuid, &format!("setOperatingMode/{}", mode_id))?;
+                let resp = lox.send_cmd(&ctrl.uuid, &format!("setOperatingMode/{}", mode_id))?;
                 print_resp(&resp, cli.json, &ctrl.name, &format!("mode={}", m));
             } else if let Some(temp_override) = r#override {
                 let resp = lox.send_cmd(
@@ -1455,10 +1459,7 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 } else {
                     println!("Thermostat: {} ({})", ctrl.name, ctrl.uuid);
-                    println!(
-                        "Room:       {}",
-                        ctrl.room.as_deref().unwrap_or("─")
-                    );
+                    println!("Room:       {}", ctrl.room.as_deref().unwrap_or("─"));
                     let mut i = 1;
                     loop {
                         let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
@@ -1496,10 +1497,7 @@ fn main() -> Result<()> {
                 }
                 "disarm" | "off" => "off",
                 "quit" | "ack" | "acknowledge" => "quit",
-                other => bail!(
-                    "Unknown alarm action '{}'. Use: arm, disarm, quit",
-                    other
-                ),
+                other => bail!("Unknown alarm action '{}'. Use: arm, disarm, quit", other),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
@@ -1520,10 +1518,7 @@ fn main() -> Result<()> {
             print_resp(&resp, cli.json, &ctrl.name, "lock");
         }
 
-        Cmd::Unlock {
-            name_or_uuid,
-            room,
-        } => {
+        Cmd::Unlock { name_or_uuid, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
@@ -1547,18 +1542,9 @@ fn main() -> Result<()> {
                 for (uuid, ctrl) in ctrl_map {
                     if let Some(stat) = ctrl.get("statistic") {
                         if !stat.is_null() {
-                            let name = ctrl
-                                .get("name")
-                                .and_then(|n| n.as_str())
-                                .unwrap_or("?");
-                            let typ = ctrl
-                                .get("type")
-                                .and_then(|t| t.as_str())
-                                .unwrap_or("?");
-                            let room_uuid = ctrl
-                                .get("room")
-                                .and_then(|r| r.as_str())
-                                .unwrap_or("");
+                            let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                            let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                            let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
                             let room = rooms.get(room_uuid).cloned();
                             stats_controls.push((
                                 name.to_string(),
@@ -1580,10 +1566,7 @@ fn main() -> Result<()> {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
-                println!(
-                    "{:<40} {:<22} {:<24} UUID",
-                    "NAME", "TYPE", "ROOM"
-                );
+                println!("{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
                 println!("{}", "─".repeat(120));
                 for (name, uuid, typ, room) in &stats_controls {
                     println!(
@@ -1748,8 +1731,7 @@ fn main() -> Result<()> {
                                 .or_else(|| xml_attr(&body, "version"))
                                 .or_else(|| {
                                     // Only use "Version" if it looks like a version string (contains dots)
-                                    xml_attr(&body, "Version")
-                                        .filter(|v| v.contains('.'))
+                                    xml_attr(&body, "Version").filter(|v| v.contains('.'))
                                 });
                             let update_available = xml_attr(&body, "Version")
                                 .or_else(|| xml_attr(&body, "update"))
@@ -1782,7 +1764,9 @@ fn main() -> Result<()> {
                         }
                     }
                 } else {
-                    println!("Set serial number for update checks: lox config set --serial <serial>");
+                    println!(
+                        "Set serial number for update checks: lox config set --serial <serial>"
+                    );
                 }
             }
             UpdateCmd::Install { confirm } => {
@@ -1839,9 +1823,7 @@ fn main() -> Result<()> {
 
         Cmd::Reboot { confirm } => {
             if !confirm {
-                bail!(
-                    "Reboot requires --confirm flag. This will restart your Miniserver!"
-                );
+                bail!("Reboot requires --confirm flag. This will restart your Miniserver!");
             }
             let lox = LoxClient::new(Config::load()?);
             let resp = lox.get_text("/jdev/sys/reboot")?;
@@ -1852,30 +1834,18 @@ fn main() -> Result<()> {
         Cmd::Files { action } => match action {
             FilesCmd::Ls { path } => {
                 let lox = LoxClient::new(Config::load()?);
-                let listing = lox.get_text(&format!(
-                    "/dev/fsget/{}",
-                    path.trim_start_matches('/')
-                ))?;
+                let listing =
+                    lox.get_text(&format!("/dev/fsget/{}", path.trim_start_matches('/')))?;
                 println!("{}", listing);
             }
             FilesCmd::Get { path, output } => {
                 let lox = LoxClient::new(Config::load()?);
-                let data = lox.get_bytes(&format!(
-                    "/dev/fsget/{}",
-                    path.trim_start_matches('/')
-                ))?;
-                let out_path = output.unwrap_or_else(|| {
-                    path.rsplit('/')
-                        .next()
-                        .unwrap_or("download")
-                        .to_string()
-                });
+                let data =
+                    lox.get_bytes(&format!("/dev/fsget/{}", path.trim_start_matches('/')))?;
+                let out_path = output
+                    .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("download").to_string());
                 fs::write(&out_path, &data)?;
-                println!(
-                    "✓ Downloaded {} bytes → {}",
-                    data.len(),
-                    out_path
-                );
+                println!("✓ Downloaded {} bytes → {}", data.len(), out_path);
             }
         },
 
@@ -2165,10 +2135,7 @@ fn main() -> Result<()> {
                 let lox = LoxClient::new(cfg.clone());
                 // Hash the token with the key for the check endpoint
                 let hash = token::hash_token(&ts.token, &ts.key);
-                let resp = lox.get_json(&format!(
-                    "/jdev/sys/checktoken/{}/{}",
-                    hash, cfg.user
-                ))?;
+                let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
                 let code = resp
                     .pointer("/LL/Code")
                     .and_then(|c| c.as_str())
@@ -2193,10 +2160,8 @@ fn main() -> Result<()> {
                 let cfg = Config::load()?;
                 let lox = LoxClient::new(cfg.clone());
                 let hash = token::hash_token(&ts.token, &ts.key);
-                let resp = lox.get_json(&format!(
-                    "/jdev/sys/refreshtoken/{}/{}",
-                    hash, cfg.user
-                ))?;
+                let resp =
+                    lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
                 let code = resp
                     .pointer("/LL/Code")
                     .and_then(|c| c.as_str())
@@ -2239,10 +2204,7 @@ fn main() -> Result<()> {
                 let cfg = Config::load()?;
                 let lox = LoxClient::new(cfg.clone());
                 let hash = token::hash_token(&ts.token, &ts.key);
-                let resp = lox.get_json(&format!(
-                    "/jdev/sys/killtoken/{}/{}",
-                    hash, cfg.user
-                ))?;
+                let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
                 let code = resp
                     .pointer("/LL/Code")
                     .and_then(|c| c.as_str())
@@ -2333,7 +2295,9 @@ fn main() -> Result<()> {
         Cmd::Log { lines } => {
             let lox = LoxClient::new(Config::load()?);
             let log = lox.get_text("/dev/fsget/log/def.log")?;
-            if log.contains("<errorcode>403</errorcode>") || log.contains("<errorcode>401</errorcode>") {
+            if log.contains("<errorcode>403</errorcode>")
+                || log.contains("<errorcode>401</errorcode>")
+            {
                 bail!("Access denied. The Miniserver log requires admin privileges.");
             }
             if log.trim_start().starts_with('<') && log.contains("<errorcode>") {
