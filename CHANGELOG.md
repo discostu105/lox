@@ -44,5 +44,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket nonce uses cryptographically random bytes
 - Debug `eprintln!` removed from token RSA parsing
 
-[Unreleased]: https://github.com/chrisb/lox/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/chrisb/lox/releases/tag/v0.1.0
+[Unreleased]: https://github.com/discostu105/lox/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/discostu105/lox/releases/tag/v0.1.0
