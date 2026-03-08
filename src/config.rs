@@ -14,6 +14,9 @@ pub struct Config {
     pub serial: String,
     #[serde(default)]
     pub aliases: HashMap<String, String>,
+    /// IANA timezone name (e.g. "Europe/Vienna"). Uses system local time if unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 impl Config {

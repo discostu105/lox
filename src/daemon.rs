@@ -198,7 +198,7 @@ fn cmp_value(op: &str, target: &str, new: f64) -> bool {
     }
 }
 
-fn in_time_window(window: &str) -> bool {
+fn in_time_window(window: &str, timezone: Option<&str>) -> bool {
     // Format: "HH:MM-HH:MM"
     let parts: Vec<&str> = window.split('-').collect();
     if parts.len() != 2 { return true; }
@@ -212,17 +212,27 @@ fn in_time_window(window: &str) -> bool {
         (Some(s), Some(e)) => (s, e),
         _ => return true,
     };
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let local_min = ((secs % 86400) / 60) as u32; // UTC min — good enough for ±1h tz
+    use chrono::Timelike;
+    let local_min: u32 = if let Some(tz_name) = timezone {
+        if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+            let now = chrono::Utc::now().with_timezone(&tz);
+            now.hour() * 60 + now.minute()
+        } else {
+            let now = chrono::Local::now();
+            now.hour() * 60 + now.minute()
+        }
+    } else {
+        let now = chrono::Local::now();
+        now.hour() * 60 + now.minute()
+    };
     if start <= end { local_min >= start && local_min <= end }
     else { local_min >= start || local_min <= end }  // overnight window
 }
 
-fn eval_rule(rule: &Rule, old: Option<f64>, new: f64, registry: &StateRegistry) -> bool {
+fn eval_rule(rule: &Rule, old: Option<f64>, new: f64, registry: &StateRegistry, timezone: Option<&str>) -> bool {
     // Time window check
     if let Some(window) = &rule.only_between {
-        if !in_time_window(window) { return false; }
+        if !in_time_window(window, timezone) { return false; }
     }
 
     // Primary condition
@@ -314,6 +324,7 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
 
     println!("\n🔌 Connecting to Miniserver...");
 
+    let timezone: Option<String> = cfg.timezone.clone();
     let rules = Arc::new(automations.rules);
     let rule_uuids = Arc::new(rule_uuids);
     let registry2 = registry.clone();
@@ -327,12 +338,14 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
         let registry3 = registry2.clone();
         let cooldowns3 = cooldowns2.clone();
         let verbose2 = verbose;
+        let timezone2 = timezone.clone();
         let result = ws.run(move |events: Vec<StateEvent>| {
         let rules = &rules2;
         let rule_uuids = &rule_uuids2;
         let registry2 = &registry3;
         let cooldowns2 = &cooldowns3;
         let verbose = verbose2;
+        let tz = timezone2.as_deref();
         for ev in events {
             let old = {
                 let mut reg = registry2.write().unwrap();
@@ -353,7 +366,7 @@ pub async fn run_daemon(cfg: Config, verbose: bool) -> Result<()> {
                 let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
                 if rule_uuid != &ev.uuid { continue; }
 
-                if !eval_rule(rule, old, ev.value, &registry2.read().unwrap()) { continue; }
+                if !eval_rule(rule, old, ev.value, &registry2.read().unwrap(), tz) { continue; }
 
                 // Cooldown check
                 let last = cooldowns2.read().unwrap().get(&i).copied().unwrap_or(0);
@@ -483,7 +496,7 @@ pub async fn run_polling_daemon(cfg: Config, verbose: bool, interval_secs: u64) 
             for (i, rule) in rules.iter().enumerate() {
                 let Some(ref rule_uuid) = rule_uuids[i] else { continue; };
                 if rule_uuid != uuid { continue; }
-                let matches = eval_rule(rule, old_val, new_val, &registry.read().unwrap());
+                let matches = eval_rule(rule, old_val, new_val, &registry.read().unwrap(), cfg.timezone.as_deref());
                 // For non-"changes" rules: only trigger on false→true transition
                 let was_matched = *prev_matched.read().unwrap().get(&i).unwrap_or(&false);
                 let is_edge = if rule.op == "changes" { matches } else { matches && !was_matched };
