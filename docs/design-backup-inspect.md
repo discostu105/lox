@@ -1,6 +1,6 @@
 # Design: `lox config` — Loxone Config Inspection
 
-> **Status: PARTIALLY IMPLEMENTED** — Renames done (PR #29). `download`, `list`, `extract`, `upload` implemented. **Not yet implemented:** `lox config users`, `lox config devices`, `lox config diff`.
+> **Status: IMPLEMENTED** — All commands implemented: `download`, `list`, `extract`, `upload`, `users`, `devices`, `diff`.
 
 ## Command Rename
 
