@@ -1,0 +1,164 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: lox-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: lox-linux-aarch64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: lox-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: lox-macos-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild (Linux musl)
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: |
+          if echo "${{ matrix.target }}" | grep -q "linux-musl"; then
+            cargo zigbuild --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Rename binary
+        run: |
+          cp target/${{ matrix.target }}/release/lox ${{ matrix.artifact }}
+
+      - name: SHA256 checksum
+        run: |
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          else
+            shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Update formula with checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          export SHA_MACOS_ARM=$(awk '{print $1}' artifacts/lox-macos-aarch64.sha256)
+          export SHA_MACOS_X86=$(awk '{print $1}' artifacts/lox-macos-x86_64.sha256)
+          export SHA_LINUX_ARM=$(awk '{print $1}' artifacts/lox-linux-aarch64.sha256)
+          export SHA_LINUX_X86=$(awk '{print $1}' artifacts/lox-linux-x86_64.sha256)
+
+          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" Formula/lox.rb
+
+          # Update SHA256 values in order of appearance:
+          # 1st = macos-aarch64, 2nd = macos-x86_64,
+          # 3rd = linux-aarch64, 4th = linux-x86_64
+          python3 - <<'PYEOF'
+          import re, os
+
+          sha_map = [
+              os.environ["SHA_MACOS_ARM"],
+              os.environ["SHA_MACOS_X86"],
+              os.environ["SHA_LINUX_ARM"],
+              os.environ["SHA_LINUX_X86"],
+          ]
+
+          with open("Formula/lox.rb") as f:
+              content = f.read()
+
+          idx = [0]
+          def replacer(m):
+              i = idx[0]
+              idx[0] += 1
+              return f'sha256 "{sha_map[i]}"'
+
+          content = re.sub(r'sha256 "[^"]*"', replacer, content)
+
+          with open("Formula/lox.rb", "w") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Commit updated formula
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/lox.rb
+          git commit -m "brew: update formula to ${GITHUB_REF_NAME}"
+          git push origin main

@@ -1740,7 +1740,8 @@ fn main() -> Result<()> {
                                 .or_else(|| xml_attr(&body, "update"))
                                 .map(|v| v != "0" && v != ver)
                                 .unwrap_or(false);
-                            let is_update_available = update_available || new_ver.map(|v| v != ver).unwrap_or(false);
+                            let is_update_available =
+                                update_available || new_ver.map(|v| v != ver).unwrap_or(false);
                             if cli.json {
                                 println!(
                                     "{}",
@@ -1757,7 +1758,7 @@ fn main() -> Result<()> {
                                     println!("✓ Firmware is up to date");
                                 }
                             } else if is_update_available {
-                                println!("Update available (check Loxone Config for version details)");
+                                println!("Update available (check Loxone Config for details)");
                             } else {
                                 println!("✓ Firmware is up to date");
                             }
@@ -2408,12 +2409,10 @@ fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
                 _ => current == target,
             }
         }
-        "ne" | "!=" => {
-            match (current.parse::<f64>(), target.parse::<f64>()) {
-                (Ok(a), Ok(b)) => (a - b).abs() >= f64::EPSILON * a.abs().max(b.abs()).max(1.0),
-                _ => current != target,
-            }
-        }
+        "ne" | "!=" => match (current.parse::<f64>(), target.parse::<f64>()) {
+            (Ok(a), Ok(b)) => (a - b).abs() >= f64::EPSILON * a.abs().max(b.abs()).max(1.0),
+            _ => current != target,
+        },
         "contains" => current.contains(target),
         "gt" | ">" => parse_f(current)? > parse_f(target)?,
         "lt" | "<" => parse_f(current)? < parse_f(target)?,
@@ -2460,6 +2459,10 @@ mod tests {
         assert!(eval_op("1", "eq", "1").unwrap());
         assert!(!eval_op("1", "eq", "2").unwrap());
         assert!(eval_op("hello", "==", "hello").unwrap());
+        // Numeric string formatting differences (Loxone API returns trailing zeros)
+        assert!(eval_op("200002700", "==", "200002700.000").unwrap());
+        assert!(eval_op("21.5", "==", "21.500000").unwrap());
+        assert!(!eval_op("21.5", "==", "21.6").unwrap());
     }
 
     #[test]

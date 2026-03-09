@@ -7,13 +7,12 @@ Single binary. No runtime. No cloud. Works in scripts, cron jobs, and AI agent p
 
 ## Why this exists
 
-The Loxone app is great for humans tapping on phones. It's useless for everything else.
+The Loxone app is great for everyday use — but it offers no API or scripting support for automation, CI/CD pipelines, or headless environments.
 
 `lox` gives you a proper CLI so you can:
 
 - **Script your home** — bash, Python, cron, whatever
 - **Connect AI agents** — Claude, GPT, or any LLM tool can control your home via shell commands
-- **Build automations** — rule engine with conditions, time windows, edge detection
 - **Chain commands** — `lox if "Temperatur" gt 25 && lox blind "Südseite" pos 80`
 - **Integrate with anything** — exit codes, JSON output, stdin/stdout
 
@@ -68,6 +67,12 @@ An agent can discover your home (`lox ls --json`), read sensor values, control d
 
 ## Install
 
+**Homebrew (macOS/Linux):**
+```bash
+brew install discostu105/lox/lox
+```
+
+**Build from source:**
 ```bash
 git clone https://github.com/discostu105/lox
 cd lox
@@ -75,7 +80,7 @@ cargo build --release
 cp target/release/lox ~/.local/bin/
 ```
 
-**Requirements:** Rust 1.75+. No OpenSSL. No runtime dependencies.
+**Requirements (source):** Rust 1.75+. No OpenSSL. No runtime dependencies.
 
 ## Setup
 
@@ -111,16 +116,31 @@ Then use short names directly: `lox on wz`, `lox off kueche`
 # ── System ────────────────────────────────────────────────────────
 lox status                              # Miniserver health: firmware, PLC, memory
 lox status --energy                     # + live energy panel (PV, grid, battery, consumption)
+lox status --diag                       # CPU, tasks, context switches, SD card
+lox status --net                        # Network config (IP, MAC, DNS, DHCP, NTP)
+lox status --bus                        # CAN bus statistics
+lox status --lan                        # LAN packet statistics
+lox status --all                        # All diagnostic sections
 lox status --json
+lox time                                # Miniserver system date/time
 
 # ── Discovery ─────────────────────────────────────────────────────
 lox ls                                  # All controls
 lox ls --type Jalousie                  # Filter by type
 lox ls --room "Wohnzimmer"              # Filter by room
+lox ls --cat "Beleuchtung"              # Filter by category
+lox ls --favorites                      # Only favorites
 lox ls --values                         # Include current values (slower)
 lox ls --type LightControllerV2 --json  # JSON for agents/scripts
 lox rooms                               # List all rooms
+lox categories                          # List all categories
 lox get "Lichtsteuerung Wohnzimmer"     # Full state of one control
+lox info "Lichtsteuerung Wohnzimmer"    # Detailed info (sub-controls, states, moods)
+lox globals                             # Global states (operating mode, sunrise, etc.)
+lox modes                               # Operating modes
+lox discover                            # Find Miniservers on local network (UDP)
+lox discover --timeout 5               # Custom timeout in seconds
+lox extensions                          # Connected extensions and devices
 
 # ── Resolving ambiguous names ─────────────────────────────────────
 # When multiple controls share the same name (e.g. "Temperatur"):
@@ -135,6 +155,8 @@ lox mood "Lichtsteuerung Wohnzimmer" plus     # Next mood
 lox mood "Lichtsteuerung Wohnzimmer" minus    # Previous mood
 lox mood "Lichtsteuerung Wohnzimmer" off      # Turn off (mood 778)
 lox mood "Lichtsteuerung Wohnzimmer" 704      # Set by numeric mood ID
+lox dimmer "Stehlampe" 75                     # Set dimmer 0-100%
+lox color "LED Strip" "#FF0000"               # Set color (hex RGB or hsv())
 
 # ── Blinds ────────────────────────────────────────────────────────
 lox blind "Beschattung Süd" up
@@ -145,6 +167,32 @@ lox blind "Beschattung Süd" full-up
 lox blind "Beschattung Süd" full-down
 lox blind "Beschattung Süd" shade       # Automatic shading
 
+# ── Gates ────────────────────────────────────────────────────────
+lox gate "Garagentor" open
+lox gate "Garagentor" close
+lox gate "Garagentor" stop
+
+# ── Climate ──────────────────────────────────────────────────────
+lox thermostat "Heizung Wohnzimmer" --temp 22.5     # Set comfort temp
+lox thermostat "Heizung Wohnzimmer" --mode auto     # auto|manual|comfort|eco
+lox thermostat "Heizung" --override 24 --duration 120  # Override for N minutes
+lox weather                             # Current weather data
+lox weather --forecast                  # 7-day forecast
+
+# ── Security ─────────────────────────────────────────────────────
+lox alarm "Alarmanlage" arm             # Arm alarm
+lox alarm "Alarmanlage" arm --no-motion # Arm without motion detection
+lox alarm "Alarmanlage" disarm          # Disarm
+lox alarm "Alarmanlage" quit            # Acknowledge/silence
+lox lock "Heizung" --reason "Wartung"   # Lock a control
+lox unlock "Heizung"                    # Unlock a control
+
+# ── Statistics & History ──────────────────────────────────────────
+lox stats                               # Controls with statistics enabled
+lox history "Temperatur" --month 2025-01  # Monthly statistics
+lox history "Temperatur" --day 2025-01-15 # Daily statistics
+lox history "Temperatur" --csv          # CSV output
+
 # ── Conditions & Logic ────────────────────────────────────────────
 lox if "Temperatur Außen" gt 25         # Exit 0=true, 1=false
 lox if "Schalter" eq 1 && lox on "Licht"
@@ -153,31 +201,44 @@ lox if "Schalter" eq 1 && lox on "Licht"
 lox set "Sollwert Heizung" 21.5
 lox pulse "Taster"
 
+# ── Music Server ─────────────────────────────────────────────────
+lox music play                          # Play zone 1
+lox music pause 2                       # Pause zone 2
+lox music stop                          # Stop zone 1
+lox music volume 50                     # Set volume 0-100
+
 # ── Scenes ────────────────────────────────────────────────────────
 lox run abend
 lox scene list
 lox scene show abend
 lox scene new abend
 
-# ── Automation Daemon ─────────────────────────────────────────────
-lox daemon                              # WebSocket (needs Monitor rights)
-lox daemon --poll                       # HTTP polling fallback
-lox automation list
+# ── System Administration ────────────────────────────────────────
+lox update check                        # Check for firmware updates
+lox update install --confirm            # Install firmware update
+lox reboot --confirm                    # Reboot the Miniserver
+lox files ls /                          # Browse Miniserver filesystem
+lox files get /log/def.log              # Download a file
+lox log                                 # Miniserver log (needs admin)
 
 # ── Cache ─────────────────────────────────────────────────────────
 lox cache info
+lox cache check                         # Check if cache is current
 lox cache refresh
 lox cache clear
 
 # ── Token Auth ────────────────────────────────────────────────────
 lox token fetch                         # Fetch & save token (valid 20 days)
 lox token info
-lox token clear
+lox token check                         # Verify token on Miniserver
+lox token refresh                       # Extend token validity
+lox token revoke                        # Revoke token on Miniserver
+lox token clear                         # Delete local token file
 
 # ── Raw ───────────────────────────────────────────────────────────
 lox send <uuid> <command>
+lox send <uuid> <command> --secured <hash>  # Secured command
 lox watch "Temperatur Außen"
-lox log                                 # Miniserver log (needs admin)
 ```
 
 ---
@@ -201,32 +262,6 @@ steps:
 
 ---
 
-## Automation Rules
-
-`~/.lox/automations.yaml` — evaluated by the daemon:
-
-```yaml
-rules:
-  - name: "Sonnenschutz bei Hitze"
-    when:
-      control: "Temperatur Außen"
-      op: gt
-      value: 28
-    also:
-      - control: "Windgeschwindigkeit"
-        op: lt
-        value: 10
-    only_between: "10:00-18:00"
-    then:
-      - control: "Beschattung Süd"
-        command: "pos 80"
-```
-
-**Operators:** `eq`, `ne`, `gt`, `lt`, `gte`, `lte`, `changes`  
-**Conditions:** `also` (AND), `only_between` (time window)
-
----
-
 ## Performance
 
 Structure cache at `~/.lox/cache/structure.json` (24h TTL):
@@ -247,9 +282,13 @@ Structure cache at `~/.lox/cache/structure.json` (24h TTL):
 | `LightControllerV2` | `on`, `off`, `mood plus/minus/off/<id>` |
 | `Jalousie` / `CentralJalousie` | `up`, `down`, `stop`, `pos <0-100>`, `shade`, `full-up`, `full-down` |
 | `Switch` | `on`, `off`, `pulse` |
-| `Dimmer` | `on`, `off`, `set <0-100>` |
+| `Dimmer` | `dimmer <name> <0-100>` |
+| `Gate` / `CentralGate` | `gate <name> open/close/stop` |
+| `ColorPickerV2` | `color <name> #RRGGBB` or `color <name> "hsv(h,s,v)"` |
+| `IRoomControllerV2` | `thermostat <name> --temp/--mode/--override` |
+| `Alarm` | `alarm <name> arm/disarm/quit` |
 | `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
-| Any | `send <raw-command>` |
+| Any | `send <uuid> <raw-command>`, `lock`, `unlock` |
 
 ---
 
@@ -262,21 +301,9 @@ Structure cache at `~/.lox/cache/structure.json` (24h TTL):
     structure.json     # LoxApp3.json (24h TTL, ~150KB)
   token.json           # Token auth (optional)
   scenes/*.yaml        # Your scenes
-  automations.yaml     # Automation rules
 ```
 
 Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted.
-
----
-
-## Systemd Service
-
-```bash
-lox service install    # Install automation daemon as systemd user service
-lox service status
-lox service logs
-lox service uninstall
-```
 
 ---
 
@@ -284,7 +311,6 @@ lox service uninstall
 
 - Loxone Miniserver Gen 1/2, firmware 12.0+
 - Local network access (or DynDNS)
-- For `lox daemon` (WebSocket): Monitor rights enabled in Loxone Config
 - For `lox log`: Admin user
 
 ---

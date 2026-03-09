@@ -1,10 +1,10 @@
 # lox — Design Document
 
-> CLI + Automation Daemon for Loxone Miniserver
+> CLI for Loxone Miniserver
 
 ## Status
 
-Working prototype. Core commands functional, polling daemon tested end-to-end.
+Working. Core commands functional and tested end-to-end.
 
 ---
 
@@ -14,26 +14,25 @@ Working prototype. Core commands functional, polling daemon tested end-to-end.
 ┌─────────────────────────────────────────────────────────┐
 │  lox CLI (single binary)                                 │
 │                                                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
-│  │ Commands │  │  Scenes  │  │  Daemon  │              │
-│  │ on/off   │  │ YAML     │  │ poll/WS  │              │
-│  │ blind    │  │ run      │  │ rules    │              │
-│  │ if/watch │  │ new      │  │ fire     │              │
-│  └────┬─────┘  └─────┬────┘  └────┬─────┘              │
-│       │              │             │                     │
-│  ┌────▼──────────────▼─────────────▼────┐               │
-│  │            HTTP Client               │               │
-│  │   reqwest + Basic Auth + TLS         │               │
-│  └────────────────────┬─────────────────┘               │
-└───────────────────────┼─────────────────────────────────┘
-                        │ HTTPS / WSS
-              ┌─────────▼──────────┐
-              │  Loxone Miniserver │
-              │   /jdev/sps/io/    │
-              │   /dev/sps/io/all  │
-              │   /data/LoxApp3    │
-              │   /ws/rfc6455      │
-              └────────────────────┘
+│  ┌──────────┐  ┌──────────┐                             │
+│  │ Commands │  │  Scenes  │                             │
+│  │ on/off   │  │ YAML     │                             │
+│  │ blind    │  │ run      │                             │
+│  │ if/watch │  │ new      │                             │
+│  └────┬─────┘  └─────┬────┘                             │
+│       │              │                                   │
+│  ┌────▼──────────────▼────┐                              │
+│  │      HTTP Client       │                              │
+│  │  reqwest + Basic Auth  │                              │
+│  └──────────┬─────────────┘                              │
+└─────────────┼───────────────────────────────────────────┘
+              │ HTTPS
+    ┌─────────▼──────────┐
+    │  Loxone Miniserver │
+    │   /jdev/sps/io/    │
+    │   /dev/sps/io/all  │
+    │   /data/LoxApp3    │
+    └────────────────────┘
 ```
 
 ---
@@ -50,8 +49,6 @@ Working prototype. Core commands functional, polling daemon tested end-to-end.
 | `lox if` | ✅ | Exit codes for shell scripting |
 | `lox watch` | ✅ | HTTP polling loop |
 | `lox run <scene>` | ✅ | Multi-step YAML scenes |
-| `lox daemon --poll` | ✅ | Polling daemon, rules tested E2E |
-| `lox daemon` (WS) | ⚠️ | Connects/auth OK, needs Monitor rights for `enablestatusupdate` |
 | `lox log` | ⚠️ | Needs admin user |
 | `--json` output | ✅ | All commands |
 
@@ -59,109 +56,20 @@ Working prototype. Core commands functional, polling daemon tested end-to-end.
 
 ## Next Steps
 
-### 1. WebSocket — Real-time State (High Priority)
+### 1. `lox watch` via WebSocket (Medium Priority)
 
-**Problem:** `enablestatusupdate` returns 400 for non-admin users.  
-**Fix:** In Loxone Config → User Management → enable "Monitor" right for the user.
-
-Once that's enabled:
-- Remove polling fallback as primary recommendation
-- WS gives instant (<100ms) state changes vs 2-3s polling lag
-- Enables automation on fast events (motion sensors, doorbells)
-
-**Loxone WS binary protocol** (already implemented, needs live testing):
-```
-Header (8 bytes): 0x03 | type | flags | reserved | uint32_le length
-type 0x02 = ValueEventTable: repeated [UUID(16) + double(8)] records
-```
-
-**TODO:**
-- Test with Monitor rights enabled
-- Handle reconnect gracefully (currently reconnects but state is lost)
-- State cache: persist last-known values across reconnects
-
----
-
-### 2. `lox watch` via WebSocket (Medium Priority)
-
-Currently polling. Once WS works:
+Currently polling. The WS infrastructure exists in `ws.rs` (`connect_raw`). Once wired up:
 
 ```bash
 lox watch "Lichtsteuerung"     # real-time, <100ms latency
 lox watch --all                # stream all state changes
 ```
 
-With `--all` useful for discovering what changes when you operate physical switches.
+Requires Monitor rights enabled in Loxone Config → User Management.
 
 ---
 
-### 3. Daemon: systemd Integration (Medium Priority)
-
-```bash
-lox daemon install    # writes /etc/systemd/system/lox-daemon.service
-lox daemon status     # shows systemd status
-lox daemon logs       # journalctl output
-```
-
-Service file template:
-```ini
-[Unit]
-Description=Loxone Automation Daemon
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/lox daemon --poll
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
----
-
-### 4. Automation Rule Improvements (Medium Priority)
-
-**Current:** Single `when` + `op` + `value`
-
-**Planned:**
-```yaml
-rules:
-  # Multiple conditions (AND)
-  - when:
-      - control: "Temperatur Wohnzimmer"
-        op: gt
-        value: "25"
-      - control: "Beschattung"
-        op: eq
-        value: "0"      # not already shaded
-    run: "lox blind 'Beschattung Zentral EG' shade"
-
-  # Time window
-  - when: "Türklingel"
-    op: eq
-    value: "1"
-    only_between: "08:00-22:00"
-    run: "lox on 'Licht Eingang'"
-
-  # Consecutive triggers (debounce vs require N hits)
-  - when: "Bewegungsmelder"
-    op: eq
-    value: "1"
-    require_count: 1
-    cooldown_secs: 300
-    run: "lox run alarm"
-```
-
-**Environment variables in run scripts:**
-```bash
-# Pass current value to script
-run: "notify.sh $LOX_CONTROL $LOX_VALUE $LOX_PREV_VALUE"
-```
-
----
-
-### 5. `lox set` — Analog/Virtual Inputs (Medium Priority)
+### 2. `lox set` — Analog/Virtual Inputs (Medium Priority)
 
 Send analog values to virtual inputs:
 
@@ -174,7 +82,7 @@ API: `/jdev/sps/io/{uuid}/{value}` already supports this, just needs a dedicated
 
 ---
 
-### 6. `lox mood` — LightControllerV2 Moods (Low Priority)
+### 3. `lox mood` — LightControllerV2 Moods (Low Priority)
 
 Loxone light controllers have named moods (Stimmungen):
 
@@ -188,7 +96,7 @@ The `/all` output for LightControllerV2 includes `moodList` — needs parsing.
 
 ---
 
-### 7. `lox rooms` — Room-scoped Commands (Low Priority)
+### 4. `lox rooms` — Room-scoped Commands (Low Priority)
 
 ```bash
 lox room "Wohnzimmer" off    # turn off everything in room
@@ -199,7 +107,7 @@ Already have room data in structure, just needs a Room command that iterates.
 
 ---
 
-### 8. TLS Improvements (Low Priority)
+### 5. TLS Improvements (Low Priority)
 
 Currently using `danger_accept_invalid_certs`. Options:
 
@@ -214,7 +122,7 @@ Loxone supports JWT tokens via `/jdev/sys/gettoken` — longer-lived, more secur
 
 ---
 
-### 9. `lox backup` — Structure/Config Backup (Low Priority)
+### 6. `lox backup` — Structure/Config Backup (Low Priority)
 
 ```bash
 lox backup          # save LoxApp3.json + current state snapshot
@@ -239,9 +147,6 @@ Scenes (~/.lox/scenes/*.yaml)
   name, description, steps[]
     step: {control, cmd, delay_ms}
 
-Automations (~/.lox/automations.yaml)
-  rules[]
-    rule: {when, op, value, run, cooldown_secs, description}
 ```
 
 ---
@@ -250,7 +155,7 @@ Automations (~/.lox/automations.yaml)
 
 | Issue | Impact | Fix |
 |-------|--------|-----|
-| `enablestatusupdate` needs Monitor rights | WS daemon falls back to polling | Enable Monitor right in Loxone Config |
+| `enablestatusupdate` needs Monitor rights | `lox watch` can't use WS | Enable Monitor right in Loxone Config |
 | `CentralLightController` has no numeric `/all` value | Can't watch central lights via polling | Use LightControllerV2 UUIDs directly |
 | State values only via WS (not HTTP) for most types | `lox get` shows limited info | WS with Monitor rights |
 | `lox log` needs admin | Can't read Miniserver logs | Use admin user |
