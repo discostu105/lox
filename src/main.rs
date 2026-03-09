@@ -1152,7 +1152,17 @@ fn main() -> Result<()> {
                 "up" | "open" => "PulseUp",
                 "down" | "close" => "PulseDown",
                 "stop" => "off",
-                "shade" | "auto" => "AutomaticDown",
+                "shade" | "auto" => {
+                    if let Some(pct) = pos {
+                        if !(0.0..=100.0).contains(&pct) {
+                            bail!("Position must be 0-100");
+                        }
+                        cmd_owned = format!("manualLamella/{:.4}", pct);
+                        &cmd_owned
+                    } else {
+                        "AutomaticDown"
+                    }
+                }
                 "full-up" => "FullUp",
                 "full-down" => "FullDown",
                 "pos" | "position" => {
@@ -1160,31 +1170,46 @@ fn main() -> Result<()> {
                     if !(0.0..=100.0).contains(&pct) {
                         bail!("Position must be 0-100");
                     }
-                    cmd_owned = format!("manualPosition/{:.4}", pct / 100.0);
+                    cmd_owned = format!("manualPosition/{:.4}", pct);
                     &cmd_owned
                 }
                 other => {
                     // Try numeric mood-style: pos 50
                     if let Ok(pct) = other.parse::<f64>() {
                         if (0.0..=100.0).contains(&pct) {
-                            cmd_owned = format!("manualPosition/{:.4}", pct / 100.0);
+                            cmd_owned = format!("manualPosition/{:.4}", pct);
                             &cmd_owned
                         } else {
                             bail!("Position must be 0-100");
                         }
                     } else {
-                        bail!("Unknown action '{}'. Use: up down stop shade full-up full-down pos <0-100>", other)
+                        bail!("Unknown action '{}'. Use: up down stop shade [<0-100>] full-up full-down pos <0-100>", other)
                     }
                 }
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
             if !cli.json {
-                thread::sleep(Duration::from_millis(800));
-                let xml = lox.get_all(&ctrl.uuid)?;
-                if let Some(pos_str) = xml_attr(&xml, "StatePos") {
-                    let p: f64 = pos_str.parse().unwrap_or(0.0);
-                    println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
+                // manualPosition moves don't set StateUp/StateDown, so we can't use those
+                // as a motion indicator. Instead, poll until StatePos stabilizes (two
+                // consecutive reads agree) or we time out after 30s.
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                let mut prev_pos: Option<f64> = None;
+                loop {
+                    thread::sleep(Duration::from_millis(500));
+                    let xml = lox.get_all(&ctrl.uuid)?;
+                    let cur_pos = xml_attr(&xml, "StatePos")
+                        .and_then(|v| v.parse::<f64>().ok());
+                    let timed_out = std::time::Instant::now() >= deadline;
+                    let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
+                    if stable || timed_out {
+                        if let Some(p) = cur_pos {
+                            let suffix = if timed_out && !stable { "  (moving…)" } else { "" };
+                            println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
+                        }
+                        break;
+                    }
+                    prev_pos = cur_pos;
                 }
             }
         }
@@ -2433,7 +2458,7 @@ fn parse_f(s: &str) -> Result<f64> {
 }
 
 /// Percent-encode characters that would corrupt an HTTP path segment.
-/// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/0.5") pass through.
+/// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/50") pass through.
 fn encode_path_value(s: &str) -> String {
     s.chars()
         .flat_map(|c| match c {
@@ -2497,8 +2522,8 @@ mod tests {
     fn test_encode_path_value_plain() {
         assert_eq!(encode_path_value("on"), "on");
         assert_eq!(
-            encode_path_value("manualPosition/0.5"),
-            "manualPosition/0.5"
+            encode_path_value("manualPosition/50"),
+            "manualPosition/50"
         );
     }
 
