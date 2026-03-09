@@ -210,7 +210,7 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 
 ## Status
 
-This project is under active development. It works well for everyday use, but expect rough edges — APIs may change between releases, and not every Miniserver configuration has been tested. If you run into issues, please [open a bug report](https://github.com/discostu105/lox/issues). Pull requests and contributions are welcome.
+This is a weekend hobby project — built for fun and personal use. It works well enough for my own setup, but it hasn't been exhaustively tested across different Miniserver configurations. Things might break, APIs might change, and there are certainly rough edges. If you run into issues, feel free to [open a bug report](https://github.com/discostu105/lox/issues). Pull requests and contributions are welcome.
 
 **Use at your own risk.** Commands that modify your Miniserver (e.g., `config upload`, `reboot`, `update`) can affect your live system. Always have a backup.
 
