@@ -3,9 +3,11 @@ use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     pub host: String,
     pub user: String,
@@ -17,20 +19,34 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn dir() -> PathBuf { home_dir().unwrap_or_default().join(".lox") }
-    pub fn path() -> PathBuf { Self::dir().join("config.yaml") }
+    pub fn dir() -> PathBuf {
+        home_dir().unwrap_or_default().join(".lox")
+    }
+    pub fn path() -> PathBuf {
+        Self::dir().join("config.yaml")
+    }
 
     pub fn load() -> Result<Self> {
         let path = Self::path();
-        let content = fs::read_to_string(&path)
-            .with_context(|| "Config not found. Run: lox config set --host ... --user ... --pass ...")?;
-        Ok(serde_yaml::from_str(&content)?)
+        let content = fs::read_to_string(&path).with_context(|| {
+            "Config not found. Run: lox config set --host ... --user ... --pass ..."
+        })?;
+        let mut cfg: Self = serde_yaml::from_str(&content)?;
+        if !cfg.host.is_empty()
+            && !cfg.host.starts_with("http://")
+            && !cfg.host.starts_with("https://")
+        {
+            cfg.host = format!("https://{}", cfg.host);
+        }
+        Ok(cfg)
     }
 
     pub fn save(&self) -> Result<()> {
         let path = Self::path();
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(&path, serde_yaml::to_string(self)?)?;
+        #[cfg(unix)]
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
         println!("✓  Config saved to {:?}", path);
         Ok(())
     }
