@@ -13,9 +13,9 @@ lox get "Temperatur [OG Schlafzimmer]"
 ## Setup
 
 ```bash
-lox config set --host https://192.168.1.100 --user admin --pass secret
-lox config set --serial YOUR_SERIAL    # enables correct TLS hostname
-lox config show                        # show config (password redacted)
+lox setup set --host https://192.168.1.100 --user admin --pass secret
+lox setup set --serial YOUR_SERIAL     # enables correct TLS hostname
+lox setup show                         # show config (password redacted)
 ```
 
 ### Aliases
@@ -192,16 +192,16 @@ lox autopilot state "Rule Name"        # show when a rule last fired
 
 ---
 
-## Backup (Loxone Config)
+## Loxone Config
 
 ```bash
-lox backup download                    # download latest config ZIP via FTP
-lox backup download --extract          # download + decompress to .Loxone XML
-lox backup download -o config.zip      # custom output filename
-lox backup list                        # list all backups on the Miniserver
-lox backup extract config.zip          # decompress LoxCC → .Loxone XML
-lox backup extract config.zip -o out.Loxone
-lox backup restore config.zip --force  # upload to Miniserver (dangerous)
+lox config download                    # download latest config ZIP via FTP
+lox config download --extract          # download + decompress to .Loxone XML
+lox config download -o config.zip      # custom output filename
+lox config list                        # list all configs on the Miniserver
+lox config extract config.zip          # decompress LoxCC → .Loxone XML
+lox config extract config.zip -o out.Loxone
+lox config upload config.zip --force   # upload to Miniserver (dangerous)
 ```
 
 ---

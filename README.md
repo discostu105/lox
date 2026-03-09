@@ -85,10 +85,10 @@ cp target/release/lox ~/.local/bin/
 ## Setup
 
 ```bash
-lox config set --host https://192.168.1.100 --user USER --pass PASS
+lox setup set --host https://192.168.1.100 --user USER --pass PASS
 
 # With serial for correct TLS hostname (avoids cert warnings)
-lox config set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
+lox setup set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
 ```
 
 Config: `~/.lox/config.yaml`
@@ -126,7 +126,7 @@ lox thermostat "Heizung" --temp 22.5   # Set temperature
 lox alarm "Alarmanlage" arm            # Arm alarm
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
-lox backup download --extract          # Download & extract Loxone Config
+lox config download --extract          # Download & extract Loxone Config
 lox run abend                          # Run a scene
 lox send <uuid> <command>              # Raw command
 ```

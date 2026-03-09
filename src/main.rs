@@ -87,10 +87,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Configure connection
-    Config {
+    /// Configure connection settings
+    Setup {
         #[command(subcommand)]
-        action: ConfigCmd,
+        action: SetupCmd,
     },
     /// Manage control name aliases
     Alias {
@@ -363,10 +363,10 @@ enum Cmd {
         #[command(subcommand)]
         action: TokenCmd,
     },
-    /// Download and manage Miniserver configuration backups
-    Backup {
+    /// Download, inspect, and manage Loxone Config files
+    Config {
         #[command(subcommand)]
-        action: BackupCmd,
+        action: ConfigCmd,
     },
     /// List and inspect automatic rules (Automatik-Regel / Autopilot)
     Autopilot {
@@ -472,7 +472,7 @@ enum CacheCmd {
 }
 
 #[derive(Subcommand)]
-enum ConfigCmd {
+enum SetupCmd {
     /// Set one or more config fields (omitted fields are preserved)
     Set {
         #[arg(long)]
@@ -510,8 +510,8 @@ enum SceneCmd {
 }
 
 #[derive(Subcommand)]
-enum BackupCmd {
-    /// Download the latest configuration backup from the Miniserver
+enum ConfigCmd {
+    /// Download the latest Loxone Config from the Miniserver via FTP
     Download {
         /// Custom output filename
         #[arg(short, long)]
@@ -520,19 +520,19 @@ enum BackupCmd {
         #[arg(long)]
         extract: bool,
     },
-    /// List available backups on the Miniserver
+    /// List available configs on the Miniserver
     List,
-    /// Decompress a local backup ZIP to XML
+    /// Decompress a local config ZIP to .Loxone XML
     Extract {
-        /// Path to a backup ZIP file
+        /// Path to a config ZIP file
         file: String,
         /// Custom output filename
         #[arg(short, long)]
         output: Option<String>,
     },
-    /// Upload a backup to the Miniserver (dangerous — requires --force)
-    Restore {
-        /// Path to a backup ZIP file
+    /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
+    Upload {
+        /// Path to a config ZIP file
         file: String,
         /// Confirm the upload
         #[arg(long)]
@@ -546,8 +546,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Cmd::Config { action } => match action {
-            ConfigCmd::Set {
+        Cmd::Setup { action } => match action {
+            SetupCmd::Set {
                 host,
                 user,
                 pass,
@@ -572,7 +572,7 @@ fn main() -> Result<()> {
                 }
                 cfg.save()?;
             }
-            ConfigCmd::Show => {
+            SetupCmd::Show => {
                 let cfg = Config::load()?;
                 println!("host:   {}", cfg.host);
                 println!("user:   {}", cfg.user);
@@ -2468,13 +2468,13 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Backup { action } => {
+        Cmd::Config { action } => {
             let cfg = Config::load()?;
             match action {
-                BackupCmd::List => {
+                ConfigCmd::List => {
                     let backups = ftp::list_backups(&cfg)?;
                     if backups.is_empty() {
-                        println!("No configuration backups found on the Miniserver.");
+                        println!("No configs found on the Miniserver.");
                     } else if cli.json {
                         let arr: Vec<serde_json::Value> = backups
                             .iter()
@@ -2502,10 +2502,10 @@ fn main() -> Result<()> {
                         }
                     }
                 }
-                BackupCmd::Download { output, extract } => {
+                ConfigCmd::Download { output, extract } => {
                     let backups = ftp::list_backups(&cfg)?;
                     if backups.is_empty() {
-                        bail!("No configuration backups found on the Miniserver.");
+                        bail!("No configs found on the Miniserver.");
                     }
                     let newest = &backups[0];
                     eprintln!(
@@ -2535,7 +2535,7 @@ fn main() -> Result<()> {
                         );
                     }
                 }
-                BackupCmd::Extract { file, output } => {
+                ConfigCmd::Extract { file, output } => {
                     let zip_data =
                         fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
                     eprintln!("Extracting sps0.LoxCC...");
@@ -2551,14 +2551,14 @@ fn main() -> Result<()> {
                         xml_path
                     );
                 }
-                BackupCmd::Restore { file, force } => {
+                ConfigCmd::Upload { file, force } => {
                     if !force {
                         eprintln!(
-                            "⚠  WARNING: Uploading a configuration backup will replace the current\n\
-                             \x20  Miniserver programming. A bad configuration can require physical\n\
-                             \x20  SD card access to recover.\n\
+                            "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
+                             \x20  programming. A bad configuration can require physical SD card\n\
+                             \x20  access to recover.\n\
                              \n\
-                             \x20  Backup file: {}\n\
+                             \x20  Config file: {}\n\
                              \n\
                              \x20  Use --force to proceed.",
                             file
