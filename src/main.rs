@@ -1232,7 +1232,10 @@ fn main() -> Result<()> {
                             bail!("Position must be 0-100");
                         }
                     } else {
-                        bail!("Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>", other)
+                        bail!(
+                            "Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>",
+                            other
+                        )
                     }
                 }
             };
@@ -1243,10 +1246,13 @@ fn main() -> Result<()> {
                     // Slat tilt doesn't change StatePos; just read once after a short settle.
                     thread::sleep(Duration::from_millis(800));
                     let xml = lox.get_all(&ctrl.uuid)?;
-                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok()) {
+                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok())
+                    {
                         println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
                     }
-                    if let Some(s) = xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok()) {
+                    if let Some(s) =
+                        xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok())
+                    {
                         println!("   Shade:    {:.0}%  {}", s * 100.0, bar(s, 1.0));
                     }
                 } else {
@@ -1258,14 +1264,23 @@ fn main() -> Result<()> {
                     loop {
                         thread::sleep(Duration::from_millis(500));
                         let xml = lox.get_all(&ctrl.uuid)?;
-                        let cur_pos = xml_attr(&xml, "StatePos")
-                            .and_then(|v| v.parse::<f64>().ok());
+                        let cur_pos =
+                            xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok());
                         let timed_out = std::time::Instant::now() >= deadline;
                         let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
                         if stable || timed_out {
                             if let Some(p) = cur_pos {
-                                let suffix = if timed_out && !stable { "  (moving…)" } else { "" };
-                                println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
+                                let suffix = if timed_out && !stable {
+                                    "  (moving…)"
+                                } else {
+                                    ""
+                                };
+                                println!(
+                                    "   Position: {:.0}%  {}{}",
+                                    p * 100.0,
+                                    bar(p, 1.0),
+                                    suffix
+                                );
                             }
                             break;
                         }
@@ -2337,7 +2352,7 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&arr)?);
                     } else {
                         let name_w = rules.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
-                        println!("{:<width$}  {}", "NAME", "UUID", width = name_w);
+                        println!("{:<width$}  UUID", "NAME", width = name_w);
                         for r in &rules {
                             println!("{:<width$}  {}", r.name, r.uuid, width = name_w);
                         }
@@ -2474,10 +2489,7 @@ fn main() -> Result<()> {
                             .collect();
                         println!("{}", serde_json::to_string_pretty(&arr)?);
                     } else {
-                        println!(
-                            "  {:<4} {:<8} {:<22} Size",
-                            "#", "Version", "Date"
-                        );
+                        println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
                         for (i, b) in backups.iter().enumerate() {
                             println!(
                                 "  {:<4} {:<8} {:<22} {} KB{}",
@@ -2502,8 +2514,7 @@ fn main() -> Result<()> {
                         newest.size / 1024
                     );
                     let data = ftp::download_backup(&cfg, &newest.filename)?;
-                    let out_path =
-                        output.unwrap_or_else(|| newest.filename.clone());
+                    let out_path = output.unwrap_or_else(|| newest.filename.clone());
                     fs::write(&out_path, &data)?;
                     println!("Saved to {}", out_path);
 
@@ -2525,15 +2536,12 @@ fn main() -> Result<()> {
                     }
                 }
                 BackupCmd::Extract { file, output } => {
-                    let zip_data = fs::read(&file)
-                        .with_context(|| format!("Cannot read {}", file))?;
+                    let zip_data =
+                        fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
                     eprintln!("Extracting sps0.LoxCC...");
                     let xml = loxcc::extract_and_decompress(&zip_data)?;
                     let xml_path = output.unwrap_or_else(|| {
-                        file.strip_suffix(".zip")
-                            .unwrap_or(&file)
-                            .to_string()
-                            + ".Loxone"
+                        file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
                     });
                     fs::write(&xml_path, &xml)?;
                     println!(
@@ -2557,17 +2565,12 @@ fn main() -> Result<()> {
                         );
                         std::process::exit(1);
                     }
-                    let data = fs::read(&file)
-                        .with_context(|| format!("Cannot read {}", file))?;
+                    let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
                     let filename = std::path::Path::new(&file)
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or(&file);
-                    eprintln!(
-                        "Uploading {} ({} KB)...",
-                        filename,
-                        data.len() / 1024
-                    );
+                    eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
                     ftp::upload_backup(&cfg, filename, &data)?;
                     println!("Upload complete.");
                     println!("Reboot the Miniserver to apply: lox reboot");
@@ -2770,10 +2773,7 @@ mod tests {
     #[test]
     fn test_encode_path_value_plain() {
         assert_eq!(encode_path_value("on"), "on");
-        assert_eq!(
-            encode_path_value("manualPosition/50"),
-            "manualPosition/50"
-        );
+        assert_eq!(encode_path_value("manualPosition/50"), "manualPosition/50");
     }
 
     #[test]

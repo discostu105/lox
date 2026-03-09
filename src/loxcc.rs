@@ -126,11 +126,7 @@ pub fn extract_and_decompress(zip_data: &[u8]) -> Result<Vec<u8>> {
     let mut loxcc_data = None;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        if file
-            .name()
-            .to_lowercase()
-            .contains("sps0.loxcc")
-        {
+        if file.name().to_lowercase().contains("sps0.loxcc") {
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             loxcc_data = Some(buf);
@@ -221,8 +217,8 @@ mod tests {
         let buf = Vec::new();
         let cursor = std::io::Cursor::new(buf);
         let mut zip_writer = zip::ZipWriter::new(cursor);
-        let options =
-            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         zip_writer.start_file("other.txt", options).unwrap();
         zip_writer.write_all(b"hello").unwrap();
         let cursor = zip_writer.finish().unwrap();
@@ -262,8 +258,8 @@ mod tests {
         let buf = Vec::new();
         let cursor = std::io::Cursor::new(buf);
         let mut zip_writer = zip::ZipWriter::new(cursor);
-        let options =
-            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         zip_writer.start_file("sps0.LoxCC", options).unwrap();
         zip_writer.write_all(&loxcc_blob).unwrap();
         let cursor = zip_writer.finish().unwrap();

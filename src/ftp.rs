@@ -75,7 +75,10 @@ pub fn list_backups(cfg: &Config) -> Result<Vec<BackupInfo>> {
             continue;
         }
         // Size is typically field index 4 in Unix-style listing
-        let size = fields.get(4).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let size = fields
+            .get(4)
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
         if let Some(info) = parse_backup_name(name, size) {
             backups.push(info);
         }
