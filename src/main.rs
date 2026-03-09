@@ -178,7 +178,7 @@ enum Cmd {
         #[arg(long)]
         room: Option<String>,
     },
-    /// Control blind: up | down | stop | shade | full-up | full-down | pos <0-100>
+    /// Control blind: up | down | stop | shade [<0-100>] | pos <0-100>
     Blind {
         name_or_uuid: String,
         action: String,
@@ -1149,8 +1149,8 @@ fn main() -> Result<()> {
             }
             let cmd_owned: String;
             let cmd: &str = match action.to_lowercase().as_str() {
-                "up" | "open" => "PulseUp",
-                "down" | "close" => "PulseDown",
+                "up" | "open" => "FullUp",
+                "down" | "close" => "FullDown",
                 "stop" => "off",
                 "shade" | "auto" => {
                     if let Some(pct) = pos {
@@ -1163,8 +1163,6 @@ fn main() -> Result<()> {
                         "AutomaticDown"
                     }
                 }
-                "full-up" => "FullUp",
-                "full-down" => "FullDown",
                 "pos" | "position" => {
                     let pct = pos.ok_or_else(|| anyhow::anyhow!("pos requires a value 0-100"))?;
                     if !(0.0..=100.0).contains(&pct) {
@@ -1183,33 +1181,45 @@ fn main() -> Result<()> {
                             bail!("Position must be 0-100");
                         }
                     } else {
-                        bail!("Unknown action '{}'. Use: up down stop shade [<0-100>] full-up full-down pos <0-100>", other)
+                        bail!("Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>", other)
                     }
                 }
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
             if !cli.json {
-                // manualPosition moves don't set StateUp/StateDown, so we can't use those
-                // as a motion indicator. Instead, poll until StatePos stabilizes (two
-                // consecutive reads agree) or we time out after 30s.
-                let deadline = std::time::Instant::now() + Duration::from_secs(30);
-                let mut prev_pos: Option<f64> = None;
-                loop {
-                    thread::sleep(Duration::from_millis(500));
+                if cmd.starts_with("manualLamella") {
+                    // Slat tilt doesn't change StatePos; just read once after a short settle.
+                    thread::sleep(Duration::from_millis(800));
                     let xml = lox.get_all(&ctrl.uuid)?;
-                    let cur_pos = xml_attr(&xml, "StatePos")
-                        .and_then(|v| v.parse::<f64>().ok());
-                    let timed_out = std::time::Instant::now() >= deadline;
-                    let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
-                    if stable || timed_out {
-                        if let Some(p) = cur_pos {
-                            let suffix = if timed_out && !stable { "  (moving…)" } else { "" };
-                            println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
-                        }
-                        break;
+                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok()) {
+                        println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
                     }
-                    prev_pos = cur_pos;
+                    if let Some(s) = xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok()) {
+                        println!("   Shade:    {:.0}%  {}", s * 100.0, bar(s, 1.0));
+                    }
+                } else {
+                    // manualPosition moves don't set StateUp/StateDown, so we can't use those
+                    // as a motion indicator. Instead, poll until StatePos stabilizes (two
+                    // consecutive reads agree) or we time out after 30s.
+                    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                    let mut prev_pos: Option<f64> = None;
+                    loop {
+                        thread::sleep(Duration::from_millis(500));
+                        let xml = lox.get_all(&ctrl.uuid)?;
+                        let cur_pos = xml_attr(&xml, "StatePos")
+                            .and_then(|v| v.parse::<f64>().ok());
+                        let timed_out = std::time::Instant::now() >= deadline;
+                        let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
+                        if stable || timed_out {
+                            if let Some(p) = cur_pos {
+                                let suffix = if timed_out && !stable { "  (moving…)" } else { "" };
+                                println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
+                            }
+                            break;
+                        }
+                        prev_pos = cur_pos;
+                    }
                 }
             }
         }
