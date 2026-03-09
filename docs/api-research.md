@@ -1,5 +1,7 @@
 # Loxone REST API Research — New Opportunities for the CLI
 
+> **Status: REFERENCE** — Research document. See [plan.md](plan.md) for implementation status of proposed features.
+
 ## Already Implemented (Status Quo)
 
 | Endpoint | Used in `lox` |

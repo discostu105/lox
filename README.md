@@ -127,6 +127,9 @@ lox alarm "Alarmanlage" arm            # Arm alarm
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
+lox config users file.Loxone           # List users from config
+lox config devices file.Loxone         # List hardware inventory
+lox config diff old.Loxone new.Loxone  # Compare two configs
 lox run abend                          # Run a scene
 lox send <uuid> <command>              # Raw command
 ```

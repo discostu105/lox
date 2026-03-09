@@ -45,6 +45,7 @@ uuid = { version = "1", features = ["v4"] }
 # Backup deps
 suppaftp = "6"
 zip = "2"
+quick-xml = "0.37"
 
 [dev-dependencies]
 httpmock = "0.7"

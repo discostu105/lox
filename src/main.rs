@@ -2,6 +2,7 @@ mod client;
 mod config;
 mod ftp;
 mod loxcc;
+mod loxone_xml;
 mod scene;
 mod token;
 mod ws;
@@ -20,6 +21,16 @@ use std::thread;
 use std::time::Duration;
 
 use byteorder::{LittleEndian, ReadBytesExt};
+
+/// Load config XML from a .Loxone file or extract from a .zip backup.
+fn load_config_xml(path: &str) -> Result<Vec<u8>> {
+    let data = fs::read(path).with_context(|| format!("Cannot read {}", path))?;
+    if path.ends_with(".zip") {
+        loxcc::extract_and_decompress(&data)
+    } else {
+        Ok(data)
+    }
+}
 
 fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     let key = format!("{}=\"", attr);
@@ -537,6 +548,23 @@ enum ConfigCmd {
         /// Confirm the upload
         #[arg(long)]
         force: bool,
+    },
+    /// List user accounts from a .Loxone config file
+    Users {
+        /// Path to a .Loxone XML file (from `lox config extract`)
+        file: String,
+    },
+    /// List hardware devices from a .Loxone config file
+    Devices {
+        /// Path to a .Loxone XML file (from `lox config extract`)
+        file: String,
+    },
+    /// Compare two config files (ZIP or .Loxone)
+    Diff {
+        /// First config file (older)
+        file1: String,
+        /// Second config file (newer)
+        file2: String,
     },
 }
 
@@ -2468,115 +2496,300 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Config { action } => {
-            let cfg = Config::load()?;
-            match action {
-                ConfigCmd::List => {
-                    let backups = ftp::list_backups(&cfg)?;
-                    if backups.is_empty() {
-                        println!("No configs found on the Miniserver.");
-                    } else if cli.json {
-                        let arr: Vec<serde_json::Value> = backups
-                            .iter()
-                            .map(|b| {
-                                serde_json::json!({
-                                    "filename": b.filename,
-                                    "version": b.version,
-                                    "date": b.formatted_date(),
-                                    "size": b.size,
-                                })
+        Cmd::Config { action } => match action {
+            ConfigCmd::List => {
+                let cfg = Config::load()?;
+                let backups = ftp::list_backups(&cfg)?;
+                if backups.is_empty() {
+                    println!("No configs found on the Miniserver.");
+                } else if cli.json {
+                    let arr: Vec<serde_json::Value> = backups
+                        .iter()
+                        .map(|b| {
+                            serde_json::json!({
+                                "filename": b.filename,
+                                "version": b.version,
+                                "date": b.formatted_date(),
+                                "size": b.size,
                             })
-                            .collect();
-                        println!("{}", serde_json::to_string_pretty(&arr)?);
-                    } else {
-                        println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
-                        for (i, b) in backups.iter().enumerate() {
-                            println!(
-                                "  {:<4} {:<8} {:<22} {} KB{}",
-                                i + 1,
-                                b.version,
-                                b.formatted_date(),
-                                b.size / 1024,
-                                if i == 0 { "  (latest)" } else { "" }
-                            );
-                        }
-                    }
-                }
-                ConfigCmd::Download { output, extract } => {
-                    let backups = ftp::list_backups(&cfg)?;
-                    if backups.is_empty() {
-                        bail!("No configs found on the Miniserver.");
-                    }
-                    let newest = &backups[0];
-                    eprintln!(
-                        "Downloading {} ({} KB)...",
-                        newest.filename,
-                        newest.size / 1024
-                    );
-                    let data = ftp::download_backup(&cfg, &newest.filename)?;
-                    let out_path = output.unwrap_or_else(|| newest.filename.clone());
-                    fs::write(&out_path, &data)?;
-                    println!("Saved to {}", out_path);
-
-                    if extract {
-                        eprintln!("Extracting sps0.LoxCC...");
-                        let xml = loxcc::extract_and_decompress(&data)?;
-                        let xml_path = out_path
-                            .strip_suffix(".zip")
-                            .unwrap_or(&out_path)
-                            .to_string()
-                            + ".Loxone";
-                        fs::write(&xml_path, &xml)?;
+                        })
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&arr)?);
+                } else {
+                    println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
+                    for (i, b) in backups.iter().enumerate() {
                         println!(
-                            "Decompressed {} KB → {} KB → {}",
-                            data.len() / 1024,
-                            xml.len() / 1024,
-                            xml_path
+                            "  {:<4} {:<8} {:<22} {} KB{}",
+                            i + 1,
+                            b.version,
+                            b.formatted_date(),
+                            b.size / 1024,
+                            if i == 0 { "  (latest)" } else { "" }
                         );
                     }
                 }
-                ConfigCmd::Extract { file, output } => {
-                    let zip_data =
-                        fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+            }
+            ConfigCmd::Download { output, extract } => {
+                let cfg = Config::load()?;
+                let backups = ftp::list_backups(&cfg)?;
+                if backups.is_empty() {
+                    bail!("No configs found on the Miniserver.");
+                }
+                let newest = &backups[0];
+                eprintln!(
+                    "Downloading {} ({} KB)...",
+                    newest.filename,
+                    newest.size / 1024
+                );
+                let data = ftp::download_backup(&cfg, &newest.filename)?;
+                let out_path = output.unwrap_or_else(|| newest.filename.clone());
+                fs::write(&out_path, &data)?;
+                println!("Saved to {}", out_path);
+
+                if extract {
                     eprintln!("Extracting sps0.LoxCC...");
-                    let xml = loxcc::extract_and_decompress(&zip_data)?;
-                    let xml_path = output.unwrap_or_else(|| {
-                        file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
-                    });
+                    let xml = loxcc::extract_and_decompress(&data)?;
+                    let xml_path = out_path
+                        .strip_suffix(".zip")
+                        .unwrap_or(&out_path)
+                        .to_string()
+                        + ".Loxone";
                     fs::write(&xml_path, &xml)?;
                     println!(
                         "Decompressed {} KB → {} KB → {}",
-                        zip_data.len() / 1024,
+                        data.len() / 1024,
                         xml.len() / 1024,
                         xml_path
                     );
                 }
-                ConfigCmd::Upload { file, force } => {
-                    if !force {
-                        eprintln!(
-                            "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
+            }
+            ConfigCmd::Extract { file, output } => {
+                let zip_data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                eprintln!("Extracting sps0.LoxCC...");
+                let xml = loxcc::extract_and_decompress(&zip_data)?;
+                let xml_path = output.unwrap_or_else(|| {
+                    file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
+                });
+                fs::write(&xml_path, &xml)?;
+                println!(
+                    "Decompressed {} KB → {} KB → {}",
+                    zip_data.len() / 1024,
+                    xml.len() / 1024,
+                    xml_path
+                );
+            }
+            ConfigCmd::Upload { file, force } => {
+                let cfg = Config::load()?;
+                if !force {
+                    eprintln!(
+                        "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
                              \x20  programming. A bad configuration can require physical SD card\n\
                              \x20  access to recover.\n\
                              \n\
                              \x20  Config file: {}\n\
                              \n\
                              \x20  Use --force to proceed.",
-                            file
+                        file
+                    );
+                    std::process::exit(1);
+                }
+                let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                let filename = std::path::Path::new(&file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&file);
+                eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
+                ftp::upload_backup(&cfg, filename, &data)?;
+                println!("Upload complete.");
+                println!("Reboot the Miniserver to apply: lox reboot");
+            }
+            ConfigCmd::Users { file } => {
+                if file.ends_with(".zip") {
+                    bail!(
+                        "Expected a .Loxone XML file. Run `lox config extract {}` first.",
+                        file
+                    );
+                }
+                let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                let users = loxone_xml::parse_users(&xml)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&users)?);
+                } else {
+                    let nfc_count = users.iter().filter(|u| u.nfc).count();
+                    println!("  {:<26} {:<6} Description", "Name", "NFC");
+                    for u in &users {
+                        println!(
+                            "  {:<26} {:<6} {}",
+                            u.name,
+                            if u.nfc { "yes" } else { "-" },
+                            u.description,
                         );
-                        std::process::exit(1);
                     }
-                    let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                    let filename = std::path::Path::new(&file)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(&file);
-                    eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
-                    ftp::upload_backup(&cfg, filename, &data)?;
-                    println!("Upload complete.");
-                    println!("Reboot the Miniserver to apply: lox reboot");
+                    println!("\n{} users ({} with NFC)", users.len(), nfc_count);
                 }
             }
-        }
+            ConfigCmd::Devices { file } => {
+                if file.ends_with(".zip") {
+                    bail!(
+                        "Expected a .Loxone XML file. Run `lox config extract {}` first.",
+                        file
+                    );
+                }
+                let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                let devices = loxone_xml::parse_devices(&xml)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&devices)?);
+                } else {
+                    let tree: Vec<_> = devices
+                        .iter()
+                        .filter(|d| d.bus == loxone_xml::DeviceBus::Tree)
+                        .collect();
+                    let air: Vec<_> = devices
+                        .iter()
+                        .filter(|d| d.bus == loxone_xml::DeviceBus::Air)
+                        .collect();
+                    let net: Vec<_> = devices
+                        .iter()
+                        .filter(|d| d.bus == loxone_xml::DeviceBus::Network)
+                        .collect();
+
+                    if !tree.is_empty() {
+                        println!("  Tree devices ({})", tree.len());
+                        println!("  {:<30} {:<12} Type", "Name", "Serial");
+                        for d in &tree {
+                            println!(
+                                "  {:<30} {:<12} {}",
+                                d.name,
+                                d.serial.as_deref().unwrap_or("-"),
+                                d.type_label
+                            );
+                        }
+                    }
+                    if !air.is_empty() {
+                        if !tree.is_empty() {
+                            println!();
+                        }
+                        println!("  LoxAIR devices ({})", air.len());
+                        println!("  {:<30} Type", "Name");
+                        for d in &air {
+                            println!("  {:<30} {}", d.name, d.type_label);
+                        }
+                    }
+                    if !net.is_empty() {
+                        if !tree.is_empty() || !air.is_empty() {
+                            println!();
+                        }
+                        println!("  Network devices ({})", net.len());
+                        println!("  {:<30} {:<18} MAC", "Name", "Address");
+                        for d in &net {
+                            println!(
+                                "  {:<30} {:<18} {}",
+                                d.name,
+                                d.address.as_deref().unwrap_or("-"),
+                                d.mac.as_deref().unwrap_or("-")
+                            );
+                        }
+                    }
+                    println!("\n{} devices total", devices.len());
+                }
+            }
+            ConfigCmd::Diff { file1, file2 } => {
+                let xml1 = load_config_xml(&file1)?;
+                let xml2 = load_config_xml(&file2)?;
+                let s1 = loxone_xml::parse_config_summary(&xml1)?;
+                let s2 = loxone_xml::parse_config_summary(&xml2)?;
+                let diff = loxone_xml::diff_configs(&s1, &s2);
+
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&diff)?);
+                } else {
+                    println!(
+                        "Config version: {} → {}",
+                        diff.version_old, diff.version_new
+                    );
+                    println!("Modified: {} → {}", diff.date_old, diff.date_new);
+
+                    if !diff.controls_added.is_empty()
+                        || !diff.controls_removed.is_empty()
+                        || !diff.controls_changed.is_empty()
+                    {
+                        println!("\nControls:");
+                        for c in &diff.controls_added {
+                            println!("  + Added: \"{}\" ({})", c.name, c.control_type);
+                        }
+                        for c in &diff.controls_changed {
+                            println!(
+                                "  ~ Changed: \"{}\" — {} \"{}\" → \"{}\"",
+                                c.name, c.field, c.old_value, c.new_value
+                            );
+                        }
+                        for c in &diff.controls_removed {
+                            println!("  - Removed: \"{}\" ({})", c.name, c.control_type);
+                        }
+                    }
+
+                    if !diff.rooms_added.is_empty()
+                        || !diff.rooms_removed.is_empty()
+                        || !diff.rooms_renamed.is_empty()
+                    {
+                        println!("\nRooms:");
+                        for r in &diff.rooms_added {
+                            println!("  + Added: \"{}\"", r);
+                        }
+                        for r in &diff.rooms_renamed {
+                            println!("  ~ Renamed: \"{}\" → \"{}\"", r.old, r.new);
+                        }
+                        for r in &diff.rooms_removed {
+                            println!("  - Removed: \"{}\"", r);
+                        }
+                    }
+
+                    if !diff.categories_added.is_empty()
+                        || !diff.categories_removed.is_empty()
+                        || !diff.categories_renamed.is_empty()
+                    {
+                        println!("\nCategories:");
+                        for c in &diff.categories_added {
+                            println!("  + Added: \"{}\"", c);
+                        }
+                        for c in &diff.categories_renamed {
+                            println!("  ~ Renamed: \"{}\" → \"{}\"", c.old, c.new);
+                        }
+                        for c in &diff.categories_removed {
+                            println!("  - Removed: \"{}\"", c);
+                        }
+                    }
+
+                    if !diff.users_added.is_empty() || !diff.users_removed.is_empty() {
+                        println!("\nUsers:");
+                        for u in &diff.users_added {
+                            println!("  + Added: \"{}\"", u);
+                        }
+                        for u in &diff.users_removed {
+                            println!("  - Removed: \"{}\"", u);
+                        }
+                    }
+
+                    let total = diff.controls_added.len()
+                        + diff.controls_removed.len()
+                        + diff.controls_changed.len()
+                        + diff.rooms_added.len()
+                        + diff.rooms_removed.len()
+                        + diff.rooms_renamed.len()
+                        + diff.categories_added.len()
+                        + diff.categories_removed.len()
+                        + diff.categories_renamed.len()
+                        + diff.users_added.len()
+                        + diff.users_removed.len();
+
+                    if !diff.has_changes() {
+                        println!("\nNo structural changes.");
+                    } else {
+                        println!("\n{} changes total", total);
+                    }
+                }
+            }
+        },
         Cmd::Log { lines } => {
             let lox = LoxClient::new(Config::load()?);
             let log = lox.get_text("/dev/fsget/log/def.log")?;

@@ -1,5 +1,7 @@
 # Loxone Config Interactions — Research
 
+> **Status: REFERENCE** — Research document. Core features (backup download/list/extract/upload) implemented as `lox config`. See [design-backup.md](design-backup.md) and [design-backup-inspect.md](design-backup-inspect.md) for design details.
+
 ## Background
 
 "Loxone Config" is the official desktop application for programming Loxone Miniservers. It creates `.Loxone` project files and uploads compiled configurations to the Miniserver. This document researches what programmatic interactions are possible from the CLI.

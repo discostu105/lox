@@ -1,5 +1,7 @@
 # Design: `lox config` — Loxone Config Inspection
 
+> **Status: IMPLEMENTED** — All commands implemented: `download`, `list`, `extract`, `upload`, `users`, `devices`, `diff`.
+
 ## Command Rename
 
 "Loxone Config" is the well-known desktop application for programming Miniservers.

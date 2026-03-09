@@ -202,6 +202,9 @@ lox config list                        # list all configs on the Miniserver
 lox config extract config.zip          # decompress LoxCC → .Loxone XML
 lox config extract config.zip -o out.Loxone
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
+lox config users file.Loxone           # list user accounts from config XML
+lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
+lox config diff old.Loxone new.Loxone  # compare two configs (accepts .zip or .Loxone)
 ```
 
 ---

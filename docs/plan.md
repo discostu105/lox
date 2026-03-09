@@ -1,5 +1,7 @@
 # CLI Feature Plan — Prioritized Roadmap
 
+> **Status: IMPLEMENTED** — All Priority 1–4 features and config inspection commands are implemented.
+
 Based on [API research](api-research.md) and current CLI capabilities.
 
 ---

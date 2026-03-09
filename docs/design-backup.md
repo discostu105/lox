@@ -1,5 +1,7 @@
 # Design: `lox backup` — Miniserver Configuration Backup
 
+> **Status: IMPLEMENTED** — All phases done. Renamed to `lox config` (see [design-backup-inspect.md](design-backup-inspect.md)).
+
 > Download, inspect, and manage Loxone Miniserver configuration backups from the CLI.
 
 ## Motivation

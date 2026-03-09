@@ -1,5 +1,7 @@
 # Design: `lox autopilot` — Automatik-Regel CLI Support
 
+> **Status: IMPLEMENTED** — `lox autopilot list` and `lox autopilot state` are fully implemented.
+
 ## Background
 
 Loxone's "Automatik-Regel" (Automatic Rule / Autopilot) feature lets users create

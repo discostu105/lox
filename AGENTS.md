@@ -2,6 +2,19 @@
 
 See [CLAUDE.md](CLAUDE.md) for build commands, architecture, non-interactive shell rules, and session completion protocol.
 
+## Pre-push CI Checklist
+
+**ALWAYS run these four checks before committing/pushing.** They mirror `.github/workflows/ci.yml` (ubuntu + macos):
+
+```bash
+cargo fmt --check            # formatting
+cargo clippy -- -D warnings  # lints (warnings are errors)
+cargo build --release        # release build
+cargo test                   # all tests
+```
+
+Do not push until all four pass. Fix issues and re-run before committing.
+
 <!-- BEGIN BEADS INTEGRATION -->
 ## Issue Tracking with bd (beads)
 
