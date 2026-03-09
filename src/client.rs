@@ -11,6 +11,16 @@ use std::time::Duration;
 use crate::config::Config;
 use crate::token::TokenStore;
 
+// ── AutopilotRule ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct AutopilotRule {
+    pub name: String,
+    pub uuid: String,
+    pub state_changed: String,
+    pub state_history: String,
+}
+
 // ── Control ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -363,6 +373,64 @@ impl LoxClient {
                 .cmp(&b.0.parse::<i32>().unwrap_or(0))
         });
         Ok(result)
+    }
+
+    pub fn list_autopilot_rules(&mut self) -> Result<Vec<AutopilotRule>> {
+        let structure = self.get_structure()?;
+        let mut rules = Vec::new();
+        if let Some(map) = structure.get("autopilot").and_then(|a| a.as_object()) {
+            for (uuid, entry) in map {
+                let name = entry
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let state_changed = entry
+                    .get("states")
+                    .and_then(|s| s.get("changed"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let state_history = entry
+                    .get("states")
+                    .and_then(|s| s.get("history"))
+                    .and_then(|h| h.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                rules.push(AutopilotRule {
+                    name,
+                    uuid: uuid.clone(),
+                    state_changed,
+                    state_history,
+                });
+            }
+        }
+        rules.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(rules)
+    }
+
+    pub fn find_autopilot_rule(&mut self, name_or_uuid: &str) -> Result<AutopilotRule> {
+        let rules = self.list_autopilot_rules()?;
+        if is_uuid(name_or_uuid) {
+            return rules
+                .into_iter()
+                .find(|r| r.uuid == name_or_uuid)
+                .context("Autopilot rule UUID not found");
+        }
+        let matches: Vec<AutopilotRule> = rules
+            .into_iter()
+            .filter(|r| r.name.to_lowercase().contains(&name_or_uuid.to_lowercase()))
+            .collect();
+        match matches.len() {
+            0 => bail!("No autopilot rule matching '{}'", name_or_uuid),
+            1 => Ok(matches.into_iter().next().unwrap()),
+            _ => {
+                for r in &matches {
+                    eprintln!("  {}", r.name);
+                }
+                bail!("Ambiguous: '{}'", name_or_uuid)
+            }
+        }
     }
 
     pub fn find_control(&mut self, name_or_uuid: &str) -> Result<Control> {

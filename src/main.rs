@@ -361,6 +361,11 @@ enum Cmd {
         #[command(subcommand)]
         action: TokenCmd,
     },
+    /// List and inspect automatic rules (Automatik-Regel / Autopilot)
+    Autopilot {
+        #[command(subcommand)]
+        action: AutopilotCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -377,6 +382,14 @@ enum TokenCmd {
     Refresh,
     /// Revoke token on the Miniserver
     Revoke,
+}
+
+#[derive(Subcommand)]
+enum AutopilotCmd {
+    /// List all automatic rules
+    List,
+    /// Show when a rule last fired
+    State { name_or_uuid: String },
 }
 
 #[derive(Subcommand)]
@@ -2264,6 +2277,73 @@ fn main() -> Result<()> {
                 }
             }
         },
+        Cmd::Autopilot { action } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            match action {
+                AutopilotCmd::List => {
+                    let rules = lox.list_autopilot_rules()?;
+                    if rules.is_empty() {
+                        println!("No autopilot rules found.");
+                    } else if cli.json {
+                        let arr: Vec<serde_json::Value> = rules
+                            .iter()
+                            .map(|r| {
+                                serde_json::json!({
+                                    "name": r.name,
+                                    "uuid": r.uuid,
+                                    "state_changed": r.state_changed,
+                                    "state_history": r.state_history,
+                                })
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&arr)?);
+                    } else {
+                        let name_w = rules.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
+                        println!("{:<width$}  {}", "NAME", "UUID", width = name_w);
+                        for r in &rules {
+                            println!("{:<width$}  {}", r.name, r.uuid, width = name_w);
+                        }
+                    }
+                }
+                AutopilotCmd::State { name_or_uuid } => {
+                    let rule = lox.find_autopilot_rule(&name_or_uuid)?;
+                    let resp = lox.get_json(&format!("/jdev/sps/io/{}/state", rule.state_changed));
+                    if cli.json {
+                        match resp {
+                            Ok(v) => println!("{}", serde_json::to_string_pretty(&v)?),
+                            Err(e) => bail!("{}", e),
+                        }
+                    } else {
+                        let last_run = match resp {
+                            Ok(v) => {
+                                let raw = v
+                                    .get("LL")
+                                    .and_then(|ll| ll.get("value"))
+                                    .and_then(|val| val.as_str())
+                                    .unwrap_or("");
+                                if raw.is_empty() || raw == "0" {
+                                    "never".to_string()
+                                } else if let Ok(secs) = raw.parse::<i64>() {
+                                    let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
+                                        .unwrap()
+                                        .and_hms_opt(0, 0, 0)
+                                        .unwrap()
+                                        .and_local_timezone(chrono::Local)
+                                        .unwrap();
+                                    let dt = lox_epoch + chrono::Duration::seconds(secs);
+                                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                                } else {
+                                    raw.to_string()
+                                }
+                            }
+                            Err(_) => "unavailable".to_string(),
+                        };
+                        println!("Rule:     {}", rule.name);
+                        println!("Last run: {}", last_run);
+                    }
+                }
+            }
+        }
         Cmd::Cache { action } => {
             let cfg = Config::load()?;
             let cache = LoxClient::cache_path(&cfg);
