@@ -1,6 +1,6 @@
 [package]
 name = "lox"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Loxone Miniserver CLI — control lights, blinds, and more from your terminal"
 repository = "https://github.com/discostu105/lox"
