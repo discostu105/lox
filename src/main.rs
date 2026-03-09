@@ -1,5 +1,7 @@
 mod client;
 mod config;
+mod ftp;
+mod loxcc;
 mod scene;
 mod token;
 mod ws;
@@ -361,6 +363,11 @@ enum Cmd {
         #[command(subcommand)]
         action: TokenCmd,
     },
+    /// Download and manage Miniserver configuration backups
+    Backup {
+        #[command(subcommand)]
+        action: BackupCmd,
+    },
     /// List and inspect automatic rules (Automatik-Regel / Autopilot)
     Autopilot {
         #[command(subcommand)]
@@ -500,6 +507,37 @@ enum SceneCmd {
     Show { name: String },
     /// Create a new empty scene file
     New { name: String },
+}
+
+#[derive(Subcommand)]
+enum BackupCmd {
+    /// Download the latest configuration backup from the Miniserver
+    Download {
+        /// Custom output filename
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Also decompress LoxCC to XML
+        #[arg(long)]
+        extract: bool,
+    },
+    /// List available backups on the Miniserver
+    List,
+    /// Decompress a local backup ZIP to XML
+    Extract {
+        /// Path to a backup ZIP file
+        file: String,
+        /// Custom output filename
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Upload a backup to the Miniserver (dangerous — requires --force)
+    Restore {
+        /// Path to a backup ZIP file
+        file: String,
+        /// Confirm the upload
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -1194,7 +1232,10 @@ fn main() -> Result<()> {
                             bail!("Position must be 0-100");
                         }
                     } else {
-                        bail!("Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>", other)
+                        bail!(
+                            "Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>",
+                            other
+                        )
                     }
                 }
             };
@@ -1205,10 +1246,13 @@ fn main() -> Result<()> {
                     // Slat tilt doesn't change StatePos; just read once after a short settle.
                     thread::sleep(Duration::from_millis(800));
                     let xml = lox.get_all(&ctrl.uuid)?;
-                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok()) {
+                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok())
+                    {
                         println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
                     }
-                    if let Some(s) = xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok()) {
+                    if let Some(s) =
+                        xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok())
+                    {
                         println!("   Shade:    {:.0}%  {}", s * 100.0, bar(s, 1.0));
                     }
                 } else {
@@ -1220,14 +1264,23 @@ fn main() -> Result<()> {
                     loop {
                         thread::sleep(Duration::from_millis(500));
                         let xml = lox.get_all(&ctrl.uuid)?;
-                        let cur_pos = xml_attr(&xml, "StatePos")
-                            .and_then(|v| v.parse::<f64>().ok());
+                        let cur_pos =
+                            xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok());
                         let timed_out = std::time::Instant::now() >= deadline;
                         let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
                         if stable || timed_out {
                             if let Some(p) = cur_pos {
-                                let suffix = if timed_out && !stable { "  (moving…)" } else { "" };
-                                println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
+                                let suffix = if timed_out && !stable {
+                                    "  (moving…)"
+                                } else {
+                                    ""
+                                };
+                                println!(
+                                    "   Position: {:.0}%  {}{}",
+                                    p * 100.0,
+                                    bar(p, 1.0),
+                                    suffix
+                                );
                             }
                             break;
                         }
@@ -2299,7 +2352,7 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&arr)?);
                     } else {
                         let name_w = rules.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
-                        println!("{:<width$}  {}", "NAME", "UUID", width = name_w);
+                        println!("{:<width$}  UUID", "NAME", width = name_w);
                         for r in &rules {
                             println!("{:<width$}  {}", r.name, r.uuid, width = name_w);
                         }
@@ -2412,6 +2465,115 @@ fn main() -> Result<()> {
                     }
                     LoxClient::load_or_fetch_structure(&cfg, &client)?;
                     println!("✓ Structure cache refreshed ({:?})", cache);
+                }
+            }
+        }
+        Cmd::Backup { action } => {
+            let cfg = Config::load()?;
+            match action {
+                BackupCmd::List => {
+                    let backups = ftp::list_backups(&cfg)?;
+                    if backups.is_empty() {
+                        println!("No configuration backups found on the Miniserver.");
+                    } else if cli.json {
+                        let arr: Vec<serde_json::Value> = backups
+                            .iter()
+                            .map(|b| {
+                                serde_json::json!({
+                                    "filename": b.filename,
+                                    "version": b.version,
+                                    "date": b.formatted_date(),
+                                    "size": b.size,
+                                })
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&arr)?);
+                    } else {
+                        println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
+                        for (i, b) in backups.iter().enumerate() {
+                            println!(
+                                "  {:<4} {:<8} {:<22} {} KB{}",
+                                i + 1,
+                                b.version,
+                                b.formatted_date(),
+                                b.size / 1024,
+                                if i == 0 { "  (latest)" } else { "" }
+                            );
+                        }
+                    }
+                }
+                BackupCmd::Download { output, extract } => {
+                    let backups = ftp::list_backups(&cfg)?;
+                    if backups.is_empty() {
+                        bail!("No configuration backups found on the Miniserver.");
+                    }
+                    let newest = &backups[0];
+                    eprintln!(
+                        "Downloading {} ({} KB)...",
+                        newest.filename,
+                        newest.size / 1024
+                    );
+                    let data = ftp::download_backup(&cfg, &newest.filename)?;
+                    let out_path = output.unwrap_or_else(|| newest.filename.clone());
+                    fs::write(&out_path, &data)?;
+                    println!("Saved to {}", out_path);
+
+                    if extract {
+                        eprintln!("Extracting sps0.LoxCC...");
+                        let xml = loxcc::extract_and_decompress(&data)?;
+                        let xml_path = out_path
+                            .strip_suffix(".zip")
+                            .unwrap_or(&out_path)
+                            .to_string()
+                            + ".Loxone";
+                        fs::write(&xml_path, &xml)?;
+                        println!(
+                            "Decompressed {} KB → {} KB → {}",
+                            data.len() / 1024,
+                            xml.len() / 1024,
+                            xml_path
+                        );
+                    }
+                }
+                BackupCmd::Extract { file, output } => {
+                    let zip_data =
+                        fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                    eprintln!("Extracting sps0.LoxCC...");
+                    let xml = loxcc::extract_and_decompress(&zip_data)?;
+                    let xml_path = output.unwrap_or_else(|| {
+                        file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
+                    });
+                    fs::write(&xml_path, &xml)?;
+                    println!(
+                        "Decompressed {} KB → {} KB → {}",
+                        zip_data.len() / 1024,
+                        xml.len() / 1024,
+                        xml_path
+                    );
+                }
+                BackupCmd::Restore { file, force } => {
+                    if !force {
+                        eprintln!(
+                            "⚠  WARNING: Uploading a configuration backup will replace the current\n\
+                             \x20  Miniserver programming. A bad configuration can require physical\n\
+                             \x20  SD card access to recover.\n\
+                             \n\
+                             \x20  Backup file: {}\n\
+                             \n\
+                             \x20  Use --force to proceed.",
+                            file
+                        );
+                        std::process::exit(1);
+                    }
+                    let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                    let filename = std::path::Path::new(&file)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&file);
+                    eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
+                    ftp::upload_backup(&cfg, filename, &data)?;
+                    println!("Upload complete.");
+                    println!("Reboot the Miniserver to apply: lox reboot");
                 }
             }
         }
@@ -2611,10 +2773,7 @@ mod tests {
     #[test]
     fn test_encode_path_value_plain() {
         assert_eq!(encode_path_value("on"), "on");
-        assert_eq!(
-            encode_path_value("manualPosition/50"),
-            "manualPosition/50"
-        );
+        assert_eq!(encode_path_value("manualPosition/50"), "manualPosition/50");
     }
 
     #[test]
