@@ -210,7 +210,7 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 
 ## Status
 
-This project is a an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If like the project, please help and contribute.
+This project is a an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If you like the project, please help and contribute.
 
 **Use at your own risk.** Commands that modify your Miniserver (e.g., `config upload`, `reboot`, `update`) can affect your live system. Always have a backup.
 
