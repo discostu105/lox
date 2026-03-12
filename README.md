@@ -69,6 +69,7 @@ An agent can discover your home (`lox ls --json`), read sensor values, control d
 
 **Homebrew (macOS/Linux):**
 ```bash
+brew tap discostu105/lox https://github.com/discostu105/lox
 brew install discostu105/lox/lox
 ```
 
