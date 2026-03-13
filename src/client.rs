@@ -69,12 +69,22 @@ impl LoxClient {
 
     pub fn get_text(&self, path: &str) -> Result<String> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
-        self.request_with_retry(|| self.apply_auth(self.client.get(&url)).send()?.text().map_err(Into::into))
+        self.request_with_retry(|| {
+            self.apply_auth(self.client.get(&url))
+                .send()?
+                .text()
+                .map_err(Into::into)
+        })
     }
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
-        self.request_with_retry(|| self.apply_auth(self.client.get(&url)).send()?.json::<Value>().map_err(Into::into))
+        self.request_with_retry(|| {
+            self.apply_auth(self.client.get(&url))
+                .send()?
+                .json::<Value>()
+                .map_err(Into::into)
+        })
     }
 
     pub fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
@@ -501,9 +511,7 @@ impl LoxClient {
 }
 
 pub fn is_uuid(s: &str) -> bool {
-    s.len() > 20
-        && s.contains('-')
-        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+    s.len() > 20 && s.contains('-') && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 /// Validate that a UUID is safe to embed in a URL path.
@@ -863,7 +871,9 @@ mod tests {
         let mut client = LoxClient::new(mock_config(&server));
         let controls = client.resolve_all_in_room("Kitchen", None).unwrap();
         assert_eq!(controls.len(), 2);
-        assert!(controls.iter().all(|c| c.room.as_deref() == Some("Kitchen")));
+        assert!(controls
+            .iter()
+            .all(|c| c.room.as_deref() == Some("Kitchen")));
     }
 
     #[test]
@@ -880,7 +890,9 @@ mod tests {
             }));
         });
         let mut client = LoxClient::new(mock_config(&server));
-        let controls = client.resolve_all_in_room("Kitchen", Some("Switch")).unwrap();
+        let controls = client
+            .resolve_all_in_room("Kitchen", Some("Switch"))
+            .unwrap();
         assert_eq!(controls.len(), 1);
         assert_eq!(controls[0].typ, "Switch");
     }

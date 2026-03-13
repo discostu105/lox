@@ -1290,7 +1290,8 @@ fn main() -> Result<()> {
                     }
                 }
             } else {
-                let name = name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+                let name = name_or_uuid
+                    .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
                 let resp = lox.send_cmd(&uuid, "on")?;
                 print_resp(&resp, cli.json, &name, "on");
@@ -1311,7 +1312,8 @@ fn main() -> Result<()> {
                     }
                 }
             } else {
-                let name = name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+                let name = name_or_uuid
+                    .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
                 let resp = lox.send_cmd(&uuid, "off")?;
                 print_resp(&resp, cli.json, &name, "off");
@@ -1732,7 +1734,10 @@ fn main() -> Result<()> {
                 "lock" => "on",
                 "unlock" => "off",
                 "open" => "open",
-                other => bail!("Unknown doorlock action '{}'. Use: lock, unlock, open", other),
+                other => bail!(
+                    "Unknown doorlock action '{}'. Use: lock, unlock, open",
+                    other
+                ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, &action);
@@ -1753,7 +1758,10 @@ fn main() -> Result<()> {
                 "answer" => "answer",
                 "hangup" | "decline" => "hangup",
                 "open" => "open",
-                other => bail!("Unknown intercom action '{}'. Use: answer, hangup, open", other),
+                other => bail!(
+                    "Unknown intercom action '{}'. Use: answer, hangup, open",
+                    other
+                ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, &action);
@@ -1780,7 +1788,10 @@ fn main() -> Result<()> {
                 }
                 "stop" => "stop",
                 "pause" => "pause",
-                other => bail!("Unknown charger action '{}'. Use: start, stop, pause", other),
+                other => bail!(
+                    "Unknown charger action '{}'. Use: start, stop, pause",
+                    other
+                ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, &action);
@@ -3044,10 +3055,7 @@ fn main() -> Result<()> {
             } else if filtered.is_empty() {
                 println!("No sensors found.");
             } else {
-                println!(
-                    "{:<36} {:<20} {:<20} VALUE",
-                    "NAME", "TYPE", "ROOM"
-                );
+                println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
                 println!("{}", "─".repeat(96));
                 for c in &filtered {
                     let xml = lox.get_all(&c.uuid).unwrap_or_default();
@@ -3090,10 +3098,7 @@ fn main() -> Result<()> {
             } else if energy.is_empty() {
                 println!("No energy meters found.");
             } else {
-                println!(
-                    "{:<36} {:<20} {:<20} VALUE",
-                    "NAME", "TYPE", "ROOM"
-                );
+                println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
                 println!("{}", "─".repeat(96));
                 for c in &energy {
                     let xml = lox.get_all(&c.uuid).unwrap_or_default();
