@@ -495,6 +495,9 @@ enum SetupCmd {
         pass: Option<String>,
         #[arg(long)]
         serial: Option<String>,
+        /// Enable SSL certificate verification (default: off for self-signed Miniserver certs)
+        #[arg(long)]
+        verify_ssl: Option<bool>,
     },
     /// Show current config (password redacted)
     Show,
@@ -580,6 +583,7 @@ fn main() -> Result<()> {
                 user,
                 pass,
                 serial,
+                verify_ssl,
             } => {
                 let mut cfg = Config::load().unwrap_or_default();
                 if let Some(h) = host {
@@ -597,6 +601,9 @@ fn main() -> Result<()> {
                 }
                 if let Some(s) = serial {
                     cfg.serial = s;
+                }
+                if let Some(v) = verify_ssl {
+                    cfg.verify_ssl = Some(v);
                 }
                 cfg.save()?;
             }

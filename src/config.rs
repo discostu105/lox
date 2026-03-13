@@ -16,6 +16,9 @@ pub struct Config {
     pub serial: String,
     #[serde(default)]
     pub aliases: HashMap<String, String>,
+    /// Enable SSL certificate verification (default: false for Miniserver self-signed certs)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_ssl: Option<bool>,
 }
 
 impl Config {
