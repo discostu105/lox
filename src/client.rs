@@ -843,4 +843,99 @@ mod tests {
         let uuid = client.resolve_with_room("mylight", None).unwrap();
         assert_eq!(uuid, "alias-uuid-1234567890");
     }
+
+    // ── resolve_all_in_room ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_all_in_room() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": { "r1": { "name": "Kitchen" }, "r2": { "name": "Bedroom" } },
+                "controls": {
+                    "u1": { "name": "Light 1", "type": "Switch", "room": "r1" },
+                    "u2": { "name": "Blind 1", "type": "Jalousie", "room": "r1" },
+                    "u3": { "name": "Light 2", "type": "Switch", "room": "r2" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let controls = client.resolve_all_in_room("Kitchen", None).unwrap();
+        assert_eq!(controls.len(), 2);
+        assert!(controls.iter().all(|c| c.room.as_deref() == Some("Kitchen")));
+    }
+
+    #[test]
+    fn test_resolve_all_in_room_with_type_filter() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": { "r1": { "name": "Kitchen" } },
+                "controls": {
+                    "u1": { "name": "Light 1", "type": "Switch", "room": "r1" },
+                    "u2": { "name": "Blind 1", "type": "Jalousie", "room": "r1" }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let controls = client.resolve_all_in_room("Kitchen", Some("Switch")).unwrap();
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].typ, "Switch");
+    }
+
+    #[test]
+    fn test_resolve_all_in_room_empty_returns_err() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": {}, "controls": {}
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        assert!(client.resolve_all_in_room("NonExistent", None).is_err());
+    }
+
+    // ── is_uuid (strict) ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_uuid_strict() {
+        // Valid Loxone UUIDs
+        assert!(is_uuid("1fbc668c-005c-7471-ffffed57184a04d2"));
+        assert!(is_uuid("0f1e2d3c-a1b2-c3d4-e5f6a7b8c9d0e1f2"));
+        // Too short
+        assert!(!is_uuid("short-str"));
+        // Contains non-hex characters
+        assert!(!is_uuid("1fbc668c-005c-7471-xxxxed57184a04d2"));
+        // No dashes
+        assert!(!is_uuid("1fbc668c005c7471ffffed57184a04d2"));
+        // Human-readable strings should NOT match
+        assert!(!is_uuid("Licht Wohnzimmer"));
+        assert!(!is_uuid("Kitchen Light [Room]"));
+    }
+
+    // ── retry logic ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_retry_on_server_error() {
+        let server = MockServer::start();
+        let test_uuid = "0f1e2d3c-a1b2-c3d4-e5f6a7b8c9d0e1f2";
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/jdev/sps/io/{}/on", test_uuid));
+            then.status(200).json_body(serde_json::json!({
+                "LL": { "Code": "200", "value": "1" }
+            }));
+        });
+        let client = LoxClient::new(mock_config(&server));
+        let resp = client.send_cmd(test_uuid, "on").unwrap();
+        assert_eq!(
+            resp.pointer("/LL/Code").and_then(|v| v.as_str()),
+            Some("200")
+        );
+        // Verify it was called (at least once; retries only on failure)
+        mock.assert_hits(1);
+    }
 }

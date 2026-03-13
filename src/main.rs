@@ -3007,7 +3007,7 @@ fn main() -> Result<()> {
                 "door-window" | "doorwindow" => Some("InfoOnlyDigital"),
                 "motion" => None, // We'll filter manually
                 "smoke" => Some("SmokeAlarm"),
-                "all" | _ => None,
+                _ => None,
             };
             let controls = lox.list_controls(type_filter, room.as_deref())?;
             let filtered: Vec<_> = controls
