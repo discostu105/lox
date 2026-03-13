@@ -175,15 +175,21 @@ enum Cmd {
     },
     /// Turn on
     On {
-        name_or_uuid: String,
+        name_or_uuid: Option<String>,
         #[arg(long)]
         room: Option<String>,
+        /// Apply to all controls in a room
+        #[arg(long)]
+        all_in_room: Option<String>,
     },
     /// Turn off
     Off {
-        name_or_uuid: String,
+        name_or_uuid: Option<String>,
         #[arg(long)]
         room: Option<String>,
+        /// Apply to all controls in a room
+        #[arg(long)]
+        all_in_room: Option<String>,
     },
     /// Momentary pulse
     Pulse {
@@ -262,14 +268,44 @@ enum Cmd {
         #[arg(long)]
         room: Option<String>,
     },
-    /// Control alarm: arm | disarm | quit
+    /// Control door lock: lock | unlock | open
+    Doorlock {
+        name_or_uuid: String,
+        /// Action: lock, unlock, open
+        action: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Control intercom: answer | hangup | open
+    Intercom {
+        name_or_uuid: String,
+        /// Action: answer, hangup, open
+        action: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Control EV charger: start | stop | pause
+    Charger {
+        name_or_uuid: String,
+        /// Action: start, stop, pause
+        action: String,
+        /// Maximum charge limit in kWh
+        #[arg(long)]
+        limit: Option<f64>,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Control alarm: arm | arm-home | disarm | quit
     Alarm {
         name_or_uuid: String,
-        /// Action: arm, disarm, quit/ack
+        /// Action: arm, arm-home, disarm, quit/ack
         action: String,
         /// Arm without motion detection
         #[arg(long)]
         no_motion: bool,
+        /// PIN code for arm/disarm
+        #[arg(long)]
+        code: Option<String>,
         #[arg(long)]
         room: Option<String>,
     },
@@ -384,6 +420,19 @@ enum Cmd {
         #[command(subcommand)]
         action: AutopilotCmd,
     },
+    /// List sensor readings (temperature, door/window, motion, smoke)
+    Sensors {
+        /// Filter by sensor type: temperature, door-window, motion, smoke, all
+        #[arg(long, default_value = "all")]
+        r#type: String,
+        #[arg(long)]
+        room: Option<String>,
+    },
+    /// Show energy meter readings
+    Energy {
+        #[arg(long)]
+        room: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -446,6 +495,30 @@ enum MusicCmd {
     Volume {
         /// Volume level 0-100
         level: u32,
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Skip to next track
+    Next {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Go to previous track
+    Prev {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Mute a zone
+    Mute {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Unmute a zone
+    Unmute {
         /// Zone number
         #[arg(default_value = "1")]
         zone: u32,
@@ -1202,17 +1275,47 @@ fn main() -> Result<()> {
             };
             print_resp(&resp, cli.json, &name_or_uuid, &command);
         }
-        Cmd::On { name_or_uuid, room } => {
+        Cmd::On {
+            name_or_uuid,
+            room,
+            all_in_room,
+        } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = lox.send_cmd(&uuid, "on")?;
-            print_resp(&resp, cli.json, &name_or_uuid, "on");
+            if let Some(room_name) = all_in_room {
+                let controls = lox.resolve_all_in_room(&room_name, None)?;
+                for ctrl in &controls {
+                    match lox.send_cmd(&ctrl.uuid, "on") {
+                        Ok(resp) => print_resp(&resp, cli.json, &ctrl.name, "on"),
+                        Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                    }
+                }
+            } else {
+                let name = name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+                let uuid = lox.resolve_with_room(&name, room.as_deref())?;
+                let resp = lox.send_cmd(&uuid, "on")?;
+                print_resp(&resp, cli.json, &name, "on");
+            }
         }
-        Cmd::Off { name_or_uuid, room } => {
+        Cmd::Off {
+            name_or_uuid,
+            room,
+            all_in_room,
+        } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = lox.send_cmd(&uuid, "off")?;
-            print_resp(&resp, cli.json, &name_or_uuid, "off");
+            if let Some(room_name) = all_in_room {
+                let controls = lox.resolve_all_in_room(&room_name, None)?;
+                for ctrl in &controls {
+                    match lox.send_cmd(&ctrl.uuid, "off") {
+                        Ok(resp) => print_resp(&resp, cli.json, &ctrl.name, "off"),
+                        Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                    }
+                }
+            } else {
+                let name = name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+                let uuid = lox.resolve_with_room(&name, room.as_deref())?;
+                let resp = lox.send_cmd(&uuid, "off")?;
+                print_resp(&resp, cli.json, &name, "off");
+            }
         }
         Cmd::Pulse { name_or_uuid, room } => {
             let mut lox = LoxClient::new(Config::load()?);
@@ -1614,10 +1717,80 @@ fn main() -> Result<()> {
             }
         }
 
+        Cmd::Doorlock {
+            name_or_uuid,
+            action,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            if !ctrl.typ.contains("DoorLock") && !ctrl.typ.contains("Lock") {
+                bail!("'{}' is type '{}', not a DoorLock", ctrl.name, ctrl.typ);
+            }
+            let cmd = match action.to_lowercase().as_str() {
+                "lock" => "on",
+                "unlock" => "off",
+                "open" => "open",
+                other => bail!("Unknown doorlock action '{}'. Use: lock, unlock, open", other),
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
+            print_resp(&resp, cli.json, &ctrl.name, &action);
+        }
+
+        Cmd::Intercom {
+            name_or_uuid,
+            action,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            if !ctrl.typ.contains("Intercom") {
+                bail!("'{}' is type '{}', not an Intercom", ctrl.name, ctrl.typ);
+            }
+            let cmd = match action.to_lowercase().as_str() {
+                "answer" => "answer",
+                "hangup" | "decline" => "hangup",
+                "open" => "open",
+                other => bail!("Unknown intercom action '{}'. Use: answer, hangup, open", other),
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
+            print_resp(&resp, cli.json, &ctrl.name, &action);
+        }
+
+        Cmd::Charger {
+            name_or_uuid,
+            action,
+            limit,
+            room,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let ctrl = lox.find_control(&uuid)?;
+            let cmd_owned: String;
+            let cmd: &str = match action.to_lowercase().as_str() {
+                "start" => {
+                    if let Some(kwh) = limit {
+                        cmd_owned = format!("start/{:.1}", kwh);
+                        &cmd_owned
+                    } else {
+                        "start"
+                    }
+                }
+                "stop" => "stop",
+                "pause" => "pause",
+                other => bail!("Unknown charger action '{}'. Use: start, stop, pause", other),
+            };
+            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
+            print_resp(&resp, cli.json, &ctrl.name, &action);
+        }
+
         Cmd::Alarm {
             name_or_uuid,
             action,
             no_motion,
+            code,
             room,
         } => {
             let mut lox = LoxClient::new(Config::load()?);
@@ -1626,17 +1799,42 @@ fn main() -> Result<()> {
             if !matches!(ctrl.typ.as_str(), "Alarm") {
                 bail!("'{}' is type '{}', not an Alarm", ctrl.name, ctrl.typ);
             }
-            let cmd = match action.to_lowercase().as_str() {
+            let cmd_owned: String;
+            let cmd: &str = match action.to_lowercase().as_str() {
                 "arm" | "on" => {
-                    if no_motion {
+                    let base = if no_motion {
                         "delayedon/0"
                     } else {
                         "delayedon/1"
+                    };
+                    if let Some(ref pin) = code {
+                        cmd_owned = format!("{}/{}", base, pin);
+                        &cmd_owned
+                    } else {
+                        base
                     }
                 }
-                "disarm" | "off" => "off",
+                "arm-home" | "home" => {
+                    if let Some(ref pin) = code {
+                        cmd_owned = format!("delayedon/0/{}", pin);
+                        &cmd_owned
+                    } else {
+                        "delayedon/0"
+                    }
+                }
+                "disarm" | "off" => {
+                    if let Some(ref pin) = code {
+                        cmd_owned = format!("off/{}", pin);
+                        &cmd_owned
+                    } else {
+                        "off"
+                    }
+                }
                 "quit" | "ack" | "acknowledge" => "quit",
-                other => bail!("Unknown alarm action '{}'. Use: arm, disarm, quit", other),
+                other => bail!(
+                    "Unknown alarm action '{}'. Use: arm, arm-home, disarm, quit",
+                    other
+                ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, cli.json, &ctrl.name, cmd);
@@ -1944,6 +2142,10 @@ fn main() -> Result<()> {
                     }
                     (zone, format!("volume/{}", level))
                 }
+                MusicCmd::Next { zone } => (zone, "queueplus".to_string()),
+                MusicCmd::Prev { zone } => (zone, "queueminus".to_string()),
+                MusicCmd::Mute { zone } => (zone, "mute".to_string()),
+                MusicCmd::Unmute { zone } => (zone, "unmute".to_string()),
             };
             let url = format!("{}/zone/{}/{}", music_base, zone, cmd_path);
             match client.get(&url).send() {
@@ -2797,6 +2999,117 @@ fn main() -> Result<()> {
                 }
             }
         },
+        Cmd::Sensors { r#type, room } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let type_lower = r#type.to_lowercase();
+            let type_filter: Option<&str> = match type_lower.as_str() {
+                "temperature" | "temp" => Some("InfoOnlyAnalog"),
+                "door-window" | "doorwindow" => Some("InfoOnlyDigital"),
+                "motion" => None, // We'll filter manually
+                "smoke" => Some("SmokeAlarm"),
+                "all" | _ => None,
+            };
+            let controls = lox.list_controls(type_filter, room.as_deref())?;
+            let filtered: Vec<_> = controls
+                .iter()
+                .filter(|c| match type_lower.as_str() {
+                    "temperature" | "temp" => c.typ == "InfoOnlyAnalog",
+                    "door-window" | "doorwindow" => c.typ == "InfoOnlyDigital",
+                    "motion" => {
+                        matches!(c.typ.as_str(), "PresenceDetector" | "MotionSensor")
+                    }
+                    "smoke" => c.typ == "SmokeAlarm",
+                    _ => matches!(
+                        c.typ.as_str(),
+                        "InfoOnlyAnalog"
+                            | "InfoOnlyDigital"
+                            | "PresenceDetector"
+                            | "MotionSensor"
+                            | "SmokeAlarm"
+                            | "Meter"
+                    ),
+                })
+                .collect();
+            if cli.json {
+                let mut arr = Vec::new();
+                for c in &filtered {
+                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
+                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
+                    arr.push(serde_json::json!({
+                        "name": c.name, "uuid": c.uuid, "type": c.typ,
+                        "room": c.room, "value": val,
+                    }));
+                }
+                println!("{}", serde_json::to_string_pretty(&arr)?);
+            } else if filtered.is_empty() {
+                println!("No sensors found.");
+            } else {
+                println!(
+                    "{:<36} {:<20} {:<20} VALUE",
+                    "NAME", "TYPE", "ROOM"
+                );
+                println!("{}", "─".repeat(96));
+                for c in &filtered {
+                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
+                    let val = xml_attr(&xml, "value").unwrap_or("?");
+                    println!(
+                        "{:<36} {:<20} {:<20} {}",
+                        c.name,
+                        c.typ,
+                        c.room.as_deref().unwrap_or("─"),
+                        val
+                    );
+                }
+                println!("\n{} sensors", filtered.len());
+            }
+        }
+
+        Cmd::Energy { room } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let controls = lox.list_controls(None, room.as_deref())?;
+            let energy: Vec<_> = controls
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.typ.as_str(),
+                        "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
+                    ) || c.typ.contains("Energy")
+                })
+                .collect();
+            if cli.json {
+                let mut arr = Vec::new();
+                for c in &energy {
+                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
+                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
+                    arr.push(serde_json::json!({
+                        "name": c.name, "uuid": c.uuid, "type": c.typ,
+                        "room": c.room, "value": val,
+                    }));
+                }
+                println!("{}", serde_json::to_string_pretty(&arr)?);
+            } else if energy.is_empty() {
+                println!("No energy meters found.");
+            } else {
+                println!(
+                    "{:<36} {:<20} {:<20} VALUE",
+                    "NAME", "TYPE", "ROOM"
+                );
+                println!("{}", "─".repeat(96));
+                for c in &energy {
+                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
+                    let val = xml_attr(&xml, "value").unwrap_or("?");
+                    println!(
+                        "{:<36} {:<20} {:<20} {}",
+                        c.name,
+                        c.typ,
+                        c.room.as_deref().unwrap_or("─"),
+                        val
+                    );
+                }
+                println!("\n{} energy meters", energy.len());
+            }
+        }
+
         Cmd::Log { lines } => {
             let lox = LoxClient::new(Config::load()?);
             let log = lox.get_text("/dev/fsget/log/def.log")?;
