@@ -56,15 +56,29 @@ fn parse_headers(headers: &[String]) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
+/// Build the full OTLP metrics URL from the user-provided endpoint.
+/// Appends `/v1/metrics` only if not already present.
+fn otlp_metrics_url(endpoint: &str) -> String {
+    let base = endpoint.trim_end_matches('/');
+    if base.ends_with("/v1/metrics") {
+        base.to_string()
+    } else {
+        format!("{}/v1/metrics", base)
+    }
+}
+
 /// Build an OTLP metric exporter with the given endpoint and headers.
-fn build_exporter(endpoint: &str, headers: &[String]) -> Result<MetricExporter> {
+fn build_exporter(endpoint: &str, headers: &[String], delta: bool) -> Result<MetricExporter> {
     let header_map = parse_headers(headers)?;
     let mut builder = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_endpoint(format!("{}/v1/metrics", endpoint.trim_end_matches('/')));
+        .with_endpoint(otlp_metrics_url(endpoint));
     if !header_map.is_empty() {
         builder = builder.with_headers(header_map);
+    }
+    if delta {
+        builder = builder.with_temporality(opentelemetry_sdk::metrics::Temporality::Delta);
     }
     builder
         .build()
@@ -84,6 +98,27 @@ fn build_resource(cfg: &Config) -> Resource {
     Resource::builder().with_attributes(attrs).build()
 }
 
+/// Check if the OTLP endpoint is reachable by sending an empty export request.
+fn check_endpoint(endpoint: &str, headers: &[String]) -> Result<()> {
+    let url = otlp_metrics_url(endpoint);
+    let header_map = parse_headers(headers)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+    let mut req = client
+        .post(&url)
+        .header("Content-Type", "application/x-protobuf")
+        .body(Vec::new());
+    for (k, v) in &header_map {
+        req = req.header(k, v);
+    }
+    match req.send() {
+        Ok(r) if r.status().is_success() || r.status().as_u16() == 415 => Ok(()),
+        Ok(r) => bail!("OTLP endpoint {} returned HTTP {}", url, r.status()),
+        Err(e) => bail!("Cannot reach OTLP endpoint {}: {}", url, e),
+    }
+}
+
 /// Build the MeterProvider with async PeriodicReader.
 ///
 /// Must be called from within a tokio runtime context (e.g. inside `block_on`
@@ -94,8 +129,9 @@ fn build_provider(
     endpoint: &str,
     interval: Duration,
     headers: &[String],
+    delta: bool,
 ) -> Result<SdkMeterProvider> {
-    let exporter = build_exporter(endpoint, headers)?;
+    let exporter = build_exporter(endpoint, headers, delta)?;
     let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
         .with_interval(interval)
         .build();
@@ -110,76 +146,88 @@ fn build_provider(
 /// Shared state for the latest values from WebSocket streaming.
 type StateStore = Arc<Mutex<HashMap<String, (StateUuidInfo, f64)>>>;
 
-/// Record system diagnostics (CPU, heap, tasks, etc.) as metrics.
+/// Tracks previous cumulative values for delta computation.
+type PrevValues = HashMap<String, f64>;
+
+/// Record system diagnostics as metrics.
 fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) -> Result<()> {
-    // Heap
-    if let Ok(text) = lox.get_text("/dev/sys/heap") {
-        if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.heap_bytes").build();
-            gauge.record(val, &[]);
-        }
-    }
-
-    // CPU (admin only — may fail)
-    if let Ok(text) = lox.get_text("/jdev/sys/lastcpu") {
-        if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.cpu_percent").build();
-            gauge.record(val, &[]);
-        }
-    }
-
-    // Tasks
-    if let Ok(text) = lox.get_text("/jdev/sys/numtasks") {
-        if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.tasks_count").build();
-            gauge.record(val, &[]);
-        }
-    }
-
-    // Context switches
-    if let Ok(text) = lox.get_text("/jdev/sys/contextswitches") {
-        if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.context_switches").build();
-            gauge.record(val, &[]);
+    let gauge_metrics: &[(&str, &str, &str)] = &[
+        ("/dev/sys/heap", "loxone.system.heap", "kBy"),
+        ("/jdev/sys/lastcpu", "loxone.system.cpu", "%"),
+        ("/jdev/sys/numtasks", "loxone.system.tasks", "{tasks}"),
+    ];
+    for (path, name, unit) in gauge_metrics {
+        if let Ok(text) = lox.get_text(path) {
+            if let Some(val) = extract_lox_value(&text) {
+                meter
+                    .f64_gauge(*name)
+                    .with_unit(*unit)
+                    .build()
+                    .record(val, &[]);
+            }
         }
     }
 
     Ok(())
 }
 
+/// Fetch a cumulative value from the Miniserver and record it as a gauge.
+/// When `delta` is true, computes and records the difference since the last call.
+fn record_cumulative(
+    lox: &LoxClient,
+    meter: &opentelemetry::metrics::Meter,
+    prev: &mut PrevValues,
+    path: &str,
+    name: &str,
+    delta: bool,
+) {
+    if let Ok(text) = lox.get_text(path) {
+        if let Some(current) = extract_lox_value(&text) {
+            let val = if delta {
+                let prev_val = prev.get(name).copied().unwrap_or(current);
+                let d = current - prev_val;
+                prev.insert(name.to_string(), current);
+                if d < 0.0 {
+                    current
+                } else {
+                    d
+                } // handle counter reset
+            } else {
+                current
+            };
+            meter.f64_gauge(name.to_string()).build().record(val, &[]);
+        }
+    }
+}
+
 /// Record CAN bus and LAN network metrics.
-fn record_network_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) -> Result<()> {
-    let can_metrics = [
+/// These are cumulative counters — with `delta` mode, only the increment
+/// since the last cycle is reported.
+fn record_network_metrics(
+    lox: &LoxClient,
+    meter: &opentelemetry::metrics::Meter,
+    prev: &mut PrevValues,
+    delta: bool,
+) -> Result<()> {
+    let counters: &[(&str, &str)] = &[
         ("/jdev/bus/packetssent", "loxone.can.packets_sent"),
         ("/jdev/bus/packetsreceived", "loxone.can.packets_received"),
         ("/jdev/bus/receiveerrors", "loxone.can.receive_errors"),
         ("/jdev/bus/frameerrors", "loxone.can.frame_errors"),
         ("/jdev/bus/overruns", "loxone.can.overruns"),
-    ];
-    for (path, name) in &can_metrics {
-        if let Ok(text) = lox.get_text(path) {
-            if let Some(val) = extract_lox_value(&text) {
-                let gauge = meter.f64_gauge(*name).build();
-                gauge.record(val, &[]);
-            }
-        }
-    }
-
-    let lan_metrics = [
         ("/jdev/lan/txp", "loxone.lan.tx_packets"),
         ("/jdev/lan/txe", "loxone.lan.tx_errors"),
         ("/jdev/lan/txc", "loxone.lan.tx_collisions"),
         ("/jdev/lan/rxp", "loxone.lan.rx_packets"),
         ("/jdev/lan/rxo", "loxone.lan.rx_overflow"),
         ("/jdev/lan/eof", "loxone.lan.eof_errors"),
+        (
+            "/jdev/sys/contextswitches",
+            "loxone.system.context_switches",
+        ),
     ];
-    for (path, name) in &lan_metrics {
-        if let Ok(text) = lox.get_text(path) {
-            if let Some(val) = extract_lox_value(&text) {
-                let gauge = meter.f64_gauge(*name).build();
-                gauge.record(val, &[]);
-            }
-        }
+    for (path, name) in counters {
+        record_cumulative(lox, meter, prev, path, name, delta);
     }
 
     Ok(())
@@ -217,7 +265,7 @@ fn record_control_metrics(
             }
         }
 
-        let attrs = [
+        let mut attrs = vec![
             KeyValue::new("control.name", info.control_name.clone()),
             KeyValue::new("control.type", info.control_type.clone()),
             KeyValue::new("control.uuid", uuid.clone()),
@@ -228,6 +276,9 @@ fn record_control_metrics(
                 info.category.clone().unwrap_or_default(),
             ),
         ];
+        if let Some(unit) = &info.unit {
+            attrs.push(KeyValue::new("unit", unit.clone()));
+        }
         gauge.record(*value, &attrs);
     }
 }
@@ -276,6 +327,7 @@ fn parse_numeric_prefix(s: &str) -> Option<f64> {
 /// - Connect to Miniserver WebSocket for real-time state changes
 /// - Push metrics via OTLP at the configured interval
 /// - Also fetch system/network diagnostics on each interval
+#[allow(clippy::too_many_arguments)]
 pub fn serve(
     cfg: &Config,
     endpoint: &str,
@@ -284,6 +336,7 @@ pub fn serve(
     room_filter: Option<&str>,
     headers: &[String],
     quiet: bool,
+    delta: bool,
 ) -> Result<()> {
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
@@ -294,13 +347,17 @@ pub fn serve(
     let store: StateStore = Arc::new(Mutex::new(HashMap::new()));
     let store_ws = Arc::clone(&store);
 
+    // Verify the OTLP endpoint is reachable before starting
+    check_endpoint(endpoint, headers)?;
+
     // Create tokio runtime — the async PeriodicReader spawns a tokio task
     // for periodic export, so the runtime must be active for its lifetime.
     let rt = tokio::runtime::Runtime::new()?;
 
     // Build provider inside the runtime context so the PeriodicReader's
     // tokio task is spawned on this runtime.
-    let provider = rt.block_on(async { build_provider(cfg, endpoint, interval, headers) })?;
+    let provider =
+        rt.block_on(async { build_provider(cfg, endpoint, interval, headers, delta) })?;
 
     if !quiet {
         eprintln!(
@@ -320,15 +377,23 @@ pub fn serve(
     let tf_sys = tf.clone();
     let rf_sys = rf.clone();
     let store_sys = Arc::clone(&store);
+    let quiet_sys = quiet;
     std::thread::spawn(move || {
         let lox = LoxClient::new(cfg_sys);
+        let mut prev = PrevValues::new();
         loop {
-            // Record system diagnostics
             let _ = record_system_metrics(&lox, &meter_sys);
-            let _ = record_network_metrics(&lox, &meter_sys);
+            let _ = record_network_metrics(&lox, &meter_sys, &mut prev, delta);
 
-            // Record control state gauges from the shared store
+            let control_count = store_sys.lock().unwrap().len();
             record_control_metrics(&store_sys, &meter_sys, tf_sys.as_deref(), rf_sys.as_deref());
+
+            if !quiet_sys {
+                eprintln!(
+                    "[otel] recorded {} control states + system metrics",
+                    control_count
+                );
+            }
 
             std::thread::sleep(interval);
         }
@@ -367,7 +432,11 @@ pub fn push(
     room_filter: Option<&str>,
     headers: &[String],
     quiet: bool,
+    delta: bool,
 ) -> Result<()> {
+    // Verify the OTLP endpoint is reachable before starting
+    check_endpoint(endpoint, headers)?;
+
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
     let structure = lox.get_structure()?.clone();
@@ -382,8 +451,9 @@ pub fn push(
     let rt = tokio::runtime::Runtime::new()?;
 
     // Build provider inside the runtime context.
-    let provider =
-        rt.block_on(async { build_provider(cfg, endpoint, Duration::from_secs(60), headers) })?;
+    let provider = rt.block_on(async {
+        build_provider(cfg, endpoint, Duration::from_secs(60), headers, delta)
+    })?;
     let meter = provider.meter("loxone");
 
     // Collect initial state dump via WebSocket with a timeout.
@@ -427,42 +497,20 @@ pub fn push(
         Err(_) => {} // Timeout — collected what we could
     }
 
-    // Pre-create gauge instruments on the main thread so the SDK registers
-    // them before the first PeriodicReader collection cycle. Values are
-    // then recorded on a blocking thread via the same instrument handles.
-    let heap_gauge = meter.f64_gauge("loxone.system.heap_bytes").build();
-    let cpu_gauge = meter.f64_gauge("loxone.system.cpu_percent").build();
-    let tasks_gauge = meter.f64_gauge("loxone.system.tasks_count").build();
-    let ctx_gauge = meter.f64_gauge("loxone.system.context_switches").build();
-
-    // Fetch values on a std::thread (reqwest::blocking) and record via pre-created gauges
+    // Record system metrics on a std::thread (reqwest::blocking can't
+    // run inside a tokio runtime context without panicking).
     {
         let cfg_sys = cfg.clone();
+        let meter_sys = meter.clone();
         std::thread::spawn(move || {
             let lox_sys = LoxClient::new(cfg_sys);
-            if let Ok(text) = lox_sys.get_text("/dev/sys/heap") {
-                if let Some(v) = extract_lox_value(&text) {
-                    heap_gauge.record(v, &[]);
-                }
-            }
-            if let Ok(text) = lox_sys.get_text("/jdev/sys/lastcpu") {
-                if let Some(v) = extract_lox_value(&text) {
-                    cpu_gauge.record(v, &[]);
-                }
-            }
-            if let Ok(text) = lox_sys.get_text("/jdev/sys/numtasks") {
-                if let Some(v) = extract_lox_value(&text) {
-                    tasks_gauge.record(v, &[]);
-                }
-            }
-            if let Ok(text) = lox_sys.get_text("/jdev/sys/contextswitches") {
-                if let Some(v) = extract_lox_value(&text) {
-                    ctx_gauge.record(v, &[]);
-                }
-            }
+            let mut prev = PrevValues::new();
+            let _ = record_system_metrics(&lox_sys, &meter_sys);
+            // For push mode, delta=false since there's no previous value
+            let _ = record_network_metrics(&lox_sys, &meter_sys, &mut prev, false);
         })
         .join()
-        .unwrap();
+        .ok();
     }
 
     // Record control metrics from collected state
