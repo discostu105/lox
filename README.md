@@ -117,7 +117,7 @@ Quick overview — see **[COMMANDS.md](COMMANDS.md)** for the full reference wit
 
 ```bash
 lox ls                                  # List all controls
-lox ls --type Jalousie --room "EG"      # Filter by type/room/category
+lox ls -t Jalousie -r "EG"             # Filter by type/room/category
 lox get "Temperatur [Schlafzimmer]"     # Read a control's state
 lox on "Licht Wohnzimmer"              # Turn on
 lox off "Licht Wohnzimmer"             # Turn off
@@ -128,11 +128,9 @@ lox alarm "Alarmanlage" arm            # Arm alarm
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
-lox config users file.Loxone           # List users from config
-lox config devices file.Loxone         # List hardware inventory
 lox config diff old.Loxone new.Loxone  # Compare two configs
 lox run abend                          # Run a scene
-lox send <uuid> <command>              # Raw command
+lox completions bash                   # Generate shell completions
 ```
 
 ---

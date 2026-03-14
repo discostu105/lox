@@ -1,12 +1,14 @@
 # Command Reference
 
-All commands support `--json` for structured output. Controls can be referenced by name (fuzzy matched), UUID, or alias.
+All commands support `--json` for structured output and `-q`/`--quiet` to suppress non-essential output. Controls can be referenced by name (fuzzy matched), UUID, or alias.
 
-When multiple controls share the same name, disambiguate with `--room` or bracket syntax:
+When multiple controls share the same name, disambiguate with `-r`/`--room` or bracket syntax:
 ```bash
-lox get "Temperatur" --room "Schlafzimmer"
+lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
+
+Global flags: `--json`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var)
 
 ---
 
@@ -23,7 +25,7 @@ lox setup show                         # show config (password redacted)
 ```bash
 lox alias add wz "1d8af56e-036e-e9ad-ffffed57184a04d2"
 lox alias remove wz
-lox alias list
+lox alias ls
 ```
 
 Then use directly: `lox on wz`
@@ -34,11 +36,11 @@ Then use directly: `lox on wz`
 
 ```bash
 lox ls                                 # all controls
-lox ls --type Jalousie                 # filter by type
-lox ls --room "Wohnzimmer"            # filter by room
-lox ls --cat "Beleuchtung"            # filter by category
-lox ls --favorites                    # only favorites
-lox ls --values                       # include live values (slower)
+lox ls -t Jalousie                     # filter by type
+lox ls -r "Wohnzimmer"                 # filter by room
+lox ls -c "Beleuchtung"                # filter by category
+lox ls -f                              # only favorites
+lox ls -v                              # include live values (slower)
 
 lox get "Licht Wohnzimmer"            # full state of one control
 lox info "Licht Wohnzimmer"           # detailed: sub-controls, states, moods
@@ -145,6 +147,7 @@ Operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
 
 ```bash
 lox set "Sollwert Heizung" 21.5
+lox set "Sollwert Heizung" 21.5 -r "Wohnzimmer"  # disambiguate with room
 lox pulse "Taster"
 ```
 
@@ -165,7 +168,7 @@ lox music volume 50                    # volume 0-100
 
 ```bash
 lox run abend                          # run a scene
-lox scene list                         # list all scenes
+lox scene ls                           # list all scenes
 lox scene show abend                   # print YAML definition
 lox scene new abend                    # create empty scene file
 ```
@@ -186,7 +189,7 @@ steps:
 ## Autopilot (Automatic Rules)
 
 ```bash
-lox autopilot list                     # list all automatic rules
+lox autopilot ls                       # list all automatic rules
 lox autopilot state "Rule Name"        # show when a rule last fired
 ```
 
@@ -198,7 +201,7 @@ lox autopilot state "Rule Name"        # show when a rule last fired
 lox config download                    # download latest config ZIP via FTP
 lox config download --extract          # download + decompress to .Loxone XML
 lox config download -o config.zip      # custom output filename
-lox config list                        # list all configs on the Miniserver
+lox config ls                          # list all configs on the Miniserver
 lox config extract config.zip          # decompress LoxCC → .Loxone XML
 lox config extract config.zip -o out.Loxone
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
@@ -221,7 +224,7 @@ lox status --lan                       # LAN packet statistics
 lox status --all                       # all diagnostic sections
 lox time                               # Miniserver system date/time
 lox log                                # system log (admin only)
-lox log --lines 100
+lox log -n 100                         # custom line count
 ```
 
 ---
@@ -231,7 +234,7 @@ lox log --lines 100
 ```bash
 lox files ls /                         # browse Miniserver filesystem
 lox files get /log/def.log             # download a file
-lox files get /log/def.log --output local.log
+lox files get /log/def.log -o local.log
 ```
 
 ---
@@ -268,7 +271,7 @@ lox token clear                        # delete local token file
 lox send <uuid> <command>              # send raw command to a control
 lox send <uuid> <command> --secured <hash>  # secured command
 lox watch "Temperatur"                 # poll state and print changes (Ctrl+C to stop)
-lox watch "Temperatur" --interval 5    # custom poll interval in seconds
+lox watch "Temperatur" -i 5            # custom poll interval in seconds
 ```
 
 ---
@@ -277,6 +280,25 @@ lox watch "Temperatur" --interval 5    # custom poll interval in seconds
 
 ```bash
 lox update check                       # check for updates
-lox update install --confirm           # install update
-lox reboot --confirm                   # reboot Miniserver
+lox update install --yes               # install update
+lox reboot --yes                       # reboot Miniserver
+```
+
+---
+
+## Shell Completions
+
+```bash
+lox completions bash                   # generate bash completions
+lox completions zsh                    # generate zsh completions
+lox completions fish                   # generate fish completions
+
+# Install (bash):
+lox completions bash > /etc/bash_completion.d/lox
+
+# Install (zsh):
+lox completions zsh > ~/.zfunc/_lox
+
+# Install (fish):
+lox completions fish > ~/.config/fish/completions/lox.fish
 ```

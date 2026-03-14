@@ -8,7 +8,8 @@ mod token;
 mod ws;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use client::LoxClient;
 use config::Config;
 use reqwest::blocking::Client;
@@ -88,26 +89,328 @@ fn now_hms() -> String {
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "lox", about = "Loxone Miniserver CLI", version)]
+#[command(
+    name = "lox",
+    about = "Loxone Miniserver CLI",
+    version,
+    infer_subcommands = true,
+    disable_help_subcommand = true,
+    help_template = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+Control:
+  on, off, set, pulse          Basic control (on/off/set/pulse)
+  blind, gate, dimmer          Blinds, gates, dimmers
+  mood, color                  Light moods, colors
+  thermostat, alarm            Climate, security
+  doorlock, intercom, charger  Door locks, intercoms, EV chargers
+  music                        Music server zones
+  lock, unlock                 Lock/unlock controls (admin)
+  run, send                    Run scenes, send raw commands
+
+Inspect:
+  ls, get, info, watch, if     List, query, monitor controls
+  rooms, categories, modes     Structure metadata
+  globals, sensors, energy     Global states, sensor & energy readings
+  weather, stats, history      Weather, statistics
+  autopilot                    Automatic rules
+
+System:
+  status, log, time            Health, logs, clock
+  discover, extensions         Find Miniservers, list extensions
+  update, reboot               Firmware updates, reboot
+  files                        Browse Miniserver filesystem
+
+Configuration:
+  setup, alias, scene          Connection settings, aliases, scenes
+  cache, token                 Cache & auth token management
+  config                       Loxone Config files (download/inspect/diff)
+  completions                  Generate shell completions
+
+{options}{after-help}"
+)]
 struct Cli {
     #[arg(long, global = true)]
     json: bool,
+    /// Suppress non-essential output
+    #[arg(long, short = 'q', global = true)]
+    quiet: bool,
+    /// Disable colored output (also respects NO_COLOR env var)
+    #[arg(long, global = true)]
+    no_color: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Configure connection settings
-    Setup {
-        #[command(subcommand)]
-        action: SetupCmd,
+    // ── Control ──────────────────────────────────────────────────────────────
+    /// Turn on
+    On {
+        name_or_uuid: Option<String>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Apply to all controls in a room
+        #[arg(long)]
+        all_in_room: Option<String>,
     },
-    /// Manage control name aliases
-    Alias {
-        #[command(subcommand)]
-        action: AliasCmd,
+    /// Turn off
+    Off {
+        name_or_uuid: Option<String>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Apply to all controls in a room
+        #[arg(long)]
+        all_in_room: Option<String>,
     },
+    /// Set analog/virtual input value
+    Set {
+        /// Control name or UUID
+        name_or_uuid: String,
+        /// Value to send (numeric or text)
+        value: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Momentary pulse
+    Pulse {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control blind: up | down | stop | shade [<0-100>] | pos <0-100>
+    Blind {
+        name_or_uuid: String,
+        action: String,
+        #[arg(allow_hyphen_values = true)]
+        pos: Option<f64>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control light moods: plus | minus | off | <mood-id>
+    Mood {
+        name_or_uuid: String,
+        /// Mood action: plus, minus, off, or numeric mood ID
+        action: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Set dimmer level (0-100)
+    Dimmer {
+        name_or_uuid: String,
+        /// Brightness level 0-100
+        level: f64,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control gate: open | close | stop
+    Gate {
+        name_or_uuid: String,
+        /// Action: open, close, stop
+        action: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Set color on ColorPickerV2 (hex RGB e.g. #FF0000 or hsv(h,s,v))
+    Color {
+        name_or_uuid: String,
+        /// Color value: hex RGB (#FF0000) or hsv(h,s,v)
+        value: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control thermostat (IRoomControllerV2)
+    Thermostat {
+        name_or_uuid: String,
+        /// Set comfort temperature
+        #[arg(long)]
+        temp: Option<f64>,
+        /// Set operating mode: auto|manual|comfort|eco
+        #[arg(long)]
+        mode: Option<String>,
+        /// Override temperature
+        #[arg(long)]
+        r#override: Option<f64>,
+        /// Override duration in minutes
+        #[arg(long, default_value = "60")]
+        duration: u64,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control alarm: arm | arm-home | disarm | quit
+    Alarm {
+        name_or_uuid: String,
+        /// Action: arm, arm-home, disarm, quit/ack
+        action: String,
+        /// Arm without motion detection
+        #[arg(long)]
+        no_motion: bool,
+        /// PIN code for arm/disarm
+        #[arg(long)]
+        code: Option<String>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control door lock: lock | unlock | open
+    Doorlock {
+        name_or_uuid: String,
+        /// Action: lock, unlock, open
+        action: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control intercom: answer | hangup | open
+    Intercom {
+        name_or_uuid: String,
+        /// Action: answer, hangup, open
+        action: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control EV charger: start | stop | pause
+    Charger {
+        name_or_uuid: String,
+        /// Action: start, stop, pause
+        action: String,
+        /// Maximum charge limit in kWh
+        #[arg(long)]
+        limit: Option<f64>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Control music server zones
+    Music {
+        #[command(subcommand)]
+        action: MusicCmd,
+    },
+    /// Lock a control (admin, firmware v11.3.2.11+)
+    Lock {
+        name_or_uuid: String,
+        /// Reason for locking
+        #[arg(long, default_value = "locked via CLI")]
+        reason: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Unlock a control
+    Unlock {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Run a scene
+    Run { scene: String },
+    /// Send raw command
+    Send {
+        name_or_uuid: String,
+        command: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Send as secured command (requires visualization password hash)
+        #[arg(long)]
+        secured: Option<String>,
+    },
+
+    // ── Inspect ──────────────────────────────────────────────────────────────
+    /// List controls
+    Ls {
+        #[arg(long, short = 't')]
+        r#type: Option<String>,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        #[arg(long, short = 'v')]
+        values: bool,
+        /// Filter by category name
+        #[arg(long, short = 'c')]
+        cat: Option<String>,
+        /// Show only favorites
+        #[arg(long, short = 'f')]
+        favorites: bool,
+    },
+    /// Get full state of a control
+    Get {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Show detailed control info (sub-controls, states, moods, flags)
+    Info {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Poll a control's state and print changes (Ctrl+C to stop)
+    Watch {
+        name_or_uuid: String,
+        #[arg(
+            long,
+            short = 'i',
+            default_value = "2",
+            help = "Poll interval in seconds"
+        )]
+        interval: u64,
+    },
+    /// Check state (exit 0=match, 1=no match)
+    If {
+        name_or_uuid: String,
+        op: String,
+        value: String,
+        /// Room qualifier to disambiguate controls with the same name
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// List all rooms in the structure
+    Rooms,
+    /// List all categories
+    Categories,
+    /// Show global states (operating mode, sunrise/sunset, wind/rain warnings)
+    Globals,
+    /// List operating modes
+    Modes,
+    /// List sensor readings (temperature, door/window, motion, smoke)
+    Sensors {
+        /// Filter by sensor type: temperature, door-window, motion, smoke, all
+        #[arg(long, default_value = "all")]
+        r#type: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Show energy meter readings
+    Energy {
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Show weather data
+    Weather {
+        /// Show 7-day forecast
+        #[arg(long)]
+        forecast: bool,
+    },
+    /// List controls that have statistics enabled
+    Stats,
+    /// Fetch historical statistics data
+    History {
+        name_or_uuid: String,
+        /// Fetch monthly data (YYYY-MM)
+        #[arg(long)]
+        month: Option<String>,
+        /// Fetch daily data (YYYY-MM-DD)
+        #[arg(long)]
+        day: Option<String>,
+        /// Output as CSV
+        #[arg(long)]
+        csv: bool,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// List and inspect automatic rules (Automatik-Regel / Autopilot)
+    Autopilot {
+        #[command(subcommand)]
+        action: AutopilotCmd,
+    },
+
+    // ── System ───────────────────────────────────────────────────────────────
     /// Miniserver health
     Status {
         #[arg(long)]
@@ -128,277 +431,58 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// List controls
-    Ls {
-        #[arg(long)]
-        r#type: Option<String>,
-        #[arg(long)]
-        room: Option<String>,
-        #[arg(long)]
-        values: bool,
-        /// Filter by category name
-        #[arg(long)]
-        cat: Option<String>,
-        /// Show only favorites
-        #[arg(long)]
-        favorites: bool,
+    /// Fetch the Miniserver system log (tail)
+    Log {
+        #[arg(
+            long,
+            short = 'n',
+            default_value = "50",
+            help = "Number of lines to show"
+        )]
+        lines: usize,
     },
-    /// List all rooms in the structure
-    Rooms,
-    /// List all categories
-    Categories,
-    /// Show detailed control info (sub-controls, states, moods, flags)
-    Info {
-        name_or_uuid: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Show global states (operating mode, sunrise/sunset, wind/rain warnings)
-    Globals,
-    /// List operating modes
-    Modes,
-    /// Get full state of a control
-    Get {
-        name_or_uuid: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Send raw command
-    Send {
-        name_or_uuid: String,
-        command: String,
-        #[arg(long)]
-        room: Option<String>,
-        /// Send as secured command (requires visualization password hash)
-        #[arg(long)]
-        secured: Option<String>,
-    },
-    /// Turn on
-    On {
-        name_or_uuid: Option<String>,
-        #[arg(long)]
-        room: Option<String>,
-        /// Apply to all controls in a room
-        #[arg(long)]
-        all_in_room: Option<String>,
-    },
-    /// Turn off
-    Off {
-        name_or_uuid: Option<String>,
-        #[arg(long)]
-        room: Option<String>,
-        /// Apply to all controls in a room
-        #[arg(long)]
-        all_in_room: Option<String>,
-    },
-    /// Momentary pulse
-    Pulse {
-        name_or_uuid: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control blind: up | down | stop | shade [<0-100>] | pos <0-100>
-    Blind {
-        name_or_uuid: String,
-        action: String,
-        #[arg(allow_hyphen_values = true)]
-        pos: Option<f64>,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control light moods: plus | minus | off | <mood-id>
-    Mood {
-        name_or_uuid: String,
-        /// Mood action: plus, minus, off, or numeric mood ID
-        action: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Set dimmer level (0-100)
-    Dimmer {
-        name_or_uuid: String,
-        /// Brightness level 0-100
-        level: f64,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control gate: open | close | stop
-    Gate {
-        name_or_uuid: String,
-        /// Action: open, close, stop
-        action: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Set color on ColorPickerV2 (hex RGB e.g. #FF0000 or hsv(h,s,v))
-    Color {
-        name_or_uuid: String,
-        /// Color value: hex RGB (#FF0000) or hsv(h,s,v)
-        value: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Show weather data
-    Weather {
-        /// Show 7-day forecast
-        #[arg(long)]
-        forecast: bool,
-    },
+    /// Show Miniserver system date/time
+    Time,
     /// Discover Miniservers on the local network (UDP broadcast)
     Discover {
         /// Timeout in seconds
         #[arg(long, default_value = "3")]
         timeout: u64,
     },
-    /// Control thermostat (IRoomControllerV2)
-    Thermostat {
-        name_or_uuid: String,
-        /// Set comfort temperature
-        #[arg(long)]
-        temp: Option<f64>,
-        /// Set operating mode: auto|manual|comfort|eco
-        #[arg(long)]
-        mode: Option<String>,
-        /// Override temperature
-        #[arg(long)]
-        r#override: Option<f64>,
-        /// Override duration in minutes
-        #[arg(long, default_value = "60")]
-        duration: u64,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control door lock: lock | unlock | open
-    Doorlock {
-        name_or_uuid: String,
-        /// Action: lock, unlock, open
-        action: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control intercom: answer | hangup | open
-    Intercom {
-        name_or_uuid: String,
-        /// Action: answer, hangup, open
-        action: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control EV charger: start | stop | pause
-    Charger {
-        name_or_uuid: String,
-        /// Action: start, stop, pause
-        action: String,
-        /// Maximum charge limit in kWh
-        #[arg(long)]
-        limit: Option<f64>,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Control alarm: arm | arm-home | disarm | quit
-    Alarm {
-        name_or_uuid: String,
-        /// Action: arm, arm-home, disarm, quit/ack
-        action: String,
-        /// Arm without motion detection
-        #[arg(long)]
-        no_motion: bool,
-        /// PIN code for arm/disarm
-        #[arg(long)]
-        code: Option<String>,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Lock a control (admin, firmware v11.3.2.11+)
-    Lock {
-        name_or_uuid: String,
-        /// Reason for locking
-        #[arg(long, default_value = "locked via CLI")]
-        reason: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Unlock a control
-    Unlock {
-        name_or_uuid: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// List controls that have statistics enabled
-    Stats,
-    /// Fetch historical statistics data
-    History {
-        name_or_uuid: String,
-        /// Fetch monthly data (YYYY-MM)
-        #[arg(long)]
-        month: Option<String>,
-        /// Fetch daily data (YYYY-MM-DD)
-        #[arg(long)]
-        day: Option<String>,
-        /// Output as CSV
-        #[arg(long)]
-        csv: bool,
-        #[arg(long)]
-        room: Option<String>,
-    },
+    /// List connected extensions and devices
+    Extensions,
     /// Check for firmware updates
     Update {
         #[command(subcommand)]
         action: UpdateCmd,
     },
-    /// Control music server zones
-    Music {
-        #[command(subcommand)]
-        action: MusicCmd,
-    },
     /// Reboot the Miniserver
     Reboot {
-        /// Skip confirmation
-        #[arg(long)]
-        confirm: bool,
+        /// Skip confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Browse Miniserver filesystem
     Files {
         #[command(subcommand)]
         action: FilesCmd,
     },
-    /// List connected extensions and devices
-    Extensions,
-    /// Show Miniserver system date/time
-    Time,
-    /// Poll a control's state and print changes (Ctrl+C to stop)
-    Watch {
-        name_or_uuid: String,
-        #[arg(long, default_value = "2", help = "Poll interval in seconds")]
-        interval: u64,
+
+    // ── Configuration ────────────────────────────────────────────────────────
+    /// Configure connection settings
+    Setup {
+        #[command(subcommand)]
+        action: SetupCmd,
     },
-    /// Check state (exit 0=match, 1=no match)
-    If {
-        name_or_uuid: String,
-        op: String,
-        value: String,
-        /// Room qualifier to disambiguate controls with the same name
-        #[arg(long)]
-        room: Option<String>,
+    /// Manage control name aliases
+    Alias {
+        #[command(subcommand)]
+        action: AliasCmd,
     },
-    /// Run a scene
-    Run { scene: String },
     /// Manage scenes
     Scene {
         #[command(subcommand)]
         action: SceneCmd,
-    },
-    /// Fetch the Miniserver system log (tail)
-    Log {
-        #[arg(long, default_value = "50", help = "Number of lines to show")]
-        lines: usize,
-    },
-    /// Set analog/virtual input value
-    Set {
-        /// Control name or UUID
-        name_or_uuid: String,
-        /// Value to send (numeric or text)
-        value: String,
     },
     /// Manage local cache
     Cache {
@@ -415,23 +499,10 @@ enum Cmd {
         #[command(subcommand)]
         action: ConfigCmd,
     },
-    /// List and inspect automatic rules (Automatik-Regel / Autopilot)
-    Autopilot {
-        #[command(subcommand)]
-        action: AutopilotCmd,
-    },
-    /// List sensor readings (temperature, door/window, motion, smoke)
-    Sensors {
-        /// Filter by sensor type: temperature, door-window, motion, smoke, all
-        #[arg(long, default_value = "all")]
-        r#type: String,
-        #[arg(long)]
-        room: Option<String>,
-    },
-    /// Show energy meter readings
-    Energy {
-        #[arg(long)]
-        room: Option<String>,
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
     },
 }
 
@@ -454,7 +525,8 @@ enum TokenCmd {
 #[derive(Subcommand)]
 enum AutopilotCmd {
     /// List all automatic rules
-    List,
+    #[command(alias = "list")]
+    Ls,
     /// Show when a rule last fired
     State { name_or_uuid: String },
 }
@@ -463,11 +535,11 @@ enum AutopilotCmd {
 enum UpdateCmd {
     /// Check for available firmware updates
     Check,
-    /// Install firmware update (requires confirmation)
+    /// Install firmware update (requires --yes to confirm)
     Install {
-        /// Skip confirmation
-        #[arg(long)]
-        confirm: bool,
+        /// Skip confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 }
 
@@ -538,7 +610,7 @@ enum FilesCmd {
         /// Path on the Miniserver filesystem
         path: String,
         /// Local output path (defaults to filename)
-        #[arg(long)]
+        #[arg(short, long)]
         output: Option<String>,
     },
 }
@@ -583,13 +655,15 @@ enum AliasCmd {
     /// Remove an alias
     Remove { name: String },
     /// List all aliases
-    List,
+    #[command(alias = "list")]
+    Ls,
 }
 
 #[derive(Subcommand)]
 enum SceneCmd {
     /// List all saved scenes
-    List,
+    #[command(alias = "list")]
+    Ls,
     /// Print a scene's YAML definition
     Show { name: String },
     /// Create a new empty scene file
@@ -608,7 +682,8 @@ enum ConfigCmd {
         extract: bool,
     },
     /// List available configs on the Miniserver
-    List,
+    #[command(alias = "list")]
+    Ls,
     /// Decompress a local config ZIP to .Loxone XML
     Extract {
         /// Path to a config ZIP file
@@ -715,7 +790,7 @@ fn main() -> Result<()> {
                         println!("No alias named '{}'", name);
                     }
                 }
-                AliasCmd::List => {
+                AliasCmd::Ls => {
                     if cfg.aliases.is_empty() {
                         println!("No aliases. Add with: lox alias add <name> <uuid>");
                     } else {
@@ -2122,9 +2197,9 @@ fn main() -> Result<()> {
                     );
                 }
             }
-            UpdateCmd::Install { confirm } => {
-                if !confirm {
-                    bail!("Firmware update requires --confirm flag. This will reboot your Miniserver!");
+            UpdateCmd::Install { yes } => {
+                if !yes {
+                    bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
                 }
                 let lox = LoxClient::new(Config::load()?);
                 let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
@@ -2179,9 +2254,9 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Reboot { confirm } => {
-            if !confirm {
-                bail!("Reboot requires --confirm flag. This will restart your Miniserver!");
+        Cmd::Reboot { yes } => {
+            if !yes {
+                bail!("Reboot requires --yes flag. This will restart your Miniserver!");
             }
             let lox = LoxClient::new(Config::load()?);
             let resp = lox.get_text("/jdev/sys/reboot")?;
@@ -2384,7 +2459,7 @@ fn main() -> Result<()> {
         }
 
         Cmd::Scene { action } => match action {
-            SceneCmd::List => {
+            SceneCmd::Ls => {
                 let names = Scene::list()?;
                 if names.is_empty() {
                     println!("No scenes. Create: lox scene new <name>");
@@ -2421,9 +2496,10 @@ fn main() -> Result<()> {
         Cmd::Set {
             name_or_uuid,
             value,
+            room,
         } => {
             let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve(&name_or_uuid)?;
+            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let resp = lox.send_cmd(&uuid, &encode_path_value(&value))?;
             let code = resp
                 .pointer("/LL/Code")
@@ -2585,7 +2661,7 @@ fn main() -> Result<()> {
         Cmd::Autopilot { action } => {
             let mut lox = LoxClient::new(Config::load()?);
             match action {
-                AutopilotCmd::List => {
+                AutopilotCmd::Ls => {
                     let rules = lox.list_autopilot_rules()?;
                     if rules.is_empty() {
                         println!("No autopilot rules found.");
@@ -2722,7 +2798,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Config { action } => match action {
-            ConfigCmd::List => {
+            ConfigCmd::Ls => {
                 let cfg = Config::load()?;
                 let backups = ftp::list_backups(&cfg)?;
                 if backups.is_empty() {
@@ -3118,6 +3194,11 @@ fn main() -> Result<()> {
                 }
                 println!("\n{} energy meters", energy.len());
             }
+        }
+
+        Cmd::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "lox", &mut std::io::stdout());
         }
 
         Cmd::Log { lines } => {
