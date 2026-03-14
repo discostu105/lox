@@ -1,6 +1,6 @@
 # Command Reference
 
-All commands support `--json` for structured output and `-q`/`--quiet` to suppress non-essential output. Controls can be referenced by name (fuzzy matched), UUID, or alias.
+All commands support `-o`/`--output` for format selection (`json`, `csv`, `table`) and `-q`/`--quiet` to suppress non-essential output. Controls can be referenced by name (fuzzy matched), UUID, or alias.
 
 When multiple controls share the same name, disambiguate with `-r`/`--room` or bracket syntax:
 ```bash
@@ -8,7 +8,7 @@ lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
 
-Global flags: `--json`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`
+Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`
 
 ---
 
@@ -138,7 +138,7 @@ lox unlock "Heizung"
 lox stats                              # controls with statistics enabled
 lox history "Temperatur" --month 2025-01
 lox history "Temperatur" --day 2025-01-15
-lox history "Temperatur" --csv         # CSV output
+lox history "Temperatur" -o csv        # CSV output
 ```
 
 ---
@@ -212,10 +212,10 @@ lox autopilot state "Rule Name"        # show when a rule last fired
 ```bash
 lox config download                    # download latest config ZIP via FTP
 lox config download --extract          # download + decompress to .Loxone XML
-lox config download -o config.zip      # custom output filename
+lox config download --save-as config.zip  # custom output filename
 lox config ls                          # list all configs on the Miniserver
 lox config extract config.zip          # decompress LoxCC → .Loxone XML
-lox config extract config.zip -o out.Loxone
+lox config extract config.zip --save-as out.Loxone
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
@@ -245,7 +245,7 @@ lox log -n 100                         # custom line count
 ```bash
 lox files ls /                         # browse Miniserver filesystem
 lox files get /log/def.log             # download a file
-lox files get /log/def.log -o local.log
+lox files get /log/def.log --save-as local.log
 ```
 
 ---

@@ -21,9 +21,9 @@ The Loxone app is great for everyday use — but it offers no API or scripting s
 lox off "Licht Wohnzimmer Zentral" && lox blind "Südseite" full-up
 
 # AI agent can call these:
-lox ls --type LightControllerV2 --json | jq '.[].name'
+lox ls --type LightControllerV2 -o json | jq '.[].name'
 lox light mood "Wohnzimmer" off
-lox status --json | jq '.plc_running'
+lox status -o json | jq '.plc_running'
 
 # Disambiguate sensors with the same name using --room or bracket syntax
 lox get "Temperatur" --room "Schlafzimmer"
@@ -43,7 +43,7 @@ lox if "Temperatur Außen" gt 28 && lox blind "Beschattung Süd" pos 70
 This CLI was designed for AI agent integration. Every command:
 
 - Exits `0` on success, non-zero on error
-- Has `--json` flag for structured output
+- Has `-o json` flag for structured output
 - Uses fuzzy name matching — agents don't need UUIDs
 - Supports `--room` flag and `[Room]` bracket syntax to resolve ambiguous names
 - Returns readable errors with suggestions
@@ -52,7 +52,7 @@ This CLI was designed for AI agent integration. Every command:
 ```json
 {
   "name": "lox",
-  "description": "Control Loxone smart home. Returns JSON on --json flag.",
+  "description": "Control Loxone smart home. Use -o json for structured output.",
   "parameters": {
     "command": { "type": "string", "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'status --energy'" }
   }
@@ -61,7 +61,7 @@ This CLI was designed for AI agent integration. Every command:
 
 The agent calls `lox <command>` as a shell tool and reads stdout. That's it.
 
-An agent can discover your home (`lox ls --json`), read sensor values, control devices, and check conditions — all without any custom integration layer.
+An agent can discover your home (`lox ls -o json`), read sensor values, control devices, and check conditions — all without any custom integration layer.
 
 ---
 
