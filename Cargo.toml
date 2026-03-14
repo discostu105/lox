@@ -45,8 +45,8 @@ uuid = { version = "1", features = ["v4"] }
 
 # OpenTelemetry deps
 opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "http-proto", "reqwest-client"] }
 
 # Backup deps
 suppaftp = "6"
