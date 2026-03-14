@@ -56,13 +56,24 @@ fn parse_headers(headers: &[String]) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
+/// Build the full OTLP metrics URL from the user-provided endpoint.
+/// Appends `/v1/metrics` only if not already present.
+fn otlp_metrics_url(endpoint: &str) -> String {
+    let base = endpoint.trim_end_matches('/');
+    if base.ends_with("/v1/metrics") {
+        base.to_string()
+    } else {
+        format!("{}/v1/metrics", base)
+    }
+}
+
 /// Build an OTLP metric exporter with the given endpoint and headers.
 fn build_exporter(endpoint: &str, headers: &[String]) -> Result<MetricExporter> {
     let header_map = parse_headers(headers)?;
     let mut builder = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_endpoint(format!("{}/v1/metrics", endpoint.trim_end_matches('/')));
+        .with_endpoint(otlp_metrics_url(endpoint));
     if !header_map.is_empty() {
         builder = builder.with_headers(header_map);
     }
@@ -85,16 +96,20 @@ fn build_resource(cfg: &Config) -> Resource {
 }
 
 /// Check if the OTLP endpoint is reachable by sending an empty export request.
-fn check_endpoint(endpoint: &str) -> Result<()> {
-    let url = format!("{}/v1/metrics", endpoint.trim_end_matches('/'));
-    let resp = reqwest::blocking::Client::builder()
+fn check_endpoint(endpoint: &str, headers: &[String]) -> Result<()> {
+    let url = otlp_metrics_url(endpoint);
+    let header_map = parse_headers(headers)?;
+    let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
-        .build()?
+        .build()?;
+    let mut req = client
         .post(&url)
         .header("Content-Type", "application/x-protobuf")
-        .body(Vec::new())
-        .send();
-    match resp {
+        .body(Vec::new());
+    for (k, v) in &header_map {
+        req = req.header(k, v);
+    }
+    match req.send() {
         Ok(r) if r.status().is_success() || r.status().as_u16() == 415 => Ok(()),
         Ok(r) => bail!("OTLP endpoint {} returned HTTP {}", url, r.status()),
         Err(e) => bail!("Cannot reach OTLP endpoint {}: {}", url, e),
@@ -312,7 +327,7 @@ pub fn serve(
     let store_ws = Arc::clone(&store);
 
     // Verify the OTLP endpoint is reachable before starting
-    check_endpoint(endpoint)?;
+    check_endpoint(endpoint, headers)?;
 
     // Create tokio runtime — the async PeriodicReader spawns a tokio task
     // for periodic export, so the runtime must be active for its lifetime.
@@ -398,7 +413,7 @@ pub fn push(
     quiet: bool,
 ) -> Result<()> {
     // Verify the OTLP endpoint is reachable before starting
-    check_endpoint(endpoint)?;
+    check_endpoint(endpoint, headers)?;
 
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
