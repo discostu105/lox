@@ -84,6 +84,23 @@ fn build_resource(cfg: &Config) -> Resource {
     Resource::builder().with_attributes(attrs).build()
 }
 
+/// Check if the OTLP endpoint is reachable by sending an empty export request.
+fn check_endpoint(endpoint: &str) -> Result<()> {
+    let url = format!("{}/v1/metrics", endpoint.trim_end_matches('/'));
+    let resp = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?
+        .post(&url)
+        .header("Content-Type", "application/x-protobuf")
+        .body(Vec::new())
+        .send();
+    match resp {
+        Ok(r) if r.status().is_success() || r.status().as_u16() == 415 => Ok(()),
+        Ok(r) => bail!("OTLP endpoint {} returned HTTP {}", url, r.status()),
+        Err(e) => bail!("Cannot reach OTLP endpoint {}: {}", url, e),
+    }
+}
+
 /// Build the MeterProvider with async PeriodicReader.
 ///
 /// Must be called from within a tokio runtime context (e.g. inside `block_on`
@@ -294,6 +311,9 @@ pub fn serve(
     let store: StateStore = Arc::new(Mutex::new(HashMap::new()));
     let store_ws = Arc::clone(&store);
 
+    // Verify the OTLP endpoint is reachable before starting
+    check_endpoint(endpoint)?;
+
     // Create tokio runtime — the async PeriodicReader spawns a tokio task
     // for periodic export, so the runtime must be active for its lifetime.
     let rt = tokio::runtime::Runtime::new()?;
@@ -320,6 +340,7 @@ pub fn serve(
     let tf_sys = tf.clone();
     let rf_sys = rf.clone();
     let store_sys = Arc::clone(&store);
+    let quiet_sys = quiet;
     std::thread::spawn(move || {
         let lox = LoxClient::new(cfg_sys);
         loop {
@@ -328,7 +349,15 @@ pub fn serve(
             let _ = record_network_metrics(&lox, &meter_sys);
 
             // Record control state gauges from the shared store
+            let control_count = store_sys.lock().unwrap().len();
             record_control_metrics(&store_sys, &meter_sys, tf_sys.as_deref(), rf_sys.as_deref());
+
+            if !quiet_sys {
+                eprintln!(
+                    "[otel] recorded {} control states + system metrics",
+                    control_count
+                );
+            }
 
             std::thread::sleep(interval);
         }
@@ -368,6 +397,9 @@ pub fn push(
     headers: &[String],
     quiet: bool,
 ) -> Result<()> {
+    // Verify the OTLP endpoint is reachable before starting
+    check_endpoint(endpoint)?;
+
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
     let structure = lox.get_structure()?.clone();
