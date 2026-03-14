@@ -40,10 +40,10 @@ fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     Some(&xml[start..end])
 }
 
-fn print_resp(resp: &Value, json: bool, name: &str, cmd: &str) {
+fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
     if json {
         println!("{}", serde_json::to_string_pretty(resp).unwrap());
-    } else {
+    } else if !quiet {
         let val = resp
             .pointer("/LL/value")
             .and_then(|v| v.as_str())
@@ -104,7 +104,7 @@ Control:
   blind, gate, dimmer          Blinds, gates, dimmers
   mood, color                  Light moods, colors
   thermostat, alarm            Climate, security
-  doorlock, intercom, charger  Door locks, intercoms, EV chargers
+  door, intercom, charger     Door locks, intercoms, EV chargers
   music                        Music server zones
   lock, unlock                 Lock/unlock controls (admin)
   run, send                    Run scenes, send raw commands
@@ -139,6 +139,9 @@ struct Cli {
     /// Disable colored output (also respects NO_COLOR env var)
     #[arg(long, global = true)]
     no_color: bool,
+    /// Suppress table headers (useful for piping)
+    #[arg(long, global = true)]
+    no_header: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -253,7 +256,8 @@ enum Cmd {
         room: Option<String>,
     },
     /// Control door lock: lock | unlock | open
-    Doorlock {
+    #[command(alias = "doorlock")]
+    Door {
         name_or_uuid: String,
         /// Action: lock, unlock, open
         action: String,
@@ -300,7 +304,12 @@ enum Cmd {
         room: Option<String>,
     },
     /// Run a scene
-    Run { scene: String },
+    Run {
+        scene: String,
+        /// Preview what would be executed without sending commands
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Send raw command
     Send {
         name_or_uuid: String,
@@ -413,7 +422,8 @@ enum Cmd {
     // ── System ───────────────────────────────────────────────────────────────
     /// Miniserver health
     Status {
-        #[arg(long)]
+        /// Show energy meters (deprecated: use `lox energy` instead)
+        #[arg(long, hide = true)]
         energy: bool,
         /// Show CPU, tasks, context switches, SD card health
         #[arg(long)]
@@ -631,18 +641,21 @@ enum CacheCmd {
 enum SetupCmd {
     /// Set one or more config fields (omitted fields are preserved)
     Set {
-        #[arg(long)]
+        #[arg(long, env = "LOX_HOST")]
         host: Option<String>,
-        #[arg(long)]
+        #[arg(long, env = "LOX_USER")]
         user: Option<String>,
         /// Password (or set LOX_PASS env var to avoid it appearing in the process table)
         #[arg(long, env = "LOX_PASS")]
         pass: Option<String>,
-        #[arg(long)]
+        #[arg(long, env = "LOX_SERIAL")]
         serial: Option<String>,
-        /// Enable SSL certificate verification (default: off for self-signed Miniserver certs)
+        /// Enable SSL certificate verification (for valid certs)
         #[arg(long)]
-        verify_ssl: Option<bool>,
+        verify_ssl: bool,
+        /// Disable SSL certificate verification (default, for self-signed Miniserver certs)
+        #[arg(long, conflicts_with = "verify_ssl")]
+        no_verify_ssl: bool,
     },
     /// Show current config (password redacted)
     Show,
@@ -723,6 +736,15 @@ enum ConfigCmd {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let quiet = cli.quiet;
+    let no_header = cli.no_header;
+
+    // Respect NO_COLOR env var (clig.dev standard) and --no-color flag
+    if cli.no_color || std::env::var("NO_COLOR").is_ok() {
+        // No ANSI colors are used currently, but this signals to any future
+        // colored output that colors should be suppressed.
+        std::env::set_var("NO_COLOR", "1");
+    }
 
     match cli.cmd {
         Cmd::Setup { action } => match action {
@@ -732,6 +754,7 @@ fn main() -> Result<()> {
                 pass,
                 serial,
                 verify_ssl,
+                no_verify_ssl,
             } => {
                 let mut cfg = Config::load().unwrap_or_default();
                 if let Some(h) = host {
@@ -750,10 +773,15 @@ fn main() -> Result<()> {
                 if let Some(s) = serial {
                     cfg.serial = s;
                 }
-                if let Some(v) = verify_ssl {
-                    cfg.verify_ssl = Some(v);
+                if verify_ssl {
+                    cfg.verify_ssl = Some(true);
+                } else if no_verify_ssl {
+                    cfg.verify_ssl = Some(false);
                 }
-                cfg.save()?;
+                let path = cfg.save()?;
+                if !quiet {
+                    println!("✓  Config saved to {:?}", path);
+                }
             }
             SetupCmd::Show => {
                 let cfg = Config::load()?;
@@ -780,12 +808,16 @@ fn main() -> Result<()> {
                 AliasCmd::Add { name, uuid } => {
                     cfg.aliases.insert(name.clone(), uuid.clone());
                     cfg.save()?;
-                    println!("✓  alias '{}' → {}", name, uuid);
+                    if !quiet {
+                        println!("✓  alias '{}' → {}", name, uuid);
+                    }
                 }
                 AliasCmd::Remove { name } => {
                     if cfg.aliases.remove(&name).is_some() {
                         cfg.save()?;
-                        println!("✓  removed alias '{}'", name);
+                        if !quiet {
+                            println!("✓  removed alias '{}'", name);
+                        }
                     } else {
                         println!("No alias named '{}'", name);
                     }
@@ -796,8 +828,10 @@ fn main() -> Result<()> {
                     } else {
                         let mut aliases: Vec<_> = cfg.aliases.iter().collect();
                         aliases.sort_by_key(|(k, _)| k.as_str());
-                        println!("{:<24} UUID", "ALIAS");
-                        println!("{}", "─".repeat(60));
+                        if !no_header {
+                            println!("{:<24} UUID", "ALIAS");
+                            println!("{}", "─".repeat(60));
+                        }
                         for (name, uuid) in aliases {
                             println!("{:<24} {}", name, uuid);
                         }
@@ -1064,11 +1098,13 @@ fn main() -> Result<()> {
                     )?
                 );
             } else if values {
-                println!(
-                    "{:<40} {:<24} {:<22} {:<20} UUID",
-                    "NAME", "ROOM", "TYPE", "VALUE"
-                );
-                println!("{}", "─".repeat(140));
+                if !no_header {
+                    println!(
+                        "{:<40} {:<24} {:<22} {:<20} UUID",
+                        "NAME", "ROOM", "TYPE", "VALUE"
+                    );
+                    println!("{}", "─".repeat(140));
+                }
                 for c in &controls {
                     let val = lox
                         .get_all(&c.uuid)
@@ -1086,8 +1122,10 @@ fn main() -> Result<()> {
                 }
                 println!("\n{} controls", controls.len());
             } else {
-                println!("{:<40} {:<24} {:<22} UUID", "NAME", "ROOM", "TYPE");
-                println!("{}", "─".repeat(120));
+                if !no_header {
+                    println!("{:<40} {:<24} {:<22} UUID", "NAME", "ROOM", "TYPE");
+                    println!("{}", "─".repeat(120));
+                }
                 for c in &controls {
                     println!(
                         "{:<40} {:<24} {:<22} {}",
@@ -1348,7 +1386,7 @@ fn main() -> Result<()> {
             } else {
                 lox.send_cmd(&uuid, &command)?
             };
-            print_resp(&resp, cli.json, &name_or_uuid, &command);
+            print_resp(&resp, cli.json, quiet, &name_or_uuid, &command);
         }
         Cmd::On {
             name_or_uuid,
@@ -1360,7 +1398,7 @@ fn main() -> Result<()> {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
                     match lox.send_cmd(&ctrl.uuid, "on") {
-                        Ok(resp) => print_resp(&resp, cli.json, &ctrl.name, "on"),
+                        Ok(resp) => print_resp(&resp, cli.json, quiet, &ctrl.name, "on"),
                         Err(e) => eprintln!("  {} — {}", ctrl.name, e),
                     }
                 }
@@ -1369,7 +1407,7 @@ fn main() -> Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
                 let resp = lox.send_cmd(&uuid, "on")?;
-                print_resp(&resp, cli.json, &name, "on");
+                print_resp(&resp, cli.json, quiet, &name, "on");
             }
         }
         Cmd::Off {
@@ -1382,7 +1420,7 @@ fn main() -> Result<()> {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
                     match lox.send_cmd(&ctrl.uuid, "off") {
-                        Ok(resp) => print_resp(&resp, cli.json, &ctrl.name, "off"),
+                        Ok(resp) => print_resp(&resp, cli.json, quiet, &ctrl.name, "off"),
                         Err(e) => eprintln!("  {} — {}", ctrl.name, e),
                     }
                 }
@@ -1391,14 +1429,14 @@ fn main() -> Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
                 let resp = lox.send_cmd(&uuid, "off")?;
-                print_resp(&resp, cli.json, &name, "off");
+                print_resp(&resp, cli.json, quiet, &name, "off");
             }
         }
         Cmd::Pulse { name_or_uuid, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let resp = lox.send_cmd(&uuid, "pulse")?;
-            print_resp(&resp, cli.json, &name_or_uuid, "pulse");
+            print_resp(&resp, cli.json, quiet, &name_or_uuid, "pulse");
         }
 
         Cmd::Blind {
@@ -1455,7 +1493,7 @@ fn main() -> Result<()> {
                 }
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, cmd);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, cmd);
             if !cli.json {
                 if cmd.starts_with("manualLamella") {
                     // Slat tilt doesn't change StatePos; just read once after a short settle.
@@ -1539,7 +1577,7 @@ fn main() -> Result<()> {
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             if cli.json {
-                print_resp(&resp, true, &ctrl.name, cmd);
+                print_resp(&resp, true, quiet, &ctrl.name, cmd);
             } else {
                 println!("✓  {} → mood {}", ctrl.name, action);
                 thread::sleep(Duration::from_millis(400));
@@ -1568,7 +1606,13 @@ fn main() -> Result<()> {
                 bail!("Dimmer level must be 0-100");
             }
             let resp = lox.send_cmd(&ctrl.uuid, &format!("{}", level))?;
-            print_resp(&resp, cli.json, &ctrl.name, &format!("dim={}", level));
+            print_resp(
+                &resp,
+                cli.json,
+                quiet,
+                &ctrl.name,
+                &format!("dim={}", level),
+            );
         }
 
         Cmd::Gate {
@@ -1589,7 +1633,7 @@ fn main() -> Result<()> {
                 other => bail!("Unknown gate action '{}'. Use: open, close, stop", other),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, cmd);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, cmd);
         }
 
         Cmd::Color {
@@ -1620,7 +1664,7 @@ fn main() -> Result<()> {
                 value.clone()
             };
             let resp = lox.send_cmd(&ctrl.uuid, &cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, &cmd);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, &cmd);
         }
 
         Cmd::Weather { forecast } => {
@@ -1731,7 +1775,7 @@ fn main() -> Result<()> {
             }
             if let Some(t) = temp {
                 let resp = lox.send_cmd(&ctrl.uuid, &format!("setComfortTemperature/{}", t))?;
-                print_resp(&resp, cli.json, &ctrl.name, &format!("temp={}", t));
+                print_resp(&resp, cli.json, quiet, &ctrl.name, &format!("temp={}", t));
             } else if let Some(m) = mode {
                 let lower = m.to_lowercase();
                 let mode_id = match lower.as_str() {
@@ -1743,7 +1787,7 @@ fn main() -> Result<()> {
                     other => other,
                 };
                 let resp = lox.send_cmd(&ctrl.uuid, &format!("setOperatingMode/{}", mode_id))?;
-                print_resp(&resp, cli.json, &ctrl.name, &format!("mode={}", m));
+                print_resp(&resp, cli.json, quiet, &ctrl.name, &format!("mode={}", m));
             } else if let Some(temp_override) = r#override {
                 let resp = lox.send_cmd(
                     &ctrl.uuid,
@@ -1752,6 +1796,7 @@ fn main() -> Result<()> {
                 print_resp(
                     &resp,
                     cli.json,
+                    quiet,
                     &ctrl.name,
                     &format!("override={}°/{}min", temp_override, duration),
                 );
@@ -1794,7 +1839,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Doorlock {
+        Cmd::Door {
             name_or_uuid,
             action,
             room,
@@ -1815,7 +1860,7 @@ fn main() -> Result<()> {
                 ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, &action);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, &action);
         }
 
         Cmd::Intercom {
@@ -1839,7 +1884,7 @@ fn main() -> Result<()> {
                 ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, &action);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, &action);
         }
 
         Cmd::Charger {
@@ -1872,7 +1917,7 @@ fn main() -> Result<()> {
                 ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, &action);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, &action);
         }
 
         Cmd::Alarm {
@@ -1926,7 +1971,7 @@ fn main() -> Result<()> {
                 ),
             };
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, cli.json, &ctrl.name, cmd);
+            print_resp(&resp, cli.json, quiet, &ctrl.name, cmd);
         }
 
         Cmd::Lock {
@@ -1941,7 +1986,7 @@ fn main() -> Result<()> {
                 &ctrl.uuid,
                 &format!("lockcontrol/1/{}", encode_path_value(&reason)),
             )?;
-            print_resp(&resp, cli.json, &ctrl.name, "lock");
+            print_resp(&resp, cli.json, quiet, &ctrl.name, "lock");
         }
 
         Cmd::Unlock { name_or_uuid, room } => {
@@ -1949,7 +1994,7 @@ fn main() -> Result<()> {
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             let resp = lox.send_cmd(&ctrl.uuid, "unlockcontrol")?;
-            print_resp(&resp, cli.json, &ctrl.name, "unlock");
+            print_resp(&resp, cli.json, quiet, &ctrl.name, "unlock");
         }
 
         Cmd::Stats => {
@@ -1992,8 +2037,10 @@ fn main() -> Result<()> {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
-                println!("{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
-                println!("{}", "─".repeat(120));
+                if !no_header {
+                    println!("{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
+                    println!("{}", "─".repeat(120));
+                }
                 for (name, uuid, typ, room) in &stats_controls {
                     println!(
                         "{:<40} {:<22} {:<24} {}",
@@ -2434,26 +2481,57 @@ fn main() -> Result<()> {
             std::process::exit(if matches { 0 } else { 1 });
         }
 
-        Cmd::Run { scene } => {
+        Cmd::Run { scene, dry_run } => {
             let s = Scene::load(&scene)?;
             let mut lox = LoxClient::new(Config::load()?);
-            println!("▶  {}", s.name.as_deref().unwrap_or(&scene));
-            if let Some(d) = &s.description {
-                println!("   {}", d);
-            }
-            println!();
-            for (i, step) in s.steps.iter().enumerate() {
-                let uuid = match lox.resolve(&step.control) {
-                    Ok(u) => u,
-                    Err(e) => {
-                        eprintln!("Step {}: {}", i + 1, e);
-                        continue;
+            if dry_run {
+                println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
+                if let Some(d) = &s.description {
+                    println!("   {}", d);
+                }
+                println!();
+                for (i, step) in s.steps.iter().enumerate() {
+                    let resolved = match lox.resolve(&step.control) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("Step {}: {} (resolve failed: {})", i + 1, step.control, e);
+                            continue;
+                        }
+                    };
+                    println!(
+                        "  {}. {} → {}{}",
+                        i + 1,
+                        step.control,
+                        step.cmd,
+                        if step.delay_ms > 0 {
+                            format!(" (delay {}ms)", step.delay_ms)
+                        } else {
+                            String::new()
+                        }
+                    );
+                    let _ = resolved; // used for validation
+                }
+            } else {
+                if !quiet {
+                    println!("▶  {}", s.name.as_deref().unwrap_or(&scene));
+                    if let Some(d) = &s.description {
+                        println!("   {}", d);
                     }
-                };
-                let resp = lox.send_cmd(&uuid, &step.cmd)?;
-                print_resp(&resp, cli.json, &step.control, &step.cmd);
-                if step.delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(step.delay_ms));
+                    println!();
+                }
+                for (i, step) in s.steps.iter().enumerate() {
+                    let uuid = match lox.resolve(&step.control) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("Step {}: {}", i + 1, e);
+                            continue;
+                        }
+                    };
+                    let resp = lox.send_cmd(&uuid, &step.cmd)?;
+                    print_resp(&resp, cli.json, quiet, &step.control, &step.cmd);
+                    if step.delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(step.delay_ms));
+                    }
                 }
             }
         }
@@ -2510,7 +2588,9 @@ fn main() -> Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
             if code == "200" {
-                println!("✓  {} = {}", name_or_uuid, val);
+                if !quiet {
+                    println!("✓  {} = {}", name_or_uuid, val);
+                }
             } else {
                 bail!("Error {}: {}", code, val);
             }
@@ -3136,8 +3216,10 @@ fn main() -> Result<()> {
             } else if filtered.is_empty() {
                 println!("No sensors found.");
             } else {
-                println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-                println!("{}", "─".repeat(96));
+                if !no_header {
+                    println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
+                    println!("{}", "─".repeat(96));
+                }
                 for c in &filtered {
                     let xml = lox.get_all(&c.uuid).unwrap_or_default();
                     let val = xml_attr(&xml, "value").unwrap_or("?");
@@ -3179,8 +3261,10 @@ fn main() -> Result<()> {
             } else if energy.is_empty() {
                 println!("No energy meters found.");
             } else {
-                println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-                println!("{}", "─".repeat(96));
+                if !no_header {
+                    println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
+                    println!("{}", "─".repeat(96));
+                }
                 for c in &energy {
                     let xml = lox.get_all(&c.uuid).unwrap_or_default();
                     let val = xml_attr(&xml, "value").unwrap_or("?");

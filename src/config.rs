@@ -44,13 +44,12 @@ impl Config {
         Ok(cfg)
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<PathBuf> {
         let path = Self::path();
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(&path, serde_yaml::to_string(self)?)?;
         #[cfg(unix)]
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        println!("✓  Config saved to {:?}", path);
-        Ok(())
+        Ok(path)
     }
 }

@@ -8,7 +8,7 @@ lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
 
-Global flags: `--json`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var)
+Global flags: `--json`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`
 
 ---
 
@@ -17,7 +17,14 @@ Global flags: `--json`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` e
 ```bash
 lox setup set --host https://192.168.1.100 --user admin --pass secret
 lox setup set --serial YOUR_SERIAL     # enables correct TLS hostname
+lox setup set --verify-ssl             # enable cert verification
+lox setup set --no-verify-ssl          # disable (default, self-signed)
 lox setup show                         # show config (password redacted)
+```
+
+All config fields also support env vars: `LOX_HOST`, `LOX_USER`, `LOX_PASS`, `LOX_SERIAL`
+```bash
+LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 ```
 
 ### Aliases
@@ -115,7 +122,10 @@ lox alarm "Alarmanlage" arm            # arm alarm
 lox alarm "Alarmanlage" arm --no-motion  # arm without motion detection
 lox alarm "Alarmanlage" disarm
 lox alarm "Alarmanlage" quit           # acknowledge/silence
-lox lock "Heizung" --reason "Wartung"  # lock a control
+lox door "Haustür" lock                # lock a door lock
+lox door "Haustür" unlock              # unlock
+lox door "Haustür" open                # open (e.g. electric strike)
+lox lock "Heizung" --reason "Wartung"  # lock a control (admin)
 lox unlock "Heizung"
 ```
 
@@ -168,6 +178,7 @@ lox music volume 50                    # volume 0-100
 
 ```bash
 lox run abend                          # run a scene
+lox run abend --dry-run                # preview without executing
 lox scene ls                           # list all scenes
 lox scene show abend                   # print YAML definition
 lox scene new abend                    # create empty scene file
@@ -216,7 +227,6 @@ lox config diff old.Loxone new.Loxone  # compare two configs (accepts .zip or .L
 
 ```bash
 lox status                             # firmware, PLC state, memory
-lox status --energy                    # live energy panel (PV, grid, battery)
 lox status --diag                      # CPU, tasks, context switches, SD card
 lox status --net                       # network config (IP, MAC, DNS, DHCP, NTP)
 lox status --bus                       # CAN bus statistics
