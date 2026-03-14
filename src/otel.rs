@@ -3,13 +3,18 @@
 //! Supports both continuous daemon mode (`lox otel serve`) and one-shot push
 //! (`lox otel push`). Uses WebSocket streaming for real-time control state
 //! updates, plus HTTP polling for system/network diagnostics.
+//!
+//! Uses the experimental async PeriodicReader which spawns a tokio task
+//! (not a std thread) for periodic export, avoiding the executor mismatch
+//! between `futures_executor::block_on` and async HTTP clients.
 
 use anyhow::{bail, Result};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::{Protocol, WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -57,7 +62,7 @@ fn build_exporter(endpoint: &str, headers: &[String]) -> Result<MetricExporter> 
     let mut builder = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_endpoint(endpoint);
+        .with_endpoint(format!("{}/v1/metrics", endpoint.trim_end_matches('/')));
     if !header_map.is_empty() {
         builder = builder.with_headers(header_map);
     }
@@ -77,6 +82,27 @@ fn build_resource(cfg: &Config) -> Resource {
         attrs.push(KeyValue::new("device.id", cfg.serial.clone()));
     }
     Resource::builder().with_attributes(attrs).build()
+}
+
+/// Build the MeterProvider with async PeriodicReader.
+///
+/// Must be called from within a tokio runtime context (e.g. inside `block_on`
+/// or with an active `rt.enter()` guard). The PeriodicReader spawns a tokio
+/// task that periodically collects and exports metrics.
+fn build_provider(
+    cfg: &Config,
+    endpoint: &str,
+    interval: Duration,
+    headers: &[String],
+) -> Result<SdkMeterProvider> {
+    let exporter = build_exporter(endpoint, headers)?;
+    let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_interval(interval)
+        .build();
+    Ok(SdkMeterProvider::builder()
+        .with_resource(build_resource(cfg))
+        .with_reader(reader)
+        .build())
 }
 
 // ── Metric recording ────────────────────────────────────────────────────────
@@ -208,11 +234,12 @@ fn record_control_metrics(
 
 /// Extract a numeric value from Loxone XML/JSON response.
 /// Handles both JSON `{"LL":{"value":"42"}}` and plain XML `value="42"` formats.
+/// Also handles values with unit suffixes like "352880/1016404kB" or "42.5%".
 fn extract_lox_value(text: &str) -> Option<f64> {
     // Try JSON first
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
         if let Some(val) = v.pointer("/LL/value").and_then(|v| v.as_str()) {
-            return val.parse().ok();
+            return parse_numeric_prefix(val);
         }
     }
     // Try XML attribute
@@ -220,10 +247,27 @@ fn extract_lox_value(text: &str) -> Option<f64> {
     if let Some(start) = text.find(key) {
         let rest = &text[start + key.len()..];
         if let Some(end) = rest.find('"') {
-            return rest[..end].parse().ok();
+            return parse_numeric_prefix(&rest[..end]);
         }
     }
     None
+}
+
+/// Parse the leading numeric portion of a string, ignoring trailing
+/// units or denominators (e.g. "352880/1016404kB" → 352880.0).
+fn parse_numeric_prefix(s: &str) -> Option<f64> {
+    if let Ok(v) = s.parse::<f64>() {
+        return Some(v);
+    }
+    // Find the longest leading substring that parses as a number
+    let end = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(s.len());
+    if end > 0 {
+        s[..end].parse().ok()
+    } else {
+        None
+    }
 }
 
 // ── Serve (continuous daemon) ───────────────────────────────────────────────
@@ -241,15 +285,6 @@ pub fn serve(
     headers: &[String],
     quiet: bool,
 ) -> Result<()> {
-    let exporter = build_exporter(endpoint, headers)?;
-    let reader = PeriodicReader::builder(exporter)
-        .with_interval(interval)
-        .build();
-    let provider = SdkMeterProvider::builder()
-        .with_resource(build_resource(cfg))
-        .with_reader(reader)
-        .build();
-
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
     let structure = lox.get_structure()?.clone();
@@ -258,6 +293,14 @@ pub fn serve(
     // Shared state store updated by WebSocket, read by metric callbacks
     let store: StateStore = Arc::new(Mutex::new(HashMap::new()));
     let store_ws = Arc::clone(&store);
+
+    // Create tokio runtime — the async PeriodicReader spawns a tokio task
+    // for periodic export, so the runtime must be active for its lifetime.
+    let rt = tokio::runtime::Runtime::new()?;
+
+    // Build provider inside the runtime context so the PeriodicReader's
+    // tokio task is spawned on this runtime.
+    let provider = rt.block_on(async { build_provider(cfg, endpoint, interval, headers) })?;
 
     if !quiet {
         eprintln!(
@@ -270,7 +313,8 @@ pub fn serve(
     let tf = type_filter.map(|s| s.to_string());
     let rf = room_filter.map(|s| s.to_string());
 
-    // Spawn system metrics polling on a separate thread
+    // Spawn system metrics polling on a separate thread.
+    // Uses reqwest::blocking for HTTP calls — must run outside tokio context.
     let cfg_sys = cfg.clone();
     let meter_sys = provider.meter("loxone");
     let tf_sys = tf.clone();
@@ -290,8 +334,8 @@ pub fn serve(
         }
     });
 
-    // WebSocket streaming on the main async runtime
-    let rt = tokio::runtime::Runtime::new()?;
+    // WebSocket streaming keeps the runtime alive. The PeriodicReader's
+    // tokio task runs in the background, exporting metrics at each interval.
     rt.block_on(stream::stream_events(cfg, |events| {
         let mut state = store_ws.lock().unwrap();
         for event in &events {
@@ -324,16 +368,6 @@ pub fn push(
     headers: &[String],
     quiet: bool,
 ) -> Result<()> {
-    let exporter = build_exporter(endpoint, headers)?;
-    let reader = PeriodicReader::builder(exporter)
-        .with_interval(Duration::from_secs(1))
-        .build();
-    let provider = SdkMeterProvider::builder()
-        .with_resource(build_resource(cfg))
-        .with_reader(reader)
-        .build();
-    let meter = provider.meter("loxone");
-
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
     let structure = lox.get_structure()?.clone();
@@ -343,14 +377,19 @@ pub fn push(
         eprintln!("Collecting current state...");
     }
 
+    // Create tokio runtime — needed for both WS streaming and the async
+    // PeriodicReader. The runtime stays alive for the entire function.
+    let rt = tokio::runtime::Runtime::new()?;
+
+    // Build provider inside the runtime context.
+    let provider =
+        rt.block_on(async { build_provider(cfg, endpoint, Duration::from_secs(60), headers) })?;
+    let meter = provider.meter("loxone");
+
     // Collect initial state dump via WebSocket with a timeout.
-    // After subscribing, the Miniserver sends a full dump of all states,
-    // then switches to incremental updates. We collect for a few seconds
-    // to capture the full dump, then disconnect.
     let store: StateStore = Arc::new(Mutex::new(HashMap::new()));
     let store_ws = Arc::clone(&store);
 
-    let rt = tokio::runtime::Runtime::new()?;
     let collect_result = rt.block_on(async {
         tokio::time::timeout(
             Duration::from_secs(10),
@@ -365,12 +404,7 @@ pub fn push(
                         }
                     }
                 }
-                // After we've collected the initial dump (first batch of value states),
-                // check if we already have enough. The initial dump is complete when
-                // we've received at least some states.
                 if collected && !state.is_empty() {
-                    // Signal to stop by returning an error (stream_events will propagate it)
-                    // We use a custom error type to distinguish "done collecting" from real errors
                     return Err(anyhow::anyhow!("__done_collecting__"));
                 }
                 Ok(())
@@ -393,9 +427,43 @@ pub fn push(
         Err(_) => {} // Timeout — collected what we could
     }
 
-    // Record system metrics
-    let _ = record_system_metrics(&lox, &meter);
-    let _ = record_network_metrics(&lox, &meter);
+    // Pre-create gauge instruments on the main thread so the SDK registers
+    // them before the first PeriodicReader collection cycle. Values are
+    // then recorded on a blocking thread via the same instrument handles.
+    let heap_gauge = meter.f64_gauge("loxone.system.heap_bytes").build();
+    let cpu_gauge = meter.f64_gauge("loxone.system.cpu_percent").build();
+    let tasks_gauge = meter.f64_gauge("loxone.system.tasks_count").build();
+    let ctx_gauge = meter.f64_gauge("loxone.system.context_switches").build();
+
+    // Fetch values on a std::thread (reqwest::blocking) and record via pre-created gauges
+    {
+        let cfg_sys = cfg.clone();
+        std::thread::spawn(move || {
+            let lox_sys = LoxClient::new(cfg_sys);
+            if let Ok(text) = lox_sys.get_text("/dev/sys/heap") {
+                if let Some(v) = extract_lox_value(&text) {
+                    heap_gauge.record(v, &[]);
+                }
+            }
+            if let Ok(text) = lox_sys.get_text("/jdev/sys/lastcpu") {
+                if let Some(v) = extract_lox_value(&text) {
+                    cpu_gauge.record(v, &[]);
+                }
+            }
+            if let Ok(text) = lox_sys.get_text("/jdev/sys/numtasks") {
+                if let Some(v) = extract_lox_value(&text) {
+                    tasks_gauge.record(v, &[]);
+                }
+            }
+            if let Ok(text) = lox_sys.get_text("/jdev/sys/contextswitches") {
+                if let Some(v) = extract_lox_value(&text) {
+                    ctx_gauge.record(v, &[]);
+                }
+            }
+        })
+        .join()
+        .unwrap();
+    }
 
     // Record control metrics from collected state
     record_control_metrics(&store, &meter, type_filter, room_filter);
@@ -408,12 +476,20 @@ pub fn push(
         );
     }
 
-    // Wait for the periodic reader to complete at least one export cycle,
-    // then shut down (which does a final flush).
-    std::thread::sleep(Duration::from_secs(2));
-
-    // Shutdown may fail if no metrics were recorded (empty flush) — non-fatal
-    let _ = provider.shutdown();
+    // Flush and shut down. Use spawn_blocking for the sync force_flush()
+    // so we don't block a runtime worker thread (which would prevent the
+    // PeriodicReader's tokio task from being polled).
+    rt.block_on(async {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let provider_clone = provider.clone();
+        let flush_result = tokio::task::spawn_blocking(move || provider_clone.force_flush()).await;
+        match flush_result {
+            Ok(Err(e)) => eprintln!("Warning: OTel flush: {}", e),
+            Err(e) => eprintln!("Warning: OTel flush task: {}", e),
+            _ => {}
+        }
+        let _ = provider.shutdown();
+    });
 
     if !quiet {
         eprintln!("Done.");
@@ -491,8 +567,25 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_lox_value_with_unit_suffix() {
+        // Heap response: "352880/1016404kB"
+        let text = r#"<LL control="dev/sys/heap" value="352880/1016404kB" Code="200"/>"#;
+        assert_eq!(extract_lox_value(text), Some(352880.0));
+    }
+
+    #[test]
     fn test_extract_lox_value_none() {
         assert_eq!(extract_lox_value("no value here"), None);
+    }
+
+    #[test]
+    fn test_parse_numeric_prefix() {
+        assert_eq!(parse_numeric_prefix("42"), Some(42.0));
+        assert_eq!(parse_numeric_prefix("42.5"), Some(42.5));
+        assert_eq!(parse_numeric_prefix("352880/1016404kB"), Some(352880.0));
+        assert_eq!(parse_numeric_prefix("-1.5"), Some(-1.5));
+        assert_eq!(parse_numeric_prefix("abc"), None);
+        assert_eq!(parse_numeric_prefix(""), None);
     }
 
     #[test]
