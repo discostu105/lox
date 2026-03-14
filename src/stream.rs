@@ -4,7 +4,6 @@
 //! and yields structured state-change events. Used by `lox stream` and `lox otel`.
 
 use anyhow::{bail, Result};
-use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -20,13 +19,6 @@ use crate::config::Config;
 use crate::ws::LoxWsClient;
 
 type HmacSha256 = Hmac<Sha256>;
-type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
-
-fn aes_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
-    Aes256CbcEnc::new_from_slices(key, iv)
-        .expect("bad key/iv")
-        .encrypt_padded_vec_mut::<cbc::cipher::block_padding::Pkcs7>(plaintext)
-}
 
 // ── Binary message types ────────────────────────────────────────────────────
 
@@ -499,13 +491,19 @@ pub fn parse_binary_payload(msg_type: u8, data: &[u8]) -> Result<Vec<StateEvent>
 /// This function runs until the connection is closed or an error occurs.
 /// Authenticate on the WebSocket using RSA key exchange + AES encryption.
 /// This is required before any commands (like enablebinstatusupdate) are accepted.
+///
+/// The entire auth flow happens on the same WebSocket connection:
+/// 1. Fetch RSA public key via WS
+/// 2. Key exchange (send RSA-encrypted AES session key)
+/// 3. Request getkey2 via WS (one-time key is session-specific)
+/// 4. Compute HMAC and send encrypted authenticate command
 async fn ws_authenticate(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     cfg: &Config,
 ) -> Result<()> {
-    // 1. Fetch RSA public key via HTTP
+    // 1. Fetch RSA public key via HTTP (WS doesn't support this command)
     let cfg2 = cfg.clone();
     let pub_key_pem: String = tokio::task::spawn_blocking(move || -> Result<String> {
         let client = reqwest::blocking::Client::builder()
@@ -551,7 +549,7 @@ async fn ws_authenticate(
     rand::thread_rng().fill_bytes(&mut aes_iv);
     let key_info = format!("{}:{}", hex::encode(aes_key), hex::encode(aes_iv));
 
-    // 3. RSA-encrypt key info
+    // 3. RSA-encrypt key info and do key exchange
     let encrypted_b64 = {
         let enc = pub_key.encrypt(
             &mut rand::thread_rng(),
@@ -560,117 +558,124 @@ async fn ws_authenticate(
         )?;
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc)
     };
-
-    // 4. Get HMAC key for authentication
-    let cfg3 = cfg.clone();
-    let (sig, hash_alg) = tokio::task::spawn_blocking(move || -> Result<(String, String)> {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(crate::client::USER_AGENT)
-            .danger_accept_invalid_certs(true)
-            .build()?;
-        let resp: serde_json::Value = client
-            .get(format!("{}/jdev/sys/getkey2", cfg3.host))
-            .basic_auth(&cfg3.user, Some(&cfg3.pass))
-            .send()?
-            .json()?;
-        let val = resp
-            .pointer("/LL/value")
-            .ok_or_else(|| anyhow::anyhow!("no key2"))?;
-        let key_hex = val.get("key").and_then(|v| v.as_str()).unwrap_or("");
-        let salt_hex = val.get("salt").and_then(|v| v.as_str()).unwrap_or("");
-        let hash_alg = val
-            .get("hashAlg")
-            .and_then(|v| v.as_str())
-            .unwrap_or("SHA256")
-            .to_string();
-        let key_b = hex::decode(key_hex)?;
-        let salt = String::from_utf8(hex::decode(salt_hex)?)?;
-
-        let mut h1 = Sha1Digest::new();
-        h1.update(cfg3.pass.as_bytes());
-        let pass_sha1 = format!("{:X}", h1.finalize());
-        let visu = format!(
-            "{:X}",
-            Sha256::digest(format!("{}:{}", pass_sha1, salt).as_bytes())
-        );
-
-        let mut mac = HmacSha256::new_from_slice(&key_b)?;
-        mac.update(format!("{}:{}", cfg3.user, visu).as_bytes());
-        Ok((hex::encode(mac.finalize().into_bytes()), hash_alg))
-    })
-    .await??;
-
-    // 5. Key exchange
     ws.send(Message::Text(format!(
         "jdev/sys/keyexchange/{}",
         encrypted_b64
     )))
     .await?;
+    ws_expect_code_200(ws, "keyexchange").await?;
 
-    // Read keyexchange response
-    for _ in 0..5 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
-            Ok(Some(Ok(Message::Text(t)))) => {
-                let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
-                let code = v
-                    .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("0");
-                if code != "200" {
-                    bail!("keyexchange failed ({}): {}", code, t);
-                }
-                break;
-            }
-            Ok(Some(Ok(Message::Binary(_)))) => continue,
-            Ok(Some(Err(e))) => bail!("WS error: {}", e),
-            _ => bail!("WS timeout/closed during keyexchange"),
-        }
-    }
+    // 4. Get one-time HMAC key over WS
+    ws.send(Message::Text(format!("jdev/sys/getkey2/{}", cfg.user)))
+        .await?;
+    let key2_json = ws_read_text_value(ws, "getkey2").await?;
+    let key2_val: Value = serde_json::from_str(&key2_json).unwrap_or_default();
 
-    // 6. Authenticate via encrypted gettoken (same as token.rs)
-    let _hash_alg = hash_alg;
+    let key_hex = key2_val.get("key").and_then(|v| v.as_str()).unwrap_or("");
+    let salt_hex = key2_val.get("salt").and_then(|v| v.as_str()).unwrap_or("");
+    let hash_alg = key2_val
+        .get("hashAlg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("SHA1");
+
+    let key_b = hex::decode(key_hex)?;
+
+    // 5. Compute HMAC signature per lxcommunicator protocol:
+    //    pwHash = hashAlg(password + ":" + salt_hex).toUpperCase()
+    //    sig = HMAC-hashAlg(hex_decode(key), "user:" + pwHash)
+    //    Note: salt is used as raw hex string (NOT hex-decoded)
+    let pw_hash = if hash_alg == "SHA256" {
+        format!(
+            "{:X}",
+            Sha256::digest(format!("{}:{}", cfg.pass, salt_hex).as_bytes())
+        )
+    } else {
+        let mut h1 = Sha1Digest::new();
+        h1.update(format!("{}:{}", cfg.pass, salt_hex).as_bytes());
+        format!("{:X}", h1.finalize())
+    };
+    let mut mac = HmacSha256::new_from_slice(&key_b)?;
+    mac.update(format!("{}:{}", cfg.user, pw_hash).as_bytes());
+    let sig = hex::encode(mac.finalize().into_bytes());
+
+    // 6. Send gettoken command
     let client_uuid = uuid::Uuid::new_v4().to_string();
     let cmd = format!(
         "jdev/sys/gettoken/{}/{}/4/{}/lox-cli",
         sig, cfg.user, client_uuid
     );
-    let enc_cmd = aes_encrypt(&aes_key, &aes_iv, cmd.as_bytes());
-    let enc_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc_cmd);
-    let enc_url: String = enc_b64
-        .chars()
-        .map(|c| match c {
-            '+' => "%2B".to_string(),
-            '/' => "%2F".to_string(),
-            '=' => "%3D".to_string(),
-            c => c.to_string(),
-        })
-        .collect();
-    ws.send(Message::Text(format!("jdev/sys/enc/{}", enc_url)))
-        .await?;
+    ws.send(Message::Text(cmd)).await?;
+    ws_expect_code_200(ws, "gettoken").await?;
 
-    // Read auth response
+    Ok(())
+}
+
+/// Read a text response from the WS, returning the "value" field as a string.
+/// Skips binary messages. If the value is an object, returns it as JSON.
+async fn ws_read_text_value(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    label: &str,
+) -> Result<String> {
     for _ in 0..10 {
         match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
-                let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
+                let v: Value = serde_json::from_str(&t).unwrap_or_default();
                 let code = v
                     .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
+                    .or_else(|| v.pointer("/LL/code"))
+                    .and_then(|c| c.as_str().or_else(|| c.as_i64().map(|_| "200")))
+                    .unwrap_or("0");
+                if code == "200" {
+                    let val = v.pointer("/LL/value").unwrap_or(&Value::Null);
+                    return if val.is_string() {
+                        Ok(val.as_str().unwrap().to_string())
+                    } else {
+                        Ok(val.to_string())
+                    };
+                }
+                if code != "0" {
+                    bail!("{} failed ({}): {}", label, code, t);
+                }
+            }
+            Ok(Some(Ok(Message::Binary(_)))) => continue,
+            Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
+            _ => bail!("WS timeout during {}", label),
+        }
+    }
+    bail!("{}: no response after 10 messages", label)
+}
+
+/// Read WS messages until we get a text response with code 200.
+async fn ws_expect_code_200(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    label: &str,
+) -> Result<()> {
+    for _ in 0..10 {
+        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => {
+                let v: Value = serde_json::from_str(&t).unwrap_or_default();
+                let code = v
+                    .pointer("/LL/Code")
+                    .or_else(|| v.pointer("/LL/code"))
+                    .and_then(|c| c.as_str().or_else(|| c.as_i64().map(|_| "200")))
                     .unwrap_or("0");
                 if code == "200" {
                     return Ok(());
                 }
                 if code != "0" {
-                    bail!("WebSocket authentication failed ({}): {}", code, t);
+                    bail!("{} failed ({}): {}", label, code, t);
                 }
             }
             Ok(Some(Ok(Message::Binary(_)))) => continue,
-            Ok(Some(Err(e))) => bail!("WS error: {}", e),
-            _ => bail!("WS timeout waiting for auth response"),
+            Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
+            _ => bail!("WS timeout during {}", label),
         }
     }
-
-    bail!("WebSocket authentication: no response after 10 messages")
+    bail!("{}: no 200 response after 10 messages", label)
 }
 
 pub async fn stream_events<F>(cfg: &Config, mut handler: F) -> Result<()>
@@ -680,9 +685,7 @@ where
     let ws_client = LoxWsClient::new(cfg.clone());
     let (mut ws_stream, _resp) = ws_client.connect_raw().await?;
 
-    // Authenticate on the WebSocket before subscribing.
-    // The Miniserver requires a key exchange + encrypted auth on WebSocket,
-    // even if HTTP basic auth was in the upgrade header.
+    // Authenticate on the WebSocket.
     ws_authenticate(&mut ws_stream, cfg).await?;
 
     // Subscribe to binary status updates
