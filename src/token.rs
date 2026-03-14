@@ -1,7 +1,6 @@
 //! Loxone token authentication via WS + RSA/AES command encryption
 
 use anyhow::{bail, Result};
-use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -15,7 +14,6 @@ use crate::config::Config;
 use crate::ws::LoxWsClient;
 
 type HmacSha256 = Hmac<Sha256>;
-type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TokenStore {
@@ -42,12 +40,6 @@ impl TokenStore {
             .as_secs();
         self.valid_until > now + 300
     }
-}
-
-fn aes_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
-    Aes256CbcEnc::new_from_slices(key, iv)
-        .expect("bad key/iv")
-        .encrypt_padded_vec_mut::<cbc::cipher::block_padding::Pkcs7>(plaintext)
 }
 
 #[allow(dead_code)]
@@ -132,41 +124,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc)
     };
 
-    // 4. Compute HMAC for gettoken BEFORE keyexchange (salt is one-time use)
-    let cfg3 = cfg.clone();
-    let sig = tokio::task::spawn_blocking(move || -> Result<String> {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(crate::client::USER_AGENT)
-            .danger_accept_invalid_certs(true)
-            .build()?;
-        let resp: serde_json::Value = client
-            .get(format!("{}/jdev/sys/getkey2", cfg3.host))
-            .basic_auth(&cfg3.user, Some(&cfg3.pass))
-            .send()?
-            .json()?;
-        let val = resp
-            .pointer("/LL/value")
-            .ok_or_else(|| anyhow::anyhow!("no key2"))?;
-        let key_hex = val.get("key").and_then(|v| v.as_str()).unwrap_or("");
-        let salt_hex = val.get("salt").and_then(|v| v.as_str()).unwrap_or("");
-        let key_b = hex::decode(key_hex)?;
-        let salt = String::from_utf8(hex::decode(salt_hex)?)?;
-
-        let mut h1 = Sha1Digest::new();
-        h1.update(cfg3.pass.as_bytes());
-        let pass_sha1 = format!("{:X}", h1.finalize());
-        let visu = format!(
-            "{:X}",
-            Sha256::digest(format!("{}:{}", pass_sha1, salt).as_bytes())
-        );
-
-        let mut mac = HmacSha256::new_from_slice(&key_b)?;
-        mac.update(format!("{}:{}", cfg3.user, visu).as_bytes());
-        Ok(hex::encode(mac.finalize().into_bytes()))
-    })
-    .await??;
-
-    // 5. WS connect + key exchange
+    // 4. WS connect + key exchange
     let ws_client = LoxWsClient::new(cfg.clone());
     let (mut ws, _) = ws_client.connect_raw().await?;
     ws.send(Message::Text(format!(
@@ -195,28 +153,43 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
         }
     }
 
-    // 6. Send encrypted gettoken command
+    // 5. Get one-time key via WS (must be same connection as gettoken)
+    ws.send(Message::Text(format!("jdev/sys/getkey2/{}", cfg.user)))
+        .await?;
+    let key2_val = ws_read_json_value(&mut ws, "getkey2").await?;
+    let key_hex = key2_val.get("key").and_then(|v| v.as_str()).unwrap_or("");
+    let salt_hex = key2_val.get("salt").and_then(|v| v.as_str()).unwrap_or("");
+    let hash_alg = key2_val
+        .get("hashAlg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("SHA1");
+
+    let key_b = hex::decode(key_hex)?;
+
+    // Hash: hashAlg(password + ":" + salt_hex).toUpperCase()
+    // Note: salt is used as raw hex string (NOT hex-decoded)
+    let pw_hash = if hash_alg == "SHA256" {
+        format!(
+            "{:X}",
+            Sha256::digest(format!("{}:{}", cfg.pass, salt_hex).as_bytes())
+        )
+    } else {
+        let mut h1 = Sha1Digest::new();
+        h1.update(format!("{}:{}", cfg.pass, salt_hex).as_bytes());
+        format!("{:X}", h1.finalize())
+    };
+
+    let mut mac = HmacSha256::new_from_slice(&key_b)?;
+    mac.update(format!("{}:{}", cfg.user, pw_hash).as_bytes());
+    let sig = hex::encode(mac.finalize().into_bytes());
+
+    // 6. Send gettoken command
     let client_uuid = uuid::Uuid::new_v4().to_string();
     let cmd = format!(
         "jdev/sys/gettoken/{}/{}/4/{}/lox-cli",
         sig, cfg.user, client_uuid
     );
-    let enc_cmd_b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        aes_encrypt(&aes_key, &aes_iv, cmd.as_bytes()),
-    );
-    // URL-encode the base64 (+ and / need encoding in WS commands)
-    let enc_cmd_url: String = enc_cmd_b64
-        .chars()
-        .map(|c| match c {
-            '+' => "%2B".to_string(),
-            '/' => "%2F".to_string(),
-            '=' => "%3D".to_string(),
-            c => c.to_string(),
-        })
-        .collect();
-    ws.send(Message::Text(format!("jdev/sys/enc/{}", enc_cmd_url)))
-        .await?;
+    ws.send(Message::Text(cmd)).await?;
 
     // 7. Read token response
     let mut token_resp: Option<serde_json::Value> = None;
@@ -224,7 +197,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
         match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
-                    if v.pointer("/LL/Code").is_some() {
+                    if v.pointer("/LL/Code").is_some() || v.pointer("/LL/code").is_some() {
                         token_resp = Some(v);
                         break;
                     }
@@ -240,6 +213,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
 
     let code = token_resp
         .pointer("/LL/Code")
+        .or_else(|| token_resp.pointer("/LL/code"))
         .and_then(|c| c.as_str())
         .unwrap_or("0");
     if code != "200" {
@@ -268,6 +242,40 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     };
     ts.save()?;
     Ok(ts)
+}
+
+/// Read a WS text response and return the parsed JSON value field.
+async fn ws_read_json_value(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    label: &str,
+) -> Result<serde_json::Value> {
+    for _ in 0..10 {
+        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
+                let code = v
+                    .pointer("/LL/Code")
+                    .or_else(|| v.pointer("/LL/code"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("0");
+                if code == "200" {
+                    return Ok(v
+                        .pointer("/LL/value")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null));
+                }
+                if code != "0" {
+                    bail!("{} failed ({}): {}", label, code, t);
+                }
+            }
+            Ok(Some(Ok(Message::Binary(_)))) => continue,
+            Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
+            _ => bail!("WS timeout during {}", label),
+        }
+    }
+    bail!("{}: no response after 10 messages", label)
 }
 
 #[cfg(test)]
