@@ -78,6 +78,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     let cfg2 = cfg.clone();
     let pub_key_pem: String = tokio::task::spawn_blocking(move || -> Result<String> {
         let client = reqwest::blocking::Client::builder()
+            .user_agent(crate::client::USER_AGENT)
             .danger_accept_invalid_certs(true)
             .build()?;
         let resp: serde_json::Value = client
@@ -135,6 +136,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     let cfg3 = cfg.clone();
     let sig = tokio::task::spawn_blocking(move || -> Result<String> {
         let client = reqwest::blocking::Client::builder()
+            .user_agent(crate::client::USER_AGENT)
             .danger_accept_invalid_certs(true)
             .build()?;
         let resp: serde_json::Value = client

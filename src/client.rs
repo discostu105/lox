@@ -26,6 +26,8 @@ impl std::error::Error for HttpStatusError {}
 use crate::config::Config;
 use crate::token::TokenStore;
 
+pub const USER_AGENT: &str = concat!("lox-cli/", env!("CARGO_PKG_VERSION"));
+
 // ── AutopilotRule ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -62,6 +64,7 @@ impl LoxClient {
         let verify_ssl = cfg.verify_ssl.unwrap_or(false);
         Self {
             client: Client::builder()
+                .user_agent(USER_AGENT)
                 .danger_accept_invalid_certs(!verify_ssl)
                 .timeout(Duration::from_secs(10))
                 .build()

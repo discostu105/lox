@@ -2143,6 +2143,7 @@ fn main() -> Result<()> {
                     .replace("https://", "http://")
             );
             let client = Client::builder()
+                .user_agent(client::USER_AGENT)
                 .danger_accept_invalid_certs(true)
                 .timeout(Duration::from_secs(10))
                 .build()?;
@@ -2708,6 +2709,7 @@ fn main() -> Result<()> {
                 }
                 CacheCmd::Refresh => {
                     let client = Client::builder()
+                        .user_agent(client::USER_AGENT)
                         .danger_accept_invalid_certs(true)
                         .timeout(Duration::from_secs(15))
                         .build()?;
