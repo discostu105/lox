@@ -78,11 +78,10 @@ impl LoxClient {
         &self,
         rb: reqwest::blocking::RequestBuilder,
     ) -> reqwest::blocking::RequestBuilder {
-        if let Some(ts) = TokenStore::load().filter(|t| t.is_valid()) {
-            rb.basic_auth(&self.cfg.user, Some(&ts.token))
-        } else {
-            rb.basic_auth(&self.cfg.user, Some(&self.cfg.pass))
-        }
+        // Always use password for HTTP basic auth.
+        // Loxone tokens are for WebSocket auth only — they can't be
+        // used as HTTP basic auth passwords.
+        rb.basic_auth(&self.cfg.user, Some(&self.cfg.pass))
     }
 
     pub fn get_text(&self, path: &str) -> Result<String> {
