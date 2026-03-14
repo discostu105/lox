@@ -101,6 +101,7 @@ pub struct StateUuidInfo {
     pub control_type: String,
     pub room: Option<String>,
     pub category: Option<String>,
+    pub unit: Option<String>,
 }
 
 /// Build a map from state UUID → control metadata by walking the structure cache.
@@ -133,6 +134,8 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                 .and_then(|c| cats.get(c))
                 .cloned();
 
+            let unit = extract_unit(ctrl);
+
             // Control's own states
             add_states_from(
                 &mut map,
@@ -142,6 +145,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                 &typ,
                 room.as_deref(),
                 cat.as_deref(),
+                unit.as_deref(),
             );
 
             // Sub-control states
@@ -149,6 +153,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                 for (sub_uuid, sub) in subs {
                     let sub_name = format!("{}/{}", name, str_field(sub, "name"));
                     let sub_type = str_field(sub, "type");
+                    let sub_unit = extract_unit(sub).or_else(|| unit.clone());
                     add_states_from(
                         &mut map,
                         sub,
@@ -157,6 +162,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                         &sub_type,
                         room.as_deref(),
                         cat.as_deref(),
+                        sub_unit.as_deref(),
                     );
                 }
             }
@@ -176,6 +182,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                         control_type: "GlobalState".to_string(),
                         room: None,
                         category: None,
+                        unit: None,
                     },
                 );
             }
@@ -198,6 +205,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
                                 control_type: "AutopilotRule".to_string(),
                                 room: None,
                                 category: None,
+                                unit: None,
                             },
                         );
                     }
@@ -209,6 +217,7 @@ pub fn build_state_uuid_map(structure: &Value) -> HashMap<String, StateUuidInfo>
     map
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_states_from(
     map: &mut HashMap<String, StateUuidInfo>,
     ctrl: &Value,
@@ -217,6 +226,7 @@ fn add_states_from(
     typ: &str,
     room: Option<&str>,
     cat: Option<&str>,
+    unit: Option<&str>,
 ) {
     if let Some(states) = ctrl.get("states").and_then(|s| s.as_object()) {
         for (state_name, uuid_val) in states {
@@ -230,6 +240,7 @@ fn add_states_from(
                         control_type: typ.to_string(),
                         room: room.map(|r| r.to_string()),
                         category: cat.map(|c| c.to_string()),
+                        unit: unit.map(|u| u.to_string()),
                     },
                 );
             }
@@ -247,6 +258,31 @@ fn build_name_map(structure: &Value, key: &str) -> HashMap<String, String> {
         }
     }
     map
+}
+
+/// Extract the unit suffix from a Loxone printf-style format string.
+/// e.g. "%.1f°C" → "Cel", "%.0fppm" → "ppm", "%.3fkW" → "kW", "%.0f%%" → "%"
+fn extract_unit(ctrl: &Value) -> Option<String> {
+    let details = ctrl.get("details")?;
+    // Try format keys in order of specificity
+    for key in &["format", "actualFormat"] {
+        if let Some(fmt) = details.get(*key).and_then(|v| v.as_str()) {
+            // Find the last format specifier (e.g. %d, %f, %s) and take what's after it
+            if let Some(pos) = fmt.rfind(|c: char| "dfs".contains(c)) {
+                let suffix = fmt[pos + 1..].trim();
+                if !suffix.is_empty() {
+                    // Normalize common units to UCUM (OTel convention)
+                    let unit = match suffix {
+                        "°C" | "°" => "Cel",
+                        "%%" | "%" => "%",
+                        _ => suffix,
+                    };
+                    return Some(unit.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn str_field(val: &Value, key: &str) -> String {
@@ -954,6 +990,7 @@ mod tests {
                     "type": "LightControllerV2",
                     "room": "r1",
                     "cat": "c1",
+                    "details": { "format": "%.1f°C" },
                     "states": {
                         "active": "state-active-uuid",
                         "value": "state-value-uuid"
@@ -991,13 +1028,15 @@ mod tests {
         assert_eq!(active.control_type, "LightControllerV2");
         assert_eq!(active.room.as_deref(), Some("Kitchen"));
         assert_eq!(active.category.as_deref(), Some("Lighting"));
+        assert_eq!(active.unit.as_deref(), Some("Cel"));
 
-        // Sub-control states
+        // Sub-control states (inherit parent unit)
         let dimmer = map.get("state-dimmer-pos").unwrap();
         assert_eq!(dimmer.control_name, "Kitchen Light/Dimmer");
         assert_eq!(dimmer.state_name, "position");
+        assert_eq!(dimmer.unit.as_deref(), Some("Cel"));
 
-        // Global states
+        // Global states (no unit)
         let global = map.get("global-op-mode-uuid").unwrap();
         assert_eq!(global.control_name, "Global");
         assert_eq!(global.state_name, "operatingMode");

@@ -148,35 +148,40 @@ type StateStore = Arc<Mutex<HashMap<String, (StateUuidInfo, f64)>>>;
 
 /// Record system diagnostics (CPU, heap, tasks, etc.) as metrics.
 fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) -> Result<()> {
-    // Heap
     if let Ok(text) = lox.get_text("/dev/sys/heap") {
         if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.heap_bytes").build();
-            gauge.record(val, &[]);
+            meter
+                .f64_gauge("loxone.system.heap")
+                .with_unit("kBy")
+                .build()
+                .record(val, &[]);
         }
     }
-
-    // CPU (admin only — may fail)
     if let Ok(text) = lox.get_text("/jdev/sys/lastcpu") {
         if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.cpu_percent").build();
-            gauge.record(val, &[]);
+            meter
+                .f64_gauge("loxone.system.cpu")
+                .with_unit("%")
+                .build()
+                .record(val, &[]);
         }
     }
-
-    // Tasks
     if let Ok(text) = lox.get_text("/jdev/sys/numtasks") {
         if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.tasks_count").build();
-            gauge.record(val, &[]);
+            meter
+                .f64_gauge("loxone.system.tasks")
+                .with_unit("{tasks}")
+                .build()
+                .record(val, &[]);
         }
     }
-
-    // Context switches
     if let Ok(text) = lox.get_text("/jdev/sys/contextswitches") {
         if let Some(val) = extract_lox_value(&text) {
-            let gauge = meter.f64_gauge("loxone.system.context_switches").build();
-            gauge.record(val, &[]);
+            meter
+                .f64_gauge("loxone.system.context_switches")
+                .with_unit("{switches}")
+                .build()
+                .record(val, &[]);
         }
     }
 
@@ -253,7 +258,7 @@ fn record_control_metrics(
             }
         }
 
-        let attrs = [
+        let mut attrs = vec![
             KeyValue::new("control.name", info.control_name.clone()),
             KeyValue::new("control.type", info.control_type.clone()),
             KeyValue::new("control.uuid", uuid.clone()),
@@ -264,6 +269,9 @@ fn record_control_metrics(
                 info.category.clone().unwrap_or_default(),
             ),
         ];
+        if let Some(unit) = &info.unit {
+            attrs.push(KeyValue::new("unit", unit.clone()));
+        }
         gauge.record(*value, &attrs);
     }
 }
