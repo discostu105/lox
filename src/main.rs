@@ -736,6 +736,9 @@ enum OtelCmd {
         /// Additional header for auth (e.g. "Authorization=Bearer xxx")
         #[arg(long)]
         header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
     },
     /// One-shot: push current state and exit
     Push {
@@ -751,6 +754,9 @@ enum OtelCmd {
         /// Additional header for auth
         #[arg(long)]
         header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
     },
 }
 
@@ -3676,6 +3682,7 @@ fn main() -> Result<()> {
                     r#type,
                     room,
                     header,
+                    delta,
                 } => {
                     let interval = otel::parse_interval(&interval)?;
                     otel::serve(
@@ -3686,6 +3693,7 @@ fn main() -> Result<()> {
                         room.as_deref(),
                         &header,
                         quiet,
+                        delta,
                     )?;
                 }
                 OtelCmd::Push {
@@ -3693,6 +3701,7 @@ fn main() -> Result<()> {
                     r#type,
                     room,
                     header,
+                    delta,
                 } => {
                     otel::push(
                         &cfg,
@@ -3701,6 +3710,7 @@ fn main() -> Result<()> {
                         room.as_deref(),
                         &header,
                         quiet,
+                        delta,
                     )?;
                 }
             }

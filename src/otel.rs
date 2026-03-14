@@ -68,7 +68,7 @@ fn otlp_metrics_url(endpoint: &str) -> String {
 }
 
 /// Build an OTLP metric exporter with the given endpoint and headers.
-fn build_exporter(endpoint: &str, headers: &[String]) -> Result<MetricExporter> {
+fn build_exporter(endpoint: &str, headers: &[String], delta: bool) -> Result<MetricExporter> {
     let header_map = parse_headers(headers)?;
     let mut builder = MetricExporter::builder()
         .with_http()
@@ -76,6 +76,9 @@ fn build_exporter(endpoint: &str, headers: &[String]) -> Result<MetricExporter> 
         .with_endpoint(otlp_metrics_url(endpoint));
     if !header_map.is_empty() {
         builder = builder.with_headers(header_map);
+    }
+    if delta {
+        builder = builder.with_temporality(opentelemetry_sdk::metrics::Temporality::Delta);
     }
     builder
         .build()
@@ -126,8 +129,9 @@ fn build_provider(
     endpoint: &str,
     interval: Duration,
     headers: &[String],
+    delta: bool,
 ) -> Result<SdkMeterProvider> {
-    let exporter = build_exporter(endpoint, headers)?;
+    let exporter = build_exporter(endpoint, headers, delta)?;
     let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
         .with_interval(interval)
         .build();
@@ -308,6 +312,7 @@ fn parse_numeric_prefix(s: &str) -> Option<f64> {
 /// - Connect to Miniserver WebSocket for real-time state changes
 /// - Push metrics via OTLP at the configured interval
 /// - Also fetch system/network diagnostics on each interval
+#[allow(clippy::too_many_arguments)]
 pub fn serve(
     cfg: &Config,
     endpoint: &str,
@@ -316,6 +321,7 @@ pub fn serve(
     room_filter: Option<&str>,
     headers: &[String],
     quiet: bool,
+    delta: bool,
 ) -> Result<()> {
     // Load structure for UUID mapping
     let mut lox = LoxClient::new(cfg.clone());
@@ -335,7 +341,8 @@ pub fn serve(
 
     // Build provider inside the runtime context so the PeriodicReader's
     // tokio task is spawned on this runtime.
-    let provider = rt.block_on(async { build_provider(cfg, endpoint, interval, headers) })?;
+    let provider =
+        rt.block_on(async { build_provider(cfg, endpoint, interval, headers, delta) })?;
 
     if !quiet {
         eprintln!(
@@ -411,6 +418,7 @@ pub fn push(
     room_filter: Option<&str>,
     headers: &[String],
     quiet: bool,
+    delta: bool,
 ) -> Result<()> {
     // Verify the OTLP endpoint is reachable before starting
     check_endpoint(endpoint, headers)?;
@@ -429,8 +437,9 @@ pub fn push(
     let rt = tokio::runtime::Runtime::new()?;
 
     // Build provider inside the runtime context.
-    let provider =
-        rt.block_on(async { build_provider(cfg, endpoint, Duration::from_secs(60), headers) })?;
+    let provider = rt.block_on(async {
+        build_provider(cfg, endpoint, Duration::from_secs(60), headers, delta)
+    })?;
     let meter = provider.meter("loxone");
 
     // Collect initial state dump via WebSocket with a timeout.
