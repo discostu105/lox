@@ -88,6 +88,61 @@ fn now_hms() -> String {
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
+fn detect_shell() -> Option<Shell> {
+    std::env::var("SHELL").ok().and_then(|s| {
+        let name = s.rsplit('/').next().unwrap_or(&s);
+        match name {
+            "bash" => Some(Shell::Bash),
+            "zsh" => Some(Shell::Zsh),
+            "fish" => Some(Shell::Fish),
+            "elvish" => Some(Shell::Elvish),
+            "pwsh" | "powershell" => Some(Shell::PowerShell),
+            _ => None,
+        }
+    })
+}
+
+fn install_completions(shell: Shell, cmd: &mut clap::Command) -> Result<()> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let (path, label) = match shell {
+        Shell::Bash => {
+            let dir = format!("{}/.local/share/bash-completion/completions", home);
+            fs::create_dir_all(&dir)?;
+            (format!("{}/lox", dir), "bash")
+        }
+        Shell::Zsh => {
+            // Use ~/.zfunc which is a common user completions dir
+            let dir = format!("{}/.zfunc", home);
+            fs::create_dir_all(&dir)?;
+            (format!("{}/_lox", dir), "zsh")
+        }
+        Shell::Fish => {
+            let dir = format!("{}/.config/fish/completions", home);
+            fs::create_dir_all(&dir)?;
+            (format!("{}/lox.fish", dir), "fish")
+        }
+        Shell::Elvish => {
+            bail!("Elvish completions must be installed manually — run: lox completions elvish");
+        }
+        Shell::PowerShell => {
+            bail!("PowerShell completions must be installed manually — run: lox completions powershell");
+        }
+        _ => bail!("Unsupported shell"),
+    };
+    let mut buf = Vec::new();
+    generate(shell, cmd, "lox", &mut buf);
+    fs::write(&path, buf)?;
+
+    eprintln!("Installed {} completions to {}", label, path);
+    if shell == Shell::Zsh {
+        eprintln!("Ensure ~/.zfunc is in your fpath. Add to ~/.zshrc:");
+        eprintln!("  fpath=(~/.zfunc $fpath)");
+        eprintln!("  autoload -Uz compinit && compinit");
+    }
+    eprintln!("Restart your shell or open a new tab to activate.");
+    Ok(())
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -553,10 +608,14 @@ enum Cmd {
         #[command(subcommand)]
         action: ConfigCmd,
     },
-    /// Generate shell completions
+    /// Generate or install shell completions
     Completions {
-        /// Shell to generate completions for
-        shell: Shell,
+        /// Shell to generate completions for (auto-detected if omitted)
+        shell: Option<Shell>,
+
+        /// Install completions to the standard location for your shell
+        #[arg(long)]
+        install: bool,
     },
 }
 
@@ -3659,9 +3718,17 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Completions { shell } => {
+        Cmd::Completions { shell, install } => {
+            let detected = shell.or_else(detect_shell);
+            let Some(sh) = detected else {
+                bail!("Could not detect shell. Specify one: lox completions bash|zsh|fish");
+            };
             let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "lox", &mut std::io::stdout());
+            if install {
+                install_completions(sh, &mut cmd)?;
+            } else {
+                generate(sh, &mut cmd, "lox", &mut std::io::stdout());
+            }
         }
 
         Cmd::Log { lines } => {
