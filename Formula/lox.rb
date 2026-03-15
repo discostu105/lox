@@ -1,7 +1,7 @@
 class Lox < Formula
   desc "Loxone Miniserver CLI — control lights, blinds, and automations from your terminal"
   homepage "https://github.com/discostu105/lox"
-  version "0.6.1"
+  version "0.6.2"
   license "MIT"
 
   on_macos do
