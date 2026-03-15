@@ -65,6 +65,7 @@ impl LoxClient {
             client: Client::builder()
                 .user_agent(USER_AGENT)
                 .danger_accept_invalid_certs(!verify_ssl)
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap(),
@@ -86,20 +87,18 @@ impl LoxClient {
     pub fn get_text(&self, path: &str) -> Result<String> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
         self.request_with_retry(|| {
-            self.apply_auth(self.client.get(&url))
-                .send()?
-                .text()
-                .map_err(Into::into)
+            let resp = self.apply_auth(self.client.get(&url)).send()?;
+            Self::check_redirect(&resp, &url)?;
+            resp.text().map_err(Into::into)
         })
     }
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
         self.request_with_retry(|| {
-            self.apply_auth(self.client.get(&url))
-                .send()?
-                .json::<Value>()
-                .map_err(Into::into)
+            let resp = self.apply_auth(self.client.get(&url)).send()?;
+            Self::check_redirect(&resp, &url)?;
+            resp.json::<Value>().map_err(Into::into)
         })
     }
 
@@ -107,6 +106,7 @@ impl LoxClient {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
         self.request_with_retry(|| {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
+            Self::check_redirect(&resp, &url)?;
             let status = resp.status();
             let bytes = resp.bytes()?.to_vec();
             if !status.is_success() {
@@ -118,6 +118,28 @@ impl LoxClient {
             }
             Ok(bytes)
         })
+    }
+
+    /// Check if a response is a redirect and return a helpful error instead of
+    /// silently following it. Miniserver Gen 2 redirects HTTP to a cloud DynDNS
+    /// HTTPS URL, which loses auth credentials and causes 401 errors.
+    fn check_redirect(resp: &reqwest::blocking::Response, original_url: &str) -> Result<()> {
+        if resp.status().is_redirection() {
+            let location = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown");
+            bail!(
+                "Server redirected {} → {}\n\
+                 Miniserver Gen 2 redirects HTTP to HTTPS via cloud DNS.\n\
+                 Fix: update your config to use https:// — \
+                 run: lox config set --host https://<your-miniserver-ip>",
+                original_url,
+                location
+            );
+        }
+        Ok(())
     }
 
     /// Retry a request up to 3 times with exponential backoff on network errors.
@@ -183,9 +205,9 @@ impl LoxClient {
         let resp = client
             .get(&url)
             .basic_auth(&cfg.user, Some(&cfg.pass))
-            .send()?
-            .error_for_status()?
-            .bytes()?;
+            .send()?;
+        Self::check_redirect(&resp, &url)?;
+        let resp = resp.error_for_status()?.bytes()?;
         let v: Value = serde_json::from_slice(&resp)?;
         if use_cache {
             if let Some(parent) = cache.parent() {
@@ -967,5 +989,40 @@ mod tests {
         );
         // Verify it was called (at least once; retries only on failure)
         mock.assert_hits(1);
+    }
+
+    // ── redirect detection ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_redirect_detected_as_error() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(301).header(
+                "location",
+                "https://192-168-10-222.serial.dyndns.loxonecloud.com/data/LoxApp3.json",
+            );
+        });
+        let mut client = LoxClient::new(mock_config(&server));
+        let err = client.get_structure().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("redirected"), "expected redirect error: {msg}");
+        assert!(
+            msg.contains("loxonecloud.com"),
+            "expected redirect URL in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_get_json_redirect_detected() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/jdev/sps/io/test/state");
+            then.status(302)
+                .header("location", "https://cloud.example.com/jdev/sps/io/test/state");
+        });
+        let client = LoxClient::new(mock_config(&server));
+        let err = client.get_json("/jdev/sps/io/test/state").unwrap_err();
+        assert!(err.to_string().contains("redirected"));
     }
 }
