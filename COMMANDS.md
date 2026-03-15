@@ -302,8 +302,14 @@ lox stream --json                      # output as NDJSON (one JSON object per l
 
 ## OpenTelemetry Export
 
+Pushes metrics, logs, and traces to any OTLP-compatible backend (Dynatrace, Datadog, Grafana Cloud, etc.).
+
+**Metrics**: control state gauges, system diagnostics (CPU, heap, tasks), network counters (CAN/LAN), weather data.
+**Logs**: state change events, text-state messages, Miniserver system log (`def.log`).
+**Traces**: synthetic automation traces — correlates autopilot rule fires with temporally-close state changes.
+
 ```bash
-# Continuous daemon — push metrics via OTLP every 30s
+# Continuous daemon — push metrics + logs + traces via OTLP every 30s
 lox otel serve --endpoint http://localhost:4318 --interval 30s
 
 # With auth header (Dynatrace, Datadog, etc.)
@@ -313,8 +319,17 @@ lox otel serve --endpoint https://otlp.example.com:4318 \
 # Filter by room or control type
 lox otel serve --endpoint ... --room "Kitchen" --type LightControllerV2
 
+# Metrics only (disable logs and traces)
+lox otel serve --endpoint ... --no-logs --no-traces
+
+# Metrics + logs only (disable traces)
+lox otel serve --endpoint ... --no-traces
+
 # One-shot push (for cron jobs)
 lox otel push --endpoint http://localhost:4318
+
+# One-shot push, metrics only
+lox otel push --endpoint http://localhost:4318 --no-logs
 ```
 
 ---

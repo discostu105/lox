@@ -516,7 +516,7 @@ enum Cmd {
         action: FilesCmd,
     },
 
-    /// Export metrics & logs to OpenTelemetry backends
+    /// Export metrics, logs & traces to OpenTelemetry backends
     Otel {
         #[command(subcommand)]
         action: OtelCmd,
@@ -719,7 +719,7 @@ enum FilesCmd {
 
 #[derive(Subcommand)]
 enum OtelCmd {
-    /// Continuously push metrics to an OTLP endpoint
+    /// Continuously push metrics, logs & traces to an OTLP endpoint
     Serve {
         /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
         #[arg(long, default_value = "http://localhost:4318")]
@@ -739,6 +739,12 @@ enum OtelCmd {
         /// Use delta temporality (required by Dynatrace and some backends)
         #[arg(long)]
         delta: bool,
+        /// Disable log export (metrics and traces only)
+        #[arg(long)]
+        no_logs: bool,
+        /// Disable trace export (metrics and logs only)
+        #[arg(long)]
+        no_traces: bool,
     },
     /// One-shot: push current state and exit
     Push {
@@ -757,6 +763,9 @@ enum OtelCmd {
         /// Use delta temporality (required by Dynatrace and some backends)
         #[arg(long)]
         delta: bool,
+        /// Disable log export (metrics only)
+        #[arg(long)]
+        no_logs: bool,
     },
 }
 
@@ -3683,6 +3692,8 @@ fn main() -> Result<()> {
                     room,
                     header,
                     delta,
+                    no_logs,
+                    no_traces,
                 } => {
                     let interval = otel::parse_interval(&interval)?;
                     otel::serve(
@@ -3694,6 +3705,8 @@ fn main() -> Result<()> {
                         &header,
                         quiet,
                         delta,
+                        no_logs,
+                        no_traces,
                     )?;
                 }
                 OtelCmd::Push {
@@ -3702,6 +3715,7 @@ fn main() -> Result<()> {
                     room,
                     header,
                     delta,
+                    no_logs,
                 } => {
                     otel::push(
                         &cfg,
@@ -3711,6 +3725,7 @@ fn main() -> Result<()> {
                         &header,
                         quiet,
                         delta,
+                        no_logs,
                     )?;
                 }
             }
