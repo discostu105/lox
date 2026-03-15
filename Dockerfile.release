@@ -1,0 +1,4 @@
+FROM scratch
+ARG TARGETARCH
+COPY docker/linux/${TARGETARCH}/lox /lox
+ENTRYPOINT ["/lox"]
