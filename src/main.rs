@@ -64,6 +64,54 @@ fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
     }
 }
 
+/// Print a dry-run envelope showing what would be executed.
+fn print_dry_run(
+    json: bool,
+    quiet: bool,
+    uuid: &str,
+    command: &str,
+    control_name: &str,
+    room: Option<&str>,
+) {
+    if json {
+        let mut obj = serde_json::json!({
+            "ok": true,
+            "dry_run": true,
+            "would_execute": {
+                "uuid": uuid,
+                "command": command,
+                "control": control_name,
+            }
+        });
+        if let Some(r) = room {
+            obj["would_execute"]["room"] = serde_json::Value::String(r.to_string());
+        }
+        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+    } else if !quiet {
+        println!("[dry-run] {} → {} (uuid: {})", control_name, command, uuid);
+    }
+}
+
+/// Execute a command or print dry-run info. Returns the response (or None for dry-run).
+#[allow(clippy::too_many_arguments)]
+fn send_or_dry_run(
+    lox: &LoxClient,
+    uuid: &str,
+    cmd: &str,
+    control_name: &str,
+    room: Option<&str>,
+    dry_run: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<Option<Value>> {
+    if dry_run {
+        print_dry_run(json, quiet, uuid, cmd, control_name, room);
+        Ok(None)
+    } else {
+        Ok(Some(lox.send_cmd(uuid, cmd)?))
+    }
+}
+
 fn bar(v: f64, max: f64) -> String {
     let n = ((v / max * 20.0) as usize).min(20);
     format!(
@@ -187,6 +235,7 @@ Configuration:
   cache, token                 Cache & auth token management
   config                       Loxone Config files (download/inspect/diff)
   completions                  Generate shell completions
+  schema                       Command schema for AI agent discovery
 
 {options}{after-help}"
 )]
@@ -206,6 +255,15 @@ struct Cli {
     /// Verbose output (-v for requests, -vv for request+response bodies)
     #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
     verbose: u8,
+    /// Validate and resolve inputs without executing commands
+    #[arg(long, global = true)]
+    dry_run: bool,
+    /// Fail instead of prompting for confirmation (implied by --output json)
+    #[arg(long, global = true)]
+    non_interactive: bool,
+    /// Trace ID for correlating agent actions in logs
+    #[arg(long, global = true)]
+    trace_id: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -620,6 +678,11 @@ enum Cmd {
         #[arg(long)]
         install: bool,
     },
+    /// Show command schema for AI agent discovery
+    Schema {
+        /// Show schema for a specific command (e.g. "blind", "light")
+        command: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -938,15 +1001,70 @@ enum ConfigCmd {
     },
 }
 
+// ── Error envelope ────────────────────────────────────────────────────────────
+
+/// Categorize an anyhow error into a machine-readable error code.
+fn categorize_error(e: &anyhow::Error) -> &'static str {
+    let msg = format!("{:#}", e);
+    let lower = msg.to_lowercase();
+    if lower.contains("no control matching") {
+        "control_not_found"
+    } else if lower.contains("ambiguous") {
+        "ambiguous_control"
+    } else if lower.contains("config not found") {
+        "config_not_found"
+    } else if lower.contains("requires --yes") {
+        "confirmation_required"
+    } else if let Some(http_err) = e.downcast_ref::<client::HttpStatusError>() {
+        match http_err.status {
+            401 => "unauthorized",
+            403 => "forbidden",
+            404 => "not_found",
+            _ => "http_error",
+        }
+    } else if lower.contains("connection") || lower.contains("timeout") {
+        "connection_error"
+    } else {
+        "error"
+    }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-fn main() -> Result<()> {
+fn main() {
     let cli = Cli::parse();
+    let json = cli.output == OutputFormat::Json;
+    if let Err(e) = run(cli) {
+        if json {
+            let envelope = serde_json::json!({
+                "ok": false,
+                "error": categorize_error(&e),
+                "message": format!("{:#}", e),
+            });
+            println!("{}", serde_json::to_string_pretty(&envelope).unwrap());
+        } else {
+            eprintln!("Error: {:#}", e);
+        }
+        std::process::exit(1);
+    }
+}
+
+fn run(cli: Cli) -> Result<()> {
     client::set_verbose(cli.verbose);
     let quiet = cli.quiet;
     let no_header = cli.no_header;
     let json = cli.output == OutputFormat::Json;
     let csv = cli.output == OutputFormat::Csv;
+    let dry_run = cli.dry_run;
+    // In JSON mode, always be non-interactive
+    let _non_interactive = cli.non_interactive || json;
+    let trace_id = cli.trace_id.clone();
+
+    if let Some(tid) = &trace_id {
+        if cli.verbose > 0 {
+            eprintln!("trace-id: {}", tid);
+        }
+    }
 
     // Respect NO_COLOR env var (clig.dev standard) and --no-color flag
     if cli.no_color || std::env::var("NO_COLOR").is_ok() {
@@ -1602,12 +1720,22 @@ fn main() -> Result<()> {
         } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = if let Some(hash) = secured {
-                lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
+            if dry_run {
+                let ctrl = lox.find_control(&uuid).ok();
+                let name = ctrl
+                    .as_ref()
+                    .map(|c| c.name.as_str())
+                    .unwrap_or(&name_or_uuid);
+                let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
+                print_dry_run(json, quiet, &uuid, &command, name, room);
             } else {
-                lox.send_cmd(&uuid, &command)?
-            };
-            print_resp(&resp, json, quiet, &name_or_uuid, &command);
+                let resp = if let Some(hash) = secured {
+                    lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
+                } else {
+                    lox.send_cmd(&uuid, &command)?
+                };
+                print_resp(&resp, json, quiet, &name_or_uuid, &command);
+            }
         }
         Cmd::On {
             name_or_uuid,
@@ -1618,17 +1746,34 @@ fn main() -> Result<()> {
             if let Some(room_name) = all_in_room {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
-                    match lox.send_cmd(&ctrl.uuid, "on") {
-                        Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "on"),
-                        Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                    if dry_run {
+                        print_dry_run(
+                            json,
+                            quiet,
+                            &ctrl.uuid,
+                            "on",
+                            &ctrl.name,
+                            ctrl.room.as_deref(),
+                        );
+                    } else {
+                        match lox.send_cmd(&ctrl.uuid, "on") {
+                            Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "on"),
+                            Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                        }
                     }
                 }
             } else {
                 let name = name_or_uuid
                     .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
-                let resp = lox.send_cmd(&uuid, "on")?;
-                print_resp(&resp, json, quiet, &name, "on");
+                if dry_run {
+                    let ctrl = lox.find_control(&uuid).ok();
+                    let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
+                    print_dry_run(json, quiet, &uuid, "on", &name, room);
+                } else {
+                    let resp = lox.send_cmd(&uuid, "on")?;
+                    print_resp(&resp, json, quiet, &name, "on");
+                }
             }
         }
         Cmd::Off {
@@ -1640,24 +1785,47 @@ fn main() -> Result<()> {
             if let Some(room_name) = all_in_room {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
-                    match lox.send_cmd(&ctrl.uuid, "off") {
-                        Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "off"),
-                        Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                    if dry_run {
+                        print_dry_run(
+                            json,
+                            quiet,
+                            &ctrl.uuid,
+                            "off",
+                            &ctrl.name,
+                            ctrl.room.as_deref(),
+                        );
+                    } else {
+                        match lox.send_cmd(&ctrl.uuid, "off") {
+                            Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "off"),
+                            Err(e) => eprintln!("  {} — {}", ctrl.name, e),
+                        }
                     }
                 }
             } else {
                 let name = name_or_uuid
                     .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
                 let uuid = lox.resolve_with_room(&name, room.as_deref())?;
-                let resp = lox.send_cmd(&uuid, "off")?;
-                print_resp(&resp, json, quiet, &name, "off");
+                if dry_run {
+                    let ctrl = lox.find_control(&uuid).ok();
+                    let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
+                    print_dry_run(json, quiet, &uuid, "off", &name, room);
+                } else {
+                    let resp = lox.send_cmd(&uuid, "off")?;
+                    print_resp(&resp, json, quiet, &name, "off");
+                }
             }
         }
         Cmd::Pulse { name_or_uuid, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = lox.send_cmd(&uuid, "pulse")?;
-            print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
+            if dry_run {
+                let ctrl = lox.find_control(&uuid).ok();
+                let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
+                print_dry_run(json, quiet, &uuid, "pulse", &name_or_uuid, room);
+            } else {
+                let resp = lox.send_cmd(&uuid, "pulse")?;
+                print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
+            }
         }
 
         Cmd::Blind {
@@ -1713,6 +1881,17 @@ fn main() -> Result<()> {
                     }
                 }
             };
+            if dry_run {
+                print_dry_run(
+                    json,
+                    quiet,
+                    &ctrl.uuid,
+                    cmd,
+                    &ctrl.name,
+                    ctrl.room.as_deref(),
+                );
+                return Ok(());
+            }
             let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
             print_resp(&resp, json, quiet, &ctrl.name, cmd);
             if !json {
@@ -1797,11 +1976,21 @@ fn main() -> Result<()> {
                         }
                     }
                 };
-                let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-                if json {
-                    print_resp(&resp, true, quiet, &ctrl.name, cmd);
-                } else if !quiet {
-                    println!("✓  {} → mood {}", ctrl.name, action);
+                if let Some(resp) = send_or_dry_run(
+                    &lox,
+                    &ctrl.uuid,
+                    cmd,
+                    &ctrl.name,
+                    ctrl.room.as_deref(),
+                    dry_run,
+                    json,
+                    quiet,
+                )? {
+                    if json {
+                        print_resp(&resp, true, quiet, &ctrl.name, cmd);
+                    } else if !quiet {
+                        println!("✓  {} → mood {}", ctrl.name, action);
+                    }
                 }
             }
             LightCmd::Dim {
@@ -1815,8 +2004,19 @@ fn main() -> Result<()> {
                 if !(0.0..=100.0).contains(&level) {
                     bail!("Dimmer level must be 0-100");
                 }
-                let resp = lox.send_cmd(&ctrl.uuid, &format!("{}", level))?;
-                print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
+                let dim_cmd = format!("{}", level);
+                if let Some(resp) = send_or_dry_run(
+                    &lox,
+                    &ctrl.uuid,
+                    &dim_cmd,
+                    &ctrl.name,
+                    ctrl.room.as_deref(),
+                    dry_run,
+                    json,
+                    quiet,
+                )? {
+                    print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
+                }
             }
             LightCmd::Color {
                 name_or_uuid,
@@ -1842,8 +2042,18 @@ fn main() -> Result<()> {
                 } else {
                     value
                 };
-                let resp = lox.send_cmd(&ctrl.uuid, &cmd)?;
-                print_resp(&resp, json, quiet, &ctrl.name, &cmd);
+                if let Some(resp) = send_or_dry_run(
+                    &lox,
+                    &ctrl.uuid,
+                    &cmd,
+                    &ctrl.name,
+                    ctrl.room.as_deref(),
+                    dry_run,
+                    json,
+                    quiet,
+                )? {
+                    print_resp(&resp, json, quiet, &ctrl.name, &cmd);
+                }
             }
         },
 
@@ -1855,28 +2065,43 @@ fn main() -> Result<()> {
             } => {
                 let mut lox = LoxClient::new(Config::load()?);
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let resp = lox.send_cmd(&uuid, &encode_path_value(&value))?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let val = resp
-                    .pointer("/LL/value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                if code == "200" {
-                    if !quiet {
-                        println!("✓  {} = {}", name_or_uuid, val);
-                    }
+                let encoded = encode_path_value(&value);
+                if dry_run {
+                    print_dry_run(json, quiet, &uuid, &encoded, &name_or_uuid, None);
                 } else {
-                    bail!("Error {}: {}", code, val);
+                    let resp = lox.send_cmd(&uuid, &encoded)?;
+                    let code = resp
+                        .pointer("/LL/Code")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let val = resp
+                        .pointer("/LL/value")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    if code == "200" {
+                        if !quiet {
+                            println!("✓  {} = {}", name_or_uuid, val);
+                        }
+                    } else {
+                        bail!("Error {}: {}", code, val);
+                    }
                 }
             }
             InputCmd::Pulse { name_or_uuid, room } => {
                 let mut lox = LoxClient::new(Config::load()?);
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let resp = lox.send_cmd(&uuid, "pulse")?;
-                print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
+                if let Some(resp) = send_or_dry_run(
+                    &lox,
+                    &uuid,
+                    "pulse",
+                    &name_or_uuid,
+                    None,
+                    dry_run,
+                    json,
+                    quiet,
+                )? {
+                    print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
+                }
             }
         },
 
@@ -1913,22 +2138,30 @@ fn main() -> Result<()> {
                     }
                 }
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            if json {
-                print_resp(&resp, true, quiet, &ctrl.name, cmd);
-            } else {
-                println!("✓  {} → mood {}", ctrl.name, action);
-                thread::sleep(Duration::from_millis(400));
-                let xml = lox.get_all(&ctrl.uuid)?;
-                let state = xml_attr(&xml, "value").unwrap_or_default();
-                // State encodes active moods as a packed integer
-                // 200002700 = off, other values = mood active
-                let is_off = state.starts_with("200002700") || state == "0";
-                println!(
-                    "   State: {}  ({})",
-                    state,
-                    if is_off { "off" } else { "active" }
-                );
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                if json {
+                    print_resp(&resp, true, quiet, &ctrl.name, cmd);
+                } else {
+                    println!("✓  {} → mood {}", ctrl.name, action);
+                    thread::sleep(Duration::from_millis(400));
+                    let xml = lox.get_all(&ctrl.uuid)?;
+                    let state = xml_attr(&xml, "value").unwrap_or_default();
+                    let is_off = state.starts_with("200002700") || state == "0";
+                    println!(
+                        "   State: {}  ({})",
+                        state,
+                        if is_off { "off" } else { "active" }
+                    );
+                }
             }
         }
 
@@ -1943,8 +2176,19 @@ fn main() -> Result<()> {
             if !(0.0..=100.0).contains(&level) {
                 bail!("Dimmer level must be 0-100");
             }
-            let resp = lox.send_cmd(&ctrl.uuid, &format!("{}", level))?;
-            print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
+            let dim_cmd = format!("{}", level);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                &dim_cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
+            }
         }
 
         Cmd::Gate {
@@ -1964,8 +2208,18 @@ fn main() -> Result<()> {
                 "stop" => "stop",
                 other => bail!("Unknown gate action '{}'. Use: open, close, stop", other),
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, cmd);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, cmd);
+            }
         }
 
         Cmd::Color {
@@ -1995,8 +2249,18 @@ fn main() -> Result<()> {
             } else {
                 value.clone()
             };
-            let resp = lox.send_cmd(&ctrl.uuid, &cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, &cmd);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                &cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, &cmd);
+            }
         }
 
         Cmd::Weather { forecast } => {
@@ -2114,9 +2378,19 @@ fn main() -> Result<()> {
                             })?
                             .parse()
                             .context("Temperature must be a number")?;
-                        let resp =
-                            lox.send_cmd(&ctrl.uuid, &format!("setComfortTemperature/{}", t))?;
-                        print_resp(&resp, json, quiet, &ctrl.name, &format!("temp={}", t));
+                        let temp_cmd = format!("setComfortTemperature/{}", t);
+                        if let Some(resp) = send_or_dry_run(
+                            &lox,
+                            &ctrl.uuid,
+                            &temp_cmd,
+                            &ctrl.name,
+                            ctrl.room.as_deref(),
+                            dry_run,
+                            json,
+                            quiet,
+                        )? {
+                            print_resp(&resp, json, quiet, &ctrl.name, &format!("temp={}", t));
+                        }
                     }
                     "mode" => {
                         let m = value.as_deref().ok_or_else(|| {
@@ -2133,9 +2407,19 @@ fn main() -> Result<()> {
                             "building-protection" | "building" => "4",
                             other => other,
                         };
-                        let resp =
-                            lox.send_cmd(&ctrl.uuid, &format!("setOperatingMode/{}", mode_id))?;
-                        print_resp(&resp, json, quiet, &ctrl.name, &format!("mode={}", m));
+                        let mode_cmd = format!("setOperatingMode/{}", mode_id);
+                        if let Some(resp) = send_or_dry_run(
+                            &lox,
+                            &ctrl.uuid,
+                            &mode_cmd,
+                            &ctrl.name,
+                            ctrl.room.as_deref(),
+                            dry_run,
+                            json,
+                            quiet,
+                        )? {
+                            print_resp(&resp, json, quiet, &ctrl.name, &format!("mode={}", m));
+                        }
                     }
                     "override" => {
                         let temp_override: f64 = value
@@ -2148,15 +2432,25 @@ fn main() -> Result<()> {
                             .parse()
                             .context("Override temperature must be a number")?;
                         let dur = duration.unwrap_or(60);
-                        let resp = lox
-                            .send_cmd(&ctrl.uuid, &format!("override/{}/{}", temp_override, dur))?;
-                        print_resp(
-                            &resp,
+                        let override_cmd = format!("override/{}/{}", temp_override, dur);
+                        if let Some(resp) = send_or_dry_run(
+                            &lox,
+                            &ctrl.uuid,
+                            &override_cmd,
+                            &ctrl.name,
+                            ctrl.room.as_deref(),
+                            dry_run,
                             json,
                             quiet,
-                            &ctrl.name,
-                            &format!("override={}°/{}min", temp_override, dur),
-                        );
+                        )? {
+                            print_resp(
+                                &resp,
+                                json,
+                                quiet,
+                                &ctrl.name,
+                                &format!("override={}°/{}min", temp_override, dur),
+                            );
+                        }
                     }
                     other => bail!(
                         "Unknown thermostat action '{}'. Use: temp, mode, override",
@@ -2222,8 +2516,18 @@ fn main() -> Result<()> {
                     other
                 ),
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, &action);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, &action);
+            }
         }
 
         Cmd::Intercom {
@@ -2246,8 +2550,18 @@ fn main() -> Result<()> {
                     other
                 ),
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, &action);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, &action);
+            }
         }
 
         Cmd::Charger {
@@ -2279,8 +2593,18 @@ fn main() -> Result<()> {
                     other
                 ),
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, &action);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, &action);
+            }
         }
 
         Cmd::Alarm {
@@ -2333,8 +2657,18 @@ fn main() -> Result<()> {
                     other
                 ),
             };
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, cmd);
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, cmd);
+            }
         }
 
         Cmd::Lock {
@@ -2345,19 +2679,37 @@ fn main() -> Result<()> {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
-            let resp = lox.send_cmd(
+            let lock_cmd = format!("lockcontrol/1/{}", encode_path_value(&reason));
+            if let Some(resp) = send_or_dry_run(
+                &lox,
                 &ctrl.uuid,
-                &format!("lockcontrol/1/{}", encode_path_value(&reason)),
-            )?;
-            print_resp(&resp, json, quiet, &ctrl.name, "lock");
+                &lock_cmd,
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, "lock");
+            }
         }
 
         Cmd::Unlock { name_or_uuid, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
-            let resp = lox.send_cmd(&ctrl.uuid, "unlockcontrol")?;
-            print_resp(&resp, json, quiet, &ctrl.name, "unlock");
+            if let Some(resp) = send_or_dry_run(
+                &lox,
+                &ctrl.uuid,
+                "unlockcontrol",
+                &ctrl.name,
+                ctrl.room.as_deref(),
+                dry_run,
+                json,
+                quiet,
+            )? {
+                print_resp(&resp, json, quiet, &ctrl.name, "unlock");
+            }
         }
 
         Cmd::Stats => {
@@ -2972,10 +3324,13 @@ fn main() -> Result<()> {
             std::process::exit(if matches { 0 } else { 1 });
         }
 
-        Cmd::Run { scene, dry_run } => {
+        Cmd::Run {
+            scene,
+            dry_run: scene_dry_run,
+        } => {
             let s = Scene::load(&scene)?;
             let mut lox = LoxClient::new(Config::load()?);
-            if dry_run {
+            if dry_run || scene_dry_run {
                 println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
                 if let Some(d) = &s.description {
                     println!("   {}", d);
@@ -3018,9 +3373,19 @@ fn main() -> Result<()> {
                             continue;
                         }
                     };
-                    let resp = lox.send_cmd(&uuid, &step.cmd)?;
-                    print_resp(&resp, json, quiet, &step.control, &step.cmd);
-                    if step.delay_ms > 0 {
+                    if let Some(resp) = send_or_dry_run(
+                        &lox,
+                        &uuid,
+                        &step.cmd,
+                        &step.control,
+                        None,
+                        dry_run,
+                        json,
+                        quiet,
+                    )? {
+                        print_resp(&resp, json, quiet, &step.control, &step.cmd);
+                    }
+                    if step.delay_ms > 0 && !dry_run {
                         thread::sleep(Duration::from_millis(step.delay_ms));
                     }
                 }
@@ -3069,21 +3434,26 @@ fn main() -> Result<()> {
         } => {
             let mut lox = LoxClient::new(Config::load()?);
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let resp = lox.send_cmd(&uuid, &encode_path_value(&value))?;
-            let code = resp
-                .pointer("/LL/Code")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let val = resp
-                .pointer("/LL/value")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            if code == "200" {
-                if !quiet {
-                    println!("✓  {} = {}", name_or_uuid, val);
-                }
+            let encoded = encode_path_value(&value);
+            if dry_run {
+                print_dry_run(json, quiet, &uuid, &encoded, &name_or_uuid, None);
             } else {
-                bail!("Error {}: {}", code, val);
+                let resp = lox.send_cmd(&uuid, &encoded)?;
+                let code = resp
+                    .pointer("/LL/Code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let val = resp
+                    .pointer("/LL/value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                if code == "200" {
+                    if !quiet {
+                        println!("✓  {} = {}", name_or_uuid, val);
+                    }
+                } else {
+                    bail!("Error {}: {}", code, val);
+                }
             }
         }
         Cmd::Token { action } => match action {
@@ -3851,9 +4221,142 @@ fn main() -> Result<()> {
                 }
             }
         }
+
+        Cmd::Schema { command } => {
+            let schema = build_schema(command.as_deref())?;
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+        }
     }
 
     Ok(())
+}
+
+// ── Schema introspection ─────────────────────────────────────────────────────
+
+fn build_schema(filter: Option<&str>) -> Result<Value> {
+    let cmd = Cli::command();
+
+    if let Some(name) = filter {
+        let sub = cmd.get_subcommands().find(|s| {
+            s.get_name().eq_ignore_ascii_case(name)
+                || s.get_all_aliases().any(|a| a.eq_ignore_ascii_case(name))
+        });
+        let Some(sub) = sub else {
+            bail!(
+                "Unknown command '{}'. Run `lox schema` for all commands.",
+                name
+            );
+        };
+        return Ok(describe_command(sub, true));
+    }
+
+    let commands: Vec<Value> = cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set())
+        .map(|s| describe_command(s, false))
+        .collect();
+
+    Ok(serde_json::json!({
+        "name": "lox",
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "Loxone Miniserver CLI",
+        "global_flags": [
+            {"name": "--output", "short": "-o", "type": "enum", "values": ["table", "json", "csv"], "default": "table"},
+            {"name": "--quiet", "short": "-q", "type": "bool", "description": "Suppress non-essential output"},
+            {"name": "--dry-run", "type": "bool", "description": "Validate and resolve inputs without executing commands"},
+            {"name": "--non-interactive", "type": "bool", "description": "Fail instead of prompting for confirmation"},
+            {"name": "--trace-id", "type": "string", "description": "Trace ID for correlating agent actions"},
+            {"name": "--verbose", "short": "-v", "type": "count", "description": "Verbose output (-v requests, -vv bodies)"},
+        ],
+        "commands": commands,
+    }))
+}
+
+fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
+    let mut obj = serde_json::json!({
+        "name": cmd.get_name(),
+        "description": cmd.get_about().map(|s| s.to_string()).unwrap_or_default(),
+    });
+
+    // Collect positional and flag arguments
+    let args: Vec<Value> = cmd
+        .get_arguments()
+        .filter(|a| a.get_id() != "help" && a.get_id() != "version")
+        .map(|a| {
+            let mut arg = serde_json::json!({
+                "name": a.get_id().to_string(),
+            });
+            if let Some(help) = a.get_help() {
+                arg["description"] = Value::String(help.to_string());
+            }
+            if let Some(short) = a.get_short() {
+                arg["short"] = Value::String(format!("-{}", short));
+            }
+            if a.get_long().is_some() {
+                arg["long"] = Value::String(format!("--{}", a.get_id()));
+            }
+            if a.get_num_args().is_some_and(|r| r.max_values() == 0) {
+                arg["type"] = Value::String("bool".to_string());
+            }
+            if let Some(vals) = a.get_default_values().first() {
+                arg["default"] = Value::String(vals.to_string_lossy().to_string());
+            }
+            arg
+        })
+        .collect();
+
+    if !args.is_empty() {
+        obj["args"] = Value::Array(args);
+    }
+
+    // Subcommands
+    let subs: Vec<Value> = cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set())
+        .map(|s| describe_command(s, detailed))
+        .collect();
+
+    if !subs.is_empty() {
+        obj["subcommands"] = Value::Array(subs);
+    }
+
+    if detailed {
+        // Include control type hints for common commands
+        let type_hints = match cmd.get_name() {
+            "blind" => Some("Jalousie, CentralJalousie"),
+            "gate" => Some("Gate, CentralGate"),
+            "alarm" => Some("Alarm"),
+            "thermostat" => Some("IRoomControllerV2, IRoomController"),
+            "door" => Some("DoorLock"),
+            "intercom" => Some("Intercom"),
+            "charger" => Some("Charger, EV"),
+            "light" => Some("LightControllerV2, LightController, ColorPickerV2"),
+            _ => None,
+        };
+        if let Some(types) = type_hints {
+            obj["control_types"] = Value::String(types.to_string());
+        }
+
+        // Include valid actions
+        let actions = match cmd.get_name() {
+            "blind" => Some(vec!["up", "down", "stop", "shade", "pos <0-100>"]),
+            "gate" => Some(vec!["open", "close", "stop"]),
+            "alarm" => Some(vec!["arm", "arm-home", "disarm", "quit"]),
+            "door" => Some(vec!["lock", "unlock", "open"]),
+            "intercom" => Some(vec!["answer", "hangup", "open"]),
+            "charger" => Some(vec!["start", "stop", "pause"]),
+            _ => None,
+        };
+        if let Some(acts) = actions {
+            obj["valid_actions"] = Value::Array(
+                acts.into_iter()
+                    .map(|a| Value::String(a.to_string()))
+                    .collect(),
+            );
+        }
+    }
+
+    obj
 }
 
 // ── Stream helpers ────────────────────────────────────────────────────────────
