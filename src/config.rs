@@ -132,11 +132,13 @@ mod tests {
         let dir = tempdir().unwrap();
         // Config::save() uses the hardcoded path, so we test roundtrip via
         // manual serialization + LOX_CONFIG-based load.
-        let mut cfg = Config::default();
-        cfg.host = "https://10.0.0.1".to_string();
-        cfg.user = "testuser".to_string();
-        cfg.pass = "testpass".to_string();
-        cfg.serial = "00:11:22:33:44:55".to_string();
+        let mut cfg = Config {
+            host: "https://10.0.0.1".to_string(),
+            user: "testuser".to_string(),
+            pass: "testpass".to_string(),
+            serial: "00:11:22:33:44:55".to_string(),
+            ..Default::default()
+        };
         cfg.aliases
             .insert("light".to_string(), "some-uuid".to_string());
 
