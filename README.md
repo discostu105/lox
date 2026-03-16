@@ -47,6 +47,11 @@ This CLI was designed for AI agent integration. Every command:
 - Uses fuzzy name matching — agents don't need UUIDs
 - Supports `--room` flag and `[Room]` bracket syntax to resolve ambiguous names
 - Returns readable errors with suggestions
+- `--dry-run` validates without executing — preview what would happen
+- `--trace-id` correlates agent actions across logs
+- `--non-interactive` fails instead of prompting (implied by `-o json`)
+- `lox schema` lets agents discover available commands programmatically
+- Errors return structured JSON envelopes with categorized error codes
 
 **Example: give an LLM a shell tool**
 ```json
@@ -62,6 +67,15 @@ This CLI was designed for AI agent integration. Every command:
 The agent calls `lox <command>` as a shell tool and reads stdout. That's it.
 
 An agent can discover your home (`lox ls -o json`), read sensor values, control devices, and check conditions — all without any custom integration layer.
+
+**Agent-friendly workflow:**
+```bash
+lox schema -o json                    # discover available commands
+lox ls -o json                        # discover controls
+lox --dry-run on "Licht" -o json      # preview before executing
+lox --trace-id "run-42" on "Licht"    # execute with tracing
+lox health --problems -o json         # check device health
+```
 
 ---
 
@@ -143,6 +157,8 @@ lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
 lox config diff old.Loxone new.Loxone  # Compare two configs
 lox run abend                          # Run a scene
+lox health --problems                  # Device health (battery, signal, offline)
+lox schema blind                       # Command schema for AI agent discovery
 lox completions bash                   # Generate shell completions
 ```
 

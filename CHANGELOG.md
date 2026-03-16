@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `lox health` — device health dashboard showing battery, signal, offline status, and bus errors for Tree/Air devices (`--type tree|air`, `--problems`)
+- `lox schema` — command schema introspection for AI agent discovery; lists commands with metadata, args, and valid actions
+- `--dry-run` global flag — validates and resolves inputs without executing commands; returns structured JSON envelope with `-o json`
+- `--non-interactive` global flag — fails instead of prompting for confirmation (implied by `-o json`)
+- `--trace-id` global flag — correlation ID for tracking agent actions in logs
+- `-v`/`--verbose` global flag — `-v` shows HTTP requests, `-vv` shows requests + response bodies
+- `--all-in-room` flag on `lox on`/`lox off` — apply command to all controls in a room
+- Structured JSON error envelopes when using `-o json` (categorized error codes: `control_not_found`, `ambiguous_control`, `unauthorized`, `connection_error`, etc.)
+
+### Changed
+- `lox extensions` now queries `/data/status` instead of `LoxApp3.json` — provides richer device information including Tree branch error counts, device parent relationships, and plugin versions
+
 ### Removed
 - `lox daemon` — automation daemon (WebSocket/polling rule engine)
 - `lox automation` — automation rule management

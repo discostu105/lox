@@ -8,7 +8,34 @@ lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
 
-Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`
+Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`, `-v`/`--verbose` (request logging), `--dry-run`, `--non-interactive`, `--trace-id`
+
+---
+
+## Verbose & Dry-Run
+
+```bash
+lox -v ls                              # show HTTP requests
+lox -vv get "Temperatur"               # show requests + response bodies
+lox --dry-run on "Licht Wohnzimmer"    # preview without executing
+lox --dry-run on "Licht" -o json       # dry-run returns JSON envelope
+lox --non-interactive reboot           # fail instead of prompting (implied by -o json)
+lox --trace-id "abc-123" on "Licht"    # correlation ID for agent tracing
+```
+
+`--dry-run` validates and resolves inputs without sending commands. With `-o json`, it returns a structured envelope:
+```json
+{
+  "ok": true,
+  "dry_run": true,
+  "would_execute": {
+    "uuid": "1d8af56e-...",
+    "command": "on",
+    "control": "Licht Wohnzimmer",
+    "room": "Wohnzimmer"
+  }
+}
+```
 
 ---
 
@@ -59,6 +86,13 @@ lox modes                             # operating modes
 lox extensions                        # connected extensions and devices
 lox discover                          # find Miniservers on local network (UDP)
 lox discover --timeout 5
+
+lox health                            # device health dashboard (battery, signal, offline)
+lox health --type tree                # filter by device type (tree or air)
+lox health --problems                 # show only devices with issues
+
+lox schema                            # list all commands with metadata (for AI agents)
+lox schema blind                      # show schema for a specific command
 ```
 
 ---
@@ -68,6 +102,8 @@ lox discover --timeout 5
 ```bash
 lox on "Licht Wohnzimmer"
 lox off "Licht Wohnzimmer"
+lox on --all-in-room "Wohnzimmer"     # turn on all controls in a room
+lox off --all-in-room "Schlafzimmer"  # turn off all controls in a room
 lox light mood "Licht Wohnzimmer" plus      # next mood
 lox light mood "Licht Wohnzimmer" minus     # previous mood
 lox light mood "Licht Wohnzimmer" off       # turn off (mood 778)
@@ -237,6 +273,47 @@ lox time                               # Miniserver system date/time
 lox log                                # system log (admin only)
 lox log -n 100                         # custom line count
 ```
+
+---
+
+## Device Health
+
+```bash
+lox health                            # device health dashboard
+lox health --type tree                # filter: tree or air devices only
+lox health --problems                 # show only devices with warnings/offline
+lox health -o json                    # JSON output
+```
+
+Shows battery levels, signal strength, online/offline status, and bus errors for Tree and Air devices.
+
+---
+
+## Command Schema (AI Agents)
+
+```bash
+lox schema                            # list all commands with metadata
+lox schema blind                      # schema for a specific command
+lox schema -o json                    # JSON output for programmatic use
+```
+
+Returns command structure, arguments, subcommands, control type hints, and valid actions. Designed for AI agent discovery — agents can introspect what commands exist and what parameters they accept.
+
+---
+
+## Error Envelopes
+
+When using `-o json`, errors return structured envelopes instead of plain text:
+
+```json
+{
+  "ok": false,
+  "error": "control_not_found",
+  "message": "No control matching 'Nonexistent'"
+}
+```
+
+Error codes: `control_not_found`, `ambiguous_control`, `config_not_found`, `confirmation_required`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
 
 ---
 
