@@ -2459,8 +2459,34 @@ fn main() -> Result<()> {
                 // Default to current month
                 chrono::Local::now().format("%Y%m").to_string()
             };
-            let path = format!("/dev/fsget//stats/{}.{}", ctrl.uuid, period);
-            let data = lox.get_bytes(&path)?;
+            // Stats files may be named {uuid}.{period} or {uuid}_{N}.{period}
+            // for controls with multiple outputs.  Try bare name first, then
+            // fall back to listing the /stats directory for suffixed files.
+            let bare = format!("/dev/fsget//stats/{}.{}", ctrl.uuid, period);
+            let data = match lox.get_bytes(&bare) {
+                Ok(d) => d,
+                Err(_) => {
+                    let listing = lox.get_text("/dev/fslist//stats")?;
+                    let prefix = ctrl.uuid.as_str();
+                    let suffix = format!(".{}", period);
+                    let mut files: Vec<&str> = listing
+                        .lines()
+                        .filter_map(|line| line.rsplit_once(' ').map(|(_, name)| name))
+                        .filter(|name| name.starts_with(prefix) && name.ends_with(suffix.as_str()))
+                        .collect();
+                    files.sort();
+                    if files.is_empty() {
+                        anyhow::bail!(
+                            "No statistics files found for {} in period {}",
+                            ctrl.uuid,
+                            period
+                        );
+                    }
+                    // Use the first matching file (primary output)
+                    let path = format!("/dev/fsget//stats/{}", files[0]);
+                    lox.get_bytes(&path)?
+                }
+            };
 
             if data.is_empty() {
                 println!("No statistics data available for this period.");
