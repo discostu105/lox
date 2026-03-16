@@ -39,8 +39,8 @@ pub fn cmd_on(
             }
         }
     } else {
-        let name =
-            name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+        let name = name_or_uuid
+            .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
         let uuid = lox.resolve_with_room(&name, room.as_deref())?;
         if ctx.dry_run {
             let ctrl = lox.find_control(&uuid).ok();
@@ -81,8 +81,8 @@ pub fn cmd_off(
             }
         }
     } else {
-        let name =
-            name_or_uuid.ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
+        let name = name_or_uuid
+            .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
         let uuid = lox.resolve_with_room(&name, room.as_deref())?;
         if ctx.dry_run {
             let ctrl = lox.find_control(&uuid).ok();
@@ -194,7 +194,8 @@ pub fn cmd_blind(
                 let xml = lox.get_all(&ctrl.uuid)?;
                 let cur_pos = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok());
                 let timed_out = std::time::Instant::now() >= deadline;
-                let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
+                let stable =
+                    matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
                 if stable || timed_out {
                     if let Some(p) = cur_pos {
                         let suffix = if timed_out && !stable {
@@ -202,12 +203,7 @@ pub fn cmd_blind(
                         } else {
                             ""
                         };
-                        println!(
-                            "   Position: {:.0}%  {}{}",
-                            p * 100.0,
-                            bar(p, 1.0),
-                            suffix
-                        );
+                        println!("   Position: {:.0}%  {}{}", p * 100.0, bar(p, 1.0), suffix);
                     }
                     break;
                 }
@@ -291,7 +287,13 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
                 ctx.json,
                 ctx.quiet,
             )? {
-                print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &format!("dim={}", level));
+                print_resp(
+                    &resp,
+                    ctx.json,
+                    ctx.quiet,
+                    &ctrl.name,
+                    &format!("dim={}", level),
+                );
             }
         }
         LightCmd::Color {
@@ -594,14 +596,18 @@ pub fn cmd_thermostat(
                     ctx.json,
                     ctx.quiet,
                 )? {
-                    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &format!("temp={}", t));
+                    print_resp(
+                        &resp,
+                        ctx.json,
+                        ctx.quiet,
+                        &ctrl.name,
+                        &format!("temp={}", t),
+                    );
                 }
             }
             "mode" => {
                 let m = value.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Usage: lox thermostat <name> mode <auto|manual|comfort|eco>"
-                    )
+                    anyhow::anyhow!("Usage: lox thermostat <name> mode <auto|manual|comfort|eco>")
                 })?;
                 let lower = m.to_lowercase();
                 let mode_id = match lower.as_str() {
@@ -623,7 +629,13 @@ pub fn cmd_thermostat(
                     ctx.json,
                     ctx.quiet,
                 )? {
-                    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &format!("mode={}", m));
+                    print_resp(
+                        &resp,
+                        ctx.json,
+                        ctx.quiet,
+                        &ctrl.name,
+                        &format!("mode={}", m),
+                    );
                 }
             }
             "override" => {
