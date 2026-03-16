@@ -412,7 +412,7 @@ enum Cmd {
         r#type: Option<String>,
         #[arg(long, short = 'r')]
         room: Option<String>,
-        #[arg(long, short = 'v')]
+        #[arg(long)]
         values: bool,
         /// Filter by category name
         #[arg(long, short = 'c')]
@@ -1352,13 +1352,25 @@ fn main() -> Result<()> {
             let mut lox = LoxClient::new(Config::load()?);
             let structure = lox.get_structure()?;
             if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
-                let mut names: Vec<&str> = rooms
-                    .values()
-                    .filter_map(|r| r.get("name").and_then(|n| n.as_str()))
+                let mut entries: Vec<_> = rooms
+                    .iter()
+                    .filter_map(|(uuid, r)| {
+                        r.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|name| (uuid.as_str(), name))
+                    })
                     .collect();
-                names.sort();
-                for n in names {
-                    println!("{}", n);
+                entries.sort_by_key(|(_, name)| *name);
+                if json {
+                    let arr: Vec<_> = entries
+                        .iter()
+                        .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&arr)?);
+                } else {
+                    for (_, name) in entries {
+                        println!("{}", name);
+                    }
                 }
             }
         }
@@ -2447,8 +2459,34 @@ fn main() -> Result<()> {
                 // Default to current month
                 chrono::Local::now().format("%Y%m").to_string()
             };
-            let path = format!("/binstatisticdata/{}/{}", ctrl.uuid, period);
-            let data = lox.get_bytes(&path)?;
+            // Stats files may be named {uuid}.{period} or {uuid}_{N}.{period}
+            // for controls with multiple outputs.  Try bare name first, then
+            // fall back to listing the /stats directory for suffixed files.
+            let bare = format!("/dev/fsget//stats/{}.{}", ctrl.uuid, period);
+            let data = match lox.get_bytes(&bare) {
+                Ok(d) => d,
+                Err(_) => {
+                    let listing = lox.get_text("/dev/fslist//stats")?;
+                    let prefix = ctrl.uuid.as_str();
+                    let suffix = format!(".{}", period);
+                    let mut files: Vec<&str> = listing
+                        .lines()
+                        .filter_map(|line| line.rsplit_once(' ').map(|(_, name)| name))
+                        .filter(|name| name.starts_with(prefix) && name.ends_with(suffix.as_str()))
+                        .collect();
+                    files.sort();
+                    if files.is_empty() {
+                        anyhow::bail!(
+                            "No statistics files found for {} in period {}",
+                            ctrl.uuid,
+                            period
+                        );
+                    }
+                    // Use the first matching file (primary output)
+                    let path = format!("/dev/fsget//stats/{}", files[0]);
+                    lox.get_bytes(&path)?
+                }
+            };
 
             if data.is_empty() {
                 println!("No statistics data available for this period.");
@@ -2485,6 +2523,7 @@ fn main() -> Result<()> {
 
                 // Skip binary statistics header if present:
                 // u32 valueCount | u32 controlType | u32 nameLength | name bytes
+                // After the header, entries are aligned to entry_size boundaries.
                 if data.len() > 12 {
                     let value_count = cursor.read_u32::<LittleEndian>().unwrap_or(0);
                     let _control_type = cursor.read_u32::<LittleEndian>().unwrap_or(0);
@@ -2492,10 +2531,10 @@ fn main() -> Result<()> {
                     // Mask off version flag bit from valueCount
                     let _vc = value_count & 0x7FFF_FFFF;
                     // Skip name string
-                    let skip = name_length as usize;
-                    if cursor.position() as usize + skip <= data.len() {
-                        cursor.set_position(cursor.position() + skip as u64);
-                    }
+                    let header_end = 12 + name_length as usize;
+                    // Align to next entry_size boundary
+                    let aligned = header_end.div_ceil(entry_size) * entry_size;
+                    cursor.set_position(aligned as u64);
                 }
 
                 while cursor.position() as usize + entry_size <= data.len() {
@@ -2661,23 +2700,33 @@ fn main() -> Result<()> {
             println!("Reboot initiated: {}", val);
         }
 
-        Cmd::Files { action } => match action {
-            FilesCmd::Ls { path } => {
-                let lox = LoxClient::new(Config::load()?);
-                let listing =
-                    lox.get_text(&format!("/dev/fsget/{}", path.trim_start_matches('/')))?;
-                println!("{}", listing);
+        Cmd::Files { action } => {
+            let lox = LoxClient::new(Config::load()?);
+            // Loxone fsget/fslist expect absolute paths — the double slash
+            // in e.g. /dev/fsget//temp/file.img is intentional (API prefix +
+            // filesystem root).
+            let abs = |p: &str| {
+                if p.starts_with('/') {
+                    p.to_string()
+                } else {
+                    format!("/{p}")
+                }
+            };
+            match action {
+                FilesCmd::Ls { path } => {
+                    let listing = lox.get_text(&format!("/dev/fslist/{}", abs(&path)))?;
+                    println!("{}", listing);
+                }
+                FilesCmd::Get { path, save_as } => {
+                    let data = lox.get_bytes(&format!("/dev/fsget/{}", abs(&path)))?;
+                    let out_path = save_as.unwrap_or_else(|| {
+                        path.rsplit('/').next().unwrap_or("download").to_string()
+                    });
+                    fs::write(&out_path, &data)?;
+                    println!("✓ Downloaded {} bytes → {}", data.len(), out_path);
+                }
             }
-            FilesCmd::Get { path, save_as } => {
-                let lox = LoxClient::new(Config::load()?);
-                let data =
-                    lox.get_bytes(&format!("/dev/fsget/{}", path.trim_start_matches('/')))?;
-                let out_path = save_as
-                    .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("download").to_string());
-                fs::write(&out_path, &data)?;
-                println!("✓ Downloaded {} bytes → {}", data.len(), out_path);
-            }
-        },
+        }
 
         Cmd::Extensions => {
             let mut lox = LoxClient::new(Config::load()?);
@@ -4245,5 +4294,105 @@ mod tests {
         assert_eq!(v1, 100.0);
         assert_eq!(v2, 200.0);
         assert_eq!(v3, 300.0);
+    }
+
+    // ── CLI definition (flag conflicts, etc.) ─────────────────────────────
+
+    /// Clap's debug_assert runs all internal consistency checks: duplicate
+    /// short flags, missing values, conflicting attributes, etc.  This is
+    /// the same check that caused the `-v` panic at runtime — catching it
+    /// here means CI will fail before any user ever sees it.
+    #[test]
+    fn test_cli_debug_assert() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    // ── binary stats header alignment ─────────────────────────────────────
+
+    /// Stats files have a header (12 bytes + variable-length name) followed
+    /// by entries aligned to entry_size boundaries.  Verify the alignment
+    /// calculation for short and long names.
+    #[test]
+    fn test_stats_header_alignment_short_name() {
+        // "CO2" → 3 bytes, header_end = 15, entry_size = 16 → aligned = 16
+        let name = b"CO2";
+        let header_end = 12 + name.len();
+        let entry_size: usize = 4 + 4 + 1 * 8; // uuid(4) + ts(4) + 1×f64
+        let aligned = header_end.div_ceil(entry_size) * entry_size;
+        assert_eq!(aligned, 16);
+    }
+
+    #[test]
+    fn test_stats_header_alignment_long_name() {
+        // 21-byte UTF-8 name, header_end = 33, entry_size = 16 → aligned = 48
+        let name = "Zähler Licht Vorraum"; // 21 UTF-8 bytes (ä = 2 bytes)
+        assert_eq!(name.len(), 21);
+        let header_end = 12 + name.len();
+        let entry_size: usize = 4 + 4 + 1 * 8;
+        let aligned = header_end.div_ceil(entry_size) * entry_size;
+        assert_eq!(aligned, 48);
+    }
+
+    #[test]
+    fn test_stats_header_alignment_exact_boundary() {
+        // Name exactly fills to a boundary: header_end = 32, entry_size = 16 → 32
+        let header_end = 32usize;
+        let entry_size: usize = 16;
+        let aligned = header_end.div_ceil(entry_size) * entry_size;
+        assert_eq!(aligned, 32);
+    }
+
+    /// Full round-trip: build a binary stats file with header + aligned
+    /// entries and verify we parse the correct timestamps and values.
+    #[test]
+    fn test_stats_file_parse_with_header() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut data = Vec::new();
+        // Header: valueCount=1 (with version flag), controlType=0, nameLength=3
+        data.write_u32::<LittleEndian>(0x8000_0001).unwrap();
+        data.write_u32::<LittleEndian>(0).unwrap();
+        data.write_u32::<LittleEndian>(3).unwrap(); // "CO2"
+        data.extend_from_slice(b"CO2");
+        // Pad to 16 bytes (entry_size alignment)
+        data.push(0); // null terminator / padding to reach 16
+        assert_eq!(data.len(), 16);
+        // Entry 1: uuid_prefix(4) + ts(4) + value(8) = 16 bytes
+        data.write_u32::<LittleEndian>(0x03b498a5).unwrap(); // uuid prefix
+        data.write_u32::<LittleEndian>(541_293_056).unwrap(); // ~2026-03-01
+        data.write_f64::<LittleEndian>(985.2).unwrap();
+        // Entry 2
+        data.write_u32::<LittleEndian>(0x03b498a5).unwrap();
+        data.write_u32::<LittleEndian>(541_296_656).unwrap(); // +1 hour
+        data.write_f64::<LittleEndian>(1215.1).unwrap();
+
+        let num_outputs = 1;
+        let entry_size = 4 + 4 + num_outputs * 8;
+        let mut cursor = Cursor::new(data.as_slice());
+
+        // Skip header (same logic as the history command)
+        let value_count = cursor.read_u32::<LittleEndian>().unwrap();
+        let _control_type = cursor.read_u32::<LittleEndian>().unwrap();
+        let name_length = cursor.read_u32::<LittleEndian>().unwrap();
+        assert_eq!(value_count & 0x7FFF_FFFF, 1);
+        assert_eq!(name_length, 3);
+        let header_end = 12 + name_length as usize;
+        let aligned = header_end.div_ceil(entry_size) * entry_size;
+        cursor.set_position(aligned as u64);
+        assert_eq!(cursor.position(), 16);
+
+        // Parse entries
+        let mut entries = Vec::new();
+        while cursor.position() as usize + entry_size <= data.len() {
+            let _uuid_part = cursor.read_u32::<LittleEndian>().unwrap();
+            let ts = cursor.read_u32::<LittleEndian>().unwrap();
+            let val = cursor.read_f64::<LittleEndian>().unwrap();
+            entries.push((ts, val));
+        }
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, 541_293_056);
+        assert_eq!(entries[0].1, 985.2);
+        assert_eq!(entries[1].0, 541_296_656);
+        assert_eq!(entries[1].1, 1215.1);
     }
 }
