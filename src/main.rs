@@ -10,7 +10,7 @@ mod token;
 mod ws;
 
 use anyhow::{bail, Context, Result};
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use client::LoxClient;
 use config::Config;
@@ -203,6 +203,9 @@ struct Cli {
     /// Suppress table headers (useful for piping)
     #[arg(long, global = true)]
     no_header: bool,
+    /// Verbose output (-v for requests, -vv for request+response bodies)
+    #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
+    verbose: u8,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -939,6 +942,7 @@ enum ConfigCmd {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    client::set_verbose(cli.verbose);
     let quiet = cli.quiet;
     let no_header = cli.no_header;
     let json = cli.output == OutputFormat::Json;

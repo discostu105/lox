@@ -6,13 +6,63 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
+
+// ── Global verbosity ─────────────────────────────────────────────────────────
+
+static VERBOSE: AtomicU8 = AtomicU8::new(0);
+
+/// Set the global verbosity level (0 = off, 1 = -v, 2 = -vv).
+pub fn set_verbose(level: u8) {
+    VERBOSE.store(level, Ordering::Relaxed);
+}
+
+fn verbose() -> u8 {
+    VERBOSE.load(Ordering::Relaxed)
+}
+
+/// Redact credentials from a URL string for safe logging.
+/// Removes basic-auth passwords and known sensitive query parameters.
+pub fn redact_url(url: &str) -> String {
+    // Redact userinfo password (http://user:pass@host → http://user:***@host)
+    let mut result = if let Ok(mut parsed) = reqwest::Url::parse(url) {
+        if parsed.password().is_some() {
+            let _ = parsed.set_password(Some("***"));
+        }
+        parsed.to_string()
+    } else {
+        url.to_string()
+    };
+    // Redact known sensitive query params
+    for param in &["token", "key", "pass", "password", "autht"] {
+        // Match param=value patterns in query strings
+        let pattern = format!("{}=", param);
+        if let Some(idx) = result.find(&pattern) {
+            let start = idx + pattern.len();
+            let end = result[start..]
+                .find('&')
+                .map_or(result.len(), |i| start + i);
+            result.replace_range(start..end, "***");
+        }
+    }
+    result
+}
 
 /// HTTP error with status code preserved for structured matching in retry logic.
 #[derive(Debug)]
 pub struct HttpStatusError {
     pub status: u16,
     pub path: String,
+}
+
+/// Log a response body at -vv level, truncating large responses.
+fn log_body(body: &str) {
+    if body.len() > 500 {
+        eprintln!("  body: {}… ({} bytes total)", &body[..500], body.len());
+    } else {
+        eprintln!("  body: {}", body);
+    }
 }
 
 impl std::fmt::Display for HttpStatusError {
@@ -117,30 +167,69 @@ impl LoxClient {
 
     pub fn get_text(&self, path: &str) -> Result<String> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        if verbose() >= 1 {
+            eprintln!("GET {}", redact_url(&url));
+        }
         self.request_with_retry(|| {
-            self.apply_auth(self.client.get(&url))
-                .send()?
-                .text()
-                .map_err(Into::into)
+            let resp = self.apply_auth(self.client.get(&url)).send()?;
+            if verbose() >= 1 {
+                eprintln!(
+                    "  → {} {}",
+                    resp.status().as_u16(),
+                    resp.status().canonical_reason().unwrap_or("")
+                );
+            }
+            let body = resp.text()?;
+            if verbose() >= 2 {
+                log_body(&body);
+            }
+            Ok(body)
         })
     }
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        if verbose() >= 1 {
+            eprintln!("GET {}", redact_url(&url));
+        }
         self.request_with_retry(|| {
-            self.apply_auth(self.client.get(&url))
-                .send()?
-                .json::<Value>()
-                .map_err(Into::into)
+            let resp = self.apply_auth(self.client.get(&url)).send()?;
+            if verbose() >= 1 {
+                eprintln!(
+                    "  → {} {}",
+                    resp.status().as_u16(),
+                    resp.status().canonical_reason().unwrap_or("")
+                );
+            }
+            if verbose() >= 2 {
+                let text = resp.text()?;
+                log_body(&text);
+                serde_json::from_str::<Value>(&text).map_err(Into::into)
+            } else {
+                resp.json::<Value>().map_err(Into::into)
+            }
         })
     }
 
     pub fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        if verbose() >= 1 {
+            eprintln!("GET {}", redact_url(&url));
+        }
         self.request_with_retry(|| {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
             let status = resp.status();
+            if verbose() >= 1 {
+                eprintln!(
+                    "  → {} {}",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
+                );
+            }
             let bytes = resp.bytes()?.to_vec();
+            if verbose() >= 2 {
+                eprintln!("  body: <{} bytes>", bytes.len());
+            }
             if !status.is_success() {
                 return Err(HttpStatusError {
                     status: status.as_u16(),
@@ -204,6 +293,13 @@ impl LoxClient {
                     if age.as_secs() < 86400 {
                         if let Ok(data) = fs::read_to_string(&cache) {
                             if let Ok(v) = serde_json::from_str::<Value>(&data) {
+                                if verbose() >= 1 {
+                                    eprintln!(
+                                        "Using cached structure ({} bytes, age {}s)",
+                                        data.len(),
+                                        age.as_secs()
+                                    );
+                                }
                                 return Ok(v);
                             }
                         }
@@ -212,12 +308,24 @@ impl LoxClient {
             }
         }
         let url = format!("{}/data/LoxApp3.json", cfg.host);
+        if verbose() >= 1 {
+            eprintln!("GET {}", redact_url(&url));
+        }
         let resp = client
             .get(&url)
             .basic_auth(&cfg.user, Some(&cfg.pass))
-            .send()?
-            .error_for_status()?
-            .bytes()?;
+            .send()?;
+        if verbose() >= 1 {
+            eprintln!(
+                "  → {} {}",
+                resp.status().as_u16(),
+                resp.status().canonical_reason().unwrap_or("")
+            );
+        }
+        let resp = resp.error_for_status()?.bytes()?;
+        if verbose() >= 2 {
+            eprintln!("  body: <{} bytes>", resp.len());
+        }
         let v: Value = serde_json::from_slice(&resp)?;
         if use_cache {
             if let Some(parent) = cache.parent() {
@@ -1041,5 +1149,37 @@ mod tests {
         let client = LoxClient::new(mock_config(&server));
         let result = client.get_text("/old-path").unwrap();
         assert_eq!(result, "ok");
+    }
+
+    // ── redact_url ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_redact_url_plain() {
+        let url = "https://192.168.1.5/data/LoxApp3.json";
+        assert_eq!(redact_url(url), url);
+    }
+
+    #[test]
+    fn test_redact_url_basic_auth_password() {
+        assert_eq!(
+            redact_url("https://admin:secret@192.168.1.5/data/LoxApp3.json"),
+            "https://admin:***@192.168.1.5/data/LoxApp3.json"
+        );
+    }
+
+    #[test]
+    fn test_redact_url_query_token() {
+        assert_eq!(
+            redact_url("https://host/path?token=abc123&other=ok"),
+            "https://host/path?token=***&other=ok"
+        );
+    }
+
+    #[test]
+    fn test_redact_url_query_password() {
+        assert_eq!(
+            redact_url("https://host/path?pass=secret"),
+            "https://host/path?pass=***"
+        );
     }
 }
