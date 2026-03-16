@@ -142,6 +142,10 @@ lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
 lox config diff old.Loxone new.Loxone  # Compare two configs
+lox config init ~/loxone-config        # Init git repo for config versioning
+lox config pull                        # Download, diff & git-commit config
+lox config log                         # Show config change history
+lox config restore abc123 --force      # Restore config from git history
 lox run abend                          # Run a scene
 lox completions bash                   # Generate shell completions
 ```
@@ -194,6 +198,42 @@ Structure cache at `~/.lox/cache/structure.json` (24h TTL):
 | `Alarm` | `alarm <name> arm/disarm/quit` |
 | `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
 | Any | `send <uuid> <raw-command>`, `lock`, `unlock` |
+
+---
+
+## Config Versioning (GitOps)
+
+Track Miniserver configuration changes in a git repository — automated backups with meaningful commit messages:
+
+```bash
+# One-time setup
+lox config init ~/loxone-config
+
+# Pull current config, diff against previous, commit with semantic message
+lox config pull
+
+# View history
+lox config log
+
+# Restore a previous version
+lox config restore abc123 --force
+```
+
+Each pull downloads the config via FTP, decompresses the proprietary LoxCC format to XML, generates a semantic diff (controls/rooms/users added/removed/renamed), and commits with a meaningful message like:
+
+```
+[504F94AABBCC] Config backup 2026-03-08 18:22:56 (v42)
+
++ Added control: "Garage Light" (Switch)
+~ Light: "Licht EG" -> "Licht Erdgeschoss"
+- Removed user: "guest"
+```
+
+**Cron-friendly:** `lox config pull --quiet` for automated nightly backups.
+
+**Multi-Miniserver:** each Miniserver gets its own subdirectory (by serial number).
+
+**Safe restore:** uploads the original backup ZIP from git history (no risky recompression).
 
 ---
 
