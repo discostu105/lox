@@ -4395,4 +4395,87 @@ mod tests {
         assert_eq!(entries[1].0, 541_296_656);
         assert_eq!(entries[1].1, 1215.1);
     }
+
+    // ── completions ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_completions_bash_generates_output() {
+        let mut cmd = Cli::command();
+        let mut buf = Vec::new();
+        generate(Shell::Bash, &mut cmd, "lox", &mut buf);
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("_lox"),
+            "bash completions should define _lox function"
+        );
+        assert!(
+            output.contains("COMPREPLY"),
+            "bash completions should use COMPREPLY"
+        );
+    }
+
+    #[test]
+    fn test_completions_zsh_generates_output() {
+        let mut cmd = Cli::command();
+        let mut buf = Vec::new();
+        generate(Shell::Zsh, &mut cmd, "lox", &mut buf);
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("compdef"),
+            "zsh completions should contain compdef"
+        );
+    }
+
+    #[test]
+    fn test_completions_fish_generates_output() {
+        let mut cmd = Cli::command();
+        let mut buf = Vec::new();
+        generate(Shell::Fish, &mut cmd, "lox", &mut buf);
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("complete -c lox"),
+            "fish completions should define completions for lox"
+        );
+    }
+
+    #[test]
+    fn test_detect_shell_from_env() {
+        // detect_shell reads $SHELL — just verify it returns Some for known shells
+        // or None for unknown ones (depends on test environment)
+        let result = detect_shell();
+        // In CI $SHELL may or may not be set; just ensure no panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_install_completions_creates_file() {
+        let tmp = std::env::temp_dir().join("lox_test_completions");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // Override HOME to use temp dir
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+
+        let mut cmd = Cli::command();
+        let result = install_completions(Shell::Bash, &mut cmd);
+        assert!(
+            result.is_ok(),
+            "install_completions should succeed for bash"
+        );
+
+        let bash_file = tmp.join(".local/share/bash-completion/completions/lox");
+        assert!(bash_file.exists(), "bash completion file should be created");
+        let content = fs::read_to_string(&bash_file).unwrap();
+        assert!(
+            content.contains("_lox"),
+            "installed file should contain bash completions"
+        );
+
+        // Restore HOME
+        if let Some(h) = prev_home {
+            std::env::set_var("HOME", h);
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
