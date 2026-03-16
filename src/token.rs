@@ -1,10 +1,10 @@
 //! Loxone token authentication via WS + RSA/AES command encryption
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
-use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Encrypt, RsaPublicKey};
+use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
 use sha1::Sha1 as Sha1Digest;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -214,11 +214,11 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     for _ in 0..10 {
         match tokio::time::timeout(Duration::from_secs(WS_TIMEOUT_SECS), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
-                    if v.pointer("/LL/Code").is_some() || v.pointer("/LL/code").is_some() {
-                        token_resp = Some(v);
-                        break;
-                    }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t)
+                    && (v.pointer("/LL/Code").is_some() || v.pointer("/LL/code").is_some())
+                {
+                    token_resp = Some(v);
+                    break;
                 }
             }
             Ok(Some(Ok(Message::Binary(_)))) => continue,

@@ -1,11 +1,11 @@
 //! Loxone WebSocket client — used for token auth key exchange
 
 use anyhow::Result;
-use rustls::{crypto::ring, ClientConfig};
+use rustls::{ClientConfig, crypto::ring};
 use std::sync::Arc;
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::http::Request;
-use tokio_tungstenite::Connector;
 
 use rand::RngCore as _;
 

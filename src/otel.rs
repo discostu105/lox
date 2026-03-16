@@ -13,18 +13,18 @@
 //! (not a std thread) for periodic export, avoiding the executor mismatch
 //! between `futures_executor::block_on` and async HTTP clients.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
+use opentelemetry::KeyValue;
 use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _, Severity};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
-use opentelemetry::KeyValue;
 use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter};
 use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -246,14 +246,14 @@ fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter)
         ("/jdev/sys/numtasks", "loxone.system.tasks", "{tasks}"),
     ];
     for (path, name, unit) in gauge_metrics {
-        if let Ok(text) = lox.get_text(path) {
-            if let Some(val) = extract_lox_value(&text) {
-                meter
-                    .f64_gauge(*name)
-                    .with_unit(*unit)
-                    .build()
-                    .record(val, &[]);
-            }
+        if let Ok(text) = lox.get_text(path)
+            && let Some(val) = extract_lox_value(&text)
+        {
+            meter
+                .f64_gauge(*name)
+                .with_unit(*unit)
+                .build()
+                .record(val, &[]);
         }
     }
 
@@ -270,22 +270,18 @@ fn record_cumulative(
     name: &str,
     delta: bool,
 ) {
-    if let Ok(text) = lox.get_text(path) {
-        if let Some(current) = extract_lox_value(&text) {
-            let val = if delta {
-                let prev_val = prev.get(name).copied().unwrap_or(current);
-                let d = current - prev_val;
-                prev.insert(name.to_string(), current);
-                if d < 0.0 {
-                    current
-                } else {
-                    d
-                } // handle counter reset
-            } else {
-                current
-            };
-            meter.f64_gauge(name.to_string()).build().record(val, &[]);
-        }
+    if let Ok(text) = lox.get_text(path)
+        && let Some(current) = extract_lox_value(&text)
+    {
+        let val = if delta {
+            let prev_val = prev.get(name).copied().unwrap_or(current);
+            let d = current - prev_val;
+            prev.insert(name.to_string(), current);
+            if d < 0.0 { current } else { d } // handle counter reset
+        } else {
+            current
+        };
+        meter.f64_gauge(name.to_string()).build().record(val, &[]);
     }
 }
 
@@ -333,25 +329,23 @@ fn record_control_metrics(
     let gauge = meter.f64_gauge("loxone.control.value").build();
 
     for (uuid, (info, value)) in state.iter() {
-        if let Some(tf) = type_filter {
-            if !info
+        if let Some(tf) = type_filter
+            && !info
                 .control_type
                 .to_lowercase()
                 .contains(&tf.to_lowercase())
-            {
-                continue;
-            }
+        {
+            continue;
         }
-        if let Some(rf) = room_filter {
-            if !info
+        if let Some(rf) = room_filter
+            && !info
                 .room
                 .as_deref()
                 .unwrap_or("")
                 .to_lowercase()
                 .contains(&rf.to_lowercase())
-            {
-                continue;
-            }
+        {
+            continue;
         }
 
         let mut attrs = vec![
@@ -628,10 +622,10 @@ fn emit_automation_trace(
 /// Also handles values with unit suffixes like "352880/1016404kB" or "42.5%".
 fn extract_lox_value(text: &str) -> Option<f64> {
     // Try JSON first
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
-        if let Some(val) = v.pointer("/LL/value").and_then(|v| v.as_str()) {
-            return parse_numeric_prefix(val);
-        }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text)
+        && let Some(val) = v.pointer("/LL/value").and_then(|v| v.as_str())
+    {
+        return parse_numeric_prefix(val);
     }
     // Try XML attribute
     let key = "value=\"";
@@ -654,11 +648,7 @@ fn parse_numeric_prefix(s: &str) -> Option<f64> {
     let end = s
         .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
         .unwrap_or(s.len());
-    if end > 0 {
-        s[..end].parse().ok()
-    } else {
-        None
-    }
+    if end > 0 { s[..end].parse().ok() } else { None }
 }
 
 // ── Serve (continuous daemon) ───────────────────────────────────────────────
@@ -799,14 +789,14 @@ pub fn serve(
         {
             let mut state = store_ws.lock().unwrap();
             for event in &events {
-                if let StateEvent::ValueState { uuid, value } = event {
-                    if let Some(info) = state_map_ws.get(uuid) {
-                        let old_value = state.get(uuid).map(|(_, v)| *v);
-                        state.insert(uuid.clone(), (info.clone(), *value));
+                if let StateEvent::ValueState { uuid, value } = event
+                    && let Some(info) = state_map_ws.get(uuid)
+                {
+                    let old_value = state.get(uuid).map(|(_, v)| *v);
+                    state.insert(uuid.clone(), (info.clone(), *value));
 
-                        if let Some(ref lp) = log_provider_ws {
-                            emit_state_change_log(lp, info, uuid, *value, old_value);
-                        }
+                    if let Some(ref lp) = log_provider_ws {
+                        emit_state_change_log(lp, info, uuid, *value, old_value);
                     }
                 }
             }
@@ -840,12 +830,12 @@ pub fn serve(
         // Check for autopilot triggers → automation traces
         if let Some(ref tp) = trace_provider_ws {
             for event in &events {
-                if let StateEvent::ValueState { uuid, value } = event {
-                    if *value == 1.0 && autopilot_ws.contains(uuid) {
-                        if let Some(info) = state_map_ws.get(uuid) {
-                            emit_automation_trace(tp, info, uuid, &events, &state_map_ws);
-                        }
-                    }
+                if let StateEvent::ValueState { uuid, value } = event
+                    && *value == 1.0
+                    && autopilot_ws.contains(uuid)
+                    && let Some(info) = state_map_ws.get(uuid)
+                {
+                    emit_automation_trace(tp, info, uuid, &events, &state_map_ws);
                 }
             }
         }

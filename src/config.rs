@@ -36,9 +36,9 @@ impl Config {
         let path = std::env::var("LOX_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| Self::path());
-        let content = fs::read_to_string(&path).with_context(|| {
-            "Config not found. Run: lox config set --host ... --user ... --pass ..."
-        })?;
+        let content = fs::read_to_string(&path).with_context(
+            || "Config not found. Run: lox config set --host ... --user ... --pass ...",
+        )?;
         let mut cfg: Self = serde_yaml::from_str(&content)?;
         if !cfg.host.is_empty()
             && !cfg.host.starts_with("http://")

@@ -3,11 +3,11 @@
 //! Connects to the Miniserver via WebSocket, subscribes to binary status updates,
 //! and yields structured state-change events. Used by `lox stream` and `lox otel`.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
-use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Encrypt, RsaPublicKey};
+use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
 use serde_json::Value;
 use sha1::Sha1 as Sha1Digest;
 use sha2::{Digest, Sha256};
