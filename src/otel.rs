@@ -681,7 +681,7 @@ pub fn serve(
     no_traces: bool,
 ) -> Result<()> {
     // Load structure for UUID mapping
-    let mut lox = LoxClient::new(cfg.clone());
+    let mut lox = LoxClient::new(cfg.clone())?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
 
@@ -749,7 +749,13 @@ pub fn serve(
     let log_provider_sys = log_provider.clone();
     let quiet_sys = quiet;
     std::thread::spawn(move || {
-        let lox = LoxClient::new(cfg_sys);
+        let lox = match LoxClient::new(cfg_sys) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("failed to create HTTP client: {e}");
+                return;
+            }
+        };
         let mut prev = PrevValues::new();
         let mut last_log_lines: usize = 0;
         loop {
@@ -880,7 +886,7 @@ pub fn push(
     check_endpoint(endpoint, headers)?;
 
     // Load structure for UUID mapping
-    let mut lox = LoxClient::new(cfg.clone());
+    let mut lox = LoxClient::new(cfg.clone())?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
 
@@ -971,7 +977,13 @@ pub fn push(
         let cfg_sys = cfg.clone();
         let meter_sys = meter.clone();
         std::thread::spawn(move || {
-            let lox_sys = LoxClient::new(cfg_sys);
+            let lox_sys = match LoxClient::new(cfg_sys) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("failed to create HTTP client: {e}");
+                    return;
+                }
+            };
             let mut prev = PrevValues::new();
             let _ = record_system_metrics(&lox_sys, &meter_sys);
             // For push mode, delta=false since there's no previous value

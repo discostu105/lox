@@ -1325,7 +1325,7 @@ fn run(cli: Cli) -> Result<()> {
             let show_net = net || all;
             let show_bus = bus || all;
             let show_lan = lan || all;
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let version = lox.get_text("/dev/cfg/version")?;
             let heap = lox.get_text("/dev/sys/heap")?;
             let sps = lox.get_text("/dev/sps/state")?;
@@ -1380,7 +1380,7 @@ fn run(cli: Cli) -> Result<()> {
                 println!("└─────────────────────────────────────────────────────");
             }
             if energy {
-                let mut lox_mut = LoxClient::new(Config::load()?);
+                let mut lox_mut = LoxClient::new(Config::load()?)?;
                 let meters = lox_mut
                     .list_controls(Some("meter"), None)
                     .unwrap_or_default()
@@ -1551,7 +1551,7 @@ fn run(cli: Cli) -> Result<()> {
             cat,
             favorites,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let controls = lox.list_controls_ext(
                 r#type.as_deref(),
                 room.as_deref(),
@@ -1613,7 +1613,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Rooms => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let structure = lox.get_structure()?;
             if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
                 let mut entries: Vec<_> = rooms
@@ -1640,7 +1640,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Categories => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let cats = lox.list_categories()?;
             if json {
                 let arr: Vec<_> = cats
@@ -1659,7 +1659,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Info { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid_resolved)?;
             let ctrl_json = lox.get_control_json(&ctrl.uuid)?;
@@ -1732,7 +1732,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Globals => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let globals = lox.get_global_states()?;
             if json {
                 let mut map = serde_json::Map::new();
@@ -1763,7 +1763,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Modes => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let modes = lox.get_operating_modes()?;
             // Try to get the current operating mode
             let globals = lox.get_global_states().unwrap_or_default();
@@ -1800,7 +1800,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Get { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid_resolved)?;
             let xml = lox.get_all(&ctrl.uuid)?;
@@ -1864,7 +1864,7 @@ fn run(cli: Cli) -> Result<()> {
             room,
             secured,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             if dry_run {
                 let ctrl = lox.find_control(&uuid).ok();
@@ -1888,7 +1888,7 @@ fn run(cli: Cli) -> Result<()> {
             room,
             all_in_room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             if let Some(room_name) = all_in_room {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
@@ -1927,7 +1927,7 @@ fn run(cli: Cli) -> Result<()> {
             room,
             all_in_room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             if let Some(room_name) = all_in_room {
                 let controls = lox.resolve_all_in_room(&room_name, None)?;
                 for ctrl in &controls {
@@ -1962,7 +1962,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Cmd::Pulse { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             if dry_run {
                 let ctrl = lox.find_control(&uuid).ok();
@@ -1980,7 +1980,7 @@ fn run(cli: Cli) -> Result<()> {
             pos,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
@@ -2095,7 +2095,7 @@ fn run(cli: Cli) -> Result<()> {
                 action,
                 room,
             } => {
-                let mut lox = LoxClient::new(Config::load()?);
+                let mut lox = LoxClient::new(Config::load()?)?;
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
                 let ctrl = lox.find_control(&uuid)?;
                 if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
@@ -2144,7 +2144,7 @@ fn run(cli: Cli) -> Result<()> {
                 level,
                 room,
             } => {
-                let mut lox = LoxClient::new(Config::load()?);
+                let mut lox = LoxClient::new(Config::load()?)?;
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
                 let ctrl = lox.find_control(&uuid)?;
                 if !(0.0..=100.0).contains(&level) {
@@ -2169,7 +2169,7 @@ fn run(cli: Cli) -> Result<()> {
                 value,
                 room,
             } => {
-                let mut lox = LoxClient::new(Config::load()?);
+                let mut lox = LoxClient::new(Config::load()?)?;
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
                 let ctrl = lox.find_control(&uuid)?;
                 if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
@@ -2209,7 +2209,7 @@ fn run(cli: Cli) -> Result<()> {
                 value,
                 room,
             } => {
-                let mut lox = LoxClient::new(Config::load()?);
+                let mut lox = LoxClient::new(Config::load()?)?;
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
                 let encoded = encode_path_value(&value);
                 if dry_run {
@@ -2234,7 +2234,7 @@ fn run(cli: Cli) -> Result<()> {
                 }
             }
             InputCmd::Pulse { name_or_uuid, room } => {
-                let mut lox = LoxClient::new(Config::load()?);
+                let mut lox = LoxClient::new(Config::load()?)?;
                 let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
                 if let Some(resp) = send_or_dry_run(
                     &lox,
@@ -2257,7 +2257,7 @@ fn run(cli: Cli) -> Result<()> {
             action,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
@@ -2316,7 +2316,7 @@ fn run(cli: Cli) -> Result<()> {
             level,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !(0.0..=100.0).contains(&level) {
@@ -2342,7 +2342,7 @@ fn run(cli: Cli) -> Result<()> {
             action,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "Gate" | "CentralGate") {
@@ -2373,7 +2373,7 @@ fn run(cli: Cli) -> Result<()> {
             value,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
@@ -2410,7 +2410,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Weather { forecast } => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let data = lox.get_bytes("/data/weatheru.bin")?;
             if data.is_empty() {
                 println!("No weather data available on the Miniserver.");
@@ -2496,7 +2496,7 @@ fn run(cli: Cli) -> Result<()> {
             duration,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(
@@ -2642,7 +2642,7 @@ fn run(cli: Cli) -> Result<()> {
             action,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !ctrl.typ.contains("DoorLock") && !ctrl.typ.contains("Lock") {
@@ -2676,7 +2676,7 @@ fn run(cli: Cli) -> Result<()> {
             action,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !ctrl.typ.contains("Intercom") {
@@ -2711,7 +2711,7 @@ fn run(cli: Cli) -> Result<()> {
             limit,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !ctrl.typ.contains("Charger") && !ctrl.typ.contains("EV") {
@@ -2755,7 +2755,7 @@ fn run(cli: Cli) -> Result<()> {
             code,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if !matches!(ctrl.typ.as_str(), "Alarm") {
@@ -2817,7 +2817,7 @@ fn run(cli: Cli) -> Result<()> {
             reason,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             let lock_cmd = format!("lockcontrol/1/{}", encode_path_value(&reason));
@@ -2836,7 +2836,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Unlock { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
             if let Some(resp) = send_or_dry_run(
@@ -2854,7 +2854,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Stats => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let structure = lox.get_structure()?.clone();
             let mut rooms: HashMap<String, String> = HashMap::new();
             if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
@@ -2916,7 +2916,7 @@ fn run(cli: Cli) -> Result<()> {
             day,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid)?;
 
@@ -3021,7 +3021,7 @@ fn run(cli: Cli) -> Result<()> {
 
         Cmd::Update { action } => match action {
             UpdateCmd::Check => {
-                let lox = LoxClient::new(Config::load()?);
+                let lox = LoxClient::new(Config::load()?)?;
                 let version = lox.get_text("/dev/cfg/version")?;
                 let ver = xml_attr(&version, "value").unwrap_or("?");
                 println!("Current firmware: {}", ver);
@@ -3083,7 +3083,7 @@ fn run(cli: Cli) -> Result<()> {
                 if !yes {
                     bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
                 }
-                let lox = LoxClient::new(Config::load()?);
+                let lox = LoxClient::new(Config::load()?)?;
                 let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
                 let val = xml_attr(&resp, "value").unwrap_or("?");
                 println!("Update triggered: {}", val);
@@ -3140,14 +3140,14 @@ fn run(cli: Cli) -> Result<()> {
             if !yes {
                 bail!("Reboot requires --yes flag. This will restart your Miniserver!");
             }
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let resp = lox.get_text("/jdev/sys/reboot")?;
             let val = xml_attr(&resp, "value").unwrap_or("ok");
             println!("Reboot initiated: {}", val);
         }
 
         Cmd::Files { action } => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             match action {
                 FilesCmd::Ls { path } => {
                     let listing = lox.get_text(&format!("/dev/fslist/{}", abs_path(&path)))?;
@@ -3165,7 +3165,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Extensions => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let status_xml = lox.get_text("/data/status")?;
 
             // Parse /data/status XML for extensions and devices
@@ -3340,7 +3340,7 @@ fn run(cli: Cli) -> Result<()> {
             device_type,
             problems,
         } => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let status_xml = lox.get_text("/data/status")?;
 
             // Parse /data/status XML for devices (same source as `lox extensions`)
@@ -3576,7 +3576,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Time => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             // /jdev/sys/date and /jdev/sys/time require admin rights.
             // /data/status is accessible to all users and contains the Miniserver
             // timestamp in the "Modified" XML attribute (e.g. "2026-03-08 23:32:30").
@@ -3603,7 +3603,7 @@ fn run(cli: Cli) -> Result<()> {
             name_or_uuid,
             interval,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let ctrl = lox.find_control(&name_or_uuid)?;
             println!(
                 "Watching '{}' every {}s  (Ctrl+C to stop)",
@@ -3629,7 +3629,7 @@ fn run(cli: Cli) -> Result<()> {
             initial,
         } => {
             let cfg = Config::load()?;
-            let mut lox = LoxClient::new(cfg.clone());
+            let mut lox = LoxClient::new(cfg.clone())?;
             let structure = lox.get_structure()?.clone();
             let state_map = stream::build_state_uuid_map(&structure);
             if !quiet {
@@ -3720,7 +3720,7 @@ fn run(cli: Cli) -> Result<()> {
             value,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let ctrl = lox.find_control(&uuid_resolved)?;
             let xml = lox.get_all(&ctrl.uuid)?;
@@ -3753,7 +3753,7 @@ fn run(cli: Cli) -> Result<()> {
             dry_run: scene_dry_run,
         } => {
             let s = Scene::load(&scene)?;
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             if dry_run || scene_dry_run {
                 println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
                 if let Some(d) = &s.description {
@@ -3856,7 +3856,7 @@ fn run(cli: Cli) -> Result<()> {
             value,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let encoded = encode_path_value(&value);
             if dry_run {
@@ -3934,7 +3934,7 @@ fn run(cli: Cli) -> Result<()> {
                 let ts = token::TokenStore::load()
                     .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
                 let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
+                let lox = LoxClient::new(cfg.clone())?;
                 // Hash the token with the key for the check endpoint
                 let hash = token::hash_token(&ts.token, &ts.key);
                 let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
@@ -3960,7 +3960,7 @@ fn run(cli: Cli) -> Result<()> {
                 let ts = token::TokenStore::load()
                     .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
                 let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
+                let lox = LoxClient::new(cfg.clone())?;
                 let hash = token::hash_token(&ts.token, &ts.key);
                 let resp =
                     lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
@@ -3978,7 +3978,7 @@ fn run(cli: Cli) -> Result<()> {
                         let unix_until = if vu > 1_500_000_000 {
                             vu
                         } else {
-                            1_230_768_000u64.saturating_add(vu)
+                            client::LOXONE_EPOCH_SECS.saturating_add(vu)
                         };
                         let new_ts = token::TokenStore {
                             token: ts.token,
@@ -4004,7 +4004,7 @@ fn run(cli: Cli) -> Result<()> {
                 let ts = token::TokenStore::load()
                     .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
                 let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
+                let lox = LoxClient::new(cfg.clone())?;
                 let hash = token::hash_token(&ts.token, &ts.key);
                 let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
                 let code = resp
@@ -4024,7 +4024,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         },
         Cmd::Autopilot { action } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             match action {
                 AutopilotCmd::Ls => {
                     let rules = lox.list_autopilot_rules()?;
@@ -4118,7 +4118,7 @@ fn run(cli: Cli) -> Result<()> {
                     }
                 }
                 CacheCmd::Check => {
-                    let lox = LoxClient::new(cfg);
+                    let lox = LoxClient::new(cfg)?;
                     let resp = lox.get_json("/jdev/sps/LoxAPPversion3")?;
                     let remote_ver = resp
                         .pointer("/LL/value")
@@ -4517,7 +4517,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Cmd::Sensors { r#type, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let type_lower = r#type.to_lowercase();
             let type_filter: Option<&str> = match type_lower.as_str() {
                 "temperature" | "temp" => Some("InfoOnlyAnalog"),
@@ -4581,7 +4581,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Energy { room } => {
-            let mut lox = LoxClient::new(Config::load()?);
+            let mut lox = LoxClient::new(Config::load()?)?;
             let controls = lox.list_controls(None, room.as_deref())?;
             let energy: Vec<_> = controls
                 .iter()
@@ -4639,7 +4639,7 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Cmd::Log { lines } => {
-            let lox = LoxClient::new(Config::load()?);
+            let lox = LoxClient::new(Config::load()?)?;
             let log = lox.get_text("/dev/fsget/log/def.log")?;
             if log.contains("<errorcode>403</errorcode>")
                 || log.contains("<errorcode>401</errorcode>")

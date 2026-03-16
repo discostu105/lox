@@ -51,10 +51,119 @@ impl Config {
 
     pub fn save(&self) -> Result<PathBuf> {
         let path = Self::path();
-        fs::create_dir_all(path.parent().unwrap())?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(&path, serde_yaml::to_string(self)?)?;
         #[cfg(unix)]
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn dir_ends_with_dot_lox() {
+        let dir = Config::dir();
+        assert!(
+            dir.ends_with(".lox"),
+            "Config::dir() should end with .lox, got {:?}",
+            dir
+        );
+    }
+
+    #[test]
+    fn path_ends_with_config_yaml() {
+        let path = Config::path();
+        assert!(
+            path.ends_with("config.yaml"),
+            "Config::path() should end with config.yaml, got {:?}",
+            path
+        );
+    }
+
+    #[test]
+    fn load_from_lox_config_env_var() {
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("test_config.yaml");
+        let yaml = "host: myhost.local\nuser: admin\npass: secret\n";
+        fs::write(&cfg_path, yaml).unwrap();
+
+        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        let cfg = Config::load().unwrap();
+        std::env::remove_var("LOX_CONFIG");
+
+        assert_eq!(cfg.user, "admin");
+        assert_eq!(cfg.pass, "secret");
+    }
+
+    #[test]
+    fn load_prepends_https_to_bare_hostname() {
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("cfg.yaml");
+        fs::write(&cfg_path, "host: miniserver.local\nuser: u\npass: p\n").unwrap();
+
+        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        let cfg = Config::load().unwrap();
+        std::env::remove_var("LOX_CONFIG");
+
+        assert_eq!(cfg.host, "https://miniserver.local");
+    }
+
+    #[test]
+    fn load_preserves_explicit_http_scheme() {
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("cfg.yaml");
+        fs::write(&cfg_path, "host: http://ms.local\nuser: u\npass: p\n").unwrap();
+
+        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        let cfg = Config::load().unwrap();
+        std::env::remove_var("LOX_CONFIG");
+
+        assert_eq!(cfg.host, "http://ms.local");
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempdir().unwrap();
+        // Config::save() uses the hardcoded path, so we test roundtrip via
+        // manual serialization + LOX_CONFIG-based load.
+        let mut cfg = Config::default();
+        cfg.host = "https://10.0.0.1".to_string();
+        cfg.user = "testuser".to_string();
+        cfg.pass = "testpass".to_string();
+        cfg.serial = "00:11:22:33:44:55".to_string();
+        cfg.aliases
+            .insert("light".to_string(), "some-uuid".to_string());
+
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        let cfg_path = dir.path().join("roundtrip.yaml");
+        fs::write(&cfg_path, &yaml).unwrap();
+
+        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        let loaded = Config::load().unwrap();
+        std::env::remove_var("LOX_CONFIG");
+
+        assert_eq!(loaded.host, "https://10.0.0.1");
+        assert_eq!(loaded.user, "testuser");
+        assert_eq!(loaded.pass, "testpass");
+        assert_eq!(loaded.serial, "00:11:22:33:44:55");
+        assert_eq!(loaded.aliases.get("light"), Some(&"some-uuid".to_string()));
+    }
+
+    #[test]
+    fn default_config_has_empty_fields() {
+        let cfg = Config::default();
+        assert!(cfg.host.is_empty());
+        assert!(cfg.user.is_empty());
+        assert!(cfg.pass.is_empty());
+        assert!(cfg.serial.is_empty());
+        assert!(cfg.aliases.is_empty());
+        assert!(cfg.verify_ssl.is_none());
+        assert!(cfg.config_repo.is_none());
     }
 }
