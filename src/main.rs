@@ -287,6 +287,7 @@ Inspect:
 
 System:
   status, log, time            Health, logs, clock
+  health                       Device health dashboard
   discover, extensions         Find Miniservers, list extensions
   update, reboot               Firmware updates, reboot
   files                        Browse Miniserver filesystem
@@ -667,6 +668,15 @@ enum Cmd {
     },
     /// List connected extensions and devices
     Extensions,
+    /// Device health dashboard — battery, signal, offline, bus errors
+    Health {
+        /// Filter by device type: tree, air
+        #[arg(long = "type", short = 't')]
+        device_type: Option<String>,
+        /// Show only devices with problems (warnings + offline)
+        #[arg(long)]
+        problems: bool,
+    },
     /// Check for firmware updates
     Update {
         #[command(subcommand)]
@@ -2843,6 +2853,287 @@ fn main() -> Result<()> {
                     for c in &ext_controls {
                         println!("{:<40} {:<22} {}", c.name, c.typ, c.uuid);
                     }
+                }
+            }
+        }
+
+        Cmd::Health {
+            device_type,
+            problems,
+        } => {
+            let mut lox = LoxClient::new(Config::load()?);
+            let structure = lox.get_structure()?.clone();
+
+            // Build room name lookup
+            let mut rooms: HashMap<String, String> = HashMap::new();
+            if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
+                for (uuid, room) in map {
+                    if let Some(name) = room.get("name").and_then(|n| n.as_str()) {
+                        rooms.insert(uuid.clone(), name.to_string());
+                    }
+                }
+            }
+
+            // Collect all devices from extensions and extension-like controls
+            #[derive(Clone)]
+            struct DeviceInfo {
+                name: String,
+                uuid: String,
+                device_type: String, // "Tree", "Air", "Extension", etc.
+                room: Option<String>,
+                online: Option<bool>,
+                battery: Option<f64>,
+                last_seen: Option<String>,
+            }
+
+            let mut devices: Vec<DeviceInfo> = Vec::new();
+
+            // 1. Extensions from structure's dedicated "extensions" key
+            if let Some(exts) = structure.get("extensions").and_then(|e| e.as_object()) {
+                for (uuid, ext) in exts {
+                    let name = ext.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                    let typ = ext.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                    let online = ext.get("online").and_then(|o| o.as_bool());
+                    let room_uuid = ext.get("room").and_then(|r| r.as_str()).unwrap_or("");
+                    let room = rooms.get(room_uuid).cloned();
+                    let device_cat = if typ.to_lowercase().contains("tree") {
+                        "Tree"
+                    } else if typ.to_lowercase().contains("air") {
+                        "Air"
+                    } else {
+                        "Extension"
+                    };
+                    devices.push(DeviceInfo {
+                        name: name.to_string(),
+                        uuid: uuid.clone(),
+                        device_type: device_cat.to_string(),
+                        room,
+                        online,
+                        battery: None,
+                        last_seen: None,
+                    });
+                }
+            }
+
+            // 2. Controls with extension-like types (TreeDevice, AirDevice, etc.)
+            if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
+                for (uuid, ctrl) in ctrl_map {
+                    let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                    if !typ.contains("Extension")
+                        && !typ.contains("TreeDevice")
+                        && !typ.contains("AirDevice")
+                    {
+                        continue;
+                    }
+                    // Skip if already collected from extensions key
+                    if devices.iter().any(|d| d.uuid == *uuid) {
+                        continue;
+                    }
+                    let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                    let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
+                    let room = rooms.get(room_uuid).cloned();
+                    let device_cat = if typ.contains("Tree") {
+                        "Tree"
+                    } else if typ.contains("Air") {
+                        "Air"
+                    } else {
+                        "Extension"
+                    };
+
+                    // Try to extract state info (battery, online) from substates
+                    let mut online = None;
+                    let mut battery = None;
+                    if let Some(states) = ctrl.get("states").and_then(|s| s.as_object()) {
+                        // Check for battery level in Air devices
+                        if let Some(bat_uuid) = states
+                            .get("battery")
+                            .or_else(|| states.get("batteryLevel"))
+                            .and_then(|v| v.as_str())
+                        {
+                            if let Ok(xml) = lox.get_all(bat_uuid) {
+                                if let Some(val) = xml_attr(&xml, "value") {
+                                    battery = val.parse::<f64>().ok();
+                                }
+                            }
+                        }
+                        // Check for online/active state
+                        if let Some(active_uuid) = states
+                            .get("active")
+                            .or_else(|| states.get("online"))
+                            .and_then(|v| v.as_str())
+                        {
+                            if let Ok(xml) = lox.get_all(active_uuid) {
+                                if let Some(val) = xml_attr(&xml, "value") {
+                                    online = Some(val == "1" || val == "1.0" || val == "true");
+                                }
+                            }
+                        }
+                    }
+
+                    devices.push(DeviceInfo {
+                        name: name.to_string(),
+                        uuid: uuid.clone(),
+                        device_type: device_cat.to_string(),
+                        room,
+                        online,
+                        battery,
+                        last_seen: None,
+                    });
+                }
+            }
+
+            // Apply type filter
+            if let Some(ref tf) = device_type {
+                devices.retain(|d| d.device_type.to_lowercase().contains(&tf.to_lowercase()));
+            }
+
+            // Fetch CAN bus stats for Tree bus error context
+            let bus_errors: Option<(String, String, String)> = {
+                let rerr = lox.get_text("/jdev/bus/receiveerrors").ok();
+                let ferr = lox.get_text("/jdev/bus/frameerrors").ok();
+                let over = lox.get_text("/jdev/bus/overruns").ok();
+                match (rerr, ferr, over) {
+                    (Some(r), Some(f), Some(o)) => {
+                        let rv = xml_attr(&r, "value").unwrap_or("0").to_string();
+                        let fv = xml_attr(&f, "value").unwrap_or("0").to_string();
+                        let ov = xml_attr(&o, "value").unwrap_or("0").to_string();
+                        Some((rv, fv, ov))
+                    }
+                    _ => None,
+                }
+            };
+
+            // Classify devices
+            let total = devices.len();
+            let mut warnings: Vec<&DeviceInfo> = Vec::new();
+            let mut offline: Vec<&DeviceInfo> = Vec::new();
+            let mut online_count = 0usize;
+
+            for d in &devices {
+                if d.online == Some(false) {
+                    offline.push(d);
+                } else if d.battery.is_some_and(|b| b < 20.0) {
+                    warnings.push(d);
+                } else {
+                    online_count += 1;
+                }
+            }
+
+            let warning_count = warnings.len();
+            let offline_count = offline.len();
+
+            if json {
+                let device_json: Vec<serde_json::Value> = devices
+                    .iter()
+                    .map(|d| {
+                        let status = if d.online == Some(false) {
+                            "offline"
+                        } else if d.battery.is_some_and(|b| b < 20.0) {
+                            "warning"
+                        } else {
+                            "online"
+                        };
+                        let mut obj = serde_json::json!({
+                            "name": d.name,
+                            "uuid": d.uuid,
+                            "type": d.device_type,
+                            "status": status,
+                        });
+                        if let Some(ref room) = d.room {
+                            obj["room"] = serde_json::json!(room);
+                        }
+                        if let Some(online) = d.online {
+                            obj["online"] = serde_json::json!(online);
+                        }
+                        if let Some(battery) = d.battery {
+                            obj["battery"] = serde_json::json!(battery);
+                        }
+                        if let Some(ref ls) = d.last_seen {
+                            obj["last_seen"] = serde_json::json!(ls);
+                        }
+                        obj
+                    })
+                    .filter(|d| !problems || d["status"] == "warning" || d["status"] == "offline")
+                    .collect();
+
+                let mut result = serde_json::json!({
+                    "total": total,
+                    "online": online_count,
+                    "warnings": warning_count,
+                    "offline": offline_count,
+                    "devices": device_json,
+                });
+                if let Some((ref re, ref fe, ref ov)) = bus_errors {
+                    result["bus"] = serde_json::json!({
+                        "receive_errors": re,
+                        "frame_errors": fe,
+                        "overruns": ov,
+                    });
+                }
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Device Health Report ({} device{})\n",
+                    total,
+                    if total == 1 { "" } else { "s" }
+                );
+                println!("  ✓ Online:  {}", online_count);
+                println!("  ⚠ Warning: {}", warning_count);
+                println!("  ✗ Offline: {}", offline_count);
+
+                // Show bus errors if any are non-zero
+                if let Some((ref re, ref fe, ref ov)) = bus_errors {
+                    let re_n: u64 = re.parse().unwrap_or(0);
+                    let fe_n: u64 = fe.parse().unwrap_or(0);
+                    let ov_n: u64 = ov.parse().unwrap_or(0);
+                    if re_n > 0 || fe_n > 0 || ov_n > 0 {
+                        println!("\nBUS ERRORS:");
+                        println!(
+                            "  Tree CAN bus  Receive errors: {}  Frame errors: {}  Overruns: {}",
+                            re, fe, ov
+                        );
+                    }
+                }
+
+                if !warnings.is_empty() {
+                    println!("\nWARNINGS:");
+                    for d in &warnings {
+                        let room_str = d
+                            .room
+                            .as_deref()
+                            .map(|r| format!(" [{}]", r))
+                            .unwrap_or_default();
+                        let mut details = Vec::new();
+                        details.push(format!("{:<8}", d.device_type));
+                        if let Some(bat) = d.battery {
+                            details.push(format!("Battery: {:.0}%", bat));
+                        }
+                        if let Some(ref ls) = d.last_seen {
+                            details.push(format!("Last seen: {}", ls));
+                        }
+                        println!("  {}{:<30} {}", d.name, room_str, details.join("  "));
+                    }
+                }
+
+                if !offline.is_empty() {
+                    println!("\nOFFLINE:");
+                    for d in &offline {
+                        let room_str = d
+                            .room
+                            .as_deref()
+                            .map(|r| format!(" [{}]", r))
+                            .unwrap_or_default();
+                        let mut details = Vec::new();
+                        details.push(format!("{:<8}", d.device_type));
+                        if let Some(ref ls) = d.last_seen {
+                            details.push(format!("Last seen: {}", ls));
+                        }
+                        println!("  {}{:<30} {}", d.name, room_str, details.join("  "));
+                    }
+                }
+
+                if !problems && warnings.is_empty() && offline.is_empty() {
+                    println!("\n✓ All devices healthy");
                 }
             }
         }
