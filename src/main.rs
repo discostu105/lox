@@ -3314,125 +3314,97 @@ fn run(cli: Cli) -> Result<()> {
             device_type,
             problems,
         } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let structure = lox.get_structure()?.clone();
+            let lox = LoxClient::new(Config::load()?);
+            let status_xml = lox.get_text("/data/status")?;
 
-            // Build room name lookup
-            let mut rooms: HashMap<String, String> = HashMap::new();
-            if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
-                for (uuid, room) in map {
-                    if let Some(name) = room.get("name").and_then(|n| n.as_str()) {
-                        rooms.insert(uuid.clone(), name.to_string());
-                    }
-                }
+            // Parse /data/status XML for devices (same source as `lox extensions`)
+            use quick_xml::events::Event;
+            use quick_xml::Reader;
+
+            fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
+                e.attributes()
+                    .flatten()
+                    .find(|a| a.key.as_ref() == name)
+                    .map(|a| String::from_utf8_lossy(&a.value).to_string())
+                    .unwrap_or_default()
             }
 
-            // Collect all devices from extensions and extension-like controls
             #[derive(Clone)]
             struct DeviceInfo {
                 name: String,
-                uuid: String,
                 device_type: String, // "Tree", "Air", "Extension", etc.
-                room: Option<String>,
-                online: Option<bool>,
-                battery: Option<f64>,
-                last_seen: Option<String>,
+                place: Option<String>,
+                online: bool,
+                battery: Option<u32>,
             }
 
             let mut devices: Vec<DeviceInfo> = Vec::new();
+            let mut reader = Reader::from_str(&status_xml);
+            let mut buf = Vec::new();
 
-            // 1. Extensions from structure's dedicated "extensions" key
-            if let Some(exts) = structure.get("extensions").and_then(|e| e.as_object()) {
-                for (uuid, ext) in exts {
-                    let name = ext.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    let typ = ext.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                    let online = ext.get("online").and_then(|o| o.as_bool());
-                    let room_uuid = ext.get("room").and_then(|r| r.as_str()).unwrap_or("");
-                    let room = rooms.get(room_uuid).cloned();
-                    let device_cat = if typ.to_lowercase().contains("tree") {
-                        "Tree"
-                    } else if typ.to_lowercase().contains("air") {
-                        "Air"
-                    } else {
-                        "Extension"
-                    };
-                    devices.push(DeviceInfo {
-                        name: name.to_string(),
-                        uuid: uuid.clone(),
-                        device_type: device_cat.to_string(),
-                        room,
-                        online,
-                        battery: None,
-                        last_seen: None,
-                    });
-                }
-            }
-
-            // 2. Controls with extension-like types (TreeDevice, AirDevice, etc.)
-            if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
-                for (uuid, ctrl) in ctrl_map {
-                    let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                    if !typ.contains("Extension")
-                        && !typ.contains("TreeDevice")
-                        && !typ.contains("AirDevice")
-                    {
-                        continue;
-                    }
-                    // Skip if already collected from extensions key
-                    if devices.iter().any(|d| d.uuid == *uuid) {
-                        continue;
-                    }
-                    let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
-                    let room = rooms.get(room_uuid).cloned();
-                    let device_cat = if typ.contains("Tree") {
-                        "Tree"
-                    } else if typ.contains("Air") {
-                        "Air"
-                    } else {
-                        "Extension"
-                    };
-
-                    // Try to extract state info (battery, online) from substates
-                    let mut online = None;
-                    let mut battery = None;
-                    if let Some(states) = ctrl.get("states").and_then(|s| s.as_object()) {
-                        // Check for battery level in Air devices
-                        if let Some(bat_uuid) = states
-                            .get("battery")
-                            .or_else(|| states.get("batteryLevel"))
-                            .and_then(|v| v.as_str())
-                        {
-                            if let Ok(xml) = lox.get_all(bat_uuid) {
-                                if let Some(val) = xml_attr(&xml, "value") {
-                                    battery = val.parse::<f64>().ok();
-                                }
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                        match tag.as_str() {
+                            "TreeBranch" => {
+                                devices.push(DeviceInfo {
+                                    name: xattr(e, b"Name"),
+                                    device_type: "Tree".to_string(),
+                                    place: None,
+                                    online: true, // branches are always online if present
+                                    battery: None,
+                                });
                             }
-                        }
-                        // Check for online/active state
-                        if let Some(active_uuid) = states
-                            .get("active")
-                            .or_else(|| states.get("online"))
-                            .and_then(|v| v.as_str())
-                        {
-                            if let Ok(xml) = lox.get_all(active_uuid) {
-                                if let Some(val) = xml_attr(&xml, "value") {
-                                    online = Some(val == "1" || val == "1.0" || val == "true");
-                                }
+                            "Extension" => {
+                                devices.push(DeviceInfo {
+                                    name: xattr(e, b"Name"),
+                                    device_type: xattr(e, b"Type"),
+                                    place: None,
+                                    online: xattr(e, b"Online") == "true",
+                                    battery: None,
+                                });
                             }
+                            "GenericNetworkDevice" => {
+                                let place = xattr(e, b"Place");
+                                devices.push(DeviceInfo {
+                                    name: xattr(e, b"Name"),
+                                    device_type: xattr(e, b"Type"),
+                                    place: if place.is_empty() { None } else { Some(place) },
+                                    online: xattr(e, b"Online") == "true",
+                                    battery: None,
+                                });
+                            }
+                            "TreeDevice" => {
+                                let place = xattr(e, b"Place");
+                                devices.push(DeviceInfo {
+                                    name: xattr(e, b"Name"),
+                                    device_type: "Tree Device".to_string(),
+                                    place: if place.is_empty() { None } else { Some(place) },
+                                    online: xattr(e, b"Online") == "true",
+                                    battery: None,
+                                });
+                            }
+                            "AirDevice" => {
+                                let place = xattr(e, b"Place");
+                                devices.push(DeviceInfo {
+                                    name: xattr(e, b"Name"),
+                                    device_type: xattr(e, b"Type"),
+                                    place: if place.is_empty() { None } else { Some(place) },
+                                    online: xattr(e, b"Online") == "true",
+                                    battery: xattr(e, b"Battery").parse::<u32>().ok(),
+                                });
+                            }
+                            _ => {}
                         }
                     }
-
-                    devices.push(DeviceInfo {
-                        name: name.to_string(),
-                        uuid: uuid.clone(),
-                        device_type: device_cat.to_string(),
-                        room,
-                        online,
-                        battery,
-                        last_seen: None,
-                    });
+                    Ok(Event::Eof) => break,
+                    Err(e) => {
+                        anyhow::bail!("Failed to parse status XML: {}", e);
+                    }
+                    _ => {}
                 }
+                buf.clear();
             }
 
             // Apply type filter
@@ -3463,9 +3435,9 @@ fn run(cli: Cli) -> Result<()> {
             let mut online_count = 0usize;
 
             for d in &devices {
-                if d.online == Some(false) {
+                if !d.online {
                     offline.push(d);
-                } else if d.battery.is_some_and(|b| b < 20.0) {
+                } else if d.battery.is_some_and(|b| b < 20) {
                     warnings.push(d);
                 } else {
                     online_count += 1;
@@ -3479,30 +3451,24 @@ fn run(cli: Cli) -> Result<()> {
                 let device_json: Vec<serde_json::Value> = devices
                     .iter()
                     .map(|d| {
-                        let status = if d.online == Some(false) {
+                        let status = if !d.online {
                             "offline"
-                        } else if d.battery.is_some_and(|b| b < 20.0) {
+                        } else if d.battery.is_some_and(|b| b < 20) {
                             "warning"
                         } else {
                             "online"
                         };
                         let mut obj = serde_json::json!({
                             "name": d.name,
-                            "uuid": d.uuid,
                             "type": d.device_type,
                             "status": status,
+                            "online": d.online,
                         });
-                        if let Some(ref room) = d.room {
-                            obj["room"] = serde_json::json!(room);
-                        }
-                        if let Some(online) = d.online {
-                            obj["online"] = serde_json::json!(online);
+                        if let Some(ref place) = d.place {
+                            obj["place"] = serde_json::json!(place);
                         }
                         if let Some(battery) = d.battery {
                             obj["battery"] = serde_json::json!(battery);
-                        }
-                        if let Some(ref ls) = d.last_seen {
-                            obj["last_seen"] = serde_json::json!(ls);
                         }
                         obj
                     })
@@ -3551,37 +3517,29 @@ fn run(cli: Cli) -> Result<()> {
                 if !warnings.is_empty() {
                     println!("\nWARNINGS:");
                     for d in &warnings {
-                        let room_str = d
-                            .room
+                        let place_str = d
+                            .place
                             .as_deref()
                             .map(|r| format!(" [{}]", r))
                             .unwrap_or_default();
                         let mut details = Vec::new();
-                        details.push(format!("{:<8}", d.device_type));
+                        details.push(format!("{:<12}", d.device_type));
                         if let Some(bat) = d.battery {
-                            details.push(format!("Battery: {:.0}%", bat));
+                            details.push(format!("Battery: {}%", bat));
                         }
-                        if let Some(ref ls) = d.last_seen {
-                            details.push(format!("Last seen: {}", ls));
-                        }
-                        println!("  {}{:<30} {}", d.name, room_str, details.join("  "));
+                        println!("  {}{:<30} {}", d.name, place_str, details.join("  "));
                     }
                 }
 
                 if !offline.is_empty() {
                     println!("\nOFFLINE:");
                     for d in &offline {
-                        let room_str = d
-                            .room
+                        let place_str = d
+                            .place
                             .as_deref()
                             .map(|r| format!(" [{}]", r))
                             .unwrap_or_default();
-                        let mut details = Vec::new();
-                        details.push(format!("{:<8}", d.device_type));
-                        if let Some(ref ls) = d.last_seen {
-                            details.push(format!("Last seen: {}", ls));
-                        }
-                        println!("  {}{:<30} {}", d.name, room_str, details.join("  "));
+                        println!("  {}{:<30} {:<12}", d.name, place_str, d.device_type);
                     }
                 }
 
