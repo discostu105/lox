@@ -256,7 +256,18 @@ lox config upload config.zip --force   # upload to Miniserver (dangerous)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
 lox config diff old.Loxone new.Loxone  # compare two configs (accepts .zip or .Loxone)
+
+# Git-based config versioning
+lox config init ~/loxone-config        # initialize a git repo for config tracking
+lox config pull                        # download, decompress, diff & git-commit
+lox config pull --quiet                # cron-friendly (no output unless error)
+lox config log                         # show config change history
+lox config log -n 5                    # last 5 entries
+lox config restore abc123 --force      # restore config from git history & upload
 ```
+
+The `pull` workflow: FTP download → LoxCC decompress → semantic diff → git commit with meaningful message.
+Multi-Miniserver: each serial gets its own subdirectory in the repo.
 
 ---
 

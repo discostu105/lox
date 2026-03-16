@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `lox config init <path>` — initialize a git repository for config version tracking (multi-Miniserver via serial subdirectories)
+- `lox config pull [--quiet]` — download config via FTP, decompress LoxCC, generate semantic diff, and git-commit with meaningful change messages
+- `lox config log [-n COUNT]` — show config change history from the git repository
+- `lox config restore <commit> --force` — restore a previous config version from git history and upload to Miniserver
 - `lox health` — device health dashboard showing battery, signal, offline status, and bus errors for Tree/Air devices (`--type tree|air`, `--problems`)
 - `lox schema` — command schema introspection for AI agent discovery; lists commands with metadata, args, and valid actions
 - `--dry-run` global flag — validates and resolves inputs without executing commands; returns structured JSON envelope with `-o json`

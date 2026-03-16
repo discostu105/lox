@@ -50,6 +50,7 @@ Working. Core commands functional and tested end-to-end.
 | `lox watch` | ✅ | HTTP polling loop |
 | `lox run <scene>` | ✅ | Multi-step YAML scenes |
 | `lox log` | ⚠️ | Needs admin user |
+| `lox config init/pull/log/restore` | ✅ | Git-based config versioning |
 | `--json` output | ✅ | All commands |
 
 ---
