@@ -19,6 +19,9 @@ pub struct Config {
     /// Enable SSL certificate verification (default: false for Miniserver self-signed certs)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_ssl: Option<bool>,
+    /// Path to a git repository for config version tracking (`lox config init`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_repo: Option<String>,
 }
 
 impl Config {

@@ -47,6 +47,7 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 | `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing) |
 | `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes |
 | `src/config.rs` | `Config` struct — loads/saves `~/.lox/config.yaml`, provides `Config::dir()` path |
+| `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/ws.rs` | `LoxWsClient` — async WebSocket connection used by token auth (RSA+AES key exchange handshake) |
 | `src/token.rs` | Token auth flow: RSA key exchange, AES-encrypted credential exchange, token storage, HMAC token hashing |

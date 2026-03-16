@@ -1,6 +1,7 @@
 mod client;
 mod config;
 mod ftp;
+mod gitops;
 mod loxcc;
 mod loxone_xml;
 mod otel;
@@ -1118,6 +1119,31 @@ enum ConfigCmd {
         file1: String,
         /// Second config file (newer)
         file2: String,
+    },
+    /// Initialize a git repository for config version tracking
+    Init {
+        /// Path for the config git repository
+        path: String,
+    },
+    /// Download the latest config from the Miniserver and commit to git
+    Pull {
+        /// Suppress output (for cron usage)
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Show config change history from the git repository
+    Log {
+        /// Number of entries to show
+        #[arg(short, long, default_value = "20")]
+        count: usize,
+    },
+    /// Restore a previous config version from git and upload to Miniserver
+    Restore {
+        /// Git commit hash to restore from
+        commit: String,
+        /// Confirm the upload (required — dangerous operation)
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -4130,300 +4156,366 @@ fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Config { action } => match action {
-            ConfigCmd::Ls => {
-                let cfg = Config::load()?;
-                let backups = ftp::list_backups(&cfg)?;
-                if backups.is_empty() {
-                    println!("No configs found on the Miniserver.");
-                } else if json {
-                    let arr: Vec<serde_json::Value> = backups
-                        .iter()
-                        .map(|b| {
-                            serde_json::json!({
-                                "filename": b.filename,
-                                "version": b.version,
-                                "date": b.formatted_date(),
-                                "size": b.size,
+        Cmd::Config { action } => {
+            match action {
+                ConfigCmd::Ls => {
+                    let cfg = Config::load()?;
+                    let backups = ftp::list_backups(&cfg)?;
+                    if backups.is_empty() {
+                        println!("No configs found on the Miniserver.");
+                    } else if json {
+                        let arr: Vec<serde_json::Value> = backups
+                            .iter()
+                            .map(|b| {
+                                serde_json::json!({
+                                    "filename": b.filename,
+                                    "version": b.version,
+                                    "date": b.formatted_date(),
+                                    "size": b.size,
+                                })
                             })
-                        })
-                        .collect();
-                    println!("{}", serde_json::to_string_pretty(&arr)?);
-                } else {
-                    println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
-                    for (i, b) in backups.iter().enumerate() {
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&arr)?);
+                    } else {
+                        println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
+                        for (i, b) in backups.iter().enumerate() {
+                            println!(
+                                "  {:<4} {:<8} {:<22} {} KB{}",
+                                i + 1,
+                                b.version,
+                                b.formatted_date(),
+                                b.size / 1024,
+                                if i == 0 { "  (latest)" } else { "" }
+                            );
+                        }
+                    }
+                }
+                ConfigCmd::Download { save_as, extract } => {
+                    let cfg = Config::load()?;
+                    let backups = ftp::list_backups(&cfg)?;
+                    if backups.is_empty() {
+                        bail!("No configs found on the Miniserver.");
+                    }
+                    let newest = &backups[0];
+                    eprintln!(
+                        "Downloading {} ({} KB)...",
+                        newest.filename,
+                        newest.size / 1024
+                    );
+                    let data = ftp::download_backup(&cfg, &newest.filename)?;
+                    let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
+                    fs::write(&out_path, &data)?;
+                    println!("Saved to {}", out_path);
+
+                    if extract {
+                        eprintln!("Extracting sps0.LoxCC...");
+                        let xml = loxcc::extract_and_decompress(&data)?;
+                        let xml_path = out_path
+                            .strip_suffix(".zip")
+                            .unwrap_or(&out_path)
+                            .to_string()
+                            + ".Loxone";
+                        fs::write(&xml_path, &xml)?;
                         println!(
-                            "  {:<4} {:<8} {:<22} {} KB{}",
-                            i + 1,
-                            b.version,
-                            b.formatted_date(),
-                            b.size / 1024,
-                            if i == 0 { "  (latest)" } else { "" }
+                            "Decompressed {} KB → {} KB → {}",
+                            data.len() / 1024,
+                            xml.len() / 1024,
+                            xml_path
                         );
                     }
                 }
-            }
-            ConfigCmd::Download { save_as, extract } => {
-                let cfg = Config::load()?;
-                let backups = ftp::list_backups(&cfg)?;
-                if backups.is_empty() {
-                    bail!("No configs found on the Miniserver.");
-                }
-                let newest = &backups[0];
-                eprintln!(
-                    "Downloading {} ({} KB)...",
-                    newest.filename,
-                    newest.size / 1024
-                );
-                let data = ftp::download_backup(&cfg, &newest.filename)?;
-                let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
-                fs::write(&out_path, &data)?;
-                println!("Saved to {}", out_path);
-
-                if extract {
+                ConfigCmd::Extract { file, save_as } => {
+                    let zip_data =
+                        fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
                     eprintln!("Extracting sps0.LoxCC...");
-                    let xml = loxcc::extract_and_decompress(&data)?;
-                    let xml_path = out_path
-                        .strip_suffix(".zip")
-                        .unwrap_or(&out_path)
-                        .to_string()
-                        + ".Loxone";
+                    let xml = loxcc::extract_and_decompress(&zip_data)?;
+                    let xml_path = save_as.unwrap_or_else(|| {
+                        file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
+                    });
                     fs::write(&xml_path, &xml)?;
                     println!(
                         "Decompressed {} KB → {} KB → {}",
-                        data.len() / 1024,
+                        zip_data.len() / 1024,
                         xml.len() / 1024,
                         xml_path
                     );
                 }
-            }
-            ConfigCmd::Extract { file, save_as } => {
-                let zip_data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                eprintln!("Extracting sps0.LoxCC...");
-                let xml = loxcc::extract_and_decompress(&zip_data)?;
-                let xml_path = save_as.unwrap_or_else(|| {
-                    file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
-                });
-                fs::write(&xml_path, &xml)?;
-                println!(
-                    "Decompressed {} KB → {} KB → {}",
-                    zip_data.len() / 1024,
-                    xml.len() / 1024,
-                    xml_path
-                );
-            }
-            ConfigCmd::Upload { file, force } => {
-                let cfg = Config::load()?;
-                if !force {
-                    eprintln!(
-                        "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
+                ConfigCmd::Upload { file, force } => {
+                    let cfg = Config::load()?;
+                    if !force {
+                        eprintln!(
+                            "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
                              \x20  programming. A bad configuration can require physical SD card\n\
                              \x20  access to recover.\n\
                              \n\
                              \x20  Config file: {}\n\
                              \n\
                              \x20  Use --force to proceed.",
-                        file
-                    );
-                    std::process::exit(1);
+                            file
+                        );
+                        std::process::exit(1);
+                    }
+                    let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                    let filename = std::path::Path::new(&file)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&file);
+                    eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
+                    ftp::upload_backup(&cfg, filename, &data)?;
+                    println!("Upload complete.");
+                    println!("Reboot the Miniserver to apply: lox reboot");
                 }
-                let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                let filename = std::path::Path::new(&file)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&file);
-                eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
-                ftp::upload_backup(&cfg, filename, &data)?;
-                println!("Upload complete.");
-                println!("Reboot the Miniserver to apply: lox reboot");
-            }
-            ConfigCmd::Users { file } => {
-                if file.ends_with(".zip") {
-                    bail!(
-                        "Expected a .Loxone XML file. Run `lox config extract {}` first.",
-                        file
-                    );
-                }
-                let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                let users = loxone_xml::parse_users(&xml)?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&users)?);
-                } else {
-                    let nfc_count = users.iter().filter(|u| u.nfc).count();
-                    println!("  {:<26} {:<6} Description", "Name", "NFC");
-                    for u in &users {
-                        println!(
-                            "  {:<26} {:<6} {}",
-                            u.name,
-                            if u.nfc { "yes" } else { "-" },
-                            u.description,
+                ConfigCmd::Users { file } => {
+                    if file.ends_with(".zip") {
+                        bail!(
+                            "Expected a .Loxone XML file. Run `lox config extract {}` first.",
+                            file
                         );
                     }
-                    println!("\n{} users ({} with NFC)", users.len(), nfc_count);
-                }
-            }
-            ConfigCmd::Devices { file } => {
-                if file.ends_with(".zip") {
-                    bail!(
-                        "Expected a .Loxone XML file. Run `lox config extract {}` first.",
-                        file
-                    );
-                }
-                let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                let devices = loxone_xml::parse_devices(&xml)?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&devices)?);
-                } else {
-                    let tree: Vec<_> = devices
-                        .iter()
-                        .filter(|d| d.bus == loxone_xml::DeviceBus::Tree)
-                        .collect();
-                    let air: Vec<_> = devices
-                        .iter()
-                        .filter(|d| d.bus == loxone_xml::DeviceBus::Air)
-                        .collect();
-                    let net: Vec<_> = devices
-                        .iter()
-                        .filter(|d| d.bus == loxone_xml::DeviceBus::Network)
-                        .collect();
-
-                    if !tree.is_empty() {
-                        println!("  Tree devices ({})", tree.len());
-                        println!("  {:<30} {:<12} Type", "Name", "Serial");
-                        for d in &tree {
-                            println!(
-                                "  {:<30} {:<12} {}",
-                                d.name,
-                                d.serial.as_deref().unwrap_or("-"),
-                                d.type_label
-                            );
-                        }
-                    }
-                    if !air.is_empty() {
-                        if !tree.is_empty() {
-                            println!();
-                        }
-                        println!("  LoxAIR devices ({})", air.len());
-                        println!("  {:<30} Type", "Name");
-                        for d in &air {
-                            println!("  {:<30} {}", d.name, d.type_label);
-                        }
-                    }
-                    if !net.is_empty() {
-                        if !tree.is_empty() || !air.is_empty() {
-                            println!();
-                        }
-                        println!("  Network devices ({})", net.len());
-                        println!("  {:<30} {:<18} MAC", "Name", "Address");
-                        for d in &net {
-                            println!(
-                                "  {:<30} {:<18} {}",
-                                d.name,
-                                d.address.as_deref().unwrap_or("-"),
-                                d.mac.as_deref().unwrap_or("-")
-                            );
-                        }
-                    }
-                    println!("\n{} devices total", devices.len());
-                }
-            }
-            ConfigCmd::Diff { file1, file2 } => {
-                let xml1 = load_config_xml(&file1)?;
-                let xml2 = load_config_xml(&file2)?;
-                let s1 = loxone_xml::parse_config_summary(&xml1)?;
-                let s2 = loxone_xml::parse_config_summary(&xml2)?;
-                let diff = loxone_xml::diff_configs(&s1, &s2);
-
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&diff)?);
-                } else {
-                    println!(
-                        "Config version: {} → {}",
-                        diff.version_old, diff.version_new
-                    );
-                    println!("Modified: {} → {}", diff.date_old, diff.date_new);
-
-                    if !diff.controls_added.is_empty()
-                        || !diff.controls_removed.is_empty()
-                        || !diff.controls_changed.is_empty()
-                    {
-                        println!("\nControls:");
-                        for c in &diff.controls_added {
-                            println!("  + Added: \"{}\" ({})", c.name, c.control_type);
-                        }
-                        for c in &diff.controls_changed {
-                            println!(
-                                "  ~ Changed: \"{}\" — {} \"{}\" → \"{}\"",
-                                c.name, c.field, c.old_value, c.new_value
-                            );
-                        }
-                        for c in &diff.controls_removed {
-                            println!("  - Removed: \"{}\" ({})", c.name, c.control_type);
-                        }
-                    }
-
-                    if !diff.rooms_added.is_empty()
-                        || !diff.rooms_removed.is_empty()
-                        || !diff.rooms_renamed.is_empty()
-                    {
-                        println!("\nRooms:");
-                        for r in &diff.rooms_added {
-                            println!("  + Added: \"{}\"", r);
-                        }
-                        for r in &diff.rooms_renamed {
-                            println!("  ~ Renamed: \"{}\" → \"{}\"", r.old, r.new);
-                        }
-                        for r in &diff.rooms_removed {
-                            println!("  - Removed: \"{}\"", r);
-                        }
-                    }
-
-                    if !diff.categories_added.is_empty()
-                        || !diff.categories_removed.is_empty()
-                        || !diff.categories_renamed.is_empty()
-                    {
-                        println!("\nCategories:");
-                        for c in &diff.categories_added {
-                            println!("  + Added: \"{}\"", c);
-                        }
-                        for c in &diff.categories_renamed {
-                            println!("  ~ Renamed: \"{}\" → \"{}\"", c.old, c.new);
-                        }
-                        for c in &diff.categories_removed {
-                            println!("  - Removed: \"{}\"", c);
-                        }
-                    }
-
-                    if !diff.users_added.is_empty() || !diff.users_removed.is_empty() {
-                        println!("\nUsers:");
-                        for u in &diff.users_added {
-                            println!("  + Added: \"{}\"", u);
-                        }
-                        for u in &diff.users_removed {
-                            println!("  - Removed: \"{}\"", u);
-                        }
-                    }
-
-                    let total = diff.controls_added.len()
-                        + diff.controls_removed.len()
-                        + diff.controls_changed.len()
-                        + diff.rooms_added.len()
-                        + diff.rooms_removed.len()
-                        + diff.rooms_renamed.len()
-                        + diff.categories_added.len()
-                        + diff.categories_removed.len()
-                        + diff.categories_renamed.len()
-                        + diff.users_added.len()
-                        + diff.users_removed.len();
-
-                    if !diff.has_changes() {
-                        println!("\nNo structural changes.");
+                    let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                    let users = loxone_xml::parse_users(&xml)?;
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&users)?);
                     } else {
-                        println!("\n{} changes total", total);
+                        let nfc_count = users.iter().filter(|u| u.nfc).count();
+                        println!("  {:<26} {:<6} Description", "Name", "NFC");
+                        for u in &users {
+                            println!(
+                                "  {:<26} {:<6} {}",
+                                u.name,
+                                if u.nfc { "yes" } else { "-" },
+                                u.description,
+                            );
+                        }
+                        println!("\n{} users ({} with NFC)", users.len(), nfc_count);
                     }
                 }
+                ConfigCmd::Devices { file } => {
+                    if file.ends_with(".zip") {
+                        bail!(
+                            "Expected a .Loxone XML file. Run `lox config extract {}` first.",
+                            file
+                        );
+                    }
+                    let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+                    let devices = loxone_xml::parse_devices(&xml)?;
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&devices)?);
+                    } else {
+                        let tree: Vec<_> = devices
+                            .iter()
+                            .filter(|d| d.bus == loxone_xml::DeviceBus::Tree)
+                            .collect();
+                        let air: Vec<_> = devices
+                            .iter()
+                            .filter(|d| d.bus == loxone_xml::DeviceBus::Air)
+                            .collect();
+                        let net: Vec<_> = devices
+                            .iter()
+                            .filter(|d| d.bus == loxone_xml::DeviceBus::Network)
+                            .collect();
+
+                        if !tree.is_empty() {
+                            println!("  Tree devices ({})", tree.len());
+                            println!("  {:<30} {:<12} Type", "Name", "Serial");
+                            for d in &tree {
+                                println!(
+                                    "  {:<30} {:<12} {}",
+                                    d.name,
+                                    d.serial.as_deref().unwrap_or("-"),
+                                    d.type_label
+                                );
+                            }
+                        }
+                        if !air.is_empty() {
+                            if !tree.is_empty() {
+                                println!();
+                            }
+                            println!("  LoxAIR devices ({})", air.len());
+                            println!("  {:<30} Type", "Name");
+                            for d in &air {
+                                println!("  {:<30} {}", d.name, d.type_label);
+                            }
+                        }
+                        if !net.is_empty() {
+                            if !tree.is_empty() || !air.is_empty() {
+                                println!();
+                            }
+                            println!("  Network devices ({})", net.len());
+                            println!("  {:<30} {:<18} MAC", "Name", "Address");
+                            for d in &net {
+                                println!(
+                                    "  {:<30} {:<18} {}",
+                                    d.name,
+                                    d.address.as_deref().unwrap_or("-"),
+                                    d.mac.as_deref().unwrap_or("-")
+                                );
+                            }
+                        }
+                        println!("\n{} devices total", devices.len());
+                    }
+                }
+                ConfigCmd::Diff { file1, file2 } => {
+                    let xml1 = load_config_xml(&file1)?;
+                    let xml2 = load_config_xml(&file2)?;
+                    let s1 = loxone_xml::parse_config_summary(&xml1)?;
+                    let s2 = loxone_xml::parse_config_summary(&xml2)?;
+                    let diff = loxone_xml::diff_configs(&s1, &s2);
+
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&diff)?);
+                    } else {
+                        println!(
+                            "Config version: {} → {}",
+                            diff.version_old, diff.version_new
+                        );
+                        println!("Modified: {} → {}", diff.date_old, diff.date_new);
+
+                        if !diff.controls_added.is_empty()
+                            || !diff.controls_removed.is_empty()
+                            || !diff.controls_changed.is_empty()
+                        {
+                            println!("\nControls:");
+                            for c in &diff.controls_added {
+                                println!("  + Added: \"{}\" ({})", c.name, c.control_type);
+                            }
+                            for c in &diff.controls_changed {
+                                println!(
+                                    "  ~ Changed: \"{}\" — {} \"{}\" → \"{}\"",
+                                    c.name, c.field, c.old_value, c.new_value
+                                );
+                            }
+                            for c in &diff.controls_removed {
+                                println!("  - Removed: \"{}\" ({})", c.name, c.control_type);
+                            }
+                        }
+
+                        if !diff.rooms_added.is_empty()
+                            || !diff.rooms_removed.is_empty()
+                            || !diff.rooms_renamed.is_empty()
+                        {
+                            println!("\nRooms:");
+                            for r in &diff.rooms_added {
+                                println!("  + Added: \"{}\"", r);
+                            }
+                            for r in &diff.rooms_renamed {
+                                println!("  ~ Renamed: \"{}\" → \"{}\"", r.old, r.new);
+                            }
+                            for r in &diff.rooms_removed {
+                                println!("  - Removed: \"{}\"", r);
+                            }
+                        }
+
+                        if !diff.categories_added.is_empty()
+                            || !diff.categories_removed.is_empty()
+                            || !diff.categories_renamed.is_empty()
+                        {
+                            println!("\nCategories:");
+                            for c in &diff.categories_added {
+                                println!("  + Added: \"{}\"", c);
+                            }
+                            for c in &diff.categories_renamed {
+                                println!("  ~ Renamed: \"{}\" → \"{}\"", c.old, c.new);
+                            }
+                            for c in &diff.categories_removed {
+                                println!("  - Removed: \"{}\"", c);
+                            }
+                        }
+
+                        if !diff.users_added.is_empty() || !diff.users_removed.is_empty() {
+                            println!("\nUsers:");
+                            for u in &diff.users_added {
+                                println!("  + Added: \"{}\"", u);
+                            }
+                            for u in &diff.users_removed {
+                                println!("  - Removed: \"{}\"", u);
+                            }
+                        }
+
+                        let total = diff.controls_added.len()
+                            + diff.controls_removed.len()
+                            + diff.controls_changed.len()
+                            + diff.rooms_added.len()
+                            + diff.rooms_removed.len()
+                            + diff.rooms_renamed.len()
+                            + diff.categories_added.len()
+                            + diff.categories_removed.len()
+                            + diff.categories_renamed.len()
+                            + diff.users_added.len()
+                            + diff.users_removed.len();
+
+                        if !diff.has_changes() {
+                            println!("\nNo structural changes.");
+                        } else {
+                            println!("\n{} changes total", total);
+                        }
+                    }
+                }
+                ConfigCmd::Init { path } => {
+                    let cfg = Config::load()?;
+                    let abs_path = if path.starts_with('/') || path.starts_with('~') {
+                        let expanded = if path.starts_with('~') {
+                            path.replacen(
+                                '~',
+                                &dirs::home_dir().unwrap_or_default().to_string_lossy(),
+                                1,
+                            )
+                        } else {
+                            path.clone()
+                        };
+                        std::path::PathBuf::from(expanded)
+                    } else {
+                        std::env::current_dir()?.join(&path)
+                    };
+                    let repo = gitops::init(&abs_path, &cfg)?;
+                    // Save the repo path in config
+                    let mut cfg = Config::load().unwrap_or_default();
+                    cfg.config_repo = Some(repo.to_string_lossy().to_string());
+                    let saved = cfg.save()?;
+                    println!("Config repo initialized at {}", repo.display());
+                    println!("Saved repo path to {}", saved.display());
+                    println!(
+                        "\nNext: run `lox config pull` to download and commit the current config."
+                    );
+                }
+                ConfigCmd::Pull { quiet: pull_quiet } => {
+                    let cfg = Config::load()?;
+                    let repo_path = cfg.config_repo.as_deref().context(
+                        "No config repo configured. Run `lox config init <path>` first.",
+                    )?;
+                    let q = pull_quiet || quiet;
+                    let committed = gitops::pull(std::path::Path::new(repo_path), &cfg, q)?;
+                    if q && committed {
+                        // In quiet/cron mode, just indicate a commit was made
+                        println!("committed");
+                    }
+                }
+                ConfigCmd::Log { count } => {
+                    let cfg = Config::load()?;
+                    let repo_path = cfg.config_repo.as_deref().context(
+                        "No config repo configured. Run `lox config init <path>` first.",
+                    )?;
+                    let ms = if !cfg.serial.is_empty() {
+                        Some(cfg.serial.as_str())
+                    } else {
+                        None
+                    };
+                    let output = gitops::log(std::path::Path::new(repo_path), ms, count)?;
+                    if output.is_empty() {
+                        println!("No config history yet. Run `lox config pull` first.");
+                    } else {
+                        println!("{}", output);
+                    }
+                }
+                ConfigCmd::Restore { commit, force } => {
+                    let cfg = Config::load()?;
+                    let repo_path = cfg.config_repo.as_deref().context(
+                        "No config repo configured. Run `lox config init <path>` first.",
+                    )?;
+                    gitops::restore(std::path::Path::new(repo_path), &cfg, &commit, force)?;
+                }
             }
-        },
+        }
         Cmd::Sensors { r#type, room } => {
             let mut lox = LoxClient::new(Config::load()?);
             let type_lower = r#type.to_lowercase();
