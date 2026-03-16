@@ -2787,73 +2787,174 @@ fn main() -> Result<()> {
         }
 
         Cmd::Extensions => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let structure = lox.get_structure()?.clone();
+            let lox = LoxClient::new(Config::load()?);
+            let status_xml = lox.get_text("/data/status")?;
 
-            // Collect extension devices from the structure file
-            let mut ext_list: Vec<serde_json::Value> = Vec::new();
+            // Parse /data/status XML for extensions and devices
+            // Structure: <Miniserver> contains <TreeBranch>, <Link>/<Extension>,
+            //   <NetworkDevices>/<GenericNetworkDevice>, each with child devices
+            let mut extensions: Vec<serde_json::Value> = Vec::new();
 
-            // Check for dedicated "extensions" key in structure
-            if let Some(exts) = structure.get("extensions").and_then(|e| e.as_object()) {
-                for (uuid, ext) in exts {
-                    let name = ext.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    let typ = ext.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                    let serial = ext.get("serial").and_then(|s| s.as_str()).unwrap_or("");
-                    let online = ext.get("online").and_then(|o| o.as_bool());
-                    ext_list.push(serde_json::json!({
-                        "uuid": uuid, "name": name, "type": typ,
-                        "serial": serial, "online": online,
-                    }));
-                }
+            use quick_xml::events::Event;
+            use quick_xml::Reader;
+
+            fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
+                e.attributes()
+                    .flatten()
+                    .find(|a| a.key.as_ref() == name)
+                    .map(|a| String::from_utf8_lossy(&a.value).to_string())
+                    .unwrap_or_default()
             }
 
-            // Also check controls with extension-like types
-            let all_controls = lox.list_controls(None, None)?;
-            let ext_controls: Vec<_> = all_controls
-                .iter()
-                .filter(|c| {
-                    c.typ.contains("Extension")
-                        || c.typ.contains("TreeDevice")
-                        || c.typ.contains("AirDevice")
-                })
-                .collect();
+            let mut reader = Reader::from_str(&status_xml);
+            let mut buf = Vec::new();
+            let mut parent_name: Option<String> = None;
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                        match tag.as_str() {
+                            "TreeBranch" => {
+                                let name = xattr(e, b"Name");
+                                extensions.push(serde_json::json!({
+                                    "name": name,
+                                    "type": "Tree",
+                                    "serial": xattr(e, b"Serial"),
+                                    "version": xattr(e, b"Version"),
+                                    "online": true,
+                                    "devices": xattr(e, b"Devices").parse::<u32>().unwrap_or(0),
+                                    "errors": xattr(e, b"Errors").parse::<u32>().unwrap_or(0),
+                                }));
+                                parent_name = Some(name);
+                            }
+                            "Extension" => {
+                                extensions.push(serde_json::json!({
+                                    "name": xattr(e, b"Name"),
+                                    "type": xattr(e, b"Type"),
+                                    "serial": xattr(e, b"Serial"),
+                                    "version": xattr(e, b"Version"),
+                                    "online": xattr(e, b"Online") == "true",
+                                }));
+                            }
+                            "GenericNetworkDevice" => {
+                                let name = xattr(e, b"Name");
+                                extensions.push(serde_json::json!({
+                                    "name": name,
+                                    "type": xattr(e, b"Type"),
+                                    "serial": xattr(e, b"MAC"),
+                                    "version": xattr(e, b"Version"),
+                                    "online": xattr(e, b"Online") == "true",
+                                    "place": xattr(e, b"Place"),
+                                }));
+                                parent_name = Some(name);
+                            }
+                            "TreeDevice" => {
+                                extensions.push(serde_json::json!({
+                                    "name": xattr(e, b"Name"),
+                                    "type": "Tree Device",
+                                    "serial": xattr(e, b"Serial"),
+                                    "version": xattr(e, b"Version"),
+                                    "online": xattr(e, b"Online") == "true",
+                                    "place": xattr(e, b"Place"),
+                                    "parent": parent_name,
+                                }));
+                            }
+                            "AirDevice" => {
+                                extensions.push(serde_json::json!({
+                                    "name": xattr(e, b"Name"),
+                                    "type": xattr(e, b"Type"),
+                                    "serial": xattr(e, b"Serial"),
+                                    "version": xattr(e, b"Version"),
+                                    "online": xattr(e, b"Online") == "true",
+                                    "place": xattr(e, b"Place"),
+                                    "battery": xattr(e, b"Battery").parse::<u32>().ok(),
+                                    "parent": parent_name,
+                                }));
+                            }
+                            "Plugin" => {
+                                extensions.push(serde_json::json!({
+                                    "name": xattr(e, b"Name"),
+                                    "type": format!("Plugin ({})", xattr(e, b"Type")),
+                                    "serial": "",
+                                    "version": xattr(e, b"Version"),
+                                    "online": xattr(e, b"Online") == "true",
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(e) => {
+                        anyhow::bail!("Failed to parse status XML: {}", e);
+                    }
+                    _ => {}
+                }
+                buf.clear();
+            }
 
             if json {
-                let mut all = ext_list.clone();
-                for c in &ext_controls {
-                    all.push(serde_json::json!({
-                        "name": c.name, "uuid": c.uuid, "type": c.typ,
-                        "room": c.room,
-                    }));
-                }
-                println!("{}", serde_json::to_string_pretty(&all)?);
-            } else if ext_list.is_empty() && ext_controls.is_empty() {
-                println!("No extensions found in structure.");
+                println!("{}", serde_json::to_string_pretty(&extensions)?);
+            } else if extensions.is_empty() {
+                println!("No extensions found.");
             } else {
-                if !ext_list.is_empty() {
-                    println!("{:<40} {:<22} {:<16} UUID", "NAME", "TYPE", "SERIAL");
-                    println!("{}", "─".repeat(100));
-                    for ext in &ext_list {
+                // Group: extensions/tree branches at top, then devices
+                let (top, devices): (Vec<_>, Vec<_>) = extensions.iter().partition(|e| {
+                    let t = e["type"].as_str().unwrap_or("");
+                    t == "Tree"
+                        || t.contains("Extension")
+                        || t.contains("Plugin")
+                        || t == "Intercom"
+                });
+
+                if !top.is_empty() {
+                    println!(
+                        "{:<36} {:<22} {:<12} {:<14} STATUS",
+                        "NAME", "TYPE", "SERIAL", "VERSION"
+                    );
+                    println!("{}", "─".repeat(96));
+                    for ext in &top {
+                        let online = ext["online"].as_bool().unwrap_or(false);
+                        let status = if online { "✓ online" } else { "✗ offline" };
                         println!(
-                            "{:<40} {:<22} {:<16} {}",
+                            "{:<36} {:<22} {:<12} {:<14} {}",
                             ext["name"].as_str().unwrap_or("?"),
                             ext["type"].as_str().unwrap_or("?"),
                             ext["serial"].as_str().unwrap_or(""),
-                            ext["uuid"].as_str().unwrap_or("?"),
+                            ext["version"].as_str().unwrap_or(""),
+                            status,
                         );
                     }
-                    println!("\n{} extensions", ext_list.len());
                 }
-                if !ext_controls.is_empty() {
-                    if !ext_list.is_empty() {
+
+                if !devices.is_empty() {
+                    if !top.is_empty() {
                         println!();
                     }
-                    println!("{:<40} {:<22} UUID", "NAME", "TYPE");
-                    println!("{}", "─".repeat(100));
-                    for c in &ext_controls {
-                        println!("{:<40} {:<22} {}", c.name, c.typ, c.uuid);
+                    println!(
+                        "{:<36} {:<26} {:<20} {:<14} STATUS",
+                        "DEVICE", "TYPE", "PLACE", "VERSION"
+                    );
+                    println!("{}", "─".repeat(110));
+                    for dev in &devices {
+                        let online = dev["online"].as_bool().unwrap_or(false);
+                        let status = if online { "✓ online" } else { "✗ offline" };
+                        println!(
+                            "{:<36} {:<26} {:<20} {:<14} {}",
+                            dev["name"].as_str().unwrap_or("?"),
+                            dev["type"].as_str().unwrap_or("?"),
+                            dev["place"].as_str().unwrap_or(""),
+                            dev["version"].as_str().unwrap_or(""),
+                            status,
+                        );
                     }
                 }
+
+                println!(
+                    "\n{} extensions/branches, {} devices",
+                    top.len(),
+                    devices.len()
+                );
             }
         }
 
