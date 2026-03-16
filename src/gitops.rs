@@ -380,7 +380,6 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn test_ms_dir_with_serial() {
