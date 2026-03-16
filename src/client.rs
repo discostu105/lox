@@ -24,7 +24,7 @@ fn verbose() -> u8 {
 
 /// Redact credentials from a URL string for safe logging.
 /// Removes basic-auth passwords and known sensitive query parameters.
-pub fn redact_url(url: &str) -> String {
+pub(crate) fn redact_url(url: &str) -> String {
     // Redact userinfo password (http://user:pass@host → http://user:***@host)
     let mut result = if let Ok(mut parsed) = reqwest::Url::parse(url) {
         if parsed.password().is_some() {
@@ -34,16 +34,18 @@ pub fn redact_url(url: &str) -> String {
     } else {
         url.to_string()
     };
-    // Redact known sensitive query params
+    // Redact all occurrences of known sensitive query params
     for param in &["token", "key", "pass", "password", "autht"] {
-        // Match param=value patterns in query strings
         let pattern = format!("{}=", param);
-        if let Some(idx) = result.find(&pattern) {
-            let start = idx + pattern.len();
+        let mut search_from = 0;
+        while let Some(idx) = result[search_from..].find(&pattern) {
+            let abs_idx = search_from + idx;
+            let start = abs_idx + pattern.len();
             let end = result[start..]
                 .find('&')
                 .map_or(result.len(), |i| start + i);
             result.replace_range(start..end, "***");
+            search_from = start + 3; // skip past "***"
         }
     }
     result
@@ -59,7 +61,9 @@ pub struct HttpStatusError {
 /// Log a response body at -vv level, truncating large responses.
 fn log_body(body: &str) {
     if body.len() > 500 {
-        eprintln!("  body: {}… ({} bytes total)", &body[..500], body.len());
+        // Find a UTF-8 safe truncation point at or before byte 500
+        let truncated = &body[..body.floor_char_boundary(500)];
+        eprintln!("  body: {}… ({} bytes total)", truncated, body.len());
     } else {
         eprintln!("  body: {}", body);
     }
@@ -115,24 +119,26 @@ impl LoxClient {
     /// Following such redirects causes 401 errors because credentials
     /// are for the local Miniserver, not the cloud gateway.
     pub fn same_origin_redirect_policy(host: &str) -> reqwest::redirect::Policy {
-        let configured_host = host.to_string();
+        // Extract the host string from the configured URL.  Try parsing as a
+        // full URL first; fall back to treating bare hostnames/IPs by
+        // prepending a dummy scheme so Url::parse succeeds.
+        let configured_host = reqwest::Url::parse(host)
+            .or_else(|_| reqwest::Url::parse(&format!("http://{}", host)))
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .unwrap_or_default();
         reqwest::redirect::Policy::custom(move |attempt| {
-            let is_cross_origin = attempt
-                .url()
-                .host_str()
-                .and_then(|target_host| {
-                    reqwest::Url::parse(&configured_host)
-                        .ok()
-                        .and_then(|u| u.host_str().map(|h| h.to_string()))
-                        .map(|cfg_host| (target_host.to_string(), cfg_host))
-                })
-                .filter(|(target, cfg)| target != cfg);
-            if let Some((target_host, cfg_host)) = is_cross_origin {
+            if configured_host.is_empty() {
+                // Could not determine configured host — allow redirect
+                return attempt.follow();
+            }
+            let target_host = attempt.url().host_str().unwrap_or_default().to_string();
+            if target_host != configured_host {
                 return attempt.error(std::io::Error::other(format!(
                     "Blocked cross-origin redirect from {} to {}. \
                      If using a local IP, ensure your config uses https:// \
                      or check your Miniserver's network settings.",
-                    cfg_host, target_host
+                    configured_host, target_host
                 )));
             }
             attempt.follow()
@@ -1180,6 +1186,14 @@ mod tests {
         assert_eq!(
             redact_url("https://host/path?pass=secret"),
             "https://host/path?pass=***"
+        );
+    }
+
+    #[test]
+    fn test_redact_url_duplicate_params() {
+        assert_eq!(
+            redact_url("https://host/path?token=abc&other=ok&token=def"),
+            "https://host/path?token=***&other=ok&token=***"
         );
     }
 }
