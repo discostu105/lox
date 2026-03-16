@@ -30,7 +30,9 @@ impl Config {
     }
 
     pub fn load() -> Result<Self> {
-        let path = Self::path();
+        let path = std::env::var("LOX_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| Self::path());
         let content = fs::read_to_string(&path).with_context(|| {
             "Config not found. Run: lox config set --host ... --user ... --pass ..."
         })?;

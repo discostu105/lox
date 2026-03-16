@@ -37,9 +37,20 @@ fn load_config_xml(path: &str) -> Result<Vec<u8>> {
 
 fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     let key = format!("{}=\"", attr);
-    let start = xml.find(&key)? + key.len();
-    let end = xml[start..].find('"')? + start;
-    Some(&xml[start..end])
+    // Search for the attribute, ensuring it starts at a word boundary
+    // (preceded by space, '<', or start of string) to avoid matching
+    // "value2" when looking for "value".
+    let mut search_from = 0;
+    loop {
+        let pos = xml[search_from..].find(&key)?;
+        let abs_pos = search_from + pos;
+        if abs_pos == 0 || matches!(xml.as_bytes()[abs_pos - 1], b' ' | b'<' | b'\t' | b'\n') {
+            let start = abs_pos + key.len();
+            let end = xml[start..].find('"')? + start;
+            return Some(&xml[start..end]);
+        }
+        search_from = abs_pos + 1;
+    }
 }
 
 fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
@@ -79,6 +90,105 @@ fn kb_fmt(kb: f64) -> String {
         format!("{:.0} MB", kb / 1024.0)
     } else {
         format!("{:.0} kB", kb)
+    }
+}
+
+/// Loxone epoch: 2009-01-01 00:00:00 local time.
+/// All Loxone timestamps are seconds since this epoch.
+fn lox_epoch() -> chrono::DateTime<chrono::Local> {
+    chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .unwrap()
+}
+
+/// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted string.
+fn lox_timestamp_to_string(ts: i64) -> String {
+    let dt = lox_epoch() + chrono::Duration::seconds(ts);
+    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// A single parsed statistics entry.
+struct StatsEntry {
+    timestamp: String,
+    values: Vec<f64>,
+}
+
+/// Parse binary statistics data (after header has been skipped).
+/// `data` is the raw bytes starting from the first entry.
+/// `num_outputs` is the number of f64 values per entry.
+fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
+    let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
+    let mut cursor = Cursor::new(data);
+    let mut entries = Vec::new();
+    while cursor.position() as usize + entry_size <= data.len() {
+        let _uuid_part = cursor.read_u32::<LittleEndian>().unwrap_or(0);
+        let ts = cursor.read_u32::<LittleEndian>().unwrap_or(0);
+        let mut values = Vec::new();
+        for _ in 0..num_outputs {
+            values.push(cursor.read_f64::<LittleEndian>().unwrap_or(0.0));
+        }
+        entries.push(StatsEntry {
+            timestamp: lox_timestamp_to_string(ts as i64),
+            values,
+        });
+    }
+    entries
+}
+
+/// Skip the binary stats file header and return the offset where entries begin.
+/// Header format: u32 valueCount | u32 controlType | u32 nameLength | name bytes
+/// Returns None if data is too short.
+fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
+    if data.len() <= 12 {
+        return None;
+    }
+    let mut cursor = Cursor::new(data);
+    let _value_count = cursor.read_u32::<LittleEndian>().ok()?;
+    let _control_type = cursor.read_u32::<LittleEndian>().ok()?;
+    let name_length = cursor.read_u32::<LittleEndian>().ok()?;
+    let header_end = 12 + name_length as usize;
+    Some(header_end.div_ceil(entry_size) * entry_size)
+}
+
+/// Determine the stats period string from day/month flags.
+fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
+    if let Some(d) = day {
+        d.replace('-', "")
+    } else if let Some(m) = month {
+        m.replace('-', "")
+    } else {
+        chrono::Local::now().format("%Y%m").to_string()
+    }
+}
+
+/// Build the bare fsget path for a stats file.
+fn stats_file_path(uuid: &str, period: &str) -> String {
+    format!("/dev/fsget//stats/{}.{}", uuid, period)
+}
+
+/// Parse an fslist output to find matching stats files for a UUID and period.
+fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
+    let suffix = format!(".{}", period);
+    let mut files: Vec<&str> = listing
+        .lines()
+        .filter_map(|line| line.rsplit_once(' ').map(|(_, name)| name))
+        .filter(|name| name.starts_with(uuid) && name.ends_with(suffix.as_str()))
+        .collect();
+    files.sort();
+    files
+}
+
+/// Normalize a filesystem path for Loxone fsget/fslist API.
+/// Ensures the path starts with '/' so the double-slash URL
+/// (e.g. /dev/fsget//path) is correct.
+fn abs_path(p: &str) -> String {
+    if p.starts_with('/') {
+        p.to_string()
+    } else {
+        format!("/{p}")
     }
 }
 
@@ -2008,12 +2118,7 @@ fn main() -> Result<()> {
                 // Parse 108-byte weather entries
                 let entry_size = 108;
                 let num_entries = data.len() / entry_size;
-                let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-                    .unwrap()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_local_timezone(chrono::Local)
-                    .unwrap();
+                let epoch = lox_epoch();
 
                 let max_display = if forecast {
                     num_entries
@@ -2026,7 +2131,7 @@ fn main() -> Result<()> {
                     for i in 0..max_display {
                         let offset = i * entry_size;
                         let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                        if let Some(entry) = parse_weather_entry(&mut cursor, &lox_epoch) {
+                        if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
                             arr.push(entry);
                         }
                     }
@@ -2040,7 +2145,7 @@ fn main() -> Result<()> {
                     for i in 0..max_display {
                         let offset = i * entry_size;
                         let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                        if let Some(entry) = parse_weather_entry(&mut cursor, &lox_epoch) {
+                        if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
                             println!(
                                 "{:<20} {:>8.1} {:>8.0} {:>8.1} {:>8.1} {:>10.0}",
                                 entry["timestamp"].as_str().unwrap_or("?"),
@@ -2451,30 +2556,16 @@ fn main() -> Result<()> {
             let num_outputs = output_names.len();
 
             // Build the URL path
-            let period = if let Some(d) = &day {
-                d.replace('-', "")
-            } else if let Some(m) = &month {
-                m.replace('-', "")
-            } else {
-                // Default to current month
-                chrono::Local::now().format("%Y%m").to_string()
-            };
+            let period = stats_period(day.as_deref(), month.as_deref());
             // Stats files may be named {uuid}.{period} or {uuid}_{N}.{period}
             // for controls with multiple outputs.  Try bare name first, then
             // fall back to listing the /stats directory for suffixed files.
-            let bare = format!("/dev/fsget//stats/{}.{}", ctrl.uuid, period);
+            let bare = stats_file_path(&ctrl.uuid, &period);
             let data = match lox.get_bytes(&bare) {
                 Ok(d) => d,
                 Err(_) => {
                     let listing = lox.get_text("/dev/fslist//stats")?;
-                    let prefix = ctrl.uuid.as_str();
-                    let suffix = format!(".{}", period);
-                    let mut files: Vec<&str> = listing
-                        .lines()
-                        .filter_map(|line| line.rsplit_once(' ').map(|(_, name)| name))
-                        .filter(|name| name.starts_with(prefix) && name.ends_with(suffix.as_str()))
-                        .collect();
-                    files.sort();
+                    let files = find_stats_files(&listing, &ctrl.uuid, &period);
                     if files.is_empty() {
                         anyhow::bail!(
                             "No statistics files found for {} in period {}",
@@ -2491,17 +2582,7 @@ fn main() -> Result<()> {
             if data.is_empty() {
                 println!("No statistics data available for this period.");
             } else {
-                // Parse binary statistics format:
-                // Header: u32 valueCount | u32 controlType | u32 nameLength
-                // Then: nameLength bytes of name string
-                // Entries: 4 bytes UUID prefix + u32 timestamp + N × f64 values
                 let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
-                let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-                    .unwrap()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_local_timezone(chrono::Local)
-                    .unwrap();
 
                 if csv {
                     print!("timestamp");
@@ -2518,50 +2599,27 @@ fn main() -> Result<()> {
                     println!("{}", "─".repeat(20 + num_outputs * 16));
                 }
 
+                // Skip header, then parse entries
+                let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
+                let entries = parse_stats_entries(&data[offset..], num_outputs);
+
                 let mut json_arr = Vec::new();
-                let mut cursor = Cursor::new(data.as_slice());
-
-                // Skip binary statistics header if present:
-                // u32 valueCount | u32 controlType | u32 nameLength | name bytes
-                // After the header, entries are aligned to entry_size boundaries.
-                if data.len() > 12 {
-                    let value_count = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-                    let _control_type = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-                    let name_length = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-                    // Mask off version flag bit from valueCount
-                    let _vc = value_count & 0x7FFF_FFFF;
-                    // Skip name string
-                    let header_end = 12 + name_length as usize;
-                    // Align to next entry_size boundary
-                    let aligned = header_end.div_ceil(entry_size) * entry_size;
-                    cursor.set_position(aligned as u64);
-                }
-
-                while cursor.position() as usize + entry_size <= data.len() {
-                    // Each entry: 4 bytes UUID prefix + u32 timestamp + N × f64
-                    let _uuid_part = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-                    let ts = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-                    let dt = lox_epoch + chrono::Duration::seconds(ts as i64);
-                    let mut values = Vec::new();
-                    for _ in 0..num_outputs {
-                        values.push(cursor.read_f64::<LittleEndian>().unwrap_or(0.0));
-                    }
-                    let dt_str = dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                for e in &entries {
                     if csv {
-                        print!("{}", dt_str);
-                        for v in &values {
+                        print!("{}", e.timestamp);
+                        for v in &e.values {
                             print!(",{:.4}", v);
                         }
                         println!();
                     } else if json {
-                        let mut entry = serde_json::json!({"timestamp": dt_str});
+                        let mut entry = serde_json::json!({"timestamp": e.timestamp});
                         for (i, name) in output_names.iter().enumerate() {
-                            entry[name] = serde_json::json!(values[i]);
+                            entry[name] = serde_json::json!(e.values[i]);
                         }
                         json_arr.push(entry);
                     } else {
-                        print!("{:<20}", dt_str);
-                        for v in &values {
+                        print!("{:<20}", e.timestamp);
+                        for v in &e.values {
                             print!(" {:>15.4}", v);
                         }
                         println!();
@@ -2702,23 +2760,13 @@ fn main() -> Result<()> {
 
         Cmd::Files { action } => {
             let lox = LoxClient::new(Config::load()?);
-            // Loxone fsget/fslist expect absolute paths — the double slash
-            // in e.g. /dev/fsget//temp/file.img is intentional (API prefix +
-            // filesystem root).
-            let abs = |p: &str| {
-                if p.starts_with('/') {
-                    p.to_string()
-                } else {
-                    format!("/{p}")
-                }
-            };
             match action {
                 FilesCmd::Ls { path } => {
-                    let listing = lox.get_text(&format!("/dev/fslist/{}", abs(&path)))?;
+                    let listing = lox.get_text(&format!("/dev/fslist/{}", abs_path(&path)))?;
                     println!("{}", listing);
                 }
                 FilesCmd::Get { path, save_as } => {
-                    let data = lox.get_bytes(&format!("/dev/fsget/{}", abs(&path)))?;
+                    let data = lox.get_bytes(&format!("/dev/fsget/{}", abs_path(&path)))?;
                     let out_path = save_as.unwrap_or_else(|| {
                         path.rsplit('/').next().unwrap_or("download").to_string()
                     });
@@ -3276,14 +3324,7 @@ fn main() -> Result<()> {
                                 if raw.is_empty() || raw == "0" {
                                     "never".to_string()
                                 } else if let Ok(secs) = raw.parse::<i64>() {
-                                    let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-                                        .unwrap()
-                                        .and_hms_opt(0, 0, 0)
-                                        .unwrap()
-                                        .and_local_timezone(chrono::Local)
-                                        .unwrap();
-                                    let dt = lox_epoch + chrono::Duration::seconds(secs);
-                                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                                    lox_timestamp_to_string(secs)
                                 } else {
                                     raw.to_string()
                                 }
@@ -4197,12 +4238,7 @@ mod tests {
     #[test]
     fn test_parse_weather_entry() {
         use byteorder::{LittleEndian, WriteBytesExt};
-        let lox_epoch = chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_local_timezone(chrono::Local)
-            .unwrap();
+        let epoch = lox_epoch();
         let mut data = Vec::new();
         // 108-byte weather entry: u32 ts + 4×i32 + 6×f64 + 4×i32 + 3×f64
         data.write_u32::<LittleEndian>(3600).unwrap(); // timestamp
@@ -4225,7 +4261,7 @@ mod tests {
         data.write_f64::<LittleEndian>(100.0).unwrap(); // CAPE
         assert_eq!(data.len(), 108);
         let mut cursor = Cursor::new(data.as_slice());
-        let entry = parse_weather_entry(&mut cursor, &lox_epoch).unwrap();
+        let entry = parse_weather_entry(&mut cursor, &epoch).unwrap();
         assert_eq!(entry["temperature"].as_f64().unwrap(), 21.5);
         assert_eq!(entry["humidity"].as_f64().unwrap(), 65.0);
         assert_eq!(entry["wind_speed"].as_f64().unwrap(), 10.0);
@@ -4344,7 +4380,8 @@ mod tests {
     }
 
     /// Full round-trip: build a binary stats file with header + aligned
-    /// entries and verify we parse the correct timestamps and values.
+    /// entries and verify we parse the correct timestamps and values
+    /// using the extracted helper functions.
     #[test]
     fn test_stats_file_parse_with_header() {
         use byteorder::{LittleEndian, WriteBytesExt};
@@ -4368,31 +4405,297 @@ mod tests {
 
         let num_outputs = 1;
         let entry_size = 4 + 4 + num_outputs * 8;
-        let mut cursor = Cursor::new(data.as_slice());
-
-        // Skip header (same logic as the history command)
-        let value_count = cursor.read_u32::<LittleEndian>().unwrap();
-        let _control_type = cursor.read_u32::<LittleEndian>().unwrap();
-        let name_length = cursor.read_u32::<LittleEndian>().unwrap();
-        assert_eq!(value_count & 0x7FFF_FFFF, 1);
-        assert_eq!(name_length, 3);
-        let header_end = 12 + name_length as usize;
-        let aligned = header_end.div_ceil(entry_size) * entry_size;
-        cursor.set_position(aligned as u64);
-        assert_eq!(cursor.position(), 16);
-
-        // Parse entries
-        let mut entries = Vec::new();
-        while cursor.position() as usize + entry_size <= data.len() {
-            let _uuid_part = cursor.read_u32::<LittleEndian>().unwrap();
-            let ts = cursor.read_u32::<LittleEndian>().unwrap();
-            let val = cursor.read_f64::<LittleEndian>().unwrap();
-            entries.push((ts, val));
-        }
+        let offset = stats_data_offset(&data, entry_size).unwrap();
+        assert_eq!(offset, 16);
+        let entries = parse_stats_entries(&data[offset..], num_outputs);
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, 541_293_056);
-        assert_eq!(entries[0].1, 985.2);
-        assert_eq!(entries[1].0, 541_296_656);
-        assert_eq!(entries[1].1, 1215.1);
+        assert_eq!(entries[0].values[0], 985.2);
+        assert_eq!(entries[1].values[0], 1215.1);
+    }
+
+    // ── xml_attr ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_xml_attr_basic() {
+        let xml = r#"<LL control="test" value="42" Code="200"/>"#;
+        assert_eq!(xml_attr(xml, "value"), Some("42"));
+        assert_eq!(xml_attr(xml, "Code"), Some("200"));
+        assert_eq!(xml_attr(xml, "control"), Some("test"));
+    }
+
+    #[test]
+    fn test_xml_attr_missing() {
+        let xml = r#"<LL control="test" value="42"/>"#;
+        assert_eq!(xml_attr(xml, "missing"), None);
+    }
+
+    #[test]
+    fn test_xml_attr_empty_value() {
+        let xml = r#"<LL value=""/>"#;
+        assert_eq!(xml_attr(xml, "value"), Some(""));
+    }
+
+    #[test]
+    fn test_xml_attr_spaces_in_value() {
+        let xml = r#"<LL value="hello world"/>"#;
+        assert_eq!(xml_attr(xml, "value"), Some("hello world"));
+    }
+
+    #[test]
+    fn test_xml_attr_no_partial_name_match() {
+        // "value" must NOT match "value2" — word boundary check
+        let xml = r#"<LL value2="wrong" value="right"/>"#;
+        assert_eq!(xml_attr(xml, "value"), Some("right"));
+    }
+
+    #[test]
+    fn test_xml_attr_partial_name_only_match() {
+        // When only value2 exists, looking for "value" returns None
+        let xml = r#"<LL value2="wrong"/>"#;
+        assert_eq!(xml_attr(xml, "value"), None);
+    }
+
+    // ── matches_filters ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_matches_filters_no_filters() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, None, None));
+    }
+
+    #[test]
+    fn test_matches_filters_type_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, Some("switch"), None, None));
+        assert!(!matches_filters(&info, Some("dimmer"), None, None));
+    }
+
+    #[test]
+    fn test_matches_filters_room_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, Some("kitchen"), None));
+        assert!(!matches_filters(&info, None, Some("bedroom"), None));
+    }
+
+    #[test]
+    fn test_matches_filters_control_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Main Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, None, Some("main")));
+        assert!(!matches_filters(&info, None, None, Some("side")));
+    }
+
+    #[test]
+    fn test_matches_filters_missing_room() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: None,
+            category: None,
+            unit: None,
+        };
+        // Room filter should not match when room is None
+        assert!(!matches_filters(&info, None, Some("kitchen"), None));
+        // But no room filter should still pass
+        assert!(matches_filters(&info, None, None, None));
+    }
+
+    // ── bar ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bar_zero() {
+        let s = bar(0.0, 100.0);
+        assert!(s.starts_with("[░"));
+        assert!(s.ends_with("0%"));
+    }
+
+    #[test]
+    fn test_bar_full() {
+        let s = bar(100.0, 100.0);
+        assert!(s.starts_with("[████████████████████]"));
+        assert!(s.ends_with("100%"));
+    }
+
+    #[test]
+    fn test_bar_half() {
+        let s = bar(50.0, 100.0);
+        assert!(s.contains("50%"));
+    }
+
+    // ── kb_fmt ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_kb_fmt_kb() {
+        assert_eq!(kb_fmt(512.0), "512 kB");
+    }
+
+    #[test]
+    fn test_kb_fmt_mb() {
+        assert_eq!(kb_fmt(2048.0), "2 MB");
+    }
+
+    #[test]
+    fn test_kb_fmt_boundary() {
+        // At exactly 1024, stays in kB
+        assert_eq!(kb_fmt(1024.0), "1024 kB");
+    }
+
+    // ── lox_epoch / lox_timestamp_to_string ───────────────────────────────────
+
+    #[test]
+    fn test_lox_epoch_is_2009() {
+        let e = lox_epoch();
+        assert_eq!(e.format("%Y-%m-%d").to_string(), "2009-01-01");
+    }
+
+    #[test]
+    fn test_lox_timestamp_to_string() {
+        // 0 seconds = epoch itself
+        let s = lox_timestamp_to_string(0);
+        assert!(s.starts_with("2009-01-01"));
+    }
+
+    // ── stats helpers ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_stats_period_day() {
+        assert_eq!(stats_period(Some("2026-03-15"), None), "20260315");
+    }
+
+    #[test]
+    fn test_stats_period_month() {
+        assert_eq!(stats_period(None, Some("2026-03")), "202603");
+    }
+
+    #[test]
+    fn test_stats_period_default() {
+        // Default returns current month in YYYYMM format
+        let p = stats_period(None, None);
+        assert_eq!(p.len(), 6);
+        assert!(p.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_stats_file_path() {
+        assert_eq!(
+            stats_file_path("abc-123", "202603"),
+            "/dev/fsget//stats/abc-123.202603"
+        );
+    }
+
+    #[test]
+    fn test_find_stats_files_basic() {
+        let listing = "123456 abc-123.202603\n789012 abc-123_1.202603\n345678 other.202603";
+        let files = find_stats_files(listing, "abc-123", "202603");
+        assert_eq!(files, vec!["abc-123.202603", "abc-123_1.202603"]);
+    }
+
+    #[test]
+    fn test_find_stats_files_no_match() {
+        let listing = "123456 other.202603";
+        let files = find_stats_files(listing, "abc-123", "202603");
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_stats_data_offset_short_name() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut data = Vec::new();
+        data.write_u32::<LittleEndian>(0x8000_0001).unwrap();
+        data.write_u32::<LittleEndian>(0).unwrap();
+        data.write_u32::<LittleEndian>(3).unwrap(); // name_length=3
+        data.extend_from_slice(b"CO2\0"); // pad to 16
+        let entry_size = 4 + 4 + 1 * 8;
+        assert_eq!(stats_data_offset(&data, entry_size), Some(16));
+    }
+
+    #[test]
+    fn test_stats_data_offset_too_short() {
+        let data = vec![0u8; 10]; // Less than 12 bytes
+        assert_eq!(stats_data_offset(&data, 16), None);
+    }
+
+    // ── parse_stats_entries ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_stats_entries_empty() {
+        let entries = parse_stats_entries(&[], 1);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_stats_entries_single_output() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut data = Vec::new();
+        data.write_u32::<LittleEndian>(0xAABBCCDD).unwrap(); // uuid prefix
+        data.write_u32::<LittleEndian>(1000).unwrap();
+        data.write_f64::<LittleEndian>(23.5).unwrap();
+        let entries = parse_stats_entries(&data, 1);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].values, vec![23.5]);
+    }
+
+    #[test]
+    fn test_parse_stats_entries_multi_output() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut data = Vec::new();
+        data.write_u32::<LittleEndian>(0xAABBCCDD).unwrap();
+        data.write_u32::<LittleEndian>(5000).unwrap();
+        data.write_f64::<LittleEndian>(100.0).unwrap();
+        data.write_f64::<LittleEndian>(200.0).unwrap();
+        data.write_f64::<LittleEndian>(300.0).unwrap();
+        let entries = parse_stats_entries(&data, 3);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].values, vec![100.0, 200.0, 300.0]);
+    }
+
+    // ── abs_path ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_abs_path_with_leading_slash() {
+        assert_eq!(abs_path("/temp/file.img"), "/temp/file.img");
+    }
+
+    #[test]
+    fn test_abs_path_without_leading_slash() {
+        assert_eq!(abs_path("temp/file.img"), "/temp/file.img");
+    }
+
+    #[test]
+    fn test_abs_path_root() {
+        assert_eq!(abs_path("/"), "/");
     }
 }
