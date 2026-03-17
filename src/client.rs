@@ -9,6 +9,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const HTTP_TIMEOUT_SECS: u64 = 10;
+const RETRY_DELAYS_MS: [u64; 3] = [200, 400, 800];
+const CACHE_TTL_SECS: u64 = 86400;
+/// Loxone epoch: 2009-01-01T00:00:00Z as Unix timestamp.
+pub const LOXONE_EPOCH_SECS: u64 = 1_230_768_000;
+
 // ── Global verbosity ─────────────────────────────────────────────────────────
 
 static VERBOSE: AtomicU8 = AtomicU8::new(0);
@@ -145,20 +153,26 @@ impl LoxClient {
         })
     }
 
-    pub fn new(cfg: Config) -> Self {
+    pub fn new(cfg: Config) -> Result<Self> {
         let verify_ssl = cfg.verify_ssl.unwrap_or(false);
         let redirect_policy = Self::same_origin_redirect_policy(&cfg.host);
-        Self {
+        let lox = Self {
             client: Client::builder()
                 .user_agent(USER_AGENT)
                 .danger_accept_invalid_certs(!verify_ssl)
                 .redirect(redirect_policy)
-                .timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
                 .build()
-                .unwrap(),
+                .context("failed to build HTTP client")?,
             cfg,
             structure: None,
+        };
+
+        if !verify_ssl && verbose() >= 1 {
+            eprintln!("warning: TLS certificate verification is disabled (verify_ssl not set)");
         }
+
+        Ok(lox)
     }
 
     pub fn apply_auth(
@@ -253,7 +267,7 @@ impl LoxClient {
     where
         F: Fn() -> Result<T>,
     {
-        let delays = [200, 400, 800];
+        let delays = RETRY_DELAYS_MS;
         let mut last_err = None;
         for (attempt, delay) in std::iter::once(&0u64).chain(delays.iter()).enumerate() {
             if attempt > 0 {
@@ -279,7 +293,9 @@ impl LoxClient {
         if self.structure.is_none() {
             self.structure = Some(Self::load_or_fetch_structure(&self.cfg, &self.client)?);
         }
-        Ok(self.structure.as_ref().unwrap())
+        self.structure
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("structure not loaded"))
     }
 
     pub fn cache_path(_cfg: &Config) -> PathBuf {
@@ -296,7 +312,7 @@ impl LoxClient {
                     let age = std::time::SystemTime::now()
                         .duration_since(modified)
                         .unwrap_or_default();
-                    if age.as_secs() < 86400 {
+                    if age.as_secs() < CACHE_TTL_SECS {
                         if let Ok(data) = fs::read_to_string(&cache) {
                             if let Ok(v) = serde_json::from_str::<Value>(&data) {
                                 if verbose() >= 1 {
@@ -723,7 +739,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let controls = client.list_controls(None, None).unwrap();
         assert_eq!(controls.len(), 2);
         let light = controls.iter().find(|c| c.name == "Main Light").unwrap();
@@ -743,7 +759,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let lights = client.list_controls(Some("light"), None).unwrap();
         assert_eq!(lights.len(), 1);
         assert_eq!(lights[0].name, "Light");
@@ -767,7 +783,7 @@ mod tests {
                 "LL": { "Code": "200", "value": "1" }
             }));
         });
-        let client = LoxClient::new(mock_config(&server));
+        let client = LoxClient::new(mock_config(&server)).unwrap();
         let resp = client.send_cmd(test_uuid, "on").unwrap();
         assert_eq!(
             resp.pointer("/LL/Code").and_then(|v| v.as_str()),
@@ -778,7 +794,7 @@ mod tests {
     #[test]
     fn test_send_cmd_rejects_path_traversal() {
         let server = MockServer::start();
-        let client = LoxClient::new(mock_config(&server));
+        let client = LoxClient::new(mock_config(&server)).unwrap();
         assert!(client.send_cmd("../../../etc/passwd", "on").is_err());
         assert!(client.send_cmd("uuid-with-slash/attack", "on").is_err());
         assert!(client.send_cmd("", "on").is_err());
@@ -806,7 +822,7 @@ mod tests {
                 "controls": { "c1": { "name": "Light", "type": "Switch", "room": "" } }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let _ = client.list_controls(None, None).unwrap();
         let _ = client.list_controls(None, None).unwrap();
         mock.assert_hits(1);
@@ -824,7 +840,7 @@ mod tests {
                 "controls": { "uuid-abc": { "name": "Kitchen Light", "type": "Switch", "room": "" } }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let uuid = client.resolve_with_room("Kitchen Light", None).unwrap();
         assert_eq!(uuid, "uuid-abc");
     }
@@ -833,7 +849,7 @@ mod tests {
     fn test_resolve_uuid_passthrough() {
         let server = MockServer::start();
         // No mock needed — UUID bypasses HTTP lookup
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let uuid = "1fbc668c-005c-7471-ffffed57184a04d2";
         assert_eq!(client.resolve_with_room(uuid, None).unwrap(), uuid);
     }
@@ -851,7 +867,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         assert!(client.resolve_with_room("Light", None).is_err());
     }
 
@@ -868,7 +884,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let uuid = client.resolve_with_room("Light [Kitchen]", None).unwrap();
         assert_eq!(uuid, "u1");
     }
@@ -889,7 +905,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let favs = client.list_controls_ext(None, None, None, true).unwrap();
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].name, "Fav Light");
@@ -910,7 +926,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let lights = client
             .list_controls_ext(None, None, Some("Lighting"), false)
             .unwrap();
@@ -930,7 +946,7 @@ mod tests {
                 "controls": {}
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let cats = client.list_categories().unwrap();
         assert_eq!(cats.len(), 2);
         assert_eq!(cats[0].1, "Lighting");
@@ -950,7 +966,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let globals = client.get_global_states().unwrap();
         assert_eq!(globals.len(), 2);
         assert!(globals.iter().any(|(n, _)| n == "operatingMode"));
@@ -969,7 +985,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let modes = client.get_operating_modes().unwrap();
         assert_eq!(modes.len(), 3);
         assert_eq!(modes[0], ("0".to_string(), "Auto".to_string()));
@@ -992,7 +1008,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let ctrl_json = client.get_control_json("u1").unwrap();
         assert_eq!(
             ctrl_json.get("name").and_then(|v| v.as_str()),
@@ -1011,7 +1027,7 @@ mod tests {
         let mut cfg = mock_config(&server);
         cfg.aliases
             .insert("mylight".into(), "alias-uuid-1234567890".into());
-        let mut client = LoxClient::new(cfg);
+        let mut client = LoxClient::new(cfg).unwrap();
         let uuid = client.resolve_with_room("mylight", None).unwrap();
         assert_eq!(uuid, "alias-uuid-1234567890");
     }
@@ -1032,7 +1048,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let controls = client.resolve_all_in_room("Kitchen", None).unwrap();
         assert_eq!(controls.len(), 2);
         assert!(controls
@@ -1053,7 +1069,7 @@ mod tests {
                 }
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let controls = client
             .resolve_all_in_room("Kitchen", Some("Switch"))
             .unwrap();
@@ -1070,7 +1086,7 @@ mod tests {
                 "rooms": {}, "controls": {}
             }));
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         assert!(client.resolve_all_in_room("NonExistent", None).is_err());
     }
 
@@ -1105,7 +1121,7 @@ mod tests {
                 "LL": { "Code": "200", "value": "1" }
             }));
         });
-        let client = LoxClient::new(mock_config(&server));
+        let client = LoxClient::new(mock_config(&server)).unwrap();
         let resp = client.send_cmd(test_uuid, "on").unwrap();
         assert_eq!(
             resp.pointer("/LL/Code").and_then(|v| v.as_str()),
@@ -1128,7 +1144,7 @@ mod tests {
                 "https://192-168-10-222.504f94d08fa8.dyndns.loxonecloud.com/data/LoxApp3.json",
             );
         });
-        let mut client = LoxClient::new(mock_config(&server));
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let result = client.get_structure();
         assert!(result.is_err(), "Cross-origin redirect should be blocked");
         let err_msg = result.unwrap_err().to_string();
@@ -1152,7 +1168,7 @@ mod tests {
             when.method(GET).path("/new-path");
             then.status(200).body("ok");
         });
-        let client = LoxClient::new(mock_config(&server));
+        let client = LoxClient::new(mock_config(&server)).unwrap();
         let result = client.get_text("/old-path").unwrap();
         assert_eq!(result, "ok");
     }

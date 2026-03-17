@@ -5,6 +5,25 @@ use suppaftp::FtpStream;
 
 use crate::config::Config;
 
+/// Retry an FTP operation up to 3 times with exponential backoff.
+fn ftp_with_retry<T, F>(f: F) -> Result<T>
+where
+    F: Fn() -> Result<T>,
+{
+    let delays = [200u64, 400, 800];
+    let mut last_err = None;
+    for (attempt, delay) in std::iter::once(&0u64).chain(delays.iter()).enumerate() {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(*delay));
+        }
+        match f() {
+            Ok(val) => return Ok(val),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("retry loop must execute at least once"))
+}
+
 /// Parsed backup filename: sps_<version>_<timestamp>.zip
 #[derive(Debug, Clone)]
 pub struct BackupInfo {
@@ -56,12 +75,15 @@ pub fn parse_backup_name(name: &str, size: u64) -> Option<BackupInfo> {
 /// Connect to the Miniserver FTP and list backup ZIPs in /prog/.
 pub fn list_backups(cfg: &Config) -> Result<Vec<BackupInfo>> {
     let host = ftp_host(cfg);
-    let mut ftp = FtpStream::connect(format!("{}:21", host))
-        .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-    ftp.login(&cfg.user, &cfg.pass)
-        .context("FTP login failed — check your admin credentials in lox config")?;
-    let listing = ftp.list(Some("/prog")).unwrap_or_default();
-    ftp.quit().ok();
+    let listing = ftp_with_retry(|| {
+        let mut ftp = FtpStream::connect(format!("{}:21", host))
+            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        ftp.login(&cfg.user, &cfg.pass)
+            .context("FTP login failed — check your admin credentials in lox config")?;
+        let listing = ftp.list(Some("/prog")).unwrap_or_default();
+        ftp.quit().ok();
+        Ok(listing)
+    })?;
 
     let mut backups = Vec::new();
     for line in &listing {
@@ -91,35 +113,39 @@ pub fn list_backups(cfg: &Config) -> Result<Vec<BackupInfo>> {
 /// Download a specific backup file from the Miniserver.
 pub fn download_backup(cfg: &Config, filename: &str) -> Result<Vec<u8>> {
     let host = ftp_host(cfg);
-    let mut ftp = FtpStream::connect(format!("{}:21", host))
-        .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-    ftp.login(&cfg.user, &cfg.pass)
-        .context("FTP login failed — check your admin credentials")?;
-    ftp.transfer_type(suppaftp::types::FileType::Binary)
-        .context("Failed to set binary transfer mode")?;
     let path = format!("/prog/{}", filename);
-    let cursor = ftp
-        .retr_as_buffer(&path)
-        .with_context(|| format!("Failed to download {}", path))?;
-    ftp.quit().ok();
-    Ok(cursor.into_inner())
+    ftp_with_retry(|| {
+        let mut ftp = FtpStream::connect(format!("{}:21", host))
+            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        ftp.login(&cfg.user, &cfg.pass)
+            .context("FTP login failed — check your admin credentials")?;
+        ftp.transfer_type(suppaftp::types::FileType::Binary)
+            .context("Failed to set binary transfer mode")?;
+        let cursor = ftp
+            .retr_as_buffer(&path)
+            .with_context(|| format!("Failed to download {}", path))?;
+        ftp.quit().ok();
+        Ok(cursor.into_inner())
+    })
 }
 
 /// Upload a backup file to the Miniserver.
 pub fn upload_backup(cfg: &Config, filename: &str, data: &[u8]) -> Result<()> {
     let host = ftp_host(cfg);
-    let mut ftp = FtpStream::connect(format!("{}:21", host))
-        .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-    ftp.login(&cfg.user, &cfg.pass)
-        .context("FTP login failed — check your admin credentials")?;
-    ftp.transfer_type(suppaftp::types::FileType::Binary)
-        .context("Failed to set binary transfer mode")?;
     let path = format!("/prog/{}", filename);
-    let mut reader = std::io::Cursor::new(data);
-    ftp.put_file(&path, &mut reader)
-        .with_context(|| format!("Failed to upload {}", path))?;
-    ftp.quit().ok();
-    Ok(())
+    ftp_with_retry(|| {
+        let mut ftp = FtpStream::connect(format!("{}:21", host))
+            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        ftp.login(&cfg.user, &cfg.pass)
+            .context("FTP login failed — check your admin credentials")?;
+        ftp.transfer_type(suppaftp::types::FileType::Binary)
+            .context("Failed to set binary transfer mode")?;
+        let mut reader = std::io::Cursor::new(data);
+        ftp.put_file(&path, &mut reader)
+            .with_context(|| format!("Failed to upload {}", path))?;
+        ftp.quit().ok();
+        Ok(())
+    })
 }
 
 /// Extract the FTP hostname from config (strip scheme, port, trailing slash).

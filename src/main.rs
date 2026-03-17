@@ -1,4 +1,5 @@
 mod client;
+mod commands;
 mod config;
 mod ftp;
 mod gitops;
@@ -14,20 +15,14 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use client::LoxClient;
-use config::Config;
-use reqwest::blocking::Client;
-use scene::Scene;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
-use std::thread;
-use std::time::Duration;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
 /// Load config XML from a .Loxone file or extract from a .zip backup.
-fn load_config_xml(path: &str) -> Result<Vec<u8>> {
+pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
     let data = fs::read(path).with_context(|| format!("Cannot read {}", path))?;
     if path.ends_with(".zip") {
         loxcc::extract_and_decompress(&data)
@@ -36,7 +31,7 @@ fn load_config_xml(path: &str) -> Result<Vec<u8>> {
     }
 }
 
-fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
+pub(crate) fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     let key = format!("{}=\"", attr);
     // Search for the attribute, ensuring it starts at a word boundary
     // (preceded by space, '<', or start of string) to avoid matching
@@ -54,7 +49,7 @@ fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     }
 }
 
-fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
+pub(crate) fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
     if json {
         println!("{}", serde_json::to_string_pretty(resp).unwrap());
     } else if !quiet {
@@ -77,7 +72,7 @@ fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
 }
 
 /// Print a dry-run envelope showing what would be executed.
-fn print_dry_run(
+pub(crate) fn print_dry_run(
     json: bool,
     quiet: bool,
     uuid: &str,
@@ -106,7 +101,7 @@ fn print_dry_run(
 
 /// Execute a command or print dry-run info. Returns the response (or None for dry-run).
 #[allow(clippy::too_many_arguments)]
-fn send_or_dry_run(
+pub(crate) fn send_or_dry_run(
     lox: &LoxClient,
     uuid: &str,
     cmd: &str,
@@ -124,7 +119,7 @@ fn send_or_dry_run(
     }
 }
 
-fn bar(v: f64, max: f64) -> String {
+pub(crate) fn bar(v: f64, max: f64) -> String {
     let n = ((v / max * 20.0) as usize).min(20);
     format!(
         "[{}{}] {:.0}%",
@@ -134,7 +129,7 @@ fn bar(v: f64, max: f64) -> String {
     )
 }
 
-fn kb_fmt(kb: f64) -> String {
+pub(crate) fn kb_fmt(kb: f64) -> String {
     if kb > 1024.0 {
         format!("{:.0} MB", kb / 1024.0)
     } else {
@@ -144,7 +139,7 @@ fn kb_fmt(kb: f64) -> String {
 
 /// Loxone epoch: 2009-01-01 00:00:00 local time.
 /// All Loxone timestamps are seconds since this epoch.
-fn lox_epoch() -> chrono::DateTime<chrono::Local> {
+pub(crate) fn lox_epoch() -> chrono::DateTime<chrono::Local> {
     chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
@@ -154,21 +149,21 @@ fn lox_epoch() -> chrono::DateTime<chrono::Local> {
 }
 
 /// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted string.
-fn lox_timestamp_to_string(ts: i64) -> String {
+pub(crate) fn lox_timestamp_to_string(ts: i64) -> String {
     let dt = lox_epoch() + chrono::Duration::seconds(ts);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// A single parsed statistics entry.
-struct StatsEntry {
-    timestamp: String,
-    values: Vec<f64>,
+pub(crate) struct StatsEntry {
+    pub(crate) timestamp: String,
+    pub(crate) values: Vec<f64>,
 }
 
 /// Parse binary statistics data (after header has been skipped).
 /// `data` is the raw bytes starting from the first entry.
 /// `num_outputs` is the number of f64 values per entry.
-fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
+pub(crate) fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
     let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
     let mut cursor = Cursor::new(data);
     let mut entries = Vec::new();
@@ -190,7 +185,7 @@ fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
 /// Skip the binary stats file header and return the offset where entries begin.
 /// Header format: u32 valueCount | u32 controlType | u32 nameLength | name bytes
 /// Returns None if data is too short.
-fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
+pub(crate) fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
     if data.len() <= 12 {
         return None;
     }
@@ -203,7 +198,7 @@ fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
 }
 
 /// Determine the stats period string from day/month flags.
-fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
+pub(crate) fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
     if let Some(d) = day {
         d.replace('-', "")
     } else if let Some(m) = month {
@@ -214,12 +209,12 @@ fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
 }
 
 /// Build the bare fsget path for a stats file.
-fn stats_file_path(uuid: &str, period: &str) -> String {
+pub(crate) fn stats_file_path(uuid: &str, period: &str) -> String {
     format!("/dev/fsget//stats/{}.{}", uuid, period)
 }
 
 /// Parse an fslist output to find matching stats files for a UUID and period.
-fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
+pub(crate) fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
     let suffix = format!(".{}", period);
     let mut files: Vec<&str> = listing
         .lines()
@@ -233,7 +228,7 @@ fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a s
 /// Normalize a filesystem path for Loxone fsget/fslist API.
 /// Ensures the path starts with '/' so the double-slash URL
 /// (e.g. /dev/fsget//path) is correct.
-fn abs_path(p: &str) -> String {
+pub(crate) fn abs_path(p: &str) -> String {
     if p.starts_with('/') {
         p.to_string()
     } else {
@@ -241,13 +236,13 @@ fn abs_path(p: &str) -> String {
     }
 }
 
-fn now_hms() -> String {
+pub(crate) fn now_hms() -> String {
     use chrono::Timelike;
     let now = chrono::Local::now();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
-fn detect_shell() -> Option<Shell> {
+pub(crate) fn detect_shell() -> Option<Shell> {
     std::env::var("SHELL").ok().and_then(|s| {
         let name = s.rsplit('/').next().unwrap_or(&s);
         match name {
@@ -261,7 +256,7 @@ fn detect_shell() -> Option<Shell> {
     })
 }
 
-fn install_completions(shell: Shell, cmd: &mut clap::Command) -> Result<()> {
+pub(crate) fn install_completions(shell: Shell, cmd: &mut clap::Command) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_default();
     let (path, label) = match shell {
         Shell::Bash => {
@@ -351,7 +346,7 @@ Configuration:
 
 {options}{after-help}"
 )]
-struct Cli {
+pub(crate) struct Cli {
     /// Output format: json, csv, or table (default)
     #[arg(long, short = 'o', global = true, value_enum, default_value = "table")]
     output: OutputFormat,
@@ -381,7 +376,7 @@ struct Cli {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum OutputFormat {
+pub(crate) enum OutputFormat {
     /// Human-readable table (default)
     Table,
     /// JSON output
@@ -391,7 +386,7 @@ enum OutputFormat {
 }
 
 #[derive(Subcommand)]
-enum Cmd {
+pub(crate) enum Cmd {
     // ── Control ──────────────────────────────────────────────────────────────
     /// Control analog/virtual inputs: set | pulse
     Input {
@@ -807,7 +802,7 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
-enum TokenCmd {
+pub(crate) enum TokenCmd {
     /// Fetch and save a new token (valid 20 days)
     Fetch,
     /// Show current token status
@@ -823,7 +818,7 @@ enum TokenCmd {
 }
 
 #[derive(Subcommand)]
-enum LightCmd {
+pub(crate) enum LightCmd {
     /// Set light mood: plus | minus | off | <mood-id>
     Mood {
         name_or_uuid: String,
@@ -852,7 +847,7 @@ enum LightCmd {
 }
 
 #[derive(Subcommand)]
-enum InputCmd {
+pub(crate) enum InputCmd {
     /// Set analog/virtual input value
     Set {
         /// Control name or UUID
@@ -871,7 +866,7 @@ enum InputCmd {
 }
 
 #[derive(Subcommand)]
-enum AutopilotCmd {
+pub(crate) enum AutopilotCmd {
     /// List all automatic rules
     #[command(alias = "list")]
     Ls,
@@ -880,7 +875,7 @@ enum AutopilotCmd {
 }
 
 #[derive(Subcommand)]
-enum UpdateCmd {
+pub(crate) enum UpdateCmd {
     /// Check for available firmware updates
     Check,
     /// Install firmware update (requires --yes to confirm)
@@ -892,7 +887,7 @@ enum UpdateCmd {
 }
 
 #[derive(Subcommand)]
-enum MusicCmd {
+pub(crate) enum MusicCmd {
     /// Play in a zone
     Play {
         /// Zone number
@@ -946,7 +941,7 @@ enum MusicCmd {
 }
 
 #[derive(Subcommand)]
-enum FilesCmd {
+pub(crate) enum FilesCmd {
     /// List files at a path
     Ls {
         /// Path on the Miniserver filesystem
@@ -964,7 +959,7 @@ enum FilesCmd {
 }
 
 #[derive(Subcommand)]
-enum OtelCmd {
+pub(crate) enum OtelCmd {
     /// Continuously push metrics, logs & traces to an OTLP endpoint
     Serve {
         /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
@@ -1016,7 +1011,7 @@ enum OtelCmd {
 }
 
 #[derive(Subcommand)]
-enum CacheCmd {
+pub(crate) enum CacheCmd {
     /// Show cache info
     Info,
     /// Clear structure cache (forces fresh fetch)
@@ -1028,7 +1023,7 @@ enum CacheCmd {
 }
 
 #[derive(Subcommand)]
-enum SetupCmd {
+pub(crate) enum SetupCmd {
     /// Set one or more config fields (omitted fields are preserved)
     Set {
         #[arg(long, env = "LOX_HOST")]
@@ -1052,7 +1047,7 @@ enum SetupCmd {
 }
 
 #[derive(Subcommand)]
-enum AliasCmd {
+pub(crate) enum AliasCmd {
     /// Add or update an alias
     Add { name: String, uuid: String },
     /// Remove an alias
@@ -1063,7 +1058,7 @@ enum AliasCmd {
 }
 
 #[derive(Subcommand)]
-enum SceneCmd {
+pub(crate) enum SceneCmd {
     /// List all saved scenes
     #[command(alias = "list")]
     Ls,
@@ -1074,7 +1069,7 @@ enum SceneCmd {
 }
 
 #[derive(Subcommand)]
-enum ConfigCmd {
+pub(crate) enum ConfigCmd {
     /// Download the latest Loxone Config from the Miniserver via FTP
     Download {
         /// Custom output filename
@@ -1197,16 +1192,16 @@ fn main() {
 
 fn run(cli: Cli) -> Result<()> {
     client::set_verbose(cli.verbose);
-    let quiet = cli.quiet;
-    let no_header = cli.no_header;
-    let json = cli.output == OutputFormat::Json;
-    let csv = cli.output == OutputFormat::Csv;
-    let dry_run = cli.dry_run;
-    // In JSON mode, always be non-interactive
-    let _non_interactive = cli.non_interactive || json;
-    let trace_id = cli.trace_id.clone();
+    let ctx = commands::RunContext {
+        json: cli.output == OutputFormat::Json,
+        quiet: cli.quiet,
+        csv: cli.output == OutputFormat::Csv,
+        dry_run: cli.dry_run,
+        no_header: cli.no_header,
+        trace_id: cli.trace_id.clone(),
+    };
 
-    if let Some(tid) = &trace_id {
+    if let Some(tid) = &ctx.trace_id {
         if cli.verbose > 0 {
             eprintln!("trace-id: {}", tid);
         }
@@ -1214,105 +1209,145 @@ fn run(cli: Cli) -> Result<()> {
 
     // Respect NO_COLOR env var (clig.dev standard) and --no-color flag
     if cli.no_color || std::env::var("NO_COLOR").is_ok() {
-        // No ANSI colors are used currently, but this signals to any future
-        // colored output that colors should be suppressed.
         std::env::set_var("NO_COLOR", "1");
     }
 
     match cli.cmd {
-        Cmd::Setup { action } => match action {
-            SetupCmd::Set {
-                host,
-                user,
-                pass,
-                serial,
-                verify_ssl,
-                no_verify_ssl,
-            } => {
-                let mut cfg = Config::load().unwrap_or_default();
-                if let Some(h) = host {
-                    cfg.host = if h.starts_with("http://") || h.starts_with("https://") {
-                        h
-                    } else {
-                        format!("https://{}", h)
-                    };
-                }
-                if let Some(u) = user {
-                    cfg.user = u;
-                }
-                if let Some(p) = pass {
-                    cfg.pass = p;
-                }
-                if let Some(s) = serial {
-                    cfg.serial = s;
-                }
-                if verify_ssl {
-                    cfg.verify_ssl = Some(true);
-                } else if no_verify_ssl {
-                    cfg.verify_ssl = Some(false);
-                }
-                let path = cfg.save()?;
-                if !quiet {
-                    println!("✓  Config saved to {:?}", path);
-                }
-            }
-            SetupCmd::Show => {
-                let cfg = Config::load()?;
-                println!("host:   {}", cfg.host);
-                println!("user:   {}", cfg.user);
-                println!("pass:   {}", "*".repeat(cfg.pass.len()));
-                if !cfg.serial.is_empty() {
-                    println!("serial: {}", cfg.serial);
-                }
-                if !cfg.aliases.is_empty() {
-                    println!("aliases:");
-                    let mut aliases: Vec<_> = cfg.aliases.iter().collect();
-                    aliases.sort_by_key(|(k, _)| k.as_str());
-                    for (name, uuid) in aliases {
-                        println!("  {}: {}", name, uuid);
-                    }
-                }
-            }
-        },
-
-        Cmd::Alias { action } => {
-            let mut cfg = Config::load()?;
-            match action {
-                AliasCmd::Add { name, uuid } => {
-                    cfg.aliases.insert(name.clone(), uuid.clone());
-                    cfg.save()?;
-                    if !quiet {
-                        println!("✓  alias '{}' → {}", name, uuid);
-                    }
-                }
-                AliasCmd::Remove { name } => {
-                    if cfg.aliases.remove(&name).is_some() {
-                        cfg.save()?;
-                        if !quiet {
-                            println!("✓  removed alias '{}'", name);
-                        }
-                    } else {
-                        println!("No alias named '{}'", name);
-                    }
-                }
-                AliasCmd::Ls => {
-                    if cfg.aliases.is_empty() {
-                        println!("No aliases. Add with: lox alias add <name> <uuid>");
-                    } else {
-                        let mut aliases: Vec<_> = cfg.aliases.iter().collect();
-                        aliases.sort_by_key(|(k, _)| k.as_str());
-                        if !no_header {
-                            println!("{:<24} UUID", "ALIAS");
-                            println!("{}", "─".repeat(60));
-                        }
-                        for (name, uuid) in aliases {
-                            println!("{:<24} {}", name, uuid);
-                        }
-                    }
-                }
-            }
+        // ── Control commands ──────────────────────────────────────────
+        Cmd::On {
+            name_or_uuid,
+            room,
+            all_in_room,
+        } => commands::control::cmd_on(&ctx, name_or_uuid, room, all_in_room),
+        Cmd::Off {
+            name_or_uuid,
+            room,
+            all_in_room,
+        } => commands::control::cmd_off(&ctx, name_or_uuid, room, all_in_room),
+        Cmd::Pulse { name_or_uuid, room } => commands::control::cmd_pulse(&ctx, name_or_uuid, room),
+        Cmd::Blind {
+            name_or_uuid,
+            action,
+            pos,
+            room,
+        } => commands::control::cmd_blind(&ctx, name_or_uuid, action, pos, room),
+        Cmd::Light { action } => commands::control::cmd_light(&ctx, action),
+        Cmd::Input { action } => commands::control::cmd_input(&ctx, action),
+        Cmd::Mood {
+            name_or_uuid,
+            action,
+            room,
+        } => commands::control::cmd_mood(&ctx, name_or_uuid, action, room),
+        Cmd::Dimmer {
+            name_or_uuid,
+            level,
+            room,
+        } => commands::control::cmd_dimmer(&ctx, name_or_uuid, level, room),
+        Cmd::Gate {
+            name_or_uuid,
+            action,
+            room,
+        } => commands::control::cmd_gate(&ctx, name_or_uuid, action, room),
+        Cmd::Color {
+            name_or_uuid,
+            value,
+            room,
+        } => commands::control::cmd_color(&ctx, name_or_uuid, value, room),
+        Cmd::Thermostat {
+            name_or_uuid,
+            action,
+            value,
+            duration,
+            room,
+        } => commands::control::cmd_thermostat(&ctx, name_or_uuid, action, value, duration, room),
+        Cmd::Door {
+            name_or_uuid,
+            action,
+            room,
+        } => commands::control::cmd_door(&ctx, name_or_uuid, action, room),
+        Cmd::Intercom {
+            name_or_uuid,
+            action,
+            room,
+        } => commands::control::cmd_intercom(&ctx, name_or_uuid, action, room),
+        Cmd::Charger {
+            name_or_uuid,
+            action,
+            limit,
+            room,
+        } => commands::control::cmd_charger(&ctx, name_or_uuid, action, limit, room),
+        Cmd::Alarm {
+            name_or_uuid,
+            action,
+            no_motion,
+            code,
+            room,
+        } => commands::control::cmd_alarm(&ctx, name_or_uuid, action, no_motion, code, room),
+        Cmd::Lock {
+            name_or_uuid,
+            reason,
+            room,
+        } => commands::control::cmd_lock(&ctx, name_or_uuid, reason, room),
+        Cmd::Unlock { name_or_uuid, room } => {
+            commands::control::cmd_unlock(&ctx, name_or_uuid, room)
         }
+        Cmd::Send {
+            name_or_uuid,
+            command,
+            room,
+            secured,
+        } => commands::control::cmd_send(&ctx, name_or_uuid, command, room, secured),
+        Cmd::Set {
+            name_or_uuid,
+            value,
+            room,
+        } => commands::control::cmd_set(&ctx, name_or_uuid, value, room),
+        Cmd::Run { scene, dry_run } => commands::control::cmd_run(&ctx, scene, dry_run),
+        Cmd::Music { action } => commands::control::cmd_music(&ctx, action),
 
+        // ── Inspect commands ──────────────────────────────────────────
+        Cmd::Ls {
+            r#type,
+            room,
+            values,
+            cat,
+            favorites,
+        } => commands::inspect::cmd_ls(&ctx, r#type, room, values, cat, favorites),
+        Cmd::Get { name_or_uuid, room } => commands::inspect::cmd_get(&ctx, name_or_uuid, room),
+        Cmd::Info { name_or_uuid, room } => commands::inspect::cmd_info(&ctx, name_or_uuid, room),
+        Cmd::Rooms => commands::inspect::cmd_rooms(&ctx),
+        Cmd::Categories => commands::inspect::cmd_categories(&ctx),
+        Cmd::Globals => commands::inspect::cmd_globals(&ctx),
+        Cmd::Modes => commands::inspect::cmd_modes(&ctx),
+        Cmd::Sensors { r#type, room } => commands::inspect::cmd_sensors(&ctx, r#type, room),
+        Cmd::Energy { room } => commands::inspect::cmd_energy(&ctx, room),
+        Cmd::Weather { forecast } => commands::inspect::cmd_weather(&ctx, forecast),
+        Cmd::Stats => commands::inspect::cmd_stats(&ctx),
+        Cmd::History {
+            name_or_uuid,
+            month,
+            day,
+            room,
+        } => commands::inspect::cmd_history(&ctx, name_or_uuid, month, day, room),
+        Cmd::Autopilot { action } => commands::inspect::cmd_autopilot(&ctx, action),
+        Cmd::Watch {
+            name_or_uuid,
+            interval,
+        } => commands::inspect::cmd_watch(&ctx, name_or_uuid, interval),
+        Cmd::Stream {
+            r#type,
+            room,
+            control,
+            initial,
+        } => commands::inspect::cmd_stream(&ctx, r#type, room, control, initial),
+        Cmd::If {
+            name_or_uuid,
+            op,
+            value,
+            room,
+        } => commands::inspect::cmd_if(&ctx, name_or_uuid, op, value, room),
+
+        // ── System commands ───────────────────────────────────────────
         Cmd::Status {
             energy,
             diag,
@@ -1320,3403 +1355,37 @@ fn run(cli: Cli) -> Result<()> {
             bus,
             lan,
             all,
-        } => {
-            let show_diag = diag || all;
-            let show_net = net || all;
-            let show_bus = bus || all;
-            let show_lan = lan || all;
-            let lox = LoxClient::new(Config::load()?);
-            let version = lox.get_text("/dev/cfg/version")?;
-            let heap = lox.get_text("/dev/sys/heap")?;
-            let sps = lox.get_text("/dev/sps/state")?;
-            let check = lox.get_text("/dev/sys/check")?;
-            let status = lox.get_text("/data/status")?;
-
-            let ver = xml_attr(&version, "value").unwrap_or("?");
-            let heap_val = xml_attr(&heap, "value").unwrap_or("?");
-            let sps_num = xml_attr(&sps, "value").unwrap_or("?");
-            let conn = xml_attr(&check, "value").unwrap_or("?");
-
-            let sps_label = match sps_num {
-                "5" => "✓ Running",
-                "3" => "Started",
-                "7" => "⚠ Error",
-                "1" => "Booting",
-                "8" => "Updating",
-                n => n,
-            };
-            let heap_display = if let Some((used, total)) = heap_val.split_once('/') {
-                let t_str = total.trim_end_matches("kB");
-                let u: f64 = used.parse().unwrap_or(0.0);
-                let t: f64 = t_str.parse().unwrap_or(1.0);
-                format!("{} / {}  {}", kb_fmt(u), kb_fmt(t), bar(u, t))
-            } else {
-                heap_val.to_string()
-            };
-
-            let ms_name = xml_attr(&status, "Name").unwrap_or("Loxone");
-            let ms_ip = xml_attr(&status, "IP").unwrap_or("?");
-            let online = if xml_attr(&status, "Offline").unwrap_or("false") == "false" {
-                "✓ Online"
-            } else {
-                "✗ Offline"
-            };
-
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "name": ms_name, "ip": ms_ip, "version": ver,
-                        "plc": sps_label, "heap": heap_val, "connections": conn,
-                    })
-                );
-            } else {
-                println!("┌─ Loxone Miniserver ─────────────────────────────────");
-                println!("│  Name:        {} ({} {})", ms_name, ms_ip, online);
-                println!("│  Firmware:    {}", ver);
-                println!("│  PLC:         {}", sps_label);
-                println!("│  Memory:      {}", heap_display);
-                println!("│  Connections: {}", conn);
-                println!("└─────────────────────────────────────────────────────");
-            }
-            if energy {
-                let mut lox_mut = LoxClient::new(Config::load()?);
-                let meters = lox_mut
-                    .list_controls(Some("meter"), None)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .chain(
-                        lox_mut
-                            .list_controls(Some("energymanager"), None)
-                            .unwrap_or_default(),
-                    )
-                    .collect::<Vec<_>>();
-                if meters.is_empty() {
-                    println!(
-                        "No energy meters found in structure (type 'Meter' or 'EnergyManager')."
-                    );
-                } else {
-                    println!("┌─ Energy Meters ─────────────────────────────────────");
-                    for ctrl in &meters {
-                        let val = lox_mut
-                            .get_all(&ctrl.uuid)
-                            .ok()
-                            .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                            .unwrap_or_else(|| "-".to_string());
-                        let v: f64 = val.parse().unwrap_or(0.0);
-                        println!(
-                            "│  {:<24} {:>8.3} kW  [{}]",
-                            ctrl.name,
-                            v,
-                            ctrl.room.as_deref().unwrap_or("─")
-                        );
-                    }
-                    println!("└─────────────────────────────────────────────────────");
-                }
-            }
-            if show_diag {
-                let cpu = lox.get_text("/jdev/sys/lastcpu").unwrap_or_default();
-                let tasks = lox.get_text("/jdev/sys/numtasks").unwrap_or_default();
-                let ctx = lox
-                    .get_text("/jdev/sys/contextswitches")
-                    .unwrap_or_default();
-                let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
-                let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
-                let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
-                let ctx_val = xml_attr(&ctx, "value").unwrap_or("?");
-                let sd_val = xml_attr(&sd, "value").unwrap_or("?");
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "cpu": cpu_val, "tasks": tasks_val,
-                            "context_switches": ctx_val, "sd_health": sd_val,
-                        })
-                    );
-                } else {
-                    println!("┌─ Diagnostics ───────────────────────────────────────");
-                    println!("│  CPU:              {}", cpu_val);
-                    println!("│  Tasks:            {}", tasks_val);
-                    println!("│  Context switches: {}", ctx_val);
-                    println!("│  SD card:          {}", sd_val);
-                    println!("└─────────────────────────────────────────────────────");
-                }
-            }
-            if show_net {
-                let ip = lox.get_text("/jdev/cfg/ip").unwrap_or_default();
-                let mac = lox.get_text("/jdev/cfg/mac").unwrap_or_default();
-                let mask = lox.get_text("/jdev/cfg/mask").unwrap_or_default();
-                let gw = lox.get_text("/jdev/cfg/gateway").unwrap_or_default();
-                let dns1 = lox.get_text("/jdev/cfg/dns1").unwrap_or_default();
-                let dhcp = lox.get_text("/jdev/cfg/dhcp").unwrap_or_default();
-                let ntp = lox.get_text("/jdev/cfg/ntp").unwrap_or_default();
-                let ip_val = xml_attr(&ip, "value").unwrap_or("?");
-                let mac_val = xml_attr(&mac, "value").unwrap_or("?");
-                let mask_val = xml_attr(&mask, "value").unwrap_or("?");
-                let gw_val = xml_attr(&gw, "value").unwrap_or("?");
-                let dns1_val = xml_attr(&dns1, "value").unwrap_or("?");
-                let dhcp_val = xml_attr(&dhcp, "value").unwrap_or("?");
-                let ntp_val = xml_attr(&ntp, "value").unwrap_or("?");
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "ip": ip_val, "mac": mac_val, "mask": mask_val,
-                            "gateway": gw_val, "dns": dns1_val,
-                            "dhcp": dhcp_val, "ntp": ntp_val,
-                        })
-                    );
-                } else {
-                    println!("┌─ Network ───────────────────────────────────────────");
-                    println!("│  IP:      {}", ip_val);
-                    println!("│  MAC:     {}", mac_val);
-                    println!("│  Mask:    {}", mask_val);
-                    println!("│  Gateway: {}", gw_val);
-                    println!("│  DNS:     {}", dns1_val);
-                    println!("│  DHCP:    {}", dhcp_val);
-                    println!("│  NTP:     {}", ntp_val);
-                    println!("└─────────────────────────────────────────────────────");
-                }
-            }
-            if show_bus {
-                let sent = lox.get_text("/jdev/bus/packetssent").unwrap_or_default();
-                let recv = lox
-                    .get_text("/jdev/bus/packetsreceived")
-                    .unwrap_or_default();
-                let rerr = lox.get_text("/jdev/bus/receiveerrors").unwrap_or_default();
-                let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
-                let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
-                let sent_val = xml_attr(&sent, "value").unwrap_or("?");
-                let recv_val = xml_attr(&recv, "value").unwrap_or("?");
-                let rerr_val = xml_attr(&rerr, "value").unwrap_or("?");
-                let ferr_val = xml_attr(&ferr, "value").unwrap_or("?");
-                let over_val = xml_attr(&over, "value").unwrap_or("?");
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "packets_sent": sent_val, "packets_received": recv_val,
-                            "receive_errors": rerr_val, "frame_errors": ferr_val,
-                            "overruns": over_val,
-                        })
-                    );
-                } else {
-                    println!("┌─ CAN Bus ───────────────────────────────────────────");
-                    println!("│  Packets sent:     {}", sent_val);
-                    println!("│  Packets received: {}", recv_val);
-                    println!("│  Receive errors:   {}", rerr_val);
-                    println!("│  Frame errors:     {}", ferr_val);
-                    println!("│  Overruns:         {}", over_val);
-                    println!("└─────────────────────────────────────────────────────");
-                }
-            }
-            if show_lan {
-                let txp = lox.get_text("/jdev/lan/txp").unwrap_or_default();
-                let txe = lox.get_text("/jdev/lan/txe").unwrap_or_default();
-                let txc = lox.get_text("/jdev/lan/txc").unwrap_or_default();
-                let rxp = lox.get_text("/jdev/lan/rxp").unwrap_or_default();
-                let rxo = lox.get_text("/jdev/lan/rxo").unwrap_or_default();
-                let eof = lox.get_text("/jdev/lan/eof").unwrap_or_default();
-                let txp_val = xml_attr(&txp, "value").unwrap_or("?");
-                let txe_val = xml_attr(&txe, "value").unwrap_or("?");
-                let txc_val = xml_attr(&txc, "value").unwrap_or("?");
-                let rxp_val = xml_attr(&rxp, "value").unwrap_or("?");
-                let rxo_val = xml_attr(&rxo, "value").unwrap_or("?");
-                let eof_val = xml_attr(&eof, "value").unwrap_or("?");
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "tx_packets": txp_val, "tx_errors": txe_val, "tx_collisions": txc_val,
-                            "rx_packets": rxp_val, "rx_overflow": rxo_val, "eof_errors": eof_val,
-                        })
-                    );
-                } else {
-                    println!("┌─ LAN Statistics ────────────────────────────────────");
-                    println!("│  TX packets:    {}", txp_val);
-                    println!("│  TX errors:     {}", txe_val);
-                    println!("│  TX collisions: {}", txc_val);
-                    println!("│  RX packets:    {}", rxp_val);
-                    println!("│  RX overflow:   {}", rxo_val);
-                    println!("│  EOF errors:    {}", eof_val);
-                    println!("└─────────────────────────────────────────────────────");
-                }
-            }
-        }
-
-        Cmd::Ls {
-            r#type,
-            room,
-            values,
-            cat,
-            favorites,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let controls = lox.list_controls_ext(
-                r#type.as_deref(),
-                room.as_deref(),
-                cat.as_deref(),
-                favorites,
-            )?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(
-                        &controls
-                            .iter()
-                            .map(|c| serde_json::json!({
-                                "name": c.name, "uuid": c.uuid, "type": c.typ, "room": c.room
-                            }))
-                            .collect::<Vec<_>>()
-                    )?
-                );
-            } else if values {
-                if !no_header {
-                    println!(
-                        "{:<40} {:<24} {:<22} {:<20} UUID",
-                        "NAME", "ROOM", "TYPE", "VALUE"
-                    );
-                    println!("{}", "─".repeat(140));
-                }
-                for c in &controls {
-                    let val = lox
-                        .get_all(&c.uuid)
-                        .ok()
-                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                        .unwrap_or_else(|| "-".to_string());
-                    println!(
-                        "{:<40} {:<24} {:<22} {:<20} {}",
-                        c.name,
-                        c.room.as_deref().unwrap_or("─"),
-                        c.typ,
-                        val,
-                        c.uuid
-                    );
-                }
-                println!("\n{} controls", controls.len());
-            } else {
-                if !no_header {
-                    println!("{:<40} {:<24} {:<22} UUID", "NAME", "ROOM", "TYPE");
-                    println!("{}", "─".repeat(120));
-                }
-                for c in &controls {
-                    println!(
-                        "{:<40} {:<24} {:<22} {}",
-                        c.name,
-                        c.room.as_deref().unwrap_or("─"),
-                        c.typ,
-                        c.uuid
-                    );
-                }
-                println!("\n{} controls", controls.len());
-            }
-        }
-
-        Cmd::Rooms => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let structure = lox.get_structure()?;
-            if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
-                let mut entries: Vec<_> = rooms
-                    .iter()
-                    .filter_map(|(uuid, r)| {
-                        r.get("name")
-                            .and_then(|n| n.as_str())
-                            .map(|name| (uuid.as_str(), name))
-                    })
-                    .collect();
-                entries.sort_by_key(|(_, name)| *name);
-                if json {
-                    let arr: Vec<_> = entries
-                        .iter()
-                        .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
-                        .collect();
-                    println!("{}", serde_json::to_string_pretty(&arr)?);
-                } else {
-                    for (_, name) in entries {
-                        println!("{}", name);
-                    }
-                }
-            }
-        }
-
-        Cmd::Categories => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let cats = lox.list_categories()?;
-            if json {
-                let arr: Vec<_> = cats
-                    .iter()
-                    .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else {
-                println!("{:<36} NAME", "UUID");
-                println!("{}", "─".repeat(60));
-                for (uuid, name) in &cats {
-                    println!("{:<36} {}", uuid, name);
-                }
-                println!("\n{} categories", cats.len());
-            }
-        }
-
-        Cmd::Info { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid_resolved)?;
-            let ctrl_json = lox.get_control_json(&ctrl.uuid)?;
-            let xml = lox.get_all(&ctrl.uuid).unwrap_or_default();
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&ctrl_json)?);
-            } else {
-                println!("Control:    {} ({})", ctrl.name, ctrl.uuid);
-                println!(
-                    "Type:       {}   Room: {}   Cat: {}",
-                    ctrl.typ,
-                    ctrl.room.as_deref().unwrap_or("─"),
-                    ctrl.cat.as_deref().unwrap_or("─"),
-                );
-                println!(
-                    "Favorite:   {}   Secured: {}",
-                    if ctrl.is_favorite { "yes" } else { "no" },
-                    if ctrl.is_secured { "yes" } else { "no" },
-                );
-                let val = xml_attr(&xml, "value").unwrap_or("?");
-                println!("Value:      {}", val);
-
-                // Sub-controls
-                if let Some(subs) = ctrl_json.get("subControls").and_then(|s| s.as_object()) {
-                    println!("\nSub-controls:");
-                    for (sub_uuid, sub) in subs {
-                        let sub_name = sub.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                        let sub_type = sub.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                        println!("  {:<30} {:<20} {}", sub_name, sub_type, sub_uuid);
-                    }
-                }
-
-                // States
-                if let Some(states) = ctrl_json.get("states").and_then(|s| s.as_object()) {
-                    println!("\nStates:");
-                    let mut state_list: Vec<_> = states.iter().collect();
-                    state_list.sort_by_key(|(k, _)| k.as_str());
-                    for (state_name, state_uuid) in &state_list {
-                        let uuid_str = state_uuid.as_str().unwrap_or("?");
-                        println!("  {:<30} {}", state_name, uuid_str);
-                    }
-                }
-
-                // Details (moods for LightControllerV2)
-                if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object()) {
-                    if let Some(moods) = details.get("moods").and_then(|m| m.as_array()) {
-                        println!("\nMoods:");
-                        for mood in moods {
-                            let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-                            let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                            println!("  {:<6} {}", id, name);
-                        }
-                    }
-                }
-
-                // Statistics config
-                if let Some(stat) = ctrl_json.get("statistic") {
-                    if !stat.is_null() {
-                        println!("\nStatistics: enabled");
-                        if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
-                            for (k, v) in outputs {
-                                let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                                println!("  {:<30} {}", name, k);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Cmd::Globals => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let globals = lox.get_global_states()?;
-            if json {
-                let mut map = serde_json::Map::new();
-                for (name, uuid) in &globals {
-                    let val = lox
-                        .get_all(uuid)
-                        .ok()
-                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                        .unwrap_or_else(|| "?".to_string());
-                    map.insert(
-                        name.clone(),
-                        serde_json::json!({"uuid": uuid, "value": val}),
-                    );
-                }
-                println!("{}", serde_json::to_string_pretty(&Value::Object(map))?);
-            } else {
-                println!("{:<30} {:<36} VALUE", "STATE", "UUID");
-                println!("{}", "─".repeat(90));
-                for (name, uuid) in &globals {
-                    let val = lox
-                        .get_all(uuid)
-                        .ok()
-                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                        .unwrap_or_else(|| "?".to_string());
-                    println!("{:<30} {:<36} {}", name, uuid, val);
-                }
-            }
-        }
-
-        Cmd::Modes => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let modes = lox.get_operating_modes()?;
-            // Try to get the current operating mode
-            let globals = lox.get_global_states().unwrap_or_default();
-            let current_mode = globals
-                .iter()
-                .find(|(name, _)| name == "operatingMode")
-                .and_then(|(_, uuid)| {
-                    lox.get_all(uuid)
-                        .ok()
-                        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                });
-            if json {
-                let arr: Vec<_> = modes
-                    .iter()
-                    .map(|(id, name)| {
-                        let active = current_mode.as_deref() == Some(id.as_str());
-                        serde_json::json!({"id": id, "name": name, "active": active})
-                    })
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else {
-                println!("{:<6} {:<30} STATUS", "ID", "MODE");
-                println!("{}", "─".repeat(50));
-                for (id, name) in &modes {
-                    let active = current_mode.as_deref() == Some(id.as_str());
-                    println!(
-                        "{:<6} {:<30} {}",
-                        id,
-                        name,
-                        if active { "← active" } else { "" }
-                    );
-                }
-            }
-        }
-
-        Cmd::Get { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid_resolved)?;
-            let xml = lox.get_all(&ctrl.uuid)?;
-            let val = xml_attr(&xml, "value").unwrap_or("?");
-            let code = xml_attr(&xml, "Code").unwrap_or("?");
-
-            if json {
-                let mut result = serde_json::json!({
-                    "name": ctrl.name, "uuid": ctrl.uuid,
-                    "type": ctrl.typ, "room": ctrl.room, "value": val,
-                });
-                for attr in &[
-                    "StateUp",
-                    "StateDown",
-                    "StatePos",
-                    "StateShade",
-                    "StateAutoShade",
-                    "StateSafety",
-                ] {
-                    if let Some(v) = xml_attr(&xml, attr) {
-                        result[attr] = Value::String(v.to_string());
-                    }
-                }
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!("Control:  {} ({})", ctrl.name, ctrl.uuid);
-                println!(
-                    "Type:     {}   Room: {}",
-                    ctrl.typ,
-                    ctrl.room.as_deref().unwrap_or("─")
-                );
-                println!("Value:    {}  [Code {}]", val, code);
-                for attr in &[
-                    "StateUp",
-                    "StateDown",
-                    "StatePos",
-                    "StateShade",
-                    "StateAutoShade",
-                ] {
-                    if let Some(v) = xml_attr(&xml, attr) {
-                        println!("  {:<12} {}", attr.trim_start_matches("State"), v);
-                    }
-                }
-                let mut i = 1;
-                loop {
-                    let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                        break;
-                    };
-                    let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
-                    if !n.is_empty() {
-                        println!("  {:<30} = {}", n, v);
-                    }
-                    i += 1;
-                }
-            }
-        }
-
-        Cmd::Send {
-            name_or_uuid,
-            command,
-            room,
-            secured,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            if dry_run {
-                let ctrl = lox.find_control(&uuid).ok();
-                let name = ctrl
-                    .as_ref()
-                    .map(|c| c.name.as_str())
-                    .unwrap_or(&name_or_uuid);
-                let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-                print_dry_run(json, quiet, &uuid, &command, name, room);
-            } else {
-                let resp = if let Some(hash) = secured {
-                    lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
-                } else {
-                    lox.send_cmd(&uuid, &command)?
-                };
-                print_resp(&resp, json, quiet, &name_or_uuid, &command);
-            }
-        }
-        Cmd::On {
-            name_or_uuid,
-            room,
-            all_in_room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            if let Some(room_name) = all_in_room {
-                let controls = lox.resolve_all_in_room(&room_name, None)?;
-                for ctrl in &controls {
-                    if dry_run {
-                        print_dry_run(
-                            json,
-                            quiet,
-                            &ctrl.uuid,
-                            "on",
-                            &ctrl.name,
-                            ctrl.room.as_deref(),
-                        );
-                    } else {
-                        match lox.send_cmd(&ctrl.uuid, "on") {
-                            Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "on"),
-                            Err(e) => eprintln!("  {} — {}", ctrl.name, e),
-                        }
-                    }
-                }
-            } else {
-                let name = name_or_uuid
-                    .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
-                let uuid = lox.resolve_with_room(&name, room.as_deref())?;
-                if dry_run {
-                    let ctrl = lox.find_control(&uuid).ok();
-                    let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-                    print_dry_run(json, quiet, &uuid, "on", &name, room);
-                } else {
-                    let resp = lox.send_cmd(&uuid, "on")?;
-                    print_resp(&resp, json, quiet, &name, "on");
-                }
-            }
-        }
-        Cmd::Off {
-            name_or_uuid,
-            room,
-            all_in_room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            if let Some(room_name) = all_in_room {
-                let controls = lox.resolve_all_in_room(&room_name, None)?;
-                for ctrl in &controls {
-                    if dry_run {
-                        print_dry_run(
-                            json,
-                            quiet,
-                            &ctrl.uuid,
-                            "off",
-                            &ctrl.name,
-                            ctrl.room.as_deref(),
-                        );
-                    } else {
-                        match lox.send_cmd(&ctrl.uuid, "off") {
-                            Ok(resp) => print_resp(&resp, json, quiet, &ctrl.name, "off"),
-                            Err(e) => eprintln!("  {} — {}", ctrl.name, e),
-                        }
-                    }
-                }
-            } else {
-                let name = name_or_uuid
-                    .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
-                let uuid = lox.resolve_with_room(&name, room.as_deref())?;
-                if dry_run {
-                    let ctrl = lox.find_control(&uuid).ok();
-                    let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-                    print_dry_run(json, quiet, &uuid, "off", &name, room);
-                } else {
-                    let resp = lox.send_cmd(&uuid, "off")?;
-                    print_resp(&resp, json, quiet, &name, "off");
-                }
-            }
-        }
-        Cmd::Pulse { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            if dry_run {
-                let ctrl = lox.find_control(&uuid).ok();
-                let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-                print_dry_run(json, quiet, &uuid, "pulse", &name_or_uuid, room);
-            } else {
-                let resp = lox.send_cmd(&uuid, "pulse")?;
-                print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
-            }
-        }
-
-        Cmd::Blind {
-            name_or_uuid,
-            action,
-            pos,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
-                bail!("'{}' is type '{}', not a Jalousie", ctrl.name, ctrl.typ);
-            }
-            let cmd_owned: String;
-            let cmd: &str = match action.to_lowercase().as_str() {
-                "up" | "open" => "FullUp",
-                "down" | "close" => "FullDown",
-                "stop" => "off",
-                "shade" | "auto" => {
-                    if let Some(pct) = pos {
-                        if !(0.0..=100.0).contains(&pct) {
-                            bail!("Position must be 0-100");
-                        }
-                        cmd_owned = format!("manualLamella/{:.4}", pct);
-                        &cmd_owned
-                    } else {
-                        "AutomaticDown"
-                    }
-                }
-                "pos" | "position" => {
-                    let pct = pos.ok_or_else(|| anyhow::anyhow!("pos requires a value 0-100"))?;
-                    if !(0.0..=100.0).contains(&pct) {
-                        bail!("Position must be 0-100");
-                    }
-                    cmd_owned = format!("manualPosition/{:.4}", pct);
-                    &cmd_owned
-                }
-                other => {
-                    // Try numeric mood-style: pos 50
-                    if let Ok(pct) = other.parse::<f64>() {
-                        if (0.0..=100.0).contains(&pct) {
-                            cmd_owned = format!("manualPosition/{:.4}", pct);
-                            &cmd_owned
-                        } else {
-                            bail!("Position must be 0-100");
-                        }
-                    } else {
-                        bail!(
-                            "Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>",
-                            other
-                        )
-                    }
-                }
-            };
-            if dry_run {
-                print_dry_run(
-                    json,
-                    quiet,
-                    &ctrl.uuid,
-                    cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                );
-                return Ok(());
-            }
-            let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-            print_resp(&resp, json, quiet, &ctrl.name, cmd);
-            if !json {
-                if cmd.starts_with("manualLamella") {
-                    // Slat tilt doesn't change StatePos; just read once after a short settle.
-                    thread::sleep(Duration::from_millis(800));
-                    let xml = lox.get_all(&ctrl.uuid)?;
-                    if let Some(p) = xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok())
-                    {
-                        println!("   Position: {:.0}%  {}", p * 100.0, bar(p, 1.0));
-                    }
-                    if let Some(s) =
-                        xml_attr(&xml, "StateShade").and_then(|v| v.parse::<f64>().ok())
-                    {
-                        println!("   Shade:    {:.0}%  {}", s * 100.0, bar(s, 1.0));
-                    }
-                } else {
-                    // manualPosition moves don't set StateUp/StateDown, so we can't use those
-                    // as a motion indicator. Instead, poll until StatePos stabilizes (two
-                    // consecutive reads agree) or we time out after 30s.
-                    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-                    let mut prev_pos: Option<f64> = None;
-                    loop {
-                        thread::sleep(Duration::from_millis(500));
-                        let xml = lox.get_all(&ctrl.uuid)?;
-                        let cur_pos =
-                            xml_attr(&xml, "StatePos").and_then(|v| v.parse::<f64>().ok());
-                        let timed_out = std::time::Instant::now() >= deadline;
-                        let stable = matches!((prev_pos, cur_pos), (Some(a), Some(b)) if (a - b).abs() < 0.005);
-                        if stable || timed_out {
-                            if let Some(p) = cur_pos {
-                                let suffix = if timed_out && !stable {
-                                    "  (moving…)"
-                                } else {
-                                    ""
-                                };
-                                println!(
-                                    "   Position: {:.0}%  {}{}",
-                                    p * 100.0,
-                                    bar(p, 1.0),
-                                    suffix
-                                );
-                            }
-                            break;
-                        }
-                        prev_pos = cur_pos;
-                    }
-                }
-            }
-        }
-
-        Cmd::Light { action } => match action {
-            LightCmd::Mood {
-                name_or_uuid,
-                action,
-                room,
-            } => {
-                let mut lox = LoxClient::new(Config::load()?);
-                let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let ctrl = lox.find_control(&uuid)?;
-                if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
-                    bail!(
-                        "'{}' is type '{}', not a LightController",
-                        ctrl.name,
-                        ctrl.typ
-                    );
-                }
-                let cmd_owned: String;
-                let cmd: &str = match action.to_lowercase().as_str() {
-                    "plus" | "next" | "+" => "plus",
-                    "minus" | "prev" | "-" => "minus",
-                    "off" => "setMood/778",
-                    other => {
-                        if let Ok(id) = other.parse::<u32>() {
-                            cmd_owned = format!("setMood/{}", id);
-                            &cmd_owned
-                        } else {
-                            bail!(
-                                "Unknown mood action '{}'. Use: plus, minus, off, or a numeric mood ID",
-                                other
-                            )
-                        }
-                    }
-                };
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    dry_run,
-                    json,
-                    quiet,
-                )? {
-                    if json {
-                        print_resp(&resp, true, quiet, &ctrl.name, cmd);
-                    } else if !quiet {
-                        println!("✓  {} → mood {}", ctrl.name, action);
-                    }
-                }
-            }
-            LightCmd::Dim {
-                name_or_uuid,
-                level,
-                room,
-            } => {
-                let mut lox = LoxClient::new(Config::load()?);
-                let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let ctrl = lox.find_control(&uuid)?;
-                if !(0.0..=100.0).contains(&level) {
-                    bail!("Dimmer level must be 0-100");
-                }
-                let dim_cmd = format!("{}", level);
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    &dim_cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    dry_run,
-                    json,
-                    quiet,
-                )? {
-                    print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
-                }
-            }
-            LightCmd::Color {
-                name_or_uuid,
-                value,
-                room,
-            } => {
-                let mut lox = LoxClient::new(Config::load()?);
-                let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let ctrl = lox.find_control(&uuid)?;
-                if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
-                    bail!("'{}' is type '{}', not a ColorPicker", ctrl.name, ctrl.typ);
-                }
-                let cmd = if value.starts_with('#') {
-                    let hex = value.trim_start_matches('#');
-                    if hex.len() != 6 {
-                        bail!("Hex color must be 6 digits: #RRGGBB");
-                    }
-                    let r = u8::from_str_radix(&hex[0..2], 16)?;
-                    let g = u8::from_str_radix(&hex[2..4], 16)?;
-                    let b = u8::from_str_radix(&hex[4..6], 16)?;
-                    let (h, s, v) = rgb_to_hsv(r, g, b);
-                    format!("hsv({},{},{})", h, s, v)
-                } else {
-                    value
-                };
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    &cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    dry_run,
-                    json,
-                    quiet,
-                )? {
-                    print_resp(&resp, json, quiet, &ctrl.name, &cmd);
-                }
-            }
-        },
-
-        Cmd::Input { action } => match action {
-            InputCmd::Set {
-                name_or_uuid,
-                value,
-                room,
-            } => {
-                let mut lox = LoxClient::new(Config::load()?);
-                let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                let encoded = encode_path_value(&value);
-                if dry_run {
-                    print_dry_run(json, quiet, &uuid, &encoded, &name_or_uuid, None);
-                } else {
-                    let resp = lox.send_cmd(&uuid, &encoded)?;
-                    let code = resp
-                        .pointer("/LL/Code")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    let val = resp
-                        .pointer("/LL/value")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    if code == "200" {
-                        if !quiet {
-                            println!("✓  {} = {}", name_or_uuid, val);
-                        }
-                    } else {
-                        bail!("Error {}: {}", code, val);
-                    }
-                }
-            }
-            InputCmd::Pulse { name_or_uuid, room } => {
-                let mut lox = LoxClient::new(Config::load()?);
-                let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &uuid,
-                    "pulse",
-                    &name_or_uuid,
-                    None,
-                    dry_run,
-                    json,
-                    quiet,
-                )? {
-                    print_resp(&resp, json, quiet, &name_or_uuid, "pulse");
-                }
-            }
-        },
-
-        // Legacy aliases — hidden but still functional
-        Cmd::Mood {
-            name_or_uuid,
-            action,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
-                bail!(
-                    "'{}' is type '{}', not a LightController",
-                    ctrl.name,
-                    ctrl.typ
-                );
-            }
-            let cmd_owned: String;
-            let cmd: &str = match action.to_lowercase().as_str() {
-                "plus" | "next" | "+" => "plus",
-                "minus" | "prev" | "-" => "minus",
-                "off" => "setMood/778",
-                other => {
-                    if let Ok(id) = other.parse::<u32>() {
-                        cmd_owned = format!("setMood/{}", id);
-                        &cmd_owned
-                    } else {
-                        bail!(
-                            "Unknown mood action '{}'. Use: plus, minus, off, or a numeric mood ID",
-                            other
-                        )
-                    }
-                }
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                if json {
-                    print_resp(&resp, true, quiet, &ctrl.name, cmd);
-                } else {
-                    println!("✓  {} → mood {}", ctrl.name, action);
-                    thread::sleep(Duration::from_millis(400));
-                    let xml = lox.get_all(&ctrl.uuid)?;
-                    let state = xml_attr(&xml, "value").unwrap_or_default();
-                    let is_off = state.starts_with("200002700") || state == "0";
-                    println!(
-                        "   State: {}  ({})",
-                        state,
-                        if is_off { "off" } else { "active" }
-                    );
-                }
-            }
-        }
-
-        Cmd::Dimmer {
-            name_or_uuid,
-            level,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !(0.0..=100.0).contains(&level) {
-                bail!("Dimmer level must be 0-100");
-            }
-            let dim_cmd = format!("{}", level);
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                &dim_cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, &format!("dim={}", level));
-            }
-        }
-
-        Cmd::Gate {
-            name_or_uuid,
-            action,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "Gate" | "CentralGate") {
-                bail!("'{}' is type '{}', not a Gate", ctrl.name, ctrl.typ);
-            }
-            let cmd = match action.to_lowercase().as_str() {
-                "open" => "open",
-                "close" => "close",
-                "stop" => "stop",
-                other => bail!("Unknown gate action '{}'. Use: open, close, stop", other),
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, cmd);
-            }
-        }
-
-        Cmd::Color {
-            name_or_uuid,
-            value,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
-                bail!("'{}' is type '{}', not a ColorPicker", ctrl.name, ctrl.typ);
-            }
-            // Parse color: #RRGGBB → "hsv(h,s,v)" or pass through hsv() format
-            let cmd = if value.starts_with('#') {
-                // Convert hex RGB to Loxone-compatible format
-                let hex = value.trim_start_matches('#');
-                if hex.len() != 6 {
-                    bail!("Hex color must be 6 digits: #RRGGBB");
-                }
-                let r = u8::from_str_radix(&hex[0..2], 16).context("Invalid red component")?;
-                let g = u8::from_str_radix(&hex[2..4], 16).context("Invalid green component")?;
-                let b = u8::from_str_radix(&hex[4..6], 16).context("Invalid blue component")?;
-                // Convert RGB to HSV
-                let (h, s, v) = rgb_to_hsv(r, g, b);
-                format!("hsv({},{},{})", h, s, v)
-            } else {
-                value.clone()
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                &cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, &cmd);
-            }
-        }
-
-        Cmd::Weather { forecast } => {
-            let lox = LoxClient::new(Config::load()?);
-            let data = lox.get_bytes("/data/weatheru.bin")?;
-            if data.is_empty() {
-                println!("No weather data available on the Miniserver.");
-            } else {
-                // Parse 108-byte weather entries
-                let entry_size = 108;
-                let num_entries = data.len() / entry_size;
-                let epoch = lox_epoch();
-
-                let max_display = if forecast {
-                    num_entries
-                } else {
-                    1.min(num_entries)
-                };
-
-                if json {
-                    let mut arr = Vec::new();
-                    for i in 0..max_display {
-                        let offset = i * entry_size;
-                        let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                        if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
-                            arr.push(entry);
-                        }
-                    }
-                    println!("{}", serde_json::to_string_pretty(&arr)?);
-                } else {
-                    println!(
-                        "{:<20} {:>8} {:>8} {:>8} {:>8} {:>10}",
-                        "TIME", "TEMP°C", "HUM%", "WIND", "RAIN", "CLOUDS"
-                    );
-                    println!("{}", "─".repeat(72));
-                    for i in 0..max_display {
-                        let offset = i * entry_size;
-                        let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                        if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
-                            println!(
-                                "{:<20} {:>8.1} {:>8.0} {:>8.1} {:>8.1} {:>10.0}",
-                                entry["timestamp"].as_str().unwrap_or("?"),
-                                entry["temperature"].as_f64().unwrap_or(0.0),
-                                entry["humidity"].as_f64().unwrap_or(0.0),
-                                entry["wind_speed"].as_f64().unwrap_or(0.0),
-                                entry["rain"].as_f64().unwrap_or(0.0),
-                                entry["clouds"].as_f64().unwrap_or(0.0),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        Cmd::Discover { timeout } => {
-            use std::net::UdpSocket;
-            println!("Scanning for Loxone Miniservers...");
-            let socket = UdpSocket::bind("0.0.0.0:0")?;
-            socket.set_broadcast(true)?;
-            socket.set_read_timeout(Some(Duration::from_secs(timeout)))?;
-            // Send discovery packet (single null byte) to port 7070
-            socket.send_to(&[0x00], "255.255.255.255:7070")?;
-            let mut buf = [0u8; 1024];
-            let mut found = Vec::new();
-            while let Ok((len, addr)) = socket.recv_from(&mut buf) {
-                let msg = String::from_utf8_lossy(&buf[..len]);
-                if json {
-                    found.push(serde_json::json!({
-                        "address": addr.to_string(),
-                        "response": msg.to_string(),
-                    }));
-                } else {
-                    println!("  Found: {} — {}", addr, msg.trim());
-                }
-            }
-            if json {
-                println!("{}", serde_json::to_string_pretty(&found)?);
-            } else if found.is_empty() {
-                println!("No Miniservers found. (Timeout: {}s)", timeout);
-            }
-        }
-
-        Cmd::Thermostat {
-            name_or_uuid,
-            action,
-            value,
-            duration,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(
-                ctrl.typ.as_str(),
-                "IRoomControllerV2" | "IRoomController" | "Fronius"
-            ) {
-                bail!(
-                    "'{}' is type '{}', not a room controller",
-                    ctrl.name,
-                    ctrl.typ
-                );
-            }
-            if let Some(act) = action {
-                match act.to_lowercase().as_str() {
-                    "temp" | "temperature" => {
-                        let t: f64 = value
-                            .as_deref()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Usage: lox thermostat <name> temp <°C>")
-                            })?
-                            .parse()
-                            .context("Temperature must be a number")?;
-                        let temp_cmd = format!("setComfortTemperature/{}", t);
-                        if let Some(resp) = send_or_dry_run(
-                            &lox,
-                            &ctrl.uuid,
-                            &temp_cmd,
-                            &ctrl.name,
-                            ctrl.room.as_deref(),
-                            dry_run,
-                            json,
-                            quiet,
-                        )? {
-                            print_resp(&resp, json, quiet, &ctrl.name, &format!("temp={}", t));
-                        }
-                    }
-                    "mode" => {
-                        let m = value.as_deref().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Usage: lox thermostat <name> mode <auto|manual|comfort|eco>"
-                            )
-                        })?;
-                        let lower = m.to_lowercase();
-                        let mode_id = match lower.as_str() {
-                            "auto" | "automatic" => "0",
-                            "manual" => "1",
-                            "comfort" => "2",
-                            "eco" | "economy" => "3",
-                            "building-protection" | "building" => "4",
-                            other => other,
-                        };
-                        let mode_cmd = format!("setOperatingMode/{}", mode_id);
-                        if let Some(resp) = send_or_dry_run(
-                            &lox,
-                            &ctrl.uuid,
-                            &mode_cmd,
-                            &ctrl.name,
-                            ctrl.room.as_deref(),
-                            dry_run,
-                            json,
-                            quiet,
-                        )? {
-                            print_resp(&resp, json, quiet, &ctrl.name, &format!("mode={}", m));
-                        }
-                    }
-                    "override" => {
-                        let temp_override: f64 = value
-                            .as_deref()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "Usage: lox thermostat <name> override <°C> [minutes]"
-                                )
-                            })?
-                            .parse()
-                            .context("Override temperature must be a number")?;
-                        let dur = duration.unwrap_or(60);
-                        let override_cmd = format!("override/{}/{}", temp_override, dur);
-                        if let Some(resp) = send_or_dry_run(
-                            &lox,
-                            &ctrl.uuid,
-                            &override_cmd,
-                            &ctrl.name,
-                            ctrl.room.as_deref(),
-                            dry_run,
-                            json,
-                            quiet,
-                        )? {
-                            print_resp(
-                                &resp,
-                                json,
-                                quiet,
-                                &ctrl.name,
-                                &format!("override={}°/{}min", temp_override, dur),
-                            );
-                        }
-                    }
-                    other => bail!(
-                        "Unknown thermostat action '{}'. Use: temp, mode, override",
-                        other
-                    ),
-                }
-            } else {
-                // Show current thermostat state
-                let xml = lox.get_all(&ctrl.uuid)?;
-                let val = xml_attr(&xml, "value").unwrap_or("?");
-                if json {
-                    let mut result = serde_json::json!({
-                        "name": ctrl.name, "uuid": ctrl.uuid,
-                        "type": ctrl.typ, "value": val,
-                    });
-                    let mut i = 1;
-                    loop {
-                        let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                            break;
-                        };
-                        let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
-                        if !n.is_empty() {
-                            result[n] = Value::String(v.to_string());
-                        }
-                        i += 1;
-                    }
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                } else {
-                    println!("Thermostat: {} ({})", ctrl.name, ctrl.uuid);
-                    println!("Room:       {}", ctrl.room.as_deref().unwrap_or("─"));
-                    let mut i = 1;
-                    loop {
-                        let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                            break;
-                        };
-                        let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
-                        if !n.is_empty() {
-                            println!("  {:<30} = {}", n, v);
-                        }
-                        i += 1;
-                    }
-                }
-            }
-        }
-
-        Cmd::Door {
-            name_or_uuid,
-            action,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !ctrl.typ.contains("DoorLock") && !ctrl.typ.contains("Lock") {
-                bail!("'{}' is type '{}', not a DoorLock", ctrl.name, ctrl.typ);
-            }
-            let cmd = match action.to_lowercase().as_str() {
-                "lock" => "on",
-                "unlock" => "off",
-                "open" => "open",
-                other => bail!(
-                    "Unknown doorlock action '{}'. Use: lock, unlock, open",
-                    other
-                ),
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, &action);
-            }
-        }
-
-        Cmd::Intercom {
-            name_or_uuid,
-            action,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !ctrl.typ.contains("Intercom") {
-                bail!("'{}' is type '{}', not an Intercom", ctrl.name, ctrl.typ);
-            }
-            let cmd = match action.to_lowercase().as_str() {
-                "answer" => "answer",
-                "hangup" | "decline" => "hangup",
-                "open" => "open",
-                other => bail!(
-                    "Unknown intercom action '{}'. Use: answer, hangup, open",
-                    other
-                ),
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, &action);
-            }
-        }
-
-        Cmd::Charger {
-            name_or_uuid,
-            action,
-            limit,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !ctrl.typ.contains("Charger") && !ctrl.typ.contains("EV") {
-                bail!("'{}' is type '{}', not a Charger", ctrl.name, ctrl.typ);
-            }
-            let cmd_owned: String;
-            let cmd: &str = match action.to_lowercase().as_str() {
-                "start" => {
-                    if let Some(kwh) = limit {
-                        cmd_owned = format!("start/{:.1}", kwh);
-                        &cmd_owned
-                    } else {
-                        "start"
-                    }
-                }
-                "stop" => "stop",
-                "pause" => "pause",
-                other => bail!(
-                    "Unknown charger action '{}'. Use: start, stop, pause",
-                    other
-                ),
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, &action);
-            }
-        }
-
-        Cmd::Alarm {
-            name_or_uuid,
-            action,
-            no_motion,
-            code,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "Alarm") {
-                bail!("'{}' is type '{}', not an Alarm", ctrl.name, ctrl.typ);
-            }
-            let cmd_owned: String;
-            let cmd: &str = match action.to_lowercase().as_str() {
-                "arm" | "on" => {
-                    let base = if no_motion {
-                        "delayedon/0"
-                    } else {
-                        "delayedon/1"
-                    };
-                    if let Some(ref pin) = code {
-                        cmd_owned = format!("{}/{}", base, pin);
-                        &cmd_owned
-                    } else {
-                        base
-                    }
-                }
-                "arm-home" | "home" => {
-                    if let Some(ref pin) = code {
-                        cmd_owned = format!("delayedon/0/{}", pin);
-                        &cmd_owned
-                    } else {
-                        "delayedon/0"
-                    }
-                }
-                "disarm" | "off" => {
-                    if let Some(ref pin) = code {
-                        cmd_owned = format!("off/{}", pin);
-                        &cmd_owned
-                    } else {
-                        "off"
-                    }
-                }
-                "quit" | "ack" | "acknowledge" => "quit",
-                other => bail!(
-                    "Unknown alarm action '{}'. Use: arm, arm-home, disarm, quit",
-                    other
-                ),
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, cmd);
-            }
-        }
-
-        Cmd::Lock {
-            name_or_uuid,
-            reason,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            let lock_cmd = format!("lockcontrol/1/{}", encode_path_value(&reason));
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                &lock_cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, "lock");
-            }
-        }
-
-        Cmd::Unlock { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                "unlockcontrol",
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                dry_run,
-                json,
-                quiet,
-            )? {
-                print_resp(&resp, json, quiet, &ctrl.name, "unlock");
-            }
-        }
-
-        Cmd::Stats => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let structure = lox.get_structure()?.clone();
-            let mut rooms: HashMap<String, String> = HashMap::new();
-            if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
-                for (uuid, room) in map {
-                    if let Some(name) = room.get("name").and_then(|n| n.as_str()) {
-                        rooms.insert(uuid.clone(), name.to_string());
-                    }
-                }
-            }
-            let mut stats_controls = Vec::new();
-            if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
-                for (uuid, ctrl) in ctrl_map {
-                    if let Some(stat) = ctrl.get("statistic") {
-                        if !stat.is_null() {
-                            let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                            let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                            let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
-                            let room = rooms.get(room_uuid).cloned();
-                            stats_controls.push((
-                                name.to_string(),
-                                uuid.clone(),
-                                typ.to_string(),
-                                room,
-                            ));
-                        }
-                    }
-                }
-            }
-            stats_controls.sort_by(|a, b| a.0.cmp(&b.0));
-            if json {
-                let arr: Vec<_> = stats_controls
-                    .iter()
-                    .map(|(n, u, t, r)| {
-                        serde_json::json!({"name": n, "uuid": u, "type": t, "room": r})
-                    })
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else {
-                if !no_header {
-                    println!("{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
-                    println!("{}", "─".repeat(120));
-                }
-                for (name, uuid, typ, room) in &stats_controls {
-                    println!(
-                        "{:<40} {:<22} {:<24} {}",
-                        name,
-                        typ,
-                        room.as_deref().unwrap_or("─"),
-                        uuid
-                    );
-                }
-                println!("\n{} controls with statistics", stats_controls.len());
-            }
-        }
-
-        Cmd::History {
-            name_or_uuid,
-            month,
-            day,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-
-            // Determine output column names from statistics config
-            let ctrl_json = lox.get_control_json(&ctrl.uuid).ok();
-            let output_names: Vec<String> = ctrl_json
-                .as_ref()
-                .and_then(|cj| cj.get("statistic"))
-                .and_then(|s| s.get("outputs"))
-                .and_then(|o| o.as_object())
-                .map(|outputs| {
-                    let mut entries: Vec<_> = outputs.iter().collect();
-                    entries.sort_by_key(|(k, _)| k.as_str().to_string());
-                    entries
-                        .iter()
-                        .map(|(_, v)| {
-                            v.get("name")
-                                .and_then(|n| n.as_str())
-                                .unwrap_or("value")
-                                .to_string()
-                        })
-                        .collect()
-                })
-                .unwrap_or_else(|| vec!["value".to_string()]);
-            let num_outputs = output_names.len();
-
-            // Build the URL path
-            let period = stats_period(day.as_deref(), month.as_deref());
-            // Stats files may be named {uuid}.{period} or {uuid}_{N}.{period}
-            // for controls with multiple outputs.  Try bare name first, then
-            // fall back to listing the /stats directory for suffixed files.
-            let bare = stats_file_path(&ctrl.uuid, &period);
-            let data = match lox.get_bytes(&bare) {
-                Ok(d) => d,
-                Err(_) => {
-                    let listing = lox.get_text("/dev/fslist//stats")?;
-                    let files = find_stats_files(&listing, &ctrl.uuid, &period);
-                    if files.is_empty() {
-                        anyhow::bail!(
-                            "No statistics files found for {} in period {}",
-                            ctrl.uuid,
-                            period
-                        );
-                    }
-                    // Use the first matching file (primary output)
-                    let path = format!("/dev/fsget//stats/{}", files[0]);
-                    lox.get_bytes(&path)?
-                }
-            };
-
-            if data.is_empty() {
-                println!("No statistics data available for this period.");
-            } else {
-                let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
-
-                if csv {
-                    print!("timestamp");
-                    for name in &output_names {
-                        print!(",{}", name);
-                    }
-                    println!();
-                } else if !json {
-                    print!("{:<20}", "TIMESTAMP");
-                    for name in &output_names {
-                        print!(" {:>15}", name);
-                    }
-                    println!();
-                    println!("{}", "─".repeat(20 + num_outputs * 16));
-                }
-
-                // Skip header, then parse entries
-                let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
-                let entries = parse_stats_entries(&data[offset..], num_outputs);
-
-                let mut json_arr = Vec::new();
-                for e in &entries {
-                    if csv {
-                        print!("{}", e.timestamp);
-                        for v in &e.values {
-                            print!(",{:.4}", v);
-                        }
-                        println!();
-                    } else if json {
-                        let mut entry = serde_json::json!({"timestamp": e.timestamp});
-                        for (i, name) in output_names.iter().enumerate() {
-                            entry[name] = serde_json::json!(e.values[i]);
-                        }
-                        json_arr.push(entry);
-                    } else {
-                        print!("{:<20}", e.timestamp);
-                        for v in &e.values {
-                            print!(" {:>15.4}", v);
-                        }
-                        println!();
-                    }
-                }
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&json_arr)?);
-                }
-            }
-        }
-
-        Cmd::Update { action } => match action {
-            UpdateCmd::Check => {
-                let lox = LoxClient::new(Config::load()?);
-                let version = lox.get_text("/dev/cfg/version")?;
-                let ver = xml_attr(&version, "value").unwrap_or("?");
-                println!("Current firmware: {}", ver);
-                let cfg = Config::load()?;
-                if !cfg.serial.is_empty() {
-                    let url = format!(
-                        "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
-                        cfg.serial, ver
-                    );
-                    match reqwest::blocking::get(&url) {
-                        Ok(resp) => {
-                            let body = resp.text().unwrap_or_default();
-                            // Try multiple XML attributes for the version
-                            let new_ver = xml_attr(&body, "Firmware")
-                                .or_else(|| xml_attr(&body, "version"))
-                                .or_else(|| {
-                                    // Only use "Version" if it looks like a version string (contains dots)
-                                    xml_attr(&body, "Version").filter(|v| v.contains('.'))
-                                });
-                            let update_available = xml_attr(&body, "Version")
-                                .or_else(|| xml_attr(&body, "update"))
-                                .map(|v| v != "0" && v != ver)
-                                .unwrap_or(false);
-                            let is_update_available =
-                                update_available || new_ver.map(|v| v != ver).unwrap_or(false);
-                            if json {
-                                println!(
-                                    "{}",
-                                    serde_json::json!({
-                                        "current": ver,
-                                        "available": new_ver.unwrap_or(if is_update_available { "yes" } else { ver }),
-                                        "update_available": is_update_available,
-                                    })
-                                );
-                            } else if let Some(nv) = new_ver {
-                                if nv != ver {
-                                    println!("Update available: {}", nv);
-                                } else {
-                                    println!("✓ Firmware is up to date");
-                                }
-                            } else if is_update_available {
-                                println!("Update available (check Loxone Config for details)");
-                            } else {
-                                println!("✓ Firmware is up to date");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Could not check for updates: {}", e);
-                            println!("Current firmware: {}", ver);
-                        }
-                    }
-                } else {
-                    println!(
-                        "Set serial number for update checks: lox config set --serial <serial>"
-                    );
-                }
-            }
-            UpdateCmd::Install { yes } => {
-                if !yes {
-                    bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
-                }
-                let lox = LoxClient::new(Config::load()?);
-                let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
-                let val = xml_attr(&resp, "value").unwrap_or("?");
-                println!("Update triggered: {}", val);
-                println!("The Miniserver will reboot during the update process.");
-            }
-        },
-
-        Cmd::Music { action } => {
-            let cfg = Config::load()?;
-            let music_base = format!(
-                "{}:7091",
-                cfg.host
-                    .trim_end_matches('/')
-                    .replace("https://", "http://")
-            );
-            let client = Client::builder()
-                .user_agent(client::USER_AGENT)
-                .danger_accept_invalid_certs(true)
-                .timeout(Duration::from_secs(10))
-                .build()?;
-            let (zone, cmd_path) = match action {
-                MusicCmd::Play { zone } => (zone, "play".to_string()),
-                MusicCmd::Pause { zone } => (zone, "pause".to_string()),
-                MusicCmd::Stop { zone } => (zone, "stop".to_string()),
-                MusicCmd::Volume { level, zone } => {
-                    if level > 100 {
-                        bail!("Volume must be 0-100");
-                    }
-                    (zone, format!("volume/{}", level))
-                }
-                MusicCmd::Next { zone } => (zone, "queueplus".to_string()),
-                MusicCmd::Prev { zone } => (zone, "queueminus".to_string()),
-                MusicCmd::Mute { zone } => (zone, "mute".to_string()),
-                MusicCmd::Unmute { zone } => (zone, "unmute".to_string()),
-            };
-            let url = format!("{}/zone/{}/{}", music_base, zone, cmd_path);
-            match client.get(&url).send() {
-                Ok(resp) => {
-                    let body = resp.text().unwrap_or_default();
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::json!({"zone": zone, "command": cmd_path, "response": body})
-                        );
-                    } else {
-                        println!("✓ Zone {} → {}", zone, cmd_path);
-                    }
-                }
-                Err(e) => bail!("Music server error: {}", e),
-            }
-        }
-
-        Cmd::Reboot { yes } => {
-            if !yes {
-                bail!("Reboot requires --yes flag. This will restart your Miniserver!");
-            }
-            let lox = LoxClient::new(Config::load()?);
-            let resp = lox.get_text("/jdev/sys/reboot")?;
-            let val = xml_attr(&resp, "value").unwrap_or("ok");
-            println!("Reboot initiated: {}", val);
-        }
-
-        Cmd::Files { action } => {
-            let lox = LoxClient::new(Config::load()?);
-            match action {
-                FilesCmd::Ls { path } => {
-                    let listing = lox.get_text(&format!("/dev/fslist/{}", abs_path(&path)))?;
-                    println!("{}", listing);
-                }
-                FilesCmd::Get { path, save_as } => {
-                    let data = lox.get_bytes(&format!("/dev/fsget/{}", abs_path(&path)))?;
-                    let out_path = save_as.unwrap_or_else(|| {
-                        path.rsplit('/').next().unwrap_or("download").to_string()
-                    });
-                    fs::write(&out_path, &data)?;
-                    println!("✓ Downloaded {} bytes → {}", data.len(), out_path);
-                }
-            }
-        }
-
-        Cmd::Extensions => {
-            let lox = LoxClient::new(Config::load()?);
-            let status_xml = lox.get_text("/data/status")?;
-
-            // Parse /data/status XML for extensions and devices
-            // Structure: <Miniserver> contains <TreeBranch>, <Link>/<Extension>,
-            //   <NetworkDevices>/<GenericNetworkDevice>, each with child devices
-            let mut extensions: Vec<serde_json::Value> = Vec::new();
-
-            use quick_xml::events::Event;
-            use quick_xml::Reader;
-
-            fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-                e.attributes()
-                    .flatten()
-                    .find(|a| a.key.as_ref() == name)
-                    .map(|a| String::from_utf8_lossy(&a.value).to_string())
-                    .unwrap_or_default()
-            }
-
-            let mut reader = Reader::from_str(&status_xml);
-            let mut buf = Vec::new();
-            let mut parent_name: Option<String> = None;
-
-            loop {
-                match reader.read_event_into(&mut buf) {
-                    Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                        let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                        match tag.as_str() {
-                            "TreeBranch" => {
-                                let name = xattr(e, b"Name");
-                                extensions.push(serde_json::json!({
-                                    "name": name,
-                                    "type": "Tree",
-                                    "serial": xattr(e, b"Serial"),
-                                    "version": xattr(e, b"Version"),
-                                    "online": true,
-                                    "devices": xattr(e, b"Devices").parse::<u32>().unwrap_or(0),
-                                    "errors": xattr(e, b"Errors").parse::<u32>().unwrap_or(0),
-                                }));
-                                parent_name = Some(name);
-                            }
-                            "Extension" => {
-                                extensions.push(serde_json::json!({
-                                    "name": xattr(e, b"Name"),
-                                    "type": xattr(e, b"Type"),
-                                    "serial": xattr(e, b"Serial"),
-                                    "version": xattr(e, b"Version"),
-                                    "online": xattr(e, b"Online") == "true",
-                                }));
-                            }
-                            "GenericNetworkDevice" => {
-                                let name = xattr(e, b"Name");
-                                extensions.push(serde_json::json!({
-                                    "name": name,
-                                    "type": xattr(e, b"Type"),
-                                    "serial": xattr(e, b"MAC"),
-                                    "version": xattr(e, b"Version"),
-                                    "online": xattr(e, b"Online") == "true",
-                                    "place": xattr(e, b"Place"),
-                                }));
-                                parent_name = Some(name);
-                            }
-                            "TreeDevice" => {
-                                extensions.push(serde_json::json!({
-                                    "name": xattr(e, b"Name"),
-                                    "type": "Tree Device",
-                                    "serial": xattr(e, b"Serial"),
-                                    "version": xattr(e, b"Version"),
-                                    "online": xattr(e, b"Online") == "true",
-                                    "place": xattr(e, b"Place"),
-                                    "parent": parent_name,
-                                }));
-                            }
-                            "AirDevice" => {
-                                extensions.push(serde_json::json!({
-                                    "name": xattr(e, b"Name"),
-                                    "type": xattr(e, b"Type"),
-                                    "serial": xattr(e, b"Serial"),
-                                    "version": xattr(e, b"Version"),
-                                    "online": xattr(e, b"Online") == "true",
-                                    "place": xattr(e, b"Place"),
-                                    "battery": xattr(e, b"Battery").parse::<u32>().ok(),
-                                    "parent": parent_name,
-                                }));
-                            }
-                            "Plugin" => {
-                                extensions.push(serde_json::json!({
-                                    "name": xattr(e, b"Name"),
-                                    "type": format!("Plugin ({})", xattr(e, b"Type")),
-                                    "serial": "",
-                                    "version": xattr(e, b"Version"),
-                                    "online": xattr(e, b"Online") == "true",
-                                }));
-                            }
-                            _ => {}
-                        }
-                    }
-                    Ok(Event::Eof) => break,
-                    Err(e) => {
-                        anyhow::bail!("Failed to parse status XML: {}", e);
-                    }
-                    _ => {}
-                }
-                buf.clear();
-            }
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&extensions)?);
-            } else if extensions.is_empty() {
-                println!("No extensions found.");
-            } else {
-                // Group: extensions/tree branches at top, then devices
-                let (top, devices): (Vec<_>, Vec<_>) = extensions.iter().partition(|e| {
-                    let t = e["type"].as_str().unwrap_or("");
-                    t == "Tree"
-                        || t.contains("Extension")
-                        || t.contains("Plugin")
-                        || t == "Intercom"
-                });
-
-                if !top.is_empty() {
-                    println!(
-                        "{:<36} {:<22} {:<12} {:<14} STATUS",
-                        "NAME", "TYPE", "SERIAL", "VERSION"
-                    );
-                    println!("{}", "─".repeat(96));
-                    for ext in &top {
-                        let online = ext["online"].as_bool().unwrap_or(false);
-                        let status = if online { "✓ online" } else { "✗ offline" };
-                        println!(
-                            "{:<36} {:<22} {:<12} {:<14} {}",
-                            ext["name"].as_str().unwrap_or("?"),
-                            ext["type"].as_str().unwrap_or("?"),
-                            ext["serial"].as_str().unwrap_or(""),
-                            ext["version"].as_str().unwrap_or(""),
-                            status,
-                        );
-                    }
-                }
-
-                if !devices.is_empty() {
-                    if !top.is_empty() {
-                        println!();
-                    }
-                    println!(
-                        "{:<36} {:<26} {:<20} {:<14} STATUS",
-                        "DEVICE", "TYPE", "PLACE", "VERSION"
-                    );
-                    println!("{}", "─".repeat(110));
-                    for dev in &devices {
-                        let online = dev["online"].as_bool().unwrap_or(false);
-                        let status = if online { "✓ online" } else { "✗ offline" };
-                        println!(
-                            "{:<36} {:<26} {:<20} {:<14} {}",
-                            dev["name"].as_str().unwrap_or("?"),
-                            dev["type"].as_str().unwrap_or("?"),
-                            dev["place"].as_str().unwrap_or(""),
-                            dev["version"].as_str().unwrap_or(""),
-                            status,
-                        );
-                    }
-                }
-
-                println!(
-                    "\n{} extensions/branches, {} devices",
-                    top.len(),
-                    devices.len()
-                );
-            }
-        }
-
+        } => commands::system::cmd_status(&ctx, energy, diag, net, bus, lan, all),
+        Cmd::Log { lines } => commands::system::cmd_log(&ctx, lines),
+        Cmd::Time => commands::system::cmd_time(&ctx),
+        Cmd::Discover { timeout } => commands::system::cmd_discover(&ctx, timeout),
+        Cmd::Extensions => commands::system::cmd_extensions(&ctx),
         Cmd::Health {
             device_type,
             problems,
-        } => {
-            let lox = LoxClient::new(Config::load()?);
-            let status_xml = lox.get_text("/data/status")?;
+        } => commands::system::cmd_health(&ctx, device_type, problems),
+        Cmd::Update { action } => commands::system::cmd_update(&ctx, action),
+        Cmd::Reboot { yes } => commands::system::cmd_reboot(&ctx, yes),
+        Cmd::Files { action } => commands::system::cmd_files(&ctx, action),
+        Cmd::Otel { action } => commands::system::cmd_otel(&ctx, action),
 
-            // Parse /data/status XML for devices (same source as `lox extensions`)
-            use quick_xml::events::Event;
-            use quick_xml::Reader;
-
-            fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-                e.attributes()
-                    .flatten()
-                    .find(|a| a.key.as_ref() == name)
-                    .map(|a| String::from_utf8_lossy(&a.value).to_string())
-                    .unwrap_or_default()
-            }
-
-            #[derive(Clone)]
-            struct DeviceInfo {
-                name: String,
-                device_type: String, // "Tree", "Air", "Extension", etc.
-                place: Option<String>,
-                online: bool,
-                battery: Option<u32>,
-            }
-
-            let mut devices: Vec<DeviceInfo> = Vec::new();
-            let mut reader = Reader::from_str(&status_xml);
-            let mut buf = Vec::new();
-
-            loop {
-                match reader.read_event_into(&mut buf) {
-                    Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                        let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                        match tag.as_str() {
-                            "TreeBranch" => {
-                                devices.push(DeviceInfo {
-                                    name: xattr(e, b"Name"),
-                                    device_type: "Tree".to_string(),
-                                    place: None,
-                                    online: true, // branches are always online if present
-                                    battery: None,
-                                });
-                            }
-                            "Extension" => {
-                                devices.push(DeviceInfo {
-                                    name: xattr(e, b"Name"),
-                                    device_type: xattr(e, b"Type"),
-                                    place: None,
-                                    online: xattr(e, b"Online") == "true",
-                                    battery: None,
-                                });
-                            }
-                            "GenericNetworkDevice" => {
-                                let place = xattr(e, b"Place");
-                                devices.push(DeviceInfo {
-                                    name: xattr(e, b"Name"),
-                                    device_type: xattr(e, b"Type"),
-                                    place: if place.is_empty() { None } else { Some(place) },
-                                    online: xattr(e, b"Online") == "true",
-                                    battery: None,
-                                });
-                            }
-                            "TreeDevice" => {
-                                let place = xattr(e, b"Place");
-                                devices.push(DeviceInfo {
-                                    name: xattr(e, b"Name"),
-                                    device_type: "Tree Device".to_string(),
-                                    place: if place.is_empty() { None } else { Some(place) },
-                                    online: xattr(e, b"Online") == "true",
-                                    battery: None,
-                                });
-                            }
-                            "AirDevice" => {
-                                let place = xattr(e, b"Place");
-                                devices.push(DeviceInfo {
-                                    name: xattr(e, b"Name"),
-                                    device_type: xattr(e, b"Type"),
-                                    place: if place.is_empty() { None } else { Some(place) },
-                                    online: xattr(e, b"Online") == "true",
-                                    battery: xattr(e, b"Battery").parse::<u32>().ok(),
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                    Ok(Event::Eof) => break,
-                    Err(e) => {
-                        anyhow::bail!("Failed to parse status XML: {}", e);
-                    }
-                    _ => {}
-                }
-                buf.clear();
-            }
-
-            // Apply type filter
-            if let Some(ref tf) = device_type {
-                devices.retain(|d| d.device_type.to_lowercase().contains(&tf.to_lowercase()));
-            }
-
-            // Fetch CAN bus stats for Tree bus error context
-            let bus_errors: Option<(String, String, String)> = {
-                let rerr = lox.get_text("/jdev/bus/receiveerrors").ok();
-                let ferr = lox.get_text("/jdev/bus/frameerrors").ok();
-                let over = lox.get_text("/jdev/bus/overruns").ok();
-                match (rerr, ferr, over) {
-                    (Some(r), Some(f), Some(o)) => {
-                        let rv = xml_attr(&r, "value").unwrap_or("0").to_string();
-                        let fv = xml_attr(&f, "value").unwrap_or("0").to_string();
-                        let ov = xml_attr(&o, "value").unwrap_or("0").to_string();
-                        Some((rv, fv, ov))
-                    }
-                    _ => None,
-                }
-            };
-
-            // Classify devices
-            let total = devices.len();
-            let mut warnings: Vec<&DeviceInfo> = Vec::new();
-            let mut offline: Vec<&DeviceInfo> = Vec::new();
-            let mut online_count = 0usize;
-
-            for d in &devices {
-                if !d.online {
-                    offline.push(d);
-                } else if d.battery.is_some_and(|b| b < 20) {
-                    warnings.push(d);
-                } else {
-                    online_count += 1;
-                }
-            }
-
-            let warning_count = warnings.len();
-            let offline_count = offline.len();
-
-            if json {
-                let device_json: Vec<serde_json::Value> = devices
-                    .iter()
-                    .map(|d| {
-                        let status = if !d.online {
-                            "offline"
-                        } else if d.battery.is_some_and(|b| b < 20) {
-                            "warning"
-                        } else {
-                            "online"
-                        };
-                        let mut obj = serde_json::json!({
-                            "name": d.name,
-                            "type": d.device_type,
-                            "status": status,
-                            "online": d.online,
-                        });
-                        if let Some(ref place) = d.place {
-                            obj["place"] = serde_json::json!(place);
-                        }
-                        if let Some(battery) = d.battery {
-                            obj["battery"] = serde_json::json!(battery);
-                        }
-                        obj
-                    })
-                    .filter(|d| !problems || d["status"] == "warning" || d["status"] == "offline")
-                    .collect();
-
-                let mut result = serde_json::json!({
-                    "total": total,
-                    "online": online_count,
-                    "warnings": warning_count,
-                    "offline": offline_count,
-                    "devices": device_json,
-                });
-                if let Some((ref re, ref fe, ref ov)) = bus_errors {
-                    result["bus"] = serde_json::json!({
-                        "receive_errors": re,
-                        "frame_errors": fe,
-                        "overruns": ov,
-                    });
-                }
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!(
-                    "Device Health Report ({} device{})\n",
-                    total,
-                    if total == 1 { "" } else { "s" }
-                );
-                println!("  ✓ Online:  {}", online_count);
-                println!("  ⚠ Warning: {}", warning_count);
-                println!("  ✗ Offline: {}", offline_count);
-
-                // Show bus errors if any are non-zero
-                if let Some((ref re, ref fe, ref ov)) = bus_errors {
-                    let re_n: u64 = re.parse().unwrap_or(0);
-                    let fe_n: u64 = fe.parse().unwrap_or(0);
-                    let ov_n: u64 = ov.parse().unwrap_or(0);
-                    if re_n > 0 || fe_n > 0 || ov_n > 0 {
-                        println!("\nBUS ERRORS:");
-                        println!(
-                            "  Tree CAN bus  Receive errors: {}  Frame errors: {}  Overruns: {}",
-                            re, fe, ov
-                        );
-                    }
-                }
-
-                if !warnings.is_empty() {
-                    println!("\nWARNINGS:");
-                    for d in &warnings {
-                        let place_str = d
-                            .place
-                            .as_deref()
-                            .map(|r| format!(" [{}]", r))
-                            .unwrap_or_default();
-                        let mut details = Vec::new();
-                        details.push(format!("{:<12}", d.device_type));
-                        if let Some(bat) = d.battery {
-                            details.push(format!("Battery: {}%", bat));
-                        }
-                        println!("  {}{:<30} {}", d.name, place_str, details.join("  "));
-                    }
-                }
-
-                if !offline.is_empty() {
-                    println!("\nOFFLINE:");
-                    for d in &offline {
-                        let place_str = d
-                            .place
-                            .as_deref()
-                            .map(|r| format!(" [{}]", r))
-                            .unwrap_or_default();
-                        println!("  {}{:<30} {:<12}", d.name, place_str, d.device_type);
-                    }
-                }
-
-                if !problems && warnings.is_empty() && offline.is_empty() {
-                    println!("\n✓ All devices healthy");
-                }
-            }
-        }
-
-        Cmd::Time => {
-            let lox = LoxClient::new(Config::load()?);
-            // /jdev/sys/date and /jdev/sys/time require admin rights.
-            // /data/status is accessible to all users and contains the Miniserver
-            // timestamp in the "Modified" XML attribute (e.g. "2026-03-08 23:32:30").
-            let status_xml = lox.get_text("/data/status")?;
-            let datetime_val = xml_attr(&status_xml, "Modified").unwrap_or("?");
-            let (date_val, time_val) = if datetime_val.contains(' ') {
-                let mut parts = datetime_val.splitn(2, ' ');
-                (parts.next().unwrap_or("?"), parts.next().unwrap_or("?"))
-            } else {
-                (datetime_val, "?")
-            };
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({"date": date_val, "time": time_val, "datetime": datetime_val})
-                );
-            } else {
-                println!("Miniserver date: {}", date_val);
-                println!("Miniserver time: {}", time_val);
-            }
-        }
-
-        Cmd::Watch {
-            name_or_uuid,
-            interval,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let ctrl = lox.find_control(&name_or_uuid)?;
-            println!(
-                "Watching '{}' every {}s  (Ctrl+C to stop)",
-                ctrl.name, interval
-            );
-            let mut last = String::new();
-            loop {
-                if let Ok(xml) = lox.get_all(&ctrl.uuid) {
-                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-                    if val != last {
-                        println!("[{}]  {} = {}", now_hms(), ctrl.name, val);
-                        last = val;
-                    }
-                }
-                thread::sleep(Duration::from_secs(interval));
-            }
-        }
-
-        Cmd::Stream {
-            r#type,
-            room,
-            control,
-            initial,
-        } => {
-            let cfg = Config::load()?;
-            let mut lox = LoxClient::new(cfg.clone());
-            let structure = lox.get_structure()?.clone();
-            let state_map = stream::build_state_uuid_map(&structure);
-            if !quiet {
-                eprintln!("Streaming state changes (Ctrl+C to stop)...");
-            }
-            if csv && !no_header {
-                println!("timestamp,control,state,value,room,type,uuid");
-            }
-
-            let type_filter = r#type;
-            let room_filter = room;
-            let control_filter = control;
-            let mut initial_done = false;
-
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(stream::stream_events(&cfg, |events| {
-                for event in &events {
-                    match event {
-                        stream::StateEvent::ValueState { uuid, value } => {
-                            if !initial && !initial_done {
-                                continue;
-                            }
-                            if let Some(info) = state_map.get(uuid) {
-                                if !matches_filters(
-                                    info,
-                                    type_filter.as_deref(),
-                                    room_filter.as_deref(),
-                                    control_filter.as_deref(),
-                                ) {
-                                    continue;
-                                }
-                                print_stream_event(
-                                    json,
-                                    csv,
-                                    &info.control_name,
-                                    &info.state_name,
-                                    &format!("{}", value),
-                                    info.room.as_deref(),
-                                    &info.control_type,
-                                    uuid,
-                                );
-                            }
-                        }
-                        stream::StateEvent::TextState { uuid, text, .. } => {
-                            if !initial && !initial_done {
-                                continue;
-                            }
-                            if let Some(info) = state_map.get(uuid) {
-                                if !matches_filters(
-                                    info,
-                                    type_filter.as_deref(),
-                                    room_filter.as_deref(),
-                                    control_filter.as_deref(),
-                                ) {
-                                    continue;
-                                }
-                                print_stream_event(
-                                    json,
-                                    csv,
-                                    &info.control_name,
-                                    &info.state_name,
-                                    text,
-                                    info.room.as_deref(),
-                                    &info.control_type,
-                                    uuid,
-                                );
-                            }
-                        }
-                        stream::StateEvent::OutOfService => {
-                            if !quiet {
-                                eprintln!("Miniserver going offline (firmware update?). Exiting.");
-                            }
-                            std::process::exit(0);
-                        }
-                        _ => {} // Keepalive, Daytimer, Weather — skip for now
-                    }
-                }
-                if !initial_done {
-                    initial_done = true;
-                }
-                Ok(())
-            }))?;
-        }
-
-        Cmd::If {
-            name_or_uuid,
-            op,
-            value,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid_resolved)?;
-            let xml = lox.get_all(&ctrl.uuid)?;
-            let current = xml_attr(&xml, "value").unwrap_or("").to_string();
-            let matches = eval_op(&current, &op, &value)?;
-            if !json {
-                println!(
-                    "{} = {}  →  {} {} {}  →  {}",
-                    ctrl.name,
-                    current,
-                    current,
-                    op,
-                    value,
-                    if matches { "✓ true" } else { "✗ false" }
-                );
-            } else {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "control": ctrl.name, "current": current,
-                        "op": op, "target": value, "result": matches
-                    })
-                );
-            }
-            std::process::exit(if matches { 0 } else { 1 });
-        }
-
-        Cmd::Run {
-            scene,
-            dry_run: scene_dry_run,
-        } => {
-            let s = Scene::load(&scene)?;
-            let mut lox = LoxClient::new(Config::load()?);
-            if dry_run || scene_dry_run {
-                println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
-                if let Some(d) = &s.description {
-                    println!("   {}", d);
-                }
-                println!();
-                for (i, step) in s.steps.iter().enumerate() {
-                    let resolved = match lox.resolve(&step.control) {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("Step {}: {} (resolve failed: {})", i + 1, step.control, e);
-                            continue;
-                        }
-                    };
-                    println!(
-                        "  {}. {} → {}{}",
-                        i + 1,
-                        step.control,
-                        step.cmd,
-                        if step.delay_ms > 0 {
-                            format!(" (delay {}ms)", step.delay_ms)
-                        } else {
-                            String::new()
-                        }
-                    );
-                    let _ = resolved; // used for validation
-                }
-            } else {
-                if !quiet {
-                    println!("▶  {}", s.name.as_deref().unwrap_or(&scene));
-                    if let Some(d) = &s.description {
-                        println!("   {}", d);
-                    }
-                    println!();
-                }
-                for (i, step) in s.steps.iter().enumerate() {
-                    let uuid = match lox.resolve(&step.control) {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("Step {}: {}", i + 1, e);
-                            continue;
-                        }
-                    };
-                    if let Some(resp) = send_or_dry_run(
-                        &lox,
-                        &uuid,
-                        &step.cmd,
-                        &step.control,
-                        None,
-                        dry_run,
-                        json,
-                        quiet,
-                    )? {
-                        print_resp(&resp, json, quiet, &step.control, &step.cmd);
-                    }
-                    if step.delay_ms > 0 && !dry_run {
-                        thread::sleep(Duration::from_millis(step.delay_ms));
-                    }
-                }
-            }
-        }
-
-        Cmd::Scene { action } => match action {
-            SceneCmd::Ls => {
-                let names = Scene::list()?;
-                if names.is_empty() {
-                    println!("No scenes. Create: lox scene new <name>");
-                } else {
-                    for name in &names {
-                        let desc = Scene::load(name)
-                            .ok()
-                            .and_then(|s| s.description)
-                            .unwrap_or_default();
-                        println!("  {:<20}  {}", name, desc);
-                    }
-                }
-            }
-            SceneCmd::Show { name } => {
-                println!(
-                    "{}",
-                    fs::read_to_string(Scene::scenes_dir().join(format!("{}.yaml", name)))
-                        .with_context(|| format!("Scene '{}' not found", name))?
-                );
-            }
-            SceneCmd::New { name } => {
-                let dir = Scene::scenes_dir();
-                fs::create_dir_all(&dir)?;
-                let path = dir.join(format!("{}.yaml", name));
-                if path.exists() {
-                    bail!("Already exists");
-                }
-                fs::write(&path, format!(
-                    "name: \"{name}\"\ndescription: \"\"\nsteps:\n  - control: \"\"\n    cmd: \"on\"\n"))?;
-                println!("✓  {:?}", path);
-            }
-        },
-
-        Cmd::Set {
-            name_or_uuid,
-            value,
-            room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let encoded = encode_path_value(&value);
-            if dry_run {
-                print_dry_run(json, quiet, &uuid, &encoded, &name_or_uuid, None);
-            } else {
-                let resp = lox.send_cmd(&uuid, &encoded)?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let val = resp
-                    .pointer("/LL/value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                if code == "200" {
-                    if !quiet {
-                        println!("✓  {} = {}", name_or_uuid, val);
-                    }
-                } else {
-                    bail!("Error {}: {}", code, val);
-                }
-            }
-        }
-        Cmd::Token { action } => match action {
-            TokenCmd::Fetch => {
-                let cfg = Config::load()?;
-                println!("Fetching token from Miniserver...");
-                let rt = tokio::runtime::Runtime::new()?;
-                match rt.block_on(token::acquire_token(&cfg)) {
-                    Ok(ts) => {
-                        let _exp =
-                            std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts.valid_until);
-                        let days = ts.valid_until.saturating_sub(
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        ) / 86400;
-                        println!("✓ Token saved to {:?}", token::TokenStore::path());
-                        println!("  Valid for: {} days", days);
-                    }
-                    Err(e) => bail!("Token fetch failed: {}", e),
-                }
-            }
-            TokenCmd::Info => match token::TokenStore::load() {
-                Some(ts) => {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
-                    let days_left = ts.valid_until.saturating_sub(now) / 86400;
-                    println!(
-                        "Token: {}...{}",
-                        &ts.token[..8],
-                        &ts.token[ts.token.len() - 4..]
-                    );
-                    if ts.is_valid() {
-                        println!("Status: ✓ valid ({} days remaining)", days_left);
-                    } else {
-                        println!("Status: ⚠ expired — run: lox token fetch");
-                    }
-                }
-                None => println!("No token saved. Using Basic Auth. Run: lox token fetch"),
-            },
-            TokenCmd::Clear => {
-                let path = token::TokenStore::path();
-                if path.exists() {
-                    fs::remove_file(&path)?;
-                    println!("✓ Token cleared (reverting to Basic Auth)");
-                } else {
-                    println!("No token to clear");
-                }
-            }
-            TokenCmd::Check => {
-                let ts = token::TokenStore::load()
-                    .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-                let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
-                // Hash the token with the key for the check endpoint
-                let hash = token::hash_token(&ts.token, &ts.key);
-                let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("?");
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "valid": code == "200",
-                            "code": code,
-                        })
-                    );
-                } else if code == "200" {
-                    println!("✓ Token is valid on the Miniserver");
-                } else {
-                    println!("✗ Token is not valid (code {})", code);
-                }
-            }
-            TokenCmd::Refresh => {
-                let ts = token::TokenStore::load()
-                    .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-                let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
-                let hash = token::hash_token(&ts.token, &ts.key);
-                let resp =
-                    lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("?");
-                if code == "200" {
-                    // Update the valid_until in our local store
-                    let valid_until = resp
-                        .pointer("/LL/value")
-                        .and_then(|v| v.get("validUntil"))
-                        .and_then(|v| v.as_u64());
-                    if let Some(vu) = valid_until {
-                        let unix_until = if vu > 1_500_000_000 {
-                            vu
-                        } else {
-                            1_230_768_000u64.saturating_add(vu)
-                        };
-                        let new_ts = token::TokenStore {
-                            token: ts.token,
-                            key: ts.key,
-                            valid_until: unix_until,
-                        };
-                        new_ts.save()?;
-                        let days = unix_until.saturating_sub(
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        ) / 86400;
-                        println!("✓ Token refreshed ({} days remaining)", days);
-                    } else {
-                        println!("✓ Token refreshed");
-                    }
-                } else {
-                    bail!("Token refresh failed (code {})", code);
-                }
-            }
-            TokenCmd::Revoke => {
-                let ts = token::TokenStore::load()
-                    .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-                let cfg = Config::load()?;
-                let lox = LoxClient::new(cfg.clone());
-                let hash = token::hash_token(&ts.token, &ts.key);
-                let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("?");
-                if code == "200" {
-                    // Remove local token
-                    let path = token::TokenStore::path();
-                    if path.exists() {
-                        fs::remove_file(&path)?;
-                    }
-                    println!("✓ Token revoked and cleared");
-                } else {
-                    bail!("Token revoke failed (code {})", code);
-                }
-            }
-        },
-        Cmd::Autopilot { action } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            match action {
-                AutopilotCmd::Ls => {
-                    let rules = lox.list_autopilot_rules()?;
-                    if rules.is_empty() {
-                        println!("No autopilot rules found.");
-                    } else if json {
-                        let arr: Vec<serde_json::Value> = rules
-                            .iter()
-                            .map(|r| {
-                                serde_json::json!({
-                                    "name": r.name,
-                                    "uuid": r.uuid,
-                                    "state_changed": r.state_changed,
-                                    "state_history": r.state_history,
-                                })
-                            })
-                            .collect();
-                        println!("{}", serde_json::to_string_pretty(&arr)?);
-                    } else {
-                        let name_w = rules.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
-                        println!("{:<width$}  UUID", "NAME", width = name_w);
-                        for r in &rules {
-                            println!("{:<width$}  {}", r.name, r.uuid, width = name_w);
-                        }
-                    }
-                }
-                AutopilotCmd::State { name_or_uuid } => {
-                    let rule = lox.find_autopilot_rule(&name_or_uuid)?;
-                    let resp = lox.get_json(&format!("/jdev/sps/io/{}/state", rule.state_changed));
-                    if json {
-                        match resp {
-                            Ok(v) => println!("{}", serde_json::to_string_pretty(&v)?),
-                            Err(e) => bail!("{}", e),
-                        }
-                    } else {
-                        let last_run = match resp {
-                            Ok(v) => {
-                                let raw = v
-                                    .get("LL")
-                                    .and_then(|ll| ll.get("value"))
-                                    .and_then(|val| val.as_str())
-                                    .unwrap_or("");
-                                if raw.is_empty() || raw == "0" {
-                                    "never".to_string()
-                                } else if let Ok(secs) = raw.parse::<i64>() {
-                                    lox_timestamp_to_string(secs)
-                                } else {
-                                    raw.to_string()
-                                }
-                            }
-                            Err(_) => "unavailable".to_string(),
-                        };
-                        println!("Rule:     {}", rule.name);
-                        println!("Last run: {}", last_run);
-                    }
-                }
-            }
-        }
-        Cmd::Cache { action } => {
-            let cfg = Config::load()?;
-            let cache = LoxClient::cache_path(&cfg);
-            match action {
-                CacheCmd::Info => {
-                    if cache.exists() {
-                        let meta = cache.metadata()?;
-                        let age = std::time::SystemTime::now()
-                            .duration_since(meta.modified()?)
-                            .unwrap_or_default();
-                        let size = meta.len();
-                        println!("Cache: {:?}", cache);
-                        println!("Size:  {:.1} KB", size as f64 / 1024.0);
-                        println!("Age:   {}m {}s", age.as_secs() / 60, age.as_secs() % 60);
-                        if age.as_secs() < 86400 {
-                            println!("Status: ✓ valid ({} until refresh)", {
-                                let remaining = 86400u64.saturating_sub(age.as_secs());
-                                format!("{}h {}m", remaining / 3600, (remaining % 3600) / 60)
-                            });
-                        } else {
-                            println!("Status: ⚠ stale (will refresh on next command)");
-                        }
-                    } else {
-                        println!("No cache. Will be created on first command.");
-                    }
-                }
-                CacheCmd::Clear => {
-                    if cache.exists() {
-                        fs::remove_file(&cache)?;
-                        println!("✓ Cache cleared");
-                    } else {
-                        println!("No cache to clear");
-                    }
-                }
-                CacheCmd::Check => {
-                    let lox = LoxClient::new(cfg);
-                    let resp = lox.get_json("/jdev/sps/LoxAPPversion3")?;
-                    let remote_ver = resp
-                        .pointer("/LL/value")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::json!({
-                                "remote_version": remote_ver,
-                                "cache_exists": cache.exists(),
-                            })
-                        );
-                    } else {
-                        println!("Remote structure version: {}", remote_ver);
-                        if cache.exists() {
-                            println!("Cache: exists at {:?}", cache);
-                        } else {
-                            println!("Cache: not present");
-                        }
-                    }
-                }
-                CacheCmd::Refresh => {
-                    let client = Client::builder()
-                        .user_agent(client::USER_AGENT)
-                        .danger_accept_invalid_certs(true)
-                        .redirect(LoxClient::same_origin_redirect_policy(&cfg.host))
-                        .timeout(Duration::from_secs(15))
-                        .build()?;
-                    if cache.exists() {
-                        let _ = fs::remove_file(&cache);
-                    }
-                    LoxClient::load_or_fetch_structure(&cfg, &client)?;
-                    println!("✓ Structure cache refreshed ({:?})", cache);
-                }
-            }
-        }
-        Cmd::Config { action } => {
-            match action {
-                ConfigCmd::Ls => {
-                    let cfg = Config::load()?;
-                    let backups = ftp::list_backups(&cfg)?;
-                    if backups.is_empty() {
-                        println!("No configs found on the Miniserver.");
-                    } else if json {
-                        let arr: Vec<serde_json::Value> = backups
-                            .iter()
-                            .map(|b| {
-                                serde_json::json!({
-                                    "filename": b.filename,
-                                    "version": b.version,
-                                    "date": b.formatted_date(),
-                                    "size": b.size,
-                                })
-                            })
-                            .collect();
-                        println!("{}", serde_json::to_string_pretty(&arr)?);
-                    } else {
-                        println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
-                        for (i, b) in backups.iter().enumerate() {
-                            println!(
-                                "  {:<4} {:<8} {:<22} {} KB{}",
-                                i + 1,
-                                b.version,
-                                b.formatted_date(),
-                                b.size / 1024,
-                                if i == 0 { "  (latest)" } else { "" }
-                            );
-                        }
-                    }
-                }
-                ConfigCmd::Download { save_as, extract } => {
-                    let cfg = Config::load()?;
-                    let backups = ftp::list_backups(&cfg)?;
-                    if backups.is_empty() {
-                        bail!("No configs found on the Miniserver.");
-                    }
-                    let newest = &backups[0];
-                    eprintln!(
-                        "Downloading {} ({} KB)...",
-                        newest.filename,
-                        newest.size / 1024
-                    );
-                    let data = ftp::download_backup(&cfg, &newest.filename)?;
-                    let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
-                    fs::write(&out_path, &data)?;
-                    println!("Saved to {}", out_path);
-
-                    if extract {
-                        eprintln!("Extracting sps0.LoxCC...");
-                        let xml = loxcc::extract_and_decompress(&data)?;
-                        let xml_path = out_path
-                            .strip_suffix(".zip")
-                            .unwrap_or(&out_path)
-                            .to_string()
-                            + ".Loxone";
-                        fs::write(&xml_path, &xml)?;
-                        println!(
-                            "Decompressed {} KB → {} KB → {}",
-                            data.len() / 1024,
-                            xml.len() / 1024,
-                            xml_path
-                        );
-                    }
-                }
-                ConfigCmd::Extract { file, save_as } => {
-                    let zip_data =
-                        fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                    eprintln!("Extracting sps0.LoxCC...");
-                    let xml = loxcc::extract_and_decompress(&zip_data)?;
-                    let xml_path = save_as.unwrap_or_else(|| {
-                        file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
-                    });
-                    fs::write(&xml_path, &xml)?;
-                    println!(
-                        "Decompressed {} KB → {} KB → {}",
-                        zip_data.len() / 1024,
-                        xml.len() / 1024,
-                        xml_path
-                    );
-                }
-                ConfigCmd::Upload { file, force } => {
-                    let cfg = Config::load()?;
-                    if !force {
-                        eprintln!(
-                            "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
-                             \x20  programming. A bad configuration can require physical SD card\n\
-                             \x20  access to recover.\n\
-                             \n\
-                             \x20  Config file: {}\n\
-                             \n\
-                             \x20  Use --force to proceed.",
-                            file
-                        );
-                        std::process::exit(1);
-                    }
-                    let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                    let filename = std::path::Path::new(&file)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(&file);
-                    eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
-                    ftp::upload_backup(&cfg, filename, &data)?;
-                    println!("Upload complete.");
-                    println!("Reboot the Miniserver to apply: lox reboot");
-                }
-                ConfigCmd::Users { file } => {
-                    if file.ends_with(".zip") {
-                        bail!(
-                            "Expected a .Loxone XML file. Run `lox config extract {}` first.",
-                            file
-                        );
-                    }
-                    let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                    let users = loxone_xml::parse_users(&xml)?;
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&users)?);
-                    } else {
-                        let nfc_count = users.iter().filter(|u| u.nfc).count();
-                        println!("  {:<26} {:<6} Description", "Name", "NFC");
-                        for u in &users {
-                            println!(
-                                "  {:<26} {:<6} {}",
-                                u.name,
-                                if u.nfc { "yes" } else { "-" },
-                                u.description,
-                            );
-                        }
-                        println!("\n{} users ({} with NFC)", users.len(), nfc_count);
-                    }
-                }
-                ConfigCmd::Devices { file } => {
-                    if file.ends_with(".zip") {
-                        bail!(
-                            "Expected a .Loxone XML file. Run `lox config extract {}` first.",
-                            file
-                        );
-                    }
-                    let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-                    let devices = loxone_xml::parse_devices(&xml)?;
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&devices)?);
-                    } else {
-                        let tree: Vec<_> = devices
-                            .iter()
-                            .filter(|d| d.bus == loxone_xml::DeviceBus::Tree)
-                            .collect();
-                        let air: Vec<_> = devices
-                            .iter()
-                            .filter(|d| d.bus == loxone_xml::DeviceBus::Air)
-                            .collect();
-                        let net: Vec<_> = devices
-                            .iter()
-                            .filter(|d| d.bus == loxone_xml::DeviceBus::Network)
-                            .collect();
-
-                        if !tree.is_empty() {
-                            println!("  Tree devices ({})", tree.len());
-                            println!("  {:<30} {:<12} Type", "Name", "Serial");
-                            for d in &tree {
-                                println!(
-                                    "  {:<30} {:<12} {}",
-                                    d.name,
-                                    d.serial.as_deref().unwrap_or("-"),
-                                    d.type_label
-                                );
-                            }
-                        }
-                        if !air.is_empty() {
-                            if !tree.is_empty() {
-                                println!();
-                            }
-                            println!("  LoxAIR devices ({})", air.len());
-                            println!("  {:<30} Type", "Name");
-                            for d in &air {
-                                println!("  {:<30} {}", d.name, d.type_label);
-                            }
-                        }
-                        if !net.is_empty() {
-                            if !tree.is_empty() || !air.is_empty() {
-                                println!();
-                            }
-                            println!("  Network devices ({})", net.len());
-                            println!("  {:<30} {:<18} MAC", "Name", "Address");
-                            for d in &net {
-                                println!(
-                                    "  {:<30} {:<18} {}",
-                                    d.name,
-                                    d.address.as_deref().unwrap_or("-"),
-                                    d.mac.as_deref().unwrap_or("-")
-                                );
-                            }
-                        }
-                        println!("\n{} devices total", devices.len());
-                    }
-                }
-                ConfigCmd::Diff { file1, file2 } => {
-                    let xml1 = load_config_xml(&file1)?;
-                    let xml2 = load_config_xml(&file2)?;
-                    let s1 = loxone_xml::parse_config_summary(&xml1)?;
-                    let s2 = loxone_xml::parse_config_summary(&xml2)?;
-                    let diff = loxone_xml::diff_configs(&s1, &s2);
-
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&diff)?);
-                    } else {
-                        println!(
-                            "Config version: {} → {}",
-                            diff.version_old, diff.version_new
-                        );
-                        println!("Modified: {} → {}", diff.date_old, diff.date_new);
-
-                        if !diff.controls_added.is_empty()
-                            || !diff.controls_removed.is_empty()
-                            || !diff.controls_changed.is_empty()
-                        {
-                            println!("\nControls:");
-                            for c in &diff.controls_added {
-                                println!("  + Added: \"{}\" ({})", c.name, c.control_type);
-                            }
-                            for c in &diff.controls_changed {
-                                println!(
-                                    "  ~ Changed: \"{}\" — {} \"{}\" → \"{}\"",
-                                    c.name, c.field, c.old_value, c.new_value
-                                );
-                            }
-                            for c in &diff.controls_removed {
-                                println!("  - Removed: \"{}\" ({})", c.name, c.control_type);
-                            }
-                        }
-
-                        if !diff.rooms_added.is_empty()
-                            || !diff.rooms_removed.is_empty()
-                            || !diff.rooms_renamed.is_empty()
-                        {
-                            println!("\nRooms:");
-                            for r in &diff.rooms_added {
-                                println!("  + Added: \"{}\"", r);
-                            }
-                            for r in &diff.rooms_renamed {
-                                println!("  ~ Renamed: \"{}\" → \"{}\"", r.old, r.new);
-                            }
-                            for r in &diff.rooms_removed {
-                                println!("  - Removed: \"{}\"", r);
-                            }
-                        }
-
-                        if !diff.categories_added.is_empty()
-                            || !diff.categories_removed.is_empty()
-                            || !diff.categories_renamed.is_empty()
-                        {
-                            println!("\nCategories:");
-                            for c in &diff.categories_added {
-                                println!("  + Added: \"{}\"", c);
-                            }
-                            for c in &diff.categories_renamed {
-                                println!("  ~ Renamed: \"{}\" → \"{}\"", c.old, c.new);
-                            }
-                            for c in &diff.categories_removed {
-                                println!("  - Removed: \"{}\"", c);
-                            }
-                        }
-
-                        if !diff.users_added.is_empty() || !diff.users_removed.is_empty() {
-                            println!("\nUsers:");
-                            for u in &diff.users_added {
-                                println!("  + Added: \"{}\"", u);
-                            }
-                            for u in &diff.users_removed {
-                                println!("  - Removed: \"{}\"", u);
-                            }
-                        }
-
-                        let total = diff.controls_added.len()
-                            + diff.controls_removed.len()
-                            + diff.controls_changed.len()
-                            + diff.rooms_added.len()
-                            + diff.rooms_removed.len()
-                            + diff.rooms_renamed.len()
-                            + diff.categories_added.len()
-                            + diff.categories_removed.len()
-                            + diff.categories_renamed.len()
-                            + diff.users_added.len()
-                            + diff.users_removed.len();
-
-                        if !diff.has_changes() {
-                            println!("\nNo structural changes.");
-                        } else {
-                            println!("\n{} changes total", total);
-                        }
-                    }
-                }
-                ConfigCmd::Init { path } => {
-                    let cfg = Config::load()?;
-                    let abs_path = if path.starts_with('/') || path.starts_with('~') {
-                        let expanded = if path.starts_with('~') {
-                            path.replacen(
-                                '~',
-                                &dirs::home_dir().unwrap_or_default().to_string_lossy(),
-                                1,
-                            )
-                        } else {
-                            path.clone()
-                        };
-                        std::path::PathBuf::from(expanded)
-                    } else {
-                        std::env::current_dir()?.join(&path)
-                    };
-                    let repo = gitops::init(&abs_path, &cfg)?;
-                    // Save the repo path in config
-                    let mut cfg = Config::load().unwrap_or_default();
-                    cfg.config_repo = Some(repo.to_string_lossy().to_string());
-                    let saved = cfg.save()?;
-                    println!("Config repo initialized at {}", repo.display());
-                    println!("Saved repo path to {}", saved.display());
-                    println!(
-                        "\nNext: run `lox config pull` to download and commit the current config."
-                    );
-                }
-                ConfigCmd::Pull { quiet: pull_quiet } => {
-                    let cfg = Config::load()?;
-                    let repo_path = cfg.config_repo.as_deref().context(
-                        "No config repo configured. Run `lox config init <path>` first.",
-                    )?;
-                    let q = pull_quiet || quiet;
-                    let committed = gitops::pull(std::path::Path::new(repo_path), &cfg, q)?;
-                    if q && committed {
-                        // In quiet/cron mode, just indicate a commit was made
-                        println!("committed");
-                    }
-                }
-                ConfigCmd::Log { count } => {
-                    let cfg = Config::load()?;
-                    let repo_path = cfg.config_repo.as_deref().context(
-                        "No config repo configured. Run `lox config init <path>` first.",
-                    )?;
-                    let ms = if !cfg.serial.is_empty() {
-                        Some(cfg.serial.as_str())
-                    } else {
-                        None
-                    };
-                    let output = gitops::log(std::path::Path::new(repo_path), ms, count)?;
-                    if output.is_empty() {
-                        println!("No config history yet. Run `lox config pull` first.");
-                    } else {
-                        println!("{}", output);
-                    }
-                }
-                ConfigCmd::Restore { commit, force } => {
-                    let cfg = Config::load()?;
-                    let repo_path = cfg.config_repo.as_deref().context(
-                        "No config repo configured. Run `lox config init <path>` first.",
-                    )?;
-                    gitops::restore(std::path::Path::new(repo_path), &cfg, &commit, force)?;
-                }
-            }
-        }
-        Cmd::Sensors { r#type, room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let type_lower = r#type.to_lowercase();
-            let type_filter: Option<&str> = match type_lower.as_str() {
-                "temperature" | "temp" => Some("InfoOnlyAnalog"),
-                "door-window" | "doorwindow" => Some("InfoOnlyDigital"),
-                "motion" => None, // We'll filter manually
-                "smoke" => Some("SmokeAlarm"),
-                _ => None,
-            };
-            let controls = lox.list_controls(type_filter, room.as_deref())?;
-            let filtered: Vec<_> = controls
-                .iter()
-                .filter(|c| match type_lower.as_str() {
-                    "temperature" | "temp" => c.typ == "InfoOnlyAnalog",
-                    "door-window" | "doorwindow" => c.typ == "InfoOnlyDigital",
-                    "motion" => {
-                        matches!(c.typ.as_str(), "PresenceDetector" | "MotionSensor")
-                    }
-                    "smoke" => c.typ == "SmokeAlarm",
-                    _ => matches!(
-                        c.typ.as_str(),
-                        "InfoOnlyAnalog"
-                            | "InfoOnlyDigital"
-                            | "PresenceDetector"
-                            | "MotionSensor"
-                            | "SmokeAlarm"
-                            | "Meter"
-                    ),
-                })
-                .collect();
-            if json {
-                let mut arr = Vec::new();
-                for c in &filtered {
-                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
-                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-                    arr.push(serde_json::json!({
-                        "name": c.name, "uuid": c.uuid, "type": c.typ,
-                        "room": c.room, "value": val,
-                    }));
-                }
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else if filtered.is_empty() {
-                println!("No sensors found.");
-            } else {
-                if !no_header {
-                    println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-                    println!("{}", "─".repeat(96));
-                }
-                for c in &filtered {
-                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
-                    let val = xml_attr(&xml, "value").unwrap_or("?");
-                    println!(
-                        "{:<36} {:<20} {:<20} {}",
-                        c.name,
-                        c.typ,
-                        c.room.as_deref().unwrap_or("─"),
-                        val
-                    );
-                }
-                println!("\n{} sensors", filtered.len());
-            }
-        }
-
-        Cmd::Energy { room } => {
-            let mut lox = LoxClient::new(Config::load()?);
-            let controls = lox.list_controls(None, room.as_deref())?;
-            let energy: Vec<_> = controls
-                .iter()
-                .filter(|c| {
-                    matches!(
-                        c.typ.as_str(),
-                        "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
-                    ) || c.typ.contains("Energy")
-                })
-                .collect();
-            if json {
-                let mut arr = Vec::new();
-                for c in &energy {
-                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
-                    let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-                    arr.push(serde_json::json!({
-                        "name": c.name, "uuid": c.uuid, "type": c.typ,
-                        "room": c.room, "value": val,
-                    }));
-                }
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else if energy.is_empty() {
-                println!("No energy meters found.");
-            } else {
-                if !no_header {
-                    println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-                    println!("{}", "─".repeat(96));
-                }
-                for c in &energy {
-                    let xml = lox.get_all(&c.uuid).unwrap_or_default();
-                    let val = xml_attr(&xml, "value").unwrap_or("?");
-                    println!(
-                        "{:<36} {:<20} {:<20} {}",
-                        c.name,
-                        c.typ,
-                        c.room.as_deref().unwrap_or("─"),
-                        val
-                    );
-                }
-                println!("\n{} energy meters", energy.len());
-            }
-        }
-
+        // ── Configuration commands ────────────────────────────────────
+        Cmd::Setup { action } => commands::config_cmd::cmd_setup(&ctx, action),
+        Cmd::Alias { action } => commands::config_cmd::cmd_alias(&ctx, action),
+        Cmd::Scene { action } => commands::config_cmd::cmd_scene(&ctx, action),
+        Cmd::Cache { action } => commands::config_cmd::cmd_cache(&ctx, action),
+        Cmd::Token { action } => commands::config_cmd::cmd_token(&ctx, action),
+        Cmd::Config { action } => commands::config_cmd::cmd_config(&ctx, action),
         Cmd::Completions { shell, install } => {
-            let detected = shell.or_else(detect_shell);
-            let Some(sh) = detected else {
-                bail!("Could not detect shell. Specify one: lox completions bash|zsh|fish");
-            };
-            let mut cmd = Cli::command();
-            if install {
-                install_completions(sh, &mut cmd)?;
-            } else {
-                generate(sh, &mut cmd, "lox", &mut std::io::stdout());
-            }
+            commands::config_cmd::cmd_completions(&ctx, shell, install)
         }
-
-        Cmd::Log { lines } => {
-            let lox = LoxClient::new(Config::load()?);
-            let log = lox.get_text("/dev/fsget/log/def.log")?;
-            if log.contains("<errorcode>403</errorcode>")
-                || log.contains("<errorcode>401</errorcode>")
-            {
-                bail!("Access denied. The Miniserver log requires admin privileges.");
-            }
-            if log.trim_start().starts_with('<') && log.contains("<errorcode>") {
-                let code = xml_attr(&log, "errorcode").unwrap_or("?");
-                bail!("Miniserver returned error code {}", code);
-            }
-            let all: Vec<&str> = log.lines().collect();
-            for line in &all[all.len().saturating_sub(lines)..] {
-                println!("{}", line);
-            }
-        }
-
-        Cmd::Otel { action } => {
-            let cfg = Config::load()?;
-            match action {
-                OtelCmd::Serve {
-                    endpoint,
-                    interval,
-                    r#type,
-                    room,
-                    header,
-                    delta,
-                    no_logs,
-                    no_traces,
-                } => {
-                    let interval = otel::parse_interval(&interval)?;
-                    otel::serve(
-                        &cfg,
-                        &endpoint,
-                        interval,
-                        r#type.as_deref(),
-                        room.as_deref(),
-                        &header,
-                        quiet,
-                        delta,
-                        no_logs,
-                        no_traces,
-                    )?;
-                }
-                OtelCmd::Push {
-                    endpoint,
-                    r#type,
-                    room,
-                    header,
-                    delta,
-                    no_logs,
-                } => {
-                    otel::push(
-                        &cfg,
-                        &endpoint,
-                        r#type.as_deref(),
-                        room.as_deref(),
-                        &header,
-                        quiet,
-                        delta,
-                        no_logs,
-                    )?;
-                }
-            }
-        }
-
-        Cmd::Schema { command } => {
-            let schema = build_schema(command.as_deref())?;
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-        }
+        Cmd::Schema { command } => commands::config_cmd::cmd_schema(&ctx, command),
     }
-
-    Ok(())
 }
 
 // ── Schema introspection ─────────────────────────────────────────────────────
 
-fn build_schema(filter: Option<&str>) -> Result<Value> {
+pub(crate) fn build_schema(filter: Option<&str>) -> Result<Value> {
     let cmd = Cli::command();
 
     if let Some(name) = filter {
@@ -4755,7 +1424,7 @@ fn build_schema(filter: Option<&str>) -> Result<Value> {
     }))
 }
 
-fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
+pub(crate) fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
     let mut obj = serde_json::json!({
         "name": cmd.get_name(),
         "description": cmd.get_about().map(|s| s.to_string()).unwrap_or_default(),
@@ -4844,7 +1513,7 @@ fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
 
 // ── Stream helpers ────────────────────────────────────────────────────────────
 
-fn matches_filters(
+pub(crate) fn matches_filters(
     info: &stream::StateUuidInfo,
     type_filter: Option<&str>,
     room_filter: Option<&str>,
@@ -4883,7 +1552,7 @@ fn matches_filters(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn print_stream_event(
+pub(crate) fn print_stream_event(
     json: bool,
     csv: bool,
     control: &str,
@@ -4929,7 +1598,7 @@ fn print_stream_event(
     }
 }
 
-fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
+pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
     let rf = r as f64 / 255.0;
     let gf = g as f64 / 255.0;
     let bf = b as f64 / 255.0;
@@ -4951,7 +1620,7 @@ fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
     (h.round() as u16, s.round() as u16, v.round() as u16)
 }
 
-fn parse_weather_entry(
+pub(crate) fn parse_weather_entry(
     cursor: &mut Cursor<&[u8]>,
     lox_epoch: &chrono::DateTime<chrono::Local>,
 ) -> Option<serde_json::Value> {
@@ -5007,7 +1676,7 @@ fn parse_weather_entry(
     }))
 }
 
-fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
+pub(crate) fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
     Ok(match op {
         "eq" | "==" => {
             // Try numeric comparison first; fall back to string
@@ -5029,7 +1698,7 @@ fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
     })
 }
 
-fn parse_f(s: &str) -> Result<f64> {
+pub(crate) fn parse_f(s: &str) -> Result<f64> {
     // Try direct parse first, then strip non-numeric suffix (e.g. "21.5°", "100%")
     s.parse::<f64>().or_else(|_| {
         let stripped = s.trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.' && c != '-');
@@ -5041,7 +1710,7 @@ fn parse_f(s: &str) -> Result<f64> {
 
 /// Percent-encode characters that would corrupt an HTTP path segment.
 /// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/50") pass through.
-fn encode_path_value(s: &str) -> String {
+pub(crate) fn encode_path_value(s: &str) -> String {
     s.chars()
         .flat_map(|c| match c {
             '%' => vec!['%', '2', '5'],

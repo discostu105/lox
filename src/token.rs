@@ -10,8 +10,12 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::client::LOXONE_EPOCH_SECS;
 use crate::config::Config;
 use crate::ws::LoxWsClient;
+
+const TOKEN_EXPIRY_MARGIN_SECS: u64 = 300;
+const WS_TIMEOUT_SECS: u64 = 5;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -36,9 +40,9 @@ impl TokenStore {
     pub fn is_valid(&self) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
-        self.valid_until > now + 300
+        self.valid_until > now + TOKEN_EXPIRY_MARGIN_SECS
     }
 }
 
@@ -124,9 +128,23 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc)
     };
 
-    // 4. WS connect + key exchange
+    // 4. WS connect + key exchange (retry up to 3 times)
     let ws_client = LoxWsClient::new(cfg.clone());
-    let (mut ws, _) = ws_client.connect_raw().await?;
+    let mut ws = None;
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(200 * (1 << attempt))).await;
+        }
+        match ws_client.connect_raw().await {
+            Ok((stream, _)) => {
+                ws = Some(stream);
+                break;
+            }
+            Err(e) if attempt == 2 => return Err(e),
+            Err(_) => continue,
+        }
+    }
+    let mut ws = ws.ok_or_else(|| anyhow::anyhow!("WS connect failed after retries"))?;
     ws.send(Message::Text(format!(
         "jdev/sys/keyexchange/{}",
         encrypted_b64
@@ -135,7 +153,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
 
     // Read keyexchange response (may get binary header first)
     for _ in 0..5 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+        match tokio::time::timeout(Duration::from_secs(WS_TIMEOUT_SECS), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
                 let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
                 let code = v
@@ -194,7 +212,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     // 7. Read token response
     let mut token_resp: Option<serde_json::Value> = None;
     for _ in 0..10 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+        match tokio::time::timeout(Duration::from_secs(WS_TIMEOUT_SECS), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
                     if v.pointer("/LL/Code").is_some() || v.pointer("/LL/code").is_some() {
@@ -232,7 +250,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     let unix_until = if valid_until > 1_500_000_000 {
         valid_until
     } else {
-        1_230_768_000u64.saturating_add(valid_until)
+        LOXONE_EPOCH_SECS.saturating_add(valid_until)
     };
 
     let ts = TokenStore {
@@ -252,7 +270,7 @@ async fn ws_read_json_value(
     label: &str,
 ) -> Result<serde_json::Value> {
     for _ in 0..10 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+        match tokio::time::timeout(Duration::from_secs(WS_TIMEOUT_SECS), ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => {
                 let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
                 let code = v
