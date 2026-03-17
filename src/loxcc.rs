@@ -5,7 +5,7 @@
 //!
 //! Reference: <https://gist.github.com/sarnau/e14ff9fe081611782a3f3cb2e2c2bacd>
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::io::{Cursor, Read};
 
 const LOXCC_MAGIC: u32 = 0xaabbccee;

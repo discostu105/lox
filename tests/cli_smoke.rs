@@ -22,7 +22,7 @@ fn version_exits_0() {
 // conflicting attributes) at the integration-test level.
 
 macro_rules! subcmd_help {
-    ($name:ident, $($arg:expr),+) => {
+    ($name:ident, $($arg:expr_2021),+) => {
         #[test]
         fn $name() {
             lox()$(.arg($arg))+ .arg("--help").assert().success();

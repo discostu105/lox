@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use serde::Serialize;
 use std::collections::HashMap;
 

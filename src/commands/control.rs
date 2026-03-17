@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use std::thread;
 use std::time::Duration;
@@ -8,8 +8,8 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::{
-    bar, encode_path_value, print_dry_run, print_resp, rgb_to_hsv, send_or_dry_run, xml_attr,
-    InputCmd, LightCmd, MusicCmd,
+    InputCmd, LightCmd, MusicCmd, bar, encode_path_value, print_dry_run, print_resp, rgb_to_hsv,
+    send_or_dry_run, xml_attr,
 };
 
 pub fn cmd_on(

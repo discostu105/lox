@@ -1,18 +1,18 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::CommandFactory;
 use clap_complete::generate;
 use reqwest::blocking::Client;
 use std::fs;
 use std::time::Duration;
 
-use crate::client::{LoxClient, LOXONE_EPOCH_SECS, USER_AGENT};
+use crate::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
 use crate::{
-    build_schema, detect_shell, ftp, gitops, install_completions, load_config_xml, loxcc,
-    loxone_xml, AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd,
+    AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, detect_shell,
+    ftp, gitops, install_completions, load_config_xml, loxcc, loxone_xml,
 };
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {

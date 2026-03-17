@@ -11,7 +11,7 @@
 //!     metadata.yaml    # firmware version, timestamp, counts
 //! ```
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -380,7 +380,6 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn test_ms_dir_with_serial() {
