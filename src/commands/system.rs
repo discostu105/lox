@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::fs;
 use std::net::UdpSocket;
 use std::time::Duration;
@@ -7,7 +7,7 @@ use crate::client::LoxClient;
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::otel;
-use crate::{abs_path, bar, kb_fmt, xml_attr, FilesCmd, OtelCmd, UpdateCmd};
+use crate::{FilesCmd, OtelCmd, UpdateCmd, abs_path, bar, kb_fmt, xml_attr};
 
 pub fn cmd_status(
     ctx: &RunContext,
@@ -312,8 +312,8 @@ pub fn cmd_extensions(ctx: &RunContext) -> Result<()> {
 
     let mut extensions: Vec<serde_json::Value> = Vec::new();
 
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
         e.attributes()
@@ -476,8 +476,8 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     let lox = LoxClient::new(Config::load()?)?;
     let status_xml = lox.get_text("/data/status")?;
 
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
         e.attributes()

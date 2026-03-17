@@ -93,9 +93,10 @@ mod tests {
         let yaml = "host: myhost.local\nuser: admin\npass: secret\n";
         fs::write(&cfg_path, yaml).unwrap();
 
-        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        // SAFETY: Test runs serially; no other threads access this env var.
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
         let cfg = Config::load().unwrap();
-        std::env::remove_var("LOX_CONFIG");
+        unsafe { std::env::remove_var("LOX_CONFIG") };
 
         assert_eq!(cfg.user, "admin");
         assert_eq!(cfg.pass, "secret");
@@ -107,9 +108,9 @@ mod tests {
         let cfg_path = dir.path().join("cfg.yaml");
         fs::write(&cfg_path, "host: miniserver.local\nuser: u\npass: p\n").unwrap();
 
-        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
         let cfg = Config::load().unwrap();
-        std::env::remove_var("LOX_CONFIG");
+        unsafe { std::env::remove_var("LOX_CONFIG") };
 
         assert_eq!(cfg.host, "https://miniserver.local");
     }
@@ -120,9 +121,9 @@ mod tests {
         let cfg_path = dir.path().join("cfg.yaml");
         fs::write(&cfg_path, "host: http://ms.local\nuser: u\npass: p\n").unwrap();
 
-        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
         let cfg = Config::load().unwrap();
-        std::env::remove_var("LOX_CONFIG");
+        unsafe { std::env::remove_var("LOX_CONFIG") };
 
         assert_eq!(cfg.host, "http://ms.local");
     }
@@ -146,9 +147,9 @@ mod tests {
         let cfg_path = dir.path().join("roundtrip.yaml");
         fs::write(&cfg_path, &yaml).unwrap();
 
-        std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap());
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
         let loaded = Config::load().unwrap();
-        std::env::remove_var("LOX_CONFIG");
+        unsafe { std::env::remove_var("LOX_CONFIG") };
 
         assert_eq!(loaded.host, "https://10.0.0.1");
         assert_eq!(loaded.user, "testuser");

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -10,9 +10,9 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::stream;
 use crate::{
-    eval_op, find_stats_files, lox_epoch, lox_timestamp_to_string, matches_filters, now_hms,
-    parse_stats_entries, parse_weather_entry, print_stream_event, stats_data_offset,
-    stats_file_path, stats_period, xml_attr, AutopilotCmd,
+    AutopilotCmd, eval_op, find_stats_files, lox_epoch, lox_timestamp_to_string, matches_filters,
+    now_hms, parse_stats_entries, parse_weather_entry, print_stream_event, stats_data_offset,
+    stats_file_path, stats_period, xml_attr,
 };
 
 pub fn cmd_ls(
@@ -189,25 +189,25 @@ pub fn cmd_info(ctx: &RunContext, name_or_uuid: String, room: Option<String>) ->
             }
         }
 
-        if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object()) {
-            if let Some(moods) = details.get("moods").and_then(|m| m.as_array()) {
-                println!("\nMoods:");
-                for mood in moods {
-                    let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-                    let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    println!("  {:<6} {}", id, name);
-                }
+        if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object())
+            && let Some(moods) = details.get("moods").and_then(|m| m.as_array())
+        {
+            println!("\nMoods:");
+            for mood in moods {
+                let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+                let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                println!("  {:<6} {}", id, name);
             }
         }
 
-        if let Some(stat) = ctrl_json.get("statistic") {
-            if !stat.is_null() {
-                println!("\nStatistics: enabled");
-                if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
-                    for (k, v) in outputs {
-                        let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                        println!("  {:<30} {}", name, k);
-                    }
+        if let Some(stat) = ctrl_json.get("statistic")
+            && !stat.is_null()
+        {
+            println!("\nStatistics: enabled");
+            if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
+                for (k, v) in outputs {
+                    let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                    println!("  {:<30} {}", name, k);
                 }
             }
         }
@@ -661,14 +661,14 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     let mut stats_controls = Vec::new();
     if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
         for (uuid, ctrl) in ctrl_map {
-            if let Some(stat) = ctrl.get("statistic") {
-                if !stat.is_null() {
-                    let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                    let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
-                    let room = rooms.get(room_uuid).cloned();
-                    stats_controls.push((name.to_string(), uuid.clone(), typ.to_string(), room));
-                }
+            if let Some(stat) = ctrl.get("statistic")
+                && !stat.is_null()
+            {
+                let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
+                let room = rooms.get(room_uuid).cloned();
+                stats_controls.push((name.to_string(), uuid.clone(), typ.to_string(), room));
             }
         }
     }

@@ -1,6 +1,6 @@
 //! Loxone HTTP client, control resolution, and structure cache
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -277,10 +277,10 @@ impl LoxClient {
                 Ok(val) => return Ok(val),
                 Err(e) => {
                     // Don't retry on 4xx client errors
-                    if let Some(http_err) = e.downcast_ref::<HttpStatusError>() {
-                        if (400..500).contains(&http_err.status) {
-                            return Err(e);
-                        }
+                    if let Some(http_err) = e.downcast_ref::<HttpStatusError>()
+                        && (400..500).contains(&http_err.status)
+                    {
+                        return Err(e);
                     }
                     last_err = Some(e);
                 }
@@ -306,27 +306,25 @@ impl LoxClient {
         let cache = Self::cache_path(cfg);
         // Skip disk cache for localhost hosts (used in tests with mock servers)
         let use_cache = !cfg.host.contains("127.0.0.1") && !cfg.host.contains("localhost");
-        if use_cache {
-            if let Ok(meta) = cache.metadata() {
-                if let Ok(modified) = meta.modified() {
-                    let age = std::time::SystemTime::now()
-                        .duration_since(modified)
-                        .unwrap_or_default();
-                    if age.as_secs() < CACHE_TTL_SECS {
-                        if let Ok(data) = fs::read_to_string(&cache) {
-                            if let Ok(v) = serde_json::from_str::<Value>(&data) {
-                                if verbose() >= 1 {
-                                    eprintln!(
-                                        "Using cached structure ({} bytes, age {}s)",
-                                        data.len(),
-                                        age.as_secs()
-                                    );
-                                }
-                                return Ok(v);
-                            }
-                        }
-                    }
+        if use_cache
+            && let Ok(meta) = cache.metadata()
+            && let Ok(modified) = meta.modified()
+        {
+            let age = std::time::SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default();
+            if age.as_secs() < CACHE_TTL_SECS
+                && let Ok(data) = fs::read_to_string(&cache)
+                && let Ok(v) = serde_json::from_str::<Value>(&data)
+            {
+                if verbose() >= 1 {
+                    eprintln!(
+                        "Using cached structure ({} bytes, age {}s)",
+                        data.len(),
+                        age.as_secs()
+                    );
                 }
+                return Ok(v);
             }
         }
         let url = format!("{}/data/LoxApp3.json", cfg.host);
@@ -433,30 +431,28 @@ impl LoxClient {
                     .get("isSecured")
                     .and_then(|f| f.as_bool())
                     .unwrap_or(false);
-                if let Some(tf) = type_filter {
-                    if !typ.to_lowercase().contains(&tf.to_lowercase()) {
-                        continue;
-                    }
+                if let Some(tf) = type_filter
+                    && !typ.to_lowercase().contains(&tf.to_lowercase())
+                {
+                    continue;
                 }
-                if let Some(rf) = room_filter {
-                    if !room
+                if let Some(rf) = room_filter
+                    && !room
                         .as_deref()
                         .unwrap_or("")
                         .to_lowercase()
                         .contains(&rf.to_lowercase())
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
-                if let Some(cf) = cat_filter {
-                    if !cat
+                if let Some(cf) = cat_filter
+                    && !cat
                         .as_deref()
                         .unwrap_or("")
                         .to_lowercase()
                         .contains(&cf.to_lowercase())
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
                 if favorites_only && !is_favorite {
                     continue;
@@ -1051,9 +1047,11 @@ mod tests {
         let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let controls = client.resolve_all_in_room("Kitchen", None).unwrap();
         assert_eq!(controls.len(), 2);
-        assert!(controls
-            .iter()
-            .all(|c| c.room.as_deref() == Some("Kitchen")));
+        assert!(
+            controls
+                .iter()
+                .all(|c| c.room.as_deref() == Some("Kitchen"))
+        );
     }
 
     #[test]

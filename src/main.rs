@@ -11,9 +11,9 @@ mod stream;
 mod token;
 mod ws;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use client::LoxClient;
 use serde_json::Value;
 use std::fs;
@@ -279,7 +279,9 @@ pub(crate) fn install_completions(shell: Shell, cmd: &mut clap::Command) -> Resu
             bail!("Elvish completions must be installed manually — run: lox completions elvish");
         }
         Shell::PowerShell => {
-            bail!("PowerShell completions must be installed manually — run: lox completions powershell");
+            bail!(
+                "PowerShell completions must be installed manually — run: lox completions powershell"
+            );
         }
         _ => bail!("Unsupported shell"),
     };
@@ -1201,15 +1203,16 @@ fn run(cli: Cli) -> Result<()> {
         trace_id: cli.trace_id.clone(),
     };
 
-    if let Some(tid) = &ctx.trace_id {
-        if cli.verbose > 0 {
-            eprintln!("trace-id: {}", tid);
-        }
+    if let Some(tid) = &ctx.trace_id
+        && cli.verbose > 0
+    {
+        eprintln!("trace-id: {}", tid);
     }
 
     // Respect NO_COLOR env var (clig.dev standard) and --no-color flag
     if cli.no_color || std::env::var("NO_COLOR").is_ok() {
-        std::env::set_var("NO_COLOR", "1");
+        // SAFETY: Called during single-threaded startup before any concurrent work.
+        unsafe { std::env::set_var("NO_COLOR", "1") };
     }
 
     match cli.cmd {
@@ -1519,34 +1522,31 @@ pub(crate) fn matches_filters(
     room_filter: Option<&str>,
     control_filter: Option<&str>,
 ) -> bool {
-    if let Some(tf) = type_filter {
-        if !info
+    if let Some(tf) = type_filter
+        && !info
             .control_type
             .to_lowercase()
             .contains(&tf.to_lowercase())
-        {
-            return false;
-        }
+    {
+        return false;
     }
-    if let Some(rf) = room_filter {
-        if !info
+    if let Some(rf) = room_filter
+        && !info
             .room
             .as_deref()
             .unwrap_or("")
             .to_lowercase()
             .contains(&rf.to_lowercase())
-        {
-            return false;
-        }
+    {
+        return false;
     }
-    if let Some(cf) = control_filter {
-        if !info
+    if let Some(cf) = control_filter
+        && !info
             .control_name
             .to_lowercase()
             .contains(&cf.to_lowercase())
-        {
-            return false;
-        }
+    {
+        return false;
     }
     true
 }
@@ -2372,7 +2372,8 @@ mod tests {
 
         // Override HOME to use temp dir
         let prev_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.to_str().unwrap());
+        // SAFETY: Test runs serially; no other threads access HOME here.
+        unsafe { std::env::set_var("HOME", tmp.to_str().unwrap()) };
 
         let mut cmd = Cli::command();
         let result = install_completions(Shell::Bash, &mut cmd);
@@ -2391,7 +2392,7 @@ mod tests {
 
         // Restore HOME
         if let Some(h) = prev_home {
-            std::env::set_var("HOME", h);
+            unsafe { std::env::set_var("HOME", h) };
         }
         let _ = fs::remove_dir_all(&tmp);
     }
