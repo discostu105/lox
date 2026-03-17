@@ -4,6 +4,7 @@
 [![Release](https://github.com/discostu105/lox/actions/workflows/release.yml/badge.svg)](https://github.com/discostu105/lox/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.91%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
 **Fast, scriptable command-line interface for Loxone Miniserver.**
 Single binary. No runtime. No cloud. Works in scripts, cron jobs, and AI agent pipelines.
