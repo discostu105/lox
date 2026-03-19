@@ -42,12 +42,22 @@ pub(crate) fn redact_url(url: &str) -> String {
     } else {
         url.to_string()
     };
-    // Redact all occurrences of known sensitive query params
+    // Redact all occurrences of known sensitive query params.
+    // Only match whole parameter names (preceded by '?' or '&') to avoid
+    // false positives like "passthrough=" matching the "pass=" pattern.
     for param in &["token", "key", "pass", "password", "autht"] {
         let pattern = format!("{}=", param);
         let mut search_from = 0;
         while let Some(idx) = result[search_from..].find(&pattern) {
             let abs_idx = search_from + idx;
+            // Ensure this is a whole query parameter name, not a substring
+            if abs_idx > 0 {
+                let prev = result.as_bytes()[abs_idx - 1];
+                if prev != b'?' && prev != b'&' {
+                    search_from = abs_idx + pattern.len();
+                    continue;
+                }
+            }
             let start = abs_idx + pattern.len();
             let end = result[start..]
                 .find('&')
@@ -192,16 +202,24 @@ impl LoxClient {
         }
         self.request_with_retry(|| {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
+            let status = resp.status();
             if verbose() >= 1 {
                 eprintln!(
                     "  → {} {}",
-                    resp.status().as_u16(),
-                    resp.status().canonical_reason().unwrap_or("")
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
                 );
             }
             let body = resp.text()?;
             if verbose() >= 2 {
                 log_body(&body);
+            }
+            if !status.is_success() {
+                return Err(HttpStatusError {
+                    status: status.as_u16(),
+                    path: path.to_string(),
+                }
+                .into());
             }
             Ok(body)
         })
@@ -214,12 +232,20 @@ impl LoxClient {
         }
         self.request_with_retry(|| {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
+            let status = resp.status();
             if verbose() >= 1 {
                 eprintln!(
                     "  → {} {}",
-                    resp.status().as_u16(),
-                    resp.status().canonical_reason().unwrap_or("")
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
                 );
+            }
+            if !status.is_success() {
+                return Err(HttpStatusError {
+                    status: status.as_u16(),
+                    path: path.to_string(),
+                }
+                .into());
             }
             if verbose() >= 2 {
                 let text = resp.text()?;

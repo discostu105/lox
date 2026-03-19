@@ -102,7 +102,7 @@ impl LoxWsClient {
             .header("Authorization", format!("Basic {}", basic))
             .header(
                 "Host",
-                url.split("wss://")
+                url.split("://")
                     .nth(1)
                     .unwrap_or("")
                     .split('/')

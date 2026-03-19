@@ -258,11 +258,15 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                     .unwrap()
                     .as_secs();
                 let days_left = ts.valid_until.saturating_sub(now) / 86400;
-                println!(
-                    "Token: {}...{}",
-                    &ts.token[..8],
-                    &ts.token[ts.token.len() - 4..]
-                );
+                if ts.token.len() >= 12 {
+                    println!(
+                        "Token: {}...{}",
+                        &ts.token[..8],
+                        &ts.token[ts.token.len() - 4..]
+                    );
+                } else {
+                    println!("Token: {}", ts.token);
+                }
                 if ts.is_valid() {
                     println!("Status: ✓ valid ({} days remaining)", days_left);
                 } else {

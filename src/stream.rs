@@ -657,8 +657,12 @@ async fn ws_read_text_value(
                 let code = v
                     .pointer("/LL/Code")
                     .or_else(|| v.pointer("/LL/code"))
-                    .and_then(|c| c.as_str().or_else(|| c.as_i64().map(|_| "200")))
-                    .unwrap_or("0");
+                    .and_then(|c| {
+                        c.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| c.as_i64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "0".to_string());
                 if code == "200" {
                     let val = v.pointer("/LL/value").unwrap_or(&Value::Null);
                     return if val.is_string() {
@@ -693,8 +697,12 @@ async fn ws_expect_code_200(
                 let code = v
                     .pointer("/LL/Code")
                     .or_else(|| v.pointer("/LL/code"))
-                    .and_then(|c| c.as_str().or_else(|| c.as_i64().map(|_| "200")))
-                    .unwrap_or("0");
+                    .and_then(|c| {
+                        c.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| c.as_i64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "0".to_string());
                 if code == "200" {
                     return Ok(());
                 }
