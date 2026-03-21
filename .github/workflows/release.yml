@@ -56,14 +56,15 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build (zigbuild for musl)
+        if: contains(matrix.target, 'linux-musl')
+        run: cargo zigbuild --release --target ${{ matrix.target }}
 
       - name: Build
-        run: |
-          if echo "${{ matrix.target }}" | grep -q "linux-musl"; then
-            cargo zigbuild --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        if: ${{ !contains(matrix.target, 'linux-musl') }}
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
