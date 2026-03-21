@@ -87,21 +87,29 @@ lox health --problems -o json         # check device health
 
 ## Install
 
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex
+```
+This downloads the latest release to `%LOCALAPPDATA%\lox` and adds it to your PATH.
+
+Or install manually: download `lox-windows-x86_64.exe` from the [latest release](https://github.com/discostu105/lox/releases/latest), rename to `lox.exe`, and place it somewhere on your PATH.
+
 **Homebrew (macOS/Linux):**
 ```bash
 brew tap discostu105/lox https://github.com/discostu105/lox
 brew install discostu105/lox/lox
 ```
 
-**Build from source:**
+**Build from source (all platforms):**
 ```bash
 git clone https://github.com/discostu105/lox
 cd lox
 cargo build --release
-cp target/release/lox ~/.local/bin/
 ```
+The binary is at `target/release/lox` (or `lox.exe` on Windows). Copy it somewhere on your PATH.
 
-**Requirements (source):** Rust 1.91+. No OpenSSL. No runtime dependencies.
+**Requirements (source):** Rust 1.91+. No OpenSSL. No runtime dependencies. Works on Windows, macOS, and Linux.
 
 ## Setup
 
@@ -112,11 +120,13 @@ lox setup set --host https://192.168.1.100 --user USER --pass PASS
 lox setup set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
 ```
 
-Config: `~/.lox/config.yaml`
+Config location:
+- **macOS/Linux:** `~/.lox/config.yaml`
+- **Windows:** `C:\Users\<YOU>\.lox\config.yaml`
 
 ### Aliases
 
-Add short names for frequently-used controls in `~/.lox/config.yaml`:
+Add short names for frequently-used controls in your `config.yaml`:
 
 ```yaml
 host: https://192.168.1.100
@@ -139,6 +149,11 @@ lox completions --install
 ```
 
 Or generate to stdout for custom setups: `lox completions bash|zsh|fish|powershell`
+
+**PowerShell** — add this to your `$PROFILE`:
+```powershell
+lox completions powershell | Out-String | Invoke-Expression
+```
 
 ---
 
@@ -270,7 +285,7 @@ Each pull downloads the config via FTP, decompresses the proprietary LoxCC forma
   scenes/*.yaml        # Your scenes
 ```
 
-Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted.
+Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted. Works on Windows, macOS, and Linux.
 
 ---
 
@@ -279,6 +294,7 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 - Loxone Miniserver Gen 1/2, firmware 12.0+
 - Local network access (or DynDNS)
 - For `lox log`: Admin user
+- **Platforms:** Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
 
 ---
 

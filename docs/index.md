@@ -20,6 +20,10 @@ nav_order: 1
 
   <div class="install-block">
     <code>brew install discostu105/lox/lox</code>
+    <span style="color: #888; font-size: 0.9em;">&nbsp; macOS/Linux</span>
+    <br>
+    <code>irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex</code>
+    <span style="color: #888; font-size: 0.9em;">&nbsp; Windows</span>
   </div>
 
   <div class="hero-buttons">
