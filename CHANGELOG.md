@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-03-21
+
 ### Added
+- **Windows support** — pre-built binaries for Windows x86_64 and aarch64 are now included in every release
 - `lox config init <path>` — initialize a git repository for config version tracking (multi-Miniserver via serial subdirectories)
 - `lox config pull [--quiet]` — download config via FTP, decompress LoxCC, generate semantic diff, and git-commit with meaningful change messages
 - `lox config log [-n COUNT]` — show config change history from the git repository
@@ -23,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `lox extensions` now queries `/data/status` instead of `LoxApp3.json` — provides richer device information including Tree branch error counts, device parent relationships, and plugin versions
+- CI: moved linting to a dedicated Ubuntu job; Windows builds no longer run redundant clippy/fmt checks
 
 ### Removed
 - `lox daemon` — automation daemon (WebSocket/polling rule engine)
@@ -61,5 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket nonce uses cryptographically random bytes
 - Debug `eprintln!` removed from token RSA parsing
 
-[Unreleased]: https://github.com/discostu105/lox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/discostu105/lox/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/discostu105/lox/compare/v0.1.0...v0.8.0
 [0.1.0]: https://github.com/discostu105/lox/releases/tag/v0.1.0
