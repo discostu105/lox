@@ -27,6 +27,12 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: lox-macos-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: lox-windows-x86_64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            artifact: lox-windows-aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -59,11 +65,18 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      - name: Rename binary
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/lox ${{ matrix.artifact }}
 
-      - name: SHA256 checksum
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/lox.exe ${{ matrix.artifact }}.exe
+
+      - name: SHA256 checksum (Unix)
+        if: runner.os != 'Windows'
         run: |
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
@@ -71,13 +84,30 @@ jobs:
             shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
           fi
 
-      - name: Upload artifacts
+      - name: SHA256 checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "${{ matrix.artifact }}.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.artifact }}.exe" | Out-File -Encoding ascii "${{ matrix.artifact }}.exe.sha256"
+
+      - name: Upload artifacts (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+
+      - name: Upload artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.exe
+            ${{ matrix.artifact }}.exe.sha256
 
   release:
     name: Create GitHub Release
