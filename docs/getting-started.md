@@ -20,8 +20,19 @@ nav_order: 2
 - Loxone Miniserver Gen 1 or Gen 2, firmware 12.0+
 - Local network access (or DynDNS with serial configured)
 - For `lox log`: Admin user required
+- **Platforms:** Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
 
 ## Installation
+
+### Windows (PowerShell)
+
+One-liner — downloads the latest release and adds it to your PATH:
+
+```powershell
+irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex
+```
+
+Or install manually: download `lox-windows-x86_64.exe` from the [latest release](https://github.com/discostu105/lox/releases/latest), rename to `lox.exe`, and place it somewhere on your PATH (e.g. `C:\Users\<YOU>\AppData\Local\lox\`).
 
 ### Homebrew (macOS / Linux)
 
@@ -30,18 +41,17 @@ brew tap discostu105/lox https://github.com/discostu105/lox
 brew install discostu105/lox/lox
 ```
 
-### Build from source
+### Build from source (all platforms)
 
 ```bash
 git clone https://github.com/discostu105/lox
 cd lox
 cargo build --release
-cp target/release/lox ~/.local/bin/
 ```
 
-**Build requirements:** Rust 1.91+. No OpenSSL. No runtime dependencies.
+The binary is at `target/release/lox` (or `lox.exe` on Windows). Copy it somewhere on your PATH.
 
-The release binary is ~4MB, statically linked with rustls for TLS.
+**Build requirements:** Rust 1.91+. No OpenSSL. No runtime dependencies.
 
 ---
 
@@ -65,7 +75,9 @@ Verify the connection:
 lox status
 ```
 
-Config is stored at `~/.lox/config.yaml`.
+Config is stored at:
+- **macOS/Linux:** `~/.lox/config.yaml`
+- **Windows:** `C:\Users\<YOU>\.lox\config.yaml`
 
 ### Environment variables
 
@@ -144,6 +156,12 @@ lox completions zsh > ~/.zfunc/_lox
 
 # Fish
 lox completions fish > ~/.config/fish/completions/lox.fish
+```
+
+**PowerShell** — add this to your `$PROFILE`:
+
+```powershell
+lox completions powershell | Out-String | Invoke-Expression
 ```
 
 ---
