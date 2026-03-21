@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use client::LoxClient;
+use dirs::home_dir;
 use serde_json::Value;
 use std::fs;
 use std::io::Cursor;
@@ -243,7 +244,8 @@ pub(crate) fn now_hms() -> String {
 }
 
 pub(crate) fn detect_shell() -> Option<Shell> {
-    std::env::var("SHELL").ok().and_then(|s| {
+    // On Unix, $SHELL is the login shell
+    if let Some(shell) = std::env::var("SHELL").ok().and_then(|s| {
         let name = s.rsplit('/').next().unwrap_or(&s);
         match name {
             "bash" => Some(Shell::Bash),
@@ -253,47 +255,63 @@ pub(crate) fn detect_shell() -> Option<Shell> {
             "pwsh" | "powershell" => Some(Shell::PowerShell),
             _ => None,
         }
-    })
+    }) {
+        return Some(shell);
+    }
+    // On Windows, $SHELL is not set; check for PowerShell via PSModulePath
+    if std::env::var("PSModulePath").is_ok() {
+        return Some(Shell::PowerShell);
+    }
+    None
 }
 
 pub(crate) fn install_completions(shell: Shell, cmd: &mut clap::Command) -> Result<()> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir().unwrap_or_default();
     let (path, label) = match shell {
         Shell::Bash => {
-            let dir = format!("{}/.local/share/bash-completion/completions", home);
+            let dir = home.join(".local/share/bash-completion/completions");
             fs::create_dir_all(&dir)?;
-            (format!("{}/lox", dir), "bash")
+            (dir.join("lox"), "bash")
         }
         Shell::Zsh => {
-            // Use ~/.zfunc which is a common user completions dir
-            let dir = format!("{}/.zfunc", home);
+            let dir = home.join(".zfunc");
             fs::create_dir_all(&dir)?;
-            (format!("{}/_lox", dir), "zsh")
+            (dir.join("_lox"), "zsh")
         }
         Shell::Fish => {
-            let dir = format!("{}/.config/fish/completions", home);
+            let dir = home.join(".config/fish/completions");
             fs::create_dir_all(&dir)?;
-            (format!("{}/lox.fish", dir), "fish")
+            (dir.join("lox.fish"), "fish")
+        }
+        Shell::PowerShell => {
+            // Install as a PowerShell profile script
+            let documents = if cfg!(windows) {
+                home.join("Documents")
+            } else {
+                home.join(".config")
+            };
+            let dir = documents.join("PowerShell");
+            fs::create_dir_all(&dir)?;
+            (dir.join("lox_completions.ps1"), "powershell")
         }
         Shell::Elvish => {
             bail!("Elvish completions must be installed manually — run: lox completions elvish");
-        }
-        Shell::PowerShell => {
-            bail!(
-                "PowerShell completions must be installed manually — run: lox completions powershell"
-            );
         }
         _ => bail!("Unsupported shell"),
     };
     let mut buf = Vec::new();
     generate(shell, cmd, "lox", &mut buf);
-    fs::write(&path, buf)?;
+    fs::write(&path, &buf)?;
 
-    eprintln!("Installed {} completions to {}", label, path);
+    eprintln!("Installed {} completions to {}", label, path.display());
     if shell == Shell::Zsh {
         eprintln!("Ensure ~/.zfunc is in your fpath. Add to ~/.zshrc:");
         eprintln!("  fpath=(~/.zfunc $fpath)");
         eprintln!("  autoload -Uz compinit && compinit");
+    }
+    if shell == Shell::PowerShell {
+        eprintln!("Add this line to your PowerShell $PROFILE to load completions:");
+        eprintln!("  . \"{}\"", path.display());
     }
     eprintln!("Restart your shell or open a new tab to activate.");
     Ok(())
@@ -2370,29 +2388,51 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
-        // Override HOME to use temp dir
+        // Override HOME (Unix) / USERPROFILE (Windows) to use temp dir
         let prev_home = std::env::var("HOME").ok();
-        // SAFETY: Test runs serially; no other threads access HOME here.
-        unsafe { std::env::set_var("HOME", tmp.to_str().unwrap()) };
+        let prev_userprofile = std::env::var("USERPROFILE").ok();
+        // SAFETY: Test runs serially; no other threads access these env vars here.
+        unsafe {
+            std::env::set_var("HOME", tmp.to_str().unwrap());
+            std::env::set_var("USERPROFILE", tmp.to_str().unwrap());
+        }
 
         let mut cmd = Cli::command();
-        let result = install_completions(Shell::Bash, &mut cmd);
-        assert!(
-            result.is_ok(),
-            "install_completions should succeed for bash"
-        );
 
-        let bash_file = tmp.join(".local/share/bash-completion/completions/lox");
-        assert!(bash_file.exists(), "bash completion file should be created");
-        let content = fs::read_to_string(&bash_file).unwrap();
-        assert!(
-            content.contains("_lox"),
-            "installed file should contain bash completions"
-        );
+        if cfg!(windows) {
+            // On Windows, test PowerShell completions
+            let result = install_completions(Shell::PowerShell, &mut cmd);
+            assert!(
+                result.is_ok(),
+                "install_completions should succeed for powershell"
+            );
+            let ps_file = tmp.join("Documents/PowerShell/lox_completions.ps1");
+            assert!(
+                ps_file.exists(),
+                "powershell completion file should be created"
+            );
+        } else {
+            // On Unix, test Bash completions
+            let result = install_completions(Shell::Bash, &mut cmd);
+            assert!(
+                result.is_ok(),
+                "install_completions should succeed for bash"
+            );
+            let bash_file = tmp.join(".local/share/bash-completion/completions/lox");
+            assert!(bash_file.exists(), "bash completion file should be created");
+            let content = fs::read_to_string(&bash_file).unwrap();
+            assert!(
+                content.contains("_lox"),
+                "installed file should contain bash completions"
+            );
+        }
 
-        // Restore HOME
+        // Restore env vars
         if let Some(h) = prev_home {
             unsafe { std::env::set_var("HOME", h) };
+        }
+        if let Some(h) = prev_userprofile {
+            unsafe { std::env::set_var("USERPROFILE", h) };
         }
         let _ = fs::remove_dir_all(&tmp);
     }
