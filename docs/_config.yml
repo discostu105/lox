@@ -16,7 +16,7 @@ back_to_top_text: "Back to top"
 
 footer_content: "MIT License. <a href=\"https://github.com/discostu105/lox\">View on GitHub</a>."
 
-color_scheme: dark
+color_scheme: lox
 
 exclude:
   - api-research.md

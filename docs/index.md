@@ -1,64 +1,107 @@
 ---
 title: Home
-layout: home
+layout: default
 nav_order: 1
 ---
 
-# lox — Loxone Miniserver CLI
+<div class="hero">
+  <div class="hero-badges">
+    <span class="hero-badge"><span class="hero-badge-icon">&#9889;</span> Single binary</span>
+    <span class="hero-badge"><span class="hero-badge-icon">&#128274;</span> No cloud</span>
+    <span class="hero-badge"><span class="hero-badge-icon">&#129302;</span> AI-ready</span>
+    <span class="hero-badge"><span class="hero-badge-icon">&#128230;</span> ~4MB</span>
+  </div>
 
-**Fast, scriptable command-line interface for Loxone Miniserver.**
-Single binary. No runtime. No cloud. Works in scripts, cron jobs, and AI agent pipelines.
-{: .fs-6 .fw-300 }
+  <h1 class="hero-title">lox</h1>
+  <p class="hero-tagline">
+    Fast, scriptable CLI for Loxone Miniserver.<br>
+    Control lights, blinds, and more from your terminal.
+  </p>
 
-[Get Started](/lox/getting-started){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
-[Command Reference](/lox/commands/){: .btn .fs-5 .mb-4 .mb-md-0 }
+  <div class="install-block">
+    <code>brew install discostu105/lox/lox</code>
+  </div>
+
+  <div class="hero-buttons">
+    <a href="/lox/getting-started" class="btn-hero btn-hero-primary">Get Started</a>
+    <a href="/lox/commands/" class="btn-hero btn-hero-secondary">Command Reference</a>
+    <a href="https://github.com/discostu105/lox" class="btn-hero btn-hero-secondary">GitHub</a>
+  </div>
+</div>
+
+<div class="features">
+  <div class="feature-card">
+    <span class="feature-icon">&#128161;</span>
+    <div class="feature-title">Script your home</div>
+    <div class="feature-desc">Bash, Python, cron — use any tool. Chain commands with pipes and exit codes like any Unix CLI.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#129302;</span>
+    <div class="feature-title">AI agent ready</div>
+    <div class="feature-desc">JSON output, schema discovery, fuzzy matching, dry-run mode, and structured errors designed for LLM tool use.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#128225;</span>
+    <div class="feature-title">Real-time streaming</div>
+    <div class="feature-desc">WebSocket state streaming with NDJSON output. Filter by room, type, or specific controls.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#128202;</span>
+    <div class="feature-title">OpenTelemetry</div>
+    <div class="feature-desc">Push metrics, logs, and traces to Dynatrace, Datadog, Grafana Cloud, or any OTLP backend.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#128196;</span>
+    <div class="feature-title">Config versioning</div>
+    <div class="feature-desc">GitOps for your Miniserver. Track config changes with semantic diffs and git history.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#9889;</span>
+    <div class="feature-title">Fast</div>
+    <div class="feature-desc">~80ms warm, ~1.2s cold. Structure cache with 24h TTL. Static Rust binary with zero runtime dependencies.</div>
+  </div>
+</div>
 
 ---
 
-## Why this exists
+<div class="section-label">Quick start</div>
 
-The Loxone app is great for everyday use — but it offers no API or scripting support for automation, CI/CD pipelines, or headless environments.
+## See it in action
 
-`lox` gives you a proper CLI so you can:
-
-- **Script your home** — bash, Python, cron, whatever
-- **Connect AI agents** — Claude, GPT, or any LLM tool can control your home via shell commands
-- **Chain commands** — `lox if "Temperatur" gt 25 && lox blind "Sudseite" pos 80`
-- **Integrate with anything** — exit codes, JSON output, stdin/stdout
+<div class="terminal">
+  <div class="terminal-header">
+    <span class="terminal-dot terminal-dot-red"></span>
+    <span class="terminal-dot terminal-dot-yellow"></span>
+    <span class="terminal-dot terminal-dot-green"></span>
+    <span class="terminal-title">Terminal</span>
+  </div>
+  <div class="terminal-body">
 
 ```bash
-# Turn off all lights when leaving
-lox off "Licht Wohnzimmer Zentral" && lox blind "Sudseite" full-up
-
-# AI agent can call these:
+# Discover your controls
 lox ls --type LightControllerV2 -o json | jq '.[].name'
-lox light mood "Wohnzimmer" off
-lox status -o json | jq '.plc_running'
 
-# Conditionally close blinds
-lox if "Temperatur Aussen" gt 28 && lox blind "Beschattung Sud" pos 70
+# Control devices
+lox on "Licht Wohnzimmer"
+lox blind "Beschattung Sud" pos 50
+lox thermostat "Heizung" temp 22.5
+
+# Conditional automation
+lox if "Temperatur" gt 28 && lox blind "Beschattung Sud" pos 70
+
+# Real-time monitoring
+lox stream --room "Kitchen" -o json
+
+# GitOps config backup
+lox config pull
 ```
+
+  </div>
+</div>
 
 ---
 
-## Quick overview
-
-```bash
-lox ls                                  # List all controls
-lox get "Temperatur [Schlafzimmer]"     # Read a control's state
-lox on "Licht Wohnzimmer"              # Turn on
-lox off "Licht Wohnzimmer"             # Turn off
-lox blind "Beschattung Sud" pos 50     # Blind to 50%
-lox light mood "Licht" plus            # Next light mood
-lox thermostat "Heizung" temp 22.5     # Set temperature
-lox alarm "Alarmanlage" arm            # Arm alarm
-lox stream --room "Kitchen" -o json    # Real-time state stream
-lox status --energy                    # Energy dashboard
-lox health --problems                  # Device health
-lox config pull                        # GitOps config versioning
-```
-
----
+<div class="section-label">Devices</div>
 
 ## Supported control types
 
@@ -77,13 +120,15 @@ lox config pull                        # GitOps config versioning
 
 ---
 
-## Performance
+<div class="section-label">Performance</div>
+
+## Benchmarks
 
 Structure cache at `~/.lox/cache/structure.json` (24h TTL):
 
 | Operation | Cold | Warm |
 |:----------|:-----|:-----|
-| `lox on "Licht"` | ~1.2s | ~80ms |
-| `lox ls` | ~1.2s | ~80ms |
+| `lox on "Licht"` | ~1.2s | **~80ms** |
+| `lox ls` | ~1.2s | **~80ms** |
 | `lox ls --values` | ~1.2s + N reqs | slower |
-| `lox status` | ~120ms | ~120ms |
+| `lox status` | ~120ms | **~120ms** |
