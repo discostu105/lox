@@ -33,21 +33,28 @@ pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
-    let key = format!("{}=\"", attr);
-    // Search for the attribute, ensuring it starts at a word boundary
-    // (preceded by space, '<', or start of string) to avoid matching
-    // "value2" when looking for "value".
+    // XML format: attr="value"
+    let xml_key = format!("{}=\"", attr);
     let mut search_from = 0;
-    loop {
-        let pos = xml[search_from..].find(&key)?;
+    while let Some(pos) = xml[search_from..].find(&xml_key) {
         let abs_pos = search_from + pos;
         if abs_pos == 0 || matches!(xml.as_bytes()[abs_pos - 1], b' ' | b'<' | b'\t' | b'\n') {
-            let start = abs_pos + key.len();
+            let start = abs_pos + xml_key.len();
             let end = xml[start..].find('"')? + start;
             return Some(&xml[start..end]);
         }
         search_from = abs_pos + 1;
     }
+
+    // JSON format: "attr": "value"  (handles /jdev/ responses)
+    let json_key = format!("\"{}\": \"", attr);
+    if let Some(pos) = xml.find(&json_key) {
+        let start = pos + json_key.len();
+        let end = xml[start..].find('"')? + start;
+        return Some(&xml[start..end]);
+    }
+
+    None
 }
 
 pub(crate) fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
@@ -711,7 +718,7 @@ pub(crate) enum Cmd {
         /// Show energy meters (deprecated: use `lox energy` instead)
         #[arg(long, hide = true)]
         energy: bool,
-        /// Show CPU, tasks, context switches, SD card health
+        /// Show CPU, tasks, context switches, interrupts, SD card health
         #[arg(long)]
         diag: bool,
         /// Show network configuration (IP, MAC, DNS, DHCP, NTP)
@@ -2097,6 +2104,22 @@ mod tests {
         // When only value2 exists, looking for "value" returns None
         let xml = r#"<LL value2="wrong"/>"#;
         assert_eq!(xml_attr(xml, "value"), None);
+    }
+
+    #[test]
+    fn test_xml_attr_json_format() {
+        // /jdev/ endpoints return JSON instead of XML
+        let json =
+            r#"{"LL": { "control": "dev/sys/lastcpu", "value": "CPU:12 SPS:26", "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("CPU:12 SPS:26"));
+        assert_eq!(xml_attr(json, "Code"), Some("200"));
+        assert_eq!(xml_attr(json, "control"), Some("dev/sys/lastcpu"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_empty_value() {
+        let json = r#"{"LL": { "control": "dev/sys/ints", "value": "", "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some(""));
     }
 
     // ── matches_filters ───────────────────────────────────────────────────────

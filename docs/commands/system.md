@@ -20,20 +20,20 @@ nav_order: 3
 
 ```bash
 lox status                   # firmware, PLC state, memory
-lox status --diag            # CPU, tasks, context switches, SD card
-lox status --net             # network config (IP, MAC, DNS, DHCP, NTP)
-lox status --bus             # CAN bus statistics
-lox status --lan             # LAN packet statistics
+lox status --diag            # CPU, tasks, interrupts, SD card health
+lox status --net             # network config (IP, MAC, DNS1/2, DHCP, NTP)
+lox status --bus             # CAN bus statistics (incl. parity errors)
+lox status --lan             # LAN statistics (incl. exhaustion, no-buffer)
 lox status --all             # all diagnostic sections
 lox status --energy          # energy dashboard
 ```
 
 | Flag | Description |
 |:-----|:------------|
-| `--diag` | CPU, tasks, context switches, SD card test |
-| `--net` | Network configuration (IP, MAC, DNS, DHCP, NTP) |
-| `--bus` | CAN bus statistics |
-| `--lan` | LAN packet statistics |
+| `--diag` | CPU, tasks, context switches, interrupts, SD card (read/write speed, errors, usage) |
+| `--net` | Network configuration (IP, MAC, DNS 1 & 2, DHCP, NTP) |
+| `--bus` | CAN bus statistics (packets, receive/frame/parity errors, overruns) |
+| `--lan` | LAN statistics (TX/RX packets, errors, collisions, underruns, exhaustion, no-buffers) |
 | `--all` | All diagnostic sections |
 | `--energy` | Energy meter dashboard |
 

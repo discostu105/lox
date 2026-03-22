@@ -277,10 +277,10 @@ Multi-Miniserver: each serial gets its own subdirectory in the repo.
 
 ```bash
 lox status                             # firmware, PLC state, memory
-lox status --diag                      # CPU, tasks, context switches, SD card
-lox status --net                       # network config (IP, MAC, DNS, DHCP, NTP)
-lox status --bus                       # CAN bus statistics
-lox status --lan                       # LAN packet statistics
+lox status --diag                      # CPU, tasks, interrupts, SD card health
+lox status --net                       # network config (IP, MAC, DNS1/2, DHCP, NTP)
+lox status --bus                       # CAN bus statistics (incl. parity errors)
+lox status --lan                       # LAN statistics (incl. exhaustion, no-buffer)
 lox status --all                       # all diagnostic sections
 lox time                               # Miniserver system date/time
 lox log                                # system log (admin only)

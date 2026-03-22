@@ -244,6 +244,12 @@ fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter)
         ("/dev/sys/heap", "loxone.system.heap", "kBy"),
         ("/jdev/sys/lastcpu", "loxone.system.cpu", "%"),
         ("/jdev/sys/numtasks", "loxone.system.tasks", "{tasks}"),
+        ("/jdev/sys/ints", "loxone.system.interrupts", "{interrupts}"),
+        (
+            "/jdev/sys/comints",
+            "loxone.system.comm_interrupts",
+            "{interrupts}",
+        ),
     ];
     for (path, name, unit) in gauge_metrics {
         if let Ok(text) = lox.get_text(path)
@@ -300,15 +306,23 @@ fn record_network_metrics(
         ("/jdev/bus/receiveerrors", "loxone.can.receive_errors"),
         ("/jdev/bus/frameerrors", "loxone.can.frame_errors"),
         ("/jdev/bus/overruns", "loxone.can.overruns"),
+        ("/jdev/bus/parityerrors", "loxone.can.parity_errors"),
         ("/jdev/lan/txp", "loxone.lan.tx_packets"),
         ("/jdev/lan/txe", "loxone.lan.tx_errors"),
         ("/jdev/lan/txc", "loxone.lan.tx_collisions"),
+        ("/jdev/lan/txu", "loxone.lan.tx_underruns"),
         ("/jdev/lan/rxp", "loxone.lan.rx_packets"),
         ("/jdev/lan/rxo", "loxone.lan.rx_overflow"),
         ("/jdev/lan/eof", "loxone.lan.eof_errors"),
+        ("/jdev/lan/exh", "loxone.lan.exhaustion"),
+        ("/jdev/lan/nob", "loxone.lan.no_buffers"),
         (
             "/jdev/sys/contextswitches",
             "loxone.system.context_switches",
+        ),
+        (
+            "/jdev/sys/contextswitchesi",
+            "loxone.system.context_switches_idle",
         ),
     ];
     for (path, name) in counters {
@@ -316,6 +330,50 @@ fn record_network_metrics(
     }
 
     Ok(())
+}
+
+/// Record SD card health metrics from `/jdev/sys/sdtest`.
+///
+/// This endpoint performs a live read/write benchmark, so it's heavier than
+/// other diagnostic endpoints. Call it at a lower frequency if needed.
+fn record_sdtest_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) {
+    use crate::commands::system::parse_sdtest;
+
+    let text = match lox.get_text("/jdev/sys/sdtest") {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let val = crate::xml_attr(&text, "value").unwrap_or("");
+    let sd = parse_sdtest(val);
+
+    if let Some(v) = sd.read_speed_kb {
+        meter
+            .f64_gauge("loxone.sd.read_speed")
+            .with_unit("kBy/s")
+            .build()
+            .record(v, &[]);
+    }
+    if let Some(v) = sd.write_speed_kb {
+        meter
+            .f64_gauge("loxone.sd.write_speed")
+            .with_unit("kBy/s")
+            .build()
+            .record(v, &[]);
+    }
+    if let Some(count) = sd.error_count {
+        meter
+            .f64_gauge("loxone.sd.errors")
+            .with_unit("{errors}")
+            .build()
+            .record(count as f64, &[]);
+    }
+    if let Some(v) = sd.usage_pct {
+        meter
+            .f64_gauge("loxone.sd.usage")
+            .with_unit("%")
+            .build()
+            .record(v, &[]);
+    }
 }
 
 /// Record the latest control state values as OTel gauge metrics.
@@ -753,6 +811,9 @@ pub fn serve(
             let _ = record_system_metrics(&lox, &meter_sys);
             let _ = record_network_metrics(&lox, &meter_sys, &mut prev, delta);
 
+            // Record SD card health metrics
+            record_sdtest_metrics(&lox, &meter_sys);
+
             // Record control state gauges from the shared store
             let control_count = store_sys.lock().unwrap().len();
             record_control_metrics(&store_sys, &meter_sys, tf_sys.as_deref(), rf_sys.as_deref());
@@ -976,6 +1037,7 @@ pub fn push(
             };
             let mut prev = PrevValues::new();
             let _ = record_system_metrics(&lox_sys, &meter_sys);
+            record_sdtest_metrics(&lox_sys, &meter_sys);
             // For push mode, delta=false since there's no previous value
             let _ = record_network_metrics(&lox_sys, &meter_sys, &mut prev, false);
         })

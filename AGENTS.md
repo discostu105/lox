@@ -82,9 +82,10 @@ GET /dev/sps/io/{uuid}/all          → XML: all state outputs for a control
 GET /dev/sps/io/{name}/state        → input state by name
 GET /dev/sys/heap, /dev/sps/state, /dev/cfg/version, /data/status  → status info
 GET /jdev/sys/lastcpu, numtasks, contextswitches, sdtest           → diagnostics
-GET /jdev/cfg/ip, mac, mask, gateway, dns1, dhcp, ntp              → network config
-GET /jdev/bus/packetssent, packetsreceived, ...                    → CAN bus stats
-GET /jdev/lan/txp, txe, rxp, ...                                  → LAN stats
+GET /jdev/sys/ints, comints, contextswitchesi                      → additional diagnostics
+GET /jdev/cfg/ip, mac, mask, gateway, dns1, dns2, dhcp, ntp       → network config
+GET /jdev/bus/packetssent, packetsreceived, ..., parityerrors      → CAN bus stats
+GET /jdev/lan/txp, txe, txc, txu, rxp, rxo, eof, exh, nob        → LAN stats
 GET /jdev/sys/date, /jdev/sys/time                                 → system clock
 GET /jdev/sps/LoxAPPversion3        → structure file version check
 GET /binstatisticdata/{uuid}/{period} → binary statistics (u32 ts + f64[] values)

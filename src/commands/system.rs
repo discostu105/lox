@@ -115,17 +115,30 @@ pub fn cmd_status(
         let ctx_sw = lox
             .get_text("/jdev/sys/contextswitches")
             .unwrap_or_default();
+        let ints = lox.get_text("/jdev/sys/ints").unwrap_or_default();
+        let comints = lox.get_text("/jdev/sys/comints").unwrap_or_default();
+        let ctx_swi = lox
+            .get_text("/jdev/sys/contextswitchesi")
+            .unwrap_or_default();
         let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
         let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
         let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
         let ctx_val = xml_attr(&ctx_sw, "value").unwrap_or("?");
+        let ints_val = xml_attr(&ints, "value").unwrap_or("?");
+        let comints_val = xml_attr(&comints, "value").unwrap_or("?");
+        let ctx_swi_val = xml_attr(&ctx_swi, "value").unwrap_or("?");
         let sd_val = xml_attr(&sd, "value").unwrap_or("?");
+        let sd_info = parse_sdtest(sd_val);
         if ctx.json {
             println!(
                 "{}",
                 serde_json::json!({
                     "cpu": cpu_val, "tasks": tasks_val,
-                    "context_switches": ctx_val, "sd_health": sd_val,
+                    "context_switches": ctx_val,
+                    "interrupts": ints_val,
+                    "comm_interrupts": comints_val,
+                    "context_switches_idle": ctx_swi_val,
+                    "sd_card": sd_info.to_json(),
                 })
             );
         } else {
@@ -133,7 +146,10 @@ pub fn cmd_status(
             println!("│  CPU:              {}", cpu_val);
             println!("│  Tasks:            {}", tasks_val);
             println!("│  Context switches: {}", ctx_val);
-            println!("│  SD card:          {}", sd_val);
+            println!("│  Interrupts:       {}", ints_val);
+            println!("│  Comm interrupts:  {}", comints_val);
+            println!("│  Ctx switches (i): {}", ctx_swi_val);
+            sd_info.print_table();
             println!("└─────────────────────────────────────────────────────");
         }
     }
@@ -143,6 +159,7 @@ pub fn cmd_status(
         let mask = lox.get_text("/jdev/cfg/mask").unwrap_or_default();
         let gw = lox.get_text("/jdev/cfg/gateway").unwrap_or_default();
         let dns1 = lox.get_text("/jdev/cfg/dns1").unwrap_or_default();
+        let dns2 = lox.get_text("/jdev/cfg/dns2").unwrap_or_default();
         let dhcp = lox.get_text("/jdev/cfg/dhcp").unwrap_or_default();
         let ntp = lox.get_text("/jdev/cfg/ntp").unwrap_or_default();
         let ip_val = xml_attr(&ip, "value").unwrap_or("?");
@@ -150,6 +167,7 @@ pub fn cmd_status(
         let mask_val = xml_attr(&mask, "value").unwrap_or("?");
         let gw_val = xml_attr(&gw, "value").unwrap_or("?");
         let dns1_val = xml_attr(&dns1, "value").unwrap_or("?");
+        let dns2_val = xml_attr(&dns2, "value").unwrap_or("?");
         let dhcp_val = xml_attr(&dhcp, "value").unwrap_or("?");
         let ntp_val = xml_attr(&ntp, "value").unwrap_or("?");
         if ctx.json {
@@ -157,7 +175,7 @@ pub fn cmd_status(
                 "{}",
                 serde_json::json!({
                     "ip": ip_val, "mac": mac_val, "mask": mask_val,
-                    "gateway": gw_val, "dns": dns1_val,
+                    "gateway": gw_val, "dns": dns1_val, "dns2": dns2_val,
                     "dhcp": dhcp_val, "ntp": ntp_val,
                 })
             );
@@ -167,7 +185,8 @@ pub fn cmd_status(
             println!("│  MAC:     {}", mac_val);
             println!("│  Mask:    {}", mask_val);
             println!("│  Gateway: {}", gw_val);
-            println!("│  DNS:     {}", dns1_val);
+            println!("│  DNS 1:   {}", dns1_val);
+            println!("│  DNS 2:   {}", dns2_val);
             println!("│  DHCP:    {}", dhcp_val);
             println!("│  NTP:     {}", ntp_val);
             println!("└─────────────────────────────────────────────────────");
@@ -181,18 +200,20 @@ pub fn cmd_status(
         let rerr = lox.get_text("/jdev/bus/receiveerrors").unwrap_or_default();
         let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
         let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
+        let perr = lox.get_text("/jdev/bus/parityerrors").unwrap_or_default();
         let sent_val = xml_attr(&sent, "value").unwrap_or("?");
         let recv_val = xml_attr(&recv, "value").unwrap_or("?");
         let rerr_val = xml_attr(&rerr, "value").unwrap_or("?");
         let ferr_val = xml_attr(&ferr, "value").unwrap_or("?");
         let over_val = xml_attr(&over, "value").unwrap_or("?");
+        let perr_val = xml_attr(&perr, "value").unwrap_or("?");
         if ctx.json {
             println!(
                 "{}",
                 serde_json::json!({
                     "packets_sent": sent_val, "packets_received": recv_val,
                     "receive_errors": rerr_val, "frame_errors": ferr_val,
-                    "overruns": over_val,
+                    "overruns": over_val, "parity_errors": perr_val,
                 })
             );
         } else {
@@ -201,6 +222,7 @@ pub fn cmd_status(
             println!("│  Packets received: {}", recv_val);
             println!("│  Receive errors:   {}", rerr_val);
             println!("│  Frame errors:     {}", ferr_val);
+            println!("│  Parity errors:    {}", perr_val);
             println!("│  Overruns:         {}", over_val);
             println!("└─────────────────────────────────────────────────────");
         }
@@ -209,21 +231,30 @@ pub fn cmd_status(
         let txp = lox.get_text("/jdev/lan/txp").unwrap_or_default();
         let txe = lox.get_text("/jdev/lan/txe").unwrap_or_default();
         let txc = lox.get_text("/jdev/lan/txc").unwrap_or_default();
+        let txu = lox.get_text("/jdev/lan/txu").unwrap_or_default();
         let rxp = lox.get_text("/jdev/lan/rxp").unwrap_or_default();
         let rxo = lox.get_text("/jdev/lan/rxo").unwrap_or_default();
         let eof = lox.get_text("/jdev/lan/eof").unwrap_or_default();
+        let exh = lox.get_text("/jdev/lan/exh").unwrap_or_default();
+        let nob = lox.get_text("/jdev/lan/nob").unwrap_or_default();
         let txp_val = xml_attr(&txp, "value").unwrap_or("?");
         let txe_val = xml_attr(&txe, "value").unwrap_or("?");
         let txc_val = xml_attr(&txc, "value").unwrap_or("?");
+        let txu_val = xml_attr(&txu, "value").unwrap_or("?");
         let rxp_val = xml_attr(&rxp, "value").unwrap_or("?");
         let rxo_val = xml_attr(&rxo, "value").unwrap_or("?");
         let eof_val = xml_attr(&eof, "value").unwrap_or("?");
+        let exh_val = xml_attr(&exh, "value").unwrap_or("?");
+        let nob_val = xml_attr(&nob, "value").unwrap_or("?");
         if ctx.json {
             println!(
                 "{}",
                 serde_json::json!({
-                    "tx_packets": txp_val, "tx_errors": txe_val, "tx_collisions": txc_val,
-                    "rx_packets": rxp_val, "rx_overflow": rxo_val, "eof_errors": eof_val,
+                    "tx_packets": txp_val, "tx_errors": txe_val,
+                    "tx_collisions": txc_val, "tx_underruns": txu_val,
+                    "rx_packets": rxp_val, "rx_overflow": rxo_val,
+                    "eof_errors": eof_val, "exhaustion": exh_val,
+                    "no_buffers": nob_val,
                 })
             );
         } else {
@@ -231,9 +262,12 @@ pub fn cmd_status(
             println!("│  TX packets:    {}", txp_val);
             println!("│  TX errors:     {}", txe_val);
             println!("│  TX collisions: {}", txc_val);
+            println!("│  TX underruns:  {}", txu_val);
             println!("│  RX packets:    {}", rxp_val);
             println!("│  RX overflow:   {}", rxo_val);
             println!("│  EOF errors:    {}", eof_val);
+            println!("│  Exhaustion:    {}", exh_val);
+            println!("│  No buffers:    {}", nob_val);
             println!("└─────────────────────────────────────────────────────");
         }
     }
@@ -850,4 +884,302 @@ pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// ── SD card test response parser ─────────────────────────────────────────
+
+/// Parsed fields from a Miniserver `/jdev/sys/sdtest` response.
+///
+/// Example raw value:
+/// ```text
+/// SD Performance: Read: 540kB/s, Write: 370kB/s, No error (0 0),
+/// ManufacturerId: 27, Date 2014/2, CardType 2, BlockSize 512, Erase 0,
+/// MaxTransferRate 25000000, RwFactor 2, ReadSpeed 22222222Hz,
+/// WriteSpeed 22222222Hz, MaxReadCurrentVDDmin 3, MaxReadCurrentVDDmax 5,
+/// MaxWriteCurrentVDDmin: 3, MaxWriteCurrentVDDmax: 1, Usage: 2.79%
+/// ```
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SdTestResult {
+    pub read_speed_kb: Option<f64>,
+    pub write_speed_kb: Option<f64>,
+    pub error_type: Option<u32>,
+    pub error_count: Option<u64>,
+    pub manufacturer_id: Option<u32>,
+    pub date: Option<String>,
+    pub card_type: Option<u32>,
+    pub block_size: Option<u32>,
+    pub usage_pct: Option<f64>,
+    pub raw: String,
+}
+
+impl SdTestResult {
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut obj = serde_json::json!({ "raw": self.raw });
+        if let Some(v) = self.read_speed_kb {
+            obj["read_speed_kbs"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.write_speed_kb {
+            obj["write_speed_kbs"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.error_type {
+            obj["error_type"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.error_count {
+            obj["error_count"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.manufacturer_id {
+            obj["manufacturer_id"] = serde_json::json!(v);
+        }
+        if let Some(ref v) = self.date {
+            obj["date"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.card_type {
+            obj["card_type"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.block_size {
+            obj["block_size"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.usage_pct {
+            obj["usage_pct"] = serde_json::json!(v);
+        }
+        obj
+    }
+
+    pub fn print_table(&self) {
+        if self.read_speed_kb.is_some() || self.write_speed_kb.is_some() {
+            let read = self
+                .read_speed_kb
+                .map(|v| format!("{:.0} kB/s", v))
+                .unwrap_or_else(|| "?".to_string());
+            let write = self
+                .write_speed_kb
+                .map(|v| format!("{:.0} kB/s", v))
+                .unwrap_or_else(|| "?".to_string());
+            println!("│  SD read:          {}", read);
+            println!("│  SD write:         {}", write);
+
+            let err_str = match (self.error_type, self.error_count) {
+                (Some(0), _) => "✓ No errors".to_string(),
+                (Some(t), Some(c)) => format!("⚠ type {} count {}", t, c),
+                _ => "?".to_string(),
+            };
+            println!("│  SD errors:        {}", err_str);
+
+            if let Some(usage) = self.usage_pct {
+                let warn = if usage > 60.0 { " ⚠" } else { "" };
+                println!("│  SD usage:         {:.1}%{}", usage, warn);
+            }
+            if let Some(ref date) = self.date {
+                let mfr = self
+                    .manufacturer_id
+                    .map(|id| format!(" (mfr {})", id))
+                    .unwrap_or_default();
+                println!("│  SD manufactured:  {}{}", date, mfr);
+            }
+        } else {
+            println!("│  SD card:          {}", self.raw);
+        }
+    }
+}
+
+/// Parse the raw value string from `/jdev/sys/sdtest` into structured fields.
+pub(crate) fn parse_sdtest(raw: &str) -> SdTestResult {
+    let mut result = SdTestResult {
+        raw: raw.to_string(),
+        ..Default::default()
+    };
+
+    // Read: NNNkB/s
+    if let Some(pos) = raw.find("Read:") {
+        let rest = &raw[pos + 5..];
+        let rest = rest.trim_start();
+        if let Some(end) = rest.find(|c: char| !c.is_ascii_digit() && c != '.')
+            && let Ok(v) = rest[..end].parse::<f64>()
+        {
+            let unit_area = &rest[end..];
+            if unit_area.starts_with("MB/s") {
+                result.read_speed_kb = Some(v * 1024.0);
+            } else {
+                result.read_speed_kb = Some(v);
+            }
+        }
+    }
+
+    // Write: NNNkB/s
+    if let Some(pos) = raw.find("Write:") {
+        let rest = &raw[pos + 6..];
+        let rest = rest.trim_start();
+        if let Some(end) = rest.find(|c: char| !c.is_ascii_digit() && c != '.')
+            && let Ok(v) = rest[..end].parse::<f64>()
+        {
+            let unit_area = &rest[end..];
+            if unit_area.starts_with("MB/s") {
+                result.write_speed_kb = Some(v * 1024.0);
+            } else {
+                result.write_speed_kb = Some(v);
+            }
+        }
+    }
+
+    // Error status: "No error (0 0)" or "error (1 1048576)"
+    if let Some(pos) = raw.find('(') {
+        let rest = &raw[pos + 1..];
+        if let Some(end) = rest.find(')') {
+            let nums: Vec<&str> = rest[..end].split_whitespace().collect();
+            if nums.len() == 2 {
+                result.error_type = nums[0].parse().ok();
+                result.error_count = nums[1].parse().ok();
+            }
+        }
+    }
+
+    // ManufacturerId: NN
+    if let Some(pos) = raw.find("ManufacturerId:") {
+        let rest = raw[pos + 15..].trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        result.manufacturer_id = rest[..end].parse().ok();
+    }
+
+    // Date YYYY/M
+    if let Some(pos) = raw.find("Date") {
+        let rest = raw[pos + 4..].trim_start();
+        // May start with ':' or not
+        let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '/')
+            .unwrap_or(rest.len());
+        let date_str = rest[..end].trim();
+        if !date_str.is_empty() {
+            result.date = Some(date_str.to_string());
+        }
+    }
+
+    // CardType N
+    if let Some(pos) = raw.find("CardType") {
+        let rest = raw[pos + 8..].trim_start();
+        let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        result.card_type = rest[..end].parse().ok();
+    }
+
+    // BlockSize NNN
+    if let Some(pos) = raw.find("BlockSize") {
+        let rest = raw[pos + 9..].trim_start();
+        let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        result.block_size = rest[..end].parse().ok();
+    }
+
+    // Usage: N.NN%
+    if let Some(pos) = raw.find("Usage:") {
+        let rest = raw[pos + 6..].trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(rest.len());
+        result.usage_pct = rest[..end].parse().ok();
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sdtest_full() {
+        let raw = "SD Performance: Read: 540kB/s, Write: 370kB/s, No error (0 0), \
+                   ManufacturerId: 27, Date 2014/2, CardType 2, BlockSize 512, Erase 0, \
+                   MaxTransferRate 25000000, RwFactor 2, ReadSpeed 22222222Hz, \
+                   WriteSpeed 22222222Hz, MaxReadCurrentVDDmin 3, MaxReadCurrentVDDmax 5, \
+                   MaxWriteCurrentVDDmin: 3, MaxWriteCurrentVDDmax: 1, Usage: 2.79%";
+        let sd = parse_sdtest(raw);
+        assert_eq!(sd.read_speed_kb, Some(540.0));
+        assert_eq!(sd.write_speed_kb, Some(370.0));
+        assert_eq!(sd.error_type, Some(0));
+        assert_eq!(sd.error_count, Some(0));
+        assert_eq!(sd.manufacturer_id, Some(27));
+        assert_eq!(sd.date.as_deref(), Some("2014/2"));
+        assert_eq!(sd.card_type, Some(2));
+        assert_eq!(sd.block_size, Some(512));
+        assert!((sd.usage_pct.unwrap() - 2.79).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_sdtest_error_card() {
+        let raw = "SD Performance: Read: 87381kB/s, Write: 2818kB/s, error (1 1048576), \
+                   ManufacturerId: 3, Date 2019/7, CardType 2, BlockSize 512, Usage: 15.20%";
+        let sd = parse_sdtest(raw);
+        assert_eq!(sd.read_speed_kb, Some(87381.0));
+        assert_eq!(sd.write_speed_kb, Some(2818.0));
+        assert_eq!(sd.error_type, Some(1));
+        assert_eq!(sd.error_count, Some(1048576));
+        assert_eq!(sd.manufacturer_id, Some(3));
+        assert_eq!(sd.card_type, Some(2));
+        assert!((sd.usage_pct.unwrap() - 15.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_sdtest_mb_per_sec() {
+        let raw = "SD Performance: Read: 30MB/s, Write: 15MB/s, No error (0 0), Usage: 5.00%";
+        let sd = parse_sdtest(raw);
+        assert_eq!(sd.read_speed_kb, Some(30.0 * 1024.0));
+        assert_eq!(sd.write_speed_kb, Some(15.0 * 1024.0));
+    }
+
+    #[test]
+    fn test_parse_sdtest_fallback() {
+        let raw = "unknown format";
+        let sd = parse_sdtest(raw);
+        assert_eq!(sd.raw, "unknown format");
+        assert!(sd.read_speed_kb.is_none());
+        assert!(sd.write_speed_kb.is_none());
+        assert!(sd.error_type.is_none());
+        assert!(sd.usage_pct.is_none());
+    }
+
+    #[test]
+    fn test_parse_sdtest_partial() {
+        let raw = "SD Performance: Read: 100kB/s, Write: 50kB/s, No error (0 0)";
+        let sd = parse_sdtest(raw);
+        assert_eq!(sd.read_speed_kb, Some(100.0));
+        assert_eq!(sd.write_speed_kb, Some(50.0));
+        assert_eq!(sd.error_type, Some(0));
+        assert!(sd.manufacturer_id.is_none());
+        assert!(sd.usage_pct.is_none());
+    }
+
+    #[test]
+    fn test_parse_sdtest_question_mark() {
+        let sd = parse_sdtest("?");
+        assert_eq!(sd.raw, "?");
+        assert!(sd.read_speed_kb.is_none());
+    }
+
+    #[test]
+    fn test_sdtest_to_json() {
+        let sd = SdTestResult {
+            read_speed_kb: Some(540.0),
+            write_speed_kb: Some(370.0),
+            error_type: Some(0),
+            error_count: Some(0),
+            usage_pct: Some(2.79),
+            raw: "test".to_string(),
+            ..Default::default()
+        };
+        let json = sd.to_json();
+        assert_eq!(json["read_speed_kbs"], 540.0);
+        assert_eq!(json["write_speed_kbs"], 370.0);
+        assert_eq!(json["error_type"], 0);
+        assert_eq!(json["error_count"], 0);
+        assert_eq!(json["usage_pct"], 2.79);
+        assert_eq!(json["raw"], "test");
+        assert!(json.get("manufacturer_id").is_none());
+    }
 }
