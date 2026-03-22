@@ -1,6 +1,6 @@
 [package]
 name = "lox"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
 rust-version = "1.91"
 description = "Loxone Miniserver CLI — control lights, blinds, and more from your terminal"
