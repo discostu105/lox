@@ -9,6 +9,14 @@ use crate::config::Config;
 use crate::otel;
 use crate::{FilesCmd, OtelCmd, UpdateCmd, abs_path, bar, kb_fmt, xml_attr};
 
+/// Extract the `value` attribute, returning `"—"` for missing or empty values.
+fn nonempty_attr(s: &str) -> &str {
+    match xml_attr(s, "value") {
+        Some(v) if !v.is_empty() => v,
+        _ => "—",
+    }
+}
+
 pub fn cmd_status(
     ctx: &RunContext,
     energy: bool,
@@ -123,18 +131,20 @@ pub fn cmd_status(
         let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
         let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
         let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
-        let ctx_val = xml_attr(&ctx_sw, "value").unwrap_or("?");
-        let ints_val = xml_attr(&ints, "value");
-        let comints_val = xml_attr(&comints, "value");
-        let ctx_swi_val = xml_attr(&ctx_swi, "value");
+        let ctx_val = xml_attr(&ctx_sw, "value").filter(|v| !v.is_empty());
+        let ints_val = xml_attr(&ints, "value").filter(|v| !v.is_empty());
+        let comints_val = xml_attr(&comints, "value").filter(|v| !v.is_empty());
+        let ctx_swi_val = xml_attr(&ctx_swi, "value").filter(|v| !v.is_empty());
         let sd_val = xml_attr(&sd, "value").unwrap_or("?");
         let sd_info = parse_sdtest(sd_val);
         if ctx.json {
             let mut diag = serde_json::json!({
                 "cpu": cpu_val, "tasks": tasks_val,
-                "context_switches": ctx_val,
                 "sd_card": sd_info.to_json(),
             });
+            if let Some(v) = ctx_val {
+                diag["context_switches"] = serde_json::json!(v);
+            }
             if let Some(v) = ints_val {
                 diag["interrupts"] = serde_json::json!(v);
             }
@@ -149,7 +159,9 @@ pub fn cmd_status(
             println!("┌─ Diagnostics ───────────────────────────────────────");
             println!("│  CPU:              {}", cpu_val);
             println!("│  Tasks:            {}", tasks_val);
-            println!("│  Context switches: {}", ctx_val);
+            if let Some(v) = ctx_val {
+                println!("│  Context switches: {}", v);
+            }
             if let Some(v) = ints_val {
                 println!("│  Interrupts:       {}", v);
             }
@@ -172,14 +184,14 @@ pub fn cmd_status(
         let dns2 = lox.get_text("/jdev/cfg/dns2").unwrap_or_default();
         let dhcp = lox.get_text("/jdev/cfg/dhcp").unwrap_or_default();
         let ntp = lox.get_text("/jdev/cfg/ntp").unwrap_or_default();
-        let ip_val = xml_attr(&ip, "value").unwrap_or("?");
-        let mac_val = xml_attr(&mac, "value").unwrap_or("?");
-        let mask_val = xml_attr(&mask, "value").unwrap_or("?");
-        let gw_val = xml_attr(&gw, "value").unwrap_or("?");
-        let dns1_val = xml_attr(&dns1, "value").unwrap_or("?");
-        let dns2_val = xml_attr(&dns2, "value").unwrap_or("?");
-        let dhcp_val = xml_attr(&dhcp, "value").unwrap_or("?");
-        let ntp_val = xml_attr(&ntp, "value").unwrap_or("?");
+        let ip_val = nonempty_attr(&ip);
+        let mac_val = nonempty_attr(&mac);
+        let mask_val = nonempty_attr(&mask);
+        let gw_val = nonempty_attr(&gw);
+        let dns1_val = nonempty_attr(&dns1);
+        let dns2_val = nonempty_attr(&dns2);
+        let dhcp_val = nonempty_attr(&dhcp);
+        let ntp_val = nonempty_attr(&ntp);
         if ctx.json {
             println!(
                 "{}",
@@ -211,12 +223,12 @@ pub fn cmd_status(
         let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
         let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
         let perr = lox.get_text("/jdev/bus/parityerrors").unwrap_or_default();
-        let sent_val = xml_attr(&sent, "value").unwrap_or("?");
-        let recv_val = xml_attr(&recv, "value").unwrap_or("?");
-        let rerr_val = xml_attr(&rerr, "value").unwrap_or("?");
-        let ferr_val = xml_attr(&ferr, "value").unwrap_or("?");
-        let over_val = xml_attr(&over, "value").unwrap_or("?");
-        let perr_val = xml_attr(&perr, "value").unwrap_or("?");
+        let sent_val = nonempty_attr(&sent);
+        let recv_val = nonempty_attr(&recv);
+        let rerr_val = nonempty_attr(&rerr);
+        let ferr_val = nonempty_attr(&ferr);
+        let over_val = nonempty_attr(&over);
+        let perr_val = nonempty_attr(&perr);
         if ctx.json {
             println!(
                 "{}",
@@ -247,15 +259,15 @@ pub fn cmd_status(
         let eof = lox.get_text("/jdev/lan/eof").unwrap_or_default();
         let exh = lox.get_text("/jdev/lan/exh").unwrap_or_default();
         let nob = lox.get_text("/jdev/lan/nob").unwrap_or_default();
-        let txp_val = xml_attr(&txp, "value").unwrap_or("?");
-        let txe_val = xml_attr(&txe, "value").unwrap_or("?");
-        let txc_val = xml_attr(&txc, "value").unwrap_or("?");
-        let txu_val = xml_attr(&txu, "value").unwrap_or("?");
-        let rxp_val = xml_attr(&rxp, "value").unwrap_or("?");
-        let rxo_val = xml_attr(&rxo, "value").unwrap_or("?");
-        let eof_val = xml_attr(&eof, "value").unwrap_or("?");
-        let exh_val = xml_attr(&exh, "value").unwrap_or("?");
-        let nob_val = xml_attr(&nob, "value").unwrap_or("?");
+        let txp_val = nonempty_attr(&txp);
+        let txe_val = nonempty_attr(&txe);
+        let txc_val = nonempty_attr(&txc);
+        let txu_val = nonempty_attr(&txu);
+        let rxp_val = nonempty_attr(&rxp);
+        let rxo_val = nonempty_attr(&rxo);
+        let eof_val = nonempty_attr(&eof);
+        let exh_val = nonempty_attr(&exh);
+        let nob_val = nonempty_attr(&nob);
         if ctx.json {
             println!(
                 "{}",
