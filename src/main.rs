@@ -844,6 +844,13 @@ pub(crate) enum TokenCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum LightCmd {
+    /// List available moods for a LightControllerV2
+    #[command(alias = "list-moods")]
+    Moods {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
     /// Set light mood: plus | minus | off | <mood-id>
     Mood {
         name_or_uuid: String,

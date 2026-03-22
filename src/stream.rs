@@ -529,6 +529,15 @@ pub fn parse_binary_payload(msg_type: u8, data: &[u8]) -> Result<Vec<StateEvent>
 /// 2. Key exchange (send RSA-encrypted AES session key)
 /// 3. Request getkey2 via WS (one-time key is session-specific)
 /// 4. Compute HMAC and send encrypted authenticate command
+pub async fn ws_authenticate_pub(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    cfg: &Config,
+) -> Result<()> {
+    ws_authenticate(ws, cfg).await
+}
+
 async fn ws_authenticate(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
