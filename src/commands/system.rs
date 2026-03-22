@@ -124,31 +124,41 @@ pub fn cmd_status(
         let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
         let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
         let ctx_val = xml_attr(&ctx_sw, "value").unwrap_or("?");
-        let ints_val = xml_attr(&ints, "value").unwrap_or("?");
-        let comints_val = xml_attr(&comints, "value").unwrap_or("?");
-        let ctx_swi_val = xml_attr(&ctx_swi, "value").unwrap_or("?");
+        let ints_val = xml_attr(&ints, "value");
+        let comints_val = xml_attr(&comints, "value");
+        let ctx_swi_val = xml_attr(&ctx_swi, "value");
         let sd_val = xml_attr(&sd, "value").unwrap_or("?");
         let sd_info = parse_sdtest(sd_val);
         if ctx.json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "cpu": cpu_val, "tasks": tasks_val,
-                    "context_switches": ctx_val,
-                    "interrupts": ints_val,
-                    "comm_interrupts": comints_val,
-                    "context_switches_idle": ctx_swi_val,
-                    "sd_card": sd_info.to_json(),
-                })
-            );
+            let mut diag = serde_json::json!({
+                "cpu": cpu_val, "tasks": tasks_val,
+                "context_switches": ctx_val,
+                "sd_card": sd_info.to_json(),
+            });
+            if let Some(v) = ints_val {
+                diag["interrupts"] = serde_json::json!(v);
+            }
+            if let Some(v) = comints_val {
+                diag["comm_interrupts"] = serde_json::json!(v);
+            }
+            if let Some(v) = ctx_swi_val {
+                diag["context_switches_idle"] = serde_json::json!(v);
+            }
+            println!("{}", diag);
         } else {
             println!("┌─ Diagnostics ───────────────────────────────────────");
             println!("│  CPU:              {}", cpu_val);
             println!("│  Tasks:            {}", tasks_val);
             println!("│  Context switches: {}", ctx_val);
-            println!("│  Interrupts:       {}", ints_val);
-            println!("│  Comm interrupts:  {}", comints_val);
-            println!("│  Ctx switches (i): {}", ctx_swi_val);
+            if let Some(v) = ints_val {
+                println!("│  Interrupts:       {}", v);
+            }
+            if let Some(v) = comints_val {
+                println!("│  Comm interrupts:  {}", v);
+            }
+            if let Some(v) = ctx_swi_val {
+                println!("│  Ctx switches (i): {}", v);
+            }
             sd_info.print_table();
             println!("└─────────────────────────────────────────────────────");
         }

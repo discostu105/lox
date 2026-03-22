@@ -681,9 +681,15 @@ fn emit_automation_trace(
 fn extract_lox_value(text: &str) -> Option<f64> {
     // Try JSON first
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text)
-        && let Some(val) = v.pointer("/LL/value").and_then(|v| v.as_str())
+        && let Some(val) = v.pointer("/LL/value")
     {
-        return parse_numeric_prefix(val);
+        // Handle both string ("123") and numeric (123) JSON values
+        if let Some(n) = val.as_f64() {
+            return Some(n);
+        }
+        if let Some(s) = val.as_str() {
+            return parse_numeric_prefix(s);
+        }
     }
     // Try XML attribute
     let key = "value=\"";
@@ -1160,6 +1166,13 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_lox_value_json_numeric() {
+        // Gen2 Miniservers return numeric values without quotes
+        let text = r#"{"LL":{"control":"dev/sys/contextswitches","value":123456789,"Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), Some(123456789.0));
+    }
+
+    #[test]
     fn test_extract_lox_value_xml() {
         let text = r#"<LL value="21.5" />"#;
         assert_eq!(extract_lox_value(text), Some(21.5));
@@ -1170,6 +1183,53 @@ mod tests {
         // Heap response: "352880/1016404kB"
         let text = r#"<LL control="dev/sys/heap" value="352880/1016404kB" Code="200"/>"#;
         assert_eq!(extract_lox_value(text), Some(352880.0));
+    }
+
+    #[test]
+    fn test_extract_lox_value_json_numeric_float() {
+        let text = r#"{"LL":{"value":3.14,"Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), Some(3.14));
+    }
+
+    #[test]
+    fn test_extract_lox_value_json_numeric_zero() {
+        let text = r#"{"LL":{"value":0,"Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), Some(0.0));
+    }
+
+    /// Regression: all OTLP diagnostic endpoints must extract values from
+    /// both Gen1 (XML, string) and Gen2 (JSON, numeric) response formats.
+    #[test]
+    fn test_extract_lox_value_all_diagnostic_formats() {
+        // Gen2 JSON numeric — the format that was broken
+        for (endpoint, num) in [
+            ("dev/sys/ints", 987654),
+            ("dev/sys/comints", 12345),
+            ("dev/sys/contextswitchesi", 98765432),
+            ("bus/parityerrors", 0),
+            ("lan/txu", 42),
+            ("lan/exh", 0),
+            ("lan/nob", 7),
+        ] {
+            let text = format!(
+                r#"{{"LL":{{"control":"{}","value":{},"Code":"200"}}}}"#,
+                endpoint, num
+            );
+            assert_eq!(
+                extract_lox_value(&text),
+                Some(num as f64),
+                "failed for endpoint {}",
+                endpoint
+            );
+        }
+
+        // Gen2 JSON string — CPU returns "CPU:12 SPS:26"
+        let text = r#"{"LL":{"value":"CPU:12 SPS:26","Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), None); // no leading number
+
+        // Gen2 JSON string with leading number — tasks
+        let text = r#"{"LL":{"value":"60","Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), Some(60.0));
     }
 
     #[test]

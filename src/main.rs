@@ -46,12 +46,22 @@ pub(crate) fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
         search_from = abs_pos + 1;
     }
 
-    // JSON format: "attr": "value"  (handles /jdev/ responses)
-    let json_key = format!("\"{}\": \"", attr);
+    // JSON format: "attr": value  (handles /jdev/ responses)
+    let json_key = format!("\"{}\": ", attr);
     if let Some(pos) = xml.find(&json_key) {
         let start = pos + json_key.len();
-        let end = xml[start..].find('"')? + start;
-        return Some(&xml[start..end]);
+        let rest = &xml[start..];
+        if let Some(stripped) = rest.strip_prefix('"') {
+            // String value: extract between quotes
+            let end = stripped.find('"')?;
+            return Some(&stripped[..end]);
+        }
+        // Numeric/other value: read until delimiter
+        let end = rest.find([',', '}', ']']).unwrap_or(rest.len());
+        let val = rest[..end].trim();
+        if !val.is_empty() {
+            return Some(val);
+        }
     }
 
     None
@@ -2120,6 +2130,113 @@ mod tests {
     fn test_xml_attr_json_empty_value() {
         let json = r#"{"LL": { "control": "dev/sys/ints", "value": "", "Code": "200"}}"#;
         assert_eq!(xml_attr(json, "value"), Some(""));
+    }
+
+    #[test]
+    fn test_xml_attr_json_numeric_value() {
+        // Gen2 Miniservers return numeric values without quotes for counters
+        let json =
+            r#"{"LL": { "control": "dev/sys/contextswitches", "value": 123456789, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("123456789"));
+        assert_eq!(xml_attr(json, "Code"), Some("200"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_numeric_last_field() {
+        // Numeric value as the last field before closing brace
+        let json = r#"{"LL": { "value": 42}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("42"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_float_value() {
+        let json = r#"{"LL": { "value": 3.14, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("3.14"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_negative_value() {
+        let json = r#"{"LL": { "value": -1, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("-1"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_zero_value() {
+        let json = r#"{"LL": { "value": 0, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("0"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_bool_value() {
+        // Unlikely from Miniserver but should not panic
+        let json = r#"{"LL": { "value": true, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("true"));
+    }
+
+    #[test]
+    fn test_xml_attr_json_null_value() {
+        let json = r#"{"LL": { "value": null, "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("null"));
+    }
+
+    /// Exercises xml_attr against every response format the Miniserver uses
+    /// for the diagnostic endpoints exposed by `lox status --diag/--net/--bus/--lan`.
+    /// This is a regression test: Gen2 Miniservers return numeric JSON values
+    /// for counters, which the original string-only parser missed.
+    #[test]
+    fn test_xml_attr_all_diagnostic_response_formats() {
+        // Gen1 XML format (most endpoints)
+        let xml = r#"<LL control="dev/sys/heap" value="352880/1016404kB" Code="200"/>"#;
+        assert_eq!(xml_attr(xml, "value"), Some("352880/1016404kB"));
+
+        // Gen2 JSON with string value (lastcpu, numtasks, sdtest)
+        let json = r#"{"LL": { "control": "dev/sys/lastcpu", "value": "CPU:11 SPS:24 Cycles:99", "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("CPU:11 SPS:24 Cycles:99"));
+
+        // Gen2 JSON with numeric value (ints, comints, contextswitches, contextswitchesi)
+        for endpoint in [
+            "dev/sys/contextswitches",
+            "dev/sys/ints",
+            "dev/sys/comints",
+            "dev/sys/contextswitchesi",
+        ] {
+            let json = format!(
+                r#"{{"LL": {{ "control": "{}", "value": 987654, "Code": "200"}}}}"#,
+                endpoint
+            );
+            assert_eq!(
+                xml_attr(&json, "value"),
+                Some("987654"),
+                "failed for endpoint {}",
+                endpoint
+            );
+        }
+
+        // Gen2 JSON with numeric value for bus/lan counters
+        for endpoint in [
+            "bus/packetssent",
+            "bus/packetsreceived",
+            "bus/parityerrors",
+            "lan/txp",
+            "lan/txu",
+            "lan/exh",
+            "lan/nob",
+        ] {
+            let json = format!(
+                r#"{{"LL": {{ "control": "{}", "value": 42, "Code": "200"}}}}"#,
+                endpoint
+            );
+            assert_eq!(
+                xml_attr(&json, "value"),
+                Some("42"),
+                "failed for endpoint {}",
+                endpoint
+            );
+        }
+
+        // Gen2 JSON with string value for network config
+        let json = r#"{"LL": { "control": "cfg/dns2", "value": "8.8.4.4", "Code": "200"}}"#;
+        assert_eq!(xml_attr(json, "value"), Some("8.8.4.4"));
     }
 
     // ── matches_filters ───────────────────────────────────────────────────────
