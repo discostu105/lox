@@ -309,4 +309,4 @@ This project is a an experiment. Expect rough edges. Not every Miniserver config
 
 ## License
 
-MIT
+[License](https://github.com/discostu105/lox/blob/main/LICENSE)
