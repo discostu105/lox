@@ -1,0 +1,15 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+    patch:
+      default:
+        target: auto
+
+fixes:
+  - "/home/runner/work/lox/lox/::"
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
