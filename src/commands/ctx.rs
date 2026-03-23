@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use crate::CtxCmd;
 use crate::commands::RunContext;
-use crate::config::{Config, ContextEntry, GlobalConfig};
+use crate::config::{Config, ContextEntry, GlobalConfig, validate_context_name};
 
 pub fn cmd_ctx(ctx: &RunContext, action: CtxCmd) -> Result<()> {
     match action {
@@ -50,6 +50,7 @@ fn ctx_add(
     pass: String,
     serial: Option<String>,
 ) -> Result<()> {
+    validate_context_name(&name)?;
     let mut global = GlobalConfig::load_or_default();
 
     if global.contexts.contains_key(&name) {
@@ -75,8 +76,8 @@ fn ctx_add(
 
     global.contexts.insert(name.clone(), entry);
 
-    // If this is the first context, make it active
-    if global.active_context.is_none() || global.contexts.len() == 1 {
+    // If no active context is set, make this one active
+    if global.active_context.is_none() {
         global.active_context = Some(name.clone());
     }
 
@@ -254,6 +255,7 @@ fn ctx_remove(ctx: &RunContext, name: String) -> Result<()> {
 }
 
 fn ctx_rename(ctx: &RunContext, old: String, new: String) -> Result<()> {
+    validate_context_name(&new)?;
     let mut global = GlobalConfig::load_or_default();
 
     let entry = global

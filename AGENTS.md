@@ -46,7 +46,8 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 |------|---------|
 | `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing) |
 | `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes |
-| `src/config.rs` | `Config` struct — loads/saves `~/.lox/config.yaml`, provides `Config::dir()` path |
+| `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
+| `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
 | `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/ws.rs` | `LoxWsClient` — async WebSocket connection used by token auth (RSA+AES key exchange handshake) |
@@ -56,21 +57,40 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 
 **Control resolution** (`LoxClient::resolve_with_room`): Names are matched against the structure cache using fuzzy substring matching. Resolution order: alias → exact UUID → bracket room qualifier (`"Name [Room]"`) → `--room` flag → fuzzy substring. Ambiguous matches are an error.
 
-**Structure cache**: `LoxApp3.json` (~150KB) is cached at `~/.lox/cache/structure.json` with a 24h TTL. All commands that need control UUIDs load this cache first; `lox cache refresh` forces a re-fetch.
+**Multi-context config**: `~/.lox/config.yaml` supports both flat (single-Miniserver, backward compatible) and multi-context format. `Config::load()` resolution: `LOX_CONFIG` env → project-local `.lox/` (walk up from cwd) → global config → `--ctx` flag override. Each context gets isolated data under `~/.lox/contexts/<name>/`.
+
+**Structure cache**: `LoxApp3.json` (~150KB) is cached per-context (e.g. `~/.lox/contexts/<name>/cache/structure.json`) with a 24h TTL. All commands that need control UUIDs load this cache first; `lox cache refresh` forces a re-fetch.
 
 **Mixed sync/async**: The CLI commands use `reqwest::blocking`. `main.rs` uses `#[tokio::main]` because `lox token fetch` needs async (WebSocket for the key exchange). The blocking reqwest client spawns its own thread pool so both modes coexist.
 
-**Token auth**: RSA public key fetched from Miniserver → encrypt AES session key → send encrypted credentials via WebSocket → receive token. Token stored in `~/.lox/token.json`, valid ~20 days.
+**Token auth**: RSA public key fetched from Miniserver → encrypt AES session key → send encrypted credentials via WebSocket → receive token. Token stored per-context (e.g. `~/.lox/contexts/<name>/token.json`), valid ~20 days.
 
 ### User data layout
 
 ```
 ~/.lox/
-  config.yaml          # host, user, pass, serial, aliases
-  token.json           # optional token auth
+  config.yaml          # flat (single-Miniserver) or multi-context format
+  contexts/            # per-context data (multi-context mode)
+    <name>/
+      cache/
+        structure.json # LoxApp3.json cache (24h TTL)
+      token.json       # optional token auth
+      scenes/*.yaml    # multi-step scene definitions
+  # Legacy flat mode (backward compatible):
   cache/
     structure.json     # LoxApp3.json cache (24h TTL)
+  token.json           # optional token auth
   scenes/*.yaml        # multi-step scene definitions
+```
+
+Project-local config (auto-discovered by walking up from cwd):
+```
+project/
+  .lox/
+    config.yaml        # connection settings
+    .gitignore         # excludes secrets and cache
+    cache/
+    scenes/
 ```
 
 ### Loxone HTTP API used

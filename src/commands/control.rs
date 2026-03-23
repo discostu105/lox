@@ -1140,8 +1140,9 @@ pub fn cmd_set(
 }
 
 pub fn cmd_run(ctx: &RunContext, scene: String, scene_dry_run: bool) -> Result<()> {
-    let s = Scene::load(&scene)?;
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let cfg = Config::load()?;
+    let s = Scene::load_with_config(&scene, &cfg)?;
+    let mut lox = LoxClient::new(cfg)?;
     if ctx.dry_run || scene_dry_run {
         println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
         if let Some(d) = &s.description {

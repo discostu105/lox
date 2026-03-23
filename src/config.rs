@@ -6,20 +6,38 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 // ── Global context override (set from --ctx flag) ────────────────────────────
 
-static CTX_OVERRIDE: OnceLock<Option<String>> = OnceLock::new();
+static CTX_OVERRIDE: RwLock<Option<String>> = RwLock::new(None);
 
 /// Set the global context override from the `--ctx` CLI flag.
-/// Must be called once, early in main, before any `Config::load()`.
+/// Called early in main, before any `Config::load()`.
 pub fn set_ctx_override(ctx: Option<String>) {
-    CTX_OVERRIDE.set(ctx).ok();
+    *CTX_OVERRIDE.write().unwrap() = ctx;
 }
 
-fn ctx_override() -> Option<&'static str> {
-    CTX_OVERRIDE.get().and_then(|o| o.as_deref())
+fn ctx_override() -> Option<String> {
+    CTX_OVERRIDE.read().unwrap().clone()
+}
+
+/// Validate that a context name is safe for use as a directory name.
+/// Rejects names containing path separators, `..`, or control characters.
+pub fn validate_context_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("Context name cannot be empty");
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        bail!(
+            "Context name '{}' contains invalid characters (/, \\, or ..)",
+            name
+        );
+    }
+    if name.chars().any(|c| c.is_control()) {
+        bail!("Context name '{}' contains control characters", name);
+    }
+    Ok(())
 }
 
 // ── Per-connection config (one Miniserver) ───────────────────────────────────
@@ -138,13 +156,11 @@ impl Config {
     }
 
     /// Token file path for this config.
-    #[allow(dead_code)]
     pub fn token_path(&self) -> PathBuf {
         self.data_dir.join("token.json")
     }
 
     /// Scenes directory for this config.
-    #[allow(dead_code)]
     pub fn scenes_dir(&self) -> PathBuf {
         self.data_dir.join("scenes")
     }
@@ -181,7 +197,7 @@ impl Config {
         // Detect format: if the YAML has a "contexts" key, it's multi-context
         let value: serde_yaml::Value = serde_yaml::from_str(&content)?;
         if value.get("contexts").is_some() {
-            Self::load_from_global_config(&content, ctx_flag)
+            Self::load_from_global_config(&content, ctx_flag.as_deref())
         } else {
             // Flat format (backward compatible)
             Self::load_flat(&path, Self::dir(), false)
@@ -341,8 +357,14 @@ impl GlobalConfig {
 /// Returns the `.lox/` directory path if found, or None.
 pub fn find_local_lox_dir() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
+    find_local_lox_dir_from(&cwd)
+}
+
+/// Walk up from the given directory looking for a `.lox/config.yaml` file.
+/// Returns the `.lox/` directory path if found, or None.
+pub fn find_local_lox_dir_from(start: &Path) -> Option<PathBuf> {
     let global_dir = Config::dir();
-    let mut dir = cwd.as_path();
+    let mut dir = start;
     loop {
         let candidate = dir.join(".lox");
         // Don't match the global ~/.lox/ directory
@@ -521,12 +543,159 @@ mod tests {
         fs::create_dir_all(&lox_dir).unwrap();
         fs::write(lox_dir.join("config.yaml"), "host: h\nuser: u\npass: p\n").unwrap();
 
-        // Save and restore cwd
-        let orig_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let found = find_local_lox_dir();
-        std::env::set_current_dir(orig_cwd).unwrap();
-
+        // Use the path-based variant to avoid thread-unsafe set_current_dir
+        let found = find_local_lox_dir_from(dir.path());
         assert_eq!(found, Some(lox_dir));
+    }
+
+    #[test]
+    fn find_local_lox_dir_walks_up() {
+        let dir = tempdir().unwrap();
+        let lox_dir = dir.path().join(".lox");
+        fs::create_dir_all(&lox_dir).unwrap();
+        fs::write(lox_dir.join("config.yaml"), "host: h\nuser: u\npass: p\n").unwrap();
+
+        // Create a nested subdirectory and search from there
+        let nested = dir.path().join("sub").join("deep");
+        fs::create_dir_all(&nested).unwrap();
+        let found = find_local_lox_dir_from(&nested);
+        assert_eq!(found, Some(lox_dir));
+    }
+
+    #[test]
+    fn validate_context_name_rejects_path_traversal() {
+        assert!(validate_context_name("home").is_ok());
+        assert!(validate_context_name("my-server_1").is_ok());
+        assert!(validate_context_name("../evil").is_err());
+        assert!(validate_context_name("foo/bar").is_err());
+        assert!(validate_context_name("foo\\bar").is_err());
+        assert!(validate_context_name("").is_err());
+    }
+
+    #[test]
+    fn load_multi_context_via_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("config.yaml");
+        let yaml = r#"
+active_context: home
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+  office:
+    host: https://10.0.0.50
+    user: admin
+    pass: office_pass
+"#;
+        fs::write(&cfg_path, yaml).unwrap();
+
+        // LOX_CONFIG with multi-context file is loaded as flat (env var bypasses context logic)
+        // So we test load_from_global_config directly
+        let cfg = Config::load_from_global_config(yaml, None).unwrap();
+        assert_eq!(cfg.host, "https://192.168.1.100");
+        assert_eq!(cfg.user, "admin");
+        assert_eq!(cfg.pass, "secret");
+        assert_eq!(cfg.context_name, Some("home".to_string()));
+    }
+
+    #[test]
+    fn load_multi_context_with_ctx_override() {
+        let yaml = r#"
+active_context: home
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+  office:
+    host: https://10.0.0.50
+    user: admin
+    pass: office_pass
+"#;
+        let cfg = Config::load_from_global_config(yaml, Some("office")).unwrap();
+        assert_eq!(cfg.host, "https://10.0.0.50");
+        assert_eq!(cfg.pass, "office_pass");
+        assert_eq!(cfg.context_name, Some("office".to_string()));
+    }
+
+    #[test]
+    fn load_multi_context_missing_context_errors() {
+        let yaml = r#"
+active_context: home
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+"#;
+        let result = Config::load_from_global_config(yaml, Some("nonexistent"));
+        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("nonexistent"), "Error: {}", err);
+    }
+
+    #[test]
+    fn load_multi_context_no_active_errors() {
+        let yaml = r#"
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+"#;
+        let result = Config::load_from_global_config(yaml, None);
+        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("No active context"), "Error: {}", err);
+    }
+
+    #[test]
+    fn load_flat_config_via_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("config.yaml");
+        fs::write(&cfg_path, "host: myhost.local\nuser: u\npass: p\n").unwrap();
+
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
+        let cfg = Config::load().unwrap();
+        unsafe { std::env::remove_var("LOX_CONFIG") };
+
+        // Flat config loaded via LOX_CONFIG should have data_dir set to parent
+        assert_eq!(cfg.data_dir, dir.path().to_path_buf());
+        assert!(!cfg.is_local);
+        assert!(cfg.context_name.is_none());
+    }
+
+    #[test]
+    fn config_save_roundtrip_with_context() {
+        let entry = ContextEntry {
+            host: "https://10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            pass: "pass".to_string(),
+            serial: "SER123".to_string(),
+            aliases: HashMap::from([("l".to_string(), "uuid-1".to_string())]),
+            verify_ssl: Some(true),
+            config_repo: None,
+        };
+        let cfg = entry.into_config("test", PathBuf::from("/tmp/test"));
+        // Round-trip through ContextEntry
+        let entry2 = ContextEntry::from(&cfg);
+        assert_eq!(entry2.host, "https://10.0.0.1");
+        assert_eq!(entry2.serial, "SER123");
+        assert_eq!(entry2.aliases.get("l"), Some(&"uuid-1".to_string()));
+        assert_eq!(entry2.verify_ssl, Some(true));
+    }
+
+    #[test]
+    fn config_cache_dir_uses_data_dir() {
+        let cfg = Config {
+            data_dir: PathBuf::from("/my/data"),
+            ..Default::default()
+        };
+        assert_eq!(cfg.cache_dir(), PathBuf::from("/my/data/cache"));
+        assert_eq!(cfg.token_path(), PathBuf::from("/my/data/token.json"));
+        assert_eq!(cfg.scenes_dir(), PathBuf::from("/my/data/scenes"));
     }
 }
