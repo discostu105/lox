@@ -24,16 +24,19 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn scenes_dir() -> PathBuf {
-        Config::dir().join("scenes")
+    /// Scenes directory for a specific config (context-aware).
+    pub fn scenes_dir_for(cfg: &Config) -> PathBuf {
+        cfg.scenes_dir()
     }
 
-    pub fn load(name: &str) -> Result<Self> {
-        Self::load_from(name, &Self::scenes_dir())
+    /// Load a scene by name using context-aware path.
+    pub fn load_with_config(name: &str, cfg: &Config) -> Result<Self> {
+        Self::load_from(name, &Self::scenes_dir_for(cfg))
     }
 
-    pub fn list() -> Result<Vec<String>> {
-        Self::list_from(&Self::scenes_dir())
+    /// List all scene names using context-aware path.
+    pub fn list_with_config(cfg: &Config) -> Result<Vec<String>> {
+        Self::list_from(&Self::scenes_dir_for(cfg))
     }
 
     /// Load a scene by name from the given directory.
@@ -70,10 +73,12 @@ mod tests {
 
     #[test]
     fn scenes_dir_ends_with_scenes() {
-        let dir = Scene::scenes_dir();
+        let cfg = Config::default();
+        let dir = Scene::scenes_dir_for(&cfg);
+        // Default config has empty data_dir, so this just checks the join
         assert!(
             dir.ends_with("scenes"),
-            "scenes_dir() should end with 'scenes', got {:?}",
+            "scenes_dir_for() should end with 'scenes', got {:?}",
             dir
         );
     }

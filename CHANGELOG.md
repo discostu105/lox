@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-Miniserver context management** (`lox ctx`) — `kubectl`-style context switching for multiple Miniservers
+  - `lox ctx add <name> --host ... --user ... --pass ...` — add a named context
+  - `lox ctx use <name>` / `lox ctx <name>` — switch active context
+  - `lox ctx list` — list all contexts (`*` = active)
+  - `lox ctx current` — show active context
+  - `lox ctx remove <name>` / `lox ctx rename <old> <new>` — manage contexts
+  - `lox ctx init` — create project-local `.lox/` directory (auto-discovered like `.git`)
+  - `lox ctx migrate` — convert existing flat config to a `default` context
+- `--ctx <name>` global flag — run any command against a specific context without switching
+- Per-context data isolation — each context gets its own cache, token, and scenes directory under `~/.lox/contexts/<name>/`
+- Project-local `.lox/` directory support — walks up from cwd, like `.git` resolution
+- Backward-compatible config format: existing flat `~/.lox/config.yaml` files continue to work unchanged
+
 ## [0.8.0] — 2026-03-21
 
 ### Added

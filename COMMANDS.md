@@ -8,7 +8,7 @@ lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
 
-Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`, `-v`/`--verbose` (request logging), `--dry-run`, `--non-interactive`, `--trace-id`
+Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`, `-v`/`--verbose` (request logging), `--dry-run`, `--non-interactive`, `--trace-id`, `--ctx <name>` (use a specific context)
 
 ---
 
@@ -421,6 +421,67 @@ lox otel push --endpoint http://localhost:4318
 # One-shot push, metrics only
 lox otel push --endpoint http://localhost:4318 --no-logs
 ```
+
+---
+
+## Context Management
+
+Manage multiple Miniserver connections, similar to `kubectl config use-context`:
+
+```bash
+lox ctx add home --host https://192.168.1.100 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx use home                    # switch active context
+lox ctx home                        # shortcut for `lox ctx use home`
+lox ctx list                        # list contexts (* = active)
+lox ctx current                     # show active context
+lox ctx remove office               # remove a context
+lox ctx rename home house           # rename a context
+```
+
+### One-off context override
+
+```bash
+lox --ctx office status             # run against 'office' without switching
+lox --ctx home ls -o json           # query 'home' context
+```
+
+### Project-local config
+
+```bash
+lox ctx init                        # create .lox/ in current directory
+lox ctx init --host ... --user ... --pass ...  # with connection details
+```
+
+Project-local `.lox/config.yaml` is auto-discovered by walking up from cwd (like `.git`). Secrets are excluded via `.lox/.gitignore`.
+
+### Migration
+
+```bash
+lox ctx migrate                     # convert flat config to 'default' context
+```
+
+Existing flat `~/.lox/config.yaml` files continue to work unchanged. Multi-context format:
+
+```yaml
+active_context: home
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+  office:
+    host: https://10.0.0.50
+    user: admin
+    pass: secret
+```
+
+### Config resolution order
+
+1. `LOX_CONFIG` env var (absolute priority)
+2. Project-local `.lox/config.yaml` (walk up from cwd)
+3. Global `~/.lox/config.yaml` (flat or multi-context)
+4. `--ctx` flag overrides context selection within global config
 
 ---
 

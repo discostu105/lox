@@ -113,14 +113,15 @@ pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
 }
 
 pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
+    let cfg = Config::load().unwrap_or_default();
     match action {
         SceneCmd::Ls => {
-            let names = Scene::list()?;
+            let names = Scene::list_with_config(&cfg)?;
             if names.is_empty() {
                 println!("No scenes. Create: lox scene new <name>");
             } else {
                 for name in &names {
-                    let desc = Scene::load(name)
+                    let desc = Scene::load_with_config(name, &cfg)
                         .ok()
                         .and_then(|s| s.description)
                         .unwrap_or_default();
@@ -131,12 +132,12 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
         SceneCmd::Show { name } => {
             println!(
                 "{}",
-                fs::read_to_string(Scene::scenes_dir().join(format!("{}.yaml", name)))
+                fs::read_to_string(Scene::scenes_dir_for(&cfg).join(format!("{}.yaml", name)))
                     .with_context(|| format!("Scene '{}' not found", name))?
             );
         }
         SceneCmd::New { name } => {
-            let dir = Scene::scenes_dir();
+            let dir = Scene::scenes_dir_for(&cfg);
             fs::create_dir_all(&dir)?;
             let path = dir.join(format!("{}.yaml", name));
             if path.exists() {
@@ -230,9 +231,9 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
 }
 
 pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
+    let cfg = Config::load()?;
     match action {
         TokenCmd::Fetch => {
-            let cfg = Config::load()?;
             println!("Fetching token from Miniserver...");
             let rt = tokio::runtime::Runtime::new()?;
             match rt.block_on(token::acquire_token(&cfg)) {
@@ -245,13 +246,13 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                             .unwrap()
                             .as_secs(),
                     ) / 86400;
-                    println!("✓ Token saved to {:?}", token::TokenStore::path());
+                    println!("✓ Token saved to {:?}", token::TokenStore::path_for(&cfg));
                     println!("  Valid for: {} days", days);
                 }
                 Err(e) => bail!("Token fetch failed: {}", e),
             }
         }
-        TokenCmd::Info => match token::TokenStore::load() {
+        TokenCmd::Info => match token::TokenStore::load_for(&cfg) {
             Some(ts) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -276,7 +277,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             None => println!("No token saved. Using Basic Auth. Run: lox token fetch"),
         },
         TokenCmd::Clear => {
-            let path = token::TokenStore::path();
+            let path = token::TokenStore::path_for(&cfg);
             if path.exists() {
                 fs::remove_file(&path)?;
                 println!("✓ Token cleared (reverting to Basic Auth)");
@@ -285,9 +286,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Check => {
-            let ts = token::TokenStore::load()
+            let ts = token::TokenStore::load_for(&cfg)
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let cfg = Config::load()?;
             let lox = LoxClient::new(cfg.clone())?;
             // Hash the token with the key for the check endpoint
             let hash = token::hash_token(&ts.token, &ts.key);
@@ -311,9 +311,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Refresh => {
-            let ts = token::TokenStore::load()
+            let ts = token::TokenStore::load_for(&cfg)
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let cfg = Config::load()?;
             let lox = LoxClient::new(cfg.clone())?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
@@ -338,7 +337,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                         key: ts.key,
                         valid_until: unix_until,
                     };
-                    new_ts.save()?;
+                    new_ts.save_for(&cfg)?;
                     let days = unix_until.saturating_sub(
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -354,9 +353,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Revoke => {
-            let ts = token::TokenStore::load()
+            let ts = token::TokenStore::load_for(&cfg)
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let cfg = Config::load()?;
             let lox = LoxClient::new(cfg.clone())?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
@@ -366,7 +364,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                 .unwrap_or_else(|| "?".to_string());
             if code == "200" {
                 // Remove local token
-                let path = token::TokenStore::path();
+                let path = token::TokenStore::path_for(&cfg);
                 if path.exists() {
                     fs::remove_file(&path)?;
                 }
