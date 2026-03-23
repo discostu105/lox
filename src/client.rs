@@ -324,8 +324,8 @@ impl LoxClient {
             .ok_or_else(|| anyhow::anyhow!("structure not loaded"))
     }
 
-    pub fn cache_path(_cfg: &Config) -> PathBuf {
-        Config::dir().join("cache").join("structure.json")
+    pub fn cache_path(cfg: &Config) -> PathBuf {
+        cfg.cache_dir().join("structure.json")
     }
 
     pub fn load_or_fetch_structure(cfg: &Config, client: &Client) -> Result<Value> {
