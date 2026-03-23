@@ -9,8 +9,8 @@ use crate::config::Config;
 use crate::scene::Scene;
 use crate::stream::{self, StateEvent};
 use crate::{
-    InputCmd, LightCmd, MusicCmd, bar, encode_path_value, print_dry_run, print_resp, rgb_to_hsv,
-    send_or_dry_run, xml_attr,
+    InputCmd, LightCmd, MusicCmd, bar, encode_path_value, json_val_str, print_dry_run, print_resp,
+    rgb_to_hsv, send_or_dry_run, xml_attr,
 };
 
 pub fn cmd_on(
@@ -492,12 +492,12 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
                 let resp = lox.send_cmd(&uuid, &encoded)?;
                 let code = resp
                     .pointer("/LL/Code")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                    .and_then(json_val_str)
+                    .unwrap_or_else(|| "?".to_string());
                 let val = resp
                     .pointer("/LL/value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                    .and_then(json_val_str)
+                    .unwrap_or_else(|| "?".to_string());
                 if code == "200" {
                     if !ctx.quiet {
                         println!("✓  {} = {}", name_or_uuid, val);

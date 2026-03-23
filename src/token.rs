@@ -158,8 +158,12 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
                 let v: serde_json::Value = serde_json::from_str(&t).unwrap_or_default();
                 let code = v
                     .pointer("/LL/Code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("0");
+                    .and_then(|c| {
+                        c.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| c.as_i64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "0".to_string());
                 if code != "200" {
                     bail!("keyexchange failed ({}): {}", code, t);
                 }
@@ -232,8 +236,12 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
     let code = token_resp
         .pointer("/LL/Code")
         .or_else(|| token_resp.pointer("/LL/code"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("0");
+        .and_then(|c| {
+            c.as_str()
+                .map(|s| s.to_string())
+                .or_else(|| c.as_i64().map(|n| n.to_string()))
+        })
+        .unwrap_or_else(|| "0".to_string());
     if code != "200" {
         bail!("gettoken failed ({}): {}", code, token_resp);
     }
@@ -276,8 +284,12 @@ async fn ws_read_json_value(
                 let code = v
                     .pointer("/LL/Code")
                     .or_else(|| v.pointer("/LL/code"))
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("0");
+                    .and_then(|c| {
+                        c.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| c.as_i64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "0".to_string());
                 if code == "200" {
                     return Ok(v
                         .pointer("/LL/value")

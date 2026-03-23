@@ -67,18 +67,28 @@ pub(crate) fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     None
 }
 
+/// Extract a JSON value as a display string, handling both string and numeric types.
+/// Gen2 Miniservers return numeric values (e.g. `"Code": 200`) instead of strings
+/// (`"Code": "200"`), so `.as_str()` alone is insufficient.
+pub(crate) fn json_val_str(v: &Value) -> Option<String> {
+    v.as_str()
+        .map(|s| s.to_string())
+        .or_else(|| v.as_i64().map(|n| n.to_string()))
+        .or_else(|| v.as_f64().map(|n| n.to_string()))
+}
+
 pub(crate) fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
     if json {
         println!("{}", serde_json::to_string_pretty(resp).unwrap());
     } else if !quiet {
         let val = resp
             .pointer("/LL/value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
+            .and_then(json_val_str)
+            .unwrap_or_else(|| "?".to_string());
         let code = resp
             .pointer("/LL/Code")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
+            .and_then(json_val_str)
+            .unwrap_or_else(|| "?".to_string());
         println!(
             "{}  {} → {} = {}",
             if code == "200" { "✓" } else { "✗" },
@@ -1774,6 +1784,40 @@ pub(crate) fn encode_path_value(s: &str) -> String {
 mod tests {
     use super::*;
     use client::is_uuid;
+
+    // ── json_val_str (Gen2 numeric value handling) ─────────────────────────
+
+    #[test]
+    fn test_json_val_str_string() {
+        let v = serde_json::json!("200");
+        assert_eq!(json_val_str(&v), Some("200".to_string()));
+    }
+
+    #[test]
+    fn test_json_val_str_integer() {
+        let v = serde_json::json!(200);
+        assert_eq!(json_val_str(&v), Some("200".to_string()));
+    }
+
+    #[test]
+    fn test_json_val_str_float() {
+        let v = serde_json::json!(21.5);
+        assert_eq!(json_val_str(&v), Some("21.5".to_string()));
+    }
+
+    #[test]
+    fn test_json_val_str_null() {
+        let v = serde_json::json!(null);
+        assert_eq!(json_val_str(&v), None);
+    }
+
+    #[test]
+    fn test_print_resp_numeric_code() {
+        // Gen2 Miniservers return numeric Code values
+        let resp = serde_json::json!({"LL": {"Code": 200, "value": 1}});
+        // Should not panic and should show ✓ (code 200)
+        print_resp(&resp, false, false, "test", "on");
+    }
 
     // ── eval_op ──────────────────────────────────────────────────────────────
 

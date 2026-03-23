@@ -12,7 +12,7 @@ use crate::scene::Scene;
 use crate::token;
 use crate::{
     AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, detect_shell,
-    ftp, gitops, install_completions, load_config_xml, loxcc, loxone_xml,
+    ftp, gitops, install_completions, json_val_str, load_config_xml, loxcc, loxone_xml,
 };
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
@@ -193,8 +193,8 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
             let resp = lox.get_json("/jdev/sps/LoxAPPversion3")?;
             let remote_ver = resp
                 .pointer("/LL/value")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+                .and_then(json_val_str)
+                .unwrap_or_else(|| "?".to_string());
             if ctx.json {
                 println!(
                     "{}",
@@ -294,8 +294,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
             let code = resp
                 .pointer("/LL/Code")
-                .and_then(|c| c.as_str())
-                .unwrap_or("?");
+                .and_then(json_val_str)
+                .unwrap_or_else(|| "?".to_string());
             if ctx.json {
                 println!(
                     "{}",
@@ -319,8 +319,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let resp = lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
             let code = resp
                 .pointer("/LL/Code")
-                .and_then(|c| c.as_str())
-                .unwrap_or("?");
+                .and_then(json_val_str)
+                .unwrap_or_else(|| "?".to_string());
             if code == "200" {
                 // Update the valid_until in our local store
                 let valid_until = resp
@@ -362,8 +362,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
             let code = resp
                 .pointer("/LL/Code")
-                .and_then(|c| c.as_str())
-                .unwrap_or("?");
+                .and_then(json_val_str)
+                .unwrap_or_else(|| "?".to_string());
             if code == "200" {
                 // Remove local token
                 let path = token::TokenStore::path();
