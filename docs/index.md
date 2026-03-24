@@ -63,6 +63,11 @@ nav_order: 1
     <div class="feature-desc">GitOps for your Miniserver. Track config changes with semantic diffs and git history.</div>
   </div>
   <div class="feature-card">
+    <span class="feature-icon">&#128279;</span>
+    <div class="feature-title">Multi-context</div>
+    <div class="feature-desc">Manage multiple Miniservers with named contexts. Switch with <code>lox ctx use</code> or override per-command with <code>--ctx</code>.</div>
+  </div>
+  <div class="feature-card">
     <span class="feature-icon">&#9889;</span>
     <div class="feature-title">Fast</div>
     <div class="feature-desc">~80ms warm, ~1.2s cold. Structure cache with 24h TTL. Static Rust binary with zero runtime dependencies.</div>

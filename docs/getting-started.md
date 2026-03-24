@@ -96,6 +96,24 @@ LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 
 ---
 
+## Multiple Miniservers
+
+Manage multiple Miniserver connections with named contexts (similar to `kubectl config use-context`):
+
+```bash
+lox ctx add home --host https://192.168.1.100 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx use home              # switch active context
+lox ctx home                  # shortcut for `lox ctx use home`
+lox --ctx office status       # one-off command against a different context
+```
+
+Existing single-Miniserver configs continue to work. Use `lox ctx migrate` to convert a flat config to a named context when you're ready.
+
+See the [Context Management](/lox/commands/configuration#context-management) reference for all options.
+
+---
+
 ## Aliases
 
 Add short names for frequently-used controls:

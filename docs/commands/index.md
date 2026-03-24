@@ -21,6 +21,7 @@ All commands support these global flags:
 | `--dry-run` | Validate and resolve without executing |
 | `--non-interactive` | Fail instead of prompting (implied by `-o json`) |
 | `--trace-id` | Correlation ID for agent tracing |
+| `--ctx <name>` | Use a specific context (overrides active context) |
 
 ## Control resolution
 
