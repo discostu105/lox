@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "lox"
-version = "0.10.2"
+version = "0.11.0"
 dependencies = [
  "aes",
  "anyhow",
