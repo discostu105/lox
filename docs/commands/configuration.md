@@ -142,9 +142,10 @@ lox --ctx office status         # run against 'office' without switching
 
 ```bash
 lox ctx init                    # create .lox/ in current directory
+lox ctx init --host https://192.168.1.100 --user admin --pass secret  # with connection details
 ```
 
-Project-local `.lox/config.yaml` is auto-discovered by walking up from cwd. Each context gets its own cache, token, and scenes directory.
+Project-local `.lox/config.yaml` is auto-discovered by walking up from cwd (like `.git`). Each context gets its own cache, token, and scenes directory. Secrets are excluded via `.lox/.gitignore`.
 
 ### Migration from flat config
 
@@ -153,6 +154,28 @@ lox ctx migrate                 # convert existing config to 'default' context
 ```
 
 Existing flat `~/.lox/config.yaml` files continue to work unchanged.
+
+### Multi-context config format
+
+```yaml
+active_context: home
+contexts:
+  home:
+    host: https://192.168.1.100
+    user: admin
+    pass: secret
+  office:
+    host: https://10.0.0.50
+    user: admin
+    pass: secret
+```
+
+### Config resolution order
+
+1. `LOX_CONFIG` env var (absolute priority)
+2. Project-local `.lox/config.yaml` (walk up from cwd)
+3. Global `~/.lox/config.yaml` (flat or multi-context)
+4. `--ctx` flag overrides context selection within global config
 
 ---
 

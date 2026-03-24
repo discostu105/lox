@@ -28,8 +28,9 @@ nav_order: 5
 | `src/commands/inspect.rs` | Inspection commands (ls, get, info, watch, stream, etc.) |
 | `src/commands/system.rs` | System commands (status, log, health, extensions, etc.) |
 | `src/commands/config_cmd.rs` | Config management commands (download, diff, git versioning) |
+| `src/commands/ctx.rs` | Context management (add, use, list, remove, rename, init, migrate) |
 | `src/client.rs` | `LoxClient` — HTTP client, control resolution, structure cache |
-| `src/config.rs` | `Config` struct — loads/saves `~/.lox/config.yaml` |
+| `src/config.rs` | `Config` / `GlobalConfig` — loads/saves config, multi-context support |
 | `src/stream.rs` | Real-time WebSocket state streaming |
 | `src/otel.rs` | OpenTelemetry metrics, logs, and traces export |
 | `src/gitops.rs` | Git-based config versioning (init, pull, log, restore) |
@@ -80,6 +81,7 @@ The token auth flow:
 
 ## User data layout
 
+Single-context (flat config):
 ```
 ~/.lox/
   config.yaml          # Host, credentials, serial, aliases
@@ -87,6 +89,32 @@ The token auth flow:
   cache/
     structure.json     # LoxApp3.json cache (24h TTL, ~150KB)
   scenes/*.yaml        # Multi-step scene definitions
+```
+
+Multi-context:
+```
+~/.lox/
+  config.yaml          # active_context + contexts map
+  contexts/
+    home/
+      cache/
+        structure.json # Per-context structure cache
+      token.json       # Per-context token
+    office/
+      cache/
+        structure.json
+      token.json
+  scenes/*.yaml        # Shared scene definitions
+```
+
+Project-local (auto-discovered by walking up from cwd):
+```
+./project/.lox/
+  config.yaml          # Connection settings
+  .gitignore           # Excludes secrets and cache
+  cache/
+    structure.json
+  scenes/*.yaml
 ```
 
 ## TLS
