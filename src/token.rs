@@ -27,14 +27,21 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    pub fn path() -> std::path::PathBuf {
-        Config::dir().join("token.json")
+    /// Token path for a specific config (context-aware).
+    pub fn path_for(cfg: &Config) -> std::path::PathBuf {
+        cfg.token_path()
     }
-    pub fn load() -> Option<Self> {
-        serde_json::from_str(&std::fs::read_to_string(Self::path()).ok()?).ok()
+    /// Load token for a specific config (context-aware).
+    pub fn load_for(cfg: &Config) -> Option<Self> {
+        serde_json::from_str(&std::fs::read_to_string(Self::path_for(cfg)).ok()?).ok()
     }
-    pub fn save(&self) -> Result<()> {
-        std::fs::write(Self::path(), serde_json::to_string_pretty(self)?)?;
+    /// Save token for a specific config (context-aware).
+    pub fn save_for(&self, cfg: &Config) -> Result<()> {
+        let path = Self::path_for(cfg);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
         Ok(())
     }
     pub fn is_valid(&self) -> bool {
@@ -266,7 +273,7 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
         key: token_key.to_string(),
         valid_until: unix_until,
     };
-    ts.save()?;
+    ts.save_for(cfg)?;
     Ok(ts)
 }
 

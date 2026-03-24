@@ -133,6 +133,15 @@ subcmd_help!(help_config_upload, "config", "upload");
 subcmd_help!(help_config_users, "config", "users");
 subcmd_help!(help_config_devices, "config", "devices");
 subcmd_help!(help_config_diff, "config", "diff");
+subcmd_help!(help_ctx, "ctx");
+subcmd_help!(help_ctx_add, "ctx", "add");
+subcmd_help!(help_ctx_use, "ctx", "use");
+subcmd_help!(help_ctx_list, "ctx", "list");
+subcmd_help!(help_ctx_current, "ctx", "current");
+subcmd_help!(help_ctx_remove, "ctx", "remove");
+subcmd_help!(help_ctx_rename, "ctx", "rename");
+subcmd_help!(help_ctx_init, "ctx", "init");
+subcmd_help!(help_ctx_migrate, "ctx", "migrate");
 subcmd_help!(help_completions, "completions");
 
 // ── Global flags accepted with subcommands ─────────────────────────────────

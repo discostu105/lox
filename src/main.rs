@@ -393,6 +393,7 @@ Configuration:
   setup, alias, scene          Connection settings, aliases, scenes
   cache, token                 Cache & auth token management
   config                       Loxone Config files (download/inspect/diff)
+  ctx                          Manage multiple Miniserver contexts
   completions                  Generate shell completions
   schema                       Command schema for AI agent discovery
 
@@ -423,6 +424,9 @@ pub(crate) struct Cli {
     /// Trace ID for correlating agent actions in logs
     #[arg(long, global = true)]
     trace_id: Option<String>,
+    /// Use a specific context (overrides active context)
+    #[arg(long = "ctx", global = true)]
+    context: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -837,6 +841,11 @@ pub(crate) enum Cmd {
         #[command(subcommand)]
         action: ConfigCmd,
     },
+    /// Manage multiple Miniserver contexts
+    Ctx {
+        #[command(subcommand)]
+        action: CtxCmd,
+    },
     /// Generate or install shell completions
     Completions {
         /// Shell to generate completions for (auto-detected if omitted)
@@ -1082,6 +1091,69 @@ pub(crate) enum CacheCmd {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum CtxCmd {
+    /// Add a new context
+    Add {
+        /// Context name
+        name: String,
+        /// Miniserver host URL
+        #[arg(long)]
+        host: String,
+        /// Username
+        #[arg(long)]
+        user: String,
+        /// Password
+        #[arg(long)]
+        pass: String,
+        /// Miniserver serial number (for DynDNS TLS)
+        #[arg(long)]
+        serial: Option<String>,
+    },
+    /// Switch the active context
+    Use {
+        /// Context name to activate
+        name: String,
+    },
+    /// List all contexts (* = active)
+    #[command(alias = "ls")]
+    List,
+    /// Show the current active context
+    Current,
+    /// Remove a context
+    Remove {
+        /// Context name to remove
+        name: String,
+    },
+    /// Rename a context
+    Rename {
+        /// Current name
+        old: String,
+        /// New name
+        new: String,
+    },
+    /// Initialize a project-local .lox/ directory
+    Init {
+        /// Miniserver host URL
+        #[arg(long)]
+        host: Option<String>,
+        /// Username
+        #[arg(long)]
+        user: Option<String>,
+        /// Password
+        #[arg(long)]
+        pass: Option<String>,
+        /// Miniserver serial number
+        #[arg(long)]
+        serial: Option<String>,
+    },
+    /// Migrate flat config to a 'default' context
+    Migrate,
+    /// Shortcut: `lox ctx <name>` = `lox ctx use <name>`
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Subcommand)]
 pub(crate) enum SetupCmd {
     /// Set one or more config fields (omitted fields are preserved)
     Set {
@@ -1250,6 +1322,9 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    // Set context override before any Config::load() calls
+    config::set_ctx_override(cli.context.clone());
+
     client::set_verbose(cli.verbose);
     let ctx = commands::RunContext {
         json: cli.output == OutputFormat::Json,
@@ -1436,6 +1511,7 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Cache { action } => commands::config_cmd::cmd_cache(&ctx, action),
         Cmd::Token { action } => commands::config_cmd::cmd_token(&ctx, action),
         Cmd::Config { action } => commands::config_cmd::cmd_config(&ctx, action),
+        Cmd::Ctx { action } => commands::ctx::cmd_ctx(&ctx, action),
         Cmd::Completions { shell, install } => {
             commands::config_cmd::cmd_completions(&ctx, shell, install)
         }

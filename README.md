@@ -124,6 +124,17 @@ Config location:
 - **macOS/Linux:** `~/.lox/config.yaml`
 - **Windows:** `C:\Users\<YOU>\.lox\config.yaml`
 
+### Multiple Miniservers
+
+Manage multiple connections with named contexts:
+
+```bash
+lox ctx add home --host https://192.168.1.100 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx use home              # switch active context
+lox --ctx office status       # one-off command against a different context
+```
+
 ### Aliases
 
 Add short names for frequently-used controls in your `config.yaml`:

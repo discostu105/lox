@@ -118,6 +118,44 @@ See the [Config Versioning guide](/lox/guides/config-versioning) for the full wo
 
 ---
 
+## Context management
+
+Manage multiple Miniserver connections, similar to `kubectl config use-context`:
+
+```bash
+lox ctx add home --host https://192.168.1.100 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx use home                # switch active context
+lox ctx home                    # shortcut for `lox ctx use home`
+lox ctx list                    # list all contexts (* = active)
+lox ctx current                 # show active context
+lox ctx remove office           # remove a context
+lox ctx rename home house       # rename a context
+```
+
+Use `--ctx <name>` on any command for a one-off override:
+```bash
+lox --ctx office status         # run against 'office' without switching
+```
+
+### Project-local config
+
+```bash
+lox ctx init                    # create .lox/ in current directory
+```
+
+Project-local `.lox/config.yaml` is auto-discovered by walking up from cwd. Each context gets its own cache, token, and scenes directory.
+
+### Migration from flat config
+
+```bash
+lox ctx migrate                 # convert existing config to 'default' context
+```
+
+Existing flat `~/.lox/config.yaml` files continue to work unchanged.
+
+---
+
 ## Shell completions
 
 ```bash
