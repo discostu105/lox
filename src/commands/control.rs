@@ -822,10 +822,7 @@ pub fn cmd_thermostat(
                 "type": ctrl.typ, "value": val,
             });
             let mut i = 1;
-            loop {
-                let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                    break;
-                };
+            while let Some(n) = xml_attr(&xml, &format!("n{}", i)) {
                 let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
                 if !n.is_empty() {
                     result[n] = serde_json::Value::String(v.to_string());
@@ -837,10 +834,7 @@ pub fn cmd_thermostat(
             println!("Thermostat: {} ({})", ctrl.name, ctrl.uuid);
             println!("Room:       {}", ctrl.room.as_deref().unwrap_or("─"));
             let mut i = 1;
-            loop {
-                let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                    break;
-                };
+            while let Some(n) = xml_attr(&xml, &format!("n{}", i)) {
                 let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
                 if !n.is_empty() {
                     println!("  {:<30} = {}", n, v);

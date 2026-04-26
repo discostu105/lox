@@ -147,17 +147,18 @@ pub fn parse_users(xml: &[u8]) -> Result<Vec<LoxUser>> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e) | Event::Empty(ref e)) if e.name().as_ref() == b"C" => {
-                if attr_value(e, b"Type").as_deref() == Some("User") {
-                    let name = attr_value_or(e, b"Title", "");
-                    let nfc_arr = attr_value_or(e, b"NFCArr", "");
-                    let desc = attr_value_or(e, b"Desc", "").replace('_', " ");
-                    users.push(LoxUser {
-                        name,
-                        nfc: !nfc_arr.is_empty(),
-                        description: desc,
-                    });
-                }
+            Ok(Event::Start(ref e) | Event::Empty(ref e))
+                if e.name().as_ref() == b"C"
+                    && attr_value(e, b"Type").as_deref() == Some("User") =>
+            {
+                let name = attr_value_or(e, b"Title", "");
+                let nfc_arr = attr_value_or(e, b"NFCArr", "");
+                let desc = attr_value_or(e, b"Desc", "").replace('_', " ");
+                users.push(LoxUser {
+                    name,
+                    nfc: !nfc_arr.is_empty(),
+                    description: desc,
+                });
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(e).context("Failed to parse XML"),

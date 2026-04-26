@@ -131,10 +131,7 @@ pub fn cmd_get(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> 
             }
         }
         let mut i = 1;
-        loop {
-            let Some(n) = xml_attr(&xml, &format!("n{}", i)) else {
-                break;
-            };
+        while let Some(n) = xml_attr(&xml, &format!("n{}", i)) {
             let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
             if !n.is_empty() {
                 println!("  {:<30} = {}", n, v);
