@@ -1,0 +1,13 @@
+# Seite "Pool" — per Konvention eine Datei pro Seite: jedes Fragment,
+# das Blöcke deklariert, beginnt mit seinem `page`-Statement (D28).
+# Darüber hinaus trägt die Fragment-Reihenfolge keine Bedeutung.
+
+page "Pool"
+
+heizen = Less(
+	"Wasser unter Soll",
+	Input1: wasser.Q,
+	Input2: solltemp,
+)
+
+pumpe.On <- heizen.Q

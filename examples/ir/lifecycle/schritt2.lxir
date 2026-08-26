@@ -1,0 +1,17 @@
+# Lebenszyklus, Schritt 2: `wetter_ok` heißt jetzt `wetter_sperre`.
+# `moved` nimmt den Lock-Eintrag mit: Objekt- und Port-UUIDs (und damit
+# das GUI-Layout) überleben die Umbenennung. Sobald der Compile durch
+# ist, darf die Zeile wieder raus.
+
+extern sonne = VirtualIn(iname: "VI1")
+
+wetter_sperre = Not(
+	I: sonne.Q,
+)
+
+altlast = And(
+	I1: sonne.Q,
+	I2: wetter_sperre.Q,
+)
+
+moved wetter_ok -> wetter_sperre

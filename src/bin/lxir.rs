@@ -680,7 +680,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
         .arg(&cfg_path)
         .arg("--sim-file")
         .arg(&specs_path)
-        .args(["--json", "--non-interactive"])
+        .args(["--output", "json", "--non-interactive"])
         .output();
     let _ = std::fs::remove_dir_all(&tmp);
     let output = output?;

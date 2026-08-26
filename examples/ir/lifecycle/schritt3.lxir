@@ -1,0 +1,13 @@
+# Lebenszyklus, Schritt 3: `altlast` verschwindet aus der Quelle. Ohne
+# Autorisierung verweigert der Compiler — verwaiste Blöcke löscht er
+# nie stillschweigend. `removed` autorisiert genau diesen einen Slug:
+# der nächste Compile löscht den Block und hinterlässt einen Tombstone
+# im Lock (D31), der die Löschung auch auf älteren Basen nachzieht.
+
+extern sonne = VirtualIn(iname: "VI1")
+
+wetter_sperre = Not(
+	I: sonne.Q,
+)
+
+removed altlast

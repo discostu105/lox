@@ -439,13 +439,18 @@ fn clock_json(spec: &str, test_name: &str) -> Result<Json> {
     Ok(Json::Object(obj))
 }
 
-/// Read `lox sim run --json` output back onto the plan. The simulator
-/// flattens every step's checks into one array per scenario, in step
-/// order; within a step (a JSON map, unordered) a check is identified by
-/// (signal key, comparator) — planning refused duplicates.
+/// Read `lox sim run --output json` output back onto the plan. The
+/// simulator flattens every step's checks into one array per scenario, in
+/// step order; within a step (a JSON map, unordered) a check is
+/// identified by (signal key, comparator) — planning refused duplicates.
+/// On failing scenarios the CLI appends a second JSON object (the error
+/// summary) to stdout — only the first value is the result.
 pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
     let sim_err = |msg: String| Err(Error::Compile(format!("sim result: {msg}")));
-    let root: Json = serde_json::from_str(stdout.trim())
+    let root: Json = serde_json::Deserializer::from_str(stdout.trim())
+        .into_iter::<Json>()
+        .next()
+        .unwrap_or_else(|| serde_json::from_str(""))
         .map_err(|e| Error::Compile(format!("sim output is not JSON ({e}): {stdout}")))?;
     let scenarios = match root.get("scenarios").and_then(Json::as_array) {
         Some(s) => s,
