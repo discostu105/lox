@@ -172,6 +172,9 @@ pub(super) struct Lift {
     ref_wires_folded: usize,
     /// Observed-default parameters elided from the full view (D30).
     default_params_elided: usize,
+    /// Automatic Designer rule summaries (full view only): extern object
+    /// index → `#` comment lines rendered from the rule's `APC=` payload.
+    rule_notes: BTreeMap<usize, Vec<String>>,
 }
 
 /// One page's (or the periphery's) share of the lifted items, as indexes
@@ -645,6 +648,36 @@ impl Lift {
             });
         }
 
+        // An `AutopilotRule` extern's whole rule lives in its `APC=`
+        // JSON — invisible as a bare declaration. The full view renders
+        // it as comment lines above the extern (view-only liberty, D29;
+        // the payload stays app-owned and is never language surface).
+        let mut rule_notes: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+        if opts.scope == DecompileScope::Full {
+            let resolve = |uuid: &str| -> Option<String> {
+                let &i = obj_index.get(uuid)?;
+                let o = &objects[i];
+                o.title.clone().or_else(|| o.iname.clone())
+            };
+            for &i in &externs {
+                let o = &objects[i];
+                if o.block_type != "AutopilotRule" {
+                    continue;
+                }
+                let Some(rule) = doc
+                    .element_at(&o.path)
+                    .and_then(|el| el.attr_decoded("APC"))
+                    .and_then(|apc| crate::autopilot::parse(&apc))
+                else {
+                    continue; // no or unreadable payload — bare extern
+                };
+                let lines = crate::autopilot::summary(&rule, &resolve);
+                if !lines.is_empty() {
+                    rule_notes.insert(i, lines);
+                }
+            }
+        }
+
         Lift {
             objects,
             page_titles,
@@ -660,11 +693,21 @@ impl Lift {
             wires,
             ref_wires_folded,
             default_params_elided,
+            rule_notes,
         }
     }
 
     pub(super) fn page_of(&self, obj: usize) -> Option<usize> {
         self.page_of.get(&self.objects[obj].uuid).copied()
+    }
+
+    /// The Automatic Designer rule summary, as comment items above the
+    /// rule's extern declaration (full view only — `rule_notes` is empty
+    /// otherwise).
+    fn push_rule_notes(&self, obj: usize, items: &mut Vec<Item>) {
+        if let Some(lines) = self.rule_notes.get(&obj) {
+            items.extend(lines.iter().map(|l| Item::Comment(format!(" {l}"))));
+        }
     }
 
     pub(super) fn page_title(&self, page: usize) -> &str {
@@ -708,6 +751,7 @@ impl Lift {
             None => Item::Comment(" periphery (not placed on a page)".to_string()),
         }];
         for &i in &b.externs {
+            self.push_rule_notes(i, &mut items);
             items.push(Item::Extern(self.extern_decls[&i].clone()));
         }
         for &i in &b.blocks {
@@ -766,11 +810,10 @@ impl Lift {
                 title: self.page_titles[p].clone(),
                 comment: None,
             })];
-            items.extend(
-                b.externs
-                    .iter()
-                    .map(|&i| Item::Extern(self.extern_decls[&i].clone())),
-            );
+            for &i in &b.externs {
+                self.push_rule_notes(i, &mut items);
+                items.push(Item::Extern(self.extern_decls[&i].clone()));
+            }
 
             // Referenced objects the page does not contain become foreign
             // externs, annotated with where they live.

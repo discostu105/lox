@@ -329,6 +329,30 @@ haus/
       the fixed-two-input gate cascade (D8), and an extern wire.
       Kept compiling by `tests/ir.rs` (fixpoint + canonical form).
 
+## Automatic Designer (Automatik Designer)
+
+The app's rule engine; each rule is an `AutopilotRule` block whose whole
+logic sits in its `APC=` JSON attribute — format facts in
+[loxone-format.md](loxone-format.md), scope decision D37 in
+[design.md](design.md). No public spec exists (checked the official API
+docs 2026-08-26); the schema is corpus-derived from 10 real rules.
+
+- [x] Read side 2026-08-26 (D37): `APC=` joins the semantic projection —
+      an app-edited rule shows up in `lxir diff` (as JSON field paths),
+      moves the fingerprint, and trips `lxir drift`; the decompile full
+      view renders each rule as `# when … / # then …` comment lines with
+      control UUIDs resolved to titles.
+- [ ] Oracle probe: does a Loxone Config open+save round-trip `APC=`
+      byte-identically (key order/whitespace), and does it preserve a
+      foreign-minted rule at all? Cheap to answer with
+      `scripts/oracle.sh`; prerequisite for any write-side work.
+- [ ] Authoring (`rule` statements compiling to `AutopilotRule` blocks)
+      is gated on evidence that does not exist yet: the `descID`/
+      event-type tables (they ship only inside the Loxone app bundle),
+      the oracle answer above, and a live-Miniserver check that a
+      compiled rule actually *executes* (silent non-execution is the
+      D8-class risk). Until then: refuse.
+
 ## Tooling & ecosystem
 
 - **Refactoring**

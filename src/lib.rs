@@ -23,6 +23,7 @@
 //! it lives in the `lox` / `lox-cli` CLIs, which are the intended consumers
 //! of this crate.
 
+pub mod autopilot;
 pub mod connectors;
 pub mod diff;
 pub mod doc;

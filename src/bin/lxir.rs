@@ -1287,6 +1287,31 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
         );
     }
     for p in &d.param_changes {
+        // An Automatic Designer rule payload is a JSON blob — rendered
+        // as field-path changes instead of two full blobs.
+        if p.port_key == "APC"
+            && let (Some(from), Some(to)) = (&p.from, &p.to)
+            && let (Some(old), Some(new)) =
+                (lxir::autopilot::parse(from), lxir::autopilot::parse(to))
+        {
+            let lines = lxir::autopilot::changes(&old, &new);
+            if !lines.is_empty() {
+                let title = b
+                    .objects()
+                    .into_iter()
+                    .chain(a.objects())
+                    .find(|o| o.uuid == p.object_uuid)
+                    .and_then(|o| o.title);
+                println!(
+                    "* {} {} {:?} rule changed:",
+                    p.block_type, p.object_uuid, title
+                );
+                for line in lines {
+                    println!("    {line}");
+                }
+                continue;
+            }
+        }
         println!(
             "* {} {}.{}: {:?} -> {:?}",
             p.block_type, p.object_uuid, p.port_key, p.from, p.to

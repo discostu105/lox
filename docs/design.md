@@ -820,3 +820,44 @@ Anything unverified is an error, not a heuristic:
     A `!=` comparator emulated as two checks — dishonest reporting
     when only one leg fails; the simulator can grow `!=` upstream
     instead.
+- **D37 — Automatic Designer rules: eyes, not hands** (2026-08-26).
+  The app's Automatic Designer stores each rule as an `AutopilotRule`
+  block whose entire logic — conditions, actions, activation — lives in
+  the element's `APC=` JSON attribute
+  ([loxone-format.md](loxone-format.md)). These blocks are the
+  Miniserver's writes (D20 already cites them as the canonical
+  GUI-owned-whole unit), so lxir does not author them; but a reader
+  blind to `APC=` had three real holes, and this decision closes
+  exactly those:
+  - **`diff`/`drift`/fingerprint compare `APC=`** like an attribute
+    parameter — an app-edited rule (a changed schedule time, a
+    disabled rule) was previously "semantically empty", the same hole
+    D18 closed for `Formula=`. `APC` deliberately does *not* join
+    `connectors::attr_params`: that table is language surface
+    (validate/compile/decompile bind those names), and the rule
+    payload must never become bindable. A `diff`-local attribute set
+    (`diff_attrs`) carries the union. Comparison is **structural, not
+    textual**: the raw payload is not writer-stable (two house rules
+    carry a raw CRLF inside the JSON), so `APC=` compares and
+    fingerprints as canonicalized parsed JSON — a reformatted rule is
+    not drift, an edited one is. The fingerprint moves only for
+    rule-carrying configs (projection extension, no version bump);
+    `lxir diff` renders an APC change as JSON field paths
+    (`eventGroups[0].events[0].value: 540 -> 600`), not two blobs.
+  - **The decompile full view renders each rule** as comment lines
+    above its extern (`# when … / # then …`), resolving the payload's
+    control UUIDs to titles — factual, every observed reference
+    resolves in-document. Unknown codes print raw (`descID 272001`),
+    interpreted labels are refused until evidence exists; the
+    adoptable view stays bare (D29 boundary: comments are for
+    readers, ManagedOnly output owes the compiler byte-fidelity).
+  - The payload is handled as **untyped JSON** end to end: a typed
+    struct would silently drop fields a newer app adds, and the diff
+    must see exactly what changed, schema known or not.
+  - Authoring (compiling rules from source) is deferred, not
+    rejected, behind the evidence it needs: the `descID`/event-type
+    tables (only inside the app bundle), an oracle answer on whether
+    Loxone Config preserves foreign-minted rules, and a live
+    Miniserver answer on whether it *executes* them — silent
+    non-execution being the D8-class failure to rule out. Until all
+    three exist, refuse-never-guess keeps the write side closed.

@@ -2571,3 +2571,52 @@ fn arithmetic_misuse_is_reported() {
         "at most 4 inputs",
     );
 }
+
+#[test]
+fn full_view_renders_autopilot_rules_as_comments() {
+    // An `AutopilotRule` carries its whole rule as JSON in `APC=` —
+    // the full view renders it above the extern, resolving control
+    // UUIDs to titles; the adoptable view stays bare (D29 boundary).
+    let apc = "{&quot;type&quot;:1,&quot;active&quot;:true,&quot;invalid&quot;:false,\
+               &quot;name&quot;:&quot;Skimmer Ein&quot;,&quot;operator&quot;:3,\
+               &quot;eventGroups&quot;:[{&quot;operator&quot;:1,&quot;events&quot;:[\
+               {&quot;type&quot;:5,&quot;descID&quot;:272001,&quot;id&quot;:272,\
+               &quot;value&quot;:540,&quot;operator&quot;:1,&quot;forceEdge&quot;:false}]}],\
+               &quot;actions&quot;:[{&quot;type&quot;:0,&quot;descID&quot;:342101,\
+               &quot;id&quot;:&quot;40000001-0000-0010-ffff504f94112233&quot;,\
+               &quot;command&quot;:&quot;on&quot;}]}";
+    let s = format!(
+        "<ControlList Version=\"1\" NextObj=\"9\">\r\n\
+         \t<C Type=\"Document\" U=\"40000000-0000-0001-ffff504f94112233\">\r\n\
+         \t\t<C Type=\"Page\" U=\"40000000-0000-0002-ffff504f94112233\" Title=\"Automatik-Regeln\" SpNo=\"1\">\r\n\
+         \t\t\t<C Type=\"Switch\" U=\"40000001-0000-0010-ffff504f94112233\" Title=\"Pumpe\" Nio=\"2\">\r\n\
+         \t\t\t\t<Co K=\"On\" U=\"40000001-0000-0011-00ffaaaaaaaa0001\"/>\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000001-0000-0012-01ffaaaaaaaa0001\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"AutopilotRule\" U=\"40000002-0000-0020-ffff504f94112233\" Title=\"Skimmer Ein\" Nio=\"1\" APC=\"{apc}\" STA=\"1\">\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000002-0000-0021-00ffaaaaaaaa0002\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\
+         \t</C>\r\n\
+         </ControlList>\r\n"
+    );
+    let doc = LoxoneDoc::parse(s.as_bytes()).unwrap();
+
+    let (m, _) = decompile(&doc, &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    assert!(
+        text.contains("# when type 5, descID 272001, id 272: value 540"),
+        "time event rendered raw:\n{text}"
+    );
+    assert!(
+        text.contains("# then \"Pumpe\": on"),
+        "action resolves the control title:\n{text}"
+    );
+
+    let mo = DecompileOptions {
+        scope: DecompileScope::ManagedOnly,
+        ..Default::default()
+    };
+    let (m, _) = decompile(&doc, &mo).unwrap();
+    assert!(!m.to_text().contains("# when"), "adoptable view stays bare");
+}

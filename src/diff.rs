@@ -10,6 +10,35 @@ use crate::connectors::attr_params;
 use crate::doc::{LoxoneDoc, ObjectSummary, WireView, ports};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Element attributes the diff projection compares for a block type: the
+/// language-surface attribute parameters (`Formula=`), plus `APC=` on
+/// `AutopilotRule` — the app-owned Automatic Designer rule payload.
+/// `APC` is *not* an `attr_params` entry because it is not language
+/// surface (the app and the Miniserver own those blocks; lxir never
+/// writes them), but it is block logic stored in an attribute all the
+/// same, and a diff blind to it would call an edited rule "semantically
+/// empty" — the exact hole D18 closed for `Formula=`.
+fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
+    attr_params(block_type)
+        .iter()
+        .copied()
+        .chain((block_type == "AutopilotRule").then_some("APC"))
+}
+
+/// The comparison/fingerprint form of one such attribute value. `APC=`
+/// is JSON and its raw text is not writer-stable (raw newlines *inside*
+/// the payload exist in the wild), so it compares canonicalized — a
+/// reformatted rule is not drift, an edited one is. Unparseable text,
+/// and every other attribute, compares verbatim.
+fn canonical_attr(name: &str, value: &Option<String>) -> Option<String> {
+    match value {
+        Some(v) if name == "APC" => {
+            Some(crate::autopilot::canonical(v).unwrap_or_else(|| v.clone()))
+        }
+        _ => value.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocDiff {
     pub added: Vec<ObjectSummary>,
@@ -108,20 +137,20 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         });
                     }
                 }
-                // Attribute parameters (block logic stored as an element
-                // attribute, e.g. `Formula=`) — a diff blind to them would
-                // call a changed formula "semantically empty".
-                for name in attr_params(&ob.block_type) {
+                // Block logic stored as an element attribute — attribute
+                // parameters (`Formula=`) and the Automatic Designer rule
+                // payload (`APC=`); see `diff_attrs`.
+                for name in diff_attrs(&ob.block_type) {
                     let attr = |doc: &LoxoneDoc, o: &ObjectSummary| {
                         doc.element_at(&o.path)
                             .and_then(|el| el.attr_decoded(name).map(|v| v.into_owned()))
                     };
                     let (va, vb) = (attr(a, oa), attr(b, ob));
-                    if va != vb {
+                    if canonical_attr(name, &va) != canonical_attr(name, &vb) {
                         out.param_changes.push(ParamChange {
                             object_uuid: uuid.clone(),
                             block_type: ob.block_type.clone(),
-                            port_key: (*name).to_string(),
+                            port_key: name.to_string(),
                             from: va,
                             to: vb,
                         });
@@ -178,11 +207,15 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
                 field(&mut buf, b'd', &def);
             }
         }
-        for name in attr_params(&o.block_type) {
+        // Same attribute set and canonical form as the diff
+        // (`diff_attrs`/`canonical_attr`): a projection extension only
+        // moves the fingerprint of documents that carry the new
+        // attribute — rule-free configs hash as before.
+        for name in diff_attrs(&o.block_type) {
             let value = doc
                 .element_at(&o.path)
                 .and_then(|el| el.attr_decoded(name).map(|v| v.into_owned()));
-            if let Some(v) = value {
+            if let Some(v) = canonical_attr(name, &value) {
                 field(&mut buf, b'a', name);
                 field(&mut buf, b'v', &v);
             }
@@ -277,6 +310,43 @@ mod tests {
     fn identical_docs_diff_empty() {
         let a = doc("X", "1", true);
         assert!(diff(&a, &a).is_empty());
+    }
+
+    #[test]
+    fn autopilot_rule_edits_are_semantic() {
+        // An app-edited Automatic Designer rule is a real change: the
+        // whole rule lives in the `APC=` attribute, which the projection
+        // compares like an attribute parameter.
+        let doc_with = |apc: &str| {
+            let s = format!(
+                "<ControlList Version=\"1\" NextObj=\"5\">\r\n\
+                 \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+                 \t\t<C Type=\"Page\" U=\"00000002-0000-0000-ffff000000000001\" Title=\"P\">\r\n\
+                 \t\t\t<C Type=\"AutopilotRule\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"R\" APC=\"{apc}\" STA=\"1\"/>\r\n\
+                 \t\t</C>\r\n\
+                 \t</C>\r\n\
+                 </ControlList>\r\n"
+            );
+            LoxoneDoc::parse(s.as_bytes()).unwrap()
+        };
+        let a = doc_with("{&quot;active&quot;:true}");
+        let b = doc_with("{&quot;active&quot;:false}");
+        let d = diff(&a, &b);
+        assert_eq!(d.param_changes.len(), 1);
+        assert_eq!(d.param_changes[0].port_key, "APC");
+        assert_eq!(
+            d.param_changes[0].from.as_deref(),
+            Some("{\"active\":true}")
+        );
+        assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
+        assert!(diff(&a, &a).is_empty());
+
+        // The raw payload text is not writer-stable (raw newlines inside
+        // the JSON exist in the wild) — reformatting and key order are
+        // not drift, only the parsed value is compared.
+        let reflowed = doc_with("{ &quot;active&quot; :&#10;true }");
+        assert!(diff(&a, &reflowed).is_empty());
+        assert_eq!(semantic_fingerprint(&a), semantic_fingerprint(&reflowed));
     }
 
     #[test]
