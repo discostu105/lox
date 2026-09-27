@@ -582,9 +582,10 @@ fn config_diff_focus_and_footer() {
     );
     let s = h.render(140, 30);
     assert!(s.contains("focus diff"), "{}", s);
-    assert!(s.contains("never writes back"), "{}", s);
-    assert!(s.contains("/srv/cfg/ms/config.Loxone"), "{}", s);
-    assert!(s.contains("lxir"), "{}", s);
+    assert!(s.contains("never writes to the Miniserver"), "{}", s);
+    assert!(s.contains("git · /srv/cfg"), "repo in the frame: {}", s);
+    assert!(s.contains("  ms/config.Loxone"), "{}", s);
+    assert!(s.contains("commit c2 · the first backup"), "{}", s);
     h.keys(&["Tab"]);
     assert_eq!(h.app.system.pane, 1);
     let s = h.render(140, 30);

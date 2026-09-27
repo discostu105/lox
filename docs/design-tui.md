@@ -583,7 +583,9 @@ Round 3 (implemented) — only what the Miniserver actually reports:
     via FTP and commits it when it changed. The footer explains this and shows the state: pulling (with elapsed
     time), `✓ up to date · last save …`, new commit, or the error. Allowed read-only (it only reads from the
     Miniserver). A pull re-reads the history and every diff. It never writes to or restores the Miniserver. The
-    footer shows where the backup is committed (`<repo>/<ms>/config.Loxone`).
+    footer shows where the data comes from: each row is a git commit of `<ms>/config.Loxone` in `config_repo`
+    (the repo is also in the frame's notch, `git · ~/…`). The diff header says what is compared: saved-in-Loxone-Config
+    date, version, pull date, then `lxir diff · commit A vs B (the backup before)`.
   - `⇥` (or `⏎`) focuses the diff: a cursor row appears, `j`/`k` move it, and `⏎` shows the full diff line.
     `⇥` goes back to the history.
 - **Update**: firmware check, changelog link, `U` install and `R` reboot, both with **typed confirmation**

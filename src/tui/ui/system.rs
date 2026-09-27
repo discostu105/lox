@@ -914,6 +914,30 @@ fn spinner(app: &App) -> &'static str {
     F[((app.now * 8.0) as usize) % F.len()]
 }
 
+/// The config repo (`~`-relative) and the file within it (`<ms>/config.Loxone`).
+fn config_src(app: &App) -> Option<(String, String)> {
+    use std::path::{Component, Path, PathBuf};
+    // `config_repo: ~/x/.` is common: drop the `.`
+    let p: PathBuf = Path::new(app.config_file.as_deref()?)
+        .components()
+        .filter(|c| !matches!(c, Component::CurDir))
+        .collect();
+    let ms = p.parent()?;
+    let repo = ms.parent()?;
+    let rel = p.strip_prefix(repo).ok()?.display().to_string();
+    Some((home_rel(&repo.display().to_string()), rel))
+}
+
+/// Fit keeping the end (paths: the last part matters most).
+fn left_fit(s: &str, w: usize) -> String {
+    let n = s.chars().count();
+    if n <= w {
+        return s.to_string();
+    }
+    let keep: String = s.chars().skip(n + 1 - w.max(1)).collect();
+    format!("…{}", keep)
+}
+
 /// `/home/me/x` → `~/x`.
 fn home_rel(p: &str) -> String {
     match std::env::var("HOME") {
@@ -952,7 +976,10 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
         app,
         area,
         buf,
-        Some(Notch::new("config history")),
+        Some(Notch::new(match config_src(app) {
+            Some((repo, _)) => format!("git · {}", repo),
+            None => "config history".into(),
+        })),
         hints,
         Some(format!("{}/{}", (s + 1).min(len), len)),
     );
@@ -993,7 +1020,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     };
     let lw = (inner.width * 2 / 5).clamp(36, 64);
     // list above, pull status + explanation below
-    let foot = if inner.height >= 16 { 6 } else { 1 };
+    let foot = if inner.height >= 18 { 8 } else { 1 };
     let list = Rect::new(inner.x, inner.y, lw, inner.height.saturating_sub(foot));
     let hgt = list.height as usize;
     if app.system.pane == 0 {
@@ -1084,34 +1111,31 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             cell(buf, inner, x, fy, "─", th.s_border(false));
         }
         put(buf, inner, inner.x + 1, fy + 1, &fit(&pst, fw), pstyle);
-        let file = app
-            .config_file
-            .as_deref()
-            .map(home_rel)
-            .unwrap_or_else(|| "the config repo".into());
-        // the end of a long path matters most
-        let n = file.chars().count();
-        let file = if n + 2 > fw {
-            let keep: String = file.chars().skip(n + 3 - fw.min(n + 2)).collect();
-            format!("→ …{}", keep)
-        } else {
-            format!("→ {}", file)
-        };
+        // where the rows come from, and what P adds to it
+        let (repo, file) =
+            config_src(app).unwrap_or_else(|| ("the config repo".into(), "config.Loxone".into()));
         let lines = [
-            "P downloads the newest backup (FTP, read-only)".to_string(),
-            "and commits it to git — never writes back:".to_string(),
-            file,
-            "diff: lxir semantic compare of config.Loxone".to_string(),
-        ];
-        for (i, l) in lines.iter().enumerate() {
-            put(
-                buf,
-                inner,
-                inner.x + 1,
-                fy + 2 + i as u16,
-                &fit(l, fw),
+            ("each row = a git commit of".to_string(), th.s_faint()),
+            (
+                format!("  {}", left_fit(&file, fw.saturating_sub(2))),
+                th.s_dim(),
+            ),
+            ("in the repo".to_string(), th.s_faint()),
+            (
+                format!("  {}", left_fit(&repo, fw.saturating_sub(2))),
+                th.s_dim(),
+            ),
+            (
+                "P: FTP-download the newest SD-card backup, commit it".to_string(),
                 th.s_faint(),
-            );
+            ),
+            (
+                "   (reads only — never writes to the Miniserver)".to_string(),
+                th.s_faint(),
+            ),
+        ];
+        for (i, (l, st)) in lines.iter().enumerate() {
+            put(buf, inner, inner.x + 1, fy + 2 + i as u16, &fit(l, fw), *st);
         }
     } else {
         put(buf, inner, inner.x + 1, fy, &fit(&pst, fw), pstyle);
@@ -1130,22 +1154,35 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     // header: what this commit is
     let mut head = Vec::new();
     if let Some(d) = &c.saved {
-        head.push(format!("saved {}", d));
+        head.push(format!("saved in Loxone Config {}", d));
     }
     if let Some(v) = &c.version {
         head.push(v.clone());
     }
     head.push(format!("pulled {}", c.date.get(..16).unwrap_or(&c.date)));
-    head.push(c.hash.get(..7).unwrap_or(&c.hash).to_string());
+    let dw = dr.width.saturating_sub(2) as usize;
     put(
         buf,
         dr,
         dr.x + 1,
         dr.y,
-        &fit(&head.join(" · "), dr.width.saturating_sub(2) as usize),
+        &fit(&head.join(" · "), dw),
         th.s_faint(),
     );
-    let body = Rect::new(dr.x, dr.y + 2, dr.width, dr.height.saturating_sub(2));
+    let short = |h: &str| h.get(..7).unwrap_or(h).to_string();
+    let vs = match commits.get(s + 1) {
+        Some(p) => format!(
+            "lxir diff · commit {} vs {} (the backup before)",
+            short(&c.hash),
+            short(&p.hash)
+        ),
+        None => format!(
+            "commit {} · the first backup, nothing before it",
+            short(&c.hash)
+        ),
+    };
+    put(buf, dr, dr.x + 1, dr.y + 1, &fit(&vs, dw), th.s_faint());
+    let body = Rect::new(dr.x, dr.y + 3, dr.width, dr.height.saturating_sub(3));
     let Some(diff) = app.diffs.get(&c.hash) else {
         if let Some(e) = app.diff_errs.get(&c.hash) {
             common::empty(
