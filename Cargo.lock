@@ -2000,6 +2000,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tokio-tungstenite",
+ "unicode-segmentation",
  "unicode-width",
  "uuid",
  "webpki-roots 0.26.11",

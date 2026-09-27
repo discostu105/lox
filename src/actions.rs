@@ -125,8 +125,8 @@ fn fmt_num(v: f64) -> String {
 impl Action {
     /// The Loxone command strings to send, in order.
     ///
-    /// Setting a specific mood sends `on` first: `setMood` is silently ignored by the
-    /// Miniserver while the light controller is off.
+    /// Moods are switched with `changeTo/{id}` (LightControllerV2; 778 = off). The
+    /// Miniserver silently ignores the undocumented `setMood/{id}`.
     pub fn commands(&self) -> Vec<String> {
         let one = |s: &str| vec![s.to_string()];
         match self {
@@ -144,9 +144,8 @@ impl Action {
             Action::Mood(m) => match m {
                 MoodCmd::Plus => one("plus"),
                 MoodCmd::Minus => one("minus"),
-                MoodCmd::Off => vec![format!("setMood/{}", MOOD_OFF_ID)],
-                MoodCmd::Set(id) if *id == MOOD_OFF_ID => vec![format!("setMood/{}", id)],
-                MoodCmd::Set(id) => vec!["on".to_string(), format!("setMood/{}", id)],
+                MoodCmd::Off => vec![format!("changeTo/{}", MOOD_OFF_ID)],
+                MoodCmd::Set(id) => vec![format!("changeTo/{}", id)],
             },
             Action::Dim(level) => vec![format!("{}", level)],
             Action::Color(c) => vec![c.clone()],
@@ -211,7 +210,8 @@ impl Action {
     pub fn risk(&self) -> Risk {
         match self {
             Action::Door(_) => Risk::Confirm,
-            Action::Gate(GateCmd::Open) => Risk::Confirm,
+            // closing can trap a car or a person as easily as opening lets someone in
+            Action::Gate(GateCmd::Open | GateCmd::Close) => Risk::Confirm,
             Action::Alarm { cmd, .. } if *cmd != AlarmCmd::Quit => Risk::Confirm,
             Action::Intercom(IntercomCmd::Open) => Risk::Confirm,
             Action::Charger(ChargerCmd::Start(_)) => Risk::Confirm,
@@ -378,16 +378,25 @@ impl Action {
     }
 }
 
+/// IRoomControllerV2 `operatingMode` values (`setOperatingMode/{id}`).
+/// Comfort / eco / building protection are *temperature* modes (`activeMode`),
+/// not operating modes.
+pub const THERMO_MODES: [(&str, &str); 6] = [
+    ("auto", "0"),
+    ("auto-heat", "1"),
+    ("auto-cool", "2"),
+    ("manual", "3"),
+    ("manual-heat", "4"),
+    ("manual-cool", "5"),
+];
+
 /// Human name for a thermostat operating mode ID.
 pub fn thermo_mode_name(id: &str) -> &str {
-    match id {
-        "0" => "auto",
-        "1" => "manual",
-        "2" => "comfort",
-        "3" => "eco",
-        "4" => "building-protection",
-        other => other,
-    }
+    THERMO_MODES
+        .iter()
+        .find(|(_, i)| *i == id)
+        .map(|(n, _)| *n)
+        .unwrap_or(id)
 }
 
 /// Quote a CLI argument only when needed.
@@ -499,17 +508,33 @@ pub fn parse_thermostat(action: &str, value: Option<&str>, minutes: Option<u64>)
         }
         "mode" => {
             let m = value.ok_or_else(|| {
-                anyhow::anyhow!("Usage: lox thermostat <name> mode <auto|manual|comfort|eco>")
+                anyhow::anyhow!(
+                    "Usage: lox thermostat <name> mode <{}>",
+                    THERMO_MODES.map(|(n, _)| n).join("|")
+                )
             })?;
-            let id = match m.to_lowercase().as_str() {
-                "auto" | "automatic" => "0".to_string(),
-                "manual" => "1".to_string(),
-                "comfort" => "2".to_string(),
-                "eco" | "economy" => "3".to_string(),
-                "building-protection" | "building" => "4".to_string(),
-                _ => m.to_string(),
+            let m = m.to_lowercase();
+            let id = match m.as_str() {
+                "automatic" => "0",
+                n if n.len() == 1 && THERMO_MODES.iter().any(|(_, id)| *id == n) => n,
+                n => match THERMO_MODES.iter().find(|(name, _)| *name == n) {
+                    Some((_, id)) => id,
+                    None if matches!(n, "comfort" | "eco" | "economy" | "building-protection") => {
+                        bail!(
+                            "'{}' is a temperature mode, not an operating mode \
+                             (operating modes: {}); set the target with `lox thermostat <name> temp`",
+                            n,
+                            THERMO_MODES.map(|(n, _)| n).join(", ")
+                        )
+                    }
+                    None => bail!(
+                        "Unknown operating mode '{}' (expected: {})",
+                        n,
+                        THERMO_MODES.map(|(n, _)| n).join(", ")
+                    ),
+                },
             };
-            ThermoCmd::Mode(id)
+            ThermoCmd::Mode(id.to_string())
         }
         "override" => {
             let t: f64 = value
@@ -646,10 +671,10 @@ mod tests {
     fn mood_mapping_sends_on_first() {
         assert_eq!(cmds(&parse_mood("plus").unwrap()), ["plus"]);
         assert_eq!(cmds(&parse_mood("-").unwrap()), ["minus"]);
-        assert_eq!(cmds(&parse_mood("off").unwrap()), ["setMood/778"]);
-        assert_eq!(cmds(&parse_mood("778").unwrap()), ["setMood/778"]);
-        assert_eq!(cmds(&parse_mood("777").unwrap()), ["on", "setMood/777"]);
-        assert_eq!(parse_mood("777").unwrap().main_command(), "setMood/777");
+        assert_eq!(cmds(&parse_mood("off").unwrap()), ["changeTo/778"]);
+        assert_eq!(cmds(&parse_mood("778").unwrap()), ["changeTo/778"]);
+        assert_eq!(cmds(&parse_mood("777").unwrap()), ["changeTo/777"]);
+        assert_eq!(parse_mood("777").unwrap().main_command(), "changeTo/777");
         assert!(parse_mood("bright").is_err());
     }
 
@@ -689,9 +714,23 @@ mod tests {
             ["setComfortTemperature/21.5"]
         );
         assert_eq!(
-            cmds(&parse_thermostat("mode", Some("eco"), None).unwrap()),
+            cmds(&parse_thermostat("mode", Some("manual"), None).unwrap()),
             ["setOperatingMode/3"]
         );
+        assert_eq!(
+            cmds(&parse_thermostat("mode", Some("auto"), None).unwrap()),
+            ["setOperatingMode/0"]
+        );
+        assert_eq!(
+            cmds(&parse_thermostat("mode", Some("5"), None).unwrap()),
+            ["setOperatingMode/5"]
+        );
+        // comfort/eco are temperature modes; they used to send operating modes 2/3
+        assert!(parse_thermostat("mode", Some("eco"), None).is_err());
+        assert!(parse_thermostat("mode", Some("comfort"), None).is_err());
+        assert!(parse_thermostat("mode", Some("9"), None).is_err());
+        assert_eq!(thermo_mode_name("3"), "manual");
+        assert_eq!(thermo_mode_name("7"), "7");
         assert_eq!(
             cmds(&parse_thermostat("override", Some("23"), None).unwrap()),
             ["override/23/60"]
@@ -736,7 +775,8 @@ mod tests {
         assert_eq!(parse_blind("down", None).unwrap().risk(), Risk::None);
         assert_eq!(parse_door("unlock").unwrap().risk(), Risk::Confirm);
         assert_eq!(parse_gate("open").unwrap().risk(), Risk::Confirm);
-        assert_eq!(parse_gate("close").unwrap().risk(), Risk::None);
+        assert_eq!(parse_gate("close").unwrap().risk(), Risk::Confirm);
+        assert_eq!(parse_gate("stop").unwrap().risk(), Risk::None);
         assert_eq!(
             parse_alarm("arm", false, None).unwrap().risk(),
             Risk::Confirm

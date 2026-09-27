@@ -105,7 +105,7 @@ lox gate "Garagentor" stop
 
 ```bash
 lox thermostat "Heizung" temp 22.5              # set comfort temperature
-lox thermostat "Heizung" mode auto               # auto | manual | comfort | eco
+lox thermostat "Heizung" mode auto               # auto | manual | auto-heat | auto-cool | manual-heat | manual-cool
 lox thermostat "Heizung" override 24 120         # override 24C for 120 minutes
 lox thermostat "Heizung"                         # show current state
 ```

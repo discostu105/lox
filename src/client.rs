@@ -26,7 +26,7 @@ pub fn set_verbose(level: u8) {
     VERBOSE.store(level, Ordering::Relaxed);
 }
 
-fn verbose() -> u8 {
+pub(crate) fn verbose() -> u8 {
     VERBOSE.load(Ordering::Relaxed)
 }
 
@@ -559,17 +559,22 @@ impl LoxClient {
             0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches[0].uuid.clone()),
             _ => {
-                for c in &matches {
-                    eprintln!(
-                        "  {:40} [{}]  {}",
-                        c.name,
-                        c.room.as_deref().unwrap_or("-"),
-                        c.uuid
-                    );
-                }
+                // candidates go into the error, not stderr: the TUI resolves too
+                let list: Vec<String> = matches
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "  {:40} [{}]  {}",
+                            c.name,
+                            c.room.as_deref().unwrap_or("-"),
+                            c.uuid
+                        )
+                    })
+                    .collect();
                 bail!(
-                    "Ambiguous: '{}'. Use [Room] qualifier or --room flag.",
-                    name_or_uuid
+                    "Ambiguous: '{}'. Use [Room] qualifier or --room flag.\n{}",
+                    name_or_uuid,
+                    list.join("\n")
                 )
             }
         }
@@ -666,10 +671,8 @@ impl LoxClient {
             0 => bail!("No autopilot rule matching '{}'", name_or_uuid),
             1 => Ok(matches.into_iter().next().unwrap()),
             _ => {
-                for r in &matches {
-                    eprintln!("  {}", r.name);
-                }
-                bail!("Ambiguous: '{}'", name_or_uuid)
+                let list: Vec<String> = matches.iter().map(|r| format!("  {}", r.name)).collect();
+                bail!("Ambiguous: '{}'\n{}", name_or_uuid, list.join("\n"))
             }
         }
     }
@@ -703,10 +706,11 @@ impl LoxClient {
             0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches.into_iter().next().unwrap()),
             _ => {
-                for c in &matches {
-                    eprintln!("  {:40} [{}]", c.name, c.room.as_deref().unwrap_or("-"));
-                }
-                bail!("Ambiguous: '{}'", name_or_uuid)
+                let list: Vec<String> = matches
+                    .iter()
+                    .map(|c| format!("  {:40} [{}]", c.name, c.room.as_deref().unwrap_or("-")))
+                    .collect();
+                bail!("Ambiguous: '{}'\n{}", name_or_uuid, list.join("\n"))
             }
         }
     }

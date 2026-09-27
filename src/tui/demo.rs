@@ -1130,7 +1130,7 @@ impl Sim {
                 let next = match (head, argf) {
                     ("on", _) => Some(if cur == 778 { 1 } else { cur }),
                     ("off", _) => Some(778),
-                    ("setMood", Some(m)) => Some(m as u32),
+                    ("changeTo" | "setMood", Some(m)) => Some(m as u32),
                     ("plus", _) => Some(match cur {
                         778 => 1,
                         3 => 778,

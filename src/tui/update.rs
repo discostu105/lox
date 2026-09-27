@@ -469,12 +469,21 @@ pub fn schedule(app: &mut App) -> Vec<Effect> {
         {
             continue;
         }
+        // one-shot polls (info, history, config) retry while they fail
+        let every = if every.is_infinite() && app.polls.failing.contains(&k) {
+            ONESHOT_RETRY
+        } else {
+            every
+        };
         if due(app, &k, every) {
             out.push(poll(app, k));
         }
     }
     out
 }
+
+/// Seconds between retries of a failed one-shot poll.
+const ONESHOT_RETRY: f64 = 30.0;
 
 /// The control whose inspector (pane or overlay) is visible.
 pub fn inspected(app: &App) -> Option<Cid> {

@@ -916,3 +916,48 @@ fn wheel_does_not_type_into_inputs() {
         other => panic!("input closed: {:?}", other.is_some()),
     }
 }
+
+/// A failed one-shot poll (Miniserver info) is retried instead of leaving the
+/// System fields blank until the next structure load.
+#[test]
+fn failed_info_poll_is_retried() {
+    let mut h = H::new();
+    h.tick(1.0);
+    let info_req = |fx: &[Effect]| {
+        fx.iter().find_map(|e| match e {
+            Effect::Poll {
+                req,
+                kind: PollKind::Info,
+            } => Some(*req),
+            _ => None,
+        })
+    };
+    let req = info_req(&h.all).expect("info polled at start");
+    let e = h.app.epoch;
+    h.msg(Msg::Polled {
+        epoch: e,
+        req,
+        kind: PollKind::Info,
+        result: Err("timeout".into()),
+    });
+    h.all.clear();
+    h.tick(5.0);
+    assert!(
+        info_req(&h.all).is_none(),
+        "no hammering right after a failure"
+    );
+    h.tick(30.0);
+    let again = info_req(&h.all).expect("info retried");
+    h.msg(Msg::Polled {
+        epoch: e,
+        req: again,
+        kind: PollKind::Info,
+        result: Ok(Polled::Info(demo::info())),
+    });
+    h.all.clear();
+    h.tick(120.0);
+    assert!(
+        info_req(&h.all).is_none(),
+        "a successful info poll is not repeated"
+    );
+}

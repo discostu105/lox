@@ -685,14 +685,6 @@ pub fn verb(
                 if d > 0.0 { "+0.5°" } else { "-0.5°" },
             )
         }
-        (Kind::Climate, Verb::Min) => {
-            plan(cid, Action::Thermostat(ThermoCmd::Mode("3".into())), "eco")
-        }
-        (Kind::Climate, Verb::Max) => plan(
-            cid,
-            Action::Thermostat(ThermoCmd::Mode("2".into())),
-            "comfort",
-        ),
         // Door lock
         (Kind::DoorLock, Verb::Primary) => {
             if s.st(h, cid, "active").unwrap_or(0.0) > 0.0 {
@@ -880,21 +872,16 @@ pub fn modes(s: &Store, h: &House, cid: Cid) -> Option<Vec<Choice>> {
         Kind::Climate => {
             let cur = s.st(h, cid, "operatingMode").map(|m| m as i64);
             Some(
-                [
-                    ("auto", "0"),
-                    ("manual", "1"),
-                    ("comfort", "2"),
-                    ("eco", "3"),
-                ]
-                .iter()
-                .map(|(n, id)| {
-                    choice(
-                        n,
-                        Action::Thermostat(ThermoCmd::Mode((*id).into())),
-                        cur.map(|c| c.to_string()).as_deref() == Some(*id),
-                    )
-                })
-                .collect(),
+                actions::THERMO_MODES
+                    .iter()
+                    .map(|(n, id)| {
+                        choice(
+                            n,
+                            Action::Thermostat(ThermoCmd::Mode((*id).into())),
+                            cur.map(|c| c.to_string()).as_deref() == Some(*id),
+                        )
+                    })
+                    .collect(),
             )
         }
         Kind::Blind => Some(vec![

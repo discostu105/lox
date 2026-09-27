@@ -307,7 +307,9 @@ fn parse_header(data: &[u8]) -> Result<BinHeader> {
         bail!("Invalid binary header magic: 0x{:02x}", data[0]);
     }
     let msg_type = data[1];
-    let estimated = data[2] & 0x01 != 0;
+    // The doc's "1st bit" of the info byte is the most significant one: Loxone's
+    // own client reads it with an MSB-first BitView (lxcommunicator BinaryEvent.js).
+    let estimated = data[2] & 0x80 != 0;
     let payload_len = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
     Ok(BinHeader {
         msg_type,
@@ -552,7 +554,10 @@ pub fn parse_binary_payload(msg_type: u8, data: &[u8]) -> Result<Vec<StateEvent>
         MSG_OUT_OF_SERVICE => Ok(vec![StateEvent::OutOfService]),
         MSG_TEXT | MSG_BINARY_FILE => Ok(vec![]), // text responses / binary files — skip
         other => {
-            eprintln!("Unknown binary message type: 0x{:02x}", other);
+            // only with -v: stderr would draw over the TUI
+            if crate::client::verbose() >= 1 {
+                eprintln!("Unknown binary message type: 0x{:02x}", other);
+            }
             Ok(vec![])
         }
     }
@@ -946,7 +951,7 @@ mod tests {
     fn framer_estimated_header_waits_for_exact() {
         let mut f = Framer::default();
         let mut est = header(MSG_VALUE_STATES, 999);
-        est[2] = 0x01;
+        est[2] = 0x80;
         assert!(f.binary(&est).unwrap().is_empty());
         assert!(f.binary(&header(MSG_VALUE_STATES, 24)).unwrap().is_empty());
         let mut payload = vec![0u8; 16];
@@ -1056,9 +1061,12 @@ mod tests {
 
     #[test]
     fn test_parse_header_estimated() {
-        let data: [u8; 8] = [0x03, 0x02, 0x01, 0x00, 0xFF, 0x00, 0x00, 0x00];
+        let data: [u8; 8] = [0x03, 0x02, 0x80, 0x00, 0xFF, 0x00, 0x00, 0x00];
         let header = parse_header(&data).unwrap();
         assert!(header.estimated);
+        // the low bit is reserved, not "estimated"
+        let data: [u8; 8] = [0x03, 0x02, 0x01, 0x00, 0xFF, 0x00, 0x00, 0x00];
+        assert!(!parse_header(&data).unwrap().estimated);
     }
 
     #[test]

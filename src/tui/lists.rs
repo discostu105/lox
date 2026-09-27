@@ -30,19 +30,47 @@ pub fn fuzzy(pattern: &str, text: &str) -> Option<u32> {
 }
 
 /// Char indices of the match (for highlighting).
+///
+/// nucleo's indices aren't char indices: it matches ASCII text by byte, and
+/// other text by grapheme — unless every grapheme *starts* with an ASCII char
+/// (`u` + combining `̈`), then again by byte of the original string. Every char
+/// of a matched grapheme is returned.
 pub fn fuzzy_indices(pattern: &str, text: &str) -> Vec<usize> {
     if pattern.trim().is_empty() {
         return Vec::new();
     }
     let pat = Pattern::parse(pattern, CaseMatching::Ignore, Normalization::Smart);
-    MATCHER.with(|m| {
+    let mut idx = MATCHER.with(|m| {
         let mut buf = Vec::new();
         let mut idx = Vec::new();
         pat.indices(Utf32Str::new(text, &mut buf), &mut m.borrow_mut(), &mut idx);
-        idx.sort_unstable();
-        idx.dedup();
-        idx.into_iter().map(|i| i as usize).collect()
-    })
+        idx
+    });
+    idx.sort_unstable();
+    idx.dedup();
+    if text.is_ascii() {
+        return idx.into_iter().map(|i| i as usize).collect();
+    }
+    let graphemes = || unicode_segmentation::UnicodeSegmentation::graphemes(text, true);
+    if graphemes().all(|g| g.starts_with(|c: char| c.is_ascii())) {
+        // byte offsets
+        return text
+            .char_indices()
+            .enumerate()
+            .filter(|(_, (b, _))| idx.binary_search(&(*b as u32)).is_ok())
+            .map(|(ci, _)| ci)
+            .collect();
+    }
+    let mut out = Vec::new();
+    let mut ci = 0;
+    for (gi, g) in graphemes().enumerate() {
+        let n = g.chars().count();
+        if idx.binary_search(&(gi as u32)).is_ok() {
+            out.extend(ci..ci + n);
+        }
+        ci += n;
+    }
+    out
 }
 
 // ── Room summaries ──────────────────────────────────────────────────────────
@@ -603,6 +631,12 @@ mod tests {
         assert!(fuzzy("blsou", "Blind South").is_some());
         assert!(fuzzy("xyz", "Blind South").is_none());
         assert_eq!(fuzzy_indices("bs", "Blind South"), [0, 6]);
+        // decomposed ü (u + U+0308) is one grapheme but two chars
+        assert_eq!(fuzzy_indices("kc", "Ku\u{308}che"), [0, 3]);
+        assert_eq!(fuzzy_indices("ku", "Ku\u{308}che"), [0, 1]);
+        // mixed: a precomposed ü makes nucleo match by grapheme
+        assert_eq!(fuzzy_indices("kc", "Ku\u{308}che Tür"), [0, 3]);
+        assert_eq!(fuzzy_indices("kc", "Küche"), [0, 2]);
         assert!(fuzzy("", "anything").is_some());
     }
 }

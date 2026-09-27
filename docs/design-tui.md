@@ -244,7 +244,7 @@ Per type, the key hints show what each key does:
 | ColorPickerV2 | toggle | brightness ±10 % | off / 100 % | `#hex` or `hsv()` | — | color presets |
 | Jalousie (blind) | stop if moving, else full travel opposite to the last direction (hint shows `▲ up` / `▼ down` / `stop`) | position ±10 % (closed %) | fully up / fully down | position | stop | shade (auto) |
 | Gate | stop if moving, else open/close | — | open / close | — | stop | — |
-| IRoomControllerV2 | — | target ±0.5 °C | eco / comfort temp | target °C | — | auto · eco · comfort · manual |
+| IRoomControllerV2 | — | target ±0.5 °C | — (operating modes change heating behavior; only via `m`) | target °C | — | operating mode: auto · auto-heat · auto-cool · manual · manual-heat · manual-cool |
 | Alarm ⚠ | — | — | — | — | — | arm · arm home · arm w/o motion · disarm |
 | Door lock ⚠ | lock ↔ unlock | — | — | — | — | open |
 | Intercom | answer / hang up | — | — | — | — | open door |
@@ -870,7 +870,7 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 | Risk level | Examples | Behavior |
 |------------|----------|----------|
 | **None** | lights, dimmers, blinds, music, thermostat target, moods, scenes | instant |
-| **Confirm** | door unlock/open, gate open, alarm arm/disarm, intercom open, wallbox start, operating mode change, bulk action on > 10 controls | `y`/`N` dialog, default No |
+| **Confirm** | door unlock/open, gate open/close, alarm arm/disarm, intercom open, wallbox start, operating mode change, bulk action on > 10 controls | `y`/`N` dialog, default No |
 | **Typed** | reboot, firmware update, config restore/upload | type the context name |
 
 - `--read-only`: all action keys are disabled (hint notches show only navigation, with `READ-ONLY` in the header). Ideal for wall displays and screen sharing.
