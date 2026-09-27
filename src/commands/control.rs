@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use std::thread;
 use std::time::Duration;
 
+use crate::actions::{self, Action, ThermoCmd};
 use crate::client::{LoxClient, USER_AGENT};
 use crate::commands::RunContext;
 use crate::config::Config;
@@ -10,7 +11,7 @@ use crate::scene::Scene;
 use crate::stream::{self, StateEvent};
 use crate::{
     InputCmd, LightCmd, MusicCmd, bar, encode_path_value, json_val_str, print_dry_run, print_resp,
-    rgb_to_hsv, send_or_dry_run, xml_attr,
+    send_or_dry_run, xml_attr,
 };
 
 pub fn cmd_on(
@@ -119,64 +120,11 @@ pub fn cmd_blind(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "Jalousie" | "CentralJalousie") {
-        bail!("'{}' is type '{}', not a Jalousie", ctrl.name, ctrl.typ);
-    }
-    let cmd_owned: String;
-    let cmd: &str = match action.to_lowercase().as_str() {
-        "up" | "open" => "FullUp",
-        "down" | "close" => "FullDown",
-        "stop" => "off",
-        "shade" | "auto" => {
-            if let Some(pct) = pos {
-                if !(0.0..=100.0).contains(&pct) {
-                    bail!("Position must be 0-100");
-                }
-                cmd_owned = format!("manualLamella/{:.4}", pct);
-                &cmd_owned
-            } else {
-                "AutomaticDown"
-            }
-        }
-        "pos" | "position" => {
-            let pct = pos.ok_or_else(|| anyhow::anyhow!("pos requires a value 0-100"))?;
-            if !(0.0..=100.0).contains(&pct) {
-                bail!("Position must be 0-100");
-            }
-            cmd_owned = format!("manualPosition/{:.4}", pct);
-            &cmd_owned
-        }
-        other => {
-            if let Ok(pct) = other.parse::<f64>() {
-                if (0.0..=100.0).contains(&pct) {
-                    cmd_owned = format!("manualPosition/{:.4}", pct);
-                    &cmd_owned
-                } else {
-                    bail!("Position must be 0-100");
-                }
-            } else {
-                bail!(
-                    "Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>",
-                    other
-                )
-            }
-        }
-    };
-    if ctx.dry_run {
-        print_dry_run(
-            ctx.json,
-            ctx.quiet,
-            &ctrl.uuid,
-            cmd,
-            &ctrl.name,
-            ctrl.room.as_deref(),
-        );
-        return Ok(());
-    }
-    let resp = lox.send_cmd(&ctrl.uuid, cmd)?;
-    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, cmd);
+    let act = actions::parse_blind(&action, pos)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    let Some(resp) = resp else { return Ok(()) };
+    let cmd = act.main_command();
+    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &cmd);
     if !ctx.json {
         if cmd.starts_with("manualLamella") {
             thread::sleep(Duration::from_millis(800));
@@ -215,41 +163,37 @@ pub fn cmd_blind(
     Ok(())
 }
 
-/// Standard Loxone mood ID for "Aus" (off). System-defined, not configurable.
-const MOOD_OFF: &str = "setMood/778";
-
-/// If a specific mood is being set (not off/plus/minus), send `on` first.
-/// setMood is silently ignored by the Miniserver when the light is off.
-fn ensure_light_on_for_mood(lox: &LoxClient, uuid: &str, cmd: &str, dry_run: bool) -> Result<()> {
-    if cmd.starts_with("setMood/") && cmd != MOOD_OFF && !dry_run {
-        lox.send_cmd(uuid, "on")?;
+/// Resolve a control, check that the action fits its type, and send the action's
+/// commands (or print a dry run). Returns the control and the response of the main
+/// command, or `None` for a dry run.
+fn run_action(
+    ctx: &RunContext,
+    lox: &mut LoxClient,
+    name_or_uuid: &str,
+    room: Option<&str>,
+    action: &Action,
+) -> Result<(crate::client::Control, Option<serde_json::Value>)> {
+    let uuid = lox.resolve_with_room(name_or_uuid, room)?;
+    let ctrl = lox.find_control(&uuid)?;
+    action.check_type(&ctrl.name, &ctrl.typ)?;
+    let cmds = action.commands();
+    let main = action.main_command();
+    if ctx.dry_run {
+        print_dry_run(
+            ctx.json,
+            ctx.quiet,
+            &ctrl.uuid,
+            &main,
+            &ctrl.name,
+            ctrl.room.as_deref(),
+        );
+        return Ok((ctrl, None));
     }
-    Ok(())
-}
-
-/// Mood entry parsed from the moodList TextState JSON.
-#[derive(Debug, PartialEq)]
-struct MoodEntry {
-    id: u64,
-    name: String,
-}
-
-/// Parse the moodList JSON array into sorted MoodEntry vec.
-fn parse_mood_list(json: &str) -> Result<Vec<MoodEntry>> {
-    let entries: Vec<serde_json::Value> = serde_json::from_str(json)
-        .map_err(|e| anyhow::anyhow!("Failed to parse moodList JSON: {}", e))?;
-
-    let mut moods: Vec<MoodEntry> = entries
-        .iter()
-        .filter_map(|v| {
-            let id = v.get("id").and_then(|i| i.as_u64())?;
-            let name = v.get("name").and_then(|n| n.as_str())?.to_string();
-            Some(MoodEntry { id, name })
-        })
-        .collect();
-
-    moods.sort_by_key(|m| m.id);
-    Ok(moods)
+    let mut last = None;
+    for cmd in &cmds {
+        last = Some(lox.send_cmd(&ctrl.uuid, cmd)?);
+    }
+    Ok((ctrl, last))
 }
 
 /// Fetch the list of available moods for a LightControllerV2 via WebSocket.
@@ -301,7 +245,7 @@ pub fn cmd_light_moods(ctx: &RunContext, name_or_uuid: String, room: Option<Stri
         .map_err(|_| anyhow::anyhow!("Timeout waiting for moodList state (10s)"))?
     })?;
 
-    let moods = parse_mood_list(&moods_json)?;
+    let moods = actions::parse_mood_list(&moods_json)?;
 
     if ctx.json {
         let json_moods: Vec<serde_json::Value> = moods
@@ -360,45 +304,11 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
             room,
         } => {
             let mut lox = LoxClient::new(Config::load()?)?;
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
-                bail!(
-                    "'{}' is type '{}', not a LightController",
-                    ctrl.name,
-                    ctrl.typ
-                );
-            }
-            let cmd_owned: String;
-            let cmd: &str = match action.to_lowercase().as_str() {
-                "plus" | "next" | "+" => "plus",
-                "minus" | "prev" | "-" => "minus",
-                "off" => MOOD_OFF,
-                other => {
-                    if let Ok(id) = other.parse::<u32>() {
-                        cmd_owned = format!("setMood/{}", id);
-                        &cmd_owned
-                    } else {
-                        bail!(
-                            "Unknown mood action '{}'. Use: plus, minus, off, or a numeric mood ID",
-                            other
-                        )
-                    }
-                }
-            };
-            ensure_light_on_for_mood(&lox, &ctrl.uuid, cmd, ctx.dry_run)?;
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                ctx.dry_run,
-                ctx.json,
-                ctx.quiet,
-            )? {
+            let act = actions::parse_mood(&action)?;
+            let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+            if let Some(resp) = resp {
                 if ctx.json {
-                    print_resp(&resp, true, ctx.quiet, &ctrl.name, cmd);
+                    print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command());
                 } else if !ctx.quiet {
                     println!("✓  {} → mood {}", ctrl.name, action);
                 }
@@ -408,70 +318,12 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
             name_or_uuid,
             level,
             room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !(0.0..=100.0).contains(&level) {
-                bail!("Dimmer level must be 0-100");
-            }
-            let dim_cmd = format!("{}", level);
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                &dim_cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                ctx.dry_run,
-                ctx.json,
-                ctx.quiet,
-            )? {
-                print_resp(
-                    &resp,
-                    ctx.json,
-                    ctx.quiet,
-                    &ctrl.name,
-                    &format!("dim={}", level),
-                );
-            }
-        }
+        } => cmd_dimmer(ctx, name_or_uuid, level, room)?,
         LightCmd::Color {
             name_or_uuid,
             value,
             room,
-        } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-            let ctrl = lox.find_control(&uuid)?;
-            if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
-                bail!("'{}' is type '{}', not a ColorPicker", ctrl.name, ctrl.typ);
-            }
-            let cmd = if value.starts_with('#') {
-                let hex = value.trim_start_matches('#');
-                if hex.len() != 6 {
-                    bail!("Hex color must be 6 digits: #RRGGBB");
-                }
-                let r = u8::from_str_radix(&hex[0..2], 16)?;
-                let g = u8::from_str_radix(&hex[2..4], 16)?;
-                let b = u8::from_str_radix(&hex[4..6], 16)?;
-                let (h, s, v) = rgb_to_hsv(r, g, b);
-                format!("hsv({},{},{})", h, s, v)
-            } else {
-                value
-            };
-            if let Some(resp) = send_or_dry_run(
-                &lox,
-                &ctrl.uuid,
-                &cmd,
-                &ctrl.name,
-                ctrl.room.as_deref(),
-                ctx.dry_run,
-                ctx.json,
-                ctx.quiet,
-            )? {
-                print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &cmd);
-            }
-        }
+        } => cmd_color(ctx, name_or_uuid, value, room)?,
     }
     Ok(())
 }
@@ -534,45 +386,11 @@ pub fn cmd_mood(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
-        bail!(
-            "'{}' is type '{}', not a LightController",
-            ctrl.name,
-            ctrl.typ
-        );
-    }
-    let cmd_owned: String;
-    let cmd: &str = match action.to_lowercase().as_str() {
-        "plus" | "next" | "+" => "plus",
-        "minus" | "prev" | "-" => "minus",
-        "off" => MOOD_OFF,
-        other => {
-            if let Ok(id) = other.parse::<u32>() {
-                cmd_owned = format!("setMood/{}", id);
-                &cmd_owned
-            } else {
-                bail!(
-                    "Unknown mood action '{}'. Use: plus, minus, off, or a numeric mood ID",
-                    other
-                )
-            }
-        }
-    };
-    ensure_light_on_for_mood(&lox, &ctrl.uuid, cmd, ctx.dry_run)?;
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = actions::parse_mood(&action)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         if ctx.json {
-            print_resp(&resp, true, ctx.quiet, &ctrl.name, cmd);
+            print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command());
         } else {
             println!("✓  {} → mood {}", ctrl.name, action);
             thread::sleep(Duration::from_millis(400));
@@ -596,22 +414,9 @@ pub fn cmd_dimmer(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !(0.0..=100.0).contains(&level) {
-        bail!("Dimmer level must be 0-100");
-    }
-    let dim_cmd = format!("{}", level);
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        &dim_cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = actions::parse_dim(level)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         print_resp(
             &resp,
             ctx.json,
@@ -630,28 +435,10 @@ pub fn cmd_gate(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "Gate" | "CentralGate") {
-        bail!("'{}' is type '{}', not a Gate", ctrl.name, ctrl.typ);
-    }
-    let cmd = match action.to_lowercase().as_str() {
-        "open" => "open",
-        "close" => "close",
-        "stop" => "stop",
-        other => bail!("Unknown gate action '{}'. Use: open, close, stop", other),
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, cmd);
+    let act = actions::parse_gate(&action)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
     }
     Ok(())
 }
@@ -663,35 +450,10 @@ pub fn cmd_color(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "ColorPickerV2" | "ColorPicker") {
-        bail!("'{}' is type '{}', not a ColorPicker", ctrl.name, ctrl.typ);
-    }
-    let cmd = if value.starts_with('#') {
-        let hex = value.trim_start_matches('#');
-        if hex.len() != 6 {
-            bail!("Hex color must be 6 digits: #RRGGBB");
-        }
-        let r = u8::from_str_radix(&hex[0..2], 16).context("Invalid red component")?;
-        let g = u8::from_str_radix(&hex[2..4], 16).context("Invalid green component")?;
-        let b = u8::from_str_radix(&hex[4..6], 16).context("Invalid blue component")?;
-        let (h, s, v) = rgb_to_hsv(r, g, b);
-        format!("hsv({},{},{})", h, s, v)
-    } else {
-        value.clone()
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        &cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &cmd);
+    let act = actions::parse_color(&value)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
     }
     Ok(())
 }
@@ -718,99 +480,29 @@ pub fn cmd_thermostat(
         );
     }
     if let Some(act) = action {
-        match act.to_lowercase().as_str() {
-            "temp" | "temperature" => {
-                let t: f64 = value
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("Usage: lox thermostat <name> temp <°C>"))?
-                    .parse()
-                    .context("Temperature must be a number")?;
-                let temp_cmd = format!("setComfortTemperature/{}", t);
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    &temp_cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    ctx.dry_run,
-                    ctx.json,
-                    ctx.quiet,
-                )? {
-                    print_resp(
-                        &resp,
-                        ctx.json,
-                        ctx.quiet,
-                        &ctrl.name,
-                        &format!("temp={}", t),
-                    );
-                }
+        let action = actions::parse_thermostat(&act, value.as_deref(), duration)?;
+        action.check_type(&ctrl.name, &ctrl.typ)?;
+        let label = match &action {
+            Action::Thermostat(ThermoCmd::ComfortTemp(t)) => format!("temp={}", t),
+            Action::Thermostat(ThermoCmd::Mode(_)) => {
+                format!("mode={}", value.as_deref().unwrap_or(""))
             }
-            "mode" => {
-                let m = value.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("Usage: lox thermostat <name> mode <auto|manual|comfort|eco>")
-                })?;
-                let lower = m.to_lowercase();
-                let mode_id = match lower.as_str() {
-                    "auto" | "automatic" => "0",
-                    "manual" => "1",
-                    "comfort" => "2",
-                    "eco" | "economy" => "3",
-                    "building-protection" | "building" => "4",
-                    other => other,
-                };
-                let mode_cmd = format!("setOperatingMode/{}", mode_id);
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    &mode_cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    ctx.dry_run,
-                    ctx.json,
-                    ctx.quiet,
-                )? {
-                    print_resp(
-                        &resp,
-                        ctx.json,
-                        ctx.quiet,
-                        &ctrl.name,
-                        &format!("mode={}", m),
-                    );
-                }
+            Action::Thermostat(ThermoCmd::Override { temp, minutes }) => {
+                format!("override={}°/{}min", temp, minutes)
             }
-            "override" => {
-                let temp_override: f64 = value
-                    .as_deref()
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Usage: lox thermostat <name> override <°C> [minutes]")
-                    })?
-                    .parse()
-                    .context("Override temperature must be a number")?;
-                let dur = duration.unwrap_or(60);
-                let override_cmd = format!("override/{}/{}", temp_override, dur);
-                if let Some(resp) = send_or_dry_run(
-                    &lox,
-                    &ctrl.uuid,
-                    &override_cmd,
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                    ctx.dry_run,
-                    ctx.json,
-                    ctx.quiet,
-                )? {
-                    print_resp(
-                        &resp,
-                        ctx.json,
-                        ctx.quiet,
-                        &ctrl.name,
-                        &format!("override={}°/{}min", temp_override, dur),
-                    );
-                }
-            }
-            other => bail!(
-                "Unknown thermostat action '{}'. Use: temp, mode, override",
-                other
-            ),
+            _ => action.main_command(),
+        };
+        if let Some(resp) = send_or_dry_run(
+            &lox,
+            &ctrl.uuid,
+            &action.main_command(),
+            &ctrl.name,
+            ctrl.room.as_deref(),
+            ctx.dry_run,
+            ctx.json,
+            ctx.quiet,
+        )? {
+            print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &label);
         }
     } else {
         // Show current thermostat state
@@ -855,59 +547,10 @@ pub fn cmd_alarm(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "Alarm") {
-        bail!("'{}' is type '{}', not an Alarm", ctrl.name, ctrl.typ);
-    }
-    let cmd_owned: String;
-    let cmd: &str = match action.to_lowercase().as_str() {
-        "arm" | "on" => {
-            let base = if no_motion {
-                "delayedon/0"
-            } else {
-                "delayedon/1"
-            };
-            if let Some(ref pin) = code {
-                cmd_owned = format!("{}/{}", base, pin);
-                &cmd_owned
-            } else {
-                base
-            }
-        }
-        "arm-home" | "home" => {
-            if let Some(ref pin) = code {
-                cmd_owned = format!("delayedon/0/{}", pin);
-                &cmd_owned
-            } else {
-                "delayedon/0"
-            }
-        }
-        "disarm" | "off" => {
-            if let Some(ref pin) = code {
-                cmd_owned = format!("off/{}", pin);
-                &cmd_owned
-            } else {
-                "off"
-            }
-        }
-        "quit" | "ack" | "acknowledge" => "quit",
-        other => bail!(
-            "Unknown alarm action '{}'. Use: arm, arm-home, disarm, quit",
-            other
-        ),
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, cmd);
+    let act = actions::parse_alarm(&action, no_motion, code)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
     }
     Ok(())
 }
@@ -919,30 +562,9 @@ pub fn cmd_door(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !ctrl.typ.contains("DoorLock") && !ctrl.typ.contains("Lock") {
-        bail!("'{}' is type '{}', not a DoorLock", ctrl.name, ctrl.typ);
-    }
-    let cmd = match action.to_lowercase().as_str() {
-        "lock" => "on",
-        "unlock" => "off",
-        "open" => "open",
-        other => bail!(
-            "Unknown doorlock action '{}'. Use: lock, unlock, open",
-            other
-        ),
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = actions::parse_door(&action)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
     }
     Ok(())
@@ -955,30 +577,9 @@ pub fn cmd_intercom(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !ctrl.typ.contains("Intercom") {
-        bail!("'{}' is type '{}', not an Intercom", ctrl.name, ctrl.typ);
-    }
-    let cmd = match action.to_lowercase().as_str() {
-        "answer" => "answer",
-        "hangup" | "decline" => "hangup",
-        "open" => "open",
-        other => bail!(
-            "Unknown intercom action '{}'. Use: answer, hangup, open",
-            other
-        ),
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = actions::parse_intercom(&action)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
     }
     Ok(())
@@ -992,38 +593,9 @@ pub fn cmd_charger(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !ctrl.typ.contains("Charger") && !ctrl.typ.contains("EV") {
-        bail!("'{}' is type '{}', not a Charger", ctrl.name, ctrl.typ);
-    }
-    let cmd_owned: String;
-    let cmd: &str = match action.to_lowercase().as_str() {
-        "start" => {
-            if let Some(kwh) = limit {
-                cmd_owned = format!("start/{:.1}", kwh);
-                &cmd_owned
-            } else {
-                "start"
-            }
-        }
-        "stop" => "stop",
-        "pause" => "pause",
-        other => bail!(
-            "Unknown charger action '{}'. Use: start, stop, pause",
-            other
-        ),
-    };
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = actions::parse_charger(&action, limit)?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
     }
     Ok(())
@@ -1036,19 +608,9 @@ pub fn cmd_lock(
     room: Option<String>,
 ) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
-    let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
-    let ctrl = lox.find_control(&uuid)?;
-    let lock_cmd = format!("lockcontrol/1/{}", encode_path_value(&reason));
-    if let Some(resp) = send_or_dry_run(
-        &lox,
-        &ctrl.uuid,
-        &lock_cmd,
-        &ctrl.name,
-        ctrl.room.as_deref(),
-        ctx.dry_run,
-        ctx.json,
-        ctx.quiet,
-    )? {
+    let act = Ok::<_, anyhow::Error>(Action::LockControl(reason))?;
+    let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
+    if let Some(resp) = resp {
         print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "lock");
     }
     Ok(())
@@ -1244,61 +806,4 @@ pub fn cmd_music(ctx: &RunContext, action: MusicCmd) -> Result<()> {
         Err(e) => bail!("Music server error: {}", e),
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_mood_list_typical() {
-        let json = r#"[
-            {"name":"Viel Licht","id":777,"static":false},
-            {"name":"Aus","id":778,"static":true},
-            {"name":"Gedimmt","id":1,"static":false}
-        ]"#;
-        let moods = parse_mood_list(json).unwrap();
-        assert_eq!(
-            moods,
-            vec![
-                MoodEntry {
-                    id: 1,
-                    name: "Gedimmt".into()
-                },
-                MoodEntry {
-                    id: 777,
-                    name: "Viel Licht".into()
-                },
-                MoodEntry {
-                    id: 778,
-                    name: "Aus".into()
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_mood_list_empty() {
-        let moods = parse_mood_list("[]").unwrap();
-        assert!(moods.is_empty());
-    }
-
-    #[test]
-    fn parse_mood_list_skips_malformed_entries() {
-        // Missing "name" field — should be skipped, not error
-        let json = r#"[{"id":1},{"id":2,"name":"OK"}]"#;
-        let moods = parse_mood_list(json).unwrap();
-        assert_eq!(moods.len(), 1);
-        assert_eq!(moods[0].name, "OK");
-    }
-
-    #[test]
-    fn parse_mood_list_invalid_json() {
-        assert!(parse_mood_list("not json").is_err());
-    }
-
-    #[test]
-    fn mood_off_constant() {
-        assert_eq!(MOOD_OFF, "setMood/778");
-    }
 }

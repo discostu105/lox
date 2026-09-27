@@ -1,0 +1,129 @@
+# Demo video script for `lox tui` — see README.md in this folder.
+#
+# Each [[step]] may set a caption (shown until the next one; "" clears it),
+# press keys (names: Enter Esc Tab S-Tab Space Up Down Left Right C-x, or any
+# character), type text, and then wait. Times are seconds.
+
+title = "lox tui — btop for your Loxone smart home"
+
+[terminal]
+cols = 120
+rows = 28
+binary = "target/release/lox"
+args = ["tui", "--demo", "--screen", "home"]
+# the demo simulates the time of day: noon has sun on the PV
+env = { LOX_DEMO_HOUR = "12.5" }
+
+[timing]
+startup = 2.5   # before the first step
+key_gap = 0.45  # between keys of one step
+type_gap = 0.10 # between typed characters
+wait = 1.5      # after a step, unless it sets its own
+
+[[step]]
+caption = "lox tui — your Loxone smart home, live in the terminal"
+wait = 3.5
+
+[[step]]
+caption = "Every room at a glance: climate, lights, blinds, alerts"
+keys = ["j", "j", "l"]
+wait = 1.5
+
+[[step]]
+caption = "⏎ opens a room — every control, live"
+keys = ["Enter"]
+wait = 2.0
+
+[[step]]
+caption = "Keyboard-first: space switches, + / − dims"
+keys = ["j", "j", "Space"]
+wait = 0.8
+
+[[step]]
+keys = ["Space", "+", "+", "+"]
+wait = 1.5
+
+[[step]]
+caption = "c — history charts from the Miniserver's statistics"
+keys = ["k", "k", "c"]
+wait = 3.5
+
+[[step]]
+keys = ["Esc"]
+caption = "w — the Loxone Config logic behind a control, live values on every wire"
+wait = 0.3
+
+[[step]]
+keys = ["j", "w"]
+wait = 4.0
+
+[[step]]
+keys = ["Esc"]
+caption = ": — fuzzy palette: jump anywhere, run any lox command"
+wait = 0.3
+
+[[step]]
+keys = [":"]
+type = "garage door"
+wait = 1.2
+
+[[step]]
+keys = ["Enter"]
+wait = 1.2
+
+[[step]]
+caption = "Doors, gates and alarms ask before they move"
+keys = ["Space"]
+wait = 2.2
+
+[[step]]
+keys = ["n"]
+wait = 0.6
+
+[[step]]
+caption = "Events: every state change as it happens — filter, facets, mute"
+keys = ["3"]
+wait = 3.0
+
+[[step]]
+caption = "Energy flow: PV, battery, grid and wallbox, animated"
+keys = ["4"]
+wait = 4.0
+
+[[step]]
+caption = "System: Miniserver CPU, PLC, SD card, clock drift, bus & LAN"
+keys = ["5"]
+wait = 3.5
+
+[[step]]
+caption = "Logs: / to search, ⏎ for the full line"
+keys = ["]", "]", "]", "/"]
+type = "intercom"
+wait = 0.5
+
+[[step]]
+keys = ["Enter", "Enter"]
+wait = 2.0
+
+[[step]]
+keys = ["Esc"]
+caption = "Config history from git, diffed by meaning (blocks, wires, params)"
+wait = 0.2
+
+[[step]]
+keys = ["]"]
+wait = 1.5
+
+[[step]]
+keys = ["Tab", "j", "j", "j"]
+wait = 2.0
+
+[[step]]
+caption = "Sites: all your Miniservers side by side"
+keys = ["6"]
+wait = 3.0
+
+[[step]]
+caption = "lox — open source CLI + TUI for Loxone · github.com/discostu105/lox"
+keys = ["1"]
+wait = 4.0

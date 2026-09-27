@@ -141,7 +141,7 @@
 
 ### 5. Control-Type-Specific Commands (via `/jdev/sps/io/{uuid}/`)
 
-Already implemented: `on`, `off`, `pulse`, `PulseUp`, `PulseDown`, `FullUp`, `FullDown`, `AutomaticDown`, `manualPosition/{pct}`, `plus`, `minus`, `setMood/{id}`
+Already implemented: `on`, `off`, `pulse`, `PulseUp`, `PulseDown`, `FullUp`, `FullDown`, `AutomaticDown`, `manualPosition/{pct}`, `plus`, `minus`, `changeTo/{moodId}`
 
 **New commands for dedicated CLI subcommands:**
 

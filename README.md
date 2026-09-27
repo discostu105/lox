@@ -183,6 +183,8 @@ lox light mood "Licht" plus            # Next light mood
 lox light moods "Licht"                # List available moods
 lox thermostat "Heizung" temp 22.5     # Set temperature
 lox alarm "Alarmanlage" arm            # Arm alarm
+lox tui                                # Live terminal UI — btop for your house
+lox tui --demo                         # …try it without a Miniserver
 lox stream --room "Kitchen" -o json    # Real-time WebSocket state stream
 lox otel serve --endpoint http://..   # Push metrics, logs & traces via OTLP
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
@@ -198,6 +200,37 @@ lox health --problems                  # Device health (battery, signal, offline
 lox schema blind                       # Command schema for AI agent discovery
 lox completions bash                   # Generate shell completions
 ```
+
+---
+
+## Terminal UI
+
+`lox tui` is a full-screen, keyboard-first live view of your installation — **btop for your house**.
+
+![lox tui --demo: rooms, controls, charts, wiring, palette, events, energy flow, system, logs, config history](docs/media/lox-tui-demo.gif)
+
+<sub>Recorded from `lox tui --demo` with [scripts/demo-video](scripts/demo-video/) — reproducible, no Miniserver needed.</sub>
+
+What's in it:
+
+- **Home** — room cards, what needs attention (open windows, low batteries, offline devices), pinned controls, a live feed
+- **Rooms** — every control with its live value; `␣` toggles, `+`/`-` dim, `=` sets a value, `m` picks a mood, `a` shows all actions
+- **Events** — every state change as it happens, filterable, with "what happened just before" correlation
+- **Energy** — animated PV / home / grid / battery flow, meters, today's curve
+- **System** — CPU, heap, devices, CAN bus & LAN, the Miniserver log, and config history with semantic diffs
+- **Sites** — all your Miniservers at a glance; switch live
+- **Wiring** (`w`) — the config program around a control, with live values on the wires: *why is this light on?*
+- **History** (`c`) — any control's statistics over 6 h to a year, with period compare, a cursor and extra series
+
+```bash
+lox tui                 # connect to the current context
+lox tui --demo          # a synthetic demo house, no Miniserver needed
+lox tui --read-only     # wall display: look, don't touch
+```
+
+`:` opens a fuzzy palette for rooms, controls, scenes and any `lox` command; `?` shows the keys; `y` copies the
+equivalent `lox` command for scripting. Doors, alarms and gates ask for confirmation, reboot and update ask you to type
+the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
 
 ---
 

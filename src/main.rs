@@ -1,14 +1,20 @@
+mod actions;
 mod client;
 mod commands;
 mod config;
 mod ftp;
 mod gitops;
+#[cfg(feature = "tui")]
+mod logic;
 mod loxcc;
 mod loxone_xml;
 mod otel;
 mod scene;
+mod statv2;
 mod stream;
 mod token;
+#[cfg(feature = "tui")]
+mod tui;
 mod ws;
 
 use anyhow::{Context, Result, bail};
@@ -798,6 +804,39 @@ pub(crate) enum Cmd {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Interactive terminal UI: rooms, live events, energy, system health
+    #[cfg(feature = "tui")]
+    #[command(
+        long_about = "Interactive terminal UI: browse and switch controls by room, watch live events, \
+energy flow, Miniserver health and all configured sites. Press ? inside for keys.\n\n\
+Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui --read-only\n  lox tui --demo    # simulated house, no Miniserver needed"
+    )]
+    Tui {
+        /// Start screen: home, rooms, events, energy, system, sites
+        #[arg(long, value_name = "SCREEN")]
+        screen: Option<String>,
+        /// Open Rooms with this room selected
+        #[arg(short = 'r', long)]
+        room: Option<String>,
+        /// Monitor only: no commands are sent to the Miniserver
+        #[arg(long)]
+        read_only: bool,
+        /// Color theme: night, day, neon, mono
+        #[arg(long)]
+        theme: Option<String>,
+        /// Icon set: plain (default) or nerd (needs a Nerd Font)
+        #[arg(long, value_name = "SET")]
+        icons: Option<String>,
+        /// Do not capture the mouse (keeps the terminal's own text selection)
+        #[arg(long)]
+        no_mouse: bool,
+        /// No animations (also: LOX_NO_MOTION=1)
+        #[arg(long)]
+        no_motion: bool,
+        /// Simulated demo house — no Miniserver needed
+        #[arg(long)]
+        demo: bool,
+    },
     /// Browse Miniserver filesystem
     Files {
         #[command(subcommand)]
@@ -1501,6 +1540,27 @@ fn run(cli: Cli) -> Result<()> {
         } => commands::system::cmd_health(&ctx, device_type, problems),
         Cmd::Update { action } => commands::system::cmd_update(&ctx, action),
         Cmd::Reboot { yes } => commands::system::cmd_reboot(&ctx, yes),
+        #[cfg(feature = "tui")]
+        Cmd::Tui {
+            screen,
+            room,
+            read_only,
+            theme,
+            icons,
+            no_mouse,
+            no_motion,
+            demo,
+        } => tui::run::run(tui::run::TuiArgs {
+            screen,
+            room,
+            read_only,
+            theme,
+            icons,
+            no_mouse,
+            no_motion,
+            no_color: cli.no_color,
+            demo,
+        }),
         Cmd::Files { action } => commands::system::cmd_files(&ctx, action),
         Cmd::Otel { action } => commands::system::cmd_otel(&ctx, action),
 

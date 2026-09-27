@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -10,9 +10,9 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::stream;
 use crate::{
-    AutopilotCmd, eval_op, find_stats_files, lox_epoch, lox_timestamp_to_string, matches_filters,
-    now_hms, parse_stats_entries, parse_weather_entry, print_stream_event, stats_data_offset,
-    stats_file_path, stats_period, xml_attr,
+    AutopilotCmd, StatsEntry, eval_op, find_stats_files, lox_epoch, lox_timestamp_to_string,
+    matches_filters, now_hms, parse_stats_entries, parse_weather_entry, print_stream_event,
+    stats_data_offset, stats_file_path, stats_period, xml_attr,
 };
 
 pub fn cmd_ls(
@@ -658,9 +658,8 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     let mut stats_controls = Vec::new();
     if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
         for (uuid, ctrl) in ctrl_map {
-            if let Some(stat) = ctrl.get("statistic")
-                && !stat.is_null()
-            {
+            let legacy = ctrl.get("statistic").is_some_and(|s| !s.is_null());
+            if legacy || !crate::statv2::groups(ctrl).is_empty() {
                 let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                 let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
                 let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
@@ -695,6 +694,28 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
+/// Names of a control's statistic outputs. Real structure files use an array of
+/// `{id, name, …}`; older ones an object keyed by index. Both are accepted.
+pub(crate) fn statistic_output_names(outputs: &serde_json::Value) -> Vec<String> {
+    let name = |v: &serde_json::Value| {
+        v.get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("value")
+            .to_string()
+    };
+    if let Some(arr) = outputs.as_array() {
+        let mut entries: Vec<_> = arr.iter().collect();
+        entries.sort_by_key(|v| v.get("id").and_then(|i| i.as_u64()).unwrap_or(0));
+        entries.into_iter().map(name).collect()
+    } else if let Some(obj) = outputs.as_object() {
+        let mut entries: Vec<_> = obj.iter().collect();
+        entries.sort_by_key(|(k, _)| k.parse::<u64>().unwrap_or(u64::MAX));
+        entries.into_iter().map(|(_, v)| name(v)).collect()
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn cmd_history(
     ctx: &RunContext,
     name_or_uuid: String,
@@ -707,24 +728,37 @@ pub fn cmd_history(
     let ctrl = lox.find_control(&uuid)?;
 
     let ctrl_json = lox.get_control_json(&ctrl.uuid).ok();
+    if let Some(cj) = &ctrl_json
+        && let Some(group) = crate::statv2::groups(cj)
+            .into_iter()
+            .find(|g| !g.accumulated)
+    {
+        let (from, to) = stats_v2_range(day.as_deref(), month.as_deref())?;
+        let data = lox.get_bytes(&crate::statv2::raw_path(
+            &ctrl.uuid, from, to, &group.id, None,
+        ))?;
+        let names: Vec<String> = group.points.iter().map(|(_, t)| t.clone()).collect();
+        let entries: Vec<StatsEntry> = crate::statv2::parse(&data, names.len())
+            .into_iter()
+            .map(|(t, values)| StatsEntry {
+                timestamp: chrono::DateTime::from_timestamp(t, 0)
+                    .map(|d| {
+                        d.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string()
+                    })
+                    .unwrap_or_default(),
+                values,
+            })
+            .collect();
+        return print_history(ctx, &names, &entries);
+    }
     let output_names: Vec<String> = ctrl_json
         .as_ref()
         .and_then(|cj| cj.get("statistic"))
         .and_then(|s| s.get("outputs"))
-        .and_then(|o| o.as_object())
-        .map(|outputs| {
-            let mut entries: Vec<_> = outputs.iter().collect();
-            entries.sort_by_key(|(k, _)| k.as_str().to_string());
-            entries
-                .iter()
-                .map(|(_, v)| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("value")
-                        .to_string()
-                })
-                .collect()
-        })
+        .map(statistic_output_names)
+        .filter(|names| !names.is_empty())
         .unwrap_or_else(|| vec!["value".to_string()]);
     let num_outputs = output_names.len();
 
@@ -749,52 +783,91 @@ pub fn cmd_history(
 
     if data.is_empty() {
         println!("No statistics data available for this period.");
-    } else {
-        let entry_size = 4 + 4 + num_outputs * 8;
+        return Ok(());
+    }
+    let entry_size = 4 + 4 + num_outputs * 8;
+    let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
+    let entries = parse_stats_entries(&data[offset..], num_outputs);
+    print_history(ctx, &output_names, &entries)
+}
 
+/// Local-time range [from, to] (unix seconds) for Statistics V2: a day, a month,
+/// or (default) the current month up to now.
+fn stats_v2_range(day: Option<&str>, month: Option<&str>) -> Result<(i64, i64)> {
+    use chrono::{Datelike, Local, NaiveDate, TimeZone};
+    let start = |d: NaiveDate| -> Result<i64> {
+        Local
+            .from_local_datetime(&d.and_hms_opt(0, 0, 0).context("bad date")?)
+            .earliest()
+            .map(|t| t.timestamp())
+            .context("date does not exist in the local time zone")
+    };
+    let next_month = |d: NaiveDate| {
+        if d.month() == 12 {
+            NaiveDate::from_ymd_opt(d.year() + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(d.year(), d.month() + 1, 1)
+        }
+    };
+    if let Some(d) = day {
+        let d = NaiveDate::parse_from_str(d, "%Y-%m-%d").context("--day must be YYYY-MM-DD")?;
+        let next = d.succ_opt().context("bad date")?;
+        return Ok((start(d)?, start(next)? - 1));
+    }
+    let first = match month {
+        Some(m) => NaiveDate::parse_from_str(&format!("{}-01", m), "%Y-%m-%d")
+            .context("--month must be YYYY-MM")?,
+        None => Local::now().date_naive().with_day(1).context("bad date")?,
+    };
+    let end = start(next_month(first).context("bad date")?)? - 1;
+    Ok((start(first)?, end.min(Local::now().timestamp())))
+}
+
+fn print_history(ctx: &RunContext, output_names: &[String], entries: &[StatsEntry]) -> Result<()> {
+    let num_outputs = output_names.len();
+    if entries.is_empty() {
+        println!("No statistics data available for this period.");
+        return Ok(());
+    }
+    if ctx.csv {
+        print!("timestamp");
+        for name in output_names {
+            print!(",{}", name);
+        }
+        println!();
+    } else if !ctx.json {
+        print!("{:<20}", "TIMESTAMP");
+        for name in output_names {
+            print!(" {:>15}", name);
+        }
+        println!();
+        println!("{}", "─".repeat(20 + num_outputs * 16));
+    }
+
+    let mut json_arr = Vec::new();
+    for e in entries {
         if ctx.csv {
-            print!("timestamp");
-            for name in &output_names {
-                print!(",{}", name);
+            print!("{}", e.timestamp);
+            for v in &e.values {
+                print!(",{:.4}", v);
             }
             println!();
-        } else if !ctx.json {
-            print!("{:<20}", "TIMESTAMP");
-            for name in &output_names {
-                print!(" {:>15}", name);
+        } else if ctx.json {
+            let mut entry = serde_json::json!({"timestamp": e.timestamp});
+            for (i, name) in output_names.iter().enumerate() {
+                entry[name] = serde_json::json!(e.values[i]);
+            }
+            json_arr.push(entry);
+        } else {
+            print!("{:<20}", e.timestamp);
+            for v in &e.values {
+                print!(" {:>15.4}", v);
             }
             println!();
-            println!("{}", "─".repeat(20 + num_outputs * 16));
         }
-
-        let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
-        let entries = parse_stats_entries(&data[offset..], num_outputs);
-
-        let mut json_arr = Vec::new();
-        for e in &entries {
-            if ctx.csv {
-                print!("{}", e.timestamp);
-                for v in &e.values {
-                    print!(",{:.4}", v);
-                }
-                println!();
-            } else if ctx.json {
-                let mut entry = serde_json::json!({"timestamp": e.timestamp});
-                for (i, name) in output_names.iter().enumerate() {
-                    entry[name] = serde_json::json!(e.values[i]);
-                }
-                json_arr.push(entry);
-            } else {
-                print!("{:<20}", e.timestamp);
-                for v in &e.values {
-                    print!(" {:>15.4}", v);
-                }
-                println!();
-            }
-        }
-        if ctx.json {
-            println!("{}", serde_json::to_string_pretty(&json_arr)?);
-        }
+    }
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&json_arr)?);
     }
     Ok(())
 }
@@ -859,4 +932,19 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::statistic_output_names;
+    use serde_json::json;
+
+    #[test]
+    fn statistic_outputs_array_and_object() {
+        let arr = json!([{"id": 1, "name": "Humidity"}, {"id": 0, "name": "Temperature"}]);
+        assert_eq!(statistic_output_names(&arr), ["Temperature", "Humidity"]);
+        let obj = json!({"10": {"name": "B"}, "2": {"name": "A"}});
+        assert_eq!(statistic_output_names(&obj), ["A", "B"]);
+        assert!(statistic_output_names(&json!(null)).is_empty());
+    }
 }
