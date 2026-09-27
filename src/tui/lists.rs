@@ -113,10 +113,8 @@ pub fn room_sum(app: &App, r: usize) -> RoomSum {
                     sum.blinds_moving = true;
                 }
             }
-            Kind::Gate => {
-                if s.st(h, c, "position").unwrap_or(0.0) > 0.01 {
-                    sum.gate_open = true;
-                }
+            Kind::Gate if s.st(h, c, "position").unwrap_or(0.0) > 0.01 => {
+                sum.gate_open = true;
             }
             _ => {}
         }
@@ -258,7 +256,7 @@ pub fn groups(app: &App) -> Vec<GroupRow> {
             .into_iter()
             .filter_map(|g| fuzzy(&app.rooms.filter_groups, &g.label).map(|s| (s, g)))
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|x| std::cmp::Reverse(x.0));
         body = scored.into_iter().map(|(_, g)| g).collect();
     }
     out.extend(body);
@@ -497,14 +495,12 @@ pub fn attention(app: &App) -> Vec<Att> {
                     }
                 }
             }
-            Kind::Gate => {
-                if s.st(h, c, "position").unwrap_or(0.0) > 0.01 {
-                    out.push(Att {
-                        level: 1,
-                        text: format!("{} open", ctrl.name),
-                        cid: Some(c),
-                    });
-                }
+            Kind::Gate if s.st(h, c, "position").unwrap_or(0.0) > 0.01 => {
+                out.push(Att {
+                    level: 1,
+                    text: format!("{} open", ctrl.name),
+                    cid: Some(c),
+                });
             }
             _ => {}
         }

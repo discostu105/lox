@@ -118,7 +118,7 @@ pub fn items(app: &App, input: &str) -> Vec<(&'static str, PalItem)> {
     let mut rooms: Vec<(u32, usize)> = (0..h.rooms.len())
         .filter_map(|r| fuzzy(q, &h.rooms[r].name).map(|s| (s, r)))
         .collect();
-    rooms.sort_by(|a, b| b.0.cmp(&a.0));
+    rooms.sort_by_key(|x| std::cmp::Reverse(x.0));
     out.extend(
         rooms
             .into_iter()
@@ -192,7 +192,7 @@ fn command_items(app: &App, q: &str) -> Vec<(&'static str, PalItem)> {
                     .top_level()
                     .filter_map(|c| fuzzy(name, &h.ctrls[c].name).map(|s| (s, c)))
                     .collect();
-                ctrls.sort_by(|a, b| b.0.cmp(&a.0));
+                ctrls.sort_by_key(|x| std::cmp::Reverse(x.0));
                 out.extend(
                     ctrls
                         .into_iter()

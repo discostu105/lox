@@ -285,6 +285,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
     // signals: SIGTERM/SIGHUP end the loop cleanly (terminal restored, state saved)
     unsafe {
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+        #[cfg(unix)]
         libc::signal(libc::SIGHUP, on_signal as *const () as libc::sighandler_t);
     }
     let prev_hook = std::panic::take_hook();
@@ -401,6 +402,8 @@ fn event_loop(
                 Effect::Quit => return Ok(()),
                 Effect::Copy(s) => osc52(&s),
                 Effect::SaveState(st) => save_state(data_dir.as_ref(), &st),
+                // Ctrl-Z: job control exists on Unix only
+                #[cfg(unix)]
                 Effect::Suspend => {
                     save_state(data_dir.as_ref(), &update::ui_state(app));
                     restore_terminal();
@@ -412,6 +415,8 @@ fn event_loop(
                     terminal.clear()?;
                     dirty = true;
                 }
+                #[cfg(not(unix))]
+                Effect::Suspend => {}
                 other => backend.handle(other, app),
             }
         }
