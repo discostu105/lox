@@ -291,7 +291,8 @@ mod tests {
         const START: &str = "<!-- keys:start (generated from src/tui/keymap.rs) -->";
         const END: &str = "<!-- keys:end -->";
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/COMMANDS.md");
-        let doc = std::fs::read_to_string(path).unwrap();
+        // Windows checkouts may have CRLF line endings
+        let doc = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
         let (a, rest) = doc
             .split_once(START)
             .expect("COMMANDS.md: keys start marker");
