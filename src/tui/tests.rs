@@ -839,3 +839,80 @@ fn scales_to_large_installations() {
     // generous: debug build on a slow CI runner
     assert!(el.as_secs_f64() < 20.0, "too slow: {:?}", el);
 }
+
+// ── Review fixes ────────────────────────────────────────────────────────────
+
+/// A held key in the inspector sends once, like on the main path.
+#[test]
+fn held_space_in_inspector_sends_one_command() {
+    let mut h = H::new();
+    let c = h.cid("Ceiling", "Office");
+    h.app
+        .overlays
+        .push(Overlay::Inspector { cid: c, scroll: 0 });
+    let mut n = 0;
+    for _ in 0..5 {
+        h.tick(0.05);
+        h.fx = update::update(&mut h.app, Msg::Key(key("Space")));
+        n += h.sends().len();
+        // a fast acknowledgement must not open the door to the next repeat
+        let acks: Vec<(u64, usize)> =
+            h.fx.iter()
+                .filter_map(|e| match e {
+                    Effect::Send { req, cid, .. } => Some((*req, *cid)),
+                    _ => None,
+                })
+                .collect();
+        let e = h.app.epoch;
+        for (req, cid) in acks {
+            h.msg(Msg::CmdDone {
+                epoch: e,
+                req,
+                cid,
+                result: Ok(()),
+            });
+        }
+    }
+    assert_eq!(n, 1);
+}
+
+/// A same-context structure refresh drops everything that holds control
+/// indices, which may now point at other controls.
+#[test]
+fn structure_refresh_drops_stale_control_indices() {
+    let mut h = H::new();
+    let c = h.cid("Ceiling", "Office");
+    h.app.rooms.marks.insert(c);
+    h.app
+        .overlays
+        .push(Overlay::Inspector { cid: c, scroll: 0 });
+    h.app.paused = true;
+    let e = h.app.epoch;
+    h.msg(Msg::NewHouse {
+        epoch: e + 1,
+        house: Box::new(House::from_structure(&demo::structure())),
+        ctx: "demo".into(),
+    });
+    assert!(h.app.rooms.marks.is_empty());
+    assert!(h.app.overlays.is_empty());
+    assert!(!h.app.paused && h.app.paused_buf.is_empty());
+}
+
+/// The mouse wheel over a text field moves, it never types.
+#[test]
+fn wheel_does_not_type_into_inputs() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let mut h = H::new();
+    h.keys(&["2", "/"]);
+    assert!(matches!(h.app.overlays.last(), Some(Overlay::Input { .. })));
+    h.msg(Msg::Mouse(MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 10,
+        row: 10,
+        modifiers: KeyModifiers::NONE,
+    }));
+    match h.app.overlays.last() {
+        Some(Overlay::Input { line, .. }) => assert_eq!(line.buf, ""),
+        other => panic!("input closed: {:?}", other.is_some()),
+    }
+}

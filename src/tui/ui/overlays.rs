@@ -411,8 +411,11 @@ fn menu(
         Some(c) if cids.len() == 1 => a.to_cli(&h.ctrls[*c].name, h.room_name(*c)),
         _ => String::new(),
     };
-    for (i, (label, key, action)) in items.iter().enumerate().take(inner.height as usize) {
-        let y = inner.y + i as u16;
+    // scroll so the selected row stays visible (long mood lists)
+    let hgt = inner.height as usize;
+    let off = sel.saturating_sub(hgt.saturating_sub(1));
+    for (i, (label, key, action)) in items.iter().enumerate().skip(off).take(hgt) {
+        let y = inner.y + (i - off) as u16;
         if i == sel {
             sel_row(app, buf, inner, y);
         }
@@ -741,8 +744,10 @@ fn ctx_switcher(app: &App, body: Rect, buf: &mut Buffer, sel: usize) {
         common::empty(app, buf, inner, &["no contexts configured"]);
         return;
     }
-    for (i, c) in app.contexts.iter().enumerate().take(inner.height as usize) {
-        let y = inner.y + i as u16;
+    let hgt = inner.height as usize;
+    let off = sel.saturating_sub(hgt.saturating_sub(1));
+    for (i, c) in app.contexts.iter().enumerate().skip(off).take(hgt) {
+        let y = inner.y + (i - off) as u16;
         if i == sel {
             sel_row(app, buf, inner, y);
         }
@@ -970,8 +975,18 @@ fn wiring(app: &App, body: Rect, buf: &mut Buffer, w: &WiringState) {
         }
     };
     let latest = app.store.events.back().map(|e| e.uuid.clone());
+    // each side scrolls on its own so the selected wire stays visible
+    let last = (bi.height as usize).saturating_sub(1);
+    let (off_in, off_out) = match rows.get(w.sel) {
+        Some((true, _)) => (w.sel.saturating_sub(last), 0),
+        Some((false, _)) => (0, (w.sel - n_in).saturating_sub(last)),
+        None => (0, 0),
+    };
     for (i, (is_in, wire)) in rows.iter().enumerate() {
         let k = if *is_in { i } else { i - n_in };
+        let Some(k) = k.checked_sub(if *is_in { off_in } else { off_out }) else {
+            continue;
+        };
         let ry = bi.y + k as u16;
         if ry >= bi.bottom() {
             continue;

@@ -142,7 +142,9 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
         put(
             buf,
             inner,
-            inner.right().saturating_sub(lbl.len() as u16 + 1),
+            inner
+                .right()
+                .saturating_sub(crate::tui::text::width(&lbl) as u16 + 1),
             inner.y,
             &lbl,
             th.s_faint(),
