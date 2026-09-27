@@ -98,8 +98,10 @@ pub fn parse(data: &[u8], outputs: usize) -> Vec<(i64, Vec<f64>)> {
         .map(|rec| {
             let ts = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]) as i64;
             let vals = rec[4..]
-                .chunks_exact(8)
-                .map(|b| f64::from_le_bytes(b.try_into().unwrap_or([0; 8])))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|b| f64::from_le_bytes(*b))
                 .collect();
             (ts, vals)
         })
