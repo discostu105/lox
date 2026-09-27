@@ -54,6 +54,48 @@ extern "C" fn on_signal(_: libc::c_int) {
     TERMINATE.store(true, Ordering::SeqCst);
 }
 
+/// The controlling terminal went away (window closed, tmux session killed).
+/// crossterm's `read()` then spins forever on a readable-but-empty fd, so the
+/// loop has to notice this itself before reading.
+#[cfg(unix)]
+fn tty_hung_up() -> bool {
+    let mut p = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let n = unsafe { libc::poll(&mut p, 1, 0) };
+    n > 0 && p.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+}
+
+#[cfg(not(unix))]
+fn tty_hung_up() -> bool {
+    false
+}
+
+/// Last line of defense: a signal or a hang-up that doesn't end the event loop
+/// within 2 s (stuck in a blocking call) ends the process, so a closed
+/// terminal can never leave a TUI spinning in the background.
+fn spawn_watchdog() {
+    let _ = std::thread::Builder::new()
+        .name("lox-tui-watchdog".into())
+        .spawn(|| {
+            let mut since: Option<Instant> = None;
+            loop {
+                std::thread::sleep(Duration::from_millis(250));
+                if tty_hung_up() {
+                    TERMINATE.store(true, Ordering::SeqCst);
+                }
+                if TERMINATE.load(Ordering::SeqCst) {
+                    let t = *since.get_or_insert_with(Instant::now);
+                    if t.elapsed() > Duration::from_secs(2) {
+                        std::process::exit(1);
+                    }
+                }
+            }
+        });
+}
+
 fn prefs_path() -> PathBuf {
     Config::dir().join("tui.yaml")
 }
@@ -288,6 +330,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
         #[cfg(unix)]
         libc::signal(libc::SIGHUP, on_signal as *const () as libc::sighandler_t);
     }
+    spawn_watchdog();
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
@@ -369,7 +412,11 @@ fn event_loop(
         } else {
             until_tick
         };
-        if event::poll(timeout)? {
+        let ready = event::poll(timeout)?;
+        if tty_hung_up() {
+            return Ok(());
+        }
+        if ready {
             // drain everything that is already queued
             loop {
                 let msg = match event::read()? {

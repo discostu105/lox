@@ -529,7 +529,11 @@ fn key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         if k.kind == KeyEventKind::Repeat {
             return Vec::new();
         }
-        if let Some((last, t)) = &app.last_key
+        // Terminals without the kitty protocol report a held key as fast
+        // presses. Only keys that act (or flip a toggle) treat those as
+        // repeats; navigation must take quick double presses.
+        if acts(b.cmd)
+            && let Some((last, t)) = &app.last_key
             && *last == code
             && app.now - t < REPEAT_GAP
         {
@@ -539,6 +543,28 @@ fn key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
     }
     app.last_key = Some((code, app.now));
     command(app, b.cmd)
+}
+
+/// Commands that change the house or flip a toggle: a held key must not
+/// fire them twice.
+fn acts(cmd: Cmd) -> bool {
+    matches!(
+        cmd,
+        Cmd::Verb(_)
+            | Cmd::Set
+            | Cmd::Mode
+            | Cmd::Menu
+            | Cmd::Pull
+            | Cmd::Reboot
+            | Cmd::Install
+            | Cmd::Pin
+            | Cmd::Mark
+            | Cmd::MarkAll
+            | Cmd::Mute
+            | Cmd::Pause
+            | Cmd::Follow
+            | Cmd::Favorites
+    )
 }
 
 /// Active keymap contexts, most specific first.

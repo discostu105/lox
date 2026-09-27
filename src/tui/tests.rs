@@ -201,6 +201,8 @@ fn key(k: &str) -> KeyEvent {
         "Tab" => (KeyCode::Tab, KeyModifiers::NONE),
         "Down" => (KeyCode::Down, KeyModifiers::NONE),
         "Up" => (KeyCode::Up, KeyModifiers::NONE),
+        "Left" => (KeyCode::Left, KeyModifiers::NONE),
+        "Right" => (KeyCode::Right, KeyModifiers::NONE),
         s if s.starts_with("C-") => (
             KeyCode::Char(s.chars().nth(2).unwrap()),
             KeyModifiers::CONTROL,
@@ -507,6 +509,35 @@ fn held_space_sends_one_command() {
     h.tick(1.0);
     h.fx = update::update(&mut h.app, Msg::Key(rep));
     assert!(h.sends().is_empty());
+}
+
+/// Quick double presses of navigation keys both count (only acting keys
+/// treat fast presses as a held key).
+#[test]
+fn quick_navigation_presses_all_count() {
+    let mut h = H::new();
+    let press = |h: &mut H, k: &str| {
+        h.tick(0.1);
+        h.msg(Msg::Key(key(k)));
+    };
+    // Home: each → moves to the next room card (the grid order comes from rendering)
+    let _ = h.render(120, 36);
+    let r0 = h.app.home.sel_room;
+    press(&mut h, "Right");
+    press(&mut h, "Right");
+    assert_eq!(
+        h.app.home.sel_room,
+        r0 + 2,
+        "second → within 0.1 s was dropped"
+    );
+    // System: each ] advances a view
+    h.keys(&["5"]);
+    let v0 = h.app.system.view;
+    press(&mut h, "]");
+    let v1 = h.app.system.view;
+    press(&mut h, "]");
+    assert_ne!(v0, v1);
+    assert_ne!(v1, h.app.system.view, "second ] within 0.1 s was dropped");
 }
 
 /// Holding `+` auto-repeats; the steps of one frame become one command
