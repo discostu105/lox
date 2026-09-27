@@ -232,6 +232,9 @@ lox tui --read-only     # wall display: look, don't touch
 equivalent `lox` command for scripting. Doors, alarms and gates ask for confirmation, reboot and update ask you to type
 the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
 
+The Wiring view and the semantic config diffs are built on [lxir](https://github.com/discostu105/lxir), which parses
+`.Loxone` configs into program blocks and wires.
+
 ---
 
 ## Scenes
@@ -331,6 +334,14 @@ Each pull downloads the config via FTP, decompresses the proprietary LoxCC forma
 ```
 
 Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted. Works on Windows, macOS, and Linux.
+
+---
+
+## Related Projects
+
+- **[lxir](https://github.com/discostu105/lxir)** — Loxone config-as-code: a text language compiled to `.Loxone` configs,
+  with a lossless XML core, a UUID/identity model, compile/decompile/adopt, semantic diff and simulated tests.
+  `lox` uses it for the TUI's Wiring view and semantic config diffs.
 
 ---
 
