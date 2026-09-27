@@ -164,6 +164,15 @@ fn command_items(app: &App, q: &str) -> Vec<(&'static str, PalItem)> {
     let mut argv = vec!["lox".to_string()];
     argv.extend(toks.iter().cloned());
     match Cli::try_parse_from(&argv) {
+        // global flags would be silently dropped: `--dry-run` must not send
+        Ok(cli) if cli.dry_run => vec![(
+            "COMMANDS",
+            PalItem::Note("--dry-run isn't supported here — the TUI would send".into()),
+        )],
+        Ok(cli) if cli.context.is_some() => vec![(
+            "COMMANDS",
+            PalItem::Note("--ctx isn't supported here — switch sites on the Sites screen".into()),
+        )],
         Ok(cli) => match plan_cmd(app, cli.cmd) {
             Ok(Parsed::Plans(plans)) => {
                 let label = plans

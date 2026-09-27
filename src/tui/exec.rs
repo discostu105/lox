@@ -204,6 +204,7 @@ impl Live {
                 uuid,
                 cmds,
                 cli,
+                secret,
                 ..
             } => {
                 let client = self.client.clone();
@@ -211,7 +212,12 @@ impl Live {
                     let mut result = Ok(());
                     for c in &cmds {
                         if let Err(e) = client.send_cmd(&uuid, c).and_then(|v| check_code(&v)) {
-                            result = Err(short_err(&e));
+                            // transport errors quote the URL, PIN included
+                            let mut msg = short_err(&e);
+                            if let Some(s) = secret.as_deref().filter(|s| !s.is_empty()) {
+                                msg = msg.replace(s, "****");
+                            }
+                            result = Err(msg);
                             break;
                         }
                     }
@@ -234,7 +240,7 @@ impl Live {
             }
             Effect::Poll { req, kind } => {
                 let client = self.client.clone();
-                let ctx = PollCtx::new(app, Some(&self.cfg));
+                let ctx = PollCtx::new(app, Some(&self.cfg), &kind);
                 self.rt.spawn_blocking(move || {
                     let result = poll_live(&client, &ctx, &kind).map_err(|e| short_err(&e));
                     let _ = tx.send(Msg::Polled {
@@ -399,6 +405,12 @@ impl Live {
             let st = tokio::task::spawn_blocking(move || Live::load_structure(&c2)).await;
             match st {
                 Ok(Ok(st)) => {
+                    // superseded by a newer switch while loading: its house
+                    // must not replace the newer one
+                    if *stop_rx.borrow() {
+                        drop_blocking(client);
+                        return;
+                    }
                     let house = build_house(&st, &roles);
                     let lm = house.last_modified.clone();
                     let epoch = next_epoch();
@@ -519,6 +531,9 @@ async fn stream_loop_inner(
                 if let Ok(Ok(st)) =
                     tokio::task::spawn_blocking(move || Live::load_structure(&c2)).await
                 {
+                    if *stop.borrow() {
+                        return;
+                    }
                     let house = build_house(&st, &roles);
                     last_modified = house.last_modified.clone();
                     epoch = next_epoch();
@@ -607,12 +622,13 @@ pub struct PollCtx {
 }
 
 impl PollCtx {
-    fn new(app: &App, cfg: Option<&Config>) -> PollCtx {
+    fn new(app: &App, cfg: Option<&Config>, kind: &PollKind) -> PollCtx {
         let h = &app.house;
-        let stats = app.polls.inflight.keys().find_map(|k| match k {
+        // the control of this poll, not any History poll in flight
+        let stats = match kind {
             PollKind::History(c) => Some(*c),
             _ => None,
-        });
+        };
         let stats = stats.map(|c: Cid| (h.ctrls[c].uuid.clone(), h.ctrls[c].stat_outputs.max(1)));
         let mut meters = Vec::new();
         // Only meters whose statistics record power: real Miniservers often

@@ -65,7 +65,9 @@ fn tty_hung_up() -> bool {
         revents: 0,
     };
     let n = unsafe { libc::poll(&mut p, 1, 0) };
-    n > 0 && p.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+    // Not POLLNVAL: macOS poll(2) doesn't support tty devices and reports
+    // POLLNVAL for a perfectly healthy terminal.
+    n > 0 && p.revents & (libc::POLLHUP | libc::POLLERR) != 0
 }
 
 #[cfg(not(unix))]
@@ -204,6 +206,9 @@ pub fn run(args: TuiArgs) -> Result<()> {
     if !io::stdout().is_terminal() || !io::stdin().is_terminal() {
         bail!("lox tui needs an interactive terminal (stdin and stdout must be a TTY)");
     }
+    // -v request logging goes to stderr, which would draw over the screen
+    // (and print URL paths such as an alarm PIN)
+    crate::client::set_verbose(0);
     let prefs = load_prefs();
 
     // theme: flag → --no-color → tui.yaml → NO_COLOR → detection (§6.1)
@@ -334,6 +339,9 @@ pub fn run(args: TuiArgs) -> Result<()> {
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
+        // a panic on a backend thread leaves the UI thread running: end it
+        // rather than draw over the restored screen
+        TERMINATE.store(true, Ordering::SeqCst);
         prev_hook(info);
     }));
 

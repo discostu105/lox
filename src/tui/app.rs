@@ -641,6 +641,8 @@ pub enum Effect {
         cmds: Vec<String>,
         cli: String,
         coalesce: bool,
+        /// Masked out of error text (alarm PIN, sent in the URL path)
+        secret: Option<String>,
     },
     Poll {
         req: u64,

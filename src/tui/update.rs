@@ -1674,6 +1674,10 @@ fn send(app: &mut App, p: Plan) -> Option<Effect> {
         cmds: p.action.commands(),
         cli,
         coalesce: step,
+        secret: match &p.action {
+            Action::Alarm { pin: Some(pin), .. } => Some(pin.clone()),
+            _ => None,
+        },
     })
 }
 
