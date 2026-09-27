@@ -6,7 +6,7 @@ use ratatui::style::Modifier;
 
 use super::common::{self, RowOpts};
 use super::inspector;
-use crate::tui::app::{App, GKey, GroupBy, Hit, RoomSort};
+use crate::tui::app::{App, FacetList, GKey, GroupBy, Hit, RoomSort};
 use crate::tui::keymap::{Cmd, Ctx};
 use crate::tui::lists::{self, CRow};
 use crate::tui::text::{fit, rfit};
@@ -64,8 +64,8 @@ fn group_notches(app: &App) -> Vec<Notch> {
         };
         v.push(Notch::new(format!("o {}", s)).active(app.rooms.sort != RoomSort::Name));
     }
-    if app.rooms.fav_only {
-        v.push(Notch::new("★ f").active(true));
+    if !app.rooms.facets.is_empty() {
+        v.push(Notch::hot(format!("f {} facets", app.rooms.facets.len()), 'f').active(true));
     }
     v
 }
@@ -92,7 +92,7 @@ fn groups(app: &App, area: Rect, buf: &mut Buffer, focus: bool) {
         }
         hints.extend(common::ctx_hints(
             Ctx::Rooms,
-            &[Cmd::GroupBy, Cmd::Sort, Cmd::Favorites],
+            &[Cmd::GroupBy, Cmd::Sort, Cmd::Facets],
         ));
         nb = nb.hints(hints);
     }
@@ -254,8 +254,19 @@ fn ctrls(app: &App, area: Rect, buf: &mut Buffer, focus: bool, narrow: bool) {
     let mut nb = NotchBox::new()
         .focus(focus)
         .title(Notch::new(title))
-        .meta(Notch::new(format!("{} controls", cids.len())))
+        .meta(Notch::new(if app.rooms.facets.is_empty() {
+            format!("{} controls", cids.len())
+        } else {
+            format!(
+                "{} of {} controls",
+                cids.len(),
+                lists::group_base(app, &key).len()
+            )
+        }))
         .position(format!("{}/{}", pos, cids.len()));
+    for pill in lists::facet_pills(app, FacetList::Controls) {
+        nb = nb.title(Notch::new(pill).active(true));
+    }
     if !app.rooms.filter_ctrls.is_empty() {
         nb = nb.title(Notch::new(format!("/{}", app.rooms.filter_ctrls)).active(true));
     } else if focus {
@@ -272,7 +283,9 @@ fn ctrls(app: &App, area: Rect, buf: &mut Buffer, focus: bool, narrow: bool) {
     if rows.is_empty() {
         let msg: &[&str] = if !app.rooms.filter_ctrls.is_empty() {
             &["no match", "Esc clears the filter"]
-        } else if app.rooms.fav_only || key == GKey::Favorites {
+        } else if !app.rooms.facets.is_empty() {
+            &["no controls match the facets", "f edits · Esc clears"]
+        } else if key == GKey::Favorites {
             &["no favorites yet", "press * on a control to pin it"]
         } else {
             &["no controls here"]

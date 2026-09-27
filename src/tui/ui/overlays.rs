@@ -10,7 +10,8 @@ use ratatui::style::{Modifier, Style};
 use super::common;
 use super::inspector;
 use crate::tui::app::{
-    App, Confirm, FilterTarget, InputKind, Line, Overlay, PalItem, WiringDoc, WiringState,
+    App, Confirm, FacetList, FilterTarget, InputKind, Line, Overlay, PalItem, WiringDoc,
+    WiringState,
 };
 use crate::tui::keymap::{self, BINDINGS, Ctx};
 use crate::tui::lists;
@@ -46,6 +47,7 @@ pub fn render(app: &App, body: Rect, buf: &mut Buffer) {
                 input(app, body, buf, kind, line, err.as_deref(), top)
             }
             Overlay::Contexts { sel } => ctx_switcher(app, body, buf, *sel),
+            Overlay::Facets { list, line, sel } => facets_box(app, body, buf, *list, line, *sel),
             Overlay::MsgLog { scroll } => msglog(app, body, buf, *scroll),
             Overlay::Wiring(w) => wiring(app, body, buf, w),
             Overlay::Inspector { cid, scroll } => {
@@ -376,6 +378,137 @@ fn palette_box(app: &App, body: Rect, buf: &mut Buffer, line: &Line, sel: usize)
     }
     if items.is_empty() && !line.buf.is_empty() {
         common::empty(app, buf, list, &["no match"]);
+    }
+}
+
+// ── Facets ──────────────────────────────────────────────────────────────────
+
+fn facets_box(app: &App, body: Rect, buf: &mut Buffer, list: FacetList, line: &Line, sel: usize) {
+    let th = &app.th;
+    let opts = lists::facet_options(app, list, &line.buf);
+    let r = centered(body, 56, body.height.saturating_sub(4).min(26));
+    let n_active = lists::facets_of(app, list).len();
+    let mut nb = NotchBox::new()
+        .title(Notch::new(match list {
+            FacetList::Controls => "facets · controls",
+            FacetList::Events => "facets · events",
+        }))
+        .hints(vec![
+            Hint::new("␣", "toggle"),
+            Hint::new("⏎", "toggle+close"),
+            Hint::new("⇥", "group"),
+            Hint::new("C-x", "clear"),
+        ])
+        .position(format!("{}", opts.len()));
+    if n_active > 0 {
+        nb = nb.meta(Notch::new(format!("{} active", n_active)).active(true));
+    }
+    let inner = boxed(app, r, buf, nb);
+    put(
+        buf,
+        inner,
+        inner.x + 1,
+        inner.y,
+        "›",
+        th.s_accent().add_modifier(Modifier::BOLD),
+    );
+    put_line(
+        app,
+        buf,
+        inner,
+        inner.x + 3,
+        inner.y,
+        line,
+        false,
+        inner.width.saturating_sub(4) as usize,
+    );
+    if line.buf.is_empty() {
+        put(
+            buf,
+            inner,
+            inner.x + 4,
+            inner.y,
+            "type to narrow — rooms, types, states…",
+            th.s_faint(),
+        );
+    }
+    let area = Rect::new(
+        inner.x,
+        inner.y + 2,
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    // rows with section headers
+    let mut rows: Vec<Option<usize>> = Vec::new();
+    let mut heads: Vec<&str> = Vec::new();
+    let mut last = None;
+    for (i, o) in opts.iter().enumerate() {
+        let sec = if o.suggested {
+            "THIS"
+        } else {
+            o.facet.dim().title()
+        };
+        if last != Some(sec) {
+            rows.push(None);
+            heads.push(sec);
+            last = Some(sec);
+        }
+        rows.push(Some(i));
+    }
+    let hgt = area.height as usize;
+    let sel_i = rows.iter().position(|r| *r == Some(sel)).unwrap_or(0);
+    let off = sel_i.saturating_sub(hgt.saturating_sub(1));
+    let mut head = heads.iter();
+    // headers before the scroll offset
+    for r in rows.iter().take(off) {
+        if r.is_none() {
+            head.next();
+        }
+    }
+    for (k, r) in rows.iter().enumerate().skip(off).take(hgt) {
+        let y = area.y + (k - off) as u16;
+        let Some(i) = r else {
+            if let Some(h) = head.next() {
+                put(
+                    buf,
+                    area,
+                    area.x + 1,
+                    y,
+                    h,
+                    th.s_dim().add_modifier(Modifier::BOLD),
+                );
+            }
+            continue;
+        };
+        let o = &opts[*i];
+        if *i == sel {
+            sel_row(app, buf, area, y);
+        }
+        let (mark, mst) = if o.active {
+            ("●", th.s_accent())
+        } else {
+            ("○", th.s_faint())
+        };
+        put(buf, area, area.x + 2, y, mark, mst);
+        let cnt = o.count.to_string();
+        let lw = (area.width as usize).saturating_sub(cnt.len() + 6);
+        let st = if o.active {
+            th.s_text().add_modifier(Modifier::BOLD)
+        } else {
+            th.s_text()
+        };
+        common::put_name(buf, area, area.x + 4, y, &o.label, lw, st, &line.buf, th);
+        put(
+            buf,
+            area,
+            area.right().saturating_sub(cnt.len() as u16 + 1),
+            y,
+            &cnt,
+            th.s_dim(),
+        );
+    }
+    if opts.is_empty() {
+        common::empty(app, buf, area, &["no match"]);
     }
 }
 

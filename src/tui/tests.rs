@@ -7,9 +7,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::{Value, json};
 
-use super::app::{App, Conn, Effect, Msg, Opts, Overlay, PollKind, Polled, Screen, SysView};
+use super::app::{
+    App, Conn, Effect, Facet, FacetList, GKey, Msg, Opts, Overlay, PollKind, Polled, Screen,
+    SysView,
+};
 use super::demo;
-use super::model::House;
+use super::model::{House, Kind};
 use super::theme::{Depth, Theme, ThemeName};
 use super::{lists, ui, update};
 
@@ -960,4 +963,133 @@ fn failed_info_poll_is_retried() {
         info_req(&h.all).is_none(),
         "a successful info poll is not repeated"
     );
+}
+
+/// Facets (§4.5a): `f ⏎` keeps the selected control's room; values of a
+/// dimension OR, dimensions AND; Esc on the list clears them.
+#[test]
+fn facets_rooms_this_room_or_and() {
+    let mut h = H::new();
+    h.keys(&["2"]);
+    let blind = h.cid("Blind South", "Living room");
+    let living = h.app.house.ctrls[blind].room.unwrap();
+    h.keys(&[":"]).typed("living south").keys(&["Enter"]);
+    h.keys(&["f"]);
+    assert!(matches!(
+        h.app.overlays.last(),
+        Some(Overlay::Facets { .. })
+    ));
+    let opts = lists::facet_options(&h.app, FacetList::Controls, "");
+    assert!(
+        opts[0].suggested && opts[0].facet == Facet::Room(living),
+        "{:?}",
+        opts[0]
+    );
+    h.keys(&["Enter"]);
+    assert!(h.app.overlays.is_empty());
+    assert_eq!(h.app.rooms.facets, vec![Facet::Room(living)]);
+    let all = lists::group_ctrls(&h.app, &GKey::All);
+    assert!(!all.is_empty());
+    assert!(
+        all.iter()
+            .all(|c| h.app.house.ctrls[*c].room == Some(living))
+    );
+    let s = h.render(140, 40);
+    assert!(s.contains("room:Living room"), "pill in the title");
+
+    // OR within the room dimension
+    let office = h.app.house.ctrls[h.cid("Ceiling", "Office")].room.unwrap();
+    h.app.rooms.facets.push(Facet::Room(office));
+    let both = lists::group_ctrls(&h.app, &GKey::All).len();
+    assert!(both > all.len());
+    // AND with a type
+    h.app.rooms.facets.push(Facet::Type("Jalousie".into()));
+    let blinds = lists::group_ctrls(&h.app, &GKey::All);
+    assert!(!blinds.is_empty() && blinds.len() < both);
+    assert!(blinds.contains(&blind));
+    assert!(
+        blinds
+            .iter()
+            .all(|c| h.app.house.ctrls[*c].kind == Kind::Blind)
+    );
+    // counts ignore the value's own dimension: toggling a room adds its blinds
+    let opts = lists::facet_options(&h.app, FacetList::Controls, "");
+    let ty = opts
+        .iter()
+        .find(|o| !o.suggested && o.facet == Facet::Type("Jalousie".into()))
+        .unwrap();
+    assert!(ty.active);
+    assert_eq!(ty.count, blinds.len());
+    // typing narrows the values
+    let q = lists::facet_options(&h.app, FacetList::Controls, "jalou");
+    assert!(!q.is_empty() && q.iter().all(|o| o.label.contains("Jalousie")));
+    // Esc on the list clears them
+    h.app.rooms.pane = 1;
+    h.keys(&["Esc"]);
+    assert!(h.app.rooms.facets.is_empty());
+}
+
+/// Facet picker keys: ␣ toggles and stays open, C-x clears, Esc clears the
+/// query first, then closes.
+#[test]
+fn facets_picker_keys() {
+    let mut h = H::new();
+    h.keys(&["2", "f"]).typed("favorite");
+    let Some(Overlay::Facets { line, sel, .. }) = h.app.overlays.last() else {
+        panic!("picker open");
+    };
+    assert_eq!((line.buf.as_str(), *sel), ("favorite", 0));
+    h.keys(&["Space"]);
+    assert_eq!(h.app.rooms.facets, vec![Facet::Fav]);
+    assert!(matches!(
+        h.app.overlays.last(),
+        Some(Overlay::Facets { .. })
+    ));
+    let favs = lists::group_ctrls(&h.app, &GKey::All);
+    assert!(
+        favs.iter()
+            .all(|c| h.app.house.ctrls[*c].is_favorite || h.app.is_pinned(*c))
+    );
+    h.keys(&["C-x"]);
+    assert!(h.app.rooms.facets.is_empty());
+    h.keys(&["Esc"]);
+    let Some(Overlay::Facets { line, .. }) = h.app.overlays.last() else {
+        panic!("first Esc clears the query");
+    };
+    assert!(line.buf.is_empty());
+    h.keys(&["Esc"]);
+    assert!(h.app.overlays.is_empty());
+}
+
+/// Events: `e` on a control sets the ctrl facet; the picker offers room and
+/// control of the selected event; source "system" for events without a control.
+#[test]
+fn facets_events() {
+    let mut h = H::new();
+    h.run_sim(30.0);
+    let light = h.cid("Hallway light", "Hallway");
+    let u = h.app.house.ctrls[light].uuid.clone();
+    let _ = h.sim.command(&u, "on");
+    h.run_sim(1.0);
+    h.keys(&[":"]).typed("hallway light").keys(&["Enter", "e"]);
+    assert_eq!(h.app.screen, Screen::Events);
+    let top = h.app.house.top(light);
+    assert_eq!(h.app.events.facets, vec![Facet::Ctrl(top)]);
+    let rows = lists::event_rows(&h.app);
+    assert!(!rows.is_empty());
+    assert!(
+        rows.iter()
+            .all(|i| h.app.store.events[*i].cid.map(|c| h.app.house.top(c)) == Some(top))
+    );
+    assert!(h.render(140, 40).contains("ctrl:"));
+    h.keys(&["f"]);
+    let opts = lists::facet_options(&h.app, FacetList::Events, "");
+    let room = h.app.house.ctrls[light].room.unwrap();
+    assert!(
+        opts.iter()
+            .any(|o| o.suggested && o.facet == Facet::Room(room))
+    );
+    assert!(opts.iter().any(|o| o.active && o.facet == Facet::Ctrl(top)));
+    h.keys(&["Esc", "Esc"]);
+    assert!(h.app.events.facets.is_empty(), "Esc: filter, then facets");
 }

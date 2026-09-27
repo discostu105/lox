@@ -199,7 +199,8 @@ fn new_house(app: &mut App, epoch: u64, house: super::model::House, ctx: String)
         // different control: drop it rather than act on the wrong one.
         app.overlays.clear();
         app.rooms.marks.clear();
-        app.events.chips.clear();
+        app.events.facets.clear();
+        app.rooms.facets.clear();
         app.home.order.clear();
         app.history.clear();
     } else {
@@ -593,7 +594,7 @@ fn acts(cmd: Cmd) -> bool {
             | Cmd::Mute
             | Cmd::Pause
             | Cmd::Follow
-            | Cmd::Favorites
+            | Cmd::Facets
     )
 }
 
@@ -719,8 +720,17 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
             app.rooms.sel_group = None;
             app.rooms.frozen = None;
         }
-        Cmd::Favorites => {
-            app.rooms.fav_only = !app.rooms.fav_only;
+        Cmd::Facets => {
+            let list = if app.screen == Screen::Events {
+                FacetList::Events
+            } else {
+                FacetList::Controls
+            };
+            app.overlays.push(Overlay::Facets {
+                list,
+                line: Line::default(),
+                sel: 0,
+            });
         }
         Cmd::Sort => {
             app.rooms.sort = match app.rooms.sort {
@@ -738,22 +748,6 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
             } else {
                 app.events.seen = app.store.next_seq;
                 app.events.sel = sel_event(app);
-            }
-        }
-        Cmd::Chip => {
-            if let Some(e) = sel_event(app)
-                .and_then(|s| app.store.index_of(s))
-                .map(|i| &app.store.events[i])
-                && let Some(r) = e.cid.and_then(|c| app.house.ctrls[c].room)
-            {
-                let chip = Chip::Room(r);
-                if let Some(i) = app.events.chips.iter().position(|c| *c == chip) {
-                    app.events.chips.remove(i);
-                } else {
-                    app.events.chips.push(chip);
-                }
-            } else if !app.events.chips.is_empty() {
-                app.events.chips.clear();
             }
         }
         Cmd::Mute => {
@@ -835,7 +829,7 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
         Cmd::ShowEvents => {
             if let Some(cid) = target_ctrl(app) {
                 let top = app.house.top(cid);
-                app.events.chips = vec![Chip::Ctrl(top)];
+                app.events.facets = vec![Facet::Ctrl(top)];
                 app.events.follow = true;
                 app.events.sel = None;
                 go(app, Screen::Events);
@@ -882,6 +876,8 @@ fn back(app: &mut App) {
         Screen::Rooms => {
             if app.rooms.pane >= 1 && !app.rooms.filter_ctrls.is_empty() {
                 app.rooms.filter_ctrls.clear();
+            } else if !app.rooms.facets.is_empty() {
+                app.rooms.facets.clear();
             } else if !app.rooms.marks.is_empty() {
                 app.rooms.marks.clear();
             } else if app.rooms.pane == 0 && !app.rooms.filter_groups.is_empty() {
@@ -894,8 +890,8 @@ fn back(app: &mut App) {
         Screen::Events => {
             if !app.events.filter.is_empty() {
                 app.events.filter.clear();
-            } else if !app.events.chips.is_empty() {
-                app.events.chips.clear();
+            } else if !app.events.facets.is_empty() {
+                app.events.facets.clear();
             } else if !app.events.follow {
                 app.events.follow = true;
                 app.events.sel = None;
@@ -1859,7 +1855,7 @@ pub fn reveal(app: &mut App, cid: Cid) {
     };
     app.rooms.group = GroupBy::Room;
     app.rooms.filter_ctrls.clear();
-    app.rooms.fav_only = false;
+    app.rooms.facets.clear();
     app.rooms
         .sel_ctrl
         .insert(key.clone(), app.house.ctrls[cid].uuid.clone());
@@ -2095,6 +2091,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
             }
         }
         Overlay::Wiring(w) => return wiring_key(app, w, &code),
+        Overlay::Facets { list, line, sel } => facets_key(app, list, &line, sel, &k, &code),
         Overlay::Inspector { .. } => match code.as_str() {
             "Esc" | "q" | "Enter" => {
                 app.overlays.pop();
@@ -2125,11 +2122,83 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
     Vec::new()
 }
 
+/// Keys of the facet picker: typing narrows, ␣ toggles, ⏎ toggles and closes.
+fn facets_key(app: &mut App, list: FacetList, line: &Line, sel: usize, k: &KeyEvent, code: &str) {
+    let opts = lists::facet_options(app, list, &line.buf);
+    let n = opts.len();
+    let toggle = |app: &mut App, f: &Facet| {
+        let v = lists::facets_mut(app, list);
+        match v.iter().position(|x| x == f) {
+            Some(i) => {
+                v.remove(i);
+            }
+            None => v.push(f.clone()),
+        }
+        app.rooms.frozen = None;
+    };
+    match code {
+        "Esc" => {
+            if line.buf.is_empty() {
+                app.overlays.pop();
+            } else if let Some(Overlay::Facets { line, sel, .. }) = app.overlays.last_mut() {
+                line.kill();
+                *sel = 0;
+            }
+        }
+        "Enter" if k.kind == KeyEventKind::Press => {
+            app.overlays.pop();
+            if let Some(o) = opts.get(sel) {
+                toggle(app, &o.facet);
+            }
+        }
+        "Space" => {
+            if let Some(o) = opts.get(sel) {
+                toggle(app, &o.facet);
+                // keep the cursor on the same value
+                let after = lists::facet_options(app, list, &line.buf);
+                let i = after
+                    .iter()
+                    .position(|x| x.facet == o.facet && x.suggested == o.suggested)
+                    .unwrap_or(sel.min(after.len().saturating_sub(1)));
+                set_sel(app, i);
+            }
+        }
+        "Down" | "C-n" => set_sel(app, (sel + 1).min(n.saturating_sub(1))),
+        "Up" | "C-p" => set_sel(app, sel.saturating_sub(1)),
+        "Tab" | "S-Tab" => {
+            // jump to the first value of the next / previous dimension
+            let sec = |o: &lists::FacetOpt| (!o.suggested, o.facet.dim());
+            let cur = opts.get(sel).map(sec);
+            let i = if code == "Tab" {
+                opts.iter().position(|o| Some(sec(o)) > cur)
+            } else {
+                let prev = opts[..sel.min(n)]
+                    .iter()
+                    .rev()
+                    .map(sec)
+                    .find(|s| Some(*s) < cur);
+                prev.and_then(|p| opts.iter().position(|o| sec(o) == p))
+            };
+            if let Some(i) = i {
+                set_sel(app, i);
+            }
+        }
+        "C-x" => lists::facets_mut(app, list).clear(),
+        _ => {
+            if let Some(Overlay::Facets { line, sel, .. }) = app.overlays.last_mut() {
+                edit_line(line, k);
+                *sel = 0;
+            }
+        }
+    }
+}
+
 fn set_sel(app: &mut App, v: usize) {
     match app.overlays.last_mut() {
         Some(Overlay::Menu { sel, .. })
         | Some(Overlay::Picker { sel, .. })
         | Some(Overlay::Contexts { sel })
+        | Some(Overlay::Facets { sel, .. })
         | Some(Overlay::Wiring(WiringState { sel, .. })) => *sel = v,
         Some(Overlay::Palette(p)) => p.sel = v,
         _ => {}
@@ -2459,7 +2528,7 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
         "e" => {
             if let Some(&cid) = app.house.by_uuid.get(&w.center) {
                 app.overlays.clear();
-                app.events.chips = vec![Chip::Ctrl(cid)];
+                app.events.facets = vec![Facet::Ctrl(cid)];
                 app.events.follow = true;
                 go(app, Screen::Events);
             }

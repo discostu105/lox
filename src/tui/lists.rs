@@ -6,8 +6,9 @@ use std::cell::RefCell;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config as NConfig, Matcher, Utf32Str};
 
-use super::app::{App, Chip, GKey, GroupBy, RoomSort};
+use super::app::{App, Dim, Facet, FacetList, GKey, GroupBy, RoomSort};
 use super::model::{Cid, Kind};
+use super::store::Event;
 use super::text::natural_key;
 use super::vm;
 
@@ -190,17 +191,26 @@ pub struct GroupRow {
     pub count: usize,
 }
 
-/// Controls of a group (top-level; LC sub-controls follow in `ctrl_rows`).
+/// Controls of a group that pass the facets (top-level; LC sub-controls follow in `ctrl_rows`).
 pub fn group_ctrls(app: &App, key: &GKey) -> Vec<Cid> {
+    let mut v = group_base(app, key);
+    let f = &app.rooms.facets;
+    if !f.is_empty() {
+        let dims = dims_of(f);
+        v.retain(|c| passes(f, &ctrl_values(app, *c, &dims), None));
+    }
+    v
+}
+
+/// Controls of a group, before facets.
+pub fn group_base(app: &App, key: &GKey) -> Vec<Cid> {
     let h = &app.house;
-    let fav_only = app.rooms.fav_only;
-    let keep = |c: Cid| !fav_only || h.ctrls[c].is_favorite || app.is_pinned(c);
-    let mut v: Vec<Cid> = match key {
+    match key {
         GKey::Favorites => h
             .top_level()
             .filter(|c| h.ctrls[*c].is_favorite || app.is_pinned(*c))
             .collect(),
-        GKey::All => h.top_level().filter(|c| keep(*c)).collect(),
+        GKey::All => h.top_level().collect(),
         GKey::Room(r) => h.rooms.get(*r).map(|r| r.ctrls.clone()).unwrap_or_default(),
         GKey::Cat(i) => h
             .top_level()
@@ -211,9 +221,7 @@ pub fn group_ctrls(app: &App, key: &GKey) -> Vec<Cid> {
             .filter(|c| type_label(app, *c) == *t)
             .collect(),
         GKey::Unassigned => h.unassigned.clone(),
-    };
-    v.retain(|c| keep(*c));
-    v
+    }
 }
 
 pub fn type_label(app: &App, c: Cid) -> String {
@@ -268,7 +276,7 @@ pub fn groups(app: &App) -> Vec<GroupRow> {
                 .collect()
         }
     };
-    if app.rooms.fav_only {
+    if !app.rooms.facets.is_empty() {
         body.retain(|g| g.count > 0);
     }
     if app.rooms.group == GroupBy::Room && app.rooms.sort != RoomSort::Name {
@@ -424,7 +432,7 @@ pub fn selected_ctrl(app: &App) -> Option<Cid> {
 
 // ── Events ──────────────────────────────────────────────────────────────────
 
-/// Indices into `store.events` that pass the chips / filter / mutes (oldest first).
+/// Indices into `store.events` that pass the facets / filter / mutes (oldest first).
 pub fn event_rows(app: &App) -> Vec<usize> {
     let h = &app.house;
     let st = &app.store;
@@ -437,14 +445,10 @@ pub fn event_rows(app: &App) -> Vec<usize> {
             if !app.events.show_muted && top.is_some_and(|c| st.is_muted(h, c)) {
                 return false;
             }
-            for chip in &app.events.chips {
-                let ok = match chip {
-                    Chip::Room(r) => e.cid.is_some_and(|c| h.ctrls[c].room == Some(*r)),
-                    Chip::Ctrl(c) => top == Some(*c) || e.cid == Some(*c),
-                };
-                if !ok {
-                    return false;
-                }
+            if !app.events.facets.is_empty()
+                && !passes(&app.events.facets, &event_values(app, e), None)
+            {
+                return false;
             }
             if !f.is_empty() {
                 let hay = match e.cid {
@@ -462,6 +466,273 @@ pub fn event_rows(app: &App) -> Vec<usize> {
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+// ── Facets (§4.5a) ──────────────────────────────────────────────────────────
+
+/// Seconds a change counts as "recent".
+const RECENT_SECS: f64 = 600.0;
+
+pub fn facets_of(app: &App, list: FacetList) -> &[Facet] {
+    match list {
+        FacetList::Controls => &app.rooms.facets,
+        FacetList::Events => &app.events.facets,
+    }
+}
+
+pub fn facets_mut(app: &mut App, list: FacetList) -> &mut Vec<Facet> {
+    match list {
+        FacetList::Controls => &mut app.rooms.facets,
+        FacetList::Events => &mut app.events.facets,
+    }
+}
+
+fn dims_of(f: &[Facet]) -> Vec<Dim> {
+    let mut d: Vec<Dim> = f.iter().map(|f| f.dim()).collect();
+    d.sort();
+    d.dedup();
+    d
+}
+
+/// Every dimension a list offers.
+fn list_dims(list: FacetList) -> &'static [Dim] {
+    match list {
+        FacetList::Controls => &[Dim::Flag, Dim::State, Dim::Room, Dim::Category, Dim::Type],
+        FacetList::Events => &[
+            Dim::Room,
+            Dim::Category,
+            Dim::Type,
+            Dim::Control,
+            Dim::Source,
+        ],
+    }
+}
+
+/// Facet values of a (top-level) control in the given dimensions; the costly
+/// ones (state, attention) only when asked for.
+pub fn ctrl_values(app: &App, c: Cid, dims: &[Dim]) -> Vec<Facet> {
+    let h = &app.house;
+    let s = &app.store;
+    let ctrl = &h.ctrls[c];
+    let mut v = Vec::new();
+    for d in dims {
+        match d {
+            Dim::Room => v.extend(ctrl.room.map(Facet::Room)),
+            Dim::Category => v.extend(ctrl.cat.map(Facet::Cat)),
+            Dim::Type => v.push(Facet::Type(type_label(app, c))),
+            Dim::State => {
+                let switch = ctrl.kind == Kind::Switch;
+                if vm::is_light_on(s, h, c) || (switch && s.st(h, c, "active").unwrap_or(0.0) > 0.0)
+                {
+                    v.push(Facet::On);
+                } else if vm::is_light(h, c) || switch {
+                    v.push(Facet::Off);
+                }
+                if vm::motion(s, h, c).is_some() {
+                    v.push(Facet::Moving);
+                }
+            }
+            Dim::Flag => {
+                if ctrl.is_favorite || app.is_pinned(c) {
+                    v.push(Facet::Fav);
+                }
+                if vm::view(s, h, c).attention {
+                    v.push(Facet::Attention);
+                }
+                if s.last_event
+                    .get(&c)
+                    .is_some_and(|t| app.now - t < RECENT_SECS)
+                {
+                    v.push(Facet::Recent);
+                }
+            }
+            Dim::Control | Dim::Source => {}
+        }
+    }
+    v
+}
+
+/// Facet values of an event (by its top-level control).
+pub fn event_values(app: &App, e: &Event) -> Vec<Facet> {
+    let h = &app.house;
+    let Some(c) = e.cid else {
+        return vec![Facet::System];
+    };
+    let top = h.top(c);
+    let mut v = vec![Facet::Ctrl(top), Facet::Type(type_label(app, top))];
+    v.extend(h.ctrls[c].room.or(h.ctrls[top].room).map(Facet::Room));
+    v.extend(h.ctrls[c].cat.or(h.ctrls[top].cat).map(Facet::Cat));
+    v
+}
+
+/// Does an item with `values` pass `active`? Each dimension with active facets
+/// needs one of them (OR); all such dimensions must hold (AND). `skip` ignores
+/// a dimension (for the counts of its own values).
+pub fn passes(active: &[Facet], values: &[Facet], skip: Option<Dim>) -> bool {
+    dims_of(active)
+        .into_iter()
+        .filter(|d| Some(*d) != skip)
+        .all(|d| {
+            active
+                .iter()
+                .filter(|f| f.dim() == d)
+                .any(|f| values.contains(f))
+        })
+}
+
+/// Short label: `room:Kitchen`, `type:Jalousie`, `★ favorite`.
+pub fn facet_label(app: &App, f: &Facet) -> String {
+    let h = &app.house;
+    match f {
+        Facet::Room(r) => format!("room:{}", h.rooms.get(*r).map_or("?", |r| &r.name)),
+        Facet::Cat(i) => format!("cat:{}", h.cats.get(*i).map_or("?", |c| &c.name)),
+        Facet::Type(t) => format!("type:{}", t),
+        Facet::On => "on".into(),
+        Facet::Off => "off".into(),
+        Facet::Moving => "moving".into(),
+        Facet::Fav => "★ favorite".into(),
+        Facet::Attention => "⚠ attention".into(),
+        Facet::Recent => "changed < 10 min".into(),
+        Facet::Ctrl(c) => format!(
+            "ctrl:{}",
+            h.ctrls.get(*c).map_or("?".into(), |_| h.display_name(*c))
+        ),
+        Facet::System => "system (no control)".into(),
+    }
+}
+
+/// Title pills: one per dimension, values joined (`room:Kitchen|Hall`).
+pub fn facet_pills(app: &App, list: FacetList) -> Vec<String> {
+    let active = facets_of(app, list);
+    dims_of(active)
+        .into_iter()
+        .map(|d| {
+            let mut out = String::new();
+            for f in active.iter().filter(|f| f.dim() == d) {
+                let l = facet_label(app, f);
+                if out.is_empty() {
+                    out = l;
+                } else {
+                    out.push('|');
+                    out.push_str(l.split_once(':').map_or(&l, |(_, v)| v));
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+/// A row of the facet picker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacetOpt {
+    pub facet: Facet,
+    pub label: String,
+    /// Items it would match, given the other dimensions' facets
+    pub count: usize,
+    pub active: bool,
+    /// From the selected row ("this room"), listed first
+    pub suggested: bool,
+}
+
+/// The picker rows: suggestions from the selected row, then every value with
+/// matches (or active), per dimension; `query` narrows them (fuzzy).
+pub fn facet_options(app: &App, list: FacetList, query: &str) -> Vec<FacetOpt> {
+    use std::collections::HashMap;
+    let active = facets_of(app, list);
+    let dims = list_dims(list);
+    // every item's values, once
+    let items: Vec<Vec<Facet>> = match list {
+        FacetList::Controls => app
+            .house
+            .top_level()
+            .map(|c| ctrl_values(app, c, dims))
+            .collect(),
+        FacetList::Events => {
+            let (h, st) = (&app.house, &app.store);
+            st.events
+                .iter()
+                .filter(|e| {
+                    app.events.show_muted || !e.cid.is_some_and(|c| st.is_muted(h, h.top(c)))
+                })
+                .map(|e| event_values(app, e))
+                .collect()
+        }
+    };
+    let mut counts: HashMap<Facet, usize> = HashMap::new();
+    for vals in &items {
+        for d in dims {
+            if !passes(active, vals, Some(*d)) {
+                continue;
+            }
+            for f in vals.iter().filter(|f| f.dim() == *d) {
+                *counts.entry(f.clone()).or_default() += 1;
+            }
+        }
+    }
+    let mk = |f: Facet, suggested: bool| FacetOpt {
+        label: facet_label(app, &f),
+        count: counts.get(&f).copied().unwrap_or(0),
+        active: active.contains(&f),
+        suggested,
+        facet: f,
+    };
+    let mut out: Vec<FacetOpt> = suggestions(app, list)
+        .into_iter()
+        .map(|f| mk(f, true))
+        .collect();
+    let mut rest: Vec<Facet> = counts
+        .keys()
+        .cloned()
+        .chain(active.iter().cloned())
+        .collect();
+    rest.sort_by_cached_key(|f| (f.dim(), facet_order(app, f)));
+    rest.dedup();
+    out.extend(rest.into_iter().map(|f| mk(f, false)));
+    let q = query.trim();
+    if !q.is_empty() {
+        out.retain(|o| fuzzy(q, &o.label).is_some());
+    }
+    out
+}
+
+/// Sort key inside a dimension: rooms/categories in house order, the rest by name.
+fn facet_order(app: &App, f: &Facet) -> (usize, Vec<(u8, u64, String)>) {
+    match f {
+        Facet::Room(i) | Facet::Cat(i) => (*i, Vec::new()),
+        Facet::On => (0, Vec::new()),
+        Facet::Off => (1, Vec::new()),
+        Facet::Moving => (2, Vec::new()),
+        Facet::Fav => (0, Vec::new()),
+        Facet::Attention => (1, Vec::new()),
+        Facet::Recent => (2, Vec::new()),
+        _ => (0, natural_key(&facet_label(app, f))),
+    }
+}
+
+/// Values of the selected row, so `f ⏎` means "this room".
+fn suggestions(app: &App, list: FacetList) -> Vec<Facet> {
+    let h = &app.house;
+    let (c, ev) = match list {
+        FacetList::Controls => (selected_ctrl(app).map(|c| h.top(c)), false),
+        FacetList::Events => (
+            app.events
+                .sel
+                .and_then(|s| app.store.index_of(s))
+                .or_else(|| event_rows(app).last().copied())
+                .and_then(|i| app.store.events[i].cid)
+                .map(|c| h.top(c)),
+            true,
+        ),
+    };
+    let Some(c) = c else {
+        return Vec::new();
+    };
+    let mut v: Vec<Facet> = h.ctrls[c].room.map(Facet::Room).into_iter().collect();
+    if ev {
+        v.push(Facet::Ctrl(c));
+    }
+    v.push(Facet::Type(type_label(app, c)));
+    v
 }
 
 // ── Attention (Home) ────────────────────────────────────────────────────────

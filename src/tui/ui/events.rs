@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 
 use super::common;
-use crate::tui::app::{App, Chip, Hit};
+use crate::tui::app::{App, FacetList, Hit};
 use crate::tui::keymap::{Cmd, Ctx};
 use crate::tui::lists;
 use crate::tui::store::{Event, Val, fmt_val};
@@ -60,12 +60,8 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
     if !app.events.filter.is_empty() {
         nb = nb.title(Notch::new(format!("/{}", app.events.filter)).active(true));
     }
-    for c in &app.events.chips {
-        let label = match c {
-            Chip::Room(r) => format!("room:{}", h.rooms[*r].name),
-            Chip::Ctrl(c) => format!("ctrl:{}", h.display_name(*c)),
-        };
-        nb = nb.title(Notch::new(label).active(true));
+    for pill in lists::facet_pills(app, FacetList::Events) {
+        nb = nb.title(Notch::new(pill).active(true));
     }
     if app.events.show_muted {
         nb = nb.title(Notch::new("+muted").active(true));
@@ -96,7 +92,7 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
         let mut hints = vec![
             Hint::new("⏎", "open"),
             Hint::new("e", "only this"),
-            Hint::new("f", "room"),
+            Hint::new("f", "facets"),
         ];
         hints.extend(common::ctx_hints(
             Ctx::Events,
@@ -180,8 +176,8 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
         inner.height.saturating_sub(gh + 1),
     );
     if rows.is_empty() {
-        let msg: &[&str] = if !app.events.filter.is_empty() || !app.events.chips.is_empty() {
-            &["no events match", "Esc clears filter and chips"]
+        let msg: &[&str] = if !app.events.filter.is_empty() || !app.events.facets.is_empty() {
+            &["no events match", "f edits the facets · Esc clears"]
         } else {
             &[
                 "waiting for events…",

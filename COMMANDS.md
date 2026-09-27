@@ -470,12 +470,12 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 | Rooms | Action |
 |---|---|
 | `b` | group by room · category · type |
-| `f` | favorites only |
+| `f` | facets: room, type, state… |
 | `o` | sort rooms: name · activity · temperature |
 
 | Events | Action |
 |---|---|
-| `f` | filter chip: this room |
+| `f` | facets: room, control, type… |
 | `x` | mute this control |
 | `X` | show muted / noisy |
 | `F` | follow newest |

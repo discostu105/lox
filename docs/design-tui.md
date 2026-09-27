@@ -69,7 +69,7 @@ Alternatives: `+`/`-` step by 10%; `<` fully up, `>` fully down; `s` stop.
 **J3 — "Why did the hallway light turn on at night?"** (Tinkerer)
 ```
 3                  → Events screen (live feed, in memory since the TUI started)
-/hallway⏎          → filter chip "hallway"
+/hallway⏎          → filter "hallway" (f adds facets: room, control, type)
 j/k                → select the event "Hallway · Light · 0 → 1 · 02:14:07"
 ⏎                  → detail pane: other states that changed within ±2 s
                      (motion sensor 0 → 1 at 02:14:06 — a suspect)
@@ -279,13 +279,47 @@ The few screen-specific keys don't collide with the vocabulary above:
 | Screen | Key | Action |
 |--------|-----|--------|
 | Rooms | `b` | Cycle group-by: Room · Category · Type |
-| Rooms | `f` | Toggle "favorites only" (Loxone `isFavorite` + pins) |
-| Events | `f` | Toggle filter chips bar (type / room / category) |
+| Rooms | `f` | Facet picker for the controls (§4.5a) |
+| Events | `f` | Facet picker for the events (§4.5a) |
 | Events | `x` | Mute the selected control's events (noise control); `X` shows muted |
 | Events | `F` | Follow mode on/off (auto-scroll to newest) |
 | System › Log | `n` / `N` | Next / previous match |
 | System › Config | `n` / `N` | Next / previous diff hunk; `P` = `lox config pull` now |
 | System › Update | `R` | Reboot (typed confirmation); `U` install update (typed confirmation) |
+
+### 4.5a Facets (`f`)
+
+`/` narrows a list by name; `f` narrows it by *what things are*. The facet picker lists every value
+the list offers, grouped by dimension, with the number of items each would match:
+
+```
+╭─ facets · controls ─────────────────────── 2 active ─╮
+│ › kü▌                                                 │
+│ THIS                                                  │
+│ ▌ ● room:Küche                                    14  │
+│   ○ type:LightControllerV2                         6  │
+│ ROOM                                                  │
+│   ● room:Küche                                    14  │
+│ TYPE                                                  │
+│   ○ type:Küchenuhr                                 1  │
+╰─ ␣ toggle · ⏎ toggle+close · ⇥ group · C-x clear ─ 5 ─╯
+```
+
+| List | Dimensions |
+|------|------------|
+| Rooms › controls | flags (★ favorite/pinned, ⚠ attention, changed < 10 min), state (on, off, moving), room, category, type |
+| Events | room, category, type, control, source (system events without a control) |
+
+- Values of one dimension combine with OR, dimensions with AND: `room ∈ {Küche, Bad} ∧ type = Jalousie`.
+- The counts of a value ignore the other values of its own dimension, so they say what toggling adds.
+  Values with no match are hidden unless active.
+- `THIS` suggests the selected row's room and type (and control, on Events): `f ⏎` means "only this room".
+- Typing narrows the values (fuzzy); `␣` toggles and stays open, `⏎` toggles and closes, `⇥`/`S-⇥`
+  jump between dimensions, `C-x` clears all, `Esc` clears the query, then closes.
+- Active facets show as pills in the pane title (`room:Küche|Bad`, `type:Jalousie`); the controls
+  pane's meta says `6 of 14 controls`. On Rooms, groups without a match are hidden.
+- `Esc` on the list clears the text filter first, then the facets. `e` on a control opens Events
+  with the facet `ctrl:<name>`.
 
 ### 4.6 Palette (`:`)
 

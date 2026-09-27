@@ -71,9 +71,8 @@ pub enum Cmd {
     Mark,
     MarkAll,
     GroupBy,
-    Favorites,
+    Facets,
     Sort,
-    Chip,
     Mute,
     ShowMuted,
     Follow,
@@ -174,14 +173,14 @@ pub static BINDINGS: &[Binding] = &[
         Cmd::GroupBy,
         "group by room · category · type"
     ),
-    b!(Rooms, ["f"], Cmd::Favorites, "favorites only"),
+    b!(Rooms, ["f"], Cmd::Facets, "facets: room, type, state…"),
     b!(
         Rooms,
         ["o"],
         Cmd::Sort,
         "sort rooms: name · activity · temperature"
     ),
-    b!(Events, ["f"], Cmd::Chip, "filter chip: this room"),
+    b!(Events, ["f"], Cmd::Facets, "facets: room, control, type…"),
     b!(Events, ["x"], Cmd::Mute, "mute this control"),
     b!(Events, ["X"], Cmd::ShowMuted, "show muted / noisy"),
     b!(Events, ["F"], Cmd::Follow, "follow newest"),
@@ -363,8 +362,8 @@ mod tests {
             lookup(&[Ctx::Item], "Space").unwrap().cmd,
             Cmd::Verb(Verb::Primary)
         );
-        assert_eq!(lookup(&[Ctx::Rooms], "f").unwrap().cmd, Cmd::Favorites);
-        assert_eq!(lookup(&[Ctx::Events], "f").unwrap().cmd, Cmd::Chip);
+        assert_eq!(lookup(&[Ctx::Rooms], "f").unwrap().cmd, Cmd::Facets);
+        assert_eq!(lookup(&[Ctx::Events], "f").unwrap().cmd, Cmd::Facets);
         assert_eq!(lookup(&[], "q").unwrap().cmd, Cmd::Quit);
         assert!(lookup(&[], "z").is_none());
     }

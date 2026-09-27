@@ -88,10 +88,80 @@ pub enum GKey {
     Unassigned,
 }
 
+/// A list filter value (§4.5a). Values of one dimension combine with OR,
+/// dimensions with AND: `room ∈ {Kitchen, Hall} ∧ type = LightController`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Facet {
+    Room(usize),
+    Cat(usize),
+    /// Type label (versions folded, as in group-by type)
+    Type(String),
+    On,
+    Off,
+    Moving,
+    /// Loxone favorite or pinned
+    Fav,
+    Attention,
+    /// Changed in the last 10 minutes
+    Recent,
+    /// A control (top level) — events only
+    Ctrl(Cid),
+    /// Events without a control (global states, system)
+    System,
+}
+
+/// Facet dimensions, in picker order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Dim {
+    Flag,
+    State,
+    Room,
+    Category,
+    Type,
+    Control,
+    Source,
+}
+
+impl Dim {
+    pub fn title(self) -> &'static str {
+        match self {
+            Dim::Flag => "FLAGS",
+            Dim::State => "STATE",
+            Dim::Room => "ROOM",
+            Dim::Category => "CATEGORY",
+            Dim::Type => "TYPE",
+            Dim::Control => "CONTROL",
+            Dim::Source => "SOURCE",
+        }
+    }
+}
+
+impl Facet {
+    pub fn dim(&self) -> Dim {
+        match self {
+            Facet::Room(_) => Dim::Room,
+            Facet::Cat(_) => Dim::Category,
+            Facet::Type(_) => Dim::Type,
+            Facet::On | Facet::Off | Facet::Moving => Dim::State,
+            Facet::Fav | Facet::Attention | Facet::Recent => Dim::Flag,
+            Facet::Ctrl(_) => Dim::Control,
+            Facet::System => Dim::Source,
+        }
+    }
+}
+
+/// Lists that take facets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FacetList {
+    Controls,
+    Events,
+}
+
 #[derive(Debug, Default)]
 pub struct RoomsState {
     pub group: GroupBy,
-    pub fav_only: bool,
+    /// Facets over the controls (`f`)
+    pub facets: Vec<Facet>,
     pub sort: RoomSort,
     /// 0 = groups, 1 = controls, 2 = inspector
     pub pane: u8,
@@ -139,12 +209,6 @@ pub struct HomeState {
     pub sel_quick: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Chip {
-    Room(usize),
-    Ctrl(Cid),
-}
-
 #[derive(Debug)]
 pub struct EventsState {
     pub follow: bool,
@@ -152,7 +216,8 @@ pub struct EventsState {
     pub sel: Option<u64>,
     /// Newest seq seen when follow was turned off (for the "↓ N new" notch)
     pub seen: u64,
-    pub chips: Vec<Chip>,
+    /// Facets over the events (`f`)
+    pub facets: Vec<Facet>,
     pub show_muted: bool,
     pub filter: String,
     /// 0 = list, 1 = detail
@@ -165,7 +230,7 @@ impl Default for EventsState {
             follow: true,
             sel: None,
             seen: 0,
-            chips: Vec::new(),
+            facets: Vec::new(),
             show_muted: false,
             filter: String::new(),
             pane: 0,
@@ -453,6 +518,12 @@ pub enum Overlay {
         err: Option<String>,
     },
     Contexts {
+        sel: usize,
+    },
+    /// `f`: facet picker (typing narrows the values)
+    Facets {
+        list: FacetList,
+        line: Line,
         sel: usize,
     },
     MsgLog {
