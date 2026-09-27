@@ -1,8 +1,9 @@
 # Design: `lox tui` — Interactive Terminal UI
 
-> **Status: PROPOSED (round 2)** — Design and UX proposal. Nothing implemented yet. Round 2 adds the btop-style
-> visual language (§6.5), the wiring overlay powered by lxir (§5.9, §12.1), drops the event journal, and
-> reassesses lox-cli (§12.2).
+> **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (lxir),
+> System › Config diffs, themes, mouse and `--demo`. Tested against a real Gen 2 Miniserver (read-only) and the
+> built-in demo house. §13 records the decisions on the open questions, §14 what real data changed.
+> Not done yet: README GIF (`vhs`) and the 1,000 ev/s frame-time benchmark.
 
 ## 1. Vision
 
@@ -840,7 +841,11 @@ src/logic.rs              thin adapter over lxir: load .Loxone, index by UUID, n
 | `crossterm` (feature `event-stream`) | terminal backend and async input | small |
 | `nucleo-matcher` | fuzzy matching | small |
 | `lxir` | `.Loxone` document model, wires, semantic diff (§12.1) | small (serde, serde_json, sha2, thiserror; all but sha2 already in the tree) |
-| `insta` (dev) | snapshot tests of rendered frames | — |
+| `unicode-width` | display width of names (wide/combining characters) | small |
+| `libc` | SIGTERM/SIGHUP → restore the terminal | already in the tree |
+
+`insta` was planned for snapshot tests; the render tests assert invariants instead (§10), which survive visual polish
+without churning snapshot files.
 
 Clipboard uses **OSC 52** (no dependency, works over SSH). Everything sits behind a cargo feature `tui`
 (on by default) so a minimal build can drop it.
@@ -849,11 +854,13 @@ Clipboard uses **OSC 52** (no dependency, works over SSH). Everything sits behin
 
 ```
 lox tui [--screen home|rooms|events|energy|system|sites] [-r <room>]
-        [--read-only] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse] [--no-motion]
+        [--read-only] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse] [--no-motion] [--demo]
 ```
+`--demo` is a **visible** flag (not hidden as first planned): it is the quickest way to try the TUI without a
+Miniserver, and the demo house is fully synthetic.
 It follows API_DESIGN_GUIDELINES: `-r` is the room, global `--no-color` gives the `mono` theme, and `--ctx` selects the context.
 
-Preferences go in `~/.lox/tui.yaml` (theme, icons, `motion: on|off`, energy role overrides, poll intervals). Per-context
+Preferences go in `~/.lox/tui.yaml` (theme, icons, `motion`, `mouse`, `transparent`, energy role overrides under `roles:`). Per-context
 UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette history, last screen).
 
 ---
@@ -877,8 +884,10 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 - **Action layer**: a table-driven test per control type (§4.3 table ⇄ `plan()`).
 - **Keymap**: no two bindings conflict within a context. Every binding has a help text.
 - **Journeys**: J1–J12 as `update()` tests with a fixture structure (≈ 40 controls, 8 rooms) and a scripted event stream.
-- **Rendering**: `insta` snapshots of every screen at 80×24, 120×36 and 180×50 via `TestBackend`, in the `night` and `mono` themes.
-  Each of the six widgets has its own snapshots (edge values 0 %, 100 %, eighth-block tips, empty series).
+- **Rendering**: every screen and the main overlays at 60×20, 80×24, 120×36 and 180×50 in `night`, `day` (256 colors)
+  and `mono`, with all poll results loaded: no panics, the header intact, the frame exactly the terminal size.
+  Widgets have unit tests for edge values (0 %, 100 %, eighth-block tips, empty series). Implemented as invariant
+  checks rather than `insta` snapshots (§8.4).
 - **Wiring**: a small checked-in `.Loxone` fixture; test that `logic::neighborhood()` resolves control → block → wires and that live/dashed classification matches the structure fixture.
 - **State edge cases** as `update()` tests: selection survives re-sort and new events; stale results after a context
   switch are dropped; a closed view ignores late results; a held `␣` sends one command; a pasted newline doesn't submit;
@@ -888,7 +897,9 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 - **Real PTY smoke test** (snapshots don't exercise terminal modes): run `lox tui --demo` in a pseudo-terminal,
   send keys, paste and a resize, quit, and assert the terminal is restored (echo on, cursor visible, main screen).
 - **Hostile text**: a fixture whose names contain escape sequences and wide/combining characters renders clean and aligned.
-- **Manual**: a `lox tui --demo` hidden flag runs against a built-in fake Miniserver (fixture + simulated
+- **Live probe** (ignored by default): `LOX_TUI_LIVE=1 cargo test live_probe -- --ignored` opens a read-only
+  stream to the configured Miniserver and checks that the initial value dump arrives.
+- **Manual**: `lox tui --demo` runs against a built-in fake Miniserver (fixture + simulated
   events). It is also used for README screenshots/GIFs (recorded with `vhs`).
 
 ---
@@ -992,16 +1003,51 @@ for M0–M10.
 
 ---
 
-## 13. Open questions
+## 13. Decisions (formerly open questions)
 
 Resolved in round 2: event journal (dropped — in-memory only), `␣` on a blind (decided, §4.3),
 theme name ("Loxone Night" stays), lxir timing (M5b, no spike needed).
 
-1. ~~**Nerd Font default**~~ — decided: **off**, opt-in only via `--icons nerd` / `tui.yaml`. There is no reliable way
+1. **Nerd Font default** — **off**, opt-in only via `--icons nerd` / `tui.yaml`. There is no reliable way
    to detect a Nerd Font; the help overlay mentions the option.
-2. **Energy roles**: is auto-detection from control types reliable on real installs, or do we need `tui.yaml` mapping from day 1?
-3. **No footer**: hints live only in the focused pane's bottom border (§5.1). Is that discoverable enough for first-time
-   users, or should a one-line footer appear during the first sessions (`tui-state.yaml` counts starts)?
-4. **Config freshness for wiring**: when the cached `.Loxone` is older than the running structure version, show the
-   wiring with a "config may be stale" notch, or refuse and offer a re-download?
-5. **What-if**: worth pursuing at all (via `lox-sim`), or is a live, honest wiring view enough?
+2. **Energy roles** — **auto-detect, with `tui.yaml` overrides from day 1.** An EFM's node types (Grid, Production,
+   Storage) are reliable; without an EFM, meter type and name heuristics apply. `roles:` in `tui.yaml` maps a
+   meter name or UUID to `grid | pv | battery | load` for installs where both fail. The real test install was
+   detected correctly without overrides.
+3. **No footer** — **no footer, not even for first sessions.** The header always shows `? help`, and the focused
+   pane's hint notches cover the keys in reach. A first-run footer would need a start counter and would still
+   disappear before people know the TUI. Revisit if users report missing keys.
+4. **Config freshness for wiring** — **show it, with a notch.** The cached `.Loxone` is stored with the structure
+   version. When the running version differs, the wiring overlay shows *cached · config may be stale* and `d`
+   re-downloads. A wiring view that is one edit behind is still far more useful than none, and the notch is honest.
+5. **What-if** — **not now.** The live wiring view answers the actual question ("why is this on?"). Keep §12.2 as the
+   plan if people ask for it.
+
+---
+
+## 14. Revisions from real data
+
+Found by running against a real Gen 2 Miniserver (read-only) and its structure file (1,092 value states):
+
+- **Stream framing bug (also in `lox stream`).** Each message is an 8-byte header plus a payload. Command replies
+  arrive as a *text* frame, which did not clear the pending header, so the next binary frame was parsed as a header
+  and the initial value dump was mostly lost (74 of 1,092 states arrived). `stream::Framer` now owns the header
+  state for all three stream loops; 790 states arrive (the rest are text/daytimer states that come in their own tables).
+- **Meters have no statistics** on this install; temperature sensors do, and they are **hourly**. The energy
+  *today* chart therefore uses only statistics whose output is a power value and otherwise builds the day from the
+  **session** (notch *this session*). Statistics timestamps are local wall time, not UTC; the parser converts with
+  the current UTC offset.
+- **EFM values arrive only on change.** `actual0–4` may never arrive in a session, so node power falls back to the
+  node meter's `actual`, then to the EFM's `Gpwr` / `Ppwr` / `Spwr`. Self-use is `(PV − export) / PV`.
+- **Gen 2 lacks some counters** (`ctx/s`, `ints/s`, `comints`); System hides counters the Miniserver doesn't report
+  instead of showing `—`.
+- **`sdtest` exercises the SD card**, so it is polled at most every 10 minutes.
+- **Light-circuit switches** report `active` as 0/100 instead of 0/1; the view normalizes to on/off.
+- **Duplicate names are the norm** (many rooms have a "Temperatur"). The palette matches name *and* room, and the
+  CLI copy (`y`) always includes `-r <room>`.
+- **Noise**: meters, EFM, analog and text states change constantly. They stay out of the Home live feed, and
+  changes below display precision don't create events.
+- **The `def.log` tail can be months old**; the Log view opens on the newest line, like `tail`.
+- **gitops commit subjects** carry a `[ms]` prefix; System › Config strips it.
+- **Value input (`=`)** is prefilled with the current value *selected*, so `=` `30` `⏎` sets 30 (typing replaces it,
+  arrows keep it for editing).

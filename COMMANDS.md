@@ -377,6 +377,129 @@ lox watch "Temperatur" -i 5            # custom poll interval in seconds
 
 ---
 
+## Terminal UI
+
+A full-screen, live view of the house: rooms and controls, a live event feed, energy flow, Miniserver health,
+config history and all your Miniservers — and you can act on it. Design: [docs/design-tui.md](docs/design-tui.md).
+
+```bash
+lox tui                                # start on the last screen (Home the first time)
+lox tui --screen energy                # start on a screen: home|rooms|events|energy|system|sites
+lox tui -r Kitchen                     # start in Rooms with a room selected
+lox tui --read-only                    # no actions at all (wall display, screen sharing)
+lox tui --theme mono                   # theme: night (default) | day | mono | neon
+lox tui --icons nerd                   # Nerd Font icons (plain Unicode by default)
+lox tui --no-mouse --no-motion         # keep the terminal's own mouse selection; no animations
+lox tui --demo                         # a synthetic demo house, no Miniserver needed
+lox --ctx office tui                   # another context; switch live with C or on the Sites screen
+```
+
+Global `--no-color` (or `NO_COLOR`) selects the `mono` theme. Harmless actions (lights, blinds, moods) are
+instant; doors, gates, alarm and wallbox ask `y/N`; reboot and firmware update ask you to type the context name.
+
+Preferences live in `~/.lox/tui.yaml`:
+
+```yaml
+theme: night          # night | day | mono | neon
+icons: plain          # plain | nerd
+motion: true          # animated energy flow, pulses
+mouse: true
+transparent: false    # keep the terminal background
+roles:                # energy role overrides: meter name or UUID → grid | pv | battery | load
+  Balcony PV: pv
+```
+
+UI state (pins, mutes, palette history, last screen) is kept per context in `tui-state.yaml`.
+
+### Keys
+
+`?` shows the keys for where you are; every pane's bottom border shows the ones in reach. `:` (or `Ctrl-K`) opens
+the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
+
+<!-- keys:start (generated from src/tui/keymap.rs) -->
+| Global | Action |
+|---|---|
+| `1` | Home |
+| `2` | Rooms |
+| `3` | Events |
+| `4` | Energy |
+| `5` | System |
+| `6` | Sites |
+| `⇥` | next pane |
+| `⇤` | previous pane |
+| `h` `←` | focus pane left |
+| `l` `→` | focus pane right |
+| `j` `↓` | move down |
+| `k` `↑` | move up |
+| `g` `Home` | first |
+| `G` `End` | last |
+| `^d` `PageDown` | half page down |
+| `^u` `PageUp` | half page up |
+| `[` | previous sub-view |
+| `]` | next sub-view |
+| `/` | filter |
+| `:` `^k` | palette: go to / run |
+| `?` | help |
+| `C` | switch context |
+| `!` | message log |
+| `p` | pause live updates |
+| `^r` | refresh structure + reconnect |
+| `q` `^c` | quit |
+| `Esc` | back |
+
+| Selected item | Action |
+|---|---|
+| `␣` | primary action |
+| `+` | step up |
+| `-` | step down |
+| `<` | minimum |
+| `>` | maximum |
+| `=` | set exact value |
+| `s` | stop |
+| `m` | mode / mood |
+| `a` | all actions |
+| `⏎` | inspect / open |
+| `w` | wiring |
+| `*` | pin to Home |
+| `e` | events of this item |
+| `y` | copy lox command |
+| `Y` | copy UUID |
+| `v` | mark |
+| `V` | mark all visible |
+
+| Rooms | Action |
+|---|---|
+| `b` | group by room · category · type |
+| `f` | favorites only |
+| `o` | sort rooms: name · activity · temperature |
+
+| Events | Action |
+|---|---|
+| `f` | filter chip: this room |
+| `x` | mute this control |
+| `X` | show muted / noisy |
+| `F` | follow newest |
+
+| System › Log | Action |
+|---|---|
+| `n` | next match |
+| `N` | previous match |
+
+| System › Config | Action |
+|---|---|
+| `n` | next change |
+| `N` | previous change |
+| `P` | lox config pull now |
+
+| System › Update | Action |
+|---|---|
+| `R` | reboot (typed confirmation) |
+| `U` | install update (typed confirmation) |
+
+<!-- keys:end -->
+
+---
+
 ## Streaming
 
 ```bash

@@ -695,6 +695,28 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
+/// Names of a control's statistic outputs. Real structure files use an array of
+/// `{id, name, …}`; older ones an object keyed by index. Both are accepted.
+pub(crate) fn statistic_output_names(outputs: &serde_json::Value) -> Vec<String> {
+    let name = |v: &serde_json::Value| {
+        v.get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("value")
+            .to_string()
+    };
+    if let Some(arr) = outputs.as_array() {
+        let mut entries: Vec<_> = arr.iter().collect();
+        entries.sort_by_key(|v| v.get("id").and_then(|i| i.as_u64()).unwrap_or(0));
+        entries.into_iter().map(name).collect()
+    } else if let Some(obj) = outputs.as_object() {
+        let mut entries: Vec<_> = obj.iter().collect();
+        entries.sort_by_key(|(k, _)| k.parse::<u64>().unwrap_or(u64::MAX));
+        entries.into_iter().map(|(_, v)| name(v)).collect()
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn cmd_history(
     ctx: &RunContext,
     name_or_uuid: String,
@@ -711,20 +733,8 @@ pub fn cmd_history(
         .as_ref()
         .and_then(|cj| cj.get("statistic"))
         .and_then(|s| s.get("outputs"))
-        .and_then(|o| o.as_object())
-        .map(|outputs| {
-            let mut entries: Vec<_> = outputs.iter().collect();
-            entries.sort_by_key(|(k, _)| k.as_str().to_string());
-            entries
-                .iter()
-                .map(|(_, v)| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("value")
-                        .to_string()
-                })
-                .collect()
-        })
+        .map(statistic_output_names)
+        .filter(|names| !names.is_empty())
         .unwrap_or_else(|| vec!["value".to_string()]);
     let num_outputs = output_names.len();
 
@@ -859,4 +869,19 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::statistic_output_names;
+    use serde_json::json;
+
+    #[test]
+    fn statistic_outputs_array_and_object() {
+        let arr = json!([{"id": 1, "name": "Humidity"}, {"id": 0, "name": "Temperature"}]);
+        assert_eq!(statistic_output_names(&arr), ["Temperature", "Humidity"]);
+        let obj = json!({"10": {"name": "B"}, "2": {"name": "A"}});
+        assert_eq!(statistic_output_names(&obj), ["A", "B"]);
+        assert!(statistic_output_names(&json!(null)).is_empty());
+    }
 }

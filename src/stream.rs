@@ -316,6 +316,49 @@ fn parse_header(data: &[u8]) -> Result<BinHeader> {
     })
 }
 
+/// Reassembles the Loxone header/payload pairs of a WebSocket stream.
+///
+/// Every message is announced by an 8-byte binary header; the payload follows
+/// as the next frame — binary for event tables, *text* for command replies.
+/// A text frame therefore consumes the pending header too; if it didn't, the
+/// next header would be taken as the text's payload and the following event
+/// table (e.g. the initial value-state dump) would be lost.
+#[derive(Default)]
+pub struct Framer {
+    pending: Option<BinHeader>,
+}
+
+impl Framer {
+    /// Feed one binary frame; returns the events it completes.
+    pub fn binary(&mut self, data: &[u8]) -> Result<Vec<StateEvent>> {
+        if let Some(header) = self.pending.take() {
+            return parse_binary_payload(header.msg_type, data);
+        }
+        if data.len() < 8 || data[0] != 0x03 {
+            return Ok(Vec::new());
+        }
+        let header = parse_header(data)?;
+        if header.estimated {
+            // an exact header follows
+            return Ok(Vec::new());
+        }
+        if header.payload_len == 0 {
+            // keepalive, out-of-service: no payload
+            return parse_binary_payload(header.msg_type, &[]);
+        }
+        if data.len() > 8 {
+            return parse_binary_payload(header.msg_type, &data[8..]);
+        }
+        self.pending = Some(header);
+        Ok(Vec::new())
+    }
+
+    /// A text frame: the payload of the pending header (a command reply).
+    pub fn text(&mut self) {
+        self.pending = None;
+    }
+}
+
 /// Parse a 16-byte Loxone UUID from binary format.
 ///
 /// Format: `{u32_le}-{u16_le}-{u16_le}-{8×u8_hex}`
@@ -736,45 +779,18 @@ where
     // The Loxone protocol sends messages in pairs:
     // 1. A binary header (8 bytes) telling us the type and size of the next payload
     // 2. The payload (binary or text)
-    let mut pending_header: Option<BinHeader> = None;
+    let mut framer = Framer::default();
 
     while let Some(msg) = ws_stream.next().await {
-        let msg = msg?;
-        match msg {
+        match msg? {
             Message::Binary(data) => {
-                if let Some(header) = pending_header.take() {
-                    // This is the payload for the previous header
-                    let events = parse_binary_payload(header.msg_type, &data)?;
-                    if !events.is_empty() {
-                        handler(events)?;
-                    }
-                } else if data.len() >= 8 && data[0] == 0x03 {
-                    // This is a binary header
-                    let header = parse_header(&data)?;
-                    if header.estimated {
-                        // Estimated header — wait for the exact header that follows
-                        continue;
-                    }
-                    if header.payload_len == 0 {
-                        // No payload — handle inline (keepalive, out-of-service)
-                        let events = parse_binary_payload(header.msg_type, &[])?;
-                        if !events.is_empty() {
-                            handler(events)?;
-                        }
-                    } else if data.len() > 8 {
-                        // Header + payload in the same frame
-                        let events = parse_binary_payload(header.msg_type, &data[8..])?;
-                        if !events.is_empty() {
-                            handler(events)?;
-                        }
-                    } else {
-                        pending_header = Some(header);
-                    }
+                let events = framer.binary(&data)?;
+                if !events.is_empty() {
+                    handler(events)?;
                 }
             }
-            Message::Text(_) => {
-                // Text responses (command ACKs, etc.) — skip for streaming
-            }
+            // command ACKs etc. — skipped for streaming
+            Message::Text(_) => framer.text(),
             Message::Ping(data) => {
                 ws_stream.send(Message::Pong(data)).await?;
             }
@@ -786,6 +802,73 @@ where
     }
 
     Ok(())
+}
+
+/// A long-lived stream session for interactive use (`lox tui`): like
+/// [`stream_events`] but with a WS keepalive every 30 s (the Miniserver drops
+/// idle sockets after ~5 min), a connect/auth timeout, and a stop signal.
+///
+/// `on_live` is called once the subscription is active. Returns `Ok(())` when
+/// stopped or when the server closed the socket; the caller reconnects.
+#[cfg(feature = "tui")]
+pub async fn stream_session<F>(
+    cfg: &Config,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+    on_live: impl FnOnce(),
+    mut handler: F,
+) -> Result<()>
+where
+    F: FnMut(Vec<StateEvent>) -> bool,
+{
+    let setup = async {
+        let ws_client = LoxWsClient::new(cfg.clone());
+        let (mut ws, _resp) = ws_client.connect_raw().await?;
+        ws_authenticate(&mut ws, cfg).await?;
+        ws.send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
+            .await?;
+        anyhow::Ok(ws)
+    };
+    let mut ws = tokio::time::timeout(Duration::from_secs(20), setup)
+        .await
+        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+    on_live();
+
+    let mut keepalive = tokio::time::interval(Duration::from_secs(30));
+    keepalive.tick().await;
+    let mut framer = Framer::default();
+    let mut last_rx = tokio::time::Instant::now();
+    loop {
+        let msg = tokio::select! {
+            _ = stop.changed() => return Ok(()),
+            _ = keepalive.tick() => {
+                // No traffic at all for 90 s (keepalive answers included): dead socket
+                if last_rx.elapsed() > Duration::from_secs(90) {
+                    bail!("connection timed out");
+                }
+                ws.send(Message::Text("keepalive".to_string())).await?;
+                continue;
+            }
+            m = ws.next() => m,
+        };
+        let Some(msg) = msg else { return Ok(()) };
+        last_rx = tokio::time::Instant::now();
+        let events = match msg? {
+            Message::Binary(data) => framer.binary(&data)?,
+            Message::Text(_) => {
+                framer.text();
+                continue;
+            }
+            Message::Ping(data) => {
+                ws.send(Message::Pong(data)).await?;
+                continue;
+            }
+            Message::Close(_) => return Ok(()),
+            _ => continue,
+        };
+        if !events.is_empty() && !handler(events) {
+            return Ok(());
+        }
+    }
 }
 
 /// Stream events until the callback returns `Some(T)`, then return that value.
@@ -805,44 +888,18 @@ where
         .send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
         .await?;
 
-    let mut pending_header: Option<BinHeader> = None;
+    let mut framer = Framer::default();
 
     while let Some(msg) = ws_stream.next().await {
-        let msg = msg?;
-        match msg {
+        match msg? {
             Message::Binary(data) => {
-                if let Some(header) = pending_header.take() {
-                    let events = parse_binary_payload(header.msg_type, &data)?;
-                    for event in &events {
-                        if let Some(result) = finder(event) {
-                            return Ok(result);
-                        }
-                    }
-                } else if data.len() >= 8 && data[0] == 0x03 {
-                    let header = parse_header(&data)?;
-                    if header.estimated {
-                        continue;
-                    }
-                    if header.payload_len == 0 {
-                        let events = parse_binary_payload(header.msg_type, &[])?;
-                        for event in &events {
-                            if let Some(result) = finder(event) {
-                                return Ok(result);
-                            }
-                        }
-                    } else if data.len() > 8 {
-                        let events = parse_binary_payload(header.msg_type, &data[8..])?;
-                        for event in &events {
-                            if let Some(result) = finder(event) {
-                                return Ok(result);
-                            }
-                        }
-                    } else {
-                        pending_header = Some(header);
+                for event in &framer.binary(&data)? {
+                    if let Some(result) = finder(event) {
+                        return Ok(result);
                     }
                 }
             }
-            Message::Text(_) => {}
+            Message::Text(_) => framer.text(),
             Message::Ping(data) => {
                 ws_stream.send(Message::Pong(data)).await?;
             }
@@ -861,6 +918,41 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn header(msg_type: u8, len: u32) -> Vec<u8> {
+        let mut h = vec![0x03, msg_type, 0, 0];
+        h.extend_from_slice(&len.to_le_bytes());
+        h
+    }
+
+    /// The reply to `enablebinstatusupdate` is header + *text* frame; the value
+    /// dump that follows must not be swallowed (regression: the TUI and
+    /// `lox stream` never saw initial values).
+    #[test]
+    fn framer_text_reply_then_value_dump() {
+        let mut f = Framer::default();
+        assert!(f.binary(&header(0, 60)).unwrap().is_empty());
+        f.text();
+        assert!(f.binary(&header(MSG_VALUE_STATES, 24)).unwrap().is_empty());
+        let mut payload = vec![0u8; 16];
+        payload[0] = 0x01;
+        payload.extend_from_slice(&21.5f64.to_le_bytes());
+        let ev = f.binary(&payload).unwrap();
+        assert_eq!(ev.len(), 1);
+        assert!(matches!(&ev[0], StateEvent::ValueState { value, .. } if *value == 21.5));
+    }
+
+    #[test]
+    fn framer_estimated_header_waits_for_exact() {
+        let mut f = Framer::default();
+        let mut est = header(MSG_VALUE_STATES, 999);
+        est[2] = 0x01;
+        assert!(f.binary(&est).unwrap().is_empty());
+        assert!(f.binary(&header(MSG_VALUE_STATES, 24)).unwrap().is_empty());
+        let mut payload = vec![0u8; 16];
+        payload.extend_from_slice(&1.0f64.to_le_bytes());
+        assert_eq!(f.binary(&payload).unwrap().len(), 1);
+    }
 
     #[test]
     fn test_parse_uuid() {

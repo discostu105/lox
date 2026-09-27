@@ -53,7 +53,7 @@ fn git_ok(repo: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// Derive a subdirectory name for this Miniserver.
-fn ms_dir(cfg: &Config) -> String {
+pub(crate) fn ms_dir(cfg: &Config) -> String {
     if !cfg.serial.is_empty() {
         cfg.serial.clone()
     } else {
