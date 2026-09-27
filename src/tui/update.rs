@@ -195,6 +195,13 @@ fn new_house(app: &mut App, epoch: u64, house: super::model::House, ctx: String)
             e.cid = house.state_owner.get(&e.uuid).map(|(c, _)| *c);
         }
         app.store.last_event.clear();
+        // Everything else holding a Cid or room index may now point at a
+        // different control: drop it rather than act on the wrong one.
+        app.overlays.clear();
+        app.rooms.marks.clear();
+        app.events.chips.clear();
+        app.home.order.clear();
+        app.history.clear();
     } else {
         let mutes = std::mem::take(&mut app.store.mutes);
         app.store = super::store::Store::new();
@@ -221,6 +228,9 @@ fn new_house(app: &mut App, epoch: u64, house: super::model::House, ctx: String)
     }
     app.pending.clear();
     app.last_dir.clear();
+    // buffered states belong to the old structure (or site)
+    app.paused = false;
+    app.paused_buf.clear();
     app.polls = PollState::default();
     app.house = house;
     app.ctx_name = ctx;
@@ -524,25 +534,36 @@ fn key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
     let Some(b) = keymap::lookup(&ctxs, &code) else {
         return Vec::new();
     };
-    // One press, one action: auto-repeat only for movement and steps
-    if !b.repeat {
+    if held(app, &k, code, b.cmd, b.repeat) {
+        return Vec::new();
+    }
+    command(app, b.cmd)
+}
+
+/// One press, one action: auto-repeat only for movement and steps. Records
+/// the key and returns true when this press is a repeat that must be dropped.
+fn held(app: &mut App, k: &KeyEvent, code: String, cmd: Cmd, repeat: bool) -> bool {
+    if !repeat {
         if k.kind == KeyEventKind::Repeat {
-            return Vec::new();
+            return true;
         }
         // Terminals without the kitty protocol report a held key as fast
         // presses. Only keys that act (or flip a toggle) treat those as
-        // repeats; navigation must take quick double presses.
-        if acts(b.cmd)
+        // repeats; navigation must take quick double presses. Enter acts
+        // when it runs a scene or switches the site.
+        let acting = acts(cmd)
+            || (cmd == Cmd::Inspect && matches!(target(app), Target::Scene(_) | Target::Site(_)));
+        if acting
             && let Some((last, t)) = &app.last_key
             && *last == code
             && app.now - t < REPEAT_GAP
         {
             app.last_key = Some((code, app.now));
-            return Vec::new();
+            return true;
         }
     }
     app.last_key = Some((code, app.now));
-    command(app, b.cmd)
+    false
 }
 
 /// Commands that change the house or flip a toggle: a held key must not
@@ -2080,7 +2101,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
                 if let Some(b) = keymap::lookup(&[Ctx::Item], &code)
                     && b.ctx == Ctx::Item
                 {
-                    if !b.repeat && k.kind == KeyEventKind::Repeat {
+                    if held(app, &k, code, b.cmd, b.repeat) {
                         return Vec::new();
                     }
                     return command(app, b.cmd);
@@ -2503,8 +2524,13 @@ fn command_or_overlay(app: &mut App, cmd: Cmd, key_char: &str) -> Vec<Effect> {
     if app.overlays.is_empty() {
         command(app, cmd)
     } else {
-        let c = key_char.chars().next().unwrap_or('j');
-        overlay_key(app, KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+        // Arrow keys, not j/k: text fields in overlays would insert letters
+        let code = if key_char == "k" {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE))
     }
 }
 
