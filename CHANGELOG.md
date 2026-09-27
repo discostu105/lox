@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-27
+
+### Added
+- **Terminal UI** (`lox tui`) — full-screen, keyboard-first live view of your installation (built in by default; `--no-default-features` for a minimal build)
+  - Home, Rooms, Events, Energy, System and Sites screens with live values
+  - Control actions from the keyboard (toggle, dim, set value, moods), with confirmation for doors, alarms and gates
+  - Wiring view (`w`) — the config program around a control, with live values on the wires (via [lxir](https://github.com/discostu105/lxir))
+  - History view (`c`) — control statistics from 6 h to a year, with period compare
+  - Fuzzy command palette (`:`), `y` copies the equivalent `lox` command
+  - `--demo` (synthetic house, no Miniserver needed) and `--read-only` (wall display) modes
+  - Miniserver log with full-line view and match highlighting; config history with semantic diffs
+
+## [0.11.0] — 2026-03-23
+
 ### Added
 - **Multi-Miniserver context management** (`lox ctx`) — `kubectl`-style context switching for multiple Miniservers
   - `lox ctx add <name> --host ... --user ... --pass ...` — add a named context
