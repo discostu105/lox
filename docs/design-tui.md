@@ -508,12 +508,12 @@ There is **no footer row**. Following btop, everything lives in the borders:
 │        ╭────────────╮                    ╭────────────╮                    ╭────────────╮                       │
 │        │  ☼  PV     │ ━━━━━━▶━━━━━━▶━━━━ │  ⌂  Home   │ ◀━━━━━━━━━━━━━━━━ │  ≋  Grid   │                       │
 │        │  6.2 kW    │                    │  2.8 kW    │  ━━━━━━▶━━━━━━▶━━ │ -2.1 kW    │  exporting            │
-│        ╰─────┬──────╯                    ╰─────┬──────╯                    ╰────────────╯                       │
-│              ┃ ▼ 1.3 kW                        ┃ ▼ 11.0 kW                                                       │
-│        ╭─────┴──────╮                    ╭─────┴──────╮                                                          │
-│        │  ▮ Battery │                    │  ⏚ Wallbox │                                                          │
-│        │  74 %  ▲   │                    │  charging  │                                                          │
-│        ╰────────────╯                    ╰────────────╯                                                          │
+│        ╰────────────╯                    ╰──┬──────┬──╯                    ╰────────────╯                       │
+│                              1.3 kW charging ┃      ┃ 11.0 kW                                                    │
+│                                  ╭───────────┴──╮ ╭──┴───────────╮                                                │
+│                                  │  ▮ Battery   │ │  ⏚ Wallbox   │                                                │
+│                                  │  74 %        │ │  charging    │                                                │
+│                                  ╰──────────────╯ ╰──────────────╯                                                │
 ├─ Today ─────────────────────────────────────────────── kWh ─┬─ Meters ───────────────────────────── 12 ────────┤
 │ 8 ┤                 ⣀⣤⣶⣿⣿⣿⣷⣦⣄                                │ Heat pump       1.9 kW   ▕████▌    ▏  14.2 kWh    │
 │ 4 ┤          ⣀⣤⣴⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣤⣀        PV                   │ Wallbox        11.0 kW   ▕██████████▏  22.0 kWh    │
@@ -525,6 +525,9 @@ There is **no footer row**. Following btop, everything lives in the borders:
 - The flow diagram is built from the configured meters. Roles (PV, grid, battery, wallbox, home) are
   detected from control types (`EnergyManager2`, `EFM`, `Meter` with bidirectional type, `Wallbox2`) and
   can be overridden in `tui.yaml`. Flow arrows animate at a speed proportional to the power; a direction change flips them.
+- Battery and wallbox hang off **Home** (side by side when both exist): storage power flows between the battery
+  and the house, never through PV. Loxone reports storage like a source (`+` = discharging, as the grid's
+  `+` = import); the connector's arrow and label ("1.2 kW discharging") show the direction.
 - Round 2: nodes get a **dot meter** (btop mem style, `⣿⣿⣿⣀⣀`) in their role gradient. The **Today** chart is a
   **mirrored braille graph** (btop's net graph): PV above the axis in the `pv` gradient, consumption below in the
   `use` gradient, a `┊` marker at *now*, and the forecast drawn in `text.faint` after it. The meter table gets

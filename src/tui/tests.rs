@@ -372,6 +372,36 @@ fn j6_energy() {
     );
 }
 
+/// Loxone reports storage power like a source (+ = discharging): the battery
+/// feeds Home, it never flows into PV.
+#[test]
+fn energy_battery_discharging_feeds_home() {
+    let mut h = H::new();
+    let hs = &h.app.house;
+    let st = |name: &str, s: &str| {
+        let c = hs.resolve(name, None).unwrap();
+        hs.ctrls[c].state(s).unwrap().to_string()
+    };
+    let mut batch = Vec::new();
+    for (u, v) in [
+        (st("Battery", "actual"), 1.5),
+        (st("Energy flow", "actual2"), 1.5),
+        (st("Energy flow", "Spwr"), 1.5),
+        (st("PV", "actual"), 0.0),
+        (st("Energy flow", "actual1"), 0.0),
+        (st("Energy flow", "Ppwr"), 0.0),
+    ] {
+        batch.push(crate::stream::StateEvent::ValueState { uuid: u, value: v });
+    }
+    let e = h.app.epoch;
+    h.msg(Msg::States { epoch: e, batch });
+    h.keys(&["4"]);
+    let f = ui::energy::flows(&h.app);
+    assert_eq!(f.batt, Some(-1.5), "+ means charging inside the TUI");
+    let s = h.render(140, 40);
+    assert!(s.contains("1.5 kW discharging"), "{}", s);
+}
+
 /// J7: sites — switch the whole TUI to another context.
 #[test]
 fn j7_switch_site() {

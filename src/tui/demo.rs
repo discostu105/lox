@@ -1391,7 +1391,8 @@ impl Sim {
         self.set("Utility", "Heat pump", "actual", r3(hp));
         self.set("Garage", "Wallbox meter", "actual", r3(wb));
         self.set("Utility", "Grid", "actual", r3(grid));
-        self.set("Utility", "Battery", "actual", r3(batt));
+        // Loxone reports storage like a source: + discharging
+        self.set("Utility", "Battery", "actual", r3(-batt));
         let nsoc = (soc + batt * 2.0 / 3600.0 * 10.0).clamp(0.0, 100.0);
         self.set(
             "Utility",
@@ -1415,11 +1416,11 @@ impl Sim {
         }
         self.set("Utility", "Energy flow", "Gpwr", r3(grid));
         self.set("Utility", "Energy flow", "Ppwr", r3(pv));
-        self.set("Utility", "Energy flow", "Spwr", r3(batt));
+        self.set("Utility", "Energy flow", "Spwr", r3(-batt));
         self.set("Utility", "Energy flow", "Ssoc", nsoc.round());
         self.set("Utility", "Energy flow", "actual0", r3(grid));
         self.set("Utility", "Energy flow", "actual1", r3(pv));
-        self.set("Utility", "Energy flow", "actual2", r3(batt));
+        self.set("Utility", "Energy flow", "actual2", r3(-batt));
         self.set("Utility", "Energy flow", "actual3", r3(load));
     }
 }

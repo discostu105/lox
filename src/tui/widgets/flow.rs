@@ -79,7 +79,8 @@ pub fn vflow(
         } else {
             (i + off) % sp
         };
-        let sym = if pos == sp - 1 {
+        // a one-cell connector always shows its direction
+        let sym = if pos == sp - 1 || height == 1 {
             if down { "▼" } else { "▲" }
         } else {
             "┃"

@@ -85,7 +85,9 @@ pub fn flows(app: &App) -> Flows {
     let h = &app.house;
     let (pv, pv_uuid) = sum(app, Role::Production);
     let (grid, grid_uuid) = sum(app, Role::Grid);
-    let (batt, _) = sum(app, Role::Storage);
+    // Loxone reports storage like a source (+ discharging, as the grid's + import);
+    // flipped here so + means charging
+    let batt = sum(app, Role::Storage).0.map(|b| -b);
     let soc = h
         .energy
         .by_role(Role::Storage)
@@ -310,83 +312,94 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
         gsub,
         None,
     );
-    // Battery below PV
+    // Battery and chargers hang off Home: power flows between them and the
+    // house, never through PV. Side by side under Home when both exist.
     let y1 = y0 + 5 + 1;
-    if h_has(app, Role::Storage) && y1 + 3 <= inner.bottom() {
-        vflow(
-            buf,
-            inner,
-            x0 + 7,
-            y0 + 5,
-            1,
-            f.batt,
-            phase,
-            th.s_color(th.batt),
-            th,
-        );
-        let bval = match (f.soc, f.batt) {
-            (Some(s), Some(b)) => format!(
-                "{:.0} % {}",
-                s,
-                if b > 0.01 {
-                    "▲"
-                } else if b < -0.01 {
-                    "▼"
-                } else {
-                    ""
-                }
-            ),
-            (Some(s), None) => format!("{:.0} %", s),
-            (None, b) => kw(b),
-        };
-        node_box(
-            app,
-            buf,
-            inner,
-            x0,
-            y1,
-            "▮",
-            "Battery",
-            &bval,
-            None,
-            f.soc.map(|s| ((s / 100.0).clamp(0.0, 1.0), Grad::Batt)),
-        );
-        if let Some(b) = f.batt {
-            put(buf, inner, x0 + 9, y0 + 5, &fmt_kw(b.abs()), th.s_dim());
-        }
-    }
-    // Chargers below Home
-    if let Some((name, p)) = f.chargers.first()
-        && y1 + 3 <= inner.bottom()
-    {
-        vflow(
-            buf,
-            inner,
-            xh + 7,
-            y0 + 5,
-            1,
-            Some(*p),
-            phase,
-            th.s_color(th.load),
-            th,
-        );
-        let sub = if *p > 0.05 {
-            ("charging", th.s_on())
+    let has_batt = h_has(app, Role::Storage);
+    let charger = f.chargers.first();
+    if y1 + 3 <= inner.bottom() {
+        let both = has_batt && charger.is_some();
+        // (box x, connector x) under Home
+        let (bx, cx) = if both {
+            (xh.saturating_sub(9), xh + 9)
         } else {
-            ("idle", th.s_dim())
+            (xh, xh)
         };
-        node_box(
-            app,
-            buf,
-            inner,
-            xh,
-            y1,
-            "⏚",
-            name,
-            &fmt_kw(*p),
-            Some(sub),
-            None,
-        );
+        if has_batt {
+            let lx = if both { xh + 3 } else { xh + 7 };
+            // + charging flows down from Home into the battery
+            vflow(
+                buf,
+                inner,
+                lx,
+                y0 + 5,
+                1,
+                f.batt,
+                phase,
+                th.s_color(th.batt),
+                th,
+            );
+            let bval = match (f.soc, f.batt) {
+                (Some(s), _) => format!("{:.0} %", s),
+                (None, b) => kw(b),
+            };
+            node_box(
+                app,
+                buf,
+                inner,
+                bx,
+                y1,
+                "▮",
+                "Battery",
+                &bval,
+                None,
+                f.soc.map(|s| ((s / 100.0).clamp(0.0, 1.0), Grad::Batt)),
+            );
+            if let Some(b) = f.batt.filter(|b| b.abs() > 0.01) {
+                let what = if b > 0.0 { "charging" } else { "discharging" };
+                let t = format!("{} {}", fmt_kw(b.abs()), what);
+                let tx = if both {
+                    lx.saturating_sub(t.chars().count() as u16 + 1)
+                } else {
+                    lx + 2
+                };
+                put(buf, inner, tx, y0 + 5, &t, th.s_dim());
+            }
+        }
+        if let Some((name, p)) = charger {
+            let lx = if both { xh + 12 } else { xh + 7 };
+            vflow(
+                buf,
+                inner,
+                lx,
+                y0 + 5,
+                1,
+                Some(*p),
+                phase,
+                th.s_color(th.load),
+                th,
+            );
+            if *p > 0.01 {
+                put(buf, inner, lx + 2, y0 + 5, &fmt_kw(*p), th.s_dim());
+            }
+            let sub = if *p > 0.05 {
+                ("charging", th.s_on())
+            } else {
+                ("idle", th.s_dim())
+            };
+            node_box(
+                app,
+                buf,
+                inner,
+                cx,
+                y1,
+                "⏚",
+                name,
+                &fmt_kw(*p),
+                Some(sub),
+                None,
+            );
+        }
     }
     // Right side: sparklines of this session, stretched over a fixed width
     // (right-aligned over the whole pane, a few minutes were a speck at the edge)
