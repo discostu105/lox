@@ -7,6 +7,7 @@ for the README and social posts.
 scripts/demo-video/make.sh
 # → target/demo-video/lox-tui-demo.mp4   1920×1080, 30 fps, captions burned in
 #   target/demo-video/lox-tui-demo.srt   the captions as subtitles
+#   target/demo-video/lox-tui-demo.gif   1280 px preview (copy to docs/media/ for the README)
 #   target/demo-video/lox-tui-demo.cast  the raw session (asciicast v2)
 ```
 

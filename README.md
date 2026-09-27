@@ -205,7 +205,13 @@ lox completions bash                   # Generate shell completions
 
 ## Terminal UI
 
-`lox tui` is a full-screen, keyboard-first live view of your installation — **btop for your house**:
+`lox tui` is a full-screen, keyboard-first live view of your installation — **btop for your house**.
+
+![lox tui --demo: rooms, controls, charts, wiring, palette, events, energy flow, system, logs, config history](docs/media/lox-tui-demo.gif)
+
+<sub>Recorded from `lox tui --demo` with [scripts/demo-video](scripts/demo-video/) — reproducible, no Miniserver needed.</sub>
+
+What's in it:
 
 - **Home** — room cards, what needs attention (open windows, low batteries, offline devices), pinned controls, a live feed
 - **Rooms** — every control with its live value; `␣` toggles, `+`/`-` dim, `=` sets a value, `m` picks a mood, `a` shows all actions

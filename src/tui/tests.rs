@@ -576,7 +576,8 @@ fn config_diff_focus_and_footer() {
             ],
         ),
     );
-    let s = h.render(140, 30);
+    // paths are shown with the platform's separator
+    let s = h.render(140, 30).replace('\\', "/");
     assert!(s.contains("focus diff"), "{}", s);
     assert!(s.contains("never writes back"), "{}", s);
     assert!(s.contains("git · /srv/cfg"), "repo in the frame: {}", s);
