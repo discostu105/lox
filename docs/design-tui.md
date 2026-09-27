@@ -184,6 +184,14 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 6. **One keymap table** in code (`tui/keymap.rs`) drives dispatch, the border key hints, the `?` overlay and the
    generated docs, and a unit test fails if two bindings collide in the same context.
 7. Text input (`/`, `:`, `=`) captures all printable keys. `Esc` cancels, `⏎` confirms.
+8. **One press, one action.** Only key *press* events act (crossterm also reports release, on Windows and with
+   the kitty keyboard protocol). Auto-repeat is allowed for movement and `+`/`-` (coalesced into one command per
+   frame), and ignored for `␣`, `<`/`>`, `=` and anything that asks for confirmation, so holding Space
+   can't toggle a blind back and forth.
+9. **Paste is text, never a submit.** Bracketed paste into the palette or a value input inserts the text; a pasted
+   newline does not run the command. Only a real `⏎` press confirms.
+10. **Back restores place.** `Esc`/`h` out of a room and back in restores that room's selection and scroll position
+    (kept per room for the session).
 
 ### 4.2 Global keys
 
@@ -200,6 +208,7 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 | `:` or `Ctrl-k` | **Palette**: go to anything, or run a `lox` command |
 | `?` | Help overlay for the current context |
 | `C` | Context (site) switcher |
+| `!` | Message log: failures and connection events of this session (§5.1) |
 | `p` | Pause / resume live updates (the display freezes, events keep buffering) |
 | `Ctrl-r` | Refresh the structure cache and reconnect |
 | `q`, `Ctrl-c` | Quit |
@@ -331,6 +340,10 @@ There is **no footer row**. Following btop, everything lives in the borders:
   show only a right-aligned position notch (`┘1/18└`). Global keys live in `?`. This replaces the footer, saves a
   row, and puts the hints next to what they act on.
 - Toasts appear inside the focused pane's bottom-right corner: `✓ Blind South → pos 30` / `✗ 403 forbidden — token user lacks rights`.
+- **A toast is never the only record.** Every failure (action refused, command error, reconnect, poll failure) also
+  goes into an in-memory **message log**. While it holds unread errors, the header shows a `! 2` badge; `!` opens
+  the log as an overlay (time, what, error, the `lox` command that failed). It is part of the same ring-buffer
+  memory budget and is not persisted.
 
 ### 5.2 ¹ Home — the dashboard
 
@@ -436,6 +449,9 @@ There is **no footer row**. Following btop, everything lives in the borders:
 
 - A ring buffer of 10,000 events. **Follow mode** stays pinned to the newest event. Moving the selection up
   turns follow off, and `F` or `G` turns it back on. `p` pauses rendering.
+- **Paused or scrolled back, the view holds still.** New events never drag the viewport or the selection; instead the
+  bottom border shows a `┘↓ 37 new└` notch (with the time of the oldest unseen event), and `G` jumps to them.
+  The selection is tracked by event identity, not row index, so it stays on the same event as rows arrive.
 - **Noise control** matters most at scale. High-frequency analog states (meters, power, lux) are
   **collapsed** into one row per control with `×N` and the latest value. `x` mutes a control. Mutes are
   saved per context. The header shows events per minute as a sparkline.
@@ -502,7 +518,8 @@ Standard width they are visible together, `[`/`]` still cycles the focused sub-v
 - **Devices**: the `lox health` table (Tree/Air devices with battery as a dot meter colored by level, signal bars, status), sorted problems first.
 - **Bus & LAN**: CAN/LAN counters with **per-interval deltas** and a trend dot sparkline. Non-zero error deltas flash red once, then stay amber.
 - **Log**: tail of `/dev/fsget/log/def.log`, level-colored, `/` search, `n`/`N`.
-- **Config**: the gitops repository (`lox config init/pull`). A commit list with a side-by-side diff of users,
+- **Config**: the gitops repository (`lox config init/pull`). Changed values are highlighted at the word level
+  (`Off-delay 120 → `**`300`**` s`), not just as whole changed lines. A commit list with a side-by-side diff of users,
   devices and controls. `P` runs a pull now. If the repo isn't set up: a hint with `lox config init`.
 - **Update**: firmware check, changelog link, `U` install and `R` reboot, both with **typed confirmation**
   (type the context name) and a progress/reconnect view through the out-of-service states.
@@ -612,9 +629,19 @@ In truecolor, gradients are precomputed into 101-entry lookup tables per theme (
 mode they are quantized to the xterm cube; with 16 colors they collapse to the gradient's semantic color
 (`ok`/`warn`/`crit` bands for `load`). `mono` uses bold/normal/dim bands.
 
-Themes: `night` (default), `day` (light terminals), `mono` (only bold/dim/reverse; used automatically with
-`NO_COLOR` or `--no-color`), and `neon` (a SilkCircuit-style magenta/cyan, for fun).
-Truecolor is detected from `COLORTERM`, with a 256-color fallback.
+Themes: `night` (default), `day` (light terminals), `mono` (only bold/dim/reverse/underline), and `neon`
+(a SilkCircuit-style magenta/cyan, for fun).
+
+**Color resolution order** (user intent before detection):
+1. `--theme` / `--no-color` flags, then `theme:` in `tui.yaml`: explicit choices win (a theme flag can deliberately
+   opt back into color even with `NO_COLOR` set).
+2. A non-empty `NO_COLOR` → `mono`. Checked *before* any capability detection.
+3. Detection: truecolor from the terminal backend / terminfo, with `COLORTERM` treated as a hint, not a requirement;
+   otherwise 256 colors, otherwise 16.
+
+Turning color off never turns off bold, underline, layout or glyphs. **Focus must survive without color**: in `mono`
+the focused pane uses heavy borders (`┏━┓┃┗┛`) and a bold title, other panes light borders; the selected row keeps
+its `▌` bar and bold name. Status is always paired with a glyph or word (`● on`, `⚠ battery`), never hue alone.
 
 ### 6.2 Glyphs
 
@@ -650,8 +677,16 @@ per-screen drawing tricks; a new screen composes these.
 Plus the plain bits: **selection** (full-width `surface` bg, accent `▌`/`▸`, bold name), **key-caps** (` ␣ ` on a
 `key` background) for Quick chips and dialogs, and **toasts** (one line in the focused pane's bottom-right, 3 s, up to 3).
 
+**Numbers beside every graph.** A braille graph or sparkline is never the only carrier of a value: the current value
+(with unit) is always printed next to it, so screen readers, `mono` and screenshots stay meaningful.
+
+**Unavailable is not zero.** A value that hasn't arrived yet, or whose source is offline, shows `—` in `text.faint`,
+never `0`. Polled values older than two poll intervals show their age (`38 % · 12 s ago`) in `text.dim`.
+
 **Motion** only where something really moves: blinds, gates, energy flow, the pending spinner, the pulse on the
 wire that just fired, and the new-event flash (row background fades from accent in 800 ms). A calm house means a calm screen.
+Nothing blinks. `motion: off` in `tui.yaml` (or `--no-motion`) replaces every animation with its final state; animation
+never delays input or hides the current value.
 
 ### 6.4 Responsive layout
 
@@ -661,7 +696,7 @@ wire that just fired, and the new-event flash (row background fades from accent 
 | 120–159 | **Standard**: the mockups above |
 | 90–119 | **Compact**: Home stacks Attention/Energy under the cards; Rooms has 2 panes and an inspector overlay |
 | 80–89 × ≥ 24 | **Narrow**: one pane at a time; `h`/`l` move between them (breadcrumb in the title) |
-| < 80 × 24 | "Terminal too small (need 80×24)" centered, with the current size |
+| < 80 × 24 | "Terminal too small (need 80×24)" centered, with the current size; `q`, `Ctrl-c` and `Ctrl-z` still work, and state is kept for when it grows again |
 
 Height: sections collapse from the bottom (Home: Live → Quick → Pinned), and there is always a single header row.
 Graphs shrink in rows before they disappear. When a bottom border is too short for all hint notches, the lowest-priority
@@ -706,6 +741,10 @@ level, and user-editable layouts. They cost maintenance and add nothing a reside
 - **Collapsed noise** in Events (§5.4), and mutes are saved.
 - **Summaries before detail**: room rows and cards show aggregates (lights on, blinds, temp, ⚠), so you
   don't need to open 40 rooms to find the one with a light on. The room list can be **sorted by "activity"** (`o` cycles sort: name · activity · temperature).
+- **Selection follows identity, not position.** Every list tracks its selection by UUID (events by sequence id).
+  Live sorts (activity, temperature, power) are **frozen while the pane has focus** and re-apply when focus leaves
+  or on `o`, so rows never jump under the cursor. After a filter, a deletion or a resize, the scroll is clamped
+  and the selected item stays visible.
 - **Initial burst**: the Miniserver sends every state on subscribe (thousands of events). These are applied
   to the store silently and don't appear in the event feed.
 
@@ -715,6 +754,20 @@ level, and user-editable layouts. They cost maintenance and add nothing a reside
 While not live, values show in `text.dim` with a stale marker, and actions are queued for 10 s or refused
 with a toast. The structure version (`/jdev/sps/LoxAPPversion3`) is checked on reconnect, and the structure
 reloads when it changed (for example after a config upload).
+
+**Stale results are discarded.** Every Effect carries a `(context generation, request id)` tag, and so does its
+result Msg. `update()` drops results whose context generation is no longer current (after `C` / a Sites switch or
+a reconnect) or whose request was superseded (a newer poll, a newer value input for the same control). A closed
+view cancels its pollers; a late result can't resurrect it.
+
+**Pending writes are tracked by identity.** A command sent for a control marks it `⋯` with the request id. A
+conflicting action on the same control (another `␣` while the first is unconfirmed) is coalesced into the pending
+one or waits for it, instead of starting a second write. A timeout is shown as "unconfirmed" (`?`), not as a
+rollback, because the command may have reached the Miniserver; the next stream value reconciles the state.
+
+**Untrusted text.** Control and room names, log lines, device names and anything else read from the Miniserver or the
+config are display data: control characters and escape sequences are stripped before rendering, so a crafted name can't
+move the cursor, set the window title or trigger OSC 52.
 
 ---
 
@@ -773,6 +826,11 @@ src/logic.rs              thin adapter over lxir: load .Loxone, index by UUID, n
   shutdown signal) and `build_state_uuid_map`.
 - All HTTP goes through the existing blocking `LoxClient` in `spawn_blocking`.
 - `update()` is pure, so journeys J1–J12 become unit tests: feed a key sequence, assert the Effects.
+- **One owner for input**: only the crossterm `EventStream` reads the terminal (no `poll`/`read` anywhere else).
+- **Terminal lifecycle**: a guard object owns raw mode, alternate screen, cursor, mouse capture, bracketed paste
+  and the keyboard-enhancement flags, and restores all of them on normal exit, error, panic (panic hook) and
+  SIGTERM/SIGHUP. `Ctrl-z` restores the terminal, suspends, and on `fg` re-acquires it and redraws in full.
+  Frames are wrapped in synchronized output when the terminal supports it.
 
 ### 8.4 Dependencies
 
@@ -791,11 +849,11 @@ Clipboard uses **OSC 52** (no dependency, works over SSH). Everything sits behin
 
 ```
 lox tui [--screen home|rooms|events|energy|system|sites] [-r <room>]
-        [--read-only] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse]
+        [--read-only] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse] [--no-motion]
 ```
 It follows API_DESIGN_GUIDELINES: `-r` is the room, global `--no-color` gives the `mono` theme, and `--ctx` selects the context.
 
-Preferences go in `~/.lox/tui.yaml` (theme, icons, energy role overrides, poll intervals). Per-context
+Preferences go in `~/.lox/tui.yaml` (theme, icons, `motion: on|off`, energy role overrides, poll intervals). Per-context
 UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette history, last screen).
 
 ---
@@ -822,8 +880,14 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 - **Rendering**: `insta` snapshots of every screen at 80×24, 120×36 and 180×50 via `TestBackend`, in the `night` and `mono` themes.
   Each of the six widgets has its own snapshots (edge values 0 %, 100 %, eighth-block tips, empty series).
 - **Wiring**: a small checked-in `.Loxone` fixture; test that `logic::neighborhood()` resolves control → block → wires and that live/dashed classification matches the structure fixture.
+- **State edge cases** as `update()` tests: selection survives re-sort and new events; stale results after a context
+  switch are dropped; a closed view ignores late results; a held `␣` sends one command; a pasted newline doesn't submit;
+  a failed action appears in the message log.
 - **Scale**: a generated fixture with 2,000 controls / 80 rooms, plus a 1,000 ev/s synthetic stream. A test asserts
   that the frame time stays under budget.
+- **Real PTY smoke test** (snapshots don't exercise terminal modes): run `lox tui --demo` in a pseudo-terminal,
+  send keys, paste and a resize, quit, and assert the terminal is restored (echo on, cursor visible, main screen).
+- **Hostile text**: a fixture whose names contain escape sequences and wide/combining characters renders clean and aligned.
 - **Manual**: a `lox tui --demo` hidden flag runs against a built-in fake Miniserver (fixture + simulated
   events). It is also used for README screenshots/GIFs (recorded with `vhs`).
 
@@ -933,7 +997,8 @@ for M0–M10.
 Resolved in round 2: event journal (dropped — in-memory only), `␣` on a blind (decided, §4.3),
 theme name ("Loxone Night" stays), lxir timing (M5b, no spike needed).
 
-1. **Nerd Font default**: off (safe) or auto-detect? Proposal: off, and suggest it in the help overlay.
+1. ~~**Nerd Font default**~~ — decided: **off**, opt-in only via `--icons nerd` / `tui.yaml`. There is no reliable way
+   to detect a Nerd Font; the help overlay mentions the option.
 2. **Energy roles**: is auto-detection from control types reliable on real installs, or do we need `tui.yaml` mapping from day 1?
 3. **No footer**: hints live only in the focused pane's bottom border (§5.1). Is that discoverable enough for first-time
    users, or should a one-line footer appear during the first sessions (`tui-state.yaml` counts starts)?
