@@ -712,20 +712,37 @@ impl LoxClient {
     }
 }
 
+/// A control UUID, optionally with one sub-control suffix
+/// (`<uuid>/masterValue`, `<uuid>/masterColor` — LightControllerV2 masters).
 pub fn is_uuid(s: &str) -> bool {
-    s.len() > 20 && s.contains('-') && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+    let (base, sub) = match s.split_once('/') {
+        Some((b, sub)) => (b, Some(sub)),
+        None => (s, None),
+    };
+    base.len() > 20
+        && base.contains('-')
+        && base.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        && sub.is_none_or(|sub| !sub.is_empty() && sub.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
 /// Validate that a UUID is safe to embed in a URL path.
-/// Rejects path traversal attempts and non-hex characters.
+/// Rejects path traversal attempts and non-hex characters; allows a single
+/// alphanumeric sub-control suffix (`<uuid>/masterColor`).
 pub fn validate_uuid(uuid: &str) -> Result<()> {
-    if uuid.is_empty() || uuid.len() > 50 {
+    if uuid.is_empty() || uuid.len() > 80 {
         bail!("Invalid UUID length: '{}'", uuid);
     }
-    if uuid.contains("..") || uuid.contains('/') || uuid.contains('\\') || uuid.contains('%') {
+    let (base, sub) = match uuid.split_once('/') {
+        Some((b, sub)) => (b, Some(sub)),
+        None => (uuid, None),
+    };
+    if uuid.contains("..") || uuid.contains('\\') || uuid.contains('%') {
         bail!("Invalid characters in UUID: '{}'", uuid);
     }
-    if !uuid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+    if sub.is_some_and(|sub| sub.is_empty() || !sub.chars().all(|c| c.is_ascii_alphanumeric())) {
+        bail!("Invalid characters in UUID: '{}'", uuid);
+    }
+    if base.is_empty() || !base.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         bail!("UUID contains non-hex characters: '{}'", uuid);
     }
     Ok(())
@@ -830,6 +847,13 @@ mod tests {
         assert!(validate_uuid("../attack").is_err());
         assert!(validate_uuid("uuid/with/slashes").is_err());
         assert!(validate_uuid("has spaces in it-----").is_err());
+        // LightControllerV2 master sub-controls
+        assert!(validate_uuid("2034c059-0222-5381-ffffed57184a04d2/masterColor").is_ok());
+        assert!(validate_uuid("2034c059-0222-5381-ffffed57184a04d2/masterValue").is_ok());
+        assert!(validate_uuid("2034c059-0222-5381-ffffed57184a04d2/a/b").is_err());
+        assert!(validate_uuid("2034c059-0222-5381-ffffed57184a04d2/").is_err());
+        assert!(validate_uuid("2034c059-0222-5381-ffffed57184a04d2/..").is_err());
+        assert!(validate_uuid("/masterColor").is_err());
     }
 
     // ── cache ─────────────────────────────────────────────────────────────────
@@ -1130,6 +1154,10 @@ mod tests {
         // Human-readable strings should NOT match
         assert!(!is_uuid("Licht Wohnzimmer"));
         assert!(!is_uuid("Kitchen Light [Room]"));
+        // Sub-control suffix
+        assert!(is_uuid("2034c059-0222-5381-ffffed57184a04d2/masterColor"));
+        assert!(!is_uuid("2034c059-0222-5381-ffffed57184a04d2/a/b"));
+        assert!(!is_uuid("Licht/masterColor"));
     }
 
     // ── retry logic ─────────────────────────────────────────────────────────
