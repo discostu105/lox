@@ -147,8 +147,10 @@ pub struct Ctrl {
     pub is_secured: bool,
     pub parent: Option<Cid>,
     pub subs: Vec<Cid>,
-    /// Miniserver statistics (`statistic.outputs`) are recorded for this control
+    /// Miniserver statistics (`statistic` or `statisticV2`) are recorded for this control
     pub has_stats: bool,
+    /// Statistics V2 series to plot: (group id, output)
+    pub stat_v2: Option<(String, String)>,
     /// Number of statistics outputs (values per record in the stats file)
     pub stat_outputs: usize,
     /// The first statistic output is power (kW), not an energy counter
@@ -453,6 +455,7 @@ impl House {
             name = typ.clone();
         }
         let cid = self.ctrls.len();
+        let stat_v2 = crate::statv2::plot_point(c);
         for (sname, su) in &states {
             self.state_owner.insert(su.clone(), (cid, sname.clone()));
         }
@@ -475,7 +478,8 @@ impl House {
                 .unwrap_or(false),
             parent,
             subs: Vec::new(),
-            has_stats: c.get("statistic").is_some(),
+            has_stats: c.get("statistic").is_some() || stat_v2.is_some(),
+            stat_v2: stat_v2.clone(),
             stat_outputs: c
                 .pointer("/statistic/outputs")
                 .map(|o| {
@@ -494,7 +498,9 @@ impl House {
                         || n.contains("pwr")
                         || n.contains("power")
                         || n.contains("leistung")
-                }),
+                })
+                // a meter's `actual` output is its power
+                || stat_v2.as_ref().is_some_and(|(_, o)| o == "actual"),
             format,
         });
         self.by_uuid.insert(uuid.to_string(), cid);
@@ -723,6 +729,29 @@ mod tests {
         let names: Vec<_> = h.rooms.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, ["EG Office", "OG Bath", "Room 2", "Room 10"]);
     }
+
+    /// Meters of the energy flow monitor only have `statisticV2` (real data).
+    #[test]
+    fn statistic_v2_meter_has_power_history() {
+        let st = serde_json::json!({
+            "rooms": {},
+            "controls": {
+                "m1": {"name": "PV-Strom", "type": "Meter",
+                    "states": {"actual": "s1", "totalDay": "s2"},
+                    "statisticV2": {"groups": [
+                        {"id": "1", "mode": 12, "dataPoints": [{"title": "Leistung", "output": "actual"}]},
+                        {"id": "2", "mode": 11, "accumulated": true,
+                         "dataPoints": [{"title": "Zählerstand", "output": "total"}]}]}},
+                "m2": {"name": "Plain", "type": "Meter", "states": {"actual": "s3"}}
+            }
+        });
+        let h = House::from_structure(&st);
+        let pv = &h.ctrls[h.by_uuid["m1"]];
+        assert!(pv.has_stats && pv.stat_power);
+        assert_eq!(pv.stat_v2, Some(("1".into(), "actual".into())));
+        let plain = &h.ctrls[h.by_uuid["m2"]];
+        assert!(!plain.has_stats && !plain.stat_power && plain.stat_v2.is_none());
+    }
 }
 
 #[cfg(test)]
@@ -753,10 +782,11 @@ mod real_structure {
         );
         for n in &h.energy.nodes {
             println!(
-                "  {:?} ctrl={} power={:?}",
+                "  {:?} ctrl={:?} power={:?} stat_power={:?}",
                 n.role,
-                n.ctrl.is_some(),
-                n.power_uuid(&h).is_some()
+                n.ctrl.map(|c| &h.ctrls[c].name),
+                n.power_uuid(&h).is_some(),
+                n.ctrl.map(|c| h.ctrls[c].stat_power)
             );
         }
     }

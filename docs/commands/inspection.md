@@ -164,7 +164,7 @@ lox weather --forecast                # 7-day forecast
 ## Statistics & History
 
 ```bash
-lox stats                             # controls with statistics enabled
+lox stats                             # controls with statistics (legacy or Statistics V2)
 lox history "Temperatur" --month 2025-01
 lox history "Temperatur" --day 2025-01-15
 lox history "Temperatur" -o csv       # CSV output for spreadsheets

@@ -609,13 +609,31 @@ async fn stream_loop_inner(
 // ── Polls ───────────────────────────────────────────────────────────────────
 
 /// What a poll needs from the app, captured on the UI thread.
+/// Where a control's statistics live.
+#[derive(Debug, Clone)]
+pub enum StatSrc {
+    /// Legacy `/stats/{uuid}.{YYYYMM}` files with this many outputs per record
+    Files(usize),
+    /// Statistics V2: (group id, output)
+    V2(String, String),
+}
+
+impl StatSrc {
+    fn of(c: &super::model::Ctrl) -> StatSrc {
+        match &c.stat_v2 {
+            Some((g, o)) => StatSrc::V2(g.clone(), o.clone()),
+            None => StatSrc::Files(c.stat_outputs.max(1)),
+        }
+    }
+}
+
 pub struct PollCtx {
     pub house_ms_type: String,
     pub house_serial: String,
-    /// History: control uuid + number of outputs
-    pub stats: Option<(String, usize)>,
-    /// EnergyDay: (role, control uuid) of meters
-    pub meters: Vec<(Role, String, usize)>,
+    /// History: control uuid + where its statistics are
+    pub stats: Option<(String, StatSrc)>,
+    /// EnergyDay: (role, control uuid, statistics) of meters
+    pub meters: Vec<(Role, String, StatSrc)>,
     pub ctx: String,
     pub contexts: Vec<String>,
     pub cfg: Option<Config>,
@@ -629,7 +647,7 @@ impl PollCtx {
             PollKind::History(c) => Some(*c),
             _ => None,
         };
-        let stats = stats.map(|c: Cid| (h.ctrls[c].uuid.clone(), h.ctrls[c].stat_outputs.max(1)));
+        let stats = stats.map(|c: Cid| (h.ctrls[c].uuid.clone(), StatSrc::of(&h.ctrls[c])));
         let mut meters = Vec::new();
         // Only meters whose statistics record power: real Miniservers often
         // have none, or log energy counters, which would read as nonsense kW.
@@ -637,11 +655,7 @@ impl PollCtx {
             if let Some(c) = n.ctrl
                 && h.ctrls[c].stat_power
             {
-                meters.push((
-                    n.role,
-                    h.ctrls[c].uuid.clone(),
-                    h.ctrls[c].stat_outputs.max(1),
-                ));
+                meters.push((n.role, h.ctrls[c].uuid.clone(), StatSrc::of(&h.ctrls[c])));
             }
         }
         PollCtx {
@@ -670,8 +684,8 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
         )),
         PollKind::Sites => Polled::Sites(sites(ctx)),
         PollKind::History(cid) => {
-            let (uuid, n) = ctx.stats.clone().context("no statistics")?;
-            Polled::History(*cid, history(client, &uuid, n)?)
+            let (uuid, src) = ctx.stats.clone().context("no statistics")?;
+            Polled::History(*cid, history(client, &uuid, &src)?)
         }
         PollKind::EnergyDay => energy_day(client, ctx),
         PollKind::ConfigLog => {
@@ -844,7 +858,30 @@ fn host_of(cfg: &Config) -> String {
 }
 
 /// Stats for a control: this month's file (and last month's early in the month).
-fn history(client: &LoxClient, uuid: &str, outputs: usize) -> Result<Series> {
+fn history(client: &LoxClient, uuid: &str, src: &StatSrc) -> Result<Series> {
+    let outputs = match src {
+        StatSrc::Files(n) => *n,
+        StatSrc::V2(group, output) => {
+            // the views need today and the last 24 h
+            let to = now() as i64;
+            let from = to - 2 * 86_400;
+            let data = client.get_bytes(&crate::statv2::raw_path(
+                uuid,
+                from,
+                to,
+                group,
+                Some(output),
+            ))?;
+            let points: Vec<(i64, f64)> = crate::statv2::parse(&data, 1)
+                .into_iter()
+                .filter_map(|(t, v)| v.first().copied().filter(|v| v.is_finite()).map(|v| (t, v)))
+                .collect();
+            if points.is_empty() {
+                bail!("no statistics recorded");
+            }
+            return Ok(Series { points });
+        }
+    };
     let now = chrono::Local::now();
     let mut periods = vec![now.format("%Y%m").to_string()];
     let yesterday = now - chrono::Duration::days(1);
@@ -894,8 +931,8 @@ fn energy_day(client: &LoxClient, ctx: &PollCtx) -> Polled {
     let tz = tz_offset();
     let now_unix = now() as i64;
     let mut by_role: BTreeMap<u8, Vec<f64>> = BTreeMap::new();
-    for (role, uuid, n) in &ctx.meters {
-        let Ok(s) = history(client, uuid, *n) else {
+    for (role, uuid, src) in &ctx.meters {
+        let Ok(s) = history(client, uuid, src) else {
             continue;
         };
         let q = data::quarter_hours(&s.points, tz, now_unix);

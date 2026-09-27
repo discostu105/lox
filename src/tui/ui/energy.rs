@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use super::common;
-use super::inspector::resample;
+use super::inspector::{resample, stretch};
 use crate::tui::app::{App, ERange, Hit, PollKind};
 use crate::tui::data;
 use crate::tui::keymap::{Cmd, Ctx};
@@ -388,10 +388,14 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
             None,
         );
     }
-    // Right side: sparklines of the last hours (session history)
+    // Right side: sparklines of this session, stretched over a fixed width
+    // (right-aligned over the whole pane, a few minutes were a speck at the edge)
     let sx = xg + 18;
     if sx + 20 < inner.right() {
-        let sw = inner.right() - sx - 2;
+        let sw = (inner.right() - sx - 2).min(40);
+        if f.pv_uuid.is_some() || f.home_uuid.is_some() || f.grid_uuid.is_some() {
+            put(buf, inner, sx, y0 + 5, "session", th.s_faint());
+        }
         let rows: [(&str, Option<&String>, Grad); 3] = [
             ("PV", f.pv_uuid.as_ref(), Grad::Pv),
             ("Home", f.home_uuid.as_ref(), Grad::Use),
@@ -405,13 +409,14 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
                 continue;
             }
             put(buf, inner, sx, y, &fit(label, 5), th.s_dim());
+            let w = sw.saturating_sub(5);
             dotspark(
                 buf,
                 inner,
                 sx + 5,
                 y,
-                sw.saturating_sub(5),
-                &data,
+                w,
+                &stretch(&resample(&data, w as usize * 2), w as usize * 2),
                 None,
                 g,
                 th,
@@ -445,6 +450,19 @@ fn session_qh(app: &App, role: Role) -> Option<Vec<f64>> {
         }
     }
     out
+}
+
+/// Today's energy of a role from its meters' `totalDay` counters (kWh).
+fn role_total_day(app: &App, role: Role) -> Option<f64> {
+    let h = &app.house;
+    let v: Vec<f64> = h
+        .energy
+        .by_role(role)
+        .filter_map(|n| n.ctrl)
+        .filter_map(|c| app.store.st(h, c, "totalDay"))
+        .filter(|v| v.is_finite())
+        .collect();
+    (!v.is_empty()).then(|| v.iter().sum())
 }
 
 /// Statistics when the Miniserver has them, else what this session has seen.
@@ -500,10 +518,13 @@ fn today(app: &App, area: Rect, buf: &mut Buffer) {
     };
     let mut nb = NotchBox::new().title(Notch::new("today"));
     if let Some((pv, usage, session)) = &day {
+        // the meters' own day counters beat a sum over sampled power
+        let pv_kwh = role_total_day(app, Role::Production).unwrap_or_else(|| kwh(pv));
+        let use_kwh = role_total_day(app, Role::Load).unwrap_or_else(|| kwh(usage));
         nb = nb.meta(Notch::new(format!(
             "☼ {} · ⌂ {}",
-            fmt_kwh(kwh(pv)),
-            fmt_kwh(kwh(usage))
+            fmt_kwh(pv_kwh),
+            fmt_kwh(use_kwh)
         )));
         if *session {
             nb = nb.title(Notch::new("this session").styled(th.s_faint()));
@@ -612,6 +633,16 @@ fn today(app: &App, area: Rect, buf: &mut Buffer) {
         &rfit(&format!("{:.0}", max), 3),
         th.s_faint(),
     );
+    if day.as_ref().is_some_and(|d| d.2) && inner.width > 50 {
+        put(
+            buf,
+            inner,
+            gx + 1,
+            inner.y,
+            "live values since start · the energy meters record no statistics",
+            th.s_faint(),
+        );
+    }
     // hour axis
     let ay = inner.bottom() - 1;
     for hh in (0..=24).step_by(if gw > 60 { 3 } else { 6 }) {

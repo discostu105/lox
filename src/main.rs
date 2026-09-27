@@ -10,6 +10,7 @@ mod loxcc;
 mod loxone_xml;
 mod otel;
 mod scene;
+mod statv2;
 mod stream;
 mod token;
 #[cfg(feature = "tui")]
