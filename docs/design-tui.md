@@ -1,6 +1,8 @@
 # Design: `lox tui` — Interactive Terminal UI
 
-> **Status: PROPOSED** — Design and UX proposal. Nothing implemented yet. Tracked as a bd epic.
+> **Status: PROPOSED (round 2)** — Design and UX proposal. Nothing implemented yet. Round 2 adds the btop-style
+> visual language (§6.5), the wiring overlay powered by lxir (§5.9, §12.1), drops the event journal, and
+> reassesses lox-cli (§12.2).
 
 ## 1. Vision
 
@@ -23,7 +25,7 @@ Design principles, in priority order:
 |---|-----------|---------|
 | P1 | **Live by default** | Values come from the WebSocket stream, not polling. Nothing needs a manual refresh. |
 | P2 | **One vocabulary** | A small set of keys means the same *intent* everywhere, on every control type. |
-| P3 | **Always discoverable** | The footer always shows what the keys do *here*. `?` shows everything. `a` opens a menu of every action on the selected item. |
+| P3 | **Always discoverable** | The focused pane's bottom border always shows what the keys do *here*. `?` shows everything. `a` opens a menu of every action on the selected item. |
 | P4 | **Safe** | Harmless actions are instant. Doors, alarms and gates ask for confirmation. Reboot and restore ask you to type a word. `--read-only` exists. |
 | P5 | **Scales** | 5 rooms or 80 rooms, 50 controls or 2,000, 1 event/s or 1,000: filters, grouping, virtualized lists, noise control. |
 | P6 | **Beautiful, calm** | A dark, restrained palette with one accent. Color carries meaning, not decoration. Motion only where something is really moving. |
@@ -65,13 +67,17 @@ Alternatives: `+`/`-` step by 10%; `<` fully up, `>` fully down; `s` stop.
 
 **J3 — "Why did the hallway light turn on at night?"** (Tinkerer)
 ```
-3                  → Events screen (live feed; history since the TUI started, or from the journal, see §7.3)
+3                  → Events screen (live feed, in memory since the TUI started)
 /hallway⏎          → filter chip "hallway"
 j/k                → select the event "Hallway · Light · 0 → 1 · 02:14:07"
-⏎                  → detail pane: the control's other states that changed within ±2 s
-                     (motion sensor 0 → 1 at 02:14:06 — found it)
+⏎                  → detail pane: other states that changed within ±2 s
+                     (motion sensor 0 → 1 at 02:14:06 — a suspect)
+w                  → wiring overlay: Motion Hallway ━━▶ LightController2 ━━▶ Hallway Light,
+                     live values on every wire — confirmed causally (§5.9)
 e                  → (from a control anywhere) jump here with the control pre-filtered
 ```
+Events are not persisted. For "what happened last night" when the TUI wasn't running, the
+answer is the control's history in the inspector (Miniserver statistics) or `lox otel` into a real TSDB.
 
 **J4 — "Is the Miniserver OK? Things feel slow."** (Integrator)
 ```
@@ -144,7 +150,7 @@ Six top-level **screens**, always in the same order, always on the number keys:
 |---|--------|---------------------|-------------------------|
 | 1 | **Home** | "How is my house right now? Does anything need me?" | — |
 | 2 | **Rooms** | "Show me / let me change anything." | Group by: Room · Category · Type (`b` cycles) |
-| 3 | **Events** | "What just happened?" | Live · Journal |
+| 3 | **Events** | "What just happened?" | — |
 | 4 | **Energy** | "Where does the power go?" | Now · Today · 7d · 30d |
 | 5 | **System** | "Is the Miniserver healthy?" | Overview · Devices · Bus & LAN · Log · Config · Update |
 | 6 | **Sites** | "How are all my Miniservers?" | — |
@@ -154,7 +160,7 @@ Hierarchy inside each screen: **Screen → Pane → Item → Action**.
 - A screen has 1–3 **panes**. One pane has **focus** (accent border, bold title).
 - A pane holds a list or a view with a **selected item**.
 - **Actions** apply to the selected item (or to marked items, see §4.4).
-- **Overlays** sit on top of all this: palette, help, action menu, confirm, value input, context switcher.
+- **Overlays** sit on top of all this: palette, help, action menu, confirm, value input, context switcher, wiring.
   Overlays form a stack, and `Esc` always pops one level.
 
 Screens and panes that don't apply are hidden or show a friendly empty state. There is no Energy
@@ -169,13 +175,13 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 ### 4.1 Rules that keep it unconfusing
 
 1. **Navigation keys never change the house.** Arrows, `hjkl`, `g`/`G`, `Tab`, `PgUp`/`PgDn` only move.
-2. **Action keys mean the same intent on every control type** (§4.3). The footer shows the concrete effect.
+2. **Action keys mean the same intent on every control type** (§4.3). The key hints show the concrete effect.
 3. **Lowercase acts, uppercase goes wider.** `y` copies the command, `Y` the UUID. `C` switches context.
    There are no hidden chords and no `g`-prefix sequences.
 4. **`Esc` always goes one level back**: close overlay → clear filter → unmark → focus parent pane.
    `Esc` never quits.
 5. **`q` quits** from anywhere without an overlay (`Ctrl-C` always quits).
-6. **One keymap table** in code (`tui/keymap.rs`) drives dispatch, the footer, the `?` overlay and the
+6. **One keymap table** in code (`tui/keymap.rs`) drives dispatch, the border key hints, the `?` overlay and the
    generated docs, and a unit test fails if two bindings collide in the same context.
 7. Text input (`/`, `:`, `=`) captures all printable keys. `Esc` cancels, `⏎` confirms.
 
@@ -201,7 +207,7 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 
 ### 4.3 The action vocabulary
 
-The core of P2. Eleven keys cover everything:
+The core of P2. Twelve keys cover everything:
 
 | Key | Intent | Mnemonic |
 |-----|--------|----------|
@@ -213,11 +219,12 @@ The core of P2. Eleven keys cover everything:
 | `m` | **Mode / mood** picker | mode |
 | `a` | **Action menu**: every action for this item, including rare ones | actions (right-click) |
 | `⏎` | **Inspect**: open the inspector / drill in | open |
+| `w` | **Wiring**: the logic around this control or event, with live values (§5.9) | "why?" |
 | `*` | **Pin** to Home (with sparkline) | star |
 | `e` | Show this item's **events** | events |
 | `y` / `Y` | Copy the `lox` **command** / UUID | yank |
 
-Per type, the footer shows what each key does:
+Per type, the key hints show what each key does:
 
 | Control type | `␣` | `+`/`-` | `<` / `>` | `=` | `s` | `m` |
 |--------------|-----|---------|-----------|-----|-----|-----|
@@ -225,7 +232,7 @@ Per type, the footer shows what each key does:
 | LightControllerV2 | toggle (last mood ↔ off) | brightness ±10 % of the master dimmer | off / 100 % | brightness | — | mood picker |
 | Dimmer, EIBDimmer | toggle | ±10 % | 0 / 100 % | level | — | — |
 | ColorPickerV2 | toggle | brightness ±10 % | off / 100 % | `#hex` or `hsv()` | — | color presets |
-| Jalousie (blind) | stop if moving, else full up/down (opposite of last direction) | position ±10 % (closed %) | fully up / fully down | position | stop | shade (auto) |
+| Jalousie (blind) | stop if moving, else full travel opposite to the last direction (hint shows `▲ up` / `▼ down` / `stop`) | position ±10 % (closed %) | fully up / fully down | position | stop | shade (auto) |
 | Gate | stop if moving, else open/close | — | open / close | — | stop | — |
 | IRoomControllerV2 | — | target ±0.5 °C | eco / comfort temp | target °C | — | auto · eco · comfort · manual |
 | Alarm ⚠ | — | — | — | — | — | arm · arm home · arm w/o motion · disarm |
@@ -239,13 +246,19 @@ Per type, the footer shows what each key does:
 | Scene | run | — | — | — | — | — |
 | Sensors / meters (read-only) | — | — | — | — | — | — |
 
-Keys that don't apply are **shown dimmed in the footer**, not hidden, so the layout stays stable.
-Pressing one gives a short hint toast ("Blind South has no modes").
+The border hints list only the keys that apply (the `?` overlay and `a` menu show the rest). Pressing a key
+that doesn't apply gives a short hint toast ("Blind South has no modes").
+
+**Decision — `␣` on a blind** (was open question 3): `␣` means "press the button", and the Loxone single-button
+behavior *is* the button. So: while the blind moves, `␣` stops it (the same rule as gate and music: `␣` during
+motion always stops). At rest, it travels fully in the direction opposite to the last one. The ambiguity is removed
+by the hint, which is computed from the live state and always says what will happen: `␣ stop`, `␣ ▲ up` or
+`␣ ▼ down`. Exact positioning stays on `+ - < > =`; `s` is an explicit stop that never starts motion.
 
 ### 4.4 Marking (bulk)
 
 `v` marks or unmarks the selection, `V` marks all visible items (so `/` then `V` means "all that
-match"). While anything is marked, the footer says `4 marked` and action keys apply to all
+match"). While anything is marked, the pane's bottom border says `4 marked` and action keys apply to all
 marked items. Keys that apply to only some of them act on those and report `3 of 4 applied`.
 `Esc` clears the marks.
 
@@ -289,24 +302,35 @@ One entry point for "go to" and "do":
 
 ## 5. Screens
 
-Mockups are **120×36** (standard layout). Color versions of every screen, with a live theme switcher, are in
-[`design-tui-mockups.html`](design-tui-mockups.html). Open it in a browser.
+Mockups are **120×36** (standard layout). The **color mockups are the visual reference**:
+[`design-tui-mockups.html`](design-tui-mockups.html) renders every screen as an exact cell grid with a live theme
+switcher. The ASCII sketches below show structure and content; for glyph-level look (gradients, braille graphs,
+notched titles) follow the HTML.
 
-### 5.1 Header & footer (every screen)
+### 5.1 Header & pane chrome (every screen)
 
 ```
- lox  ¹Home ²Rooms ³Events ⁴Energy ⁵System ⁶Sites        home · MS Gen2 15.2 · ● live 12ms · Evening · 18.4° ☼ · 14:32
- …
- ␣ toggle  +- dim  <> off/max  = set  m mood  ⏎ inspect  a actions            : palette  / filter  ? help  q quit
+ lox  ¹home ²rooms ³events ⁴energy ⁵system ⁶sites ───────── 14:32:07 ───────── home ● live 12ms  evening  18.4° ☼  ? help
+╭┐²rooms┌┐by room┌──────╮╭┐Living room┌┐/ filter┌──────────────────── ┐14┌─╮
+│ …                      ││ …                                              │
+╰────────────── ┘1/18└──╯╰┘␣ stop└┘+- step└┘= set└┘m shade└┘w wiring└─ ┘5/14└─╯
 ```
 
-- Left: the product mark and tabs. The active tab is in the accent color with an underline bar. Superscript
-  numbers are the shortcuts, as in btop.
-- Right: context · Miniserver model and firmware · **connection** (`● live 12 ms`, `◐ reconnecting 3s`,
-  `○ offline — showing cached values`, `⏻ out of service (updating)`) · operating mode · outside temp · clock.
-- Footer left: context-aware action keys for the focused item. Footer right: global keys.
-- Toasts appear at the bottom right above the footer: `✓ Blind South → pos 30` / `✗ 403 forbidden — token user lacks rights`.
-- `READ-ONLY` and `PAUSED` show as inverted badges in the header.
+There is **no footer row**. Following btop, everything lives in the borders:
+
+- **Header row**: the `lox` mark, then the screen tabs with superscript shortcuts (active one in accent, bold,
+  underlined). A rule runs across with the **clock centered in it**. Right: context · **connection**
+  (`● live 12 ms`, `◐ reconnecting 3s`, `○ offline — cached values`, `⏻ out of service`) · operating mode ·
+  outside temp · `? help`. `READ-ONLY` and `PAUSED` show as inverted badges here.
+- **Title notches** `┐title┌` in the top border: the pane name (the screen's first pane carries the superscript
+  number, `┐²rooms┌`), then sub-tabs or modes as further notches. The **hotkey letter inside a notch is
+  highlighted** in the accent color (`┐by r`**`o`**`om┌`, `┐`**`/`**` filter┌`), so each notch documents its own key.
+  Right-aligned notch: meta (counts, poll interval `┐poll 2 s┌`, `┐self-use 86%┌`).
+- **Hint notches** `┘key label└` in the **bottom border of the focused pane only**: the context-aware action
+  keys, computed per selected item from the keymap (`␣ stop` on a moving blind, `␣ ▲ up` at rest). Unfocused panes
+  show only a right-aligned position notch (`┘1/18└`). Global keys live in `?`. This replaces the footer, saves a
+  row, and puts the hints next to what they act on.
+- Toasts appear inside the focused pane's bottom-right corner: `✓ Blind South → pos 30` / `✗ 403 forbidden — token user lacks rights`.
 
 ### 5.2 ¹ Home — the dashboard
 
@@ -342,9 +366,14 @@ Mockups are **120×36** (standard layout). Color versions of every screen, with 
   Sources: device health (battery < 20 %, offline, weak signal), windows open + rain or wind warnings
   from global states, doors unlocked > 30 min, alarm events, Miniserver problems (CPU > 80 %, SD errors, bus errors),
   firmware update available, token expiring. An empty list shows `✓ All good`, and says so with some pride.
-- **Pinned**: any control pinned with `*`, each with its live value and a 30-min sparkline built from the stream.
-- **Quick**: scenes (`~/.lox/…/scenes`) and favorite moods. Focus the pane and press `␣` to run.
-- **Live**: the last N events (the full view is on screen 3).
+- Round 2 visuals: each card has a one-row **dot sparkline** of the room temperature, colored along the
+  temperature gradient; blinds show as an `info`-gradient meter. The Energy panel gets a gradient meter plus
+  a dot sparkline per flow.
+- **Pinned**: any control pinned with `*`, each with its live value and a type-fitting mini visual
+  (meter for levels, dot sparkline for temperatures, dot meter for capacities), built from the stream.
+- **Quick**: scenes (`~/.lox/…/scenes`) and favorite moods as key-caps. Focus the pane and press `␣` to run.
+- **Live**: the last N events. Rows **fade with age** (the `fade` gradient, bright → faint), and the newest
+  flashes briefly. The title notch carries the event rate as a dot sparkline (the full view is on screen 3).
 
 ### 5.3 ² Rooms — the control surface
 
@@ -376,9 +405,13 @@ Mockups are **120×36** (standard layout). Color versions of every screen, with 
   types (the left list then shows categories or types).
 - **Middle pane** lists the controls, grouped by category with section headers (LIGHTS · SHADING · CLIMATE …).
   Each row is: glyph · name · **value visual** · value text · secondary state · pending/lock marker.
-- **Right pane** is the inspector for the selected control. It has a type-specific visualization (blind
-  window, thermostat dial, light color swatch, mood list), a 24 h history sparkline (if statistics are
-  enabled), raw states, and the equivalent CLI command. At < 140 columns the inspector becomes an overlay on `⏎`.
+- **Right pane** is the inspector for the selected control, with notch tabs `┐states┌┐wiring┌┐history┌`.
+  It has a type-specific visualization (blind window, thermostat dial, light color swatch, mood list), a
+  24 h history as a small **braille graph** (Miniserver statistics if enabled, else what the TUI has seen),
+  raw states, and the equivalent CLI command. The *wiring* tab is the compact form of §5.9.
+  At < 140 columns the inspector becomes an overlay on `⏎`.
+- Room rows color their temperature along `grad.temp`. Control rows use gradient meters
+  (`lamp` for lights, `info` for blinds/humidity, `acc` for volume).
 - Values move smoothly: the blind gauge animates from the stream's position updates. A command sent but not yet
   confirmed shows `⋯` for up to 3 s, then either updates or shows `✗` and reverts.
 - Locked controls (`lox lock`) show `🔒`-free text `locked` in amber, and action keys are disabled with the reason.
@@ -406,11 +439,14 @@ Mockups are **120×36** (standard layout). Color versions of every screen, with 
 - **Noise control** matters most at scale. High-frequency analog states (meters, power, lux) are
   **collapsed** into one row per control with `×N` and the latest value. `x` mutes a control. Mutes are
   saved per context. The header shows events per minute as a sparkline.
-- The **"around this event"** correlation (±2 s, same room first) answers "why did that happen?" and costs
-  nothing to compute.
-- **Journal** (sub-view `]`): optionally, `lox tui` writes events to
-  `~/.lox/contexts/<n>/events/YYYY-MM-DD.jsonl` (off by default, `--journal`), so you can see what
-  happened at night after starting the TUI in the morning. It uses the same format as `lox stream -o json`.
+- The **"around this event"** correlation (±2 s, same room first) suggests *what* happened together and costs
+  nothing to compute. `w` on an event opens the wiring (§5.9), which shows whether it is actually *causal*.
+- Round 2: a 3-row **braille event-rate graph** (events/min, `acc` gradient) spans the top of the pane, so
+  bursts are visible at a glance. Rows fade with age; correlated rows get an `info` dot in the gutter.
+- **No persistence.** Events live only in the in-memory ring buffer and are gone when the TUI exits. The only
+  things written to disk are small UI state (mutes, pins, palette history in `tui-state.yaml`) and caches
+  (structure, the downloaded `.Loxone` for §5.9). Long-term history belongs in `lox otel` → a real TSDB,
+  or in the Miniserver's own statistics, which the inspector already reads.
 
 ### 5.5 ⁴ Energy
 
@@ -437,6 +473,10 @@ Mockups are **120×36** (standard layout). Color versions of every screen, with 
 - The flow diagram is built from the configured meters. Roles (PV, grid, battery, wallbox, home) are
   detected from control types (`EnergyManager2`, `EFM`, `Meter` with bidirectional type, `Wallbox2`) and
   can be overridden in `tui.yaml`. Flow arrows animate at a speed proportional to the power; a direction change flips them.
+- Round 2: nodes get a **dot meter** (btop mem style, `⣿⣿⣿⣀⣀`) in their role gradient. The **Today** chart is a
+  **mirrored braille graph** (btop's net graph): PV above the axis in the `pv` gradient, consumption below in the
+  `use` gradient, a `┊` marker at *now*, and the forecast drawn in `text.faint` after it. The meter table gets
+  a gradient load meter plus a 1 h dot sparkline per meter.
 - If the installation has no energy manager, the screen falls back to the **Meters** table and the chart only.
 
 ### 5.6 ⁵ System
@@ -454,8 +494,13 @@ Sub-views are shown as a tab strip in the pane title: `Overview · Devices · Bu
 │ MAC 50:4F:94:A0:XX:XX   DHCP off   NTP ✓    │ ● Extension 1           fw 15.2   ○ DI Ext     offline since 09:12 ⚠│
 ╰─────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────╯
 ```
-- **Devices**: the `lox health` table (Tree/Air devices with battery, signal, last seen, status), sorted problems first.
-- **Bus & LAN**: CAN/LAN counters with **per-interval deltas**. Non-zero error deltas flash red once, then stay amber.
+Round 2 layout (see HTML): the Overview is a **large CPU braille graph** (11 rows, `load` gradient by height:
+green → yellow → red, exactly btop's cpu box) with an inset box listing cpu, heap, tasks, ctx/s, ints/s and
+comints, each as gradient meter + value + dot sparkline. Devices, Bus & LAN and Log sit below as panes; at
+Standard width they are visible together, `[`/`]` still cycles the focused sub-view.
+
+- **Devices**: the `lox health` table (Tree/Air devices with battery as a dot meter colored by level, signal bars, status), sorted problems first.
+- **Bus & LAN**: CAN/LAN counters with **per-interval deltas** and a trend dot sparkline. Non-zero error deltas flash red once, then stay amber.
 - **Log**: tail of `/dev/fsget/log/def.log`, level-colored, `/` search, `n`/`N`.
 - **Config**: the gitops repository (`lox config init/pull`). A commit list with a side-by-side diff of users,
   devices and controls. `P` runs a pull now. If the repo isn't set up: a hint with `lox config init`.
@@ -489,6 +534,35 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
 | Picker | `m` | List of moods/modes; the current one is marked `●`. |
 | Confirm | risky actions | `y`/`N` with the default on **No**. Level 2 (reboot, update, restore) needs the context name typed. |
 | Context switcher | `C` | Small fuzzy list of contexts. |
+| Wiring | `w` | §5.9 |
+
+### 5.9 Wiring overlay (`w`) — "why is this on?"
+
+```
+╭┐Hallway Light┌┐wiring┌──────────────────────────────────────────────────────┐why is this on?┌─╮
+│ ● Hallway Light  on 40%   since 14:32:05.9 · triggered by Motion Hallway 0 → 1                  │
+│                                       ╭┐LightController2┌───╮                                   │
+│ ◉ Motion Hallway    ━━━━━━━━━1━━━━━━━▶│Mv              AQ1 │━━━━━━40%━━━━━━━▶ ● Hallway Light 40%│
+│ ◫ Door contact      ━━━━━━━open━━━━━━▶│Tg                  │                                   │
+│ ☾ Night mode Memory ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▶│DisP            AQ2 │━━━━━━0━━━━━━━━━▶ ○ Hallway LEDs off │
+│ ☼ Brightness Garden ━━━━━22.0k lx━━━━▶│Br               Qp │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▶ · Stairs light     │
+│                                       ╰────────────────────╯                                   │
+│ ━━▶ live value from the stream     ┄┄▶ block without visualization: topology only               │
+╰┘⏎ follow wire└┘h l upstream · downstream└┘e events└┘Esc close└──────────────┘lxir · r50.Loxone└─╯
+```
+
+- Opened with `w` on a control (Rooms, Home, palette result) or on an event (Events). It shows the **block that
+  drives the control**, every input wire with its source, and every output wire with its sink, one hop each way.
+  `h`/`l` move the center one block upstream/downstream; `⏎` on a wire follows it.
+- **Live values on wires**: a wire's source connector UUID *is* the state UUID the WebSocket streams (verified,
+  §12.1). Live wires are solid in the source's color and carry the current value; the wire that fired last pulses
+  briefly. Wires from blocks without a visualization have no stream value and are drawn dashed `┄┄▶` in
+  `text.faint` with their topology only. On a real config this is 13 % of all wires, but it covers the wires
+  that matter most here: sensors in, controls out.
+- Source: the `.Loxone` file from the gitops checkout (`lox config pull`) if present, otherwise the TUI offers
+  "download config via FTP" once and caches it per context (structure-version keyed). Parsed with lxir.
+- Header line: the control's current value, since when, and the input whose change came last before it
+  ("triggered by"), from the event buffer.
 
 ---
 
@@ -518,8 +592,25 @@ Loxone green is the only accent. Everything else is neutral or carries meaning.
 | `energy.battery` | `#34d399` | Battery |
 | `energy.load` | `#fb923c` | Consumption |
 
-**Temperature ramp** (as btop's CPU gradient): `#5cb8e6` (≤ 17 °) → `#69c350` (21 °) → `#f0a33a` (25 °) → `#ef5f5f` (≥ 28 °).
-**Gauges** use a 3-stop gradient along their length in truecolor, and a solid color in 256-color mode.
+**Gradients** (round 2). Each theme defines a small set of named 2–4 stop gradients. Graphs are colored **by
+height** (row position), meters **by position along the bar**: a meter at 30 % is all green, one at 95 % runs
+green → yellow → red. This is btop's trick for making values readable from color alone.
+
+| Gradient | Stops (night) | Used for |
+|----------|---------------|----------|
+| `grad.load` | `#69c350` → `#e8c33c` → `#ef5f5f` | CPU, heap, meter load, battery-low inverse |
+| `grad.temp` | `#4aa3df` (≤ 14 °) → `#69c350` → `#f0a33a` → `#ef5f5f` (≥ 28 °) | temperatures, room sparklines |
+| `grad.pv` | `#6b5212` → `#e0a93a` → `#ffe08a` | PV production graph/meters |
+| `grad.use` | `#6b3413` → `#c86a2c` → `#fbab6c` | consumption (mirrored graph, meters) |
+| `grad.grid` / `grad.batt` | `#3d3470` → `#a78bfa` / `#0f4d3a` → `#34d399` | grid, battery, capacities |
+| `grad.info` | `#1d4660` → `#5cb8e6` | blinds, humidity |
+| `grad.lamp` | `#6b5212` → `#f5c451` → `#fff1c2` | light levels |
+| `grad.acc` | `#27491f` → `#69c350` → `#b8f59b` | event rates, generic counters |
+| `grad.fade` | `text` → `text.faint` | event age (newest bright) |
+
+In truecolor, gradients are precomputed into 101-entry lookup tables per theme (cheap per cell). In 256-color
+mode they are quantized to the xterm cube; with 16 colors they collapse to the gradient's semantic color
+(`ok`/`warn`/`crit` bands for `load`). `mono` uses bold/normal/dim bands.
 
 Themes: `night` (default), `day` (light terminals), `mono` (only bold/dim/reverse; used automatically with
 `NO_COLOR` or `--no-color`), and `neon` (a SilkCircuit-style magenta/cyan, for fun).
@@ -542,19 +633,25 @@ terminals. A Nerd Font set is available with `--icons nerd` or `icons: nerd` in 
 | pending | `⋯` (animated `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) | same |
 | attention | `⚠` | `` |
 
-### 6.3 Components
+### 6.3 Components — six widgets
 
-- **Pane**: rounded border `╭╮╰╯`. Title in the top border is left-aligned (bold when focused). Right-aligned meta
-  (counts, filter) is in the top border too, as in btop.
-- **Selection**: full-width `surface` background + `▸` in the accent color + bold name. Marked items get a green `▌`
-  at the left edge.
-- **Gauge**: `▕` + eighth-blocks `▏▎▍▌▋▊▉█` + `▏`. Smooth to 1/8 of a cell. The empty track uses `text.faint`.
-- **Sparkline**: braille (2×4 dots per cell), from a 30 min or 24 h ring buffer.
-- **Charts**: ratatui `Chart` with `Marker::Braille`, and a dim `┤` axis.
-- **Cards**: small rounded panes. The title is the room name, the body 3–4 lines.
-- **Toasts**: one line, bottom right, 3 s. Colors `ok`/`crit`/`info`. Up to 3 stacked.
-- **Motion**: only for real motion (blinds, gates, energy flow, pending spinner) and the "new event" flash
-  (row background fades from accent to normal in 800 ms). A calm house means a calm screen.
+Every screen is built from **six small widgets** (each ~50–150 lines, each with its own snapshot test). No
+per-screen drawing tricks; a new screen composes these.
+
+| Widget | Look | Notes |
+|--------|------|-------|
+| **NotchBox** | rounded `╭╮╰╯`, title/tab notches `┐title┌` on top, hint notches `┘k label└` at the bottom (focused only), right-aligned meta/count notches | The only pane primitive. Takes `title`, `tabs`, `meta`, `hints`, `count`, `focus`. Hotkey letters in notches are accent + bold. |
+| **Meter** | full blocks with an eighth-block tip `▏▎▍▌▋▊▉`, track in `surface`-tinted `trk` | Each filled cell takes the gradient color of *its position*. |
+| **DotMeter** | `⣿⣿⣿⣿⣀⣀⣀` | btop mem style, for capacities (battery, heap, charge). Filled dots gradient, empty dots `text.faint`. |
+| **DotSpark** | one-row braille, 2 samples per cell, 4 levels | For per-row trends (rooms, pinned, meters, counters). Color from the gradient by the cell's value. |
+| **BrailleGraph** | area graph, 2×4 dots per cell, N rows | Colored by row height. Options: `down` (grows downward, for mirrored graphs), `floor` (faint baseline dots), overlays (a *now* marker, a forecast drawn faint). Replaces ratatui's `Chart`. |
+| **FlowLine** | `━━━▶━━━━━▶` with moving arrowheads | Speed ∝ value, direction flips with sign. Energy flow and the pulsing live wire in §5.9. |
+
+Plus the plain bits: **selection** (full-width `surface` bg, accent `▌`/`▸`, bold name), **key-caps** (` ␣ ` on a
+`key` background) for Quick chips and dialogs, and **toasts** (one line in the focused pane's bottom-right, 3 s, up to 3).
+
+**Motion** only where something really moves: blinds, gates, energy flow, the pending spinner, the pulse on the
+wire that just fired, and the new-event flash (row background fades from accent in 800 ms). A calm house means a calm screen.
 
 ### 6.4 Responsive layout
 
@@ -566,7 +663,24 @@ terminals. A Nerd Font set is available with `--icons nerd` or `icons: nerd` in 
 | 80–89 × ≥ 24 | **Narrow**: one pane at a time; `h`/`l` move between them (breadcrumb in the title) |
 | < 80 × 24 | "Terminal too small (need 80×24)" centered, with the current size |
 
-Height: sections collapse from the bottom (Home: Live → Quick → Pinned), and there is always a single header and footer row.
+Height: sections collapse from the bottom (Home: Live → Quick → Pinned), and there is always a single header row.
+Graphs shrink in rows before they disappear. When a bottom border is too short for all hint notches, the lowest-priority
+hints drop first (the keymap orders them) and a `┘? more└` notch is kept.
+
+### 6.5 The btop visual language, and what we deliberately leave out
+
+Adopted from btop, because it adds information density *and* looks great:
+
+1. Braille graphs with height gradients (CPU, PV, event rate, history).
+2. Mirrored up/down graphs for two opposing quantities (PV vs. consumption).
+3. Gradient meters and dotted `⣿` meters.
+4. Titles, sub-tabs and hotkeys as notches in the border, superscript screen numbers.
+5. Key hints in the bottom border of the focused pane instead of a footer.
+6. Clock and poll interval in borders (`┐poll 2 s┌`).
+7. Per-row mini dot sparklines.
+
+Left out on purpose: per-theme ASCII art/logos, animated backgrounds, box-in-box-in-box nesting beyond one inset
+level, and user-editable layouts. They cost maintenance and add nothing a resident needs.
 
 ---
 
@@ -632,16 +746,17 @@ src/tui/
   app.rs                  App state: screen, focus, overlay stack, marks, toasts
   msg.rs                  Msg enum (Key, Mouse, Resize, Tick, State(Vec<StateEvent>), Poll(..), CmdResult(..))
   update.rs               pure `update(app, msg) -> Vec<Effect>` (Elm-style, testable)
-  effects.rs              runs Effects: send command, poll, switch context, write journal
+  effects.rs              runs Effects: send command, poll, switch context, load config for wiring
   store.rs                live state store: state-uuid → value, control view models, event ring buffer
   model/                  typed view models per control type (LightVm, BlindVm, ClimateVm, …)
-  keymap.rs               declarative keymap: (context, key) → Command; feeds footer and help
-  theme.rs                palettes, glyph sets, capability detection
+  keymap.rs               declarative keymap: (context, key) → Command; feeds hint notches and help
+  theme.rs                palettes, gradient LUTs, glyph sets, capability detection
   ui/                     render functions per screen + overlay
     home.rs rooms.rs events.rs energy.rs system.rs sites.rs
-    palette.rs help.rs confirm.rs picker.rs input.rs
-  widgets/                gauge.rs sparkline.rs card.rs flow.rs tabs.rs toast.rs blindviz.rs
+    palette.rs help.rs confirm.rs picker.rs input.rs wiring.rs
+  widgets/                notchbox.rs meter.rs dotmeter.rs dotspark.rs braille.rs flow.rs   (§6.3)
   pollers.rs              diagnostics, health, energy stats, sites (spawn_blocking + LoxClient)
+src/logic.rs              thin adapter over lxir: load .Loxone, index by UUID, neighborhood(uuid) → blocks + wires
 ```
 
 ### 8.3 Runtime
@@ -666,6 +781,7 @@ src/tui/
 | `ratatui` | rendering and widgets | ~ 300 KB |
 | `crossterm` (feature `event-stream`) | terminal backend and async input | small |
 | `nucleo-matcher` | fuzzy matching | small |
+| `lxir` | `.Loxone` document model, wires, semantic diff (§12.1) | small (serde, serde_json, sha2, thiserror; all but sha2 already in the tree) |
 | `insta` (dev) | snapshot tests of rendered frames | — |
 
 Clipboard uses **OSC 52** (no dependency, works over SSH). Everything sits behind a cargo feature `tui`
@@ -675,7 +791,7 @@ Clipboard uses **OSC 52** (no dependency, works over SSH). Everything sits behin
 
 ```
 lox tui [--screen home|rooms|events|energy|system|sites] [-r <room>]
-        [--read-only] [--journal] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse]
+        [--read-only] [--theme night|day|mono|neon] [--icons plain|nerd] [--no-mouse]
 ```
 It follows API_DESIGN_GUIDELINES: `-r` is the room, global `--no-color` gives the `mono` theme, and `--ctx` selects the context.
 
@@ -692,8 +808,8 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 | **Confirm** | door unlock/open, gate open, alarm arm/disarm, intercom open, wallbox start, operating mode change, bulk action on > 10 controls | `y`/`N` dialog, default No |
 | **Typed** | reboot, firmware update, config restore/upload | type the context name |
 
-- `--read-only`: all action keys are disabled (footer shows them dim, with `READ-ONLY` in the header). Ideal for wall displays and screen sharing.
-- Alarm PINs and secured commands use masked input and are never saved in history or the journal.
+- `--read-only`: all action keys are disabled (hint notches show only navigation, with `READ-ONLY` in the header). Ideal for wall displays and screen sharing.
+- Alarm PINs and secured commands use masked input and are never saved in palette history.
 - The TUI never shows passwords or tokens. The Sites view shows the token expiry, not the token.
 
 ---
@@ -704,6 +820,8 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 - **Keymap**: no two bindings conflict within a context. Every binding has a help text.
 - **Journeys**: J1–J12 as `update()` tests with a fixture structure (≈ 40 controls, 8 rooms) and a scripted event stream.
 - **Rendering**: `insta` snapshots of every screen at 80×24, 120×36 and 180×50 via `TestBackend`, in the `night` and `mono` themes.
+  Each of the six widgets has its own snapshots (edge values 0 %, 100 %, eighth-block tips, empty series).
+- **Wiring**: a small checked-in `.Loxone` fixture; test that `logic::neighborhood()` resolves control → block → wires and that live/dashed classification matches the structure fixture.
 - **Scale**: a generated fixture with 2,000 controls / 80 rooms, plus a 1,000 ev/s synthetic stream. A test asserts
   that the frame time stays under budget.
 - **Manual**: a `lox tui --demo` hidden flag runs against a built-in fake Miniserver (fixture + simulated
@@ -716,77 +834,109 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 | # | Milestone | Content | Depends on |
 |---|-----------|---------|------------|
 | M0 | **Action layer** | `src/actions.rs`; CLI handlers migrated; mapping tests | — |
-| M1 | **Skeleton** | `lox tui`, terminal lifecycle, Msg/update/effects loop, store fed by the stream, theme, keymap, header/footer, help overlay, `--demo` fake Miniserver | M0 |
+| M1 | **Skeleton** | `lox tui`, terminal lifecycle, Msg/update/effects loop, store fed by the stream, theme + gradients, the six widgets, keymap + hint notches, header, help overlay, `--demo` fake Miniserver | M0 |
 | M2 | **Rooms** | three panes, grouping, filter, action vocabulary, value input, pickers, confirm, marks, inspector, optimistic updates | M1 |
 | M3 | **Home** | room cards, attention engine, pinned + sparklines, quick scenes, live ticker | M2 |
-| M4 | **Events** | feed, follow/pause, collapse, mute, detail with correlation, journal | M1 |
+| M4 | **Events** | rate graph, feed, follow/pause, collapse, mute, detail with correlation (in-memory only) | M1 |
 | M5 | **System** | overview pollers, devices, bus & LAN, log | M1 |
 | M6 | **Energy** | role detection, flow widget, meters, history chart | M1 |
 | M7 | **Palette** | fuzzy go-to, clap-parsed commands, completion, history, yank (OSC 52) | M2 |
 | M8 | **Sites** | multi-context polling, switcher, live context switch | M1 |
-| M9 | **System ops** | Config (gitops log + diff), Update/Reboot with typed confirm | M5 |
+| M5b | **Wiring (lxir)** | `src/logic.rs` over lxir, config fetch + cache, wiring overlay `w` (§5.9), inspector *wiring* tab | M2, M4 |
+| M9 | **System ops** | Config (gitops log + **lxir semantic diff**), Update/Reboot with typed confirm | M5, M5b |
 | M10 | **Polish** | themes day/mono/neon, nerd icons, mouse, responsive breakpoints, scale tests, docs (COMMANDS.md, README, GitHub Pages), GIF | all |
-| M11 | **Logic (lxir)** | spike: LoxApp3 ⇄ `.Loxone` UUID mapping; semantic config diff; logic inspector with live wire values (§12.1) | M9 |
+| (later) | **What-if** | optional: simulate "what would happen if…" via `lox-sim` behind a feature flag (§12.2) | M5b |
 
-M2 alone already makes the TUI useful for control. M3 + M4 add the "wow".
+M2 alone already makes the TUI useful for control. M3 + M4 add the "wow", and M5b the "nobody else can do this".
+The former M11 spike is gone: the UUID mapping is verified (§12.1).
 
 ---
 
 ## 12. Related projects: lxir and lox-cli
 
-### 12.1 `discostu105/lxir`: **yes, but after the MVP and optional**
+### 12.1 `discostu105/lxir`: **yes — add it, as a regular dependency for M5b**
 
 lxir compiles `.Loxone` XML into a text IR (and back), with a semantic document model (`doc`: objects,
-ports, wires, pages), a verified connector table for 100+ block types, and a semantic `diff` that filters
-out locale noise. It has the same author and licensing as lox (GPL-3.0 + commercial), so there is no license friction.
+ports, wires), a verified connector table for 100+ block types, and a semantic `diff` that filters
+out locale noise. It has the same author and licensing as lox, and tiny dependencies
+(`serde`, `serde_json`, `sha2`, `thiserror`).
 
-What it adds to the TUI:
+**The round-1 assumption is verified.** Checked against a real installation (structure cache of 148 controls
+and 25 rooms vs. its `.Loxone`, plus two other config copies):
 
-| Where | What lxir enables | Value |
-|-------|-------------------|-------|
-| **System › Config** (J11) | Replace the current `loxone_xml::diff_configs` summary (users/devices/control counts) with lxir's **semantic diff**: "block `Hallway Light` gained input from `Motion 2`", "parameter `Off-delay` 120 → 300 s". | High. Turns "something changed" into "this is what changed". |
-| **Logic inspector** (new, J3+) | Load the downloaded `.Loxone` through `lxir::doc` and show the **wiring around a control**: which inputs feed it and which blocks it feeds. Combined with the event correlation (§5.4), this answers "why did the light turn on?" *causally*: `Motion Hallway ──▶ Lighting controller Q1 ──▶ Hallway Light`, with the live values on each wire. | Very high. Nothing else does this, including the Loxone app. |
-| Rooms inspector | Show a control's config-side parameters (off-delays, thresholds) next to its live states | Medium |
+| LoxApp3.json | `.Loxone` XML | Match |
+|--------------|---------------|-------|
+| control UUID | `<C U=…>` block UUID | **148 / 148** |
+| room UUID | room `<C U=…>` | **25 / 25** |
+| state UUID (what the WebSocket streams) | output connector `<Co K=… U=…>` of the block | **469 / 950**; the rest are virtual states that exist only in the API (`jLocked`, `moodList`, `infoText`, `targetPosition`, …) |
+| — | wire = `<In Input="source-Co-UUID"/>` inside the sink connector | the source UUID **is** the streamed state UUID |
 
-Costs and risks:
+Examples: Meter `actual` → `OPf`, `total` → `OMr`; Jalousie `position` → `OutputPos`, `shadePosition` → `OutputLPos`;
+Pushbutton `active` → `Q`. So a wire's live value can be looked up directly in the store by its source UUID —
+no heuristic mapping, no name matching.
 
-- lxir is v0 (early, ~65 commits). Its API will change. **Mitigation**: depend on it behind the cargo
-  feature `logic` (off in the first TUI release). Wrap it in a thin `src/logic.rs` adapter so that API churn touches one file.
-- It needs the config file: FTP download (`lox config download` / gitops repo) plus LoxCC decompression. Both exist
-  already. The inspector works on the gitops checkout when there is one, and otherwise offers "download config (FTP)" once and caches it.
-- **Unverified assumption**: are the control UUIDs in `LoxApp3.json` the same as the object UUIDs in the `.Loxone`
-  XML (or derivable from them)? The live-values-on-wires idea depends on it. **Verify with a spike before committing to it.**
-- Binary size: lxir brings its connector table and parser (probably small, but measure).
+**Coverage caveat.** The config has 1,933 blocks but only 148 are visualized controls. Of 891 wires, **116 (13 %)**
+have a streamed source. Internal logic (AND/OR gates, memory flags, math) has no live value; the wiring overlay
+shows those wires dashed, topology only (§5.9). That is honest and still useful: the wires people ask about
+("which sensor drives this light?") are exactly sensor → controller → output, and those are live.
 
-Recommendation: keep lxir out of M0–M8. Add **M11 "Logic"**: a spike to verify the UUID mapping, then the
-semantic diff in System › Config, then the logic inspector. If the spike fails, the semantic diff still
-works on its own.
+What lxir gives the TUI, with the API it already has:
 
-### 12.2 `eisber/lox-cli`: **no, don't take code from it; at most borrow ideas**
+| Where | lxir API | Value |
+|-------|----------|-------|
+| **Wiring overlay** `w` (§5.9) and the inspector *wiring* tab | `LoxoneDoc::parse`, `objects()`, `ports(el)` with `inputs`, `wires()` | Very high. Answers "why is this on?" causally, with live values. Nothing else does this, including the Loxone app. |
+| **System › Config** (J11) | `diff::diff(a, b)` → added/removed/renamed blocks, `param_changes`, `wires_added/removed` | High. "block `Hallway Light` gained input from `Motion 2`", "`Off-delay` 120 → 300 s" instead of counts. Replaces `loxone_xml::diff_configs`. |
+| Rooms inspector | `ports()` parameters | Medium: config-side parameters (off-delays, thresholds) next to live states. |
 
-lox-cli is a fork of lox (see its NOTICE) by another author. It focuses on *authoring* config with AI agents,
-and has an offline SPS simulator (215 block types).
+Recommendation: **add it.** Drop the spike; schedule it as **M5b** right after Events (§11), behind a thin
+`src/logic.rs` adapter so lxir API churn (it is v0) touches one file. No separate cargo feature is needed given
+its size; if the binary grows noticeably, fold it under the existing `tui` feature. Measure the size in M5b.
 
-- **License is the blocker.** It is AGPL-3.0 + *their* commercial license. Copying its code into lox would put AGPL
-  code into lox and **break lox's own commercial dual license**, because you can't relicense someone
-  else's AGPL code commercially. Keep it clean-room: read their docs for ideas, don't copy code.
-- **Little overlap with the TUI anyway.** It has no TUI, no WebSocket or live state, and it targets config
-  editing, while the TUI is about runtime operation. Its simulator simulates *logic blocks*, which is not what
-  `--demo` needs (a fake *Miniserver API*: structure + state stream + command endpoint). A small
-  fixture-driven fake is simpler and belongs in lox.
-- It is a diverged copy of the same foundations (client, config, contexts). Depending on it would mean two
-  versions of the same concepts.
-- The only idea worth noting: their `.github/skills/` agent docs. That concerns lox's AI-agent story, not the TUI.
+### 12.2 `eisber/lox-cli`: reassessed without license concerns — **still no code merge; maybe `lox-sim` later**
+
+Ignoring licensing (you'd sort that out with the maintainer), the question is purely technical. A deep look at the
+current tree (~301 commits since 2026-04; last commit 2026-09-08):
+
+- **Shape.** A workspace: the `lox` binary (~23k LOC) and a `lox-sim` crate (~31k LOC). It *added* config editing
+  (`config_edit/`, ~7.4k LOC), a simulator, blocks/color/telemetry commands. It *removed* the runtime layer the
+  TUI needs: `stream.rs`, `otel.rs`, `scene.rs`, control commands, inspect, system.
+- **Shared code.** `client.rs`, `ftp.rs`, `ctx.rs` are byte-identical to ours; `main.rs`, `token.rs`, `gitops.rs`,
+  `ws.rs` have diverged heavily. Nothing there is ahead of lox for runtime use.
+- **Runtime reuse for the TUI: none.** No per-type action mapping, no state decoding, no binary event parsing.
+- **Config model vs. lxir.** Heavy overlap with lxir's `doc`. lxir is the more rigorous one (byte-faithful
+  round-trip, UUID identity) and is already what we'd use. lxir itself already uses lox-cli as its simulation
+  transport (`ir/simtest.rs`), so the two ecosystems are linked on the *authoring* side, not the runtime side.
+- **The simulator (`lox-sim`)** is the one genuinely interesting part: `.Loxone` → `SimGraph` → topological
+  tick engine, `set_input`/`get_output`/`trace`, snapshot/restore, 224 registered block types (logic, timer, math
+  solid; big controllers like `LightController2` only approximated; many stubs), ~500 tests. Signals are `f64`
+  only, and blocks are addressed by title (the UUID is not kept), so mapping to our state UUIDs is new glue.
+
+How it would fit the three places it could matter:
+
+| Use | Fit | Why |
+|-----|-----|-----|
+| `--demo` fake Miniserver | **No** | Needs LoxApp3 JSON synthesis, API-command → block-input translation and output → state events; weeks of glue for approximate controllers. A fixture + scripted stream is simpler and exact. |
+| Filling the 87 % dashed wires in §5.9 | **Tempting, but no** | Simulated values next to live ones would be presented as truth while controllers are approximated. A wiring view must never guess. |
+| **What-if** ("if motion fires now, what turns on?") | **Plausible, later** | Snapshot, `set_input`, tick N, diff outputs, clearly badged *simulated* (`BlockSupport::Unimplemented` exists for honest gaps). |
+
+**Assessment changes, but only a little.** Without the license blocker, the answer moves from "don't touch it" to:
+don't merge the fork back and don't depend on the `lox-cli` binary crate (it dropped everything the TUI needs);
+if a what-if feature is ever wanted, depend on **`lox-sim` as a versioned crate behind a feature flag** (ask the
+maintainer to publish current releases — crates.io still has an April 0.1.0 — and upstream fixes there). Check the
+binary-size and dependency cost (rayon, a different `xmltree` major) before doing so. Nothing from lox-cli is needed
+for M0–M10.
 
 ---
 
 ## 13. Open questions
 
-1. **Journal default**: should `--journal` be on by default? It is useful for J3, but it writes to disk continuously.
-2. **Nerd Font default**: off (safe) or auto-detect? Proposal: off, and suggest it in the help overlay.
-3. **Space on a blind**: "stop if moving, else toggle full up/down" copies the Loxone single-button behavior.
-   Is that intuitive enough, or should `␣` be stop-only?
-4. **Energy roles**: is auto-detection from control types reliable on real installs, or do we need `tui.yaml` mapping from day 1?
-5. **Theme name**: "Loxone Night" uses the Loxone name. Is a neutral name better (trademark)?
-6. **lxir timing**: is M11 late enough, or should the UUID-mapping spike run in parallel with M1 so the
-   logic inspector can shape the Rooms inspector layout early?
+Resolved in round 2: event journal (dropped — in-memory only), `␣` on a blind (decided, §4.3),
+theme name ("Loxone Night" stays), lxir timing (M5b, no spike needed).
+
+1. **Nerd Font default**: off (safe) or auto-detect? Proposal: off, and suggest it in the help overlay.
+2. **Energy roles**: is auto-detection from control types reliable on real installs, or do we need `tui.yaml` mapping from day 1?
+3. **No footer**: hints live only in the focused pane's bottom border (§5.1). Is that discoverable enough for first-time
+   users, or should a one-line footer appear during the first sessions (`tui-state.yaml` counts starts)?
+4. **Config freshness for wiring**: when the cached `.Loxone` is older than the running structure version, show the
+   wiring with a "config may be stale" notch, or refuse and offer a re-download?
+5. **What-if**: worth pursuing at all (via `lox-sim`), or is a live, honest wiring view enough?
