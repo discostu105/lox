@@ -186,15 +186,22 @@ pub static BINDINGS: &[Binding] = &[
     b!(Events, ["x"], Cmd::Mute, "mute this control"),
     b!(Events, ["X"], Cmd::ShowMuted, "show muted / noisy"),
     b!(Events, ["F"], Cmd::Follow, "follow newest"),
+    b!(Log, ["Enter"], Cmd::Inspect, "full line"),
     b!(Log, ["n"], Cmd::NextMatch, "next match"),
     b!(Log, ["N"], Cmd::PrevMatch, "previous match"),
+    b!(
+        Config,
+        ["Enter"],
+        Cmd::Inspect,
+        "diff: focus it, then the full line"
+    ),
     b!(Config, ["n"], Cmd::NextMatch, "next change"),
     b!(Config, ["N"], Cmd::PrevMatch, "previous change"),
     b!(
         Config,
         ["P"],
         Cmd::Pull,
-        "pull the newest config backup (lox config pull)"
+        "pull: download the newest backup, commit it to git (read-only)"
     ),
     b!(Update, ["R"], Cmd::Reboot, "reboot (typed confirmation)"),
     b!(

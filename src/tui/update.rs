@@ -6,7 +6,7 @@ use crossterm::event::{
 };
 
 use super::app::*;
-use super::data::{DiagSample, NetSample};
+use super::data::{DiagSample, LogLevel, NetSample};
 use super::keymap::{self, Cmd, Ctx};
 use super::lists::{self, CRow};
 use super::model::{Cid, Kind};
@@ -27,7 +27,10 @@ const BULK_CONFIRM: usize = 10;
 
 pub fn update(app: &mut App, msg: Msg) -> Vec<Effect> {
     match msg {
-        Msg::Key(k) => key(app, k),
+        Msg::Key(k) => {
+            app.drag = None;
+            key(app, k)
+        }
         Msg::Paste(s) => {
             paste(app, &s);
             Vec::new()
@@ -326,7 +329,10 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
             app.charts.insert(k, d);
         }
         Polled::EnergyDay { pv, usage } => app.energy_day = Some((pv, usage)),
-        Polled::ConfigLog(c) => app.commits = Some(c),
+        Polled::ConfigLog(c, file) => {
+            app.commits = Some(c);
+            app.config_file = file;
+        }
         Polled::ConfigDiff(h, lines) => {
             app.diff_errs.remove(&h);
             app.diffs.insert(h, lines);
@@ -1945,12 +1951,74 @@ fn inspect(app: &mut App) -> Vec<Effect> {
             app.toast(ToastKind::Info, format!("{} is the active context", s));
         }
         Target::None => {
-            if app.screen == Screen::System && app.system.view == SysView::Config {
-                app.system.pane = 1;
+            if app.screen == Screen::System {
+                if let Some(o) = system_text(app) {
+                    app.overlays.push(o);
+                } else if app.system.view == SysView::Config {
+                    app.system.pane = 1;
+                }
             }
         }
     }
     Vec::new()
+}
+
+/// Scroll keys shared by the full-text boxes (Value, Text).
+fn text_scroll(scroll: &mut usize, code: &str) {
+    match code {
+        "j" | "Down" => *scroll += 1,
+        "k" | "Up" => *scroll = scroll.saturating_sub(1),
+        "C-d" | "PageDown" => *scroll += 10,
+        "C-u" | "PageUp" => *scroll = scroll.saturating_sub(10),
+        "g" | "Home" => *scroll = 0,
+        _ => {}
+    }
+}
+
+/// ⏎ on a System list row: the full text of a log line or a diff line.
+fn system_text(app: &App) -> Option<Overlay> {
+    let text = |title: String, sub: String, text: String| Overlay::Text {
+        title,
+        sub,
+        text,
+        scroll: 0,
+    };
+    match app.system.view {
+        SysView::Log => {
+            let rows = log_rows(app);
+            let s = app.system.sel.get(&SysView::Log).copied().unwrap_or(0);
+            let i = *rows.get(s.min(rows.len().saturating_sub(1)))?;
+            let l = &app.log.as_ref()?.1[i];
+            let level = match l.level {
+                LogLevel::Error => "error",
+                LogLevel::Warning => "warning",
+                LogLevel::Important => "important",
+                LogLevel::Info => "info",
+            };
+            let time = l.time.get(..19).unwrap_or(&l.time);
+            Some(text(
+                format!("def.log · {}", time),
+                level.into(),
+                l.text.clone(),
+            ))
+        }
+        SysView::Config if app.system.pane == 1 => {
+            let c = selected_commit(app)?;
+            let l = app.diffs.get(&c.hash)?.get(app.system.diff_scroll)?;
+            let saved = c.saved.clone().unwrap_or_else(|| c.date.clone());
+            Some(text(
+                format!("config diff · {}", saved),
+                String::new(),
+                l.clone(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn selected_commit(app: &App) -> Option<&crate::tui::app::Commit> {
+    let s = app.system.sel.get(&SysView::Config).copied().unwrap_or(0);
+    app.commits.as_ref()?.as_ref().ok()?.get(s)
 }
 
 /// Go to Rooms with a control selected (its room, restoring place).
@@ -2201,28 +2269,30 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         Overlay::Facets { list, line, sel } => facets_key(app, list, &line, sel, &k, &code),
         Overlay::Chart(c) => return chart_key(app, c, &code),
         Overlay::Value { cid, state, .. } => {
-            let Some(Overlay::Value { scroll, .. }) = app.overlays.last_mut() else {
-                return Vec::new();
-            };
-            match code.as_str() {
-                "Esc" | "q" | "Enter" => {
+            if code == "y" {
+                if let Some(v) = state_text(app, cid, &state, false) {
+                    app.toast(
+                        ToastKind::Ok,
+                        format!("copied {} ({} chars)", state, v.len()),
+                    );
+                    return vec![Effect::Copy(v)];
+                }
+            } else if let Some(Overlay::Value { scroll, .. }) = app.overlays.last_mut() {
+                text_scroll(scroll, &code);
+                if matches!(code.as_str(), "Esc" | "q" | "Enter") {
                     app.overlays.pop();
                 }
-                "j" | "Down" => *scroll += 1,
-                "k" | "Up" => *scroll = scroll.saturating_sub(1),
-                "C-d" | "PageDown" => *scroll += 10,
-                "C-u" | "PageUp" => *scroll = scroll.saturating_sub(10),
-                "g" | "Home" => *scroll = 0,
-                "y" => {
-                    if let Some(v) = state_text(app, cid, &state, false) {
-                        app.toast(
-                            ToastKind::Ok,
-                            format!("copied {} ({} chars)", state, v.len()),
-                        );
-                        return vec![Effect::Copy(v)];
-                    }
+            }
+        }
+        Overlay::Text { text, .. } => {
+            if code == "y" {
+                app.toast(ToastKind::Ok, format!("copied ({} chars)", text.len()));
+                return vec![Effect::Copy(text)];
+            } else if let Some(Overlay::Text { scroll, .. }) = app.overlays.last_mut() {
+                text_scroll(scroll, &code);
+                if matches!(code.as_str(), "Esc" | "q" | "Enter") {
+                    app.overlays.pop();
                 }
-                _ => {}
             }
         }
         Overlay::Inspector { cid, scroll } => match code.as_str() {
@@ -2829,23 +2899,80 @@ fn mouse(app: &mut App, m: crossterm::event::MouseEvent) -> Vec<Effect> {
     if !app.opts.mouse {
         return Vec::new();
     }
+    let at = (m.column, m.row);
+    let inside = |r: &ratatui::layout::Rect| {
+        at.0 >= r.x && at.0 < r.x + r.width && at.1 >= r.y && at.1 < r.y + r.height
+    };
     match m.kind {
-        MouseEventKind::ScrollDown => return command_or_overlay(app, Cmd::Down, "j"),
-        MouseEventKind::ScrollUp => return command_or_overlay(app, Cmd::Up, "k"),
-        MouseEventKind::Down(MouseButton::Left) => {
-            let hit = {
-                let ui = app.ui.borrow();
-                ui.hits
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+            app.drag = None;
+            // the wheel scrolls the list under the pointer, not the focused one
+            if app.overlays.is_empty() {
+                let list = app
+                    .ui
+                    .borrow()
+                    .hits
                     .iter()
                     .rev()
-                    .find(|(r, _)| {
-                        m.column >= r.x
-                            && m.column < r.x + r.width
-                            && m.row >= r.y
-                            && m.row < r.y + r.height
-                    })
-                    .map(|(_, h)| *h)
+                    .find(|(r, _)| inside(r))
+                    .and_then(|(_, h)| match h {
+                        Hit::Pane(l) | Hit::Row(l, _) => Some(*l),
+                        _ => None,
+                    });
+                if let Some(l) = list {
+                    focus_pane(app, l);
+                }
+            }
+            return if m.kind == MouseEventKind::ScrollDown {
+                command_or_overlay(app, Cmd::Down, "j")
+            } else {
+                command_or_overlay(app, Cmd::Up, "k")
             };
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if let Some(d) = &mut app.drag {
+                d.to = at;
+                d.moved |= d.to != d.from;
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            let Some(d) = app.drag else {
+                return Vec::new();
+            };
+            if !d.moved {
+                app.drag = None;
+                return Vec::new();
+            }
+            let text = app.ui.borrow().frame.as_ref().map(|b| selected_text(b, &d));
+            if let Some(t) = text.filter(|t| !t.trim().is_empty()) {
+                app.toast(ToastKind::Ok, format!("copied {} chars", t.chars().count()));
+                return vec![Effect::Copy(t)];
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            let (hit, clip) = {
+                let ui = app.ui.borrow();
+                let hit = ui
+                    .hits
+                    .iter()
+                    .rev()
+                    .find(|(r, _)| inside(r))
+                    .map(|(_, h)| *h);
+                // a selection stays inside the pane it starts in (like tmux panes)
+                let pane = ui
+                    .hits
+                    .iter()
+                    .filter(|(r, h)| matches!(h, Hit::Pane(_)) && r.height > 1 && inside(r))
+                    .min_by_key(|(r, _)| r.width as u32 * r.height as u32)
+                    .map(|(r, _)| (r.x, r.x + r.width));
+                (hit, pane.unwrap_or((0, app.size.0.max(m.column + 1))))
+            };
+            app.drag = Some(Drag {
+                from: at,
+                to: at,
+                clip,
+                moved: false,
+            });
             if !app.overlays.is_empty() {
                 return Vec::new();
             }
@@ -2879,6 +3006,31 @@ fn mouse(app: &mut App, m: crossterm::event::MouseEvent) -> Vec<Effect> {
         _ => {}
     }
     Vec::new()
+}
+
+/// The text under a mouse selection: one line per row, trailing blanks trimmed.
+pub fn selected_text(buf: &ratatui::buffer::Buffer, d: &Drag) -> String {
+    let a = buf.area;
+    d.spans()
+        .into_iter()
+        .filter(|(y, _, _)| *y >= a.y && *y < a.bottom())
+        .map(|(y, c0, c1)| {
+            let mut s = String::new();
+            let mut skip = 0;
+            for x in c0..=c1.min(a.right().saturating_sub(1)) {
+                // a wide char's second cell holds a blank
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
+                let sym = buf[(x, y)].symbol();
+                skip = crate::tui::text::width(sym).saturating_sub(1);
+                s.push_str(sym);
+            }
+            s.trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn command_or_overlay(app: &mut App, cmd: Cmd, key_char: &str) -> Vec<Effect> {

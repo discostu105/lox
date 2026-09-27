@@ -214,7 +214,7 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 | `p` | Pause / resume live updates (the display freezes, events keep buffering) |
 | `Ctrl-r` | Refresh the structure cache and reconnect |
 | `q`, `Ctrl-c` | Quit |
-| mouse | click selects/focuses, scroll scrolls, click on a tab switches screen (disable with `--no-mouse`) |
+| mouse | click selects/focuses; the wheel scrolls the pane under the pointer; click on a tab switches screen; drag selects text inside the pane it starts in and copies it on release (OSC 52), shown reversed until the next key. Shift+drag still gives the terminal's own selection in most terminals. `--no-mouse` turns capture off |
 
 ### 4.3 The action vocabulary
 
@@ -569,7 +569,9 @@ Round 3 (implemented) — only what the Miniserver actually reports:
 
 - **Devices**: the `lox health` table (Tree/Air devices with battery as a dot meter colored by level, signal bars, status), sorted problems first.
 - **Bus & LAN**: CAN/LAN counters with **per-interval deltas** and a trend dot sparkline. Non-zero error deltas flash red once, then stay amber.
-- **Log**: tail of `/dev/fsget/log/def.log`, level-colored, `/` search, `n`/`N`.
+- **Log**: tail of `/dev/fsget/log/def.log`, level-colored. `/` searches (case-insensitive substring; the matches are
+  underlined in the rows), `n`/`N` jump between hits, `Esc` clears. `⏎` opens the whole line wrapped in a text box
+  (`y` copies it). Long lines like `QUITTED, Intercom …` are cut in the row.
 - **Config**: the gitops repository (`lox config init/pull`). Changed values are highlighted at the word level
   (`Off-delay 120 → `**`300`**` s`), not just as whole changed lines. If the repo isn't set up: a hint with `lox config init`.
   - The list shows when each config was **saved** in Loxone Config (the backup date), its version and what changed
@@ -580,7 +582,10 @@ Round 3 (implemented) — only what the Miniserver actually reports:
   - `P` = `lox config pull`: downloads the newest backup (Loxone Config writes one to the SD card on every save)
     via FTP and commits it when it changed. The footer explains this and shows the state: pulling (with elapsed
     time), `✓ up to date · last save …`, new commit, or the error. Allowed read-only (it only reads from the
-    Miniserver). A pull re-reads the history and every diff.
+    Miniserver). A pull re-reads the history and every diff. It never writes to or restores the Miniserver. The
+    footer shows where the backup is committed (`<repo>/<ms>/config.Loxone`).
+  - `⇥` (or `⏎`) focuses the diff: a cursor row appears, `j`/`k` move it, and `⏎` shows the full diff line.
+    `⇥` goes back to the history.
 - **Update**: firmware check, changelog link, `U` install and `R` reboot, both with **typed confirmation**
   (type the context name) and a progress/reconnect view through the out-of-service states.
 
@@ -612,6 +617,7 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
 | Context switcher | `C` | Small fuzzy list of contexts. |
 | Wiring | `w` | §5.9 |
 | History chart | `c` | §5.10 |
+| Full text | `⏎` on a Log row or a focused Config diff row | Same box for any list row cut in the list: title + level, wrapped, `j`/`k` scroll, `y` copy. |
 | State value | `⏎` on a state row in the inspector | The full value of a state: JSON pretty-printed and wrapped, `j`/`k` scroll, `y` copies the raw value. For text states the inspector row truncates (`moodList`, `circuitNames`, `daylightConfig`). |
 
 ### 5.9 Wiring overlay (`w`) — "why is this on?"

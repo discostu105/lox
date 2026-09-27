@@ -93,11 +93,66 @@ pub fn put_name(
     filter: &str,
     th: &Theme,
 ) -> u16 {
-    let s = fit(name, w);
-    if filter.is_empty() {
+    let idx = lists::fuzzy_indices(filter, name);
+    put_marked(buf, area, x, y, name, w, st, &idx, th)
+}
+
+/// Like [`put_name`], but marks every case-insensitive occurrence of `needle`
+/// (substring search, e.g. the log).
+#[allow(clippy::too_many_arguments)]
+pub fn put_found(
+    buf: &mut Buffer,
+    area: Rect,
+    x: u16,
+    y: u16,
+    text: &str,
+    w: usize,
+    st: Style,
+    needle: &str,
+    th: &Theme,
+) -> u16 {
+    let idx = substring_indices(needle, text);
+    put_marked(buf, area, x, y, text, w, st, &idx, th)
+}
+
+/// Char indices of every case-insensitive occurrence of `needle` in `text`.
+pub fn substring_indices(needle: &str, text: &str) -> Vec<usize> {
+    let low = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let n: Vec<char> = needle.trim().chars().map(low).collect();
+    let t: Vec<char> = text.chars().map(low).collect();
+    let mut out = Vec::new();
+    if n.is_empty() || n.len() > t.len() {
+        return out;
+    }
+    let mut i = 0;
+    while i + n.len() <= t.len() {
+        if t[i..i + n.len()] == n[..] {
+            out.extend(i..i + n.len());
+            i += n.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Text fitted to `w` with the chars at `idx` in the match style.
+#[allow(clippy::too_many_arguments)]
+fn put_marked(
+    buf: &mut Buffer,
+    area: Rect,
+    x: u16,
+    y: u16,
+    text: &str,
+    w: usize,
+    st: Style,
+    idx: &[usize],
+    th: &Theme,
+) -> u16 {
+    let s = fit(text, w);
+    if idx.is_empty() {
         return put(buf, area, x, y, &s, st);
     }
-    let idx = lists::fuzzy_indices(filter, name);
     let mut cx = x;
     for (i, ch) in s.chars().enumerate() {
         let cs = if idx.contains(&i) {

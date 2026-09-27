@@ -52,8 +52,17 @@ pub fn render(app: &App, body: Rect, buf: &mut Buffer) {
             Overlay::Wiring(w) => wiring(app, body, buf, w),
             Overlay::Chart(c) => super::chart::render(app, body, buf, c),
             Overlay::Value { cid, state, scroll } => {
-                value_box(app, body, buf, *cid, state, *scroll)
+                let text = crate::tui::update::state_text(app, *cid, state, true)
+                    .unwrap_or_else(|| "—".into());
+                let name = app.house.display_name(*cid);
+                text_box(app, body, buf, &name, state, &text, *scroll, "copy value")
             }
+            Overlay::Text {
+                title,
+                sub,
+                text,
+                scroll,
+            } => text_box(app, body, buf, title, sub, text, *scroll, "copy"),
             Overlay::Inspector { cid, scroll } => {
                 let w = (body.width * 2 / 3).clamp(60.min(body.width), 90.min(body.width));
                 let h = body.height.saturating_sub(2).min(34);
@@ -403,23 +412,34 @@ pub fn wrap(text: &str, w: usize) -> Vec<String> {
     out
 }
 
-fn value_box(app: &App, body: Rect, buf: &mut Buffer, cid: usize, state: &str, scroll: usize) {
+/// Full text in a scrollable box: `title` plus `sub` as the active notch.
+#[allow(clippy::too_many_arguments)]
+fn text_box(
+    app: &App,
+    body: Rect,
+    buf: &mut Buffer,
+    title: &str,
+    sub: &str,
+    text: &str,
+    scroll: usize,
+    copy: &str,
+) {
     let th = &app.th;
-    let text = crate::tui::update::state_text(app, cid, state, true).unwrap_or_else(|| "—".into());
     let w = body.width.saturating_sub(6).min(110);
-    let lines = wrap(&text, w.saturating_sub(4) as usize);
+    let lines = wrap(text, w.saturating_sub(4) as usize);
     let hgt = (lines.len() as u16 + 2).clamp(5, body.height.saturating_sub(2));
     let r = centered(body, w, hgt);
     let vis = hgt.saturating_sub(2) as usize;
     let off = scroll.min(lines.len().saturating_sub(vis));
-    let mut nb = NotchBox::new()
-        .title(Notch::new(app.house.display_name(cid)))
-        .title(Notch::new(state.to_string()).active(true))
-        .hints(vec![
-            Hint::new("jk", "scroll"),
-            Hint::new("y", "copy value"),
-            Hint::new("Esc", "close"),
-        ]);
+    let mut nb = NotchBox::new().title(Notch::new(title.to_string()));
+    if !sub.is_empty() {
+        nb = nb.title(Notch::new(sub.to_string()).active(true));
+    }
+    nb = nb.hints(vec![
+        Hint::new("jk", "scroll"),
+        Hint::new("y", copy.to_string()),
+        Hint::new("Esc", "close"),
+    ]);
     if lines.len() > vis {
         nb = nb.position(format!(
             "{}–{}/{}",

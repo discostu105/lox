@@ -389,7 +389,7 @@ lox tui -r Kitchen                     # start in Rooms with a room selected
 lox tui --read-only                    # no actions at all (wall display, screen sharing)
 lox tui --theme mono                   # theme: night (default) | day | mono | neon
 lox tui --icons nerd                   # Nerd Font icons (plain Unicode by default)
-lox tui --no-mouse --no-motion         # keep the terminal's own mouse selection; no animations
+lox tui --no-mouse --no-motion         # no mouse capture, no animations (drag-select + auto-copy works with the mouse on)
 lox tui --demo                         # a synthetic demo house, no Miniserver needed
 lox --ctx office tui                   # another context; switch live with C or on the Sites screen
 ```
@@ -483,14 +483,16 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 
 | System › Log | Action |
 |---|---|
+| `⏎` | full line |
 | `n` | next match |
 | `N` | previous match |
 
 | System › Config | Action |
 |---|---|
+| `⏎` | diff: focus it, then the full line |
 | `n` | next change |
 | `N` | previous change |
-| `P` | pull the newest config backup (lox config pull) |
+| `P` | pull: download the newest backup, commit it to git (read-only) |
 
 | System › Update | Action |
 |---|---|

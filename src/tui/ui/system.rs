@@ -33,7 +33,7 @@ fn frame(
 ) -> Rect {
     let th = &app.th;
     let mut nb = NotchBox::new()
-        .focus(app.overlays.is_empty() && app.system.pane == 0)
+        .focus(app.overlays.is_empty())
         .title(Notch::new("⁵system"));
     for v in SysView::ALL {
         nb = nb.title(Notch::new(v.title()).active(v == app.system.view));
@@ -803,7 +803,10 @@ fn log(app: &App, area: Rect, buf: &mut Buffer) {
             .and_then(|(t, _)| stale(app, *t, 30.0))
             .or(Some(Notch::new("def.log")))
     };
-    let hints = common::ctx_hints(Ctx::Log, &[Cmd::Filter, Cmd::NextMatch]);
+    let mut hints = vec![Hint::new("⏎", "full line"), Hint::new("/", "search")];
+    if !app.system.log_search.is_empty() {
+        hints.extend(common::ctx_hints(Ctx::Log, &[Cmd::NextMatch]));
+    }
     let inner = frame(
         app,
         area,
@@ -853,7 +856,7 @@ fn log(app: &App, area: Rect, buf: &mut Buffer) {
         };
         let t = l.time.get(5..19).unwrap_or(&l.time);
         put(buf, inner, inner.x + 1, y, &fit(t, 14), th.s_faint());
-        common::put_name(
+        common::put_found(
             buf,
             inner,
             inner.x + 16,
@@ -861,7 +864,7 @@ fn log(app: &App, area: Rect, buf: &mut Buffer) {
             &l.text,
             inner.width.saturating_sub(17) as usize,
             st,
-            "",
+            &app.system.log_search,
             th,
         );
     }
@@ -874,7 +877,10 @@ fn pull_status(app: &App, newest: Option<&crate::tui::app::Commit>) -> (String, 
     let th = &app.th;
     match &app.pull {
         None => (
-            "P pulls the newest backup from the Miniserver".into(),
+            match newest {
+                Some(c) => format!("last pulled {}", c.date.get(..16).unwrap_or(&c.date)),
+                None => "not pulled yet".into(),
+            },
             th.s_dim(),
         ),
         Some((t, None)) => (
@@ -908,6 +914,14 @@ fn spinner(app: &App) -> &'static str {
     F[((app.now * 8.0) as usize) % F.len()]
 }
 
+/// `/home/me/x` → `~/x`.
+fn home_rel(p: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(h) if !h.is_empty() && p.starts_with(&h) => format!("~{}", &p[h.len()..]),
+        _ => p.to_string(),
+    }
+}
+
 /// Wall-clock HH:MM of an app time.
 fn clock(app: &App, t: f64) -> String {
     let unix = std::time::SystemTime::now()
@@ -924,9 +938,16 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     let th = &app.th;
     let s = sel(app, SysView::Config);
     let len = sys_len(app, SysView::Config);
-    let mut hints = vec![Hint::new("Tab", "diff")];
+    let mut hints = if app.system.pane == 0 {
+        vec![Hint::new("⇥", "focus diff")]
+    } else {
+        vec![
+            Hint::new("⏎", "full line"),
+            Hint::new("⇥", "back to history"),
+        ]
+    };
     // pull only reads from the Miniserver: offered read-only too
-    hints.push(Hint::new("P", "pull from Miniserver"));
+    hints.push(Hint::new("P", "pull newest backup"));
     let inner = frame(
         app,
         area,
@@ -937,7 +958,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     );
     let explain = [
         "Loxone Config writes a backup to the Miniserver's SD card on every save.",
-        "`lox config pull` (P) downloads the newest one and commits it to git when it changed.",
+        "P (`lox config pull`) downloads the newest one and commits it to git when it changed.",
     ];
     let commits = match &app.commits {
         None => {
@@ -972,7 +993,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     };
     let lw = (inner.width * 2 / 5).clamp(36, 64);
     // list above, pull status + explanation below
-    let foot = if inner.height >= 12 { 3 } else { 1 };
+    let foot = if inner.height >= 16 { 6 } else { 1 };
     let list = Rect::new(inner.x, inner.y, lw, inner.height.saturating_sub(foot));
     let hgt = list.height as usize;
     if app.system.pane == 0 {
@@ -1058,19 +1079,40 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     let (pst, pstyle) = pull_status(app, commits.first());
     let fy = list.bottom();
     let fw = lw.saturating_sub(2) as usize;
-    if foot == 3 {
+    if foot > 1 {
         for x in inner.x..inner.x + lw {
             cell(buf, inner, x, fy, "─", th.s_border(false));
         }
         put(buf, inner, inner.x + 1, fy + 1, &fit(&pst, fw), pstyle);
-        put(
-            buf,
-            inner,
-            inner.x + 1,
-            fy + 2,
-            &fit("backups are written when you save in Loxone Config", fw),
-            th.s_faint(),
-        );
+        let file = app
+            .config_file
+            .as_deref()
+            .map(home_rel)
+            .unwrap_or_else(|| "the config repo".into());
+        // the end of a long path matters most
+        let n = file.chars().count();
+        let file = if n + 2 > fw {
+            let keep: String = file.chars().skip(n + 3 - fw.min(n + 2)).collect();
+            format!("→ …{}", keep)
+        } else {
+            format!("→ {}", file)
+        };
+        let lines = [
+            "P downloads the newest backup (FTP, read-only)".to_string(),
+            "and commits it to git — never writes back:".to_string(),
+            file,
+            "diff: lxir semantic compare of config.Loxone".to_string(),
+        ];
+        for (i, l) in lines.iter().enumerate() {
+            put(
+                buf,
+                inner,
+                inner.x + 1,
+                fy + 2 + i as u16,
+                &fit(l, fw),
+                th.s_faint(),
+            );
+        }
     } else {
         put(buf, inner, inner.x + 1, fy, &fit(&pst, fw), pstyle);
     }
@@ -1141,10 +1183,17 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     if app.system.pane == 1 {
         common::set_page(app, hgt);
     }
-    let off = app.system.diff_scroll.min(diff.len().saturating_sub(hgt));
+    let cur = app.system.diff_scroll.min(diff.len().saturating_sub(1));
+    let off = common::offset(app, list_id::SYS_DIFF, cur, diff.len(), hgt);
     let w = body.width.saturating_sub(2) as usize;
     for (k, l) in diff.iter().enumerate().skip(off).take(hgt) {
         let y = body.y + (k - off) as u16;
+        // the diff has a cursor once focused (⇥): ⏎ shows the whole line
+        if app.system.pane == 1 && k == cur {
+            let row = Rect::new(body.x, y, body.width, 1);
+            fill(buf, row, th.s_selected());
+            cell(buf, body, body.x, y, "▌", th.s_accent());
+        }
         if let Some(t) = l.strip_prefix("= ") {
             put(
                 buf,

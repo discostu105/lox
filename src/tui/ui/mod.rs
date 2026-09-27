@@ -44,6 +44,19 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
     }
     render_toasts(app, body, buf);
     overlays::render(app, body, buf);
+    // mouse selection: shown reversed; the frame is kept to copy its text
+    // (always: a fast drag may end before the next draw)
+    if let Some(d) = app.drag.filter(|d| d.moved) {
+        for (y, c0, c1) in d.spans() {
+            for x in c0..=c1 {
+                if x < area.right() && y < area.bottom() {
+                    let c = &mut buf[(x, y)];
+                    c.set_style(c.style().add_modifier(ratatui::style::Modifier::REVERSED));
+                }
+            }
+        }
+    }
+    app.ui.borrow_mut().frame = Some(buf.clone());
 }
 
 fn too_small(app: &App, area: Rect, buf: &mut Buffer) {

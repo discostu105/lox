@@ -494,13 +494,108 @@ fn j11_config_history() {
         "Night mode",
         "",
     )];
-    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits)));
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits), None));
     h.tick(1.0);
     assert!(
         h.all
             .iter()
             .any(|e| matches!(e, Effect::Poll { kind: PollKind::ConfigDiff(c), .. } if c == "c3"))
     );
+}
+
+/// Log: `/` finds lines (matches marked), ⏎ opens the whole line, y copies it.
+#[test]
+fn log_search_and_full_line() {
+    let mut h = H::new();
+    h.keys(&["5"]);
+    while h.app.system.view != SysView::Log {
+        h.keys(&["]"]);
+    }
+    let long = "2026-09-27 13:10:00.000;Important 1016 QUITTED, Intercom Eingang - \
+                Verbindung unterbrochen (Zentral), admins, IntercomV2 (Eingang,1fbc-ffff) \
+                retry scheduled, last seen 13:09:58 at 192.168.1.40";
+    let mut lines = demo::log();
+    lines.push(super::data::LogLine::parse(long).unwrap());
+    h.poll(PollKind::Log, Polled::Log(lines));
+    let s = h.render(120, 30);
+    assert!(s.contains("full line"), "hint: {}", s);
+    h.keys(&["/"]).typed("intercom");
+    h.keys(&["Enter"]);
+    assert_eq!(h.app.system.log_search, "intercom");
+    let s = h.render(120, 30);
+    assert!(s.contains("/intercom · 1 hits"), "{}", s);
+    // the cut-off line, in full
+    h.keys(&["Enter"]);
+    let Some(Overlay::Text {
+        title, sub, text, ..
+    }) = h.app.top_overlay()
+    else {
+        panic!("no text overlay: {:?}", h.app.top_overlay());
+    };
+    assert_eq!(title, "def.log · 2026-09-27 13:10:00");
+    assert_eq!(sub, "important");
+    assert!(text.ends_with("192.168.1.40"), "{}", text);
+    let s = h.render(120, 30);
+    assert!(s.contains("192.168.1.40"), "wrapped, not cut: {}", s);
+    h.keys(&["y"]);
+    assert!(
+        h.fx.iter()
+            .any(|e| matches!(e, Effect::Copy(t) if t.contains("QUITTED")))
+    );
+    h.keys(&["Esc"]);
+    assert!(h.app.top_overlay().is_none());
+    // Esc clears the search
+    h.keys(&["Esc"]);
+    assert!(h.app.system.log_search.is_empty());
+}
+
+/// Config: ⇥ moves a visible cursor into the diff, ⏎ shows a whole diff line;
+/// the footer says what P does and where the backup goes.
+#[test]
+fn config_diff_focus_and_footer() {
+    let mut h = H::new();
+    h.keys(&["5"]);
+    while h.app.system.view != SysView::Config {
+        h.keys(&["]"]);
+    }
+    let commits = vec![super::app::Commit::new(
+        "c2",
+        "2026-09-26 08:41:37 +0200",
+        "Config backup 2026-09-25 18:39:01 (v273)",
+        "",
+    )];
+    h.poll(
+        PollKind::ConfigLog,
+        Polled::ConfigLog(Ok(commits), Some("/srv/cfg/ms/config.Loxone".into())),
+    );
+    h.poll(
+        PollKind::ConfigDiff("c2".into()),
+        Polled::ConfigDiff(
+            "c2".into(),
+            vec![
+                "= 1 added".into(),
+                "# Security".into(),
+                "+ wire   Bewegung Vorraum Licht.AQ → Alarmanlage Personenerkennung Außen.HI1"
+                    .into(),
+            ],
+        ),
+    );
+    let s = h.render(140, 30);
+    assert!(s.contains("focus diff"), "{}", s);
+    assert!(s.contains("never writes back"), "{}", s);
+    assert!(s.contains("/srv/cfg/ms/config.Loxone"), "{}", s);
+    assert!(s.contains("lxir"), "{}", s);
+    h.keys(&["Tab"]);
+    assert_eq!(h.app.system.pane, 1);
+    let s = h.render(140, 30);
+    assert!(s.contains("back to history"), "{}", s);
+    h.keys(&["G", "Enter"]);
+    let Some(Overlay::Text { text, .. }) = h.app.top_overlay() else {
+        panic!("no text overlay");
+    };
+    assert!(text.ends_with("Außen.HI1"), "{}", text);
+    h.keys(&["Esc", "Tab"]);
+    assert_eq!(h.app.system.pane, 0);
 }
 
 /// After `P`, every diff is fetched again (one-shot polls must forget they
@@ -523,7 +618,7 @@ fn config_pull_refetches_diffs_and_shows_errors() {
             super::app::Commit::new("c1", "2026-03-18 19:39:46 +0100", "Initial", ""),
         ]
     };
-    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits())));
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits()), None));
     h.poll(
         PollKind::ConfigDiff("c2".into()),
         Polled::ConfigDiff(
@@ -542,14 +637,14 @@ fn config_pull_refetches_diffs_and_shows_errors() {
         s
     );
     assert!(s.contains("▸ Security"), "{}", s);
-    assert!(s.contains("P pulls the newest backup"), "{}", s);
+    assert!(s.contains("last pulled 2026-09-26 08:41"), "{}", s);
     // pull: running, then done — and the diffs are polled again
     h.keys(&["P"]);
     assert!(h.fx.iter().any(|e| matches!(e, Effect::ConfigPull)));
     assert!(h.render(140, 30).contains("pulling…"));
     h.all.clear();
     h.msg(Msg::ConfigPulled(Ok(false)));
-    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits())));
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits()), None));
     h.tick(1.0);
     assert!(
         h.all
@@ -1076,6 +1171,77 @@ fn wheel_does_not_type_into_inputs() {
         Some(Overlay::Input { line, .. }) => assert_eq!(line.buf, ""),
         other => panic!("input closed: {:?}", other.is_some()),
     }
+}
+
+/// Drag selects text inside the pane it starts in and copies it on release;
+/// the wheel scrolls the pane under the pointer.
+#[test]
+fn mouse_select_copies_and_wheel_scrolls_pane_under_pointer() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mut h = H::new();
+    h.keys(&["5"]);
+    while h.app.system.view != SysView::Config {
+        h.keys(&["]"]);
+    }
+    let commits = vec![super::app::Commit::new(
+        "c2",
+        "2026-09-26 08:41:37 +0200",
+        "Config backup 2026-09-25 18:39:01 (v273)",
+        "",
+    )];
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits), None));
+    h.poll(
+        PollKind::ConfigDiff("c2".into()),
+        Polled::ConfigDiff(
+            "c2".into(),
+            vec![
+                "= 1 added".into(),
+                "# Security".into(),
+                "+ wire   Bewegung.Q → Licht Außen.AI".into(),
+            ],
+        ),
+    );
+    let s = h.render(140, 30);
+    let find = |s: &str, pat: &str| {
+        s.lines().enumerate().find_map(|(y, l)| {
+            let b = l.find(pat)?;
+            Some((l[..b].chars().count() as u16, y as u16))
+        })
+    };
+    let (x0, y0) = find(&s, "Security").unwrap();
+    let (x1, y1) = find(&s, "Außen.AI").unwrap();
+    let ev = |kind, (column, row): (u16, u16)| {
+        Msg::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    h.msg(ev(MouseEventKind::Down(MouseButton::Left), (x0, y0)));
+    h.render(140, 30);
+    h.msg(ev(MouseEventKind::Drag(MouseButton::Left), (x1 + 7, y1)));
+    h.render(140, 30);
+    h.msg(ev(MouseEventKind::Up(MouseButton::Left), (x1 + 7, y1)));
+    let copied = h.fx.iter().find_map(|e| match e {
+        Effect::Copy(t) => Some(t.clone()),
+        _ => None,
+    });
+    let copied = copied.expect("copied on release");
+    assert_eq!(
+        copied, "Security\n   + wire   Bewegung.Q → Licht Außen.AI",
+        "stays inside the diff pane"
+    );
+    assert!(h.app.drag.is_some(), "the selection stays visible");
+    h.keys(&["j"]);
+    assert!(h.app.drag.is_none(), "a key clears it");
+    // wheel over the diff focuses and scrolls it, not the commit list
+    assert_eq!(h.app.system.pane, 1, "clicking the diff focused it");
+    h.keys(&["Tab"]);
+    assert_eq!(h.app.system.pane, 0);
+    h.render(140, 30);
+    h.msg(ev(MouseEventKind::ScrollDown, (x1, y1)));
+    assert_eq!(h.app.system.pane, 1);
 }
 
 /// A failed one-shot poll (Miniserver info) is retried instead of leaving the

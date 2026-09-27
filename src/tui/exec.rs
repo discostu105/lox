@@ -713,7 +713,13 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
         PollKind::EnergyDay => energy_day(client, ctx),
         PollKind::ConfigLog => {
             let cfg = ctx.cfg.as_ref().context("no config")?;
-            Polled::ConfigLog(config_log(cfg))
+            let file = repo_dir(cfg).map(|r| {
+                r.join(crate::gitops::ms_dir(cfg))
+                    .join("config.Loxone")
+                    .display()
+                    .to_string()
+            });
+            Polled::ConfigLog(config_log(cfg), file)
         }
         PollKind::ConfigDiff(hash) => {
             let cfg = ctx.cfg.as_ref().context("no config")?;
@@ -1358,7 +1364,10 @@ impl Demo {
                         let (pv, usage) = demo::energy_today(local_hour());
                         Ok(Polled::EnergyDay { pv, usage })
                     }
-                    PollKind::ConfigLog => Ok(Polled::ConfigLog(Ok(demo_commits()))),
+                    PollKind::ConfigLog => Ok(Polled::ConfigLog(
+                        Ok(demo_commits()),
+                        Some("~/loxone-config/demo/config.Loxone".into()),
+                    )),
                     PollKind::ConfigDiff(h) => Ok(Polled::ConfigDiff(h.clone(), demo_diff(h))),
                 };
                 let delay = if matches!(

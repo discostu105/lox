@@ -542,6 +542,13 @@ pub enum Overlay {
         state: String,
         scroll: usize,
     },
+    /// Full text of a list row (log line, diff line), scrollable
+    Text {
+        title: String,
+        sub: String,
+        text: String,
+        scroll: usize,
+    },
     /// Compact inspector (narrow layouts, Home, palette)
     Inspector {
         cid: Cid,
@@ -713,8 +720,12 @@ pub enum Polled {
     Sites(Vec<SiteStatus>),
     History(Cid, Series),
     Chart(ChartKey, ChartData),
-    EnergyDay { pv: Vec<f64>, usage: Vec<f64> },
-    ConfigLog(Result<Vec<Commit>, String>),
+    EnergyDay {
+        pv: Vec<f64>,
+        usage: Vec<f64>,
+    },
+    /// history, and where pulls store `config.Loxone` (for the footer)
+    ConfigLog(Result<Vec<Commit>, String>, Option<String>),
     ConfigDiff(String, Vec<String>),
 }
 
@@ -916,6 +927,36 @@ pub enum Hit {
     SubTab(usize),
 }
 
+/// Mouse text selection (drag), copied on release like a terminal would.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drag {
+    /// (column, row) where the button went down, and where it is now
+    pub from: (u16, u16),
+    pub to: (u16, u16),
+    /// Columns the selection stays within (the pane under the press)
+    pub clip: (u16, u16),
+    pub moved: bool,
+}
+
+impl Drag {
+    /// Selected cells per row, reading order: `(row, first col, last col)` inclusive.
+    pub fn spans(&self) -> Vec<(u16, u16, u16)> {
+        let (a, b) = if (self.from.1, self.from.0) <= (self.to.1, self.to.0) {
+            (self.from, self.to)
+        } else {
+            (self.to, self.from)
+        };
+        let (lo, hi) = (self.clip.0, self.clip.1.saturating_sub(1));
+        (a.1..=b.1)
+            .filter_map(|y| {
+                let c0 = if y == a.1 { a.0 } else { lo }.clamp(lo, hi);
+                let c1 = if y == b.1 { b.0 } else { hi }.clamp(lo, hi);
+                (c0 <= c1).then_some((y, c0, c1))
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct UiCache {
     pub hits: Vec<(Rect, Hit)>,
@@ -927,6 +968,8 @@ pub struct UiCache {
     pub home_cols: usize,
     /// Plot width of the history chart (cursor bounds)
     pub chart_w: usize,
+    /// The last frame while a mouse selection is active (to copy its text)
+    pub frame: Option<ratatui::buffer::Buffer>,
 }
 
 // ── App ─────────────────────────────────────────────────────────────────────
@@ -999,6 +1042,10 @@ pub struct App {
     pub diff_errs: HashMap<String, String>,
     /// `P`: when the pull started or finished; `None` result = still running
     pub pull: Option<(f64, Option<Result<bool, String>>)>,
+    /// `config.Loxone` in the config git repo (from the history poll)
+    pub config_file: Option<String>,
+    /// Mouse text selection in progress or just made
+    pub drag: Option<Drag>,
     pub wiring: WiringDoc,
     /// Last key press (code, time) for auto-repeat suppression (§4.1 rule 8)
     pub last_key: Option<(String, f64)>,
@@ -1061,6 +1108,8 @@ impl App {
             diffs: HashMap::new(),
             diff_errs: HashMap::new(),
             pull: None,
+            config_file: None,
+            drag: None,
             wiring: WiringDoc::None,
             last_key: None,
             paused_buf: Vec::new(),
