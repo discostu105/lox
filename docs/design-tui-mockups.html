@@ -1,0 +1,612 @@
+<title>lox tui</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --page:#0b0e11; --panel:#11161b; --line:#1d242c; --ink:#e3e8ee; --muted:#8a95a3; --lox:#69c350;
+  --mono:'JetBrains Mono','DejaVu Sans Mono',Menlo,Consolas,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --cond:'IBM Plex Sans Condensed','IBM Plex Sans',system-ui,sans-serif;
+}
+html,body{background:var(--page);color:var(--ink)}
+body{font:15px/1.6 var(--sans);padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:980px;margin:0 auto}
+header.intro{padding-block:56px 28px;display:grid;gap:14px}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--lox)}
+h1{font:600 clamp(40px,7vw,64px)/1 var(--cond);margin:0;letter-spacing:-.01em}
+h1 span{color:var(--lox)}
+.lede{max-width:64ch;color:var(--muted);margin:0;font-size:16px}
+.lede code,p code{font-family:var(--mono);font-size:.9em;color:var(--ink);background:var(--panel);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:10px}
+.principles div{background:var(--panel);padding:12px 14px}
+.principles b{display:block;font:600 14px/1.3 var(--cond);letter-spacing:.02em}
+.principles span{font-size:13px;color:var(--muted);line-height:1.45}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--page) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding-block:10px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{font:500 12.5px/1 var(--mono);background:transparent;color:var(--muted);border:0;padding:8px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--lox);color:#0b0e11}
+.seg button:focus-visible,.nav a:focus-visible{outline:2px solid var(--lox);outline-offset:2px}
+.nav{display:flex;flex-wrap:wrap;gap:4px 14px;font:12.5px/1.2 var(--mono)}
+.nav a{color:var(--muted);text-decoration:none}
+.nav a:hover{color:var(--ink)}
+.nav a sup{color:var(--lox)}
+section{padding-top:44px}
+section h2{font:600 26px/1.15 var(--cond);margin:6px 0 6px;text-wrap:balance}
+section>p{margin:0 0 16px;color:var(--muted);max-width:70ch}
+.win{border:1px solid var(--t-bd);border-radius:10px;overflow:hidden;background:var(--t-bg);box-shadow:0 18px 50px -24px rgba(0,0,0,.8)}
+.win-bar{display:flex;justify-content:space-between;gap:12px;font:12px/1 var(--mono);color:var(--t-dm);padding:9px 14px;border-bottom:1px solid var(--t-bd)}
+.win-body{overflow-x:auto}
+pre.term{margin:0;padding:14px 16px;font:12.5px/1.17 var(--mono);color:var(--t-tx);background:var(--t-bg);width:max-content;font-variant-ligatures:none}
+pre.term i{display:inline-block;width:1ch;height:1.17em;font-style:normal;text-align:center;overflow:hidden;vertical-align:top}
+.tx{color:var(--t-tx)}.dm{color:var(--t-dm)}.fn{color:var(--t-fn)}.bd{color:var(--t-bd)}
+.ac{color:var(--t-ac)}.on{color:var(--t-on)}.ok{color:var(--t-ok)}.wn{color:var(--t-wn)}.cr{color:var(--t-cr)}.in{color:var(--t-in)}
+.pv{color:var(--t-pv)}.gd{color:var(--t-gd)}.bt{color:var(--t-bt)}.ld{color:var(--t-ld)}.hk{color:var(--t-bg)}
+.b{font-weight:700}.ul{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
+.gsel{background:var(--t-sel)}.gsel2{background:var(--t-sel2)}.gtrk{background:var(--t-trk)}.gov{background:var(--t-ov)}
+.gkey{background:var(--t-key)}.gac{background:var(--t-ac)}.gwn{background:var(--t-wn)}.gflash{background:var(--t-flash)}
+
+/* themes */
+.stage[data-t="night"]{--t-bg:#0f1216;--t-ov:#141a21;--t-sel:#1c2a1f;--t-sel2:#19202a;--t-trk:#181e26;--t-key:#232b36;--t-flash:#1b2b1c;--t-bd:#2a313c;--t-tx:#d7dde5;--t-dm:#7d8896;--t-fn:#465160;--t-ac:#69c350;--t-on:#f5c451;--t-ok:#69c350;--t-wn:#f0a33a;--t-cr:#ef5f5f;--t-in:#5cb8e6;--t-pv:#f5c451;--t-gd:#a78bfa;--t-bt:#34d399;--t-ld:#fb923c}
+.stage[data-t="day"]{--t-bg:#f7f8f5;--t-ov:#ffffff;--t-sel:#e2efd9;--t-sel2:#eceee9;--t-trk:#e7eae4;--t-key:#e2e6df;--t-flash:#e6f3dc;--t-bd:#c9d0c5;--t-tx:#1f262e;--t-dm:#5d6773;--t-fn:#a4adb6;--t-ac:#3f8f2a;--t-on:#b7791f;--t-ok:#3f8f2a;--t-wn:#c26d00;--t-cr:#c73a3a;--t-in:#1f78b4;--t-pv:#b7791f;--t-gd:#6d4fd6;--t-bt:#0f8a63;--t-ld:#c2410c}
+.stage[data-t="neon"]{--t-bg:#120b1f;--t-ov:#1a1030;--t-sel:#2d1646;--t-sel2:#21163a;--t-trk:#1c1330;--t-key:#2c1f4a;--t-flash:#2e1a45;--t-bd:#3a2a5c;--t-tx:#ece6ff;--t-dm:#9a8cc4;--t-fn:#4d3f73;--t-ac:#e135ff;--t-on:#ffd166;--t-ok:#50fa7b;--t-wn:#ffb86c;--t-cr:#ff5c8a;--t-in:#80ffea;--t-pv:#ffd166;--t-gd:#bd93f9;--t-bt:#50fa7b;--t-ld:#ff9e64}
+.stage[data-t="mono"]{--t-bg:#121212;--t-ov:#1a1a1a;--t-sel:#2e2e2e;--t-sel2:#242424;--t-trk:#1c1c1c;--t-key:#2e2e2e;--t-flash:#262626;--t-bd:#4a4a4a;--t-tx:#dddddd;--t-dm:#8c8c8c;--t-fn:#555555;--t-ac:#ffffff;--t-on:#dddddd;--t-ok:#dddddd;--t-wn:#ffffff;--t-cr:#ffffff;--t-in:#dddddd;--t-pv:#dddddd;--t-gd:#bbbbbb;--t-bt:#dddddd;--t-ld:#bbbbbb}
+
+.vocab{width:100%;border-collapse:collapse;font-size:14px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.vocab th,.vocab td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.vocab th{font:600 12px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--panel)}
+.vocab tr:last-child td{border-bottom:0}
+.vocab td:first-child{white-space:nowrap}
+kbd{font:700 12.5px/1 var(--mono);background:#1c232c;border:1px solid #2c3540;border-bottom-width:2px;border-radius:5px;padding:3px 7px;color:var(--ink);display:inline-block;min-width:1.9em;text-align:center}
+.vocab td.dim{color:#56606c}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.sw{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}
+.sw i{width:28px;height:28px;border-radius:6px;flex:none;border:1px solid rgba(255,255,255,.08)}
+.sw b{display:block;font:500 12.5px/1.2 var(--mono)}
+.sw span{font:12px/1.3 var(--mono);color:var(--muted)}
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+@media (max-width:520px){ .bar{position:static} }
+</style>
+
+<div class="wrap">
+<header class="intro">
+  <div class="eyebrow">Design proposal · lox v0.12</div>
+  <h1><span>lox</span> tui</h1>
+  <p class="lede">A full-screen, keyboard-first, live terminal view of a Loxone installation. It shows what the house is doing, lets you change it, and explains why things happened. Every frame below is a real 120×36 cell grid, so the layouts are exact. Switch themes in the bar. The full spec is in <code>docs/design-tui.md</code>.</p>
+  <div class="principles">
+    <div><b>Live by default</b><span>Values come from the WebSocket stream. Nothing needs a manual refresh.</span></div>
+    <div><b>One vocabulary</b><span>Eleven action keys mean the same intent on every control type.</span></div>
+    <div><b>Always discoverable</b><span>The footer shows what keys do here, <code>?</code> shows all keys, <code>a</code> lists every action.</span></div>
+    <div><b>Safe</b><span>Lights are instant. Doors ask first. Reboot asks you to type the site name.</span></div>
+    <div><b>Scales</b><span>From 50 to 2,000 controls: filter, group, collapse noise.</span></div>
+  </div>
+</header>
+
+<div class="bar">
+  <nav class="nav" aria-label="Screens">
+    <a href="#home"><sup>1</sup>Home</a><a href="#rooms"><sup>2</sup>Rooms</a><a href="#palette">Palette</a><a href="#events"><sup>3</sup>Events</a><a href="#energy"><sup>4</sup>Energy</a><a href="#system"><sup>5</sup>System</a><a href="#sites"><sup>6</sup>Sites</a><a href="#overlays">Overlays</a><a href="#keys">Keys</a><a href="#theme">Theme</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme">
+    <button id="t-night" data-t="night" aria-pressed="true">night</button>
+    <button id="t-day" data-t="day" aria-pressed="false">day</button>
+    <button id="t-neon" data-t="neon" aria-pressed="false">neon</button>
+    <button id="t-mono" data-t="mono" aria-pressed="false">mono</button>
+  </div>
+</div>
+
+<div class="stage" id="stage" data-t="night">
+
+<section id="home">
+  <div class="eyebrow">Screen 1 · key 1</div>
+  <h2>Home: how is the house, and does anything need me?</h2>
+  <p>Room cards summarize each room (temperature and trend, lights, blinds, presence). <b>Attention</b> collects everything that needs a person: low batteries, open windows before rain, unlocked doors, available updates. Energy, pinned controls, quick scenes and the live ticker fill the rest.</p>
+  <div class="win"><div class="win-bar"><span>lox tui</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-home"></pre></div></div>
+</section>
+
+<section id="rooms">
+  <div class="eyebrow">Screen 2 · key 2</div>
+  <h2>Rooms: the control surface</h2>
+  <p>Three panes: rooms, the controls in the room grouped by category, and an inspector. The selected blind is moving. The pending spinner turns while the stream reports new positions, and a toast confirms the command. The footer always shows what the action keys do for the selected type.</p>
+  <div class="win"><div class="win-bar"><span>lox tui --screen rooms</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-rooms"></pre></div></div>
+</section>
+
+<section id="palette">
+  <div class="eyebrow">Overlay · key : or Ctrl-k</div>
+  <h2>Palette: go to anything, or run a lox command</h2>
+  <p>Plain text searches controls, rooms, scenes, screens and sites with fuzzy matching. Text that starts with a lox verb is parsed by the same clap definitions as the CLI, so the TUI teaches the CLI.</p>
+  <div class="win"><div class="win-bar"><span>lox tui</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-palette"></pre></div></div>
+</section>
+
+<section id="events">
+  <div class="eyebrow">Screen 3 · key 3</div>
+  <h2>Events: what just happened, and why?</h2>
+  <p>A live feed with follow mode. High-frequency meters collapse into one row (<code>×340</code>), and noisy controls can be muted. Selecting an event shows everything that changed within ±2 s: the door opened, then the motion sensor fired, then the light came on.</p>
+  <div class="win"><div class="win-bar"><span>lox tui --screen events</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-events"></pre></div></div>
+</section>
+
+<section id="energy">
+  <div class="eyebrow">Screen 4 · key 4</div>
+  <h2>Energy: where the power goes</h2>
+  <p>A flow diagram built from the configured meters. The arrows move at a speed proportional to the power. Below: today's PV curve with the forecast after “now”, and every meter sorted by current power.</p>
+  <div class="win"><div class="win-bar"><span>lox tui --screen energy</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-energy"></pre></div></div>
+</section>
+
+<section id="system">
+  <div class="eyebrow">Screen 5 · key 5</div>
+  <h2>System: btop for the Miniserver</h2>
+  <p>CPU and heap history, Tree/Air devices sorted problems first, CAN/LAN counters with per-interval deltas, and the log tail. Sub-views (<code>[</code> <code>]</code>) add Config history with a semantic diff (via lxir) and firmware update/reboot with typed confirmation.</p>
+  <div class="win"><div class="win-bar"><span>lox tui --screen system</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-system"></pre></div></div>
+</section>
+
+<section id="sites">
+  <div class="eyebrow">Screen 6 · key 6</div>
+  <h2>Sites: every Miniserver at a glance</h2>
+  <p>One row per <code>lox ctx</code> context, polled lightly while this screen is open. <code>⏎</code> switches the whole TUI to that site. <code>C</code> opens a quick switcher from anywhere.</p>
+  <div class="win"><div class="win-bar"><span>lox tui --screen sites</span><span>120×13</span></div><div class="win-body"><pre class="term" id="s-sites"></pre></div></div>
+</section>
+
+<section id="overlays">
+  <div class="eyebrow">Overlays · keys ? and confirm</div>
+  <h2>Help and safety</h2>
+  <p>The help overlay is generated from the same keymap table that drives dispatch and the footer, so it is always correct. Risky actions ask for confirmation, with <b>No</b> as the default.</p>
+  <div class="win"><div class="win-bar"><span>lox tui · ?</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-help"></pre></div></div>
+  <div style="height:18px"></div>
+  <div class="win"><div class="win-bar"><span>lox tui · confirm</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-confirm"></pre></div></div>
+</section>
+
+<section id="keys">
+  <div class="eyebrow">Keyboard model</div>
+  <h2>One vocabulary, every control type</h2>
+  <p>Navigation keys never change the house. Action keys always mean the same intent. The footer shows the concrete effect. A dash means the key does nothing for that type; it stays visible but dimmed.</p>
+  <div class="tablewrap"><table class="vocab">
+    <thead><tr><th>Key</th><th>Intent</th><th>Light</th><th>Blind</th><th>Thermostat</th><th>Music</th><th>Door lock</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>␣</kbd></td><td>Primary action</td><td>toggle</td><td>stop if moving, else full up/down</td><td class="dim">—</td><td>play / pause</td><td>lock ↔ unlock ⚠</td></tr>
+      <tr><td><kbd>+</kbd> <kbd>-</kbd></td><td>Step the value you see</td><td>±10 %</td><td>±10 % closed</td><td>±0.5 °C</td><td>volume ±5</td><td class="dim">—</td></tr>
+      <tr><td><kbd>&lt;</kbd> <kbd>&gt;</kbd></td><td>Minimum / maximum</td><td>off / 100 %</td><td>fully up / down</td><td>eco / comfort</td><td>mute / max</td><td class="dim">—</td></tr>
+      <tr><td><kbd>=</kbd></td><td>Set exact value</td><td>brightness</td><td>position</td><td>target °C</td><td>volume</td><td class="dim">—</td></tr>
+      <tr><td><kbd>s</kbd></td><td>Stop</td><td class="dim">—</td><td>stop</td><td class="dim">—</td><td>stop</td><td class="dim">—</td></tr>
+      <tr><td><kbd>m</kbd></td><td>Mode / mood picker</td><td>moods</td><td>shade</td><td>auto · eco · comfort · manual</td><td>source</td><td>open ⚠</td></tr>
+      <tr><td><kbd>a</kbd></td><td>All actions menu</td><td colspan="5">every action for the item, each with its key and its CLI equivalent</td></tr>
+      <tr><td><kbd>⏎</kbd></td><td>Inspect / drill in</td><td colspan="5">inspector with states, 24 h history, CLI command</td></tr>
+      <tr><td><kbd>*</kbd> <kbd>e</kbd></td><td>Pin to Home · show events</td><td colspan="5">works on any item, including rooms and meters</td></tr>
+      <tr><td><kbd>y</kbd> <kbd>Y</kbd></td><td>Copy command · UUID</td><td colspan="5">copies to the clipboard via OSC 52, which also works over SSH</td></tr>
+      <tr><td><kbd>v</kbd> <kbd>V</kbd></td><td>Mark · mark all visible</td><td colspan="5">with a mark set, action keys apply to every marked item (“3 of 4 applied”)</td></tr>
+    </tbody>
+  </table></div>
+  <div style="height:16px"></div>
+  <div class="tablewrap"><table class="vocab">
+    <thead><tr><th>Global</th><th>Does</th><th>Global</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>1</kbd>…<kbd>6</kbd></td><td>Go to screen</td><td><kbd>/</kbd></td><td>Filter the focused list</td></tr>
+      <tr><td><kbd>j</kbd> <kbd>k</kbd> <kbd>h</kbd> <kbd>l</kbd></td><td>Move · switch pane (arrows too)</td><td><kbd>:</kbd> <kbd>^k</kbd></td><td>Palette</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>Next pane</td><td><kbd>C</kbd></td><td>Switch site</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Previous / next sub-view</td><td><kbd>p</kbd></td><td>Pause live updates</td></tr>
+      <tr><td><kbd>g</kbd> <kbd>G</kbd></td><td>First / last</td><td><kbd>?</kbd></td><td>Help for this context</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Back one level (never quits)</td><td><kbd>q</kbd></td><td>Quit</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="theme">
+  <div class="eyebrow">Visual system</div>
+  <h2>Palette tokens</h2>
+  <p>Loxone green is the only accent. The other colors carry meaning: state, severity, or energy source. Emoji are not used because their width breaks alignment. Glyphs are single-width Unicode, with an optional Nerd Font set.</p>
+  <div class="swatches" id="swatches"></div>
+</section>
+</div>
+
+<footer>Proposal for <code>lox tui</code> · branch <code>feat/tui-design</code> · The mockups use made-up example data, not a real installation.</footer>
+</div>
+
+<script>
+const RAMP=' ▁▂▃▄▅▆▇█', EIGHTH=['','▏','▎','▍','▌','▋','▊','▉'];
+const L=s=>Array.from(s).length;
+function cell(ch){const c=ch.codePointAt(0);if(ch==='<')return'&lt;';if(ch==='>')return'&gt;';if(ch==='&')return'&amp;';if(c>0xFF&&!(c>=0x2500&&c<=0x259F))return'<i>'+ch+'</i>';return ch;}
+class S{
+  constructor(w=120,h=36){this.w=w;this.h=h;this.c=[];this.k=[];this.g=[];for(let y=0;y<h;y++){this.c.push(Array(w).fill(' '));this.k.push(Array(w).fill('tx'));this.g.push(Array(w).fill(''));}}
+  put(x,y,s,k='tx',g){if(y<0||y>=this.h)return x+L(s);for(const ch of s){if(x>=0&&x<this.w){this.c[y][x]=ch;this.k[y][x]=k;if(g!==undefined)this.g[y][x]=g;}x++;}return x;}
+  rich(x,y,parts){for(const p of parts)x=this.put(x,y,p[0],p[1]||'tx',p[2]);return x;}
+  richR(xe,y,parts){const n=parts.reduce((a,p)=>a+L(p[0]),0);return this.rich(xe-n+1,y,parts);}
+  bg(x,y,w,g){for(let i=x;i<x+w&&i<this.w;i++)this.g[y][i]=g;}
+  fill(x,y,w,h,g=''){for(let j=y;j<y+h;j++)for(let i=x;i<x+w;i++){this.c[j][i]=' ';this.k[j][i]='tx';this.g[j][i]=g;}}
+  dimAll(){for(let y=0;y<this.h;y++)for(let x=0;x<this.w;x++){this.k[y][x]='fn';this.g[y][x]='';}}
+  box(x,y,w,h,o={}){
+    const bc=o.border||(o.focus?'ac':'bd');const g=o.fill?'gov':undefined;
+    if(o.fill)this.fill(x,y,w,h,'gov');
+    this.put(x,y,'╭'+'─'.repeat(w-2)+'╮',bc,g);
+    for(let j=y+1;j<y+h-1;j++){this.put(x,j,'│',bc,g);this.put(x+w-1,j,'│',bc,g);}
+    this.put(x,y+h-1,'╰'+'─'.repeat(w-2)+'╯',bc,g);
+    const P=v=>typeof v==='string'?[[v,'dm']]:v;
+    if(o.title!==undefined){const parts=typeof o.title==='string'?[[o.title,(o.focus?'ac':(o.titleCls||'tx'))+' b']]:o.title;this.rich(x+2,y,[[' ',bc],...parts,[' ',bc]]);}
+    if(o.meta)this.richR(x+w-3,y,[[' ',bc],...P(o.meta),[' ',bc]]);
+    if(o.foot)this.richR(x+w-3,y+h-1,[[' ',bc],...P(o.foot),[' ',bc]]);
+  }
+  sep(x,y,w,title,bc='bd'){this.put(x,y,'├'+'─'.repeat(w-2)+'┤',bc);if(title)this.rich(x+2,y,[[' ',bc],[title,'tx b'],[' ',bc]]);}
+  gauge(x,y,w,f,k){this.put(x,y,'▕','fn');const n=w-2,v=Math.max(0,Math.min(1,f))*n,full=Math.floor(v),part=Math.round((v-full)*8);
+    for(let c=0;c<n;c++){let ch=' ';if(c<full)ch='█';else if(c===full&&part>0)ch=part===8?'█':EIGHTH[part];this.put(x+1+c,y,ch,typeof k==='function'?k(c/n):k,'gtrk');}
+    this.put(x+1+n,y,'▏','fn');}
+  spark(x,y,vals,k){vals.forEach((v,i)=>this.put(x+i,y,RAMP[Math.max(1,Math.min(8,Math.round(v*8)))],typeof k==='function'?k(v):k));}
+  html(){let out='';for(let y=0;y<this.h;y++){let cur=null,buf='';const flush=()=>{if(buf){const[k,g]=cur.split('|');out+='<span class="'+k+(g?' '+g:'')+'">'+buf+'</span>';}buf='';};
+    for(let x=0;x<this.w;x++){const key=this.k[y][x]+'|'+this.g[y][x];if(key!==cur){flush();cur=key;}buf+=cell(this.c[y][x]);}flush();if(y<this.h-1)out+='\n';}return out;}
+}
+const sparkStr=v=>v.map(x=>RAMP[Math.max(1,Math.min(8,Math.round(x*8)))]).join('');
+function wave(n,seed,base=.4,amp=.35){const a=[];for(let i=0;i<n;i++){a.push(Math.max(.05,Math.min(1,base+amp*Math.sin(i*.55+seed)+.12*Math.sin(i*1.7+seed*3))));}return a;}
+const load=t=>t<.6?'ok':t<.85?'wn':'cr';
+const temp=t=>t==null?'fn':t<18?'in':t<23?'ok':t<26?'wn':'cr';
+const SPIN='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+const TABS=['Home','Rooms','Events','Energy','System','Sites'],SUP=['¹','²','³','⁴','⁵','⁶'];
+
+function header(s,active){
+  s.put(0,0,' lox ','hk b','gac');
+  let x=6;
+  TABS.forEach((t,i)=>{const on=i===active;x=s.put(x,0,SUP[i],on?'ac':'fn');x=s.put(x,0,t,on?'ac b ul':'dm');x+=2;});
+  s.richR(s.w-2,0,[['home','tx b'],['  MS Gen2 · 15.2','dm'],['  ●','ok'],[' live','tx'],[' 12ms','dm'],['  Evening','on'],['  18.4°','tx'],[' ☼','pv'],['  14:32:07','dm']]);
+}
+const GLOBAL=[[':','palette'],['?','help'],['q','quit']];
+function footer(s,left,right=GLOBAL){
+  const y=s.h-1;let x=1;
+  for(const [k,l,d] of left){x=s.put(x,y,' '+k+' ',d?'fn':'tx b',d?'':'gkey');x=s.put(x+1,y,l,d?'fn':'dm');x+=2;}
+  const parts=[];right.forEach(([k,l],i)=>{parts.push([' '+k+' ','tx b','gkey'],[' '+l+(i<right.length-1?'  ':''),'dm']);});
+  s.richR(s.w-2,y,parts);
+}
+function kc(s,x,y,k,label){x=s.put(x,y,' '+k+' ','tx b','gkey');return s.put(x+1,y,label,'dm');}
+
+/* ── Home ─────────────────────────────────────────────── */
+function card(s,x,y,r,sel){
+  s.box(x,y,21,6,{title:r.n,focus:sel,border:r.warn?'wn':undefined,titleCls:r.warn?'wn':undefined});
+  const X=x+2;
+  if(r.t==null)s.put(X,y+1,'—','fn');else{let xx=s.put(X,y+1,r.t.toFixed(1)+'°',temp(r.t)+' b');
+    if(r.sp!=null){xx=s.put(xx,y+1,' → ','fn');s.put(xx,y+1,r.sp.toFixed(1)+'°','dm');const tr=r.t<r.sp-.2?['▲','wn']:r.t>r.sp+.2?['▼','in']:['·','fn'];s.put(x+18,y+1,tr[0],tr[1]);}}
+  if(r.l>0)s.rich(X,y+2,[['●','on'],[' '+r.l+' light'+(r.l>1?'s':''),'tx'],['  '+r.b+'%','dm']]);else s.rich(X,y+2,[['○','fn'],[' lights off','dm']]);
+  if(r.l3)s.rich(X,y+3,r.l3);else{s.put(X,y+3,'▾','in');s.gauge(X+2,y+3,11,r.bl,'in');s.put(X+14,y+3,String(Math.round(r.bl*100)).padStart(3)+'%','dm');}
+  s.rich(X,y+4,r.x);
+}
+function scrHome(){
+  const s=new S();header(s,0);
+  s.box(0,1,68,20,{title:'Rooms',focus:true,meta:'18 rooms · by activity',foot:[['9 more  ','dm'],[' ⏎ ','tx b','gkey'],[' open','dm']]});
+  const R=[
+    {n:'Living room',t:22.1,sp:22.0,l:3,b:62,bl:.33,x:[['◉','ok'],[' present','dm']]},
+    {n:'Kitchen',t:21.4,sp:22.0,l:1,b:100,bl:0,x:[['♪','ac'],[' Radio FM4','dm']]},
+    {n:'Office',t:22.9,sp:21.5,l:2,b:40,bl:.8,x:[['◉','ok'],[' present','dm']]},
+    {n:'Bath',t:23.5,sp:24.0,l:0,bl:0,x:[['◫','wn'],[' window open','wn']],warn:true},
+    {n:'Kids room',t:21.0,sp:21.0,l:1,b:30,bl:.5,x:[['◌','fn'],[' empty','dm']]},
+    {n:'Hallway',t:20.4,sp:20.0,l:1,b:40,bl:0,x:[['◉','ok'],[' motion 14:32','dm']]},
+    {n:'Bedroom',t:19.8,sp:19.0,l:0,bl:1,x:[['◌','fn'],[' empty','dm']]},
+    {n:'Garage',t:14.2,l:1,b:100,l3:[['⌂','tx'],[' gate ','dm'],['closed','ok']],x:[['⏚','ld'],[' wallbox 4.2 kW','dm']]},
+    {n:'Garden',t:null,l:0,l3:[['≋','in'],[' irrigation off','dm']],x:[['☼','pv'],[' 22 klx','dm']]},
+  ];
+  R.forEach((r,i)=>card(s,2+(i%3)*21,2+Math.floor(i/3)*6,r,i===0));
+
+  s.box(68,1,52,8,{title:'Attention',meta:[['4','wn b']]});
+  [[['⚠ ','wn'],['Bath window open','tx'],[' · rain in 20 min','dm']],
+   [['⚠ ','wn'],['Window contact Bath','tx'],[' · battery 8%','dm']],
+   [['● ','in'],['Front door unlocked','tx'],[' · since 13:02','dm']],
+   [['↑ ','in'],['Firmware 15.3.1 available','tx'],[' · lox update','dm']],
+   [['✓ ','ok'],['Miniserver healthy','tx'],[' · 0 bus errors','dm']]].forEach((p,i)=>s.rich(70,2+i,p));
+
+  s.box(68,9,52,8,{title:'Energy',meta:'self-use 86%'});
+  [['PV','pv',.94,'9.6 kW',wave(16,1,.6,.3)],['Home','ld',.28,'2.8 kW',wave(16,2,.35,.2)],['EV','ld',.42,'4.2 kW',wave(16,4,.5,.1)],
+   ['Batt','bt',.74,'74%  ▲',wave(16,3,.55,.15)],['Grid','gd',.13,'−1.3 kW',wave(16,5,.3,.25)]].forEach(([n,k,f,v,sp],i)=>{
+     const y=10+i;s.put(70,y,n,k+' b');s.gauge(75,y,14,f,k);s.put(90,y,v.padStart(8),'tx');s.spark(101,y,sp,k);});
+
+  s.box(68,17,52,11,{title:'Pinned',foot:[[' * ','tx b','gkey'],[' pin any control','dm']]});
+  const P=[['●','on','Terrace light',[['on ','tx'],['80%','dm']],(x,y)=>s.gauge(x,y,14,.8,'on')],
+    ['°','ok','Outside temp',[['18.4°','tx b']],(x,y)=>s.spark(x+1,y,wave(12,.4,.5,.3),'ok')],
+    ['▾','in','Blind South',[['33%','tx']],(x,y)=>s.gauge(x,y,14,.33,'in')],
+    ['⏚','ld','Wallbox',[['charging','ld']],(x,y)=>s.put(x+1,y,'4.2 kW','dm')],
+    ['◫','ok','Garage door',[['closed','ok']]],
+    ['♪','ac','Kitchen zone',[['▶ ','ac'],['FM4','tx']],(x,y)=>s.put(x+1,y,'vol 28','dm')],
+    ['°','in','Wine cellar',[['12.1°','tx b']],(x,y)=>s.spark(x+1,y,wave(12,2,.45,.05),'in')]];
+  P.forEach(([g,k,n,v,viz],i)=>{const y=18+i;s.put(70,y,g,k);s.put(72,y,n,'tx');s.rich(90,y,v);if(viz)viz(102,y);});
+
+  s.box(68,28,52,7,{title:'Quick',meta:'scenes · moods'});
+  const chips=(x,y,list)=>{for(const [ic,t,k] of list){x=s.put(x,y,' '+ic+' ',k||'ac','gkey');x=s.put(x,y,t+' ','tx','gkey');x+=1;}};
+  chips(70,29,[['▶','movie'],['▶','leave'],['▶','night'],['▶','morning']]);
+  chips(70,31,[['◐','Evening mood','on'],['▶','dinner'],['▶','away']]);
+  s.rich(70,33,[['⟳ ','dm'],['3 autopilot rules active','dm']]);
+
+  s.box(0,21,68,14,{title:'Live',meta:[[sparkStr(wave(14,1.3,.4,.35)),'ac'],[' 38/min','dm']]});
+  s.put(2,22,'TIME','fn b');s.put(12,22,'ROOM','fn b');s.put(25,22,'CONTROL','fn b');s.put(44,22,'CHANGE','fn b');
+  const EV=[
+    ['14:32:07','Kitchen','Light Ceiling',[['off','dm'],[' → ','fn'],['100%','tx b']],1],
+    ['14:32:05','Hallway','Motion',[['○','dm'],[' → ','fn'],['●','ok b']]],
+    ['14:31:58','Living room','Blind South',[['0%','dm'],[' → ','fn'],['42%','tx b'],['  ▼ moving','in']]],
+    ['14:31:40','—','Operating mode',[['Day','dm'],[' → ','fn'],['Evening','on b']]],
+    ['14:31:12','Office','Room climate',[['22.8°','dm'],[' → ','fn'],['22.9°','tx b']]],
+    ['14:30:55','Garage','Gate',[['closed','dm'],[' → ','fn'],['open','wn b'],['  ⚠','wn']]],
+    ['14:30:41','Bath','Window contact',[['closed','dm'],[' → ','fn'],['open','wn b']]],
+    ['14:30:02','Kitchen','Kitchen zone',[['vol 20','dm'],[' → ','fn'],['vol 28','tx b']]],
+    ['14:29:48','Living room','Reading lamp',[['off','dm'],[' → ','fn'],['100%','tx b']]],
+    ['14:29:10','Garden','Brightness',[['24.1k','dm'],[' → ','fn'],['22.0k lx','tx b']]],
+    ['14:28:55','Hallway','Light',[['40%','dm'],[' → ','fn'],['off','tx b']]]];
+  EV.forEach(([t,r,c,ch,fl],i)=>{const y=23+i;if(fl)s.bg(1,y,66,'gflash');s.put(2,y,t,'dm');s.put(12,y,r,'tx');s.put(25,y,c,'tx');s.rich(44,y,ch);});
+
+  footer(s,[['␣','open'],['⏎','open room'],['a','actions'],['*','pin'],['h l','panes']]);
+  return s;
+}
+
+/* ── Rooms ────────────────────────────────────────────── */
+function scrRooms(frame=0,toast=true){
+  const s=new S();header(s,1);
+  s.box(0,1,28,34,{title:'Rooms',meta:'18',foot:[[' b ','tx b','gkey'],[' by room','dm']]});
+  s.rich(2,2,[['★ ','on'],['Favorites','tx']]);s.richR(25,2,[['6','dm']]);
+  s.rich(2,3,[['◇ ','dm'],['All controls','tx']]);s.richR(25,3,[['312','dm']]);
+  s.put(1,4,'─'.repeat(26),'fn');
+  const RL=[['Living room',22.1,3,'▾'],['Kitchen',21.4,1,''],['Office',22.9,2,'▾'],['Bath',23.5,0,'⚠'],['Kids room',21.0,1,'▾'],['Hallway',20.4,1,''],['Bedroom',19.8,0,'▾'],['Garage',14.2,1,''],['Garden',null,0,''],['Basement',18.0,0,''],['Guest room',19.5,0,''],['Laundry',20.1,0,''],['Stairs',20.8,0,''],['Terrace',null,1,''],['Wine cellar',12.1,0,''],['Workshop',16.4,1,''],['Attic',17.2,0,'▾'],['Pool house',24.8,0,'']];
+  RL.forEach(([n,t,l,f],i)=>{const y=5+i,sel=i===0;if(sel){s.bg(1,y,26,'gsel2');s.put(1,y,'▸','ac');}
+    s.put(3,y,n,sel?'tx b':'tx');s.put(15,y,t==null?'   —':t.toFixed(1).padStart(4)+'°',temp(t));if(l)s.rich(21,y,[['●','on'],[String(l),'dm']]);if(f)s.put(25,y,f,f==='⚠'?'wn':'in');});
+
+  s.box(28,1,52,34,{title:'Living room',focus:true,meta:'14 controls',foot:[[' / ','tx b','gkey'],[' filter','dm']]});
+  let y=2;
+  const sec=t=>{if(y>2)y++;s.put(30,y,t,'fn b');y++;};
+  const row=(g,gk,name,viz,val,sec2,sel)=>{if(sel){s.bg(29,y,50,'gsel');s.put(29,y,'▌','ac');}s.put(30,y,g,gk);s.put(32,y,name,sel?'ac b':'tx');if(viz)viz(47,y);if(val)s.rich(60,y,val);if(sec2)s.rich(66,y,sec2);y++;};
+  const G=(f,k)=>(x,yy)=>s.gauge(x,yy,12,f,k);
+  sec('LIGHTS');
+  row('●','on','Ceiling',G(.65,'on'),[[' 65%','tx']],[['mood ','dm'],['Evening','on']]);
+  row('●','on','Reading lamp',G(1,'on'),[['100%','tx']]);
+  row('○','fn','Floor LEDs',G(0,'on'),[[' off','dm']]);
+  sec('SHADING');
+  row('▾','in','Blind South',G(.33,'in'),[[' 33%','tx']],[['▼ moving ','in'],[SPIN[frame%10],'ac']],true);
+  row('▾','in','Blind West',G(0,'in'),[['  0%','tx']],[['auto','dm']]);
+  row('▾','in','Terrace awning',G(0,'in'),[['  0%','tx']],[['⚠ wind lock','wn']]);
+  sec('CLIMATE');
+  row('°','ok','Room climate',(x,yy)=>s.rich(x,yy,[['22.1°','ok b'],[' → ','fn'],['22.0°','dm']]),null,[['comfort','dm'],[' ▲','wn']]);
+  row('%','in','Humidity',G(.48,'in'),[[' 48%','tx']]);
+  sec('SENSORS');
+  row('◫','ok','Window left',null,[['closed','ok']]);
+  row('◫','wn','Window right',null,[['tilted','wn']],[['     ⚠','wn']]);
+  row('◉','ok','Presence',null,[['yes','ok']],[['since 13:48','dm']]);
+  sec('AUDIO');
+  row('♪','ac','Living zone',G(.35,'ac'),[[' 35','tx']],[['▶ ','ac'],['Radio FM4','tx']]);
+
+  s.box(80,1,40,34,{title:'Blind South',meta:[['⋯ moving','in']]});
+  s.put(82,2,'Jalousie · Living room · Shading','dm');
+  const wx=85,wy=4;s.put(wx,wy,'┌'+'─'.repeat(12)+'┐','dm');
+  for(let j=1;j<=6;j++){s.put(wx,wy+j,'│','dm');s.put(wx+13,wy+j,'│','dm');
+    if(j<=2)s.put(wx+1,wy+j,'━'.repeat(12),'in');else if(j===3)s.put(wx+1,wy+j,'┅'.repeat(12),'in');else s.put(wx+1,wy+j,' '.repeat(12),'tx','gtrk');}
+  s.put(wx,wy+7,'└'+'─'.repeat(12)+'┘','dm');
+  s.put(83,5,'▲','fn');s.put(83,10,'▼','ac b');
+  [[['position ','dm'],[' 33%','tx b']],[['target   ','dm'],[' 30%','tx b']],[['slats    ','dm'],[' 45%','tx b']],[['auto     ','dm'],[' on','ok b']],[['motor    ','dm'],[' ▼ down','in b']]].forEach((p,i)=>s.rich(101,5+i,p));
+  s.put(82,13,'24 h','dm');s.spark(87,13,[0,0,0,0,0,0,0,.1,.5,.9,1,1,1,1,.9,.5,.2,0,0,0,0,0,.2,.5,.9,1,.8,.6,.4,.33].map(v=>Math.max(v,.02)),'in');
+  s.put(87,14,'00     06     12     18   now','fn');
+  s.put(82,16,'STATES','fn b');
+  [['position','0.33'],['targetPosition','0.30'],['shadePosition','0.45'],['up · down','0 · 1'],['autoActive · locked','1 · 0']].forEach(([a,b],i)=>{s.put(82,17+i,a,'dm');s.put(104,17+i,b,'tx');});
+  s.put(82,23,'ACTIONS','fn b');
+  kc(s,82,24,'␣','stop');kc(s,99,24,'+ -','step 10%');
+  kc(s,82,25,'<','fully up');kc(s,99,25,'>','fully down');
+  kc(s,82,26,'=','position…');kc(s,99,26,'m','shade');
+  kc(s,82,27,'a','more…');kc(s,99,27,'y','copy cmd');
+  s.put(82,29,'CLI','fn b');
+  s.rich(82,30,[['$ ','fn'],['lox','ac'],[' blind "Blind South" pos 30','tx']]);
+  s.put(82,31,'    -r "Living room"','tx');
+  if(toast)s.richR(117,33,[[' ✓ ','ok b','gov'],['Blind South → pos 30 ','tx','gov']]);
+  footer(s,[['␣','stop'],['+-','step'],['<>','up/down'],['=','set'],['m','shade'],['⏎','inspect'],['a','actions']],[[':','palette'],['?','help']]);
+  return s;
+}
+
+/* ── Palette overlay ──────────────────────────────────── */
+function scrPalette(){
+  const s=scrRooms(0,false);s.dimAll();
+  const x=20,y=5,w=80,h=19;
+  s.box(x,y,w,h,{fill:true,focus:true,title:[['palette','ac b']],foot:[[' ⏎ ','tx b','gkey'],[' go   ','dm'],[' ⇥ ','tx b','gkey'],[' complete   ','dm'],[' Esc ','tx b','gkey'],[' close','dm']]});
+  s.rich(x+2,y+1,[[': ','ac b'],['blind south','tx b'],['▌','ac']]);s.richR(x+w-3,y+1,[['6 results','dm']]);
+  s.put(x+1,y+2,'─'.repeat(w-2),'bd');
+  s.put(x+2,y+3,'CONTROLS','fn b');
+  const row=(yy,sel,name,room,type,val)=>{if(sel){s.bg(x+1,yy,w-2,'gsel');s.put(x+2,yy,'▸','ac');}s.rich(x+4,yy,name);s.put(x+30,yy,room,'tx');s.put(x+46,yy,type,'dm');s.put(x+62,yy,val,'dm');};
+  row(y+4,true,[['▾ ','in'],['Blind South','ac b']],'Living room','Jalousie','33% · moving');
+  row(y+5,false,[['▾ ','in'],['Blind South','ac']],'Kids room','Jalousie','0%');
+  row(y+6,false,[['◐ ','ac'],['Blind','ac'],['s ','tx'],['South','ac'],[' (all)','dm']],'Central','CentralJalousie','3 blinds');
+  s.put(x+2,y+8,'COMMANDS','fn b');
+  s.rich(x+4,y+9,[['lox ','fn'],['blind','ac'],[' "Blind South" ','tx'],['up · down · stop · shade · pos N','dm']]);
+  s.rich(x+4,y+10,[['lox ','fn'],['blind','ac'],[' "Blind South" pos ','tx'],['<0-100>','in']]);
+  s.put(x+2,y+12,'SCENES','fn b');
+  s.rich(x+4,y+13,[['▶ ','ac'],['south-shade','tx'],['    scene · 3 steps','dm']]);
+  s.rich(x+2,y+15,[['Tip ','in b'],['start with a lox verb to run a command: ','dm'],['off --all-in-room Office','tx']]);
+  return s;
+}
+
+/* ── Events ───────────────────────────────────────────── */
+function scrEvents(){
+  const s=new S();header(s,2);
+  s.box(0,1,120,34,{title:[['Events','ac b'],['  ▸Live','ac'],['  Journal','dm']],focus:true,meta:'1,284 buffered'});
+  let x=s.rich(2,2,[['● ','ok'],['following','tx'],['   38/min ','dm']]);s.put(x,2,sparkStr(wave(24,.7,.35,.3)),'ac');
+  s.richR(117,2,[[' room: any ','tx','gkey'],['  ','tx'],[' type: any ','tx','gkey'],['  ','tx'],[' 3 muted ','wn','gkey'],['  ','tx'],[' collapse ✓ ','tx','gkey']]);
+  [['TIME',2],['ROOM',14],['CONTROL',28],['STATE',46],['CHANGE',60]].forEach(([t,c])=>s.put(c,3,t,'fn b'));
+  const A=(a,b,k='tx b')=>[[a,'dm'],[' → ','fn'],[b,k]];
+  const E=[
+    ['14:32:07.9','Kitchen','Light Ceiling','value',A('0','100'),null,{flash:1}],
+    ['14:32:07.1','Garage','Wallbox','power',A('4.18','4.21 kW'),[['×340 ','dm'],['collapsed','fn']]],
+    ['14:32:06.1','Hallway','Light','brightness',A('0','40'),null,{cor:1}],
+    ['14:32:05.9','Hallway','Light','active',A('0','1'),null,{cor:1}],
+    ['14:32:05.4','Hallway','Motion','active',A('○','●','ok b'),null,{sel:1}],
+    ['14:32:04.9','Hallway','Door contact','open',A('closed','open'),null,{cor:1}],
+    ['14:31:58.0','Living room','Blind South','position',A('0.00','0.42'),[['×12 ','dm'],['▼ moving','in']]],
+    ['14:31:40.2','—','Operating mode','mode',A('Day','Evening','on b')],
+    ['14:31:12.6','Office','Room climate','tempActual',A('22.8','22.9')],
+    ['14:30:55.3','Garage','Gate','position',A('closed','open','wn b'),[['⚠ door open while away','wn']]],
+    ['14:30:41.0','Bath','Window contact','open',A('0','1','wn b')],
+    ['14:30:02.8','Kitchen','Kitchen zone','volume',A('20','28')],
+    ['14:29:48.4','Living room','Reading lamp','value',A('0','100')],
+    ['14:29:10.0','Garden','Brightness','value',A('24.1k','22.0k lx'),[['×58 ','dm'],['collapsed','fn']]],
+    ['14:28:55.7','Hallway','Light','active',A('1','0')],
+    ['14:28:30.2','Office','Presence','active',A('0','1')],
+    ['14:27:02.0','—','Weather','temperature',A('18.1','18.4')],
+    ['14:26:47.5','Kids room','Blind','position',A('0.00','0.50')],
+    ['14:25:13.9','Bath','Window contact','battery',A('9','8 %','wn b'),[['⚠ low battery','wn']]]];
+  E.forEach(([t,r,c,st,ch,note,f={}],i)=>{const y=4+i;
+    if(f.flash)s.bg(1,y,118,'gflash');if(f.sel){s.bg(1,y,118,'gsel');s.put(1,y,'▌','ac');}
+    if(f.cor)s.put(1,y,'•','in');
+    s.put(2,y,t,'dm');s.put(14,y,r,'tx');s.put(28,y,c,f.sel?'ac b':'tx');s.put(46,y,st,'dm');s.rich(60,y,ch);if(note)s.rich(92,y,note);});
+  s.sep(0,23,120,'Detail');
+  s.rich(2,24,[['Hallway','tx b'],[' · ','fn'],['Motion','tx b'],[' · ','fn'],['active','dm'],['  ○ → ●','ok'],['  at 14:32:05.412','dm']]);
+  s.rich(2,26,[['AROUND THIS EVENT','fn b'],['   ±2 s · same room first · ','fn'],['•','in'],[' marked above','fn']]);
+  [['  ','14:32:04.9','Door contact','closed → open','in'],['▸ ','14:32:05.4','Motion','○ → ●','ac'],['  ','14:32:05.9','Light','active 0 → 1','in'],['  ','14:32:06.1','Light','brightness 0 → 40','in']]
+    .forEach(([m,t,c,ch,k],i)=>s.rich(2,27+i,[[m,'ac'],[t,'dm'],['  Hallway  ','tx'],[c.padEnd(14),k==='ac'?'ac b':'tx'],[ch,'dm']]));
+  s.rich(2,32,[['→ ','fn'],['the door opened, the motion sensor fired, then the light switched on.','dm']]);
+  let xx=kc(s,2,33,'⏎','open control');xx=kc(s,xx+3,33,'e','only this control');xx=kc(s,xx+3,33,'x','mute Motion');xx=kc(s,xx+3,33,'y','copy');s.put(xx+1,33,'lox stream -c "Motion" -r Hallway','in');
+  footer(s,[['F','follow'],['p','pause'],['x','mute'],['f','filters'],['⏎','open control'],['[ ]','live · journal']],[[':','palette'],['?','help']]);
+  return s;
+}
+
+/* ── Energy ───────────────────────────────────────────── */
+function node(s,x,y,ic,label,k,val,sub){s.box(x,y,18,5,{border:k});s.rich(x+2,y+1,[[ic+' ',k],[label,k+' b']]);s.put(x+2,y+2,val,'tx b');s.put(x+2,y+3,sub,'dm');}
+function flowH(s,x1,x2,y,k,frame,dir=1){for(let x=x1;x<=x2;x++){const ph=(((x-x1)-frame*dir)%6+6)%6;const m=ph===0;s.put(x,y,m?(dir>0?'▶':'◀'):'━',m?k+' b':k);}}
+function scrEnergy(frame=0){
+  const s=new S();header(s,3);
+  s.box(0,1,120,17,{title:[['Energy','ac b'],['  ▸Now','ac'],['  Today','dm'],['  7d','dm'],['  30d','dm']],focus:true,meta:'self-sufficiency 100% · self-use 86%'});
+  node(s,6,3,'☼','PV','pv','9.6 kW','peak 10.2 today');
+  node(s,49,3,'⌂','Home','ac','2.8 kW','house load');
+  node(s,94,3,'≋','Grid','gd','−1.3 kW','exporting');
+  node(s,24,11,'▮','Battery','bt','74%  ▲','+1.3 kW charging');
+  node(s,76,11,'⏚','Wallbox','ld','4.2 kW','car 62% · 1 phase');
+  flowH(s,24,48,5,'pv',frame);s.put(31,4,'9.6 kW','pv');
+  flowH(s,67,93,5,'gd',frame);s.put(73,4,'1.3 kW → grid','gd');
+  s.put(58,8,'┃','dm');
+  flowH(s,34,57,9,'bt',frame,-1);flowH(s,59,84,9,'ld',frame,1);
+  s.put(33,9,'┏','bt');s.put(85,9,'┓','ld');s.put(58,9,'┻','dm');
+  s.put(33,10,'▼','bt b');s.put(85,10,'▼','ld b');s.put(35,10,'1.3 kW','bt');s.put(87,10,'4.2 kW','ld');
+  s.put(2,11,'TODAY','fn b');
+  [[['PV      ','dm'],['48.2 kWh','pv']],[['used    ','dm'],['21.7 kWh','ld']],[['export  ','dm'],['19.4 kWh','gd']],[['import  ','dm'],[' 2.1 kWh','gd']]].forEach((p,i)=>s.rich(2,12+i,p));
+  s.put(97,11,'TARIFF','fn b');
+  [[['feed-in ','dm'],['0.08 €','tx']],[['grid    ','dm'],['0.29 €','tx']],[['saved   ','dm'],['6.12 €','ok b']]].forEach((p,i)=>s.rich(97,12+i,p));
+
+  s.box(0,18,66,17,{title:[['Today','ac b'],['  kW','dm']],meta:[['[ ]','tx b'],[' range','dm']]});
+  const x0=6,yb=30,rows=11,NOW=29;
+  for(let i=0;i<48;i++){const t=i/2;let pv=t>6&&t<20?Math.sin(Math.PI*(t-6)/14):0;if(t>10.5&&t<12)pv*=.72;
+    let e=Math.round(pv*rows*8);const k=i<=NOW?'pv':'fn';
+    for(let r=0;r<rows&&e>0;r++){s.put(x0+i,yb-r,e>=8?'█':RAMP[e],k);e-=8;}
+    let ld=.09+(t>6.5&&t<8?.18:0)+(t>18&&t<21?.25:0)+(t>=12&&t<=14.5?.42:0);
+    if(i<=NOW){const lr=Math.min(rows-1,Math.round(ld*rows));s.put(x0+i,yb-lr,'━','ld b');}
+    if(i===NOW)for(let r=rows-1;r>=0;r--){if(s.c[yb-r][x0+i]===' ')s.put(x0+i,yb-r,'┊','ac');}}
+  s.put(x0+NOW-1,19,'now','ac b');
+  [['10',20],[' 5',25],[' 0',30]].forEach(([l,y])=>s.put(2,y,l,'dm'));
+  for(let y=20;y<=30;y++)s.put(5,y,(y===20||y===25||y===30)?'┤':'│','fn');
+  s.put(5,31,'└'+'─'.repeat(49),'fn');
+  [['00',0],['06',12],['12',24],['18',36],['24',46]].forEach(([l,c])=>s.put(x0+c,32,l,'dm'));
+  s.rich(2,33,[['█ ','pv'],['PV','dm'],['   ━ ','ld'],['consumption','dm'],['   █ ','fn'],['forecast','dm']]);
+
+  s.box(66,18,54,17,{title:'Meters',meta:'12 · by power'});
+  s.put(68,19,'METER','fn b');s.richR(89,19,[['NOW','fn b']]);s.put(92,19,'LOAD','fn b');s.richR(117,19,[['TODAY','fn b']]);
+  [['Wallbox',4.2,22.0],['Heat pump',1.9,14.2],['Washer',0.6,1.2],['Kitchen',0.4,3.1],['Lighting',0.3,1.8],['Office',0.3,2.4],['Server rack',0.2,4.6],['Dishwasher',0.0,1.1],['Pool pump',0.0,3.0],['Sauna',0.0,0.0]]
+    .forEach(([n,p,d],i)=>{const y=20+i;s.put(68,y,n,'tx');s.richR(89,y,[[p.toFixed(1)+' kW',p>0?'tx':'fn']]);s.gauge(92,y,13,p/11,'ld');s.richR(117,y,[[d.toFixed(1)+' kWh','dm']]);});
+  s.rich(68,32,[['Σ ','ac b'],['house ','dm'],['2.8 kW','tx b'],['  · today ','dm'],['21.7 kWh','tx b']]);
+  footer(s,[['[ ]','range'],['⏎','meter'],['*','pin'],['e','events']],[[':','palette'],['?','help']]);
+  return s;
+}
+
+/* ── System ───────────────────────────────────────────── */
+function scrSystem(){
+  const s=new S();header(s,4);
+  s.box(0,1,120,10,{title:[['System','ac b'],['  ▸Overview','ac'],['  Devices','dm'],['  Bus & LAN','dm'],['  Log','dm'],['  Config','dm'],['  Update','dm']],focus:true,meta:'polling 2 s'});
+  s.put(2,2,'CPU ','tx b');s.gauge(7,2,22,.38,load);s.put(30,2,' 38%','tx b');s.spark(36,2,wave(32,.2,.4,.2),load);
+  s.put(2,3,'Heap','tx b');s.gauge(7,3,22,.71,load);s.put(30,3,' 71%','tx b');s.put(36,3,'12.4 / 17.5 MB','dm');s.spark(51,3,wave(17,1,.7,.04),'wn');
+  s.rich(2,4,[['Tasks ','dm'],['214','tx b'],['   Ctx/s ','dm'],['9.1k','tx b'],['   Ints/s ','dm'],['1.2k','tx b'],['   SD ','dm'],['✓ ok','ok']]);
+  s.rich(72,2,[['Miniserver Gen 2','tx b'],['  504F94A1B2C3','dm']]);
+  s.rich(72,3,[['firmware ','dm'],['15.2.10.4','tx'],['  ↑ 15.3.1 available','in']]);
+  s.rich(72,4,[['uptime ','dm'],['41 d 3 h','tx'],['  · clock ','dm'],['✓ Δ0.2 s','ok']]);
+  s.put(2,5,'CPU · LAST HOUR','fn b');s.put(72,5,'NETWORK','fn b');
+  const cpu=wave(64,.3,.32,.14).map((v,i)=>i>40&&i<44?.86:v);
+  cpu.forEach((v,i)=>{let e=Math.round(v*4*8);for(let r=0;r<4&&e>0;r++){s.put(2+i,9-r,e>=8?'█':RAMP[e],load(v));e-=8;}});
+  [[['IP   ','dm'],['192.168.1.20/24','tx'],['  gw ','dm'],['.1','tx']],[['MAC  ','dm'],['50:4F:94:A1:B2:C3','tx'],['  DHCP ','dm'],['off','tx']],
+   [['DNS  ','dm'],['192.168.1.1 · 9.9.9.9','tx']],[['NTP  ','dm'],['✓ pool.ntp.org','ok']]].forEach((p,i)=>s.rich(72,6+i,p));
+
+  s.box(0,11,70,13,{title:'Devices',meta:'problems first · 47'});
+  [['DEVICE',2],['ROOM',21],['TYPE',34],['BATT',40],['SIGNAL',52],['STATUS',60]].forEach(([t,c])=>s.put(c,12,t,'fn b'));
+  const D=[['Window contact Bath','Bath','Air',.08,'▂▄▆ ',['low battery','wn']],['DI Extension','—','Link',null,null,['offline 09:12','cr']],
+    ['Motion Garden','Garden','Air',.34,'▂   ',['weak signal','wn']],['Smoke Kitchen','Kitchen','Air',.91,'▂▄▆█',['ok','ok']],
+    ['Room sensor Kids','Kids room','Air',.76,'▂▄▆ ',['ok','ok']],['Presence Office','Office','Tree',null,null,['ok','ok']],
+    ['Touch Living','Living room','Tree',null,null,['ok','ok']],['Blind motor South','Living room','Tree',null,null,['ok','ok']],['RGBW Dimmer','Kitchen','Tree',null,null,['ok','ok']]];
+  D.forEach(([n,r,t,b,sig,st],i)=>{const y=13+i;s.put(2,y,n,'tx');s.put(21,y,r,'dm');s.put(34,y,t,'dm');
+    if(b!=null){s.gauge(40,y,6,b,b<.2?'cr':b<.4?'wn':'ok');s.richR(49,y,[[Math.round(b*100)+'%',b<.2?'cr':'dm']]);}else s.put(40,y,'—','fn');
+    if(sig)s.put(52,y,sig,st[1]==='wn'&&i===2?'wn':'ok');else s.put(52,y,'—','fn');s.put(60,y,st[0],st[1]);});
+
+  s.box(70,11,50,13,{title:'Bus & LAN',meta:'Δ per 2 s'});
+  s.put(72,12,'COUNTER','fn b');s.richR(104,12,[['TOTAL','fn b']]);s.richR(117,12,[['Δ','fn b']]);
+  [['CAN sent','1,204,332','+84'],['CAN received','1,198,871','+81'],['CAN errors','0','0','ok'],['CAN frame errors','0','0','ok'],['CAN overruns','0','0','ok'],
+   ['LAN tx packets','8,331,204','+212'],['LAN rx packets','9,002,118','+240'],['LAN errors','3','+1','cr'],['LAN no buffer','0','0','ok']]
+   .forEach(([n,t,d,k],i)=>{const y=13+i;if(k==='cr')s.bg(71,y,48,'gflash');s.put(72,y,n,'tx');s.richR(104,y,[[t,k==='cr'?'cr b':'dm']]);s.richR(117,y,[[d,k||'dm']]);});
+
+  s.box(0,24,120,11,{title:'Log',meta:'def.log · following'});
+  [['14:31:40','INFO ','Operating mode changed: Day → Evening'],['14:30:12','WARN ','Air device "Window contact Bath" battery low (8%)'],
+   ['14:28:03','INFO ','User "chris" authenticated via token (lox 0.12)'],['14:22:51','ERROR','LAN: CRC error on port 1 (count 3)'],
+   ['14:15:00','INFO ','Weather service update ok'],['13:58:44','INFO ','Tree: device "Presence Office" online'],
+   ['09:12:07','WARN ','DI Extension offline (no response on link)'],['09:00:00','INFO ','Statistics written (12 controls)'],['06:00:01','INFO ','Daily backup to SD ok']]
+   .forEach(([t,l,m],i)=>{const y=25+i;s.put(2,y,'2026-09-27 '+t,'dm');s.put(23,y,l,l==='ERROR'?'cr b':l==='WARN '?'wn b':'fn b');s.put(30,y,m,l==='ERROR'?'tx b':'tx');});
+  footer(s,[['[ ]','sub-view'],['⏎','open'],['/','search'],['R','reboot'],['U','update']],[[':','palette'],['?','help']]);
+  return s;
+}
+
+/* ── Sites ────────────────────────────────────────────── */
+function scrSites(){
+  const s=new S(120,13);header(s,5);
+  s.box(0,1,120,11,{title:'Sites',focus:true,meta:'4 contexts · polling 15 s',foot:[['◆ ','ac'],['active   ','dm'],[' ⏎ ','tx b','gkey'],[' switch   ','dm'],[' a ','tx b','gkey'],[' actions','dm']]});
+  [['CONTEXT',3],['HOST',17],['STATUS',39],['FIRMWARE',55],['CPU',68],['HEAP',75],['ATTENTION',83],['LAST EVENT',101]].forEach(([t,c])=>s.put(c,2,t,'fn b'));
+  const R=[['home',1,'192.168.1.20',['● live','ok'],'12 ms','15.2.10.4',.38,.71,[['2 ⚠','wn']],'14:32 Kitchen light'],
+    ['office',0,'office.example.dyn',['● up','ok'],'48 ms','15.2.10.4',.12,.55,[['✓','ok']],'—'],
+    ['lake-house',0,'10.8.0.30 (vpn)',['● up','ok'],'91 ms','15.3.1.2',.22,.49,[['✓','ok']],'—'],
+    ['parents',0,'10.8.0.12 (vpn)',['○ unreachable','cr'],'','14.5.12.7',null,null,[['token expires 2 d','wn']],'—']];
+  R.forEach(([n,act,h,st,lat,fw,c,hp,att,le],i)=>{const y=3+i;if(i===0){s.bg(1,y,118,'gsel');s.put(1,y,'▌','ac');}
+    s.put(3,y,n,i===0?'ac b':'tx b');if(act)s.put(14,y,'◆','ac');s.put(17,y,h,'dm');s.rich(39,y,[[st[0],st[1]],[lat?' '+lat:'','dm']]);s.put(55,y,fw,'tx');
+    if(c!=null){s.put(68,y,Math.round(c*100)+'%',load(c));s.put(75,y,Math.round(hp*100)+'%',load(hp));}else{s.put(68,y,'—','fn');s.put(75,y,'—','fn');}
+    s.rich(83,y,att);s.put(101,y,le,'dm');});
+  s.rich(3,8,[['office','tx b'],['  CPU ','dm']]);s.spark(17,8,wave(20,2,.15,.08),'ok');
+  s.rich(39,8,[['lake-house','tx b'],['  CPU ','dm']]);s.spark(55,8,wave(20,4,.25,.1),'ok');
+  s.rich(3,9,[['parents','tx b'],['  last seen yesterday 22:14 · VPN down?','dm']]);
+  footer(s,[['⏎','switch'],['a','actions'],['C','quick switch']]);
+  return s;
+}
+
+/* ── Help & Confirm overlays ─────────────────────────── */
+function scrHelp(){
+  const s=scrHome();s.dimAll();
+  const x=12,y=3,w=96,h=30;
+  s.box(x,y,w,h,{fill:true,focus:true,title:[['? ','ac b'],['Help','tx b'],['  · Rooms › controls','dm']],meta:[[' / ','tx b','gkey'],[' search','dm']],foot:[[' Esc ','tx b','gkey'],[' close','dm']]});
+  const col=(cx,cy,sections)=>{let yy=cy;for(const [title,items] of sections){s.put(cx,yy,title,'fn b');yy++;for(const [k,d] of items){s.put(cx,yy,k,'ac b');s.put(cx+9,yy,d,'tx');yy++;}yy++;}};
+  col(x+3,y+2,[['ACTIONS · on the selected item',[['␣','primary: toggle · stop · play'],['+  -','step the main value'],['<  >','minimum / maximum'],['=','set exact value…'],['s','stop'],['m','mode / mood…'],['a','all actions…'],['⏎','inspect'],['*','pin to Home'],['e','events for this item'],['y  Y','copy lox command / UUID'],['v  V','mark / mark all visible']]],
+    ['VIEW',[['b','group: room · category · type'],['f','favorites only'],['o','sort: name · activity · temp']]]]);
+  col(x+50,y+2,[['SCREENS',[['1 … 6','Home Rooms Events Energy System Sites']]],
+    ['MOVE',[['j k ↑ ↓','move'],['h l ← →','pane left / right'],['Tab','next pane'],['g  G','first / last'],['^d ^u','half page'],['[  ]','previous / next sub-view']]],
+    ['FIND',[['/','filter this list'],[':  ^k','palette: go to, run'],['C','switch site']]],
+    ['APP',[['p','pause live updates'],['^r','reload structure'],['Esc','back / close'],['q','quit']]]]);
+  return s;
+}
+function scrConfirm(){
+  const s=scrRooms(0,false);s.dimAll();
+  const x=34,y=11,w=52,h=11;
+  s.box(x,y,w,h,{fill:true,border:'wn',title:[['⚠ ','wn b'],['Confirm','tx b']]});
+  s.rich(x+3,y+2,[['Unlock ','tx'],['Front door','tx b'],['?','tx']]);
+  s.put(x+3,y+3,'Entrance · Door lock · locked since 13:02','dm');
+  s.rich(x+3,y+5,[['$ ','fn'],['lox','ac'],[' door "Front door" unlock','tx']]);
+  s.rich(x+3,y+8,[[' y ','tx b','gkey'],[' unlock      ','tx'],[' N ','hk b','gac'],[' cancel','tx'],['  default','dm']]);
+  return s;
+}
+
+/* ── render ───────────────────────────────────────────── */
+const $=id=>document.getElementById(id);
+function renderStatic(){
+  $('s-home').innerHTML=scrHome().html();
+  $('s-palette').innerHTML=scrPalette().html();
+  $('s-events').innerHTML=scrEvents().html();
+  $('s-system').innerHTML=scrSystem().html();
+  $('s-sites').innerHTML=scrSites().html();
+  $('s-help').innerHTML=scrHelp().html();
+  $('s-confirm').innerHTML=scrConfirm().html();
+}
+let frame=0;
+function renderLive(){$('s-rooms').innerHTML=scrRooms(frame).html();$('s-energy').innerHTML=scrEnergy(frame).html();}
+renderStatic();renderLive();
+const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(!reduce)setInterval(()=>{frame++;renderLive();},180);
+
+/* theme switch + swatches */
+const TOK=[['bg','background'],['tx','text'],['dm','dim'],['fn','faint'],['bd','border'],['ac','accent'],['on','light on'],['ok','ok'],['wn','warn'],['cr','critical'],['in','info'],['pv','energy · PV'],['gd','energy · grid'],['bt','energy · battery'],['ld','energy · load']];
+function swatches(){const st=getComputedStyle($('stage'));$('swatches').innerHTML=TOK.map(([k,n])=>{const v=st.getPropertyValue('--t-'+k).trim();return '<div class="sw"><i style="background:'+v+'"></i><div><b>'+n+'</b><span>'+v+'</span></div></div>';}).join('');}
+function setTheme(t){$('stage').dataset.t=t;document.querySelectorAll('.seg button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.t===t)));swatches();try{localStorage.setItem('loxtui-theme',t);}catch(e){}}
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>setTheme(b.dataset.t)));
+let saved='night';try{saved=localStorage.getItem('loxtui-theme')||'night';}catch(e){}
+setTheme(saved);
+</script>
