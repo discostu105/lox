@@ -462,6 +462,7 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 | `w` | wiring |
 | `*` | pin to Home |
 | `e` | events of this item |
+| `c` | history chart (timeframes) |
 | `y` | copy lox command |
 | `Y` | copy UUID |
 | `v` | mark |

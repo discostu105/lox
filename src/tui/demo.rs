@@ -1674,6 +1674,37 @@ pub fn history(name: &str, now_unix: i64, hour_now: f64) -> Series {
     Series { points: pts }
 }
 
+/// Demo statistics for any window: a daily swing, a slow drift over the
+/// year and a little deterministic noise, sampled every 1/400 of the window.
+pub fn history_range(name: &str, from: i64, to: i64) -> Series {
+    let base = if name.contains("Outside") {
+        12.0
+    } else if name.contains("Bedroom") {
+        19.5
+    } else {
+        21.5
+    };
+    let amp = if name.contains("Outside") { 6.0 } else { 0.8 };
+    let season = if name.contains("Outside") { 8.0 } else { 1.0 };
+    let step = ((to - from) / 400).max(300);
+    let tz = chrono::Local::now().offset().local_minus_utc() as i64;
+    let points = (0..)
+        .map(|i| from + i * step)
+        .take_while(|t| *t <= to)
+        .map(|t| {
+            let hour = ((t + tz).rem_euclid(86_400)) as f64 / 3600.0;
+            let day = (t / 86_400) as f64;
+            let noise = ((t / step).wrapping_mul(7919) % 11) as f64 / 11.0 - 0.5;
+            let v = base
+                + amp * ((hour - 9.0) / 24.0 * std::f64::consts::TAU).sin()
+                + season * ((day - 20.0) / 365.0 * std::f64::consts::TAU).sin()
+                + noise * amp * 0.08;
+            (t, (v * 10.0).round() / 10.0)
+        })
+        .collect();
+    Series { points }
+}
+
 /// Demo energy history for today: (pv kW, consumption kW) per quarter hour up to `hour_now`.
 pub fn energy_today(hour_now: f64) -> (Vec<f64>, Vec<f64>) {
     let n = (hour_now * 4.0).floor() as usize;

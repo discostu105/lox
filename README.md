@@ -214,6 +214,7 @@ lox completions bash                   # Generate shell completions
 - **System** — CPU, heap, devices, CAN bus & LAN, the Miniserver log, and config history with semantic diffs
 - **Sites** — all your Miniservers at a glance; switch live
 - **Wiring** (`w`) — the config program around a control, with live values on the wires: *why is this light on?*
+- **History** (`c`) — any control's statistics over 6 h to a year, with period compare, a cursor and extra series
 
 ```bash
 lox tui                 # connect to the current context

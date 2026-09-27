@@ -300,6 +300,9 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
         Polled::History(cid, s) => {
             app.history.insert(cid, s);
         }
+        Polled::Chart(k, d) => {
+            app.charts.insert(k, d);
+        }
         Polled::EnergyDay { pv, usage } => app.energy_day = Some((pv, usage)),
         Polled::ConfigLog(c) => app.commits = Some(c),
         Polled::ConfigDiff(h, lines) => {
@@ -316,7 +319,7 @@ fn poll_name(k: &PollKind) -> &'static str {
         PollKind::Devices => "device health",
         PollKind::Log => "system log",
         PollKind::Sites => "sites",
-        PollKind::History(_) => "statistics",
+        PollKind::History(_) | PollKind::Chart(_) => "statistics",
         PollKind::EnergyDay => "energy statistics",
         PollKind::ConfigLog => "config history",
         PollKind::ConfigDiff(_) => "config diff",
@@ -455,6 +458,26 @@ pub fn schedule(app: &mut App) -> Vec<Effect> {
         && !app.history.contains_key(&cid)
     {
         want.push((PollKind::History(cid), f64::INFINITY));
+    }
+    // the history chart: every series, and the previous period when comparing
+    if let Some(c) = app.overlays.iter().rev().find_map(|o| match o {
+        Overlay::Chart(c) => Some(c),
+        _ => None,
+    }) {
+        for &cid in &c.cids {
+            for prev in [false, true] {
+                if prev && !c.compare {
+                    continue;
+                }
+                let k = c.key(cid, prev);
+                if k.back == 0 {
+                    // the current window moves: refresh every 5 minutes
+                    want.push((PollKind::Chart(k), 300.0));
+                } else if !app.charts.contains_key(&k) {
+                    want.push((PollKind::Chart(k), f64::INFINITY));
+                }
+            }
+        }
     }
     // offline: only the cheap info probe
     let offline = matches!(
@@ -835,6 +858,26 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
                 go(app, Screen::Events);
             }
         }
+        Cmd::Chart => {
+            if let Some(cid) = target_ctrl(app) {
+                if !app.house.ctrls[cid].has_stats {
+                    let name = app.house.display_name(cid);
+                    app.toast(
+                        ToastKind::Info,
+                        format!("{}: the Miniserver records no statistics", name),
+                    );
+                } else {
+                    app.overlays.push(Overlay::Chart(ChartState {
+                        cids: vec![cid],
+                        span: app.ui_state.chart_span.unwrap_or_default(),
+                        back: 0,
+                        compare: false,
+                        cursor: None,
+                    }));
+                    return schedule(app);
+                }
+            }
+        }
         Cmd::Yank => {
             if let Some(s) = yank_text(app) {
                 app.toast(ToastKind::Ok, format!("copied: {}", s));
@@ -980,8 +1023,16 @@ fn nav(app: &mut App, n: Nav, page: usize) {
                         .sel_ctrl
                         .insert(key, app.house.ctrls[*c].uuid.clone());
                 }
+                app.insp_sel = 0;
             }
-            _ => {}
+            _ => {
+                // inspector: the state rows
+                if let Some(c) = lists::selected_ctrl(app) {
+                    let len = app.house.ctrls[c].states.len();
+                    let i = app.insp_sel.min(len.saturating_sub(1));
+                    app.insp_sel = moved(i, len, n, page);
+                }
+            }
         },
         Screen::Home => {
             let cols = app.ui.borrow().home_cols.max(1);
@@ -1817,7 +1868,14 @@ fn inspect(app: &mut App) -> Vec<Effect> {
             if app.screen == Screen::Rooms && app.rooms.pane == 1 && app.size.0 >= WIDE_ROOMS {
                 app.rooms.pane = 2;
             } else if app.screen == Screen::Rooms && app.rooms.pane == 2 {
-                app.rooms.pane = 1;
+                // the full value of the selected state
+                if let Some(state) = state_name(app, cid, app.insp_sel) {
+                    app.overlays.push(Overlay::Value {
+                        cid,
+                        state,
+                        scroll: 0,
+                    });
+                }
             } else if matches!(app.top_overlay(), Some(Overlay::Inspector { .. })) {
                 app.overlays.pop();
             } else {
@@ -2092,13 +2150,50 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         }
         Overlay::Wiring(w) => return wiring_key(app, w, &code),
         Overlay::Facets { list, line, sel } => facets_key(app, list, &line, sel, &k, &code),
-        Overlay::Inspector { .. } => match code.as_str() {
-            "Esc" | "q" | "Enter" => {
+        Overlay::Chart(c) => return chart_key(app, c, &code),
+        Overlay::Value { cid, state, .. } => {
+            let Some(Overlay::Value { scroll, .. }) = app.overlays.last_mut() else {
+                return Vec::new();
+            };
+            match code.as_str() {
+                "Esc" | "q" | "Enter" => {
+                    app.overlays.pop();
+                }
+                "j" | "Down" => *scroll += 1,
+                "k" | "Up" => *scroll = scroll.saturating_sub(1),
+                "C-d" | "PageDown" => *scroll += 10,
+                "C-u" | "PageUp" => *scroll = scroll.saturating_sub(10),
+                "g" | "Home" => *scroll = 0,
+                "y" => {
+                    if let Some(v) = state_text(app, cid, &state, false) {
+                        app.toast(
+                            ToastKind::Ok,
+                            format!("copied {} ({} chars)", state, v.len()),
+                        );
+                        return vec![Effect::Copy(v)];
+                    }
+                }
+                _ => {}
+            }
+        }
+        Overlay::Inspector { cid, scroll } => match code.as_str() {
+            "Esc" | "q" => {
                 app.overlays.pop();
             }
+            "Enter" => {
+                // the full value of the selected state
+                if let Some(state) = state_name(app, cid, scroll) {
+                    app.overlays.push(Overlay::Value {
+                        cid,
+                        state,
+                        scroll: 0,
+                    });
+                }
+            }
             "j" | "Down" => {
+                let n = app.house.ctrls[cid].states.len();
                 if let Some(Overlay::Inspector { scroll, .. }) = app.overlays.last_mut() {
-                    *scroll += 1;
+                    *scroll = (*scroll + 1).min(n.saturating_sub(1));
                 }
             }
             "k" | "Up" => {
@@ -2120,6 +2215,123 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         },
     }
     Vec::new()
+}
+
+/// The `n`-th state (inspector order) of a control.
+pub fn state_name(app: &App, cid: Cid, n: usize) -> Option<String> {
+    app.house.ctrls[cid].states.keys().nth(n).cloned()
+}
+
+/// A state's value as text; `pretty` indents JSON.
+pub fn state_text(app: &App, cid: Cid, state: &str, pretty: bool) -> Option<String> {
+    let u = app.house.ctrls[cid].states.get(state)?;
+    // text first: text states may also carry a (meaningless) number
+    let Some(t) = app.store.text(u).map(str::to_string) else {
+        let n = app.store.num(u)?;
+        return Some(crate::tui::store::fmt_val(&Some(
+            crate::tui::store::Val::Num(n),
+        )));
+    };
+    if pretty
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&t)
+        && (v.is_object() || v.is_array())
+    {
+        return serde_json::to_string_pretty(&v).ok().or(Some(t));
+    }
+    Some(t)
+}
+
+/// Keys of the history chart (§5.10).
+fn chart_key(app: &mut App, c: ChartState, code: &str) -> Vec<Effect> {
+    let w = app.ui.borrow().chart_w.max(1);
+    let mut c2 = c.clone();
+    let mut fx = Vec::new();
+    match code {
+        "Esc" | "q" => {
+            if c.cursor.is_some() {
+                c2.cursor = None;
+            } else {
+                app.overlays.pop();
+                return Vec::new();
+            }
+        }
+        "1" | "2" | "3" | "4" | "5" => {
+            c2.span = Span::ALL[code.parse::<usize>().unwrap_or(1) - 1];
+            c2.back = 0;
+        }
+        "[" | "]" => {
+            let i = Span::ALL.iter().position(|s| *s == c.span).unwrap_or(1);
+            let j = if code == "]" {
+                (i + 1).min(Span::ALL.len() - 1)
+            } else {
+                i.saturating_sub(1)
+            };
+            c2.span = Span::ALL[j];
+            c2.back = 0;
+        }
+        "Left" => c2.back += 1,
+        "Right" => c2.back = (c.back - 1).max(0),
+        "." => c2.back = 0,
+        "h" | "l" | "H" | "L" => {
+            let step = if code == "H" || code == "L" { 10 } else { 1 };
+            let cur = c.cursor.unwrap_or(w - 1);
+            c2.cursor = Some(if c.cursor.is_none() {
+                cur
+            } else if code.eq_ignore_ascii_case("h") {
+                cur.saturating_sub(step)
+            } else {
+                (cur + step).min(w - 1)
+            });
+        }
+        "c" => c2.compare = !c.compare,
+        "+" => {
+            app.overlays.push(Overlay::Input {
+                kind: InputKind::ChartAdd,
+                line: Line::default(),
+                err: None,
+            });
+            return Vec::new();
+        }
+        "-" => {
+            if c.cids.len() > 1 {
+                c2.cids.pop();
+            }
+        }
+        "y" => {
+            let s = chart_cli(app, &c);
+            app.toast(ToastKind::Ok, format!("copied: {}", s));
+            return vec![Effect::Copy(s)];
+        }
+        _ => return Vec::new(),
+    }
+    if c2.span != c.span {
+        app.ui_state.chart_span = Some(c2.span);
+        fx.push(Effect::SaveState(ui_state(app)));
+    }
+    if let Some(Overlay::Chart(c)) = app.overlays.last_mut() {
+        *c = c2;
+    }
+    fx.extend(schedule(app));
+    fx
+}
+
+/// The CLI equivalent of the chart's window: `lox history … --day/--month`.
+fn chart_cli(app: &App, c: &ChartState) -> String {
+    let q = crate::actions::shell_quote;
+    let cid = c.cids[0];
+    let name = &app.house.ctrls[cid].name;
+    let (_, to) = super::exec::chart_window(app.now as i64, &c.key(cid, false));
+    let end = chrono::DateTime::from_timestamp(to, 0)
+        .map(|d| d.with_timezone(&chrono::Local))
+        .unwrap_or_else(chrono::Local::now);
+    let when = match c.span {
+        Span::H6 | Span::H24 => format!("--day {}", end.format("%Y-%m-%d")),
+        _ => format!("--month {}", end.format("%Y-%m")),
+    };
+    match app.house.room_name(cid) {
+        Some(r) => format!("lox history {} -r {} {}", q(name), q(r), when),
+        None => format!("lox history {} {}", q(name), when),
+    }
 }
 
 /// Keys of the facet picker: typing narrows, ␣ toggles, ⏎ toggles and closes.
@@ -2311,6 +2523,24 @@ fn input_submit(app: &mut App, kind: InputKind, line: Line) -> Vec<Effect> {
             }
             run_plans(app, plans)
         }
+        InputKind::ChartAdd => match lists::chart_candidates(app, &line.buf).first() {
+            Some(&cid) => {
+                if let Some(Overlay::Chart(c)) = app.overlays.last_mut()
+                    && !c.cids.contains(&cid)
+                {
+                    c.cids.push(cid);
+                }
+                schedule(app)
+            }
+            None => {
+                app.overlays.push(Overlay::Input {
+                    kind: InputKind::ChartAdd,
+                    line,
+                    err: Some("no control with statistics matches".into()),
+                });
+                Vec::new()
+            }
+        },
         InputKind::Pin { plans } => {
             let pin = line.buf.trim().to_string();
             if pin.is_empty() {

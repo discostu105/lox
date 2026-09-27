@@ -35,7 +35,14 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
         ctrls(app, mid, buf, pane == 1, false);
         let ir = Rect::new(mid.right(), area.y, iw, area.height);
         match lists::selected_ctrl(app) {
-            Some(cid) => inspector::render(app, ir, buf, cid, pane == 2, 0),
+            Some(cid) => inspector::render(
+                app,
+                ir,
+                buf,
+                cid,
+                pane == 2,
+                (pane == 2).then_some(app.insp_sel),
+            ),
             None => {
                 let inner = NotchBox::new()
                     .title(Notch::new("inspector"))

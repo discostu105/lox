@@ -735,6 +735,20 @@ fn suggestions(app: &App, list: FacetList) -> Vec<Facet> {
     v
 }
 
+/// Controls with statistics matching `q` (name and room), best first.
+pub fn chart_candidates(app: &App, q: &str) -> Vec<Cid> {
+    let h = &app.house;
+    let mut v: Vec<(u32, Cid)> = (0..h.ctrls.len())
+        .filter(|c| h.ctrls[*c].has_stats)
+        .filter_map(|c| {
+            let hay = format!("{} {}", h.display_name(c), h.room_name(c).unwrap_or(""));
+            fuzzy(q, &hay).map(|s| (s, c))
+        })
+        .collect();
+    v.sort_by_key(|(s, c)| (std::cmp::Reverse(*s), *c));
+    v.into_iter().map(|(_, c)| c).collect()
+}
+
 // ── Attention (Home) ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]

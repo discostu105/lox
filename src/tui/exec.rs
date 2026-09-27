@@ -16,7 +16,10 @@ use serde_json::Value;
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
-use super::app::{App, Commit, Conn, Effect, LogMsg, Msg, PollKind, Polled, ToastKind, WiringDoc};
+use super::app::{
+    App, ChartData, ChartKey, Commit, Conn, Effect, LogMsg, Msg, PollKind, Polled, ToastKind,
+    WiringDoc,
+};
 use super::data::{self, BusLan, Diag, MsInfo, Series, SiteStatus};
 use super::demo;
 use super::model::{Cid, House, Role};
@@ -632,6 +635,8 @@ pub struct PollCtx {
     pub house_serial: String,
     /// History: control uuid + where its statistics are
     pub stats: Option<(String, StatSrc)>,
+    /// Chart: the window (from, to) in unix seconds
+    pub window: Option<(i64, i64)>,
     /// EnergyDay: (role, control uuid, statistics) of meters
     pub meters: Vec<(Role, String, StatSrc)>,
     pub ctx: String,
@@ -645,6 +650,11 @@ impl PollCtx {
         // the control of this poll, not any History poll in flight
         let stats = match kind {
             PollKind::History(c) => Some(*c),
+            PollKind::Chart(k) => Some(k.cid),
+            _ => None,
+        };
+        let window = match kind {
+            PollKind::Chart(k) => Some(chart_window(app.now as i64, k)),
             _ => None,
         };
         let stats = stats.map(|c: Cid| (h.ctrls[c].uuid.clone(), StatSrc::of(&h.ctrls[c])));
@@ -662,6 +672,7 @@ impl PollCtx {
             house_ms_type: h.ms_type.clone(),
             house_serial: h.serial.clone(),
             stats,
+            window,
             meters,
             ctx: app.ctx_name.clone(),
             contexts: app.contexts.clone(),
@@ -686,6 +697,18 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
         PollKind::History(cid) => {
             let (uuid, src) = ctx.stats.clone().context("no statistics")?;
             Polled::History(*cid, history(client, &uuid, &src)?)
+        }
+        PollKind::Chart(k) => {
+            let (uuid, src) = ctx.stats.clone().context("no statistics")?;
+            let (from, to) = ctx.window.context("no window")?;
+            Polled::Chart(
+                *k,
+                ChartData {
+                    from,
+                    to,
+                    series: history_range(client, &uuid, &src, from, to)?,
+                },
+            )
         }
         PollKind::EnergyDay => energy_day(client, ctx),
         PollKind::ConfigLog => {
@@ -858,13 +881,34 @@ fn host_of(cfg: &Config) -> String {
 }
 
 /// Stats for a control: this month's file (and last month's early in the month).
+/// The window of a chart key: `back` spans before `now`.
+pub fn chart_window(now: i64, k: &ChartKey) -> (i64, i64) {
+    let to = now - k.back * k.span.secs();
+    (to - k.span.secs(), to)
+}
+
+/// The last two days (the views need today and the last 24 h).
 fn history(client: &LoxClient, uuid: &str, src: &StatSrc) -> Result<Series> {
+    let to = now() as i64;
+    let s = history_range(client, uuid, src, to - 2 * 86_400, to)?;
+    if s.points.is_empty() {
+        bail!("no statistics recorded");
+    }
+    Ok(s)
+}
+
+/// Statistics of a control between `from` and `to` (unix seconds); empty
+/// when nothing was recorded then (before the control existed).
+fn history_range(
+    client: &LoxClient,
+    uuid: &str,
+    src: &StatSrc,
+    from: i64,
+    to: i64,
+) -> Result<Series> {
     let outputs = match src {
         StatSrc::Files(n) => *n,
         StatSrc::V2(group, output) => {
-            // the views need today and the last 24 h
-            let to = now() as i64;
-            let from = to - 2 * 86_400;
             let data = client.get_bytes(&crate::statv2::raw_path(
                 uuid,
                 from,
@@ -876,23 +920,14 @@ fn history(client: &LoxClient, uuid: &str, src: &StatSrc) -> Result<Series> {
                 .into_iter()
                 .filter_map(|(t, v)| v.first().copied().filter(|v| v.is_finite()).map(|v| (t, v)))
                 .collect();
-            if points.is_empty() {
-                bail!("no statistics recorded");
-            }
             return Ok(Series { points });
         }
     };
-    let now = chrono::Local::now();
-    let mut periods = vec![now.format("%Y%m").to_string()];
-    let yesterday = now - chrono::Duration::days(1);
-    let yp = yesterday.format("%Y%m").to_string();
-    if yp != periods[0] {
-        periods.insert(0, yp);
-    }
+    // one file per month
     let mut points = Vec::new();
     let mut listing: Option<String> = None;
     let mut any = false;
-    for p in periods {
+    for p in months(from, to) {
         let data = match client.get_bytes(&crate::stats_file_path(uuid, &p)) {
             Ok(d) if d.len() > 12 => vec![d],
             _ => {
@@ -921,10 +956,38 @@ fn history(client: &LoxClient, uuid: &str, src: &StatSrc) -> Result<Series> {
         }
     }
     if !any {
-        bail!("no statistics file");
+        return Ok(Series::default());
     }
     points.sort_by_key(|p| p.0);
+    // keep one point before the window, so the line starts at its left edge
+    let first = points.partition_point(|p| p.0 < from).saturating_sub(1);
+    points.drain(..first);
+    points.retain(|p| p.0 <= to);
     Ok(Series { points })
+}
+
+/// `YYYYMM` of every local month touching [from, to].
+fn months(from: i64, to: i64) -> Vec<String> {
+    use chrono::{Datelike, TimeZone};
+    let local = |t: i64| {
+        chrono::Local
+            .timestamp_opt(t, 0)
+            .single()
+            .unwrap_or_else(chrono::Local::now)
+    };
+    let (a, b) = (local(from), local(to));
+    let (mut y, mut m) = (a.year(), a.month());
+    let mut out = Vec::new();
+    while (y, m) <= (b.year(), b.month()) && out.len() < 400 {
+        out.push(format!("{:04}{:02}", y, m));
+        if m == 12 {
+            y += 1;
+            m = 1;
+        } else {
+            m += 1;
+        }
+    }
+    out
 }
 
 fn energy_day(client: &LoxClient, ctx: &PollCtx) -> Polled {
@@ -1248,6 +1311,18 @@ impl Demo {
                             demo::history(&name, now() as i64, local_hour()),
                         ))
                     }
+                    PollKind::Chart(k) => {
+                        let (from, to) = chart_window(now() as i64, k);
+                        let name = app.house.ctrls[k.cid].name.clone();
+                        Ok(Polled::Chart(
+                            *k,
+                            ChartData {
+                                from,
+                                to,
+                                series: demo::history_range(&name, from, to),
+                            },
+                        ))
+                    }
                     PollKind::EnergyDay => {
                         let (pv, usage) = demo::energy_today(local_hour());
                         Ok(Polled::EnergyDay { pv, usage })
@@ -1255,7 +1330,10 @@ impl Demo {
                     PollKind::ConfigLog => Ok(Polled::ConfigLog(Ok(demo_commits()))),
                     PollKind::ConfigDiff(h) => Ok(Polled::ConfigDiff(h.clone(), demo_diff(h))),
                 };
-                let delay = if matches!(kind, PollKind::History(_) | PollKind::EnergyDay) {
+                let delay = if matches!(
+                    kind,
+                    PollKind::History(_) | PollKind::Chart(_) | PollKind::EnergyDay
+                ) {
                     400
                 } else {
                     60

@@ -77,7 +77,8 @@ pub fn range_graph(
     Some((lo, hi))
 }
 
-pub fn render(app: &App, area: Rect, buf: &mut Buffer, cid: Cid, focus: bool, scroll: usize) {
+/// `sel`: the selected state row when the inspector has focus (⏎ shows its full value).
+pub fn render(app: &App, area: Rect, buf: &mut Buffer, cid: Cid, focus: bool, sel: Option<usize>) {
     let th = &app.th;
     let h = &app.house;
     let c = &h.ctrls[cid];
@@ -114,13 +115,21 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer, cid: Cid, focus: bool, sc
 
     // type-specific visual
     let v = vm::view(&app.store, h, cid);
+    // label column: as wide as the longest sub-control name, up to a third
+    let lw = c
+        .subs
+        .iter()
+        .map(|s| crate::tui::text::width(&h.ctrls[*s].name) + 1)
+        .max()
+        .unwrap_or(0)
+        .clamp(10, (w as usize / 3).max(10)) as u16;
     let big = |buf: &mut Buffer, y: u16, label: &str, frac: Option<f64>, grad: Grad, val: &str| {
-        put(buf, inner, x, y, &fit(label, 10), th.s_dim());
-        let mw = w.saturating_sub(22);
+        put(buf, inner, x, y, &fit(label, lw as usize - 1), th.s_dim());
+        let mw = w.saturating_sub(lw + 12);
         if frac.is_some() && mw > 3 {
-            cell(buf, inner, x + 10, y, "▕", th.s_faint());
-            meter(buf, inner, x + 11, y, mw, frac, grad, th);
-            cell(buf, inner, x + 11 + mw, y, "▏", th.s_faint());
+            cell(buf, inner, x + lw, y, "▕", th.s_faint());
+            meter(buf, inner, x + lw + 1, y, mw, frac, grad, th);
+            cell(buf, inner, x + lw + 1 + mw, y, "▏", th.s_faint());
         }
         put(
             buf,
@@ -267,6 +276,10 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer, cid: Cid, focus: bool, sc
             put(buf, inner, x, y + 1, &trunc(&num(hi), 7), th.s_faint());
             put(buf, inner, x, y + gh - 1, &trunc(&num(lo), 7), th.s_faint());
         }
+        if c.has_stats && gh >= 4 {
+            let cx = put(buf, inner, x, y + 2, "c", th.s_accent());
+            put(buf, inner, cx + 1, y + 2, "chart", th.s_faint());
+        }
         y += gh + 1;
     } else if c.has_stats && !app.history.contains_key(&cid) {
         put(buf, inner, x, y, "statistics loading…", th.s_faint());
@@ -285,20 +298,43 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer, cid: Cid, focus: bool, sc
         );
         y += 1;
         let cli_rows = 2;
+        if sel.is_some() {
+            let hint = "⏎ full value";
+            put(
+                buf,
+                inner,
+                (x + w).saturating_sub(crate::tui::text::width(hint) as u16),
+                y - 1,
+                hint,
+                th.s_faint(),
+            );
+        }
         let states: Vec<(&String, &String)> = c.states.iter().collect();
+        let vis = bottom.saturating_sub(y + cli_rows) as usize;
+        let sel = sel.map(|s| s.min(states.len().saturating_sub(1)));
+        let scroll = sel.map_or(0, |s| s.saturating_sub(vis.saturating_sub(1)));
         let kw = states
             .iter()
             .map(|(k, _)| k.len())
             .max()
             .unwrap_or(8)
             .min(18) as u16;
-        for (k, u) in states.iter().skip(scroll) {
+        for (i, (k, u)) in states.iter().enumerate().skip(scroll) {
             if y + cli_rows >= bottom {
                 break;
             }
-            let val = match (app.store.num(u), app.store.text(u)) {
-                (Some(n), _) => fmt_val(&Some(Val::Num(n))),
-                (None, Some(t)) => format!("\"{}\"", clean(t)),
+            if sel == Some(i) {
+                crate::tui::widgets::fill(
+                    buf,
+                    Rect::new(inner.x, y, inner.width, 1),
+                    th.s_selected(),
+                );
+                cell(buf, inner, inner.x, y, "▌", th.s_accent());
+            }
+            // text first: text states may also carry a (meaningless) number
+            let val = match (app.store.text(u), app.store.num(u)) {
+                (Some(t), _) => format!("\"{}\"", clean(t)),
+                (None, Some(n)) => fmt_val(&Some(Val::Num(n))),
                 _ => "—".into(),
             };
             put(buf, inner, x, y, &fit(k, kw as usize), th.s_dim());

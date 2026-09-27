@@ -435,6 +435,8 @@ pub enum InputKind {
         cids: Vec<Cid>,
         spec: SetSpec,
     },
+    /// `+` in the history chart: add a series (fuzzy control name)
+    ChartAdd,
     /// Masked PIN for secured alarm commands (never stored)
     Pin {
         plans: Vec<Plan>,
@@ -530,6 +532,14 @@ pub enum Overlay {
         scroll: usize,
     },
     Wiring(WiringState),
+    /// History chart with timeframes
+    Chart(ChartState),
+    /// Full value of a state (pretty-printed JSON), scrollable
+    Value {
+        cid: Cid,
+        state: String,
+        scroll: usize,
+    },
     /// Compact inspector (narrow layouts, Home, palette)
     Inspector {
         cid: Cid,
@@ -593,6 +603,83 @@ pub enum Conn {
     OutOfService,
 }
 
+// ── History chart ───────────────────────────────────────────────────────────
+
+/// Timeframe of the history chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum Span {
+    H6,
+    #[default]
+    H24,
+    D7,
+    D30,
+    Y1,
+}
+
+impl Span {
+    pub const ALL: [Span; 5] = [Span::H6, Span::H24, Span::D7, Span::D30, Span::Y1];
+
+    pub fn secs(self) -> i64 {
+        match self {
+            Span::H6 => 6 * 3600,
+            Span::H24 => 86_400,
+            Span::D7 => 7 * 86_400,
+            Span::D30 => 30 * 86_400,
+            Span::Y1 => 365 * 86_400,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Span::H6 => "6h",
+            Span::H24 => "24h",
+            Span::D7 => "7d",
+            Span::D30 => "30d",
+            Span::Y1 => "1y",
+        }
+    }
+}
+
+/// One fetched window: a control over `span`, `back` periods before now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChartKey {
+    pub cid: Cid,
+    pub span: Span,
+    pub back: i64,
+}
+
+/// Fetched chart data: the window (unix seconds) and its points.
+#[derive(Debug, Clone)]
+pub struct ChartData {
+    pub from: i64,
+    pub to: i64,
+    pub series: Series,
+}
+
+/// `c`: the full-screen history chart (§5.10).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartState {
+    /// The control, then added series (`+`)
+    pub cids: Vec<Cid>,
+    pub span: Span,
+    /// Periods before now (`←`/`→`)
+    pub back: i64,
+    /// Previous period as a faint line
+    pub compare: bool,
+    /// Cursor column (cells from the left of the plot)
+    pub cursor: Option<usize>,
+}
+
+impl ChartState {
+    pub fn key(&self, cid: Cid, prev: bool) -> ChartKey {
+        ChartKey {
+            cid,
+            span: self.span,
+            back: self.back + prev as i64,
+        }
+    }
+}
+
 // ── Polling ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -605,6 +692,8 @@ pub enum PollKind {
     Sites,
     /// Miniserver statistics for a control (inspector history)
     History(Cid),
+    /// A window of statistics for the history chart
+    Chart(ChartKey),
     /// Today's PV / consumption from meter statistics
     EnergyDay,
     ConfigLog,
@@ -621,6 +710,7 @@ pub enum Polled {
     Log(Vec<LogLine>),
     Sites(Vec<SiteStatus>),
     History(Cid, Series),
+    Chart(ChartKey, ChartData),
     EnergyDay { pv: Vec<f64>, usage: Vec<f64> },
     ConfigLog(Result<Vec<Commit>, String>),
     ConfigDiff(String, Vec<String>),
@@ -759,6 +849,8 @@ pub struct UiState {
     pub mutes: Vec<String>,
     pub palette_history: Vec<String>,
     pub last_screen: Option<Screen>,
+    /// Last timeframe of the history chart
+    pub chart_span: Option<Span>,
 }
 
 // ── Render-time caches (written by render, read by update for mouse / paging)
@@ -781,6 +873,8 @@ pub struct UiCache {
     pub offsets: HashMap<u8, usize>,
     /// Columns of the Home card grid
     pub home_cols: usize,
+    /// Plot width of the history chart (cursor bounds)
+    pub chart_w: usize,
 }
 
 // ── App ─────────────────────────────────────────────────────────────────────
@@ -840,6 +934,10 @@ pub struct App {
     pub log: Option<(f64, Vec<LogLine>)>,
     pub sites: Vec<SiteStatus>,
     pub history: HashMap<Cid, Series>,
+    /// History chart windows
+    pub charts: HashMap<ChartKey, ChartData>,
+    /// Selected state row of the inspector (Rooms pane 3)
+    pub insp_sel: usize,
     pub energy_day: Option<(Vec<f64>, Vec<f64>)>,
     pub commits: Option<Result<Vec<Commit>, String>>,
     pub diffs: HashMap<String, Vec<String>>,
@@ -897,6 +995,8 @@ impl App {
             log: None,
             sites: Vec::new(),
             history: HashMap::new(),
+            charts: HashMap::new(),
+            insp_sel: 0,
             energy_day: None,
             commits: None,
             diffs: HashMap::new(),

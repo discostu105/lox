@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use serde_json::{Value, json};
 
 use super::app::{
-    App, Conn, Effect, Facet, FacetList, GKey, Msg, Opts, Overlay, PollKind, Polled, Screen,
-    SysView,
+    App, ChartData, ChartKey, Conn, Effect, Facet, FacetList, GKey, Msg, Opts, Overlay, PollKind,
+    Polled, Screen, Span, SysView,
 };
 use super::demo;
 use super::model::{House, Kind};
@@ -1092,4 +1092,197 @@ fn facets_events() {
     assert!(opts.iter().any(|o| o.active && o.facet == Facet::Ctrl(top)));
     h.keys(&["Esc", "Esc"]);
     assert!(h.app.events.facets.is_empty(), "Esc: filter, then facets");
+}
+
+/// Deliver the chart windows the app asked for (demo data).
+fn feed_chart(h: &mut H) {
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!("chart open");
+    };
+    for &cid in &c.cids {
+        for prev in [false, true] {
+            if prev && !c.compare {
+                continue;
+            }
+            let k = c.key(cid, prev);
+            let (from, to) = super::exec::chart_window(h.app.now as i64, &k);
+            let name = h.app.house.ctrls[cid].name.clone();
+            let series = demo::history_range(&name, from, to);
+            h.poll(
+                PollKind::Chart(k),
+                Polled::Chart(k, ChartData { from, to, series }),
+            );
+        }
+    }
+}
+
+fn chart_polls(fx: &[Effect]) -> Vec<ChartKey> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Poll {
+                kind: PollKind::Chart(k),
+                ..
+            } => Some(*k),
+            _ => None,
+        })
+        .collect()
+}
+
+/// §5.10: `c` opens the history chart; timeframes, periods, compare, cursor
+/// and the CLI equivalent.
+#[test]
+fn chart_timeframes_periods_compare() {
+    let mut h = H::new();
+    h.keys(&[":"])
+        .typed("room climate living")
+        .keys(&["Enter", "c"]);
+    let cid = h.cid("Room climate", "Living room");
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!("chart open");
+    };
+    assert_eq!((c.cids.clone(), c.span, c.back), (vec![cid], Span::H24, 0));
+    assert_eq!(
+        chart_polls(&h.fx),
+        [c.key(cid, false)],
+        "fetches the window"
+    );
+    let s = h.render(130, 36);
+    assert!(s.contains("loading statistics"), "{}", s);
+    feed_chart(&mut h);
+    let s = h.render(130, 36);
+    assert!(s.contains("min ") && s.contains("⌀"), "{}", s);
+    assert!(s.contains("°"), "unit from the control");
+
+    // 3 = 7 days, remembered
+    h.keys(&["3"]);
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!()
+    };
+    assert_eq!(c.span, Span::D7);
+    assert_eq!(h.app.ui_state.chart_span, Some(Span::D7));
+    assert!(h.fx.iter().any(|e| matches!(e, Effect::SaveState(_))));
+    assert_eq!(chart_polls(&h.fx), [c.key(cid, false)]);
+    // ← one period back, compare with the one before it
+    h.keys(&["Left", "c"]);
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!()
+    };
+    assert_eq!((c.back, c.compare), (1, true));
+    let polled: Vec<ChartKey> = chart_polls(&h.all);
+    assert!(polled.contains(&c.key(cid, false)) && polled.contains(&c.key(cid, true)));
+    feed_chart(&mut h);
+    let s = h.render(130, 36);
+    assert!(s.contains("Δ⌀") && s.contains("1 back"), "{}", s);
+    // cursor readout with the previous period
+    h.keys(&["h", "H"]);
+    let s = h.render(130, 36);
+    assert!(s.contains("▲ ") && s.contains("(prev "), "{}", s);
+    // y: the CLI equivalent
+    h.keys(&["y"]);
+    let copied = h.fx.iter().find_map(|e| match e {
+        Effect::Copy(s) => Some(s.clone()),
+        _ => None,
+    });
+    let copied = copied.expect("copied");
+    assert!(
+        copied.starts_with("lox history \"Room climate\" -r \"Living room\" --month "),
+        "{}",
+        copied
+    );
+    // Esc: cursor first, then close
+    h.keys(&["Esc"]);
+    assert!(matches!(h.app.overlays.last(), Some(Overlay::Chart(c)) if c.cursor.is_none()));
+    h.keys(&["Esc"]);
+    assert!(h.app.overlays.is_empty());
+    // the next chart opens with the remembered timeframe
+    h.keys(&["c"]);
+    assert!(matches!(h.app.overlays.last(), Some(Overlay::Chart(c)) if c.span == Span::D7));
+}
+
+/// `+` adds a series by name; `-` removes it; controls without statistics
+/// don't open a chart.
+#[test]
+fn chart_series_and_no_stats() {
+    let mut h = H::new();
+    h.keys(&[":"])
+        .typed("room climate living")
+        .keys(&["Enter", "c", "+"]);
+    h.typed("temperature office").keys(&["Enter"]);
+    let office = h.cid("Temperature", "Office");
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!("back on the chart")
+    };
+    assert_eq!(c.cids.len(), 2);
+    assert_eq!(c.cids[1], office);
+    assert!(chart_polls(&h.fx).contains(&c.key(office, false)));
+    feed_chart(&mut h);
+    assert!(h.render(130, 36).contains("Office"));
+    h.keys(&["+"]).typed("zzqqxx").keys(&["Enter"]);
+    assert!(
+        matches!(
+            h.app.overlays.last(),
+            Some(Overlay::Input { err: Some(_), .. })
+        ),
+        "no match keeps the prompt with an error"
+    );
+    h.keys(&["Esc", "-"]);
+    let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
+        panic!()
+    };
+    assert_eq!(c.cids.len(), 1);
+    h.keys(&["Esc"]);
+
+    let blind = h.cid("Blind South", "Living room");
+    assert!(!h.app.house.ctrls[blind].has_stats);
+    h.keys(&[":"]).typed("living south").keys(&["Enter", "c"]);
+    assert!(h.app.overlays.is_empty(), "no chart without statistics");
+    assert!(
+        h.app
+            .toasts
+            .iter()
+            .any(|t| t.text.contains("no statistics"))
+    );
+}
+
+/// The inspector's states are selectable; ⏎ shows the full value (JSON
+/// pretty-printed), `y` copies it raw.
+#[test]
+fn inspector_full_state_value() {
+    let mut h = H::new();
+    h.msg(Msg::Resize(170, 40));
+    h.keys(&[":"]).typed("lighting living").keys(&["Enter"]);
+    h.run_sim(1.0);
+    h.keys(&["l", "l"]);
+    assert_eq!(h.app.rooms.pane, 2);
+    let lc = lists::selected_ctrl(&h.app).unwrap();
+    let i = h.app.house.ctrls[lc]
+        .states
+        .keys()
+        .position(|k| k == "moodList")
+        .unwrap();
+    for _ in 0..i {
+        h.keys(&["j"]);
+    }
+    assert_eq!(h.app.insp_sel, i);
+    h.keys(&["Enter"]);
+    assert!(matches!(
+        h.app.overlays.last(),
+        Some(Overlay::Value { state, .. }) if state == "moodList"
+    ));
+    let s = h.render(170, 40);
+    assert!(s.contains("\"name\": \"Evening\""), "pretty JSON: {}", s);
+    h.keys(&["y"]);
+    let copied = h.fx.iter().find_map(|e| match e {
+        Effect::Copy(s) => Some(s.clone()),
+        _ => None,
+    });
+    let copied = copied.expect("copied");
+    assert!(
+        copied.starts_with("[{") && !copied.contains('\n'),
+        "raw: {}",
+        copied
+    );
+    h.keys(&["Esc"]);
+    assert!(h.app.overlays.is_empty());
+    assert_eq!(h.app.rooms.pane, 2, "back in the inspector");
 }

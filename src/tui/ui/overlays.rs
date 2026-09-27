@@ -50,12 +50,16 @@ pub fn render(app: &App, body: Rect, buf: &mut Buffer) {
             Overlay::Facets { list, line, sel } => facets_box(app, body, buf, *list, line, *sel),
             Overlay::MsgLog { scroll } => msglog(app, body, buf, *scroll),
             Overlay::Wiring(w) => wiring(app, body, buf, w),
+            Overlay::Chart(c) => super::chart::render(app, body, buf, c),
+            Overlay::Value { cid, state, scroll } => {
+                value_box(app, body, buf, *cid, state, *scroll)
+            }
             Overlay::Inspector { cid, scroll } => {
                 let w = (body.width * 2 / 3).clamp(60.min(body.width), 90.min(body.width));
                 let h = body.height.saturating_sub(2).min(34);
                 let r = centered(body, w, h);
                 clear(buf, r, app.th.s_base());
-                inspector::render(app, r, buf, *cid, top, *scroll);
+                inspector::render(app, r, buf, *cid, top, top.then_some(*scroll));
             }
         }
     }
@@ -378,6 +382,55 @@ fn palette_box(app: &App, body: Rect, buf: &mut Buffer, line: &Line, sel: usize)
     }
     if items.is_empty() && !line.buf.is_empty() {
         common::empty(app, buf, list, &["no match"]);
+    }
+}
+
+// ── Value viewer ────────────────────────────────────────────────────────────
+
+/// Wrap `text` to `w` columns (hard breaks at the width; keeps its own lines).
+pub fn wrap(text: &str, w: usize) -> Vec<String> {
+    let w = w.max(1);
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            out.push(String::new());
+        }
+        for chunk in chars.chunks(w) {
+            out.push(chunk.iter().collect());
+        }
+    }
+    out
+}
+
+fn value_box(app: &App, body: Rect, buf: &mut Buffer, cid: usize, state: &str, scroll: usize) {
+    let th = &app.th;
+    let text = crate::tui::update::state_text(app, cid, state, true).unwrap_or_else(|| "—".into());
+    let w = body.width.saturating_sub(6).min(110);
+    let lines = wrap(&text, w.saturating_sub(4) as usize);
+    let hgt = (lines.len() as u16 + 2).clamp(5, body.height.saturating_sub(2));
+    let r = centered(body, w, hgt);
+    let vis = hgt.saturating_sub(2) as usize;
+    let off = scroll.min(lines.len().saturating_sub(vis));
+    let mut nb = NotchBox::new()
+        .title(Notch::new(app.house.display_name(cid)))
+        .title(Notch::new(state.to_string()).active(true))
+        .hints(vec![
+            Hint::new("jk", "scroll"),
+            Hint::new("y", "copy value"),
+            Hint::new("Esc", "close"),
+        ]);
+    if lines.len() > vis {
+        nb = nb.position(format!(
+            "{}–{}/{}",
+            off + 1,
+            (off + vis).min(lines.len()),
+            lines.len()
+        ));
+    }
+    let inner = boxed(app, r, buf, nb);
+    for (i, l) in lines.iter().skip(off).take(vis).enumerate() {
+        put(buf, inner, inner.x + 1, inner.y + i as u16, l, th.s_text());
     }
 }
 
@@ -836,6 +889,74 @@ fn input(
                     inner.y + 2,
                     &fit(&format!("✗ {}", e), inner.width.saturating_sub(2) as usize),
                     th.s_crit(),
+                );
+            }
+        }
+        InputKind::ChartAdd => {
+            let cands = lists::chart_candidates(app, &line.buf);
+            let r = centered(body, 60, 10);
+            let nb = NotchBox::new().title(Notch::new("add series")).hints(vec![
+                Hint::new("⏎", "add best match"),
+                Hint::new("Esc", "cancel"),
+            ]);
+            let inner = boxed(app, r, buf, nb);
+            put(
+                buf,
+                inner,
+                inner.x + 1,
+                inner.y,
+                "›",
+                th.s_accent().add_modifier(Modifier::BOLD),
+            );
+            put_line(
+                app,
+                buf,
+                inner,
+                inner.x + 3,
+                inner.y,
+                line,
+                false,
+                inner.width.saturating_sub(4) as usize,
+            );
+            if let Some(e) = err {
+                put(
+                    buf,
+                    inner,
+                    inner.x + 1,
+                    inner.y + 1,
+                    &format!("✗ {}", e),
+                    th.s_crit(),
+                );
+            }
+            for (i, c) in cands
+                .iter()
+                .take(inner.height.saturating_sub(2) as usize)
+                .enumerate()
+            {
+                let y = inner.y + 2 + i as u16;
+                if i == 0 {
+                    sel_row(app, buf, inner, y);
+                }
+                let room = app.house.room_name(*c).unwrap_or("");
+                let rw = width(room).min(20);
+                common::put_name(
+                    buf,
+                    inner,
+                    inner.x + 2,
+                    y,
+                    &app.house.display_name(*c),
+                    (inner.width as usize).saturating_sub(rw + 5),
+                    th.s_text(),
+                    &line.buf,
+                    th,
+                );
+                put(
+                    buf,
+                    inner,
+                    inner.right().saturating_sub(rw as u16 + 1),
+                    y,
+                    &rfit(room, rw),
+                    th.s_dim(),
                 );
             }
         }

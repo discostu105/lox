@@ -2,7 +2,8 @@
 
 > **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (lxir),
 > System › Config diffs, themes, mouse and `--demo`. Tested against a real Gen 2 Miniserver (read-only) and the
-> built-in demo house. §13 records the decisions on the open questions, §14 what real data changed.
+> built-in demo house. The history chart (§5.10) and the facet picker (§4.5a) came from real use.
+> §13 records the decisions on the open questions, §14 what real data changed.
 > Not done yet: README GIF (`vhs`) and the 1,000 ev/s frame-time benchmark.
 
 ## 1. Vision
@@ -587,6 +588,8 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
 | Confirm | risky actions | `y`/`N` with the default on **No**. Level 2 (reboot, update, restore) needs the context name typed. |
 | Context switcher | `C` | Small fuzzy list of contexts. |
 | Wiring | `w` | §5.9 |
+| History chart | `c` | §5.10 |
+| State value | `⏎` on a state row in the inspector | The full value of a state: JSON pretty-printed and wrapped, `j`/`k` scroll, `y` copies the raw value. For text states the inspector row truncates (`moodList`, `circuitNames`, `daylightConfig`). |
 
 ### 5.9 Wiring overlay (`w`) — "why is this on?"
 
@@ -615,6 +618,42 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
   "download config via FTP" once and caches it per context (structure-version keyed). Parsed with lxir.
 - Header line: the control's current value, since when, and the input whose change came last before it
   ("triggered by"), from the event buffer.
+
+### 5.10 History chart (`c`)
+
+The inspector's graph is a fixed 24 h glance. `c` on any control with statistics (inspector, Rooms, Events,
+palette result) opens the full-screen chart:
+
+```
+╭┐Temperatur┌┐EG Küche Neu┌──────────────────────────────────────┐1 6h┌┐24h┌┐3 7d┌┐4 30d┌┐5 1y┌─╮
+│ Mon 14.09.2026 → Mon 21.09.2026   1 back · . now                                           │
+│   23.4 ┤          ⢀⣀⡀                   ⣀⡀                          ⢀⣀                     │
+│        ┤ ⣀⡀     ⢀⡎  ⠈⢆      ⢀⣀⡀       ⡜  ⢣       ⣀⣀           ⣀⠎ ⠱⡀                    │
+│   20.0 ┤⠊  ⠉⠒⠒⠊⠁     ⠈⠒⠒⠒⠊⠁  ⠈⠑⠒⠒⠒⠊⠁    ⠑⠒⠒⠒⠊⠁  ⠉⠒⠒⠒⠒⠒⠒⠒⠊⠁   ⠈⠢⠤                   │
+│          ┬             ┬             ┬             ┬             ┬             ▲            │
+│       Tue 15.       Wed 16.       Thu 17.       Fri 18.       Sat 19.       Sun 20.         │
+│ ━━ Temperatur        min 20.3° 16.09. 03:05 · max 23.4° 14.09. 16:13 · ⌀ 21.5° · Δ⌀ +0.3°  │
+│ ▲ Sun 20.09. 23:51  ·  21.1° (prev 20.8°)                                                   │
+╰┘1-5 range└┘←→ period└┘hl cursor└┘c compare└┘+- series└┘y copy cmd└┘Esc close└──────────────╯
+```
+
+| Key | Action |
+|-----|--------|
+| `1`–`5`, `[` `]` | Timeframe 6 h · 24 h · 7 d · 30 d · 1 y (remembered across sessions in `tui-state.yaml`) |
+| `←` / `→`, `.` | One period back / forward; back to now |
+| `h` `l` / `H` `L` | Cursor by one / ten columns: time and value of every series under it |
+| `c` | Compare: the previous period as a faint line, `Δ⌀` in the summary |
+| `+` / `-` | Add a series (fuzzy name of any control with statistics) / remove the last one |
+| `y` | Copy the CLI equivalent (`lox history … --day/--month`) |
+| `Esc` | Hide the cursor, then close |
+
+- Data: legacy statistics files per month (`/stats/{uuid}.{YYYYMM}`) for the window, or Statistics V2
+  `getStatistic/…/raw/{from}/{to}`. The current window refreshes every 5 minutes, past ones are fetched once.
+  Periods before the control existed are empty, not errors.
+- Each plot column shows the range of the values in its time slice (so a year keeps its daily swing) and
+  connects to the next. Analog series interpolate linearly across empty columns; on/off series hold as steps.
+- Summary per series: min and max with their time, time-weighted mean, last value, and for power meters (kW)
+  the energy of the period in kWh. The y axis keeps its zero line for non-negative data.
 
 ---
 

@@ -4,6 +4,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod app;
+pub mod chart;
 pub mod data;
 pub mod demo;
 pub mod exec;
