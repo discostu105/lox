@@ -737,7 +737,40 @@ fn diag(client: &LoxClient) -> Result<Diag> {
         ints: opt("/jdev/sys/ints"),
         comints: opt("/jdev/sys/comints"),
         sd: sd_test(client),
+        plc: jdev(client, "/jdev/sps/status")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        clock_drift: clock_drift(client),
     })
+}
+
+/// Miniserver clock vs this machine's (NTP-synced) clock. The time zone
+/// offset is fetched once per Miniserver; the request's midpoint is "now".
+fn clock_drift(client: &LoxClient) -> Option<f64> {
+    static TZ: Mutex<Option<(String, f64)>> = Mutex::new(None);
+    let host = client.cfg.host.clone();
+    let tz = {
+        let mut tz = TZ.lock().unwrap_or_else(|e| e.into_inner());
+        match tz.as_ref() {
+            Some((h, off)) if *h == host => *off,
+            _ => {
+                let off = data::parse_tz_offset(&jdev(client, "/jdev/cfg/timezoneoffset").ok()?)?;
+                *tz = Some((host, off));
+                off
+            }
+        }
+    };
+    let unix = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    };
+    let t0 = unix();
+    let ms = data::parse_hms(&jdev(client, "/jdev/sys/time").ok()?)?;
+    let t1 = unix();
+    // the Miniserver reports whole seconds: compare against the middle of that second
+    Some(data::clock_drift(ms + 0.5, (t0 + t1) / 2.0, tz))
 }
 
 /// `sdtest` exercises the SD card: run it at most every 10 minutes, not with
@@ -1072,24 +1105,22 @@ fn config_log(cfg: &Config) -> Result<Vec<Commit>, String> {
             "log",
             "-n",
             "100",
-            "--format=%H%x09%ci%x09%s",
+            "--format=%H%x09%ci%x09%s%x09%b%x1e",
             "--",
             &format!("{}/config.Loxone", ms),
         ],
     )
     .map_err(|e| short_err(&e))?;
     Ok(String::from_utf8_lossy(&out)
-        .lines()
-        .filter_map(|l| {
-            let mut p = l.splitn(3, '\t');
-            Some(Commit {
-                hash: p.next()?.to_string(),
-                date: p.next()?.to_string(),
-                // `lox config pull` prefixes subjects with the Miniserver dir: redundant here
-                subject: crate::tui::text::clean(
-                    p.next().unwrap_or("").trim_start_matches(prefix.as_str()),
-                ),
-            })
+        .split('\x1e')
+        .filter_map(|rec| {
+            let mut p = rec.trim_start_matches('\n').splitn(4, '\t');
+            let hash = p.next().filter(|h| !h.is_empty())?;
+            let date = p.next()?;
+            // `lox config pull` prefixes subjects with the Miniserver dir: redundant here
+            let subject =
+                crate::tui::text::clean(p.next().unwrap_or("").trim_start_matches(prefix.as_str()));
+            Some(Commit::new(hash, date, &subject, p.next().unwrap_or("")))
         })
         .collect())
 }
@@ -1470,35 +1501,44 @@ fn demo_scene(h: &House, name: &str) -> Vec<(String, String)> {
 
 fn demo_commits() -> Vec<Commit> {
     vec![
-        Commit {
-            hash: "c3".into(),
-            date: "2026-09-24 21:10:02 +0200".into(),
-            subject: "Night mode: hallway off-delay 120 → 300 s".into(),
-        },
-        Commit {
-            hash: "c2".into(),
-            date: "2026-09-12 18:44:40 +0200".into(),
-            subject: "Add Terrace spot, rename Office blinds".into(),
-        },
-        Commit {
-            hash: "c1".into(),
-            date: "2026-08-30 09:02:13 +0200".into(),
-            subject: "Initial config".into(),
-        },
+        Commit::new(
+            "c3",
+            "2026-09-24 21:10:02 +0200",
+            "Config backup 2026-09-24 21:08:40 (v112)",
+            "~ Changed control: \"Hallway light\" (LightController)",
+        ),
+        Commit::new(
+            "c2",
+            "2026-09-12 18:44:40 +0200",
+            "Config backup 2026-09-12 18:40:11 (v111)",
+            "+ Added control: \"Terrace spot\" (Switch)\n~ Changed control: \"Office blind\" (Jalousie)",
+        ),
+        Commit::new(
+            "c1",
+            "2026-08-30 09:02:13 +0200",
+            "Config backup 2026-08-30 09:01:57 (v110)",
+            "Initial config",
+        ),
     ]
 }
 
 fn demo_diff(hash: &str) -> Vec<String> {
     match hash {
         "c3" => vec![
-            "~ param Hallway light · Off-delay 120 → 300".into(),
+            "= 1 renamed · 1 parameters · wires +1 −0".into(),
+            "# Hallway".into(),
+            "~ param  Hallway light · Off-delay  120 → 300".into(),
             "~ rename Night → Night mode".into(),
-            "+ wire Night mode.Q → Hallway light.DisP".into(),
+            "+ wire   Night mode.Q → Hallway light.DisP".into(),
         ],
         "c2" => vec![
-            "+ block Terrace spot (Switch)".into(),
+            "= 1 added · 1 renamed · 4 re-created · wires +1 −0".into(),
+            "# Terrace".into(),
+            "+ block  Terrace spot (Switch)".into(),
+            "+ wire   Terrace button.Q → Terrace spot.Tg".into(),
+            "# Office".into(),
             "~ rename Blinds office → Office blind".into(),
-            "+ wire Terrace button.Q → Terrace spot.Tg".into(),
+            "~ block  Click signal (OutputRef)  re-created  ×4".into(),
         ],
         _ => vec!["+ initial config".into()],
     }

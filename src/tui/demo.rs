@@ -1445,7 +1445,13 @@ pub fn diag(t: f64) -> Diag {
         ctx_switches: Some(wobble(t, 17.0, 8_400.0, 9_900.0).round()),
         ints: Some(wobble(t, 11.0, 1_100.0, 1_400.0).round()),
         comints: Some(wobble(t, 23.0, 300.0, 420.0).round()),
-        sd: Some("Read: 7598kB/s, Write: 3813kB/s, No error".into()),
+        sd: Some(
+            "SD Performance: Read: 7598kB/s, Write: 3813kB/s, No error (0 0), Usage: 0.00%, \
+             Used: 4%, UncorrectableEcc: 0, PowerOnCycles: 23"
+                .into(),
+        ),
+        plc: Some("Running 100/sec".into()),
+        clock_drift: Some(0.3),
     }
 }
 

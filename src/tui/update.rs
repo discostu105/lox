@@ -6,6 +6,7 @@ use crossterm::event::{
 };
 
 use super::app::*;
+use super::data::{DiagSample, NetSample};
 use super::keymap::{self, Cmd, Ctx};
 use super::lists::{self, CRow};
 use super::model::{Cid, Kind};
@@ -82,9 +83,9 @@ pub fn update(app: &mut App, msg: Msg) -> Vec<Effect> {
             Vec::new()
         }
         Msg::ConfigPulled(r) => {
-            match r {
+            match &r {
                 Ok(changed) => {
-                    let t = if changed {
+                    let t = if *changed {
                         "config pulled — new commit"
                     } else {
                         "config pulled — no changes"
@@ -92,11 +93,16 @@ pub fn update(app: &mut App, msg: Msg) -> Vec<Effect> {
                     app.toast(ToastKind::Ok, t);
                     app.log_msg(false, "lox config pull", t, None);
                 }
-                Err(e) => app.fail("lox config pull", e, Some("lox config pull".into())),
+                Err(e) => app.fail("lox config pull", e.clone(), Some("lox config pull".into())),
             }
+            app.pull = Some((app.now, Some(r)));
             app.commits = None;
             app.diffs.clear();
-            app.polls.last.remove(&PollKind::ConfigLog);
+            app.diff_errs.clear();
+            // re-read the history and every diff (one-shot polls remember they ran)
+            let stale = |k: &PollKind| matches!(k, PollKind::ConfigLog | PollKind::ConfigDiff(_));
+            app.polls.last.retain(|k, _| !stale(k));
+            app.polls.failing.retain(|k| !stale(k));
             schedule(app)
         }
         Msg::Log(m) => {
@@ -214,6 +220,7 @@ fn new_house(app: &mut App, epoch: u64, house: super::model::House, ctx: String)
         app.energy = EnergyState::default();
         app.diag = None;
         app.diag_hist.clear();
+        app.net_hist.clear();
         app.info = None;
         app.buslan = None;
         app.buslan_prev = None;
@@ -257,6 +264,9 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
             d
         }
         Err(e) => {
+            if let PollKind::ConfigDiff(h) = &kind {
+                app.diff_errs.insert(h.clone(), e.clone());
+            }
             if app.polls.failing.insert(kind.clone()) {
                 app.log_msg(true, poll_name(&kind), e, None);
             }
@@ -265,9 +275,16 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
     };
     match data {
         Polled::Diag(d) => {
-            if let Some(c) = d.cpu {
-                app.diag_hist.push_back((c, d.heap_pct().unwrap_or(0.0)));
-                while app.diag_hist.len() > 240 {
+            if let Some(cpu) = d.cpu {
+                app.diag_hist.push_back(DiagSample {
+                    t: now,
+                    cpu,
+                    plc: d.sps,
+                    heap: d.heap_pct(),
+                    tasks: d.tasks,
+                });
+                // the graph spans at most 10 minutes
+                while app.diag_hist.front().is_some_and(|s| now - s.t > 660.0) {
                     app.diag_hist.pop_front();
                 }
             }
@@ -275,7 +292,12 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
         }
         Polled::Info(i) => app.info = Some(i),
         Polled::BusLan(b) => {
-            if let Some((_, prev)) = &app.buslan {
+            if let Some((t0, prev)) = &app.buslan {
+                app.net_hist
+                    .push_back(NetSample::between(prev, &b, now - t0, now));
+                while app.net_hist.front().is_some_and(|s| now - s.t > 660.0) {
+                    app.net_hist.pop_front();
+                }
                 for ((name, v), (_, pv)) in b.counters.iter().zip(prev.counters.iter()) {
                     if crate::tui::data::is_error_counter(name) && v.unwrap_or(0) > pv.unwrap_or(0)
                     {
@@ -306,6 +328,7 @@ fn polled(app: &mut App, epoch: u64, req: u64, kind: PollKind, result: Result<Po
         Polled::EnergyDay { pv, usage } => app.energy_day = Some((pv, usage)),
         Polled::ConfigLog(c) => app.commits = Some(c),
         Polled::ConfigDiff(h, lines) => {
+            app.diff_errs.remove(&h);
             app.diffs.insert(h, lines);
         }
     }
@@ -417,10 +440,11 @@ pub fn schedule(app: &mut App) -> Vec<Effect> {
         (PollKind::Info, f64::INFINITY),
         (
             PollKind::Diag,
+            // kept up in the background so the graph has history when opened
             if sys && view == SysView::Overview {
                 2.0
             } else {
-                30.0
+                10.0
             },
         ),
         (
@@ -440,11 +464,32 @@ pub fn schedule(app: &mut App) -> Vec<Effect> {
     }
     if sys && view == SysView::Config {
         want.push((PollKind::ConfigLog, f64::INFINITY));
-        if let Some(Ok(commits)) = &app.commits
-            && let Some(c) = commits.get(app.system.sel.get(&SysView::Config).copied().unwrap_or(0))
-            && !app.diffs.contains_key(&c.hash)
-        {
-            want.push((PollKind::ConfigDiff(c.hash.clone()), f64::INFINITY));
+        // the selected commit's diff first, then the rest in the background
+        // (two at a time: each parses two full configs)
+        if let Some(Ok(commits)) = &app.commits {
+            let sel = app.system.sel.get(&SysView::Config).copied().unwrap_or(0);
+            let busy = app
+                .polls
+                .inflight
+                .keys()
+                .filter(|k| matches!(k, PollKind::ConfigDiff(_)))
+                .count();
+            let order = commits.iter().skip(sel).chain(commits.iter().take(sel));
+            let mut n = busy;
+            for (i, c) in order.enumerate() {
+                let kind = PollKind::ConfigDiff(c.hash.clone());
+                if app.diffs.contains_key(&c.hash)
+                    || app.polls.inflight.contains_key(&kind)
+                    || app.polls.last.contains_key(&kind) && i > 0
+                {
+                    continue;
+                }
+                if i > 0 && n >= 2 {
+                    break;
+                }
+                n += 1;
+                want.push((kind, f64::INFINITY));
+            }
         }
     }
     if app.screen == Screen::Sites && app.contexts.len() > 1 {
@@ -794,8 +839,12 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
         Cmd::NextMatch | Cmd::PrevMatch => next_match(app, matches!(cmd, Cmd::NextMatch)),
         // Pull only reads from the Miniserver (FTP download + local git commit): allowed read-only
         Cmd::Pull => {
-            app.toast(ToastKind::Info, "lox config pull …");
-            return vec![Effect::ConfigPull];
+            if matches!(app.pull, Some((_, None))) {
+                app.toast(ToastKind::Info, "already pulling…");
+            } else {
+                app.pull = Some((app.now, None));
+                return vec![Effect::ConfigPull];
+            }
         }
         Cmd::Reboot | Cmd::Install => {
             if app.opts.read_only {

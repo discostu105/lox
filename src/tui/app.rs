@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
-use super::data::{BusLan, Device, Diag, LogLine, MsInfo, Series, SiteStatus};
+use super::data::{
+    BusLan, Device, Diag, DiagSample, LogLine, MsInfo, NetSample, Series, SiteStatus,
+};
 use super::model::{Cid, House};
 use super::store::Store;
 use super::theme::Theme;
@@ -721,6 +723,56 @@ pub struct Commit {
     pub hash: String,
     pub date: String,
     pub subject: String,
+    /// When the config was saved in Loxone Config (the backup's date)
+    pub saved: Option<String>,
+    /// Config version, e.g. `v273`
+    pub version: Option<String>,
+    /// One-line summary of the commit body (`+ Registriertes Gerät (PuDe)`, `+60 −2`)
+    pub summary: String,
+}
+
+impl Commit {
+    /// From `git log`: subject `Config backup 2026-09-25 18:39:01 (v273)` (as
+    /// `lox config pull` writes it) and a body listing the changed controls.
+    pub fn new(hash: &str, date: &str, subject: &str, body: &str) -> Commit {
+        let saved = subject
+            .strip_prefix("Config backup ")
+            .and_then(|r| r.get(..16))
+            .map(str::to_string);
+        let version = subject
+            .rsplit_once("(v")
+            .and_then(|(_, v)| v.strip_suffix(')'))
+            .map(|v| format!("v{}", v));
+        let lines: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let (add, rem) = (
+            lines.iter().filter(|l| l.starts_with("+ ")).count(),
+            lines.iter().filter(|l| l.starts_with("- ")).count(),
+        );
+        let summary = match lines.as_slice() {
+            [] => String::new(),
+            [one] if one.starts_with("No structural") => "no structural changes".into(),
+            // `+ Added control: "Name" (Type)` → `+ Name (Type)`
+            [one] => one
+                .replace("Added control: ", "")
+                .replace("Removed control: ", "")
+                .replace("Changed control: ", "")
+                .replace('"', ""),
+            _ if add + rem > 0 => format!("+{} −{} controls", add, rem),
+            [first, ..] => first.to_string(),
+        };
+        Commit {
+            hash: hash.into(),
+            date: date.into(),
+            subject: subject.into(),
+            saved,
+            version,
+            summary,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -924,7 +976,9 @@ pub struct App {
     pub polls: PollState,
     // polled data (time received, value)
     pub diag: Option<(f64, Diag)>,
-    pub diag_hist: VecDeque<(f64, f64)>,
+    pub diag_hist: VecDeque<DiagSample>,
+    /// LAN / CAN packet rates between bus & LAN polls
+    pub net_hist: VecDeque<NetSample>,
     pub info: Option<MsInfo>,
     pub buslan: Option<(f64, BusLan)>,
     pub buslan_prev: Option<BusLan>,
@@ -941,6 +995,10 @@ pub struct App {
     pub energy_day: Option<(Vec<f64>, Vec<f64>)>,
     pub commits: Option<Result<Vec<Commit>, String>>,
     pub diffs: HashMap<String, Vec<String>>,
+    /// Diffs that failed (hash → error), shown instead of "loading"
+    pub diff_errs: HashMap<String, String>,
+    /// `P`: when the pull started or finished; `None` result = still running
+    pub pull: Option<(f64, Option<Result<bool, String>>)>,
     pub wiring: WiringDoc,
     /// Last key press (code, time) for auto-repeat suppression (§4.1 rule 8)
     pub last_key: Option<(String, f64)>,
@@ -987,6 +1045,7 @@ impl App {
             polls: PollState::default(),
             diag: None,
             diag_hist: VecDeque::new(),
+            net_hist: VecDeque::new(),
             info: None,
             buslan: None,
             buslan_prev: None,
@@ -1000,6 +1059,8 @@ impl App {
             energy_day: None,
             commits: None,
             diffs: HashMap::new(),
+            diff_errs: HashMap::new(),
+            pull: None,
             wiring: WiringDoc::None,
             last_key: None,
             paused_buf: Vec::new(),

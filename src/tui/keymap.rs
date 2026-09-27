@@ -190,7 +190,12 @@ pub static BINDINGS: &[Binding] = &[
     b!(Log, ["N"], Cmd::PrevMatch, "previous match"),
     b!(Config, ["n"], Cmd::NextMatch, "next change"),
     b!(Config, ["N"], Cmd::PrevMatch, "previous change"),
-    b!(Config, ["P"], Cmd::Pull, "lox config pull now"),
+    b!(
+        Config,
+        ["P"],
+        Cmd::Pull,
+        "pull the newest config backup (lox config pull)"
+    ),
     b!(Update, ["R"], Cmd::Reboot, "reboot (typed confirmation)"),
     b!(
         Update,

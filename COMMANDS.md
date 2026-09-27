@@ -490,7 +490,7 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 |---|---|
 | `n` | next change |
 | `N` | previous change |
-| `P` | lox config pull now |
+| `P` | pull the newest config backup (lox config pull) |
 
 | System › Update | Action |
 |---|---|

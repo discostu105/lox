@@ -134,20 +134,28 @@ impl Logic {
 }
 
 /// Semantic config diff as human-readable lines (for System › Config).
+///
+/// The first line (`= …`) sums up the change; then one `# Page` header per
+/// config page with its changes (`+` added, `-` removed, `~` changed). Repeated
+/// identical lines collapse into one with a `×N` count.
 pub fn diff_lines(old: &[u8], new: &[u8]) -> Result<Vec<String>> {
     let a = lxir::LoxoneDoc::parse(old).map_err(|e| anyhow::anyhow!("{}", e))?;
     let b = lxir::LoxoneDoc::parse(new).map_err(|e| anyhow::anyhow!("{}", e))?;
     let d = lxir::diff::diff(&a, &b);
-    let title = |doc: &lxir::LoxoneDoc| -> HashMap<String, String> {
-        doc.objects()
-            .into_iter()
+    let (oa, ob) = (a.objects(), b.objects());
+    let title = |objs: &[lxir::doc::ObjectSummary]| -> HashMap<String, String> {
+        objs.iter()
             .map(|o| {
-                let t = o.title.or(o.iname).unwrap_or(o.block_type);
-                (o.uuid, t)
+                let t = o
+                    .title
+                    .clone()
+                    .or(o.iname.clone())
+                    .unwrap_or(o.block_type.clone());
+                (o.uuid.clone(), t)
             })
             .collect()
     };
-    let (ta, tb) = (title(&a), title(&b));
+    let (ta, tb) = (title(&oa), title(&ob));
     let (ia, ib) = (a.index(), b.index());
     let name = |uuid: &str| {
         tb.get(uuid)
@@ -155,59 +163,181 @@ pub fn diff_lines(old: &[u8], new: &[u8]) -> Result<Vec<String>> {
             .cloned()
             .unwrap_or_else(|| uuid.to_string())
     };
-    let port = |p: &str| {
+    // the page an object sits on: the deepest Page element above it
+    let pages = |objs: &[lxir::doc::ObjectSummary]| -> Vec<(Vec<usize>, String)> {
+        objs.iter()
+            .filter(|o| o.block_type == "Page")
+            .map(|o| {
+                (
+                    o.path.clone(),
+                    o.title.clone().unwrap_or_else(|| "Page".into()),
+                )
+            })
+            .collect()
+    };
+    let (pa, pb) = (pages(&oa), pages(&ob));
+    let page_of = |path: &[usize], pages: &[(Vec<usize>, String)]| -> String {
+        pages
+            .iter()
+            .filter(|(p, _)| path.starts_with(p))
+            .max_by_key(|(p, _)| p.len())
+            .map_or_else(|| "(outside pages)".into(), |(_, t)| t.clone())
+    };
+    let page_of_uuid = |uuid: &str| -> String {
+        match (ib.by_uuid.get(uuid), ia.by_uuid.get(uuid)) {
+            (Some(p), _) => page_of(p, &pb),
+            (None, Some(p)) => page_of(p, &pa),
+            _ => "(outside pages)".into(),
+        }
+    };
+    let owner = |p: &str| {
         ib.port_owner
             .get(p)
             .or_else(|| ia.port_owner.get(p))
-            .map(|(o, k)| format!("{}.{}", name(o), k))
+            .cloned()
+    };
+    let port = |p: &str| {
+        owner(p)
+            .map(|(o, k)| format!("{}.{}", name(&o), k))
             .unwrap_or_else(|| p.to_string())
     };
-    let mut out = Vec::new();
-    for o in &d.added {
-        out.push(format!(
-            "+ block  {} ({})",
-            o.title.clone().unwrap_or_default(),
+    let label = |o: &lxir::doc::ObjectSummary| {
+        format!(
+            "{} ({})",
+            o.title.clone().or(o.iname.clone()).unwrap_or_default(),
             o.block_type
-        ));
+        )
+    };
+    // page → lines, pages in order of first appearance
+    let mut by_page: Vec<(String, Vec<String>)> = Vec::new();
+    let mut push = |page: String, line: String| match by_page.iter_mut().find(|(p, _)| *p == page) {
+        Some((_, v)) => v.push(line),
+        None => by_page.push((page, vec![line])),
+    };
+    for o in &d.added {
+        push(page_of(&o.path, &pb), format!("+ block  {}", label(o)));
     }
     for o in &d.removed {
-        out.push(format!(
-            "- block  {} ({})",
-            o.title.clone().unwrap_or_default(),
-            o.block_type
-        ));
+        push(page_of(&o.path, &pa), format!("- block  {}", label(o)));
     }
     for r in &d.renamed {
-        out.push(format!(
-            "~ rename {} → {}{}",
-            r.from.clone().unwrap_or_default(),
-            r.to.clone().unwrap_or_default(),
-            if r.locale_suspect { "  (locale)" } else { "" }
-        ));
+        push(
+            page_of_uuid(&r.uuid),
+            format!(
+                "~ rename {} → {}{}",
+                r.from.clone().unwrap_or_default(),
+                r.to.clone().unwrap_or_default(),
+                if r.locale_suspect { "  (locale)" } else { "" }
+            ),
+        );
     }
     for p in &d.param_changes {
-        out.push(format!(
-            "~ param  {} · {}  {} → {}",
-            name(&p.object_uuid),
-            p.port_key,
-            p.from.clone().unwrap_or_else(|| "—".into()),
-            p.to.clone().unwrap_or_else(|| "—".into())
-        ));
+        push(
+            page_of_uuid(&p.object_uuid),
+            format!(
+                "~ param  {} · {}  {} → {}",
+                name(&p.object_uuid),
+                p.port_key,
+                p.from.clone().unwrap_or_else(|| "—".into()),
+                p.to.clone().unwrap_or_else(|| "—".into())
+            ),
+        );
     }
+    let wire_page = |w: &lxir::doc::WireView| {
+        owner(&w.to_port)
+            .or_else(|| owner(&w.from_port))
+            .map_or_else(|| "(outside pages)".into(), |(o, _)| page_of_uuid(&o))
+    };
     for w in &d.wires_added {
-        out.push(format!(
-            "+ wire   {} → {}",
-            port(&w.from_port),
-            port(&w.to_port)
-        ));
+        push(
+            wire_page(w),
+            format!("+ wire   {} → {}", port(&w.from_port), port(&w.to_port)),
+        );
     }
     for w in &d.wires_removed {
-        out.push(format!(
-            "- wire   {} → {}",
-            port(&w.from_port),
-            port(&w.to_port)
-        ));
+        push(
+            wire_page(w),
+            format!("- wire   {} → {}", port(&w.from_port), port(&w.to_port)),
+        );
     }
+    let mut out = Vec::new();
+    if by_page.is_empty() {
+        return Ok(out);
+    }
+    // totals: filled from the collapsed lines, so re-created pairs count once
+    let mut tot = [0usize; 8];
+    // loose blocks and wires last
+    by_page.sort_by_key(|(p, _)| p.starts_with('('));
+    for (page, lines) in by_page {
+        out.push(format!("# {}", page));
+        // collapse repeats, keeping first-appearance order
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        for l in lines {
+            match seen.iter_mut().find(|(s, _)| *s == l) {
+                Some((_, n)) => *n += 1,
+                None => seen.push((l, 1)),
+            }
+        }
+        // the same thing removed and added again (Config re-created it with
+        // new UUIDs): one "re-created" line instead of a + and a − block
+        let count = |seen: &[(String, usize)], l: &str| {
+            seen.iter().find(|(s, _)| s == l).map_or(0, |(_, n)| *n)
+        };
+        let mut shown: Vec<(String, usize)> = Vec::new();
+        for (l, n) in &seen {
+            let Some(rest) = l.strip_prefix("+ ") else {
+                if let Some(rest) = l.strip_prefix("- ") {
+                    let m = count(&seen, &format!("+ {}", rest)).min(*n);
+                    if *n > m {
+                        shown.push((l.clone(), n - m));
+                    }
+                } else {
+                    shown.push((l.clone(), *n));
+                }
+                continue;
+            };
+            let m = count(&seen, &format!("- {}", rest)).min(*n);
+            if m > 0 {
+                shown.push((format!("~ {}  re-created", rest), m));
+            }
+            if *n > m {
+                shown.push((l.clone(), n - m));
+            }
+        }
+        for (l, n) in shown {
+            // re-created wires follow their blocks: not counted on their own
+            let k = if l.ends_with("re-created") {
+                if l.starts_with("~ block") { 4 } else { 7 }
+            } else if l.starts_with("+ block") {
+                0
+            } else if l.starts_with("- block") {
+                1
+            } else if l.starts_with("~ rename") {
+                2
+            } else if l.starts_with("~ param") {
+                3
+            } else if l.starts_with("+ wire") {
+                5
+            } else {
+                6
+            };
+            tot[k] += n;
+            out.push(if n > 1 { format!("{}  ×{}", l, n) } else { l });
+        }
+    }
+    let mut parts = Vec::new();
+    for (k, what) in ["added", "removed", "renamed", "parameters", "re-created"]
+        .iter()
+        .enumerate()
+    {
+        if tot[k] > 0 {
+            parts.push(format!("{} {}", tot[k], what));
+        }
+    }
+    if tot[5] + tot[6] > 0 {
+        parts.push(format!("wires +{} −{}", tot[5], tot[6]));
+    }
+    out.insert(0, format!("= {}", parts.join(" · ")));
     Ok(out)
 }
 
@@ -250,6 +380,12 @@ mod tests {
         let a = demo::loxone_xml(&st);
         let b = a.replace("Title=\"Night mode\"", "Title=\"Night mode 2\"");
         let lines = diff_lines(a.as_bytes(), b.as_bytes()).unwrap();
+        assert!(
+            lines[0].starts_with("= ") && lines[0].contains("1 renamed"),
+            "{:?}",
+            lines
+        );
+        assert!(lines[1].starts_with("# "), "page header: {:?}", lines);
         assert!(
             lines
                 .iter()

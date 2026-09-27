@@ -554,17 +554,37 @@ green → yellow → red, exactly btop's cpu box) with an inset box listing cpu,
 comints, each as gradient meter + value + dot sparkline. Devices, Bus & LAN and Log sit below as panes; at
 Standard width they are visible together, `[`/`]` still cycles the focused sub-view.
 
+Round 3 (implemented) — only what the Miniserver actually reports:
+- **CPU graph** on a time axis (`−10 min … now`). The window grows with the history (1 → 10 min), so a fresh
+  session isn't a speck at the right edge; diagnostics are polled every 10 s in the background, so the graph has
+  history when the screen opens. The graph takes under half the height.
+- **Inset**: cpu, **plc** (the PLC program's share, `SPS:` of `lastcpu`), heap — meter + value + sparkline; tasks;
+  **program** (`/jdev/sps/status`: `● running · 100 cycles/s`, red when not running); **clock** drift against
+  this machine's clock (`/jdev/sys/time` + `timezoneoffset`; ✓ under 3 s, amber, red from 1 min); **SD** read /
+  write speed from `sdtest`; **SD life** (`Used:` %, power-on cycles; amber ≥ 70 %, red ≥ 90 %). Counters a
+  firmware leaves empty (Gen 2: ctx/s, ints/s, comints) are left out; uptime isn't exposed over HTTP.
+- **Network** pane: live LAN and CAN packet rates (↓/↑ per second, sparkline) from the bus & LAN counters, and
+  new errors since the pane opened. LAN "no buffer"/"exhausted" are *drops* under load, listed but not alarmed.
+- **Devices** pane head: `59 devices · 54 online · 5 offline · 1 weak signal`.
+
 - **Devices**: the `lox health` table (Tree/Air devices with battery as a dot meter colored by level, signal bars, status), sorted problems first.
 - **Bus & LAN**: CAN/LAN counters with **per-interval deltas** and a trend dot sparkline. Non-zero error deltas flash red once, then stay amber.
 - **Log**: tail of `/dev/fsget/log/def.log`, level-colored, `/` search, `n`/`N`.
 - **Config**: the gitops repository (`lox config init/pull`). Changed values are highlighted at the word level
-  (`Off-delay 120 → `**`300`**` s`), not just as whole changed lines. A commit list with a side-by-side diff of users,
-  devices and controls. `P` runs a pull now. If the repo isn't set up: a hint with `lox config init`.
+  (`Off-delay 120 → `**`300`**` s`), not just as whole changed lines. If the repo isn't set up: a hint with `lox config init`.
+  - The list shows when each config was **saved** in Loxone Config (the backup date), its version and what changed
+    (the single change, or the diff's totals once computed).
+  - The diff is semantic (lxir): a totals line, then changes **grouped by config page**; identical lines collapse
+    (`×24`), and blocks removed and added again with new UUIDs show as one dim `re-created` line. Diffs are
+    computed in the background, two at a time; a failure shows the error instead of "loading".
+  - `P` = `lox config pull`: downloads the newest backup (Loxone Config writes one to the SD card on every save)
+    via FTP and commits it when it changed. The footer explains this and shows the state: pulling (with elapsed
+    time), `✓ up to date · last save …`, new commit, or the error. Allowed read-only (it only reads from the
+    Miniserver). A pull re-reads the history and every diff.
 - **Update**: firmware check, changelog link, `U` install and `R` reboot, both with **typed confirmation**
   (type the context name) and a progress/reconnect view through the out-of-service states.
 
-Polling: the Overview polls diagnostics every 2 s while the view is visible, and every 30 s (heap/CPU only)
-otherwise. It never runs faster than 1 s, because Gen 1 Miniservers are slow.
+Polling: the Overview polls diagnostics every 2 s while the view is visible, and every 10 s otherwise. It never runs faster than 1 s, because Gen 1 Miniservers are slow.
 
 ### 5.7 ⁶ Sites
 

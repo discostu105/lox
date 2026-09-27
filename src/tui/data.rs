@@ -18,6 +18,10 @@ pub struct Diag {
     pub ints: Option<f64>,
     pub comints: Option<f64>,
     pub sd: Option<String>,
+    /// `/jdev/sps/status`, e.g. `Running 100/sec`
+    pub plc: Option<String>,
+    /// Miniserver clock minus the true time, in seconds
+    pub clock_drift: Option<f64>,
 }
 
 impl Diag {
@@ -34,6 +38,109 @@ impl Diag {
             l.contains("error") && !l.contains("no error")
         })
     }
+    /// A number after `key` in the SD test, e.g. `Read:` in `Read: 7182kB/s`.
+    pub fn sd_num(&self, key: &str) -> Option<f64> {
+        let s = self.sd.as_deref()?;
+        let rest = s[s.find(key)? + key.len()..].trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(rest.len());
+        rest[..end].parse().ok()
+    }
+    /// PLC cycles per second from `Running 100/sec`.
+    pub fn plc_rate(&self) -> Option<f64> {
+        let s = self.plc.as_deref()?;
+        let n = s.split_whitespace().find_map(|w| w.strip_suffix("/sec"))?;
+        n.parse().ok()
+    }
+    /// PLC runs (anything but `Running …` is worth a look).
+    pub fn plc_running(&self) -> Option<bool> {
+        self.plc
+            .as_deref()
+            .map(|s| s.to_lowercase().starts_with("running"))
+    }
+}
+
+/// One diagnostics sample for the System graphs.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DiagSample {
+    pub t: f64,
+    pub cpu: f64,
+    pub plc: Option<f64>,
+    pub heap: Option<f64>,
+    pub tasks: Option<f64>,
+}
+
+/// LAN / CAN packet rates (per second) between two counter polls.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct NetSample {
+    pub t: f64,
+    pub lan_rx: Option<f64>,
+    pub lan_tx: Option<f64>,
+    pub can_rx: Option<f64>,
+    pub can_tx: Option<f64>,
+    /// New LAN / CAN errors since the previous poll
+    pub lan_err: u64,
+    pub can_err: u64,
+    /// Received packets dropped for lack of buffers (routine under load)
+    pub lan_drop: u64,
+}
+
+impl NetSample {
+    pub fn between(prev: &BusLan, cur: &BusLan, dt: f64, t: f64) -> NetSample {
+        let get =
+            |b: &BusLan, name: &str| b.counters.iter().find(|c| c.0 == name).and_then(|c| c.1);
+        let rate = |name: &str| match (get(prev, name), get(cur, name)) {
+            (Some(a), Some(b)) if dt > 0.0 && b >= a => Some((b - a) as f64 / dt),
+            _ => None,
+        };
+        let drop = |name: &str| name.ends_with("no buffer") || name.ends_with("exhausted");
+        let delta = |f: &dyn Fn(&str) -> bool| {
+            cur.counters
+                .iter()
+                .zip(prev.counters.iter())
+                .filter(|(c, _)| f(&c.0))
+                .map(|(c, p)| c.1.unwrap_or(0).saturating_sub(p.1.unwrap_or(0)))
+                .sum()
+        };
+        let errs = |bus: &str| delta(&|n| n.starts_with(bus) && is_error_counter(n) && !drop(n));
+        NetSample {
+            t,
+            lan_rx: rate("LAN rx packets"),
+            lan_tx: rate("LAN tx packets"),
+            can_rx: rate("CAN received"),
+            can_tx: rate("CAN sent"),
+            lan_err: errs("LAN"),
+            can_err: errs("CAN"),
+            lan_drop: delta(&|n| n.starts_with("LAN") && drop(n)),
+        }
+    }
+}
+
+/// Seconds of the day from `HH:MM:SS`.
+pub fn parse_hms(v: &str) -> Option<f64> {
+    let mut it = v.trim().split(':').map(|p| p.parse::<f64>().ok());
+    Some(it.next()?? * 3600.0 + it.next()?? * 60.0 + it.next()??)
+}
+
+/// `+02:00:00` / `-05:30` → seconds east of UTC.
+pub fn parse_tz_offset(v: &str) -> Option<f64> {
+    let v = v.trim();
+    let (sign, rest) = match v.strip_prefix('-') {
+        Some(r) => (-1.0, r),
+        None => (1.0, v.trim_start_matches('+')),
+    };
+    let mut it = rest.split(':').map(|p| p.parse::<f64>().ok());
+    let h = it.next()??;
+    let m = it.next().flatten().unwrap_or(0.0);
+    Some(sign * (h * 3600.0 + m * 60.0))
+}
+
+/// Clock drift (s) of a Miniserver showing `ms_secs` (seconds of its local day)
+/// at unix time `now`, `tz` seconds east of UTC; wraps around midnight.
+pub fn clock_drift(ms_secs: f64, now: f64, tz: f64) -> f64 {
+    let local = (now + tz).rem_euclid(86_400.0);
+    (ms_secs - local + 43_200.0).rem_euclid(86_400.0) - 43_200.0
 }
 
 /// Static-ish Miniserver information (polled once per connection).
@@ -330,6 +437,27 @@ pub fn quarter_hours(points: &[(i64, f64)], tz: i64, now_unix: i64) -> Vec<f64> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diag_extras() {
+        let d = Diag {
+            sd: Some("SD Performance: Read: 7182kB/s, Write: 6061kB/s, No error (0 0), Usage: 0.00%, Used: 3%, UsedForSlcArea: 1%, UncorrectableEcc: 0, PowerOnCycles: 67".into()),
+            plc: Some("Running 100/sec".into()),
+            ..Default::default()
+        };
+        assert_eq!(d.sd_num("Read:"), Some(7182.0));
+        assert_eq!(d.sd_num("Used:"), Some(3.0));
+        assert_eq!(d.sd_num("PowerOnCycles:"), Some(67.0));
+        assert_eq!(d.plc_rate(), Some(100.0));
+        assert_eq!(d.plc_running(), Some(true));
+        assert_eq!(parse_tz_offset("+02:00:00"), Some(7200.0));
+        assert_eq!(parse_tz_offset("-05:30"), Some(-19800.0));
+        assert_eq!(parse_hms("19:51:13"), Some(71473.0));
+        // 12:00:05 UTC+2 shown when it is 10:00:00 UTC → 5 s fast
+        assert_eq!(clock_drift(43205.0, 36000.0, 7200.0), 5.0);
+        // across midnight: MS 23:59:58, true 00:00:01 → 3 s slow
+        assert_eq!(clock_drift(86398.0, 1.0, 0.0), -3.0);
+    }
 
     #[test]
     fn diag_values_real_shapes() {

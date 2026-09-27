@@ -5,9 +5,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use super::common;
-use super::inspector::resample;
 use crate::tui::app::{App, Conn, Hit, SysView};
-use crate::tui::data::{LogLevel, is_error_counter};
+use crate::tui::data::{DiagSample, LogLevel, NetSample, is_error_counter};
 use crate::tui::keymap::{Cmd, Ctx};
 use crate::tui::text::{fit, rfit};
 use crate::tui::theme::Grad;
@@ -79,6 +78,32 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
 
 // ── Overview ────────────────────────────────────────────────────────────────
 
+/// Step-hold `pts` (time, value) onto `n` columns spanning [from, to];
+/// columns before the first sample are 0.
+fn timeline(pts: &[(f64, f64)], from: f64, to: f64, n: usize) -> Vec<f64> {
+    let mut out = Vec::with_capacity(n);
+    let mut k = 0;
+    let mut cur = None;
+    for i in 0..n {
+        let t = from + (i as f64 + 1.0) * (to - from) / n as f64;
+        while k < pts.len() && pts[k].0 <= t {
+            cur = Some(pts[k].1);
+            k += 1;
+        }
+        out.push(cur.unwrap_or(0.0));
+    }
+    out
+}
+
+/// "−5 min", "−30 s"
+fn ago(secs: f64) -> String {
+    if secs >= 120.0 {
+        format!("−{:.0} min", secs / 60.0)
+    } else {
+        format!("−{:.0} s", secs)
+    }
+}
+
 fn overview(app: &App, area: Rect, buf: &mut Buffer) {
     let th = &app.th;
     let meta = match &app.diag {
@@ -86,18 +111,28 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
         None => Some(Notch::new("loading…")),
     };
     let inner = frame(app, area, buf, meta, Vec::new(), None);
-    let graph_h = (inner.height.saturating_sub(10)).clamp(4, 22);
-    let inset_w = 44u16.min(inner.width / 2);
+    // the graph takes under half the height: the panes below carry details
+    let graph_h = (inner.height * 9 / 20).clamp(8, 20).min(inner.height);
+    let inset_w = 46u16.min(inner.width / 2);
     let g = Rect::new(inner.x, inner.y, inner.width - inset_w - 1, graph_h);
-    // CPU graph: btop's cpu box
-    let cpu: Vec<f64> = app.diag_hist.iter().map(|x| x.0).collect();
-    if cpu.is_empty() {
+    let hist: Vec<_> = app.diag_hist.iter().copied().collect();
+    // the window grows with the history, up to 10 minutes, so it is never
+    // a speck at the right edge
+    let span = hist.first().map_or(0.0, |s| app.now - s.t);
+    let win = ((span / 60.0).ceil() * 60.0).clamp(60.0, 600.0);
+    let from = app.now - win;
+    let series = |f: &dyn Fn(&DiagSample) -> Option<f64>| -> Vec<(f64, f64)> {
+        hist.iter().filter_map(|s| f(s).map(|v| (s.t, v))).collect()
+    };
+    let cpu_pts = series(&|s| Some(s.cpu));
+    if hist.is_empty() {
         common::empty(app, buf, g, &["collecting CPU samples…"]);
     } else {
+        let gr = Rect::new(g.x + 4, g.y, g.width.saturating_sub(4), g.height - 1);
         graph(
             buf,
-            Rect::new(g.x + 4, g.y, g.width.saturating_sub(4), g.height),
-            &cpu,
+            gr,
+            &timeline(&cpu_pts, from, app.now, gr.width as usize * 2),
             100.0,
             Grad::Load,
             &GraphOpts {
@@ -107,16 +142,34 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
             th,
         );
         put(buf, g, g.x, g.y, "100", th.s_faint());
-        put(buf, g, g.x, g.y + g.height / 2, " 50", th.s_faint());
-        put(buf, g, g.x, g.bottom() - 1, "  0", th.s_faint());
-        let secs = cpu.len() as f64 * 2.0;
+        put(buf, g, g.x, g.y + (g.height - 1) / 2, " 50", th.s_faint());
+        put(buf, g, g.x, g.bottom() - 2, "  0", th.s_faint());
+        // time axis
+        let y = g.bottom() - 1;
+        put(buf, g, gr.x, y, &ago(win), th.s_faint());
+        let mid = ago(win / 2.0);
         put(
             buf,
             g,
-            g.x + 5,
-            g.bottom() - 1,
-            &format!("cpu · last {}", crate::tui::text::fmt_age(secs as u64)),
+            gr.x + gr.width / 2 - mid.chars().count() as u16 / 2,
+            y,
+            &mid,
             th.s_faint(),
+        );
+        put(buf, g, gr.right().saturating_sub(3), y, "now", th.s_faint());
+        let d = app.diag.as_ref().map(|(_, d)| d);
+        let head = format!(
+            "cpu {}",
+            d.and_then(|d| d.cpu)
+                .map_or("—".into(), |c| format!("{:.0} %", c))
+        );
+        put(
+            buf,
+            g,
+            gr.x + 1,
+            g.y,
+            &head,
+            th.s_text().add_modifier(Modifier::BOLD),
         );
     }
     // inset metrics box
@@ -124,7 +177,7 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
         g.right() + 1,
         inner.y,
         inset_w,
-        graph_h.max(9).min(inner.height),
+        graph_h.max(12).min(inner.height),
     );
     let ii = NotchBox::new()
         .title(Notch::new("miniserver"))
@@ -134,16 +187,27 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
         .as_ref()
         .map(|(_, d)| d.clone())
         .unwrap_or_default();
-    let heap: Vec<f64> = app.diag_hist.iter().map(|x| x.1).collect();
-    let rows: [(&str, Option<f64>, String, Option<&[f64]>, Grad); 2] = [
+    let spark_w = ii.width.saturating_sub(33);
+    let spark = |pts: &[(f64, f64)]| timeline(pts, from, app.now, spark_w as usize * 2);
+    let plc_pts = series(&|s| s.plc);
+    let heap_pts = series(&|s| s.heap);
+    let rows: [(&str, Option<f64>, String, &[(f64, f64)]); 3] = [
         (
             "cpu",
             d.cpu,
             d.cpu
                 .map(|v| format!("{:.0} %", v))
                 .unwrap_or_else(|| "—".into()),
-            Some(&cpu),
-            Grad::Load,
+            &cpu_pts,
+        ),
+        // the share of the CPU the PLC program takes
+        (
+            "plc",
+            d.sps,
+            d.sps
+                .map(|v| format!("{:.0} %", v))
+                .unwrap_or_else(|| "—".into()),
+            &plc_pts,
         ),
         (
             "heap",
@@ -155,28 +219,37 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
                 (Some(u), Some(t)) => format!("{:.1}/{:.1} MB", u / 1024.0, t / 1024.0),
                 _ => "—".into(),
             },
-            Some(&heap),
-            Grad::Load,
+            &heap_pts,
         ),
     ];
     let mut y = ii.y;
     let x = ii.x + 1;
-    for (label, pct, val, spark, gr) in rows {
+    for (label, pct, val, pts) in rows {
+        if pct.is_none() && label == "plc" && app.diag.is_some() {
+            continue;
+        }
         put(buf, ii, x, y, label, th.s_dim());
-        meter(buf, ii, x + 6, y, 10, pct.map(|p| p / 100.0), gr, th);
+        meter(
+            buf,
+            ii,
+            x + 6,
+            y,
+            10,
+            pct.map(|p| p / 100.0),
+            Grad::Load,
+            th,
+        );
         put(buf, ii, x + 17, y, &rfit(&val, 13), th.s_text());
-        if let Some(s) = spark
-            && s.len() >= 2
-        {
+        if pts.len() >= 2 {
             dotspark(
                 buf,
                 ii,
                 x + 31,
                 y,
-                ii.width.saturating_sub(33),
-                &resample(s, 40),
+                spark_w,
+                &spark(pts),
                 Some((0.0, 100.0)),
-                gr,
+                Grad::Load,
                 th,
             );
         }
@@ -192,42 +265,100 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
         })
         .unwrap_or_else(|| "—".into())
     };
+    let mut line = |y: &mut u16, label: &str, text: &str, st: Style| {
+        if *y < ii.bottom() {
+            put(buf, ii, x, *y, label, th.s_dim());
+            put(
+                buf,
+                ii,
+                x + 8,
+                *y,
+                &fit(text, ii.width.saturating_sub(10) as usize),
+                st,
+            );
+            *y += 1;
+        }
+    };
     for (label, v) in [
         ("tasks", d.tasks),
         ("ctx/s", d.ctx_switches),
         ("ints/s", d.ints),
         ("comints", d.comints),
     ] {
-        if y >= ii.bottom() {
-            break;
-        }
         // Gen 2 firmware doesn't report some counters: leave them out once polled
         if v.is_none() && app.diag.is_some() {
             continue;
         }
-        put(buf, ii, x, y, label, th.s_dim());
-        put(
-            buf,
-            ii,
-            x + 8,
-            y,
-            &dash(v),
-            if v.is_some() {
-                th.s_text()
-            } else {
-                th.s_faint()
-            },
-        );
-        y += 1;
-    }
-    if y < ii.bottom() {
-        put(buf, ii, x, y, "SD", th.s_dim());
-        let (s, st) = match &d.sd {
-            Some(_) if d.sd_error() => ("✗ errors", th.s_crit()),
-            Some(_) => ("✓ ok", th.s_ok()),
-            None => ("—", th.s_faint()),
+        let st = if v.is_some() {
+            th.s_text()
+        } else {
+            th.s_faint()
         };
-        put(buf, ii, x + 8, y, s, st);
+        line(&mut y, label, &dash(v), st);
+    }
+    if app.diag.is_some() {
+        // PLC: is the program running, and how fast does it cycle
+        if let Some(run) = d.plc_running() {
+            let text = match (run, d.plc_rate()) {
+                (true, Some(r)) => format!("● running · {:.0} cycles/s", r),
+                (true, None) => "● running".into(),
+                (false, _) => format!("○ {}", d.plc.clone().unwrap_or_default().to_lowercase()),
+            };
+            line(
+                &mut y,
+                "program",
+                &text,
+                if run { th.s_ok() } else { th.s_crit() },
+            );
+        }
+        // clock: a drifting Miniserver clock skews timers, logs and statistics
+        if let Some(dr) = d.clock_drift {
+            let (text, st) = if dr.abs() < 3.0 {
+                ("✓ in sync".to_string(), th.s_ok())
+            } else {
+                let amount = if dr.abs() >= 120.0 {
+                    format!("{:.0} min", dr.abs() / 60.0)
+                } else {
+                    format!("{:.0} s", dr.abs())
+                };
+                (
+                    format!("⚠ {} {}", amount, if dr > 0.0 { "fast" } else { "slow" }),
+                    if dr.abs() >= 60.0 {
+                        th.s_crit()
+                    } else {
+                        th.s_warn()
+                    },
+                )
+            };
+            line(&mut y, "clock", &text, st);
+        }
+        let (sd, st) = match &d.sd {
+            Some(_) if d.sd_error() => ("✗ errors".to_string(), th.s_crit()),
+            Some(_) => {
+                let mbs = |k: &str| d.sd_num(k).map(|v| format!("{:.1}", v / 1024.0));
+                match (mbs("Read:"), mbs("Write:")) {
+                    (Some(r), Some(w)) => (format!("✓ ok · r {} w {} MB/s", r, w), th.s_ok()),
+                    _ => ("✓ ok".into(), th.s_ok()),
+                }
+            }
+            None => ("—".into(), th.s_faint()),
+        };
+        line(&mut y, "SD", &sd, st);
+        // SD wear: worn-out cards are a classic Miniserver failure
+        if let Some(used) = d.sd_num("Used:") {
+            let st = if used >= 90.0 {
+                th.s_crit()
+            } else if used >= 70.0 {
+                th.s_warn()
+            } else {
+                th.s_text()
+            };
+            let mut t = format!("{:.0} % used", used);
+            if let Some(n) = d.sd_num("PowerOnCycles:") {
+                t.push_str(&format!(" · {:.0} power-ons", n));
+            }
+            line(&mut y, "SD life", &t, st);
+        }
     }
     // info + devices summary
     let by = inner.y + graph_h.max(ir.height);
@@ -270,6 +401,7 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
                 if k == 0 { th.s_text() } else { th.s_dim() },
             );
         }
+        net_rates(app, buf, ni, ni.y + lines.len() as u16 + 1);
     } else {
         common::empty(app, buf, ni, &["loading…"]);
     }
@@ -281,12 +413,29 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
     match &app.devices {
         Some((_, ds)) => {
             let bad: Vec<_> = ds.iter().filter(|d| d.problem() > 0).collect();
-            let head = format!(
-                "{} devices · {} online",
-                ds.len(),
-                ds.iter().filter(|d| d.online).count()
-            );
-            put(buf, di, di.x + 1, di.y, &head, th.s_text());
+            let mut parts = vec![(
+                format!(
+                    "{} devices · {} online",
+                    ds.len(),
+                    ds.iter().filter(|d| d.online).count()
+                ),
+                th.s_text(),
+            )];
+            for (p, what, st) in [
+                (3, "offline", th.s_crit()),
+                (2, "low battery", th.s_warn()),
+                (1, "weak signal", th.s_warn()),
+            ] {
+                let n = bad.iter().filter(|d| d.problem() == p).count();
+                if n > 0 {
+                    parts.push((format!(" · {} {}", n, what), st));
+                }
+            }
+            let mut hx = di.x + 1;
+            for (t, st) in parts {
+                put(buf, di, hx, di.y, &t, st);
+                hx += t.chars().count() as u16;
+            }
             if bad.is_empty() {
                 put(buf, di, di.x + 1, di.y + 1, "✓ no problems", th.s_ok());
             }
@@ -319,6 +468,83 @@ fn overview(app: &App, area: Rect, buf: &mut Buffer) {
             }
         }
         None => common::empty(app, buf, di, &["loading…"]),
+    }
+}
+
+/// Live LAN / CAN packet rates and new error counts (from the bus & LAN poll).
+fn net_rates(app: &App, buf: &mut Buffer, area: Rect, y: u16) {
+    let th = &app.th;
+    let x = area.x + 1;
+    if y >= area.bottom() {
+        return;
+    }
+    let Some(last) = app.net_hist.back() else {
+        put(buf, area, x, y, "LAN   measuring…", th.s_faint());
+        return;
+    };
+    let rate = |v: Option<f64>| {
+        v.map_or("—".into(), |r| {
+            if r >= 1000.0 {
+                format!("{:.1} k/s", r / 1000.0)
+            } else {
+                format!("{:.0}/s", r)
+            }
+        })
+    };
+    type Pick = fn(&NetSample) -> Option<f64>;
+    let rows: [(&str, Option<f64>, Option<f64>, Grad, Pick); 2] = [
+        ("LAN", last.lan_rx, last.lan_tx, Grad::Grid, |s| s.lan_rx),
+        ("CAN", last.can_rx, last.can_tx, Grad::Pv, |s| s.can_rx),
+    ];
+    let mut y = y;
+    for (label, rx, tx, gr, pick) in rows {
+        if y >= area.bottom() || (rx.is_none() && tx.is_none()) {
+            continue;
+        }
+        put(buf, area, x, y, label, th.s_dim());
+        let t = format!("↓ {:>8}  ↑ {:>8}", rate(rx), rate(tx));
+        put(buf, area, x + 6, y, &t, th.s_text());
+        let sx = x + 6 + t.chars().count() as u16 + 2;
+        let pts: Vec<f64> = app.net_hist.iter().filter_map(pick).collect();
+        if pts.len() >= 2 && sx + 8 < area.right() {
+            let w = (area.right() - sx - 1).min(40);
+            dotspark(
+                buf,
+                area,
+                sx,
+                y,
+                w,
+                &super::inspector::stretch(&pts, w as usize * 2),
+                None,
+                gr,
+                th,
+            );
+        }
+        y += 1;
+    }
+    if y < area.bottom() {
+        let lan: u64 = app.net_hist.iter().map(|s| s.lan_err).sum();
+        let can: u64 = app.net_hist.iter().map(|s| s.can_err).sum();
+        let dropped: u64 = app.net_hist.iter().map(|s| s.lan_drop).sum();
+        let (mut t, st) = if lan + can == 0 {
+            ("✓ no new bus or LAN errors".to_string(), th.s_ok())
+        } else {
+            (
+                format!("⚠ new errors: LAN +{} · CAN +{}  (bus & lan tab)", lan, can),
+                th.s_warn(),
+            )
+        };
+        if dropped > 0 {
+            t.push_str(&format!(" · {} rx dropped (no buffer)", dropped));
+        }
+        put(
+            buf,
+            area,
+            x,
+            y,
+            &fit(&t, area.width.saturating_sub(2) as usize),
+            st,
+        );
     }
 }
 
@@ -643,22 +869,76 @@ fn log(app: &App, area: Rect, buf: &mut Buffer) {
 
 // ── Config (gitops history) ─────────────────────────────────────────────────
 
+/// What `P` does and how the last pull went (bottom of the Config list).
+fn pull_status(app: &App, newest: Option<&crate::tui::app::Commit>) -> (String, Style) {
+    let th = &app.th;
+    match &app.pull {
+        None => (
+            "P pulls the newest backup from the Miniserver".into(),
+            th.s_dim(),
+        ),
+        Some((t, None)) => (
+            format!(
+                "{} pulling… downloading the newest backup (FTP) · {:.0} s",
+                spinner(app),
+                app.now - t
+            ),
+            th.s_info(),
+        ),
+        Some((t, Some(Ok(true)))) => (
+            format!("✓ {} new config committed", clock(app, *t)),
+            th.s_ok(),
+        ),
+        Some((t, Some(Ok(false)))) => (
+            format!(
+                "✓ {} up to date · last save {}",
+                clock(app, *t),
+                newest
+                    .and_then(|c| c.saved.clone())
+                    .unwrap_or_else(|| "the last pull".into())
+            ),
+            th.s_ok(),
+        ),
+        Some((_, Some(Err(e)))) => (format!("✗ pull failed: {}", e), th.s_crit()),
+    }
+}
+
+fn spinner(app: &App) -> &'static str {
+    const F: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    F[((app.now * 8.0) as usize) % F.len()]
+}
+
+/// Wall-clock HH:MM of an app time.
+fn clock(app: &App, t: f64) -> String {
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+        - (app.now - t);
+    chrono::DateTime::from_timestamp(unix as i64, 0)
+        .map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
 fn config(app: &App, area: Rect, buf: &mut Buffer) {
     let th = &app.th;
     let s = sel(app, SysView::Config);
     let len = sys_len(app, SysView::Config);
     let mut hints = vec![Hint::new("Tab", "diff")];
-    if !app.opts.read_only {
-        hints.extend(common::ctx_hints(Ctx::Config, &[Cmd::Pull]));
-    }
+    // pull only reads from the Miniserver: offered read-only too
+    hints.push(Hint::new("P", "pull from Miniserver"));
     let inner = frame(
         app,
         area,
         buf,
-        Some(Notch::new("lox config pull history")),
+        Some(Notch::new("config history")),
         hints,
         Some(format!("{}/{}", (s + 1).min(len), len)),
     );
+    let explain = [
+        "Loxone Config writes a backup to the Miniserver's SD card on every save.",
+        "`lox config pull` (P) downloads the newest one and commits it to git when it changed.",
+    ];
     let commits = match &app.commits {
         None => {
             common::empty(app, buf, inner, &["reading git history…"]);
@@ -669,23 +949,31 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
                 app,
                 buf,
                 inner,
-                &["no config history", e, "set it up with: lox config init"],
+                &[
+                    "no config history",
+                    e,
+                    "set it up with: lox config init <dir>",
+                    explain[0],
+                ],
             );
             return;
         }
         Some(Ok(c)) if c.is_empty() => {
+            let (st, _) = pull_status(app, None);
             common::empty(
                 app,
                 buf,
                 inner,
-                &["no commits yet", "P runs lox config pull"],
+                &["no commits yet", &st, explain[0], explain[1]],
             );
             return;
         }
         Some(Ok(c)) => c,
     };
-    let lw = (inner.width / 3).clamp(30, 50);
-    let list = Rect::new(inner.x, inner.y, lw, inner.height);
+    let lw = (inner.width * 2 / 5).clamp(36, 64);
+    // list above, pull status + explanation below
+    let foot = if inner.height >= 12 { 3 } else { 1 };
+    let list = Rect::new(inner.x, inner.y, lw, inner.height.saturating_sub(foot));
     let hgt = list.height as usize;
     if app.system.pane == 0 {
         common::set_page(app, hgt);
@@ -714,70 +1002,194 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
                 th.s_accent(),
             );
         }
-        let date = c.date.get(..16).unwrap_or(&c.date);
-        put(buf, list, list.x + 1, y, date, th.s_faint());
+        // when it was saved in Loxone Config, not when it was pulled
+        let date = c
+            .saved
+            .clone()
+            .unwrap_or_else(|| c.date.get(..16).unwrap_or(&c.date).to_string());
+        let mut x = put(buf, list, list.x + 1, y, &date, th.s_faint());
+        if let Some(v) = &c.version {
+            x = put(buf, list, x + 1, y, &rfit(v, 4), th.s_dim());
+        }
+        // the semantic diff's totals once computed; the pull-time summary until then
+        let diff = app.diffs.get(&c.hash);
+        let changes: Vec<&String> = diff
+            .into_iter()
+            .flatten()
+            .filter(|l| !l.starts_with("= ") && !l.starts_with("# "))
+            .collect();
+        // a single change reads better than its count
+        let single = (changes.len() == 1)
+            .then(|| changes[0].split_whitespace().collect::<Vec<_>>().join(" "));
+        let totals = single.as_deref().or_else(|| {
+            diff.and_then(|d| d.first())
+                .and_then(|l| l.strip_prefix("= "))
+        });
+        let (text, st) = if let Some(t) = totals {
+            let st = match t.chars().next() {
+                Some('+') if single.is_some() => th.s_ok(),
+                Some('-') if single.is_some() => th.s_crit(),
+                _ => th.s_text(),
+            };
+            (t, st)
+        } else if app.diffs.get(&c.hash).is_some_and(|d| d.is_empty()) {
+            ("no logic changes", th.s_dim())
+        } else if c.summary.is_empty() {
+            (c.subject.as_str(), th.s_text())
+        } else {
+            let st = match c.summary.chars().next() {
+                Some('+') => th.s_ok(),
+                Some('-') => th.s_crit(),
+                Some('n') => th.s_dim(),
+                _ => th.s_text(),
+            };
+            (c.summary.as_str(), st)
+        };
         put(
             buf,
             list,
-            list.x + 18,
+            x + 2,
             y,
-            &fit(&c.subject, lw.saturating_sub(19) as usize),
-            th.s_text(),
+            &fit(text, list.right().saturating_sub(x + 3) as usize),
+            st,
         );
     }
+    // footer under the list: pull status, then what pulling means
+    let (pst, pstyle) = pull_status(app, commits.first());
+    let fy = list.bottom();
+    let fw = lw.saturating_sub(2) as usize;
+    if foot == 3 {
+        for x in inner.x..inner.x + lw {
+            cell(buf, inner, x, fy, "─", th.s_border(false));
+        }
+        put(buf, inner, inner.x + 1, fy + 1, &fit(&pst, fw), pstyle);
+        put(
+            buf,
+            inner,
+            inner.x + 1,
+            fy + 2,
+            &fit("backups are written when you save in Loxone Config", fw),
+            th.s_faint(),
+        );
+    } else {
+        put(buf, inner, inner.x + 1, fy, &fit(&pst, fw), pstyle);
+    }
     for y in inner.y..inner.bottom() {
-        cell(buf, inner, list.right(), y, "│", th.s_border(false));
+        cell(buf, inner, inner.x + lw, y, "│", th.s_border(false));
     }
     let dr = Rect::new(
-        list.right() + 1,
+        inner.x + lw + 1,
         inner.y,
-        inner.right() - list.right() - 1,
+        inner.right() - inner.x - lw - 1,
         inner.height,
     );
     common::hit(app, dr, Hit::Pane(list_id::SYS_DIFF));
     let Some(c) = commits.get(s) else { return };
+    // header: what this commit is
+    let mut head = Vec::new();
+    if let Some(d) = &c.saved {
+        head.push(format!("saved {}", d));
+    }
+    if let Some(v) = &c.version {
+        head.push(v.clone());
+    }
+    head.push(format!("pulled {}", c.date.get(..16).unwrap_or(&c.date)));
+    head.push(c.hash.get(..7).unwrap_or(&c.hash).to_string());
+    put(
+        buf,
+        dr,
+        dr.x + 1,
+        dr.y,
+        &fit(&head.join(" · "), dr.width.saturating_sub(2) as usize),
+        th.s_faint(),
+    );
+    let body = Rect::new(dr.x, dr.y + 2, dr.width, dr.height.saturating_sub(2));
     let Some(diff) = app.diffs.get(&c.hash) else {
-        common::empty(app, buf, dr, &["loading diff…"]);
+        if let Some(e) = app.diff_errs.get(&c.hash) {
+            common::empty(
+                app,
+                buf,
+                body,
+                &["couldn't compare this config", e, "retrying every 30 s"],
+            );
+        } else {
+            common::empty(
+                app,
+                buf,
+                body,
+                &[&format!(
+                    "{} comparing with the previous backup…",
+                    spinner(app)
+                )],
+            );
+        }
         return;
     };
     if diff.is_empty() {
         common::empty(
             app,
             buf,
-            dr,
-            &["no semantic changes", "(layout or metadata only)"],
+            body,
+            &[
+                "no changes to blocks, wires or parameters",
+                "(layout or metadata only)",
+            ],
         );
         return;
     }
-    let hgt = dr.height as usize;
+    let hgt = body.height as usize;
     if app.system.pane == 1 {
         common::set_page(app, hgt);
     }
     let off = app.system.diff_scroll.min(diff.len().saturating_sub(hgt));
+    let w = body.width.saturating_sub(2) as usize;
     for (k, l) in diff.iter().enumerate().skip(off).take(hgt) {
-        let y = dr.y + (k - off) as u16;
+        let y = body.y + (k - off) as u16;
+        if let Some(t) = l.strip_prefix("= ") {
+            put(
+                buf,
+                body,
+                body.x + 1,
+                y,
+                &fit(t, w),
+                th.s_text().add_modifier(Modifier::BOLD),
+            );
+            continue;
+        }
+        if let Some(t) = l.strip_prefix("# ") {
+            put(
+                buf,
+                body,
+                body.x + 1,
+                y,
+                &fit(&format!("▸ {}", t), w),
+                th.s_accent().add_modifier(Modifier::BOLD),
+            );
+            continue;
+        }
+        let recreated = l.contains("re-created");
         let st = match l.chars().next() {
+            _ if recreated => th.s_dim(),
             Some('+') => th.s_ok(),
             Some('-') => th.s_crit(),
             Some('~') => th.s_warn(),
             _ => th.s_dim(),
         };
-        let w = dr.width.saturating_sub(2) as usize;
         // word-level emphasis: the new value after the last arrow
         match l.rfind(" → ") {
-            Some(p) if l.starts_with('~') => {
+            Some(p) if l.starts_with('~') && !recreated => {
                 let x = put(
                     buf,
-                    dr,
-                    dr.x + 1,
+                    body,
+                    body.x + 3,
                     y,
-                    &crate::tui::text::trunc(&l[..p + " → ".len()], w),
+                    &crate::tui::text::trunc(&l[..p + " → ".len()], w.saturating_sub(2)),
                     st,
                 );
-                let rest = w.saturating_sub((x - dr.x - 1) as usize);
+                let rest = w.saturating_sub((x - body.x - 1) as usize);
                 put(
                     buf,
-                    dr,
+                    body,
                     x,
                     y,
                     &fit(&l[p + " → ".len()..], rest),
@@ -785,7 +1197,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
                 );
             }
             _ => {
-                put(buf, dr, dr.x + 1, y, &fit(l, w), st);
+                put(buf, body, body.x + 3, y, &fit(l, w.saturating_sub(2)), st);
             }
         }
     }

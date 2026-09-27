@@ -488,11 +488,12 @@ fn j11_config_history() {
             ..
         }
     )));
-    let commits = vec![super::app::Commit {
-        hash: "c3".into(),
-        date: "2026-09-24 21:10:02 +0200".into(),
-        subject: "Night mode".into(),
-    }];
+    let commits = vec![super::app::Commit::new(
+        "c3",
+        "2026-09-24 21:10:02 +0200",
+        "Night mode",
+        "",
+    )];
     h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits)));
     h.tick(1.0);
     assert!(
@@ -500,6 +501,133 @@ fn j11_config_history() {
             .iter()
             .any(|e| matches!(e, Effect::Poll { kind: PollKind::ConfigDiff(c), .. } if c == "c3"))
     );
+}
+
+/// After `P`, every diff is fetched again (one-shot polls must forget they
+/// ran, or the pane says "loading" forever); failures show, not "loading".
+#[test]
+fn config_pull_refetches_diffs_and_shows_errors() {
+    let mut h = H::new();
+    h.keys(&["5"]);
+    while h.app.system.view != SysView::Config {
+        h.keys(&["]"]);
+    }
+    let commits = || {
+        vec![
+            super::app::Commit::new(
+                "c2",
+                "2026-09-26 08:41:37 +0200",
+                "Config backup 2026-09-25 18:39:01 (v273)",
+                "+ Added control: \"Registriertes Gerät\" (PuDe)",
+            ),
+            super::app::Commit::new("c1", "2026-03-18 19:39:46 +0100", "Initial", ""),
+        ]
+    };
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits())));
+    h.poll(
+        PollKind::ConfigDiff("c2".into()),
+        Polled::ConfigDiff(
+            "c2".into(),
+            vec![
+                "= 1 added".into(),
+                "# Security".into(),
+                "+ block  Registriertes Gerät (PuDe)".into(),
+            ],
+        ),
+    );
+    let s = h.render(140, 30);
+    assert!(
+        s.contains("2026-09-25 18:39 v273"),
+        "saved date + version: {}",
+        s
+    );
+    assert!(s.contains("▸ Security"), "{}", s);
+    assert!(s.contains("P pulls the newest backup"), "{}", s);
+    // pull: running, then done — and the diffs are polled again
+    h.keys(&["P"]);
+    assert!(h.fx.iter().any(|e| matches!(e, Effect::ConfigPull)));
+    assert!(h.render(140, 30).contains("pulling…"));
+    h.all.clear();
+    h.msg(Msg::ConfigPulled(Ok(false)));
+    h.poll(PollKind::ConfigLog, Polled::ConfigLog(Ok(commits())));
+    h.tick(1.0);
+    assert!(
+        h.all
+            .iter()
+            .any(|e| matches!(e, Effect::Poll { kind: PollKind::ConfigDiff(c), .. } if c == "c2")),
+        "diff re-fetched after the pull"
+    );
+    let s = h.render(140, 30);
+    assert!(
+        s.contains("up to date · last save 2026-09-25 18:39"),
+        "{}",
+        s
+    );
+    // a failing diff says so
+    let kind = PollKind::ConfigDiff("c2".into());
+    let (e, req) = (h.app.epoch, h.app.req());
+    h.app.polls.inflight.insert(kind.clone(), req);
+    h.msg(Msg::Polled {
+        epoch: e,
+        req,
+        kind,
+        result: Err("git show: bad object".into()),
+    });
+    let s = h.render(140, 30);
+    assert!(
+        s.contains("couldn't compare") && s.contains("bad object"),
+        "{}",
+        s
+    );
+}
+
+#[test]
+fn commit_summary_from_pull_message() {
+    let c = super::app::Commit::new(
+        "h",
+        "d",
+        "Config backup 2026-09-25 18:39:01 (v273)",
+        "+ Added control: \"Registriertes Gerät\" (PuDe)",
+    );
+    assert_eq!(c.saved.as_deref(), Some("2026-09-25 18:39"));
+    assert_eq!(c.version.as_deref(), Some("v273"));
+    assert_eq!(c.summary, "+ Registriertes Gerät (PuDe)");
+    let c = super::app::Commit::new(
+        "h",
+        "d",
+        "x",
+        "+ Added control: a\n+ Added control: b\n- Removed control: c",
+    );
+    assert_eq!(c.summary, "+2 −1 controls");
+}
+
+/// System overview: PLC, clock, SD wear and live LAN/CAN rates.
+#[test]
+fn system_overview_details() {
+    let mut h = H::new();
+    h.keys(&["5"]);
+    h.poll(PollKind::Diag, Polled::Diag(demo::diag(1.0)));
+    h.poll(PollKind::Info, Polled::Info(demo::info()));
+    h.poll(PollKind::BusLan, Polled::BusLan(demo::bus_lan(1.0)));
+    h.tick(5.0);
+    h.poll(PollKind::BusLan, Polled::BusLan(demo::bus_lan(6.0)));
+    let s = h.render(160, 44);
+    for want in [
+        "running · 100 cycles/s",
+        "✓ in sync",
+        "SD life",
+        "4 % used",
+        "LAN   ↓",
+        "CAN   ↓",
+        "no new bus or LAN errors",
+    ] {
+        assert!(s.contains(want), "missing {:?}:\n{}", want, s);
+    }
+    // a drifting clock warns
+    let mut d = demo::diag(2.0);
+    d.clock_drift = Some(-95.0);
+    h.poll(PollKind::Diag, Polled::Diag(d));
+    assert!(h.render(160, 44).contains("⚠ 95 s slow"));
 }
 
 /// J12: wall display — read-only never sends, and says so.
