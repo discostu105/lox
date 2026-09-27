@@ -292,7 +292,11 @@ pub fn run(args: TuiArgs) -> Result<()> {
     };
 
     let mut app = App::new(house, th, opts, ctx_name, exec::now());
-    app.tz = exec::tz_offset();
+    app.tz = if args.demo {
+        exec::demo_tz()
+    } else {
+        exec::tz_offset()
+    };
     app.contexts = contexts;
     app.scenes = scenes;
     let st = load_state(data_dir.as_ref());

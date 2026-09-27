@@ -49,10 +49,32 @@ fn stats_epoch_unix() -> i64 {
 }
 
 /// Local hour of day (fractional).
+/// Hour of the day for the demo simulation. `LOX_DEMO_HOUR=12.5` starts the
+/// demo at that time (then it runs on), so recordings look the same any time.
 pub fn local_hour() -> f64 {
     use chrono::Timelike;
+    static FIXED: std::sync::OnceLock<Option<(f64, f64)>> = std::sync::OnceLock::new();
+    let fixed = FIXED.get_or_init(|| {
+        let h: f64 = std::env::var("LOX_DEMO_HOUR").ok()?.parse().ok()?;
+        Some((h.rem_euclid(24.0), now()))
+    });
+    if let Some((h, t0)) = fixed {
+        return (h + (now() - t0) / 3600.0).rem_euclid(24.0);
+    }
     let t = chrono::Local::now();
     t.hour() as f64 + t.minute() as f64 / 60.0 + t.second() as f64 / 3600.0
+}
+
+/// The demo's clock offset: with `LOX_DEMO_HOUR` the header clock shows the
+/// simulated time of day, so it matches the sun on the PV.
+pub fn demo_tz() -> i64 {
+    match std::env::var("LOX_DEMO_HOUR")
+        .ok()
+        .and_then(|h| h.parse::<f64>().ok())
+    {
+        Some(h) => (h * 3600.0) as i64 - (now() as i64).rem_euclid(86_400),
+        None => tz_offset(),
+    }
 }
 
 pub fn tz_offset() -> i64 {

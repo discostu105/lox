@@ -1621,6 +1621,10 @@ pub fn log() -> Vec<LogLine> {
         "2026-09-27 12:47:31.994;Error 29 NTP server not reachable, retry in 60s",
         "2026-09-27 12:48:32.101;Info NTP time synchronized",
         "2026-09-27 13:02:44.380;Important 1102 Door 'Front door' unlocked",
+        // long enough to be cut in the list (⏎ shows it whole)
+        "2026-09-27 13:10:00.000;Important 1016 QUITTED, Intercom Entrance - connection lost \
+         (Central), admins, IntercomV2 (Entrance,1f0c2a61-0305-11ee-ffff504f94a0) retry \
+         scheduled, last seen 13:09:58 at 192.0.2.40",
     ];
     raw.iter().filter_map(|l| LogLine::parse(l)).collect()
 }

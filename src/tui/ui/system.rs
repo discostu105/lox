@@ -1126,11 +1126,11 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
                 th.s_dim(),
             ),
             (
-                "P: FTP-download the newest SD-card backup, commit it".to_string(),
+                "P: download the newest backup (FTP)".to_string(),
                 th.s_faint(),
             ),
             (
-                "   (reads only — never writes to the Miniserver)".to_string(),
+                "   and commit it · never writes back".to_string(),
                 th.s_faint(),
             ),
         ];

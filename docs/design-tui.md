@@ -1004,7 +1004,9 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 - **Live probe** (ignored by default): `LOX_TUI_LIVE=1 cargo test live_probe -- --ignored` opens a read-only
   stream to the configured Miniserver and checks that the initial value dump arrives.
 - **Manual**: `lox tui --demo` runs against a built-in fake Miniserver (fixture + simulated
-  events). It is also used for README screenshots/GIFs (recorded with `vhs`).
+  events). It is also used for README screenshots/GIFs (recorded with `vhs`), and for the promo video:
+  `scripts/demo-video/make.sh` plays `script.toml` in a PTY and renders an MP4 with captions and an .srt.
+  `LOX_DEMO_HOUR=12.5` pins the demo's simulated time of day (and its clock) so recordings look the same.
 
 ---
 

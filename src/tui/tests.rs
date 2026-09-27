@@ -511,12 +511,8 @@ fn log_search_and_full_line() {
     while h.app.system.view != SysView::Log {
         h.keys(&["]"]);
     }
-    let long = "2026-09-27 13:10:00.000;Important 1016 QUITTED, Intercom Eingang - \
-                Verbindung unterbrochen (Zentral), admins, IntercomV2 (Eingang,1fbc-ffff) \
-                retry scheduled, last seen 13:09:58 at 192.168.1.40";
-    let mut lines = demo::log();
-    lines.push(super::data::LogLine::parse(long).unwrap());
-    h.poll(PollKind::Log, Polled::Log(lines));
+    // the demo log ends with a long intercom line
+    h.poll(PollKind::Log, Polled::Log(demo::log()));
     let s = h.render(120, 30);
     assert!(s.contains("full line"), "hint: {}", s);
     h.keys(&["/"]).typed("intercom");
@@ -534,9 +530,9 @@ fn log_search_and_full_line() {
     };
     assert_eq!(title, "def.log · 2026-09-27 13:10:00");
     assert_eq!(sub, "important");
-    assert!(text.ends_with("192.168.1.40"), "{}", text);
+    assert!(text.ends_with("192.0.2.40"), "{}", text);
     let s = h.render(120, 30);
-    assert!(s.contains("192.168.1.40"), "wrapped, not cut: {}", s);
+    assert!(s.contains("192.0.2.40"), "wrapped, not cut: {}", s);
     h.keys(&["y"]);
     assert!(
         h.fx.iter()
@@ -582,7 +578,7 @@ fn config_diff_focus_and_footer() {
     );
     let s = h.render(140, 30);
     assert!(s.contains("focus diff"), "{}", s);
-    assert!(s.contains("never writes to the Miniserver"), "{}", s);
+    assert!(s.contains("never writes back"), "{}", s);
     assert!(s.contains("git · /srv/cfg"), "repo in the frame: {}", s);
     assert!(s.contains("  ms/config.Loxone"), "{}", s);
     assert!(s.contains("commit c2 · the first backup"), "{}", s);
