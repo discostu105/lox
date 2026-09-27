@@ -49,6 +49,7 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 | `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
 | `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |
+| `src/statv2.rs` | Statistics V2 (`statisticV2` groups, `getStatistic` paths, record parsing) — meters of the energy flow monitor |
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/ws.rs` | `LoxWsClient` — async WebSocket connection used by token auth (RSA+AES key exchange handshake) |
 | `src/token.rs` | Token auth flow: RSA key exchange, AES-encrypted credential exchange, token storage, HMAC token hashing |
@@ -112,6 +113,7 @@ GET /jdev/lan/txp, txe, txc, txu, rxp, rxo, eof, exh, nob        → LAN stats
 GET /jdev/sys/date, /jdev/sys/time                                 → system clock
 GET /jdev/sps/LoxAPPversion3        → structure file version check
 GET /binstatisticdata/{uuid}/{period} → binary statistics (u32 ts + f64[] values)
+GET /dev/sps/getStatistic/{uuid}/raw/{fromUtc}/{toUtc}/all/{group}[/{output}] → Statistics V2 (u32 unix ts + f64[])
 GET /data/weatheru.bin              → binary weather data (108-byte entries)
 GET /dev/fsget/{path}               → filesystem access
 GET /jdev/sys/checktoken, refreshtoken, killtoken                  → token management
