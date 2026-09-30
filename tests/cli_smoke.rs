@@ -216,9 +216,58 @@ fn mcp_serve_handshake_and_tools_list() {
 }
 
 #[test]
+fn mcp_serve_speaks_2026_07_28_discover_lifecycle() {
+    let meta = r#""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"smoke","version":"0"}}"#;
+    let input = format!(
+        "{}\n{}\n",
+        format_args!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{{{}}}}}"#,
+            meta
+        ),
+        format_args!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{{{}}}}}"#,
+            meta
+        ),
+    );
+    let out = lox()
+        .args(["mcp", "serve"])
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replies: Vec<serde_json::Value> = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("stdout carries JSON-RPC only"))
+        .collect();
+    let by_id = |id: i64| replies.iter().find(|r| r["id"] == id).expect("reply");
+    let discover = &by_id(1)["result"];
+    assert!(
+        discover["supportedVersions"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("2026-07-28"))
+    );
+    let list = &by_id(2)["result"];
+    assert_eq!(list["resultType"], "complete");
+    assert!(list["ttlMs"].as_u64().is_some(), "SEP-2549 cache hint");
+    assert!(
+        list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "door")
+    );
+}
+
+#[test]
 fn mcp_tool_call_without_config_reports_error() {
+    // 2026-07-28 is stateless: a tools/call carrying its own _meta needs no handshake
     let input = concat!(
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rooms","arguments":{}}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rooms","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"smoke","version":"0"}}}}"#,
         "\n",
     );
     lox()
@@ -227,7 +276,8 @@ fn mcp_tool_call_without_config_reports_error() {
         .write_stdin(input)
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""isError":true"#));
+        .stdout(predicate::str::contains(r#""isError":true"#))
+        .stdout(predicate::str::contains("config_not_found"));
 }
 
 #[test]

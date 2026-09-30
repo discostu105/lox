@@ -132,7 +132,11 @@ lox stream --type LightControllerV2      # filtered by type
 
 Clients that speak the [Model Context Protocol](https://modelcontextprotocol.io) but cannot run
 shell commands (Claude Desktop, ChatGPT connectors, Cursor, VS Code agents, n8n) can use
-`lox mcp serve`. The client launches it and talks JSON-RPC over stdio. No extra runtime is needed.
+`lox mcp serve`. The client launches it and talks to it over stdio. No extra runtime is needed.
+
+The server is built on the official Rust MCP SDK and speaks the newest revision, **MCP 2026-07-28**
+(stateless `server/discover` lifecycle), as well as every earlier revision back to 2024-11-05, so
+current and older clients both work.
 
 ### Connect a client
 
@@ -174,27 +178,36 @@ Miniserver context.
 | `blind` | action | `up`, `down`, `stop`, `shade`, `position`, `slats` |
 | `light` | action | `mood`, `dim`, `color` |
 | `thermostat` | action | `temp`, `mode`, `override` |
-| `run_scene` | action | Run a `lox` scene |
-| `gate` | risky | `open`, `close` (risky), `stop` |
-| `alarm` | risky | `arm`, `arm-home`, `disarm` (risky), `quit` |
-| `door` | risky | `lock`, `unlock`, `open` |
+| `run_scene` | action | Run a `lox` scene, with progress per step; stops when cancelled |
+| `gate` | risky | `open`, `close` (confirmed), `stop` |
+| `alarm` | risky | `arm`, `arm-home`, `disarm` (confirmed), `quit` |
+| `door` | risky | `lock`, `unlock`, `open` (all confirmed) |
 | `send_command` | risky | Raw Loxone command, only with `--allow-raw` |
 
 Controls are addressed exactly like on the command line: a name substring, `Name [Room]`, an alias
-or a UUID, with an optional `room` argument. Every action tool accepts `dry_run: true` and returns
-the equivalent `lox` command line in `cli`.
+or a UUID, with an optional `room` argument. Every tool publishes input and output schemas; every
+action tool accepts `dry_run: true` and returns the equivalent `lox` command line in `cli`.
 
 ### Safety
 
-The policy is fixed when the server starts; the model cannot change it.
+High-risk actions (doors, opening or closing gates, arming or disarming the alarm) are confirmed by
+**you**, not by the model. When the AI asks to open the front door, your MCP client shows a
+confirmation such as:
+
+```
+Door lock — Haustür (Wohnzimmer): open?
+Equivalent command: lox door "Haustür" open -r Wohnzimmer
+```
+
+Nothing is sent unless you confirm. A declined confirmation is reported to the model as
+`declined_by_user`. The same applies to `switch` or raw commands aimed at a door lock, gate or alarm.
 
 | Flag | Effect |
 |:-----|:-------|
-| *(none)* | Read tools and everyday actions. Risky actions are refused with `action_not_allowed`. |
+| *(none)* | Read tools and everyday actions. Risky actions need your confirmation; clients that cannot ask are refused (`action_not_allowed`). |
 | `--read-only` | Only read tools are listed and callable. |
-| `--allow-risky` | Also doors, opening/closing gates, arming/disarming the alarm. |
+| `--allow-risky` | Risky actions run without asking. |
 | `--allow-raw` | Also `send_command` for raw Loxone commands. |
 
-"Risky" is the same set of actions `lox tui` asks you to confirm. Risky tools carry
-`destructiveHint`, so clients that confirm destructive calls will ask you first. Credentials never
-pass through tool arguments, and alarm PINs are never echoed back.
+The policy is fixed when the server starts; the model cannot change it. Risky tools carry
+`destructiveHint`, credentials never pass through tool arguments, and alarm PINs are never echoed back.

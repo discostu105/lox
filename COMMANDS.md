@@ -317,9 +317,9 @@ Returns command structure, arguments, subcommands, control type hints, and valid
 ## MCP Server (AI Assistants)
 
 ```bash
-lox mcp serve                         # Model Context Protocol server on stdio
+lox mcp serve                         # Model Context Protocol server on stdio (MCP 2026-07-28 + older)
 lox mcp serve --read-only             # read tools only, no actions
-lox mcp serve --allow-risky           # also allow doors, gate open/close, alarm arm/disarm
+lox mcp serve --allow-risky           # doors, gates, alarm without asking the user first
 lox mcp serve --allow-raw             # also expose send_command (raw Loxone commands)
 lox mcp config                        # print config for Claude Desktop / Cursor and Claude Code
 lox mcp config -o json                # just the JSON "mcpServers" snippet
@@ -331,9 +331,11 @@ lox --dry-run mcp serve               # every action is a dry run
 MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
 Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
 `system_status`, `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
-(and `send_command` with `--allow-raw`). Every action tool accepts `dry_run`.
-High-risk actions (the ones `lox tui` asks to confirm) are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
-Tool errors use the same envelope as `-o json`, plus `invalid_arguments` and `action_not_allowed`.
+(and `send_command` with `--allow-raw`). Every tool has input and output schemas; every action tool accepts `dry_run`.
+High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
+through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
+Tool errors use the same envelope as `-o json`, plus `invalid_arguments`, `action_not_allowed`, `declined_by_user`,
+`confirmation_expired` and `confirmation_mismatch`.
 
 ---
 

@@ -208,9 +208,9 @@ lox schema -o json                        # JSON for programmatic use
 Expose `lox` to MCP clients (Claude Desktop, ChatGPT, Cursor, Claude Code, …):
 
 ```bash
-lox mcp serve                             # stdio server, launched by the client
+lox mcp serve                             # stdio server (MCP 2026-07-28 + older), launched by the client
 lox mcp serve --read-only                 # read tools only
-lox mcp serve --allow-risky               # also doors, gates, alarm
+lox mcp serve --allow-risky               # doors, gates, alarm without asking the user
 lox mcp config                            # print client config snippets
 lox mcp tools                             # list exposed tools
 ```

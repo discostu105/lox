@@ -901,7 +901,7 @@ Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui
         /// Show schema for a specific command (e.g. "blind", "light")
         command: Option<String>,
     },
-    /// Model Context Protocol server for AI assistants (Claude, ChatGPT, Cursor, …)
+    /// Model Context Protocol server (MCP 2026-07-28) for AI assistants (Claude, ChatGPT, Cursor, …)
     #[command(
         after_help = "Examples:\n  lox mcp serve                 # stdio server (what MCP clients launch)\n  lox mcp config                # print config snippets for Claude Desktop / Claude Code\n  lox mcp tools --allow-risky   # list the tools a client would see\n  lox --ctx home mcp serve --read-only"
     )]
@@ -917,7 +917,7 @@ pub(crate) struct McpPolicy {
     /// Expose read tools only (no actions)
     #[arg(long, conflicts_with_all = ["allow_risky", "allow_raw"])]
     read_only: bool,
-    /// Allow high-risk actions: doors, opening/closing gates, arming/disarming the alarm
+    /// Run high-risk actions (doors, gates, alarm) without asking the user to confirm
     #[arg(long)]
     allow_risky: bool,
     /// Expose the send_command tool for raw Loxone commands

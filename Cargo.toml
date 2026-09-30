@@ -44,6 +44,10 @@ chrono = { version = "0.4", features = ["clock"] }
 byteorder = "1"
 uuid = { version = "1", features = ["v4"] }
 
+# MCP server (`lox mcp`)
+rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io", "elicitation"] }
+schemars = "1"
+
 # OpenTelemetry deps
 opentelemetry = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace"] }
 opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
@@ -63,6 +67,8 @@ unicode-segmentation = { version = "1", optional = true }
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
+# MCP client side for protocol tests of `lox mcp`
+rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io", "elicitation"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"

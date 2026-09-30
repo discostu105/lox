@@ -234,13 +234,26 @@ pub fn cmd_light_moods(ctx: &RunContext, name_or_uuid: String, room: Option<Stri
 }
 
 /// Resolve a lighting controller and fetch its mood list via WebSocket.
-///
-/// Shared by `lox light moods` and the MCP `list_light_moods` tool.
 pub fn fetch_light_moods(
     lox: &mut LoxClient,
     name_or_uuid: &str,
     room: Option<&str>,
 ) -> Result<(crate::client::Control, Vec<actions::MoodEntry>)> {
+    let (ctrl, mood_list_uuid) = resolve_mood_list(lox, name_or_uuid, room)?;
+    let cfg = lox.cfg.clone();
+    let rt = tokio::runtime::Runtime::new()?;
+    let moods_json = rt.block_on(fetch_mood_list_json(&cfg, &mood_list_uuid))?;
+    Ok((ctrl, actions::parse_mood_list(&moods_json)?))
+}
+
+/// Resolve a lighting controller and the UUID of its `moodList` text state.
+///
+/// Shared by `lox light moods` and the MCP `list_light_moods` tool.
+pub fn resolve_mood_list(
+    lox: &mut LoxClient,
+    name_or_uuid: &str,
+    room: Option<&str>,
+) -> Result<(crate::client::Control, String)> {
     let uuid = lox.resolve_with_room(name_or_uuid, room)?;
     let ctrl = lox.find_control(&uuid)?;
     if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
@@ -250,8 +263,6 @@ pub fn fetch_light_moods(
             ctrl.typ
         );
     }
-
-    // Get the moodList state UUID from the structure
     let mood_list_uuid = lox
         .get_structure()?
         .get("controls")
@@ -268,22 +279,17 @@ pub fn fetch_light_moods(
             )
         })?
         .to_string();
+    Ok((ctrl, mood_list_uuid))
+}
 
-    // Connect via WebSocket and wait for the initial moodList TextState
-    let cfg = lox.cfg.clone();
-    let rt = tokio::runtime::Runtime::new()?;
-    let moods_json: String = rt.block_on(async {
-        use tokio::time::timeout;
-
-        timeout(
-            Duration::from_secs(10),
-            fetch_mood_list_via_ws(&cfg, &mood_list_uuid),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Timeout waiting for moodList state (10s)"))?
-    })?;
-
-    Ok((ctrl, actions::parse_mood_list(&moods_json)?))
+/// Wait (max 10 s) for the `moodList` text state in the WebSocket state dump.
+pub async fn fetch_mood_list_json(cfg: &Config, mood_list_uuid: &str) -> Result<String> {
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        fetch_mood_list_via_ws(cfg, mood_list_uuid),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Timeout waiting for moodList state (10s)"))?
 }
 
 /// Connect to the Miniserver WebSocket, subscribe to binary states,

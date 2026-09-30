@@ -1,7 +1,9 @@
 # Design: `lox mcp` — Model Context Protocol server
 
-> **Status: IMPLEMENTED (v1)** — stdio transport, 15 tools, safety tiers. Tracking issue: #107.
-> Out of scope for v1: HTTP transport, MCP resources/prompts, change notifications (§9).
+> **Status: IMPLEMENTED (v2)** — built on rmcp 3.5 (the official Rust SDK), speaks MCP **2026-07-28** and every
+> revision back to 2024-11-05 over stdio. 15 tools with input and output schemas, user confirmation for risky
+> actions, progress and cancellation for scenes. Tracking issue: #107.
+> Out of scope for now: Streamable HTTP transport, resources and `subscriptions/listen`, the tasks extension (§10).
 
 ## 1. Why
 
@@ -13,36 +15,49 @@ re-implements Miniserver access from scratch.
 
 `lox` has the hard parts already: fuzzy name resolution with room qualifiers, aliases, multi-context
 config, token/structure caching, and a shared action layer (`src/actions.rs`) with per-action risk
-levels and type checks. An MCP server is a thin protocol adapter on top.
+levels and type checks. The MCP server is a protocol adapter on top.
 
 Goals:
 
 1. `lox mcp serve` turns the installed binary into an MCP server. No extra runtime, no second tool.
-2. Agents get **few, well-described tools** that cover discovery and everyday control.
-3. **Safe by default**: doors, gates and the alarm need an explicit opt-in when the server starts.
-4. Behavior matches the CLI and the TUI exactly, because all three go through `actions.rs`.
+2. **Current protocol**: the newest MCP revision, with full backward compatibility for older clients.
+3. Agents get **few, well-described, schema-typed tools** that cover discovery and everyday control.
+4. **Safe by default**: doors, gates and the alarm need a human's confirmation, not just the model's intent.
+5. Behavior matches the CLI and the TUI exactly, because all three go through `actions.rs`.
 
-## 2. Transport and protocol
+## 2. Protocol
 
-- **stdio**, newline-delimited JSON-RPC 2.0 (the MCP stdio transport). stdout carries protocol
-  messages only; every diagnostic goes to stderr.
-- Hand-rolled, not the `rmcp` crate. The server needs `initialize`, `ping`, `tools/list` and
-  `tools/call`; that is ~200 lines over `serde_json` and adds no dependencies, keeping the single
-  binary small and the MSRV unchanged.
-- Protocol versions: the server answers with the client's requested version when it knows it
-  (`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`), otherwise with its newest.
-- Capabilities: `tools` only (`listChanged: false`). The `initialize` result carries
-  `instructions` that tell the model how to discover and address controls.
-- Requests are handled one at a time. Notifications (`notifications/initialized`,
-  `notifications/cancelled`, …) are accepted and ignored. JSON-RPC batches are accepted for older
-  clients. Unknown methods return `-32601`, malformed JSON `-32700`, unknown tools `-32602`.
+The server is built on [rmcp](https://crates.io/crates/rmcp) (default features off; `server`,
+`macros`, `transport-io`, `elicitation`). rmcp owns JSON-RPC framing, version negotiation, the
+lifecycle, cancellation, and the result shapes of every revision; `lox` owns the tools.
+
+| Revision | Lifecycle | What `lox` uses |
+|----------|-----------|-----------------|
+| **2026-07-28** | stateless: `server/discover`, per-request `_meta` (SEP-2575) | multi-round-trip confirmation (SEP-2322), cache hints on `tools/list` (SEP-2549), deterministic tool order |
+| 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 | `initialize` handshake | server-to-client elicitation for confirmation |
+
+- Newer clients probe `server/discover`; older ones send `initialize`. rmcp answers both on the same
+  stdio stream, so one binary serves Claude Desktop today and 2026-07-28 clients as they ship.
+- Transport: stdio. stdout carries protocol messages only; diagnostics go to stderr.
+- `tools/list` is fixed for the server's lifetime, so 2026-07-28 clients get `ttlMs` = 1 h and
+  `cacheScope: public`. Older clients get the legacy result shape without the hints.
+- `serverInfo` carries a title, description, website and an SVG icon (2025-11-25 icons).
+- Miniserver access is blocking (`reqwest::blocking`); every tool runs it on tokio's blocking pool,
+  so a slow Miniserver never stalls the protocol loop, pings or cancellations.
+
+### Cost of the SDK
+
+rmcp adds 11 crates (rmcp, rmcp-macros, schemars and their helpers) and about 2.8 MB to the stripped
+release binary (13.9 → 16.7 MB). In exchange the server tracks each spec revision through the SDK
+instead of by hand: 2026-07-28 replaced the handshake, server-to-client requests, sessions, ping and
+several error codes at once.
 
 ## 3. Commands
 
 ```
-lox mcp serve  [--read-only] [--allow-risky] [--allow-raw]   # run the server on stdio
-lox mcp config [--read-only] [--allow-risky] [--allow-raw]   # print client config snippets
-lox mcp tools  [--read-only] [--allow-risky] [--allow-raw]   # list the tools that would be exposed
+lox mcp serve  [--read-only | --allow-risky] [--allow-raw]   # run the server on stdio
+lox mcp config [--read-only | --allow-risky] [--allow-raw]   # print client config snippets
+lox mcp tools  [--read-only | --allow-risky] [--allow-raw]   # list the tools that would be exposed
 ```
 
 Global flags keep their meaning: `--ctx home` pins the server to one Miniserver context,
@@ -52,8 +67,11 @@ can be pasted as is.
 
 ## 4. Tools
 
-Tools are curated around user intent instead of mirroring the 52 CLI commands. Tool names are
-`snake_case` verbs or device nouns; arguments are always named.
+Tools are curated around user intent instead of mirroring the 52 CLI commands. They are defined with
+rmcp's `#[tool]` macros over typed parameter structs; the input schema is generated from the Rust
+types (flat, inlined enums, no `$ref`, so every client and model can read it). Each tool also has
+a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`, `openWorldHint`).
 
 ### 4.1 Read tools (`readOnlyHint: true`)
 
@@ -61,83 +79,124 @@ Tools are curated around user intent instead of mirroring the 52 CLI commands. T
 |------|-----------|---------|
 | `list_rooms` | — | rooms with control counts |
 | `list_controls` | `name?`, `room?`, `type?`, `category?`, `favorites_only?` | name, type, room, category, uuid, and the tool that operates it |
-| `get_control` | `name`, `room?` | live value, state attributes and named outputs, plus metadata |
+| `get_control` | `name`, `room?` | live value, state attributes and named outputs |
 | `list_sensors` | `kind?` (all, temperature, door-window, motion, smoke, energy), `room?` | sensor readings |
 | `list_light_moods` | `name`, `room?` | mood IDs and names of a lighting controller (WebSocket) |
 | `list_scenes` | — | local `lox` scenes with description and step count |
-| `system_status` | — | firmware, PLC state, heap, Miniserver clock |
+| `system_status` | — | firmware, PLC state, heap |
 
 ### 4.2 Action tools
 
 All action tools take `name`, optional `room`, and optional `dry_run`. They resolve the control,
-check its type, build an `actions::Action`, and send its commands.
+check its type, build an `actions::Action`, confirm it if needed (§5), and send its commands.
 
-| Tool | Actions | Risk |
-|------|---------|------|
-| `switch` | `on`, `off`, `pulse` | none |
-| `blind` | `up`, `down`, `stop`, `shade`, `position` (+ `value` 0–100), `slats` (+ `value`) | none |
-| `light` | `mood` (`plus`/`minus`/`off`/ID), `dim` (0–100), `color` (`#RRGGBB`, `hsv(h,s,v)`, `temp(b,k)`) | none |
-| `thermostat` | `temp`, `mode`, `override` (+ `minutes`) | none |
-| `gate` | `open`, `close`, `stop` | open/close: **risky** |
-| `alarm` | `arm`, `arm-home`, `disarm`, `quit` (+ `no_motion`, `code`) | all but quit: **risky** |
-| `door` | `lock`, `unlock`, `open` | **risky** |
-| `run_scene` | scene name | none (user-authored) |
-| `send_command` | raw Loxone command | only listed with `--allow-raw` |
+| Tool | Actions | Confirmation |
+|------|---------|--------------|
+| `switch` | `on`, `off`, `pulse` | only on door locks, gates, alarms (§5) |
+| `blind` | `up`, `down`, `stop`, `shade`, `position` (+ `value` 0–100), `slats` (+ `value`) | — |
+| `light` | `mood` (`plus`/`minus`/`off`/ID), `dim` (0–100), `color` (`#RRGGBB`, `hsv(h,s,v)`, `temp(b,k)`) | — |
+| `thermostat` | `temp`, `mode`, `override` (+ `minutes`) | — |
+| `gate` | `open`, `close`, `stop` | open, close |
+| `alarm` | `arm`, `arm-home`, `disarm`, `quit` (+ `no_motion`, `code`) | all but quit |
+| `door` | `lock`, `unlock`, `open` | all |
+| `run_scene` | scene name | — (user-authored); reports progress, stops on cancel |
+| `send_command` | raw Loxone command | only listed with `--allow-raw`; confirmed on risky types |
 
-Results are JSON objects: the resolved control, the action as text, the commands sent, the
-Miniserver response code and value, and the equivalent `lox` command line (`cli`). The same object
-is returned as `structuredContent` and as pretty-printed text content.
+Results are structured content matching the tool's `outputSchema`: the resolved control, the action
+as text, the commands sent (PINs masked), the Miniserver response, and the equivalent `lox` command
+line (`cli`).
+
+`run_scene` sends a `notifications/progress` per step when the request carries a progress token,
+and checks the request's cancellation token between steps and during delays: a cancelled scene
+stops sending immediately.
 
 ## 5. Safety model
 
-Three tiers, fixed when the server starts. The model cannot change them.
+The policy is fixed when the server starts; the model cannot change it.
 
 | Mode | Read tools | Everyday actions | Risky actions | Raw commands |
 |------|:---:|:---:|:---:|:---:|
 | `--read-only` | ✓ | — (not listed) | — | — |
-| default | ✓ | ✓ | refused | — |
-| `--allow-risky` | ✓ | ✓ | ✓ | — |
-| `--allow-raw` | ✓ | ✓ | per `--allow-risky` | ✓ |
+| default | ✓ | ✓ | **after the user confirms** | — |
+| `--allow-risky` | ✓ | ✓ | ✓ (no prompt) | — |
+| `--allow-raw` | ✓ | ✓ | per the above | ✓ |
 
-- "Risky" is exactly `Action::risk() == Risk::Confirm`, the same list the TUI asks to confirm.
-  Refused calls return a tool error with code `action_not_allowed`, naming the flag that enables them,
-  so the model can explain it to the user instead of retrying.
-- Tool annotations mark `gate`, `alarm`, `door` and `send_command` as `destructiveHint: true`, so
-  clients that ask before destructive calls will ask.
-- Every tool accepts `dry_run: true`; the global `--dry-run` forces it on.
-- Credentials never leave the server: they come from the `lox` config, never from tool arguments.
-  Alarm PINs are passed through to the Miniserver and never echoed back.
+**What is risky.** `Action::risk() == Risk::Confirm` (the set the TUI asks to confirm), plus any
+generic action (`on`, `off`, `pulse`, raw, value) aimed at a door lock, gate or alarm, so `switch off`
+on a door lock or a raw `open` to a gate cannot bypass the gate. Dry runs are never gated; they report
+`needs_confirmation: true`.
+
+**How the user confirms.** The question goes to the human through the client's UI, never to the model:
+
+- **2026-07-28 — multi-round-trip request.** The first `tools/call` returns `resultType: "input_required"`
+  with an elicitation (`{ confirm: boolean }`, message naming the control, action and equivalent CLI
+  command) and a `requestState`. The client asks the user and retries with `inputResponses`.
+  The `requestState` is a random single-use nonce kept server-side for 10 minutes and bound to the
+  control UUID and the exact commands, so it cannot be forged, replayed, or reused for another action.
+- **Older revisions — elicitation request.** The server sends `elicitation/create` during the call
+  and waits up to 5 minutes for the answer.
+- **Clients without elicitation** get `action_not_allowed`, naming `--allow-risky` and the CLI command
+  the user can run themselves.
+
+A declined confirmation returns `declined_by_user` and tells the model not to retry.
+
+Other rules: risky tools carry `destructiveHint`, so clients that confirm destructive calls will ask
+too; credentials never pass through tool arguments; alarm PINs are passed to the Miniserver and never
+echoed back.
 
 ## 6. Errors
 
-Tool failures are returned as results with `isError: true`, not as JSON-RPC errors, so the model sees
-them and can correct itself. The payload reuses the CLI error envelope:
+Tool failures are results with `isError: true` whose text is the CLI error envelope, so the model sees
+them and can correct itself:
 
 ```json
 { "ok": false, "error": "ambiguous_control", "message": "Ambiguous: 'Licht'. Use [Room] qualifier or --room flag. …" }
 ```
 
-Error codes match `lox -o json` (`control_not_found`, `ambiguous_control`, `config_not_found`,
-`unauthorized`, `connection_error`, …) plus `invalid_arguments` and `action_not_allowed`.
+Codes match `lox -o json` (`control_not_found`, `ambiguous_control`, `config_not_found`,
+`unauthorized`, `connection_error`, …) plus `invalid_arguments`, `action_not_allowed`,
+`declined_by_user`, `confirmation_expired` and `confirmation_mismatch`. Arguments that do not match the
+input schema (wrong enum value, missing field) are tool errors too, not protocol errors.
+Protocol errors are left to rmcp (unknown tool, malformed request, unsupported protocol version).
 
 ## 7. State and lifetime
 
-- Config is loaded lazily on the first tool call, so a client can list tools even before `lox setup`
-  has run; the tool call then reports `config_not_found` with the fix.
+- Config is loaded lazily on the first tool call, so a client can list tools before `lox setup` has
+  run; the tool call then reports `config_not_found` with the fix.
 - The `LoxClient` (and its in-memory structure) is rebuilt every 15 minutes. That picks up
   `lox cache refresh`, the 24 h structure TTL and changed credentials in long-lived client sessions.
+- Blocking work holds a mutex on the client; scene delays do not, so other tools stay usable while a
+  scene waits.
 - EOF on stdin ends the server with exit code 0.
 
-## 8. Testing
+## 8. Code layout
 
-- Unit tests drive `McpServer::handle_line` against an `httpmock` Miniserver: handshake and version
-  negotiation, tool listing per mode, each read tool, action dry runs and real sends, risk gating,
-  argument validation, error envelopes, notifications and batches.
-- A CLI smoke test pipes `initialize` + `tools/list` into the real binary.
+| File | Role |
+|------|------|
+| `src/mcp/mod.rs` | `ServerOptions`, `lox mcp serve/config/tools`, the stdio runtime |
+| `src/mcp/server.rs` | `LoxMcp`: `#[tool_router]` tools, typed parameters, confirmation (MRTR and elicitation), progress, cancellation, `tools/list` cache hints, server info |
+| `src/mcp/ops.rs` | synchronous Miniserver operations and the `JsonSchema` output types |
+| `src/mcp/tests.rs` | protocol tests: an rmcp client against the server over an in-memory duplex |
 
-## 9. Later
+## 9. Testing
 
-- Streamable HTTP transport (`lox mcp serve --http :8765` with a bearer token) for remote connectors.
-- MCP resources (`loxone://rooms`, `loxone://controls/{uuid}`) and `resources/subscribe` backed by
-  `lox stream`.
-- More device tools as they come up: intercom, EV charger, music zones, statistics/history.
+- **Protocol tests** drive a real rmcp client against `LoxMcp` over an in-memory duplex and an
+  `httpmock` Miniserver. Lifecycle-dependent behavior runs under both 2026-07-28 (discover) and
+  2025-11-25 (initialize): identification, cache hints, confirmation accepted, declined and
+  unsupported, the raw `input_required` round trip, forged and mismatched `requestState`, the
+  `switch`-on-a-door-lock bypass, progress notifications, and cancellation mid-scene.
+- **Schema tests**: every tool has a title, annotations, an inline input schema and an output schema
+  whose `required` fields are always present.
+- **CLI smoke tests** pipe JSON-RPC into the real binary: an `initialize` session, a `server/discover`
+  session, and a stateless 2026-07-28 `tools/call`.
+- **Interop**: the official Python SDK (`mcp` 2.2) was run against the release binary in `auto`
+  (discover), pinned `2026-07-28`, and `legacy` modes, including the door confirmation. It caught the
+  one bug the Rust tests had missed: output schemas that required fields the server omits.
+
+## 10. Later
+
+- Streamable HTTP transport (`lox mcp serve --http`) with authorization, for remote connectors.
+- Resources (`loxone://rooms`, `loxone://controls/{uuid}`) with `subscriptions/listen` backed by
+  `lox stream`, so clients see state changes live.
+- The tasks extension (SEP-2663) for long scenes.
+- More device tools: intercom, EV charger, music zones, statistics/history.

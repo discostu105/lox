@@ -76,8 +76,9 @@ An agent can discover your home (`lox ls -o json`), read sensor values, control 
 
 **MCP server (Claude Desktop, ChatGPT, Cursor, …):** clients that only speak the
 [Model Context Protocol](https://modelcontextprotocol.io) can launch `lox mcp serve` directly.
-It exposes curated tools (list rooms and controls, read state, switch, blinds, lights, climate,
-scenes) over stdio. Doors, gates and the alarm stay off unless you start it with `--allow-risky`.
+Built on the official Rust MCP SDK, it speaks MCP 2026-07-28 and every older revision, and exposes
+schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes) over stdio.
+Doors, gates and the alarm ask **you** to confirm in the MCP client before anything is sent.
 
 ```bash
 lox mcp config                        # print a ready-to-paste client config
