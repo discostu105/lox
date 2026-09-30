@@ -143,6 +143,10 @@ subcmd_help!(help_ctx_rename, "ctx", "rename");
 subcmd_help!(help_ctx_init, "ctx", "init");
 subcmd_help!(help_ctx_migrate, "ctx", "migrate");
 subcmd_help!(help_completions, "completions");
+subcmd_help!(help_mcp, "mcp");
+subcmd_help!(help_mcp_serve, "mcp", "serve");
+subcmd_help!(help_mcp_config, "mcp", "config");
+subcmd_help!(help_mcp_tools, "mcp", "tools");
 
 // ── Global flags accepted with subcommands ─────────────────────────────────
 
@@ -171,4 +175,96 @@ fn help_mentions_loxone() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Loxone"));
+}
+
+// ── MCP server over stdio ──────────────────────────────────────────────────
+
+#[test]
+fn mcp_serve_handshake_and_tools_list() {
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        "\n",
+    );
+    let out = lox()
+        .args(["mcp", "serve", "--read-only"])
+        // no Miniserver needed: listing tools never loads the config
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let lines: Vec<serde_json::Value> = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("stdout carries JSON-RPC only"))
+        .collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "one reply per request, none for notifications"
+    );
+    assert_eq!(lines[0]["result"]["protocolVersion"], "2025-06-18");
+    let tools = lines[1]["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|t| t["name"] == "list_controls"));
+    assert!(!tools.iter().any(|t| t["name"] == "switch"), "read-only");
+}
+
+#[test]
+fn mcp_tool_call_without_config_reports_error() {
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rooms","arguments":{}}}"#,
+        "\n",
+    );
+    lox()
+        .args(["mcp", "serve"])
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""isError":true"#));
+}
+
+#[test]
+fn mcp_read_only_conflicts_with_allow_risky() {
+    lox()
+        .args(["mcp", "serve", "--read-only", "--allow-risky"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn mcp_config_prints_json_snippet() {
+    let out = lox()
+        .args([
+            "--ctx",
+            "home",
+            "-o",
+            "json",
+            "mcp",
+            "config",
+            "--allow-risky",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let args = v["mcpServers"]["loxone"]["args"].as_array().unwrap();
+    assert_eq!(
+        args,
+        &vec![
+            serde_json::json!("--ctx"),
+            serde_json::json!("home"),
+            serde_json::json!("mcp"),
+            serde_json::json!("serve"),
+            serde_json::json!("--allow-risky"),
+        ]
+    );
 }

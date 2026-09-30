@@ -18,7 +18,7 @@ pub fn set_ctx_override(ctx: Option<String>) {
     *CTX_OVERRIDE.write().unwrap() = ctx;
 }
 
-fn ctx_override() -> Option<String> {
+pub(crate) fn ctx_override() -> Option<String> {
     CTX_OVERRIDE.read().unwrap().clone()
 }
 

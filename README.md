@@ -74,6 +74,19 @@ The agent calls `lox <command>` as a shell tool and reads stdout. That's it.
 
 An agent can discover your home (`lox ls -o json`), read sensor values, control devices, and check conditions — all without any custom integration layer.
 
+**MCP server (Claude Desktop, ChatGPT, Cursor, …):** clients that only speak the
+[Model Context Protocol](https://modelcontextprotocol.io) can launch `lox mcp serve` directly.
+It exposes curated tools (list rooms and controls, read state, switch, blinds, lights, climate,
+scenes) over stdio. Doors, gates and the alarm stay off unless you start it with `--allow-risky`.
+
+```bash
+lox mcp config                        # print a ready-to-paste client config
+claude mcp add loxone -- lox mcp serve   # Claude Code
+lox mcp tools                         # list the tools a client will see
+```
+
+See the [AI agent guide](docs/guides/ai-agents.md#mcp-server) for the tool list and safety model.
+
 **Agent-friendly workflow:**
 ```bash
 lox schema -o json                    # discover available commands
@@ -198,6 +211,7 @@ lox config restore abc123 --force      # Restore config from git history
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
 lox schema blind                       # Command schema for AI agent discovery
+lox mcp serve                          # MCP server for Claude Desktop, ChatGPT, Cursor, …
 lox completions bash                   # Generate shell completions
 ```
 

@@ -127,3 +127,74 @@ lox stream -o json                       # NDJSON stream of all changes
 lox stream --room "Kitchen" -o json      # filtered by room
 lox stream --type LightControllerV2      # filtered by type
 ```
+
+## MCP server
+
+Clients that speak the [Model Context Protocol](https://modelcontextprotocol.io) but cannot run
+shell commands (Claude Desktop, ChatGPT connectors, Cursor, VS Code agents, n8n) can use
+`lox mcp serve`. The client launches it and talks JSON-RPC over stdio. No extra runtime is needed.
+
+### Connect a client
+
+```bash
+lox mcp config            # prints the JSON snippet and the Claude Code command
+```
+
+Claude Desktop, Cursor and other JSON-configured clients take the `mcpServers` snippet:
+
+```json
+{
+  "mcpServers": {
+    "loxone": { "command": "/usr/local/bin/lox", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+Claude Code:
+
+```bash
+claude mcp add loxone -- /usr/local/bin/lox mcp serve
+```
+
+The server uses your normal `lox` configuration. Add `--ctx home` before `mcp` to pin it to one
+Miniserver context.
+
+### Tools
+
+| Tool | Kind | What it does |
+|:-----|:-----|:-------------|
+| `list_rooms` | read | Rooms with control counts |
+| `list_controls` | read | Controls filtered by name, room, type, category; each names the tool that operates it |
+| `get_control` | read | Live value, state attributes and named outputs of one control |
+| `list_sensors` | read | Temperature, door/window, motion, smoke or energy readings |
+| `list_light_moods` | read | Mood IDs of a lighting controller |
+| `list_scenes` | read | Your `lox` scenes |
+| `system_status` | read | Firmware, PLC state, memory |
+| `switch` | action | `on`, `off`, `pulse` |
+| `blind` | action | `up`, `down`, `stop`, `shade`, `position`, `slats` |
+| `light` | action | `mood`, `dim`, `color` |
+| `thermostat` | action | `temp`, `mode`, `override` |
+| `run_scene` | action | Run a `lox` scene |
+| `gate` | risky | `open`, `close` (risky), `stop` |
+| `alarm` | risky | `arm`, `arm-home`, `disarm` (risky), `quit` |
+| `door` | risky | `lock`, `unlock`, `open` |
+| `send_command` | risky | Raw Loxone command, only with `--allow-raw` |
+
+Controls are addressed exactly like on the command line: a name substring, `Name [Room]`, an alias
+or a UUID, with an optional `room` argument. Every action tool accepts `dry_run: true` and returns
+the equivalent `lox` command line in `cli`.
+
+### Safety
+
+The policy is fixed when the server starts; the model cannot change it.
+
+| Flag | Effect |
+|:-----|:-------|
+| *(none)* | Read tools and everyday actions. Risky actions are refused with `action_not_allowed`. |
+| `--read-only` | Only read tools are listed and callable. |
+| `--allow-risky` | Also doors, opening/closing gates, arming/disarming the alarm. |
+| `--allow-raw` | Also `send_command` for raw Loxone commands. |
+
+"Risky" is the same set of actions `lox tui` asks you to confirm. Risky tools carry
+`destructiveHint`, so clients that confirm destructive calls will ask you first. Credentials never
+pass through tool arguments, and alarm PINs are never echoed back.

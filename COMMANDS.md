@@ -314,6 +314,29 @@ Returns command structure, arguments, subcommands, control type hints, and valid
 
 ---
 
+## MCP Server (AI Assistants)
+
+```bash
+lox mcp serve                         # Model Context Protocol server on stdio
+lox mcp serve --read-only             # read tools only, no actions
+lox mcp serve --allow-risky           # also allow doors, gate open/close, alarm arm/disarm
+lox mcp serve --allow-raw             # also expose send_command (raw Loxone commands)
+lox mcp config                        # print config for Claude Desktop / Cursor and Claude Code
+lox mcp config -o json                # just the JSON "mcpServers" snippet
+lox mcp tools                         # list the tools a client would see (-o json: full definitions)
+lox --ctx home mcp serve              # pin the server to one Miniserver context
+lox --dry-run mcp serve               # every action is a dry run
+```
+
+MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
+Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
+`system_status`, `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
+(and `send_command` with `--allow-raw`). Every action tool accepts `dry_run`.
+High-risk actions (the ones `lox tui` asks to confirm) are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
+Tool errors use the same envelope as `-o json`, plus `invalid_arguments` and `action_not_allowed`.
+
+---
+
 ## Error Envelopes
 
 When using `-o json`, errors return structured envelopes instead of plain text:

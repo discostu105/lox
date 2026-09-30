@@ -54,6 +54,7 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 | `src/ws.rs` | `LoxWsClient` — async WebSocket connection used by token auth (RSA+AES key exchange handshake) |
 | `src/token.rs` | Token auth flow: RSA key exchange, AES-encrypted credential exchange, token storage, HMAC token hashing |
 | `src/actions.rs` | Shared action layer: per-control-type command mapping and risk levels (used by the CLI and the TUI) |
+| `src/mcp/` | `lox mcp`: MCP server over stdio — JSON-RPC protocol (`mod.rs`), curated tools over `LoxClient` + `actions.rs` (`tools.rs`), mocked-Miniserver tests. Design: `docs/design-mcp.md` |
 | `src/logic.rs` | Thin adapter over lxir: config program blocks, wires, neighborhood of a control, semantic config diff |
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 

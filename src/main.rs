@@ -8,6 +8,7 @@ mod gitops;
 mod logic;
 mod loxcc;
 mod loxone_xml;
+mod mcp;
 mod otel;
 mod scene;
 mod statv2;
@@ -18,7 +19,7 @@ mod tui;
 mod ws;
 
 use anyhow::{Context, Result, bail};
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use client::LoxClient;
 use dirs::home_dir;
@@ -402,6 +403,7 @@ Configuration:
   ctx                          Manage multiple Miniserver contexts
   completions                  Generate shell completions
   schema                       Command schema for AI agent discovery
+  mcp                          MCP server for AI assistants (Claude, ChatGPT, …)
 
 {options}{after-help}"
 )]
@@ -899,6 +901,59 @@ Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui
         /// Show schema for a specific command (e.g. "blind", "light")
         command: Option<String>,
     },
+    /// Model Context Protocol server for AI assistants (Claude, ChatGPT, Cursor, …)
+    #[command(
+        after_help = "Examples:\n  lox mcp serve                 # stdio server (what MCP clients launch)\n  lox mcp config                # print config snippets for Claude Desktop / Claude Code\n  lox mcp tools --allow-risky   # list the tools a client would see\n  lox --ctx home mcp serve --read-only"
+    )]
+    Mcp {
+        #[command(subcommand)]
+        action: McpCmd,
+    },
+}
+
+/// Safety policy of the MCP server, fixed at startup.
+#[derive(Args, Clone, Copy)]
+pub(crate) struct McpPolicy {
+    /// Expose read tools only (no actions)
+    #[arg(long, conflicts_with_all = ["allow_risky", "allow_raw"])]
+    read_only: bool,
+    /// Allow high-risk actions: doors, opening/closing gates, arming/disarming the alarm
+    #[arg(long)]
+    allow_risky: bool,
+    /// Expose the send_command tool for raw Loxone commands
+    #[arg(long)]
+    allow_raw: bool,
+}
+
+impl McpPolicy {
+    pub(crate) fn options(&self, dry_run: bool) -> mcp::ServerOptions {
+        mcp::ServerOptions {
+            read_only: self.read_only,
+            allow_risky: self.allow_risky,
+            allow_raw: self.allow_raw,
+            dry_run,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum McpCmd {
+    /// Run the MCP server on stdio (launched by the MCP client)
+    Serve {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
+    /// Print ready-to-paste MCP client configuration
+    Config {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
+    /// List the tools the server exposes under a policy
+    #[command(alias = "list")]
+    Tools {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1315,7 +1370,7 @@ pub(crate) enum ConfigCmd {
 // ── Error envelope ────────────────────────────────────────────────────────────
 
 /// Categorize an anyhow error into a machine-readable error code.
-fn categorize_error(e: &anyhow::Error) -> &'static str {
+pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
     let msg = format!("{:#}", e);
     let lower = msg.to_lowercase();
     if lower.contains("no control matching") {
@@ -1576,6 +1631,7 @@ fn run(cli: Cli) -> Result<()> {
             commands::config_cmd::cmd_completions(&ctx, shell, install)
         }
         Cmd::Schema { command } => commands::config_cmd::cmd_schema(&ctx, command),
+        Cmd::Mcp { action } => mcp::cmd_mcp(&ctx, action),
     }
 }
 
