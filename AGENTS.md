@@ -67,7 +67,7 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 
 **Mixed sync/async**: The CLI commands use `reqwest::blocking`. `main.rs` uses `#[tokio::main]` because `lox token fetch` needs async (WebSocket for the key exchange). The blocking reqwest client spawns its own thread pool so both modes coexist.
 
-**Token auth**: RSA public key fetched from Miniserver → encrypt AES session key → send encrypted credentials via WebSocket → receive token. Token stored per-context (e.g. `~/.lox/contexts/<name>/token.json`), valid ~20 days.
+**Token auth** (`src/token.rs`): RSA public key fetched over HTTP → RSA-encrypted AES session key sent via WS `keyexchange` → `getkey2` → HMAC credential hash (SHA-1 or SHA-256, following the `hashAlg` the Miniserver reports) → `gettoken`. Token stored per-context (e.g. `~/.lox/contexts/<name>/token.json`, mode 0600), valid ~20 days. WebSocket sessions (`lox stream`, `otel`, TUI) reuse the stored token via `authwithtoken` and only fall back to `gettoken` when it is missing, expired or rejected. HTTP requests still use Basic auth.
 
 ### User data layout
 
@@ -124,7 +124,7 @@ UDP :7070                           → Miniserver discovery (broadcast)
 HTTP :7091/zone/{n}/{cmd}           → Music server API (unofficial)
 ```
 
-TLS: `danger_accept_invalid_certs(true)` is used throughout (Miniserver uses self-signed certs). When `serial` is set in config, `Config::tls_host()` generates the DynDNS hostname for valid cert matching.
+TLS: certificate verification is off unless `verify_ssl: true` is set (Miniservers use self-signed certs); the WebSocket connector (`src/ws.rs`) always skips verification. `serial` is only used for the OTel `device.id` and the gitops directory name; there is no DynDNS hostname generation.
 
 ## Agent Workflow
 
