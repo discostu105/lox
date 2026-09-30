@@ -119,7 +119,7 @@ Project-local (auto-discovered by walking up from cwd):
 
 ## TLS
 
-Self-signed certificates are accepted (`danger_accept_invalid_certs(true)`) since Miniservers use self-signed certs. When `serial` is set in config, `Config::tls_host()` generates the DynDNS hostname for valid certificate matching.
+Self-signed certificates are accepted (certificate verification is off unless `verify_ssl: true` is set) since Miniservers use self-signed certs.
 
 ## Loxone HTTP API
 

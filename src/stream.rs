@@ -5,20 +5,14 @@
 
 use anyhow::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac};
-use rand::RngCore;
-use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
 use serde_json::Value;
-use sha1::Sha1 as Sha1Digest;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::config::Config;
+use crate::token::WsStream;
 use crate::ws::LoxWsClient;
-
-type HmacSha256 = Hmac<Sha256>;
 
 // ── Binary message types ────────────────────────────────────────────────────
 
@@ -565,248 +559,94 @@ pub fn parse_binary_payload(msg_type: u8, data: &[u8]) -> Result<Vec<StateEvent>
 
 // ── WebSocket streaming ─────────────────────────────────────────────────────
 
-/// Connect to the Miniserver WebSocket, subscribe to state updates,
-/// and call `handler` for each batch of state events.
+/// Authenticate a freshly opened WebSocket session.
 ///
-/// This function runs until the connection is closed or an error occurs.
-/// Authenticate on the WebSocket using RSA key exchange + AES encryption.
-/// This is required before any commands (like enablebinstatusupdate) are accepted.
-///
-/// The entire auth flow happens on the same WebSocket connection:
-/// 1. Fetch RSA public key via WS
-/// 2. Key exchange (send RSA-encrypted AES session key)
-/// 3. Request getkey2 via WS (one-time key is session-specific)
-/// 4. Compute HMAC and send encrypted authenticate command
-pub async fn ws_authenticate(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    cfg: &Config,
-) -> Result<()> {
-    // 1. Fetch RSA public key via HTTP (WS doesn't support this command)
-    let cfg2 = cfg.clone();
-    let pub_key_pem: String = tokio::task::spawn_blocking(move || -> Result<String> {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(crate::client::USER_AGENT)
-            .danger_accept_invalid_certs(true)
-            .build()?;
-        let resp: serde_json::Value = client
-            .get(format!("{}/jdev/sys/getPublicKey", cfg2.host))
-            .basic_auth(&cfg2.user, Some(&cfg2.pass))
-            .send()?
-            .json()?;
-        Ok(resp
-            .pointer("/LL/value")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("no public key"))?
-            .to_string())
-    })
-    .await??;
-
-    // Parse RSA public key (Loxone mis-labels as CERTIFICATE)
-    let pub_key: RsaPublicKey = {
-        let b64: String = pub_key_pem
-            .replace("-----BEGIN CERTIFICATE-----", "")
-            .replace("-----END CERTIFICATE-----", "")
-            .replace("-----BEGIN PUBLIC KEY-----", "")
-            .replace("-----END PUBLIC KEY-----", "")
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
-        for chunk in b64.as_bytes().chunks(64) {
-            pem.push_str(std::str::from_utf8(chunk).unwrap_or(""));
-            pem.push('\n');
-        }
-        pem.push_str("-----END PUBLIC KEY-----");
-        RsaPublicKey::from_public_key_pem(&pem).map_err(|e| anyhow::anyhow!("RSA parse: {}", e))?
-    };
-
-    // 2. Generate AES-256 key + IV
-    let mut aes_key = [0u8; 32];
-    let mut aes_iv = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut aes_key);
-    rand::thread_rng().fill_bytes(&mut aes_iv);
-    let key_info = format!("{}:{}", hex::encode(aes_key), hex::encode(aes_iv));
-
-    // 3. RSA-encrypt key info and do key exchange
-    let encrypted_b64 = {
-        let enc = pub_key.encrypt(
-            &mut rand::thread_rng(),
-            Pkcs1v15Encrypt,
-            key_info.as_bytes(),
-        )?;
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc)
-    };
-    ws.send(Message::Text(format!(
-        "jdev/sys/keyexchange/{}",
-        encrypted_b64
-    )))
-    .await?;
-    ws_expect_code_200(ws, "keyexchange").await?;
-
-    // 4. Get one-time HMAC key over WS
-    ws.send(Message::Text(format!("jdev/sys/getkey2/{}", cfg.user)))
-        .await?;
-    let key2_json = ws_read_text_value(ws, "getkey2").await?;
-    let key2_val: Value = serde_json::from_str(&key2_json).unwrap_or_default();
-
-    let key_hex = key2_val.get("key").and_then(|v| v.as_str()).unwrap_or("");
-    let salt_hex = key2_val.get("salt").and_then(|v| v.as_str()).unwrap_or("");
-    let hash_alg = key2_val
-        .get("hashAlg")
-        .and_then(|v| v.as_str())
-        .unwrap_or("SHA1");
-
-    let key_b = hex::decode(key_hex)?;
-
-    // 5. Compute HMAC signature per lxcommunicator protocol:
-    //    pwHash = hashAlg(password + ":" + salt_hex).toUpperCase()
-    //    sig = HMAC-hashAlg(hex_decode(key), "user:" + pwHash)
-    //    Note: salt is used as raw hex string (NOT hex-decoded)
-    let pw_hash = if hash_alg == "SHA256" {
-        format!(
-            "{:X}",
-            Sha256::digest(format!("{}:{}", cfg.pass, salt_hex).as_bytes())
-        )
-    } else {
-        let mut h1 = Sha1Digest::new();
-        h1.update(format!("{}:{}", cfg.pass, salt_hex).as_bytes());
-        format!("{:X}", h1.finalize())
-    };
-    let mut mac = HmacSha256::new_from_slice(&key_b)?;
-    mac.update(format!("{}:{}", cfg.user, pw_hash).as_bytes());
-    let sig = hex::encode(mac.finalize().into_bytes());
-
-    // 6. Send gettoken command
-    let client_uuid = uuid::Uuid::new_v4().to_string();
-    let cmd = format!(
-        "jdev/sys/gettoken/{}/{}/4/{}/lox-cli",
-        sig, cfg.user, client_uuid
-    );
-    ws.send(Message::Text(cmd)).await?;
-    ws_expect_code_200(ws, "gettoken").await?;
-
-    Ok(())
+/// Required before any commands (like enablebinstatusupdate) are accepted.
+/// Reuses the stored token (`authwithtoken`) and only requests a new one when
+/// there is none or it was rejected — see [`crate::token::authenticate_ws`].
+pub async fn ws_authenticate(ws: &mut WsStream, cfg: &Config) -> Result<()> {
+    crate::token::authenticate_ws(ws, cfg).await
 }
 
-/// Read a text response from the WS, returning the "value" field as a string.
-/// Skips binary messages. If the value is an object, returns it as JSON.
-async fn ws_read_text_value(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    label: &str,
-) -> Result<String> {
-    for _ in 0..10 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
-            Ok(Some(Ok(Message::Text(t)))) => {
-                let v: Value = serde_json::from_str(&t).unwrap_or_default();
-                let code = v
-                    .pointer("/LL/Code")
-                    .or_else(|| v.pointer("/LL/code"))
-                    .and_then(|c| {
-                        c.as_str()
-                            .map(|s| s.to_string())
-                            .or_else(|| c.as_i64().map(|n| n.to_string()))
-                    })
-                    .unwrap_or_else(|| "0".to_string());
-                if code == "200" {
-                    let val = v.pointer("/LL/value").unwrap_or(&Value::Null);
-                    return if val.is_string() {
-                        Ok(val.as_str().unwrap().to_string())
-                    } else {
-                        Ok(val.to_string())
-                    };
-                }
-                if code != "0" {
-                    bail!("{} failed ({}): {}", label, code, t);
-                }
-            }
-            Ok(Some(Ok(Message::Binary(_)))) => continue,
-            Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
-            _ => bail!("WS timeout during {}", label),
-        }
-    }
-    bail!("{}: no response after 10 messages", label)
-}
-
-/// Read WS messages until we get a text response with code 200.
-async fn ws_expect_code_200(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    label: &str,
-) -> Result<()> {
-    for _ in 0..10 {
-        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
-            Ok(Some(Ok(Message::Text(t)))) => {
-                let v: Value = serde_json::from_str(&t).unwrap_or_default();
-                let code = v
-                    .pointer("/LL/Code")
-                    .or_else(|| v.pointer("/LL/code"))
-                    .and_then(|c| {
-                        c.as_str()
-                            .map(|s| s.to_string())
-                            .or_else(|| c.as_i64().map(|n| n.to_string()))
-                    })
-                    .unwrap_or_else(|| "0".to_string());
-                if code == "200" {
-                    return Ok(());
-                }
-                if code != "0" {
-                    bail!("{} failed ({}): {}", label, code, t);
-                }
-            }
-            Ok(Some(Ok(Message::Binary(_)))) => continue,
-            Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
-            _ => bail!("WS timeout during {}", label),
-        }
-    }
-    bail!("{}: no 200 response after 10 messages", label)
-}
-
-pub async fn stream_events<F>(cfg: &Config, mut handler: F) -> Result<()>
-where
-    F: FnMut(Vec<StateEvent>) -> Result<()>,
-{
+/// Connect, authenticate and subscribe to binary status updates.
+async fn open_subscribed(cfg: &Config) -> Result<WsStream> {
     let ws_client = LoxWsClient::new(cfg.clone());
-    let (mut ws_stream, _resp) = ws_client.connect_raw().await?;
-
-    // Authenticate on the WebSocket.
-    ws_authenticate(&mut ws_stream, cfg).await?;
-
-    // Subscribe to binary status updates
-    ws_stream
-        .send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
+    let (mut ws, _resp) = ws_client.connect_raw().await?;
+    let reuse_rejected_before = crate::token::token_reuse_rejected();
+    if let Err(e) = ws_authenticate(&mut ws, cfg).await {
+        // The stored token was just rejected and the fallback `gettoken` failed
+        // on the same socket (the Miniserver may close it after a failed
+        // login): retry once on a fresh connection, which skips the token.
+        if reuse_rejected_before || !crate::token::token_reuse_rejected() {
+            return Err(e);
+        }
+        ws = ws_client.connect_raw().await?.0;
+        ws_authenticate(&mut ws, cfg).await?;
+    }
+    ws.send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
         .await?;
+    Ok(ws)
+}
 
+/// Keepalive interval: the Miniserver drops sockets that send nothing for ~5 min.
+const KEEPALIVE_SECS: u64 = 30;
+/// No traffic at all (keepalive answers included) for this long: dead socket.
+const DEAD_SOCKET_SECS: u64 = 90;
+
+/// Drive a subscribed socket: frame the binary state tables, answer pings and
+/// send a keepalive every [`KEEPALIVE_SECS`]. `on_events` returns `Ok(false)`
+/// to stop. Returns `Ok(())` when stopped or when the server closed the socket.
+async fn pump<F>(ws: &mut WsStream, mut on_events: F) -> Result<()>
+where
+    F: FnMut(Vec<StateEvent>) -> Result<bool>,
+{
     // The Loxone protocol sends messages in pairs:
     // 1. A binary header (8 bytes) telling us the type and size of the next payload
     // 2. The payload (binary or text)
     let mut framer = Framer::default();
-
-    while let Some(msg) = ws_stream.next().await {
+    let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
+    keepalive.tick().await;
+    let mut last_rx = tokio::time::Instant::now();
+    loop {
+        let msg = tokio::select! {
+            _ = keepalive.tick() => {
+                if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
+                    bail!("connection timed out");
+                }
+                ws.send(Message::Text("keepalive".to_string())).await?;
+                continue;
+            }
+            m = ws.next() => m,
+        };
+        let Some(msg) = msg else { return Ok(()) };
+        last_rx = tokio::time::Instant::now();
         match msg? {
             Message::Binary(data) => {
                 let events = framer.binary(&data)?;
-                if !events.is_empty() {
-                    handler(events)?;
+                if !events.is_empty() && !on_events(events)? {
+                    return Ok(());
                 }
             }
             // command ACKs etc. — skipped for streaming
             Message::Text(_) => framer.text(),
-            Message::Ping(data) => {
-                ws_stream.send(Message::Pong(data)).await?;
-            }
-            Message::Close(_) => {
-                break;
-            }
+            Message::Ping(data) => ws.send(Message::Pong(data)).await?,
+            Message::Close(_) => return Ok(()),
             _ => {}
         }
     }
+}
 
-    Ok(())
+/// Connect to the Miniserver WebSocket, subscribe to state updates,
+/// and call `handler` for each batch of state events.
+///
+/// Runs until the connection is closed or an error occurs; keepalives keep an
+/// otherwise idle socket open.
+pub async fn stream_events<F>(cfg: &Config, mut handler: F) -> Result<()>
+where
+    F: FnMut(Vec<StateEvent>) -> Result<()>,
+{
+    let mut ws = open_subscribed(cfg).await?;
+    pump(&mut ws, |events| handler(events).map(|()| true)).await
 }
 
 /// A long-lived stream session for interactive use (`lox tui`): like
@@ -825,20 +665,12 @@ pub async fn stream_session<F>(
 where
     F: FnMut(Vec<StateEvent>) -> bool,
 {
-    let setup = async {
-        let ws_client = LoxWsClient::new(cfg.clone());
-        let (mut ws, _resp) = ws_client.connect_raw().await?;
-        ws_authenticate(&mut ws, cfg).await?;
-        ws.send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
-            .await?;
-        anyhow::Ok(ws)
-    };
-    let mut ws = tokio::time::timeout(Duration::from_secs(20), setup)
+    let mut ws = tokio::time::timeout(Duration::from_secs(20), open_subscribed(cfg))
         .await
         .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     on_live();
 
-    let mut keepalive = tokio::time::interval(Duration::from_secs(30));
+    let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
     keepalive.tick().await;
     let mut framer = Framer::default();
     let mut last_rx = tokio::time::Instant::now();
@@ -847,7 +679,7 @@ where
             _ = stop.changed() => return Ok(()),
             _ = keepalive.tick() => {
                 // No traffic at all for 90 s (keepalive answers included): dead socket
-                if last_rx.elapsed() > Duration::from_secs(90) {
+                if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
                     bail!("connection timed out");
                 }
                 ws.send(Message::Text("keepalive".to_string())).await?;
@@ -884,38 +716,14 @@ pub async fn stream_events_until<F, T>(cfg: &Config, mut finder: F) -> Result<T>
 where
     F: FnMut(&StateEvent) -> Option<T>,
 {
-    let ws_client = LoxWsClient::new(cfg.clone());
-    let (mut ws_stream, _resp) = ws_client.connect_raw().await?;
-
-    ws_authenticate(&mut ws_stream, cfg).await?;
-
-    ws_stream
-        .send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
-        .await?;
-
-    let mut framer = Framer::default();
-
-    while let Some(msg) = ws_stream.next().await {
-        match msg? {
-            Message::Binary(data) => {
-                for event in &framer.binary(&data)? {
-                    if let Some(result) = finder(event) {
-                        return Ok(result);
-                    }
-                }
-            }
-            Message::Text(_) => framer.text(),
-            Message::Ping(data) => {
-                ws_stream.send(Message::Pong(data)).await?;
-            }
-            Message::Close(_) => {
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    bail!("WebSocket closed before matching event was found")
+    let mut ws = open_subscribed(cfg).await?;
+    let mut found = None;
+    pump(&mut ws, |events| {
+        found = events.iter().find_map(&mut finder);
+        Ok(found.is_none())
+    })
+    .await?;
+    found.ok_or_else(|| anyhow::anyhow!("WebSocket closed before matching event was found"))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

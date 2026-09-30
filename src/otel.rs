@@ -33,6 +33,10 @@ use crate::client::LoxClient;
 use crate::config::Config;
 use crate::stream::{self, StateEvent, StateUuidInfo, WeatherEntry};
 
+/// `otel serve` WebSocket reconnect backoff bounds.
+const RECONNECT_MIN_SECS: u64 = 1;
+const RECONNECT_MAX_SECS: u64 = 60;
+
 // ── Interval parsing ────────────────────────────────────────────────────────
 
 /// Parse a human-friendly duration string (e.g. "30s", "5m", "1h").
@@ -851,7 +855,7 @@ pub fn serve(
 
     // WebSocket streaming keeps the runtime alive. The PeriodicReader's
     // tokio task runs in the background, exporting metrics at each interval.
-    rt.block_on(stream::stream_events(cfg, |events| {
+    let mut handler = |events: Vec<StateEvent>| -> Result<()> {
         // Process value states (update store + emit logs)
         {
             let mut state = store_ws.lock().unwrap();
@@ -908,7 +912,38 @@ pub fn serve(
         }
 
         Ok(())
-    }))?;
+    };
+
+    // A daemon: reconnect with backoff when the Miniserver drops the socket
+    // (reboot, network blip) instead of exiting. Ctrl+C stops it and flushes.
+    rt.block_on(async {
+        let mut backoff = RECONNECT_MIN_SECS;
+        loop {
+            let started = std::time::Instant::now();
+            let result = tokio::select! {
+                r = stream::stream_events(cfg, &mut handler) => r,
+                _ = tokio::signal::ctrl_c() => return,
+            };
+            if started.elapsed() > Duration::from_secs(60) {
+                backoff = RECONNECT_MIN_SECS;
+            }
+            match result {
+                Ok(()) => eprintln!(
+                    "[otel] WebSocket closed by Miniserver; reconnecting in {}s",
+                    backoff
+                ),
+                Err(e) => eprintln!(
+                    "[otel] WebSocket error: {:#}; reconnecting in {}s",
+                    e, backoff
+                ),
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
+                _ = tokio::signal::ctrl_c() => return,
+            }
+            backoff = (backoff * 2).min(RECONNECT_MAX_SECS);
+        }
+    });
 
     // Graceful shutdown
     metric_provider
