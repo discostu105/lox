@@ -200,3 +200,19 @@ lox schema                                # list all commands with metadata
 lox schema blind                          # schema for a specific command
 lox schema -o json                        # JSON for programmatic use
 ```
+
+---
+
+## MCP server
+
+Expose `lox` to MCP clients (Claude Desktop, ChatGPT, Cursor, Claude Code, …):
+
+```bash
+lox mcp serve                             # stdio server (MCP 2026-07-28 + older), launched by the client
+lox mcp serve --read-only                 # read tools only
+lox mcp serve --allow-risky               # doors, gates, alarm without asking the user
+lox mcp config                            # print client config snippets
+lox mcp tools                             # list exposed tools
+```
+
+See the [AI agent guide](../guides/ai-agents#mcp-server) for tools and the safety model.

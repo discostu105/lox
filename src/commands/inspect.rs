@@ -481,6 +481,35 @@ pub fn cmd_modes(ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
+/// Does a control type belong to a sensor kind (`temperature`, `door-window`,
+/// `motion`, `smoke`; anything else means all sensor types)?
+/// Shared by `lox sensors` and the MCP `list_sensors` tool.
+pub fn is_sensor_type(kind: &str, typ: &str) -> bool {
+    match kind {
+        "temperature" | "temp" => typ == "InfoOnlyAnalog",
+        "door-window" | "doorwindow" => typ == "InfoOnlyDigital",
+        "motion" => matches!(typ, "PresenceDetector" | "MotionSensor"),
+        "smoke" => typ == "SmokeAlarm",
+        _ => matches!(
+            typ,
+            "InfoOnlyAnalog"
+                | "InfoOnlyDigital"
+                | "PresenceDetector"
+                | "MotionSensor"
+                | "SmokeAlarm"
+                | "Meter"
+        ),
+    }
+}
+
+/// Energy meters and managers (`lox energy`, MCP `list_sensors kind=energy`).
+pub fn is_energy_type(typ: &str) -> bool {
+    matches!(
+        typ,
+        "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
+    ) || typ.contains("Energy")
+}
+
 pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
     let type_lower = r#type.to_lowercase();
@@ -494,23 +523,7 @@ pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Re
     let controls = lox.list_controls(type_filter, room.as_deref())?;
     let filtered: Vec<_> = controls
         .iter()
-        .filter(|c| match type_lower.as_str() {
-            "temperature" | "temp" => c.typ == "InfoOnlyAnalog",
-            "door-window" | "doorwindow" => c.typ == "InfoOnlyDigital",
-            "motion" => {
-                matches!(c.typ.as_str(), "PresenceDetector" | "MotionSensor")
-            }
-            "smoke" => c.typ == "SmokeAlarm",
-            _ => matches!(
-                c.typ.as_str(),
-                "InfoOnlyAnalog"
-                    | "InfoOnlyDigital"
-                    | "PresenceDetector"
-                    | "MotionSensor"
-                    | "SmokeAlarm"
-                    | "Meter"
-            ),
-        })
+        .filter(|c| is_sensor_type(&type_lower, &c.typ))
         .collect();
     if ctx.json {
         let mut arr = Vec::new();
@@ -549,15 +562,7 @@ pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Re
 pub fn cmd_energy(ctx: &RunContext, room: Option<String>) -> Result<()> {
     let mut lox = LoxClient::new(Config::load()?)?;
     let controls = lox.list_controls(None, room.as_deref())?;
-    let energy: Vec<_> = controls
-        .iter()
-        .filter(|c| {
-            matches!(
-                c.typ.as_str(),
-                "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
-            ) || c.typ.contains("Energy")
-        })
-        .collect();
+    let energy: Vec<_> = controls.iter().filter(|c| is_energy_type(&c.typ)).collect();
     if ctx.json {
         let mut arr = Vec::new();
         for c in &energy {

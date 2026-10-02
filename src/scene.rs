@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneStep {
     pub control: String,
     pub cmd: String,

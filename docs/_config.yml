@@ -23,6 +23,7 @@ exclude:
   - autopilot-design.md
   - design-backup.md
   - design-backup-inspect.md
+  - design-mcp.md
   - design-tui.md
   - design-tui-mockups.html
   - loxone-config-research.md
