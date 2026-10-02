@@ -242,7 +242,7 @@ impl Scalar {
 pub struct LightParams {
     #[serde(flatten)]
     pub target: Target,
-    /// mood (lighting controller), dim (0-100), or color (color picker)
+    /// mood (lighting controller), dim (dimmer, 0-100), or color (color picker)
     pub action: LightAction,
     /// mood: plus | minus | off | <mood id>; dim: 0-100; color: #RRGGBB | hsv(h,s,v) | temp(brightness,kelvin)
     pub value: Scalar,
@@ -826,7 +826,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Control lights",
-        description = "Change a light: switch a lighting controller's mood (plus, minus, off, or a mood ID from list_light_moods), dim (0-100), or set a color (#RRGGBB, hsv(h,s,v), or temp(brightness,kelvin)) on a color picker.",
+        description = "Change a light: switch a lighting controller's mood (plus, minus, off, or a mood ID from list_light_moods), dim a dimmer (0-100), or set a color (#RRGGBB, hsv(h,s,v), or temp(brightness,kelvin)) on a color picker.",
         output_schema = schema_for_output::<ActionResult>(),
         annotations(read_only_hint = false, destructive_hint = false, open_world_hint = false)
     )]

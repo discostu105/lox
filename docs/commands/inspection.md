@@ -134,7 +134,7 @@ lox modes                             # operating modes
 
 ```bash
 lox sensors                           # all sensor readings
-lox sensors --type temperature        # temperature sensors only
+lox sensors --type temperature        # temperature sensors only (by unit: °)
 lox sensors --type door-window        # door/window sensors
 lox sensors --type motion             # motion sensors
 lox sensors --type smoke              # smoke detectors

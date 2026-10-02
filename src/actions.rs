@@ -338,6 +338,8 @@ impl Action {
                 "LightController",
                 "CentralLightController",
             ]),
+            // a LightControllerV2 ignores a bare level and still answers 200
+            Action::Dim(_) => Some(&["Dimmer", "EIBDimmer"]),
             Action::Color(_) => Some(&["ColorPickerV2", "ColorPicker"]),
             Action::Gate(_) => Some(&["Gate", "CentralGate"]),
             Action::Thermostat(_) => Some(&["IRoomControllerV2", "IRoomController", "Fronius"]),
@@ -363,6 +365,10 @@ impl Action {
             let what = match self {
                 Action::Blind(_) => "a Jalousie",
                 Action::Mood(_) => "a LightController",
+                Action::Dim(_) if typ.contains("LightController") => {
+                    "a Dimmer; switch a lighting controller with a mood instead"
+                }
+                Action::Dim(_) => "a Dimmer",
                 Action::Color(_) => "a ColorPicker",
                 Action::Gate(_) => "a Gate",
                 Action::Thermostat(_) => "a room controller",
@@ -685,6 +691,10 @@ mod tests {
         assert_eq!(cmds(&Action::Pulse), ["pulse"]);
         assert_eq!(cmds(&parse_dim(40.0).unwrap()), ["40"]);
         assert!(parse_dim(-1.0).is_err());
+        let dim = parse_dim(40.0).unwrap();
+        assert!(dim.check_type("Spots", "Dimmer").is_ok());
+        let err = dim.check_type("Büro", "LightControllerV2").unwrap_err();
+        assert!(err.to_string().contains("mood"), "{err}");
         assert_eq!(cmds(&parse_gate("open").unwrap()), ["open"]);
         assert_eq!(cmds(&parse_door("lock").unwrap()), ["on"]);
         assert_eq!(cmds(&parse_door("unlock").unwrap()), ["off"]);

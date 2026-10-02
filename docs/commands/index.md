@@ -38,6 +38,7 @@ lox get "Temperatur [OG Schlafzimmer]"
 ```
 
 Resolution order: alias > exact UUID > bracket room qualifier > `--room` flag > fuzzy substring.
+When several controls match, one whose name matches exactly wins (`Zentral` over `Jalousie Zentral`).
 
 ## Dry-run mode
 

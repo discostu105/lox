@@ -123,7 +123,11 @@ The policy is fixed when the server starts; the model cannot change it.
 
 **What is risky.** `Action::risk() == Risk::Confirm` (the set the TUI asks to confirm), plus any
 generic action (`on`, `off`, `pulse`, raw, value) aimed at a door lock, gate or alarm, so `switch off`
-on a door lock or a raw `open` to a gate cannot bypass the gate. Dry runs are never gated; they report
+on a door lock or a raw `open` to a gate cannot bypass the gate. Installations often wire a door opener
+as a plain `Pushbutton` or `Switch` (e.g. "Tür öffnen" in an access category), so generic actions are
+also gated on controls whose icon or category icon names a door, gate, garage, lock or key
+(`IconsFilled/door-open.svg`, `login-key.svg`; category names are user-chosen and localized, icons are
+not), and on controls Loxone marks `isSecured`. Dry runs are never gated; they report
 `needs_confirmation: true`.
 
 **How the user confirms.** The question goes to the human through the client's UI, never to the model:

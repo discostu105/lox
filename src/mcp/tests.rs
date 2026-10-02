@@ -28,21 +28,34 @@ const DOOR: &str = "0f1e2d3c-0003-1111-ffff000000000003";
 const TEMP: &str = "0f1e2d3c-0004-1111-ffff000000000004";
 const SWITCH: &str = "0f1e2d3c-0005-1111-ffff000000000005";
 const ALARM: &str = "0f1e2d3c-0006-1111-ffff000000000006";
+const THERMO: &str = "0f1e2d3c-0007-1111-ffff000000000007";
+const OPENER: &str = "0f1e2d3c-0008-1111-ffff000000000008";
 
 fn structure() -> Value {
     json!({
         "rooms": {
             "r1": { "name": "Wohnzimmer" },
             "r2": { "name": "Küche" },
+            "r3": { "name": "Zentral" },
         },
-        "cats": { "c1": { "name": "Beleuchtung" } },
+        "cats": {
+            "c1": { "name": "Beleuchtung", "image": "IconsFilled/lightbulb-3.svg" },
+            "c2": { "name": "Zutritt", "image": "IconsFilled/door-open.svg" },
+        },
         "controls": {
             LIGHT: { "name": "Licht Wohnzimmer", "type": "LightControllerV2", "room": "r1", "cat": "c1" },
             BLIND: { "name": "Beschattung Süd", "type": "Jalousie", "room": "r1" },
             DOOR: { "name": "Haustür", "type": "DoorLock", "room": "r1" },
-            TEMP: { "name": "Temperatur", "type": "InfoOnlyAnalog", "room": "r2" },
+            TEMP: { "name": "Temperatur", "type": "InfoOnlyAnalog", "room": "r2", "details": { "format": "%.1f°" } },
+            "0f1e2d3c-0009-1111-ffff000000000009": { "name": "CO2", "type": "InfoOnlyAnalog", "room": "r2", "details": { "format": "%.0fppm" } },
             SWITCH: { "name": "Licht Küche", "type": "Switch", "room": "r2", "cat": "c1" },
             ALARM: { "name": "Alarmanlage", "type": "Alarm", "room": "r1" },
+            // a real installation: the thermostat is named like its room, and the
+            // front door opener is a plain push-button in an access category
+            THERMO: { "name": "Zentral", "type": "IRoomControllerV2", "room": "r3" },
+            "0f1e2d3c-000a-1111-ffff00000000000a": { "name": "Jalousie Zentral", "type": "Jalousie", "room": "r3" },
+            "0f1e2d3c-000b-1111-ffff00000000000b": { "name": "Spots Küche", "type": "Dimmer", "room": "r2" },
+            OPENER: { "name": "Tür öffnen", "type": "Pushbutton", "room": "r3", "cat": "c2" },
         }
     })
 }
@@ -424,7 +437,7 @@ async fn list_rooms_counts_controls() {
     let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
     let (out, err) = call(&client, "list_rooms", json!({})).await;
     assert!(!err, "{}", out);
-    assert_eq!(out["count"], 2);
+    assert_eq!(out["count"], 3);
     let wz = out["rooms"]
         .as_array()
         .unwrap()
@@ -482,11 +495,51 @@ async fn ambiguous_and_unknown_names_are_tool_errors_with_codes() {
     let (out, err) = call(&client, "get_control", json!({ "name": "Licht" })).await;
     assert!(err);
     assert_eq!(out["error"], "ambiguous_control");
-    assert!(out["message"].as_str().unwrap().contains("Licht Küche"));
+    let message = out["message"].as_str().unwrap();
+    assert!(message.contains("Licht Küche"));
+    assert!(message.contains("Pass `room`"), "{message}");
+    assert!(!message.contains("--room"), "CLI wording: {message}");
 
     let (out, err) = call(&client, "get_control", json!({ "name": "Sauna" })).await;
     assert!(err);
     assert_eq!(out["error"], "control_not_found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_exact_name_wins_over_names_containing_it() {
+    // "Zentral" is also inside "Jalousie Zentral"; the thermostat is still addressable
+    let ms = miniserver().await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    for args in [
+        json!({ "name": "Zentral", "action": "temp", "value": 21.5, "dry_run": true }),
+        json!({ "name": "zentral", "room": "Zentral", "action": "temp", "value": 21.5, "dry_run": true }),
+    ] {
+        let (out, err) = call(&client, "thermostat", args).await;
+        assert!(!err, "{}", out);
+        assert_eq!(out["control"]["uuid"], THERMO);
+    }
+    // a partial name is still ambiguous
+    let (out, err) = call(&client, "get_control", json!({ "name": "Zentr" })).await;
+    assert!(err, "{}", out);
+    assert_eq!(out["error"], "ambiguous_control");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dim_on_a_lighting_controller_is_refused() {
+    // a LightControllerV2 ignores a bare level but answers 200: don't report success
+    let ms = miniserver().await;
+    let m = any_command(&ms).await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    let (out, err) = call(
+        &client,
+        "light",
+        json!({ "name": "Licht Wohnzimmer", "action": "dim", "value": 40 }),
+    )
+    .await;
+    assert!(err, "{}", out);
+    assert_eq!(out["error"], "invalid_arguments");
+    assert!(out["message"].as_str().unwrap().contains("mood"), "{}", out);
+    m.assert_hits_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -675,7 +728,7 @@ async fn light_mood_and_dim() {
     let (out, err) = call(
         &client,
         "light",
-        json!({ "name": "Licht Küche", "action": "dim", "value": 30, "dry_run": true }),
+        json!({ "name": "Spots Küche", "action": "dim", "value": 30, "dry_run": true }),
     )
     .await;
     assert!(!err, "{}", out);
@@ -812,6 +865,37 @@ async fn generic_actions_on_risky_controls_need_confirmation_too() {
     assert!(err, "{}", out);
     assert_eq!(out["error"], "action_not_allowed");
     m.assert_hits_async(0).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn door_opener_push_buttons_need_confirmation() {
+    // "Tür öffnen" is a Pushbutton, but its category icon says door
+    for lifecycle in BOTH {
+        let ms = miniserver().await;
+        let m = any_command(&ms).await;
+        let (client, _) = confirm_session(&ms, lifecycle, UserAnswer::CannotAsk).await;
+        let (out, err) = call(
+            &client,
+            "switch",
+            json!({ "name": "Tür öffnen", "state": "pulse" }),
+        )
+        .await;
+        assert!(err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["error"], "action_not_allowed");
+        m.assert_hits_async(0).await;
+    }
+    // an ordinary switch is not gated
+    let ms = miniserver().await;
+    let m = command(&ms, SWITCH, "pulse").await;
+    let (client, _) = confirm_session(&ms, Lifecycle::Modern, UserAnswer::CannotAsk).await;
+    let (out, err) = call(
+        &client,
+        "switch",
+        json!({ "name": "Licht Küche", "state": "pulse" }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    m.assert_hits_async(1).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
