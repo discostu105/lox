@@ -127,7 +127,16 @@ on a door lock or a raw `open` to a gate cannot bypass the gate. Installations o
 as a plain `Pushbutton` or `Switch` (e.g. "Tür öffnen" in an access category), so generic actions are
 also gated on controls whose icon or category icon names a door, gate, garage, lock or key
 (`IconsFilled/door-open.svg`, `login-key.svg`; category names are user-chosen and localized, icons are
-not), and on controls Loxone marks `isSecured`. Dry runs are never gated; they report
+not), and on controls Loxone marks `isSecured`. Finally, the user can list any control under
+`confirm:` in the `lox` config (UUID, alias, or case-insensitive name substring with an optional
+`[Room]`); every action on a listed control is confirmed, e.g. a pool cover:
+
+```yaml
+confirm:
+  - Pool Abdeckung [Pool]
+```
+
+`--allow-risky` skips all of these confirmations. Dry runs are never gated; they report
 `needs_confirmation: true`.
 
 **How the user confirms.** The question goes to the human through the client's UI, never to the model:
@@ -137,6 +146,7 @@ not), and on controls Loxone marks `isSecured`. Dry runs are never gated; they r
   command) and a `requestState`. The client asks the user and retries with `inputResponses`.
   The `requestState` is a random single-use nonce kept server-side for 10 minutes and bound to the
   control UUID and the exact commands, so it cannot be forged, replayed, or reused for another action.
+  Every action tool accepts the retry, since any of them can hit a confirmation.
 - **Older revisions — elicitation request.** The server sends `elicitation/create` during the call
   and waits up to 5 minutes for the answer.
 - **Clients without elicitation** get `action_not_allowed`, naming `--allow-risky` and the CLI command
@@ -154,13 +164,15 @@ Tool failures are results with `isError: true` whose text is the CLI error envel
 them and can correct itself:
 
 ```json
-{ "ok": false, "error": "ambiguous_control", "message": "Ambiguous: 'Licht'. Use [Room] qualifier or --room flag. …" }
+{ "ok": false, "error": "ambiguous_control", "message": "Ambiguous: 'Licht'. Pass `room`, write the name as 'Name [Room]', or use the UUID. …" }
 ```
 
 Codes match `lox -o json` (`control_not_found`, `ambiguous_control`, `config_not_found`,
 `unauthorized`, `connection_error`, …) plus `invalid_arguments`, `action_not_allowed`,
 `declined_by_user`, `confirmation_expired` and `confirmation_mismatch`. Arguments that do not match the
-input schema (wrong enum value, missing field) are tool errors too, not protocol errors.
+input schema (wrong enum value, missing field) are tool errors too, not protocol errors: rmcp's
+plain-text message is wrapped in the envelope as `invalid_arguments`
+(`"Invalid arguments: unknown variant `fly`, expected one of `up`, …"`).
 Protocol errors are left to rmcp (unknown tool, malformed request, unsupported protocol version).
 
 ## 7. State and lifetime

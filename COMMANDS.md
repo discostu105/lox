@@ -334,6 +334,14 @@ Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light
 (and `send_command` with `--allow-raw`). Every tool has input and output schemas; every action tool accepts `dry_run`.
 High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
+Door openers wired as push-buttons are recognized by their door/gate/lock/key icons. To have any other control confirmed
+(e.g. a pool cover), list it under `confirm:` in the config (UUID, alias, or name with an optional `[Room]`; shown by `lox setup show`):
+
+```yaml
+confirm:
+  - Pool Abdeckung [Pool]
+```
+
 Tool errors use the same envelope as `-o json`, plus `invalid_arguments`, `action_not_allowed`, `declined_by_user`,
 `confirmation_expired` and `confirmation_mismatch`.
 

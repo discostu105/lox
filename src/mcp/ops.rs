@@ -579,6 +579,34 @@ pub fn is_access_control(ctrl: &Control) -> bool {
     ctrl.is_secured || is_access_icon(&ctrl.icon) || is_access_icon(&ctrl.cat_icon)
 }
 
+/// Is this control on the user's `confirm:` list in the config? An entry matches
+/// the UUID, an alias of it, or the name as a case-insensitive substring with an
+/// optional `[Room]` qualifier ("Pool Abdeckung" covers both cover buttons).
+/// Over-matching only means one more question, so the match is deliberately loose.
+pub fn on_confirm_list(cfg: &Config, ctrl: &Control) -> bool {
+    let contains = |haystack: Option<&str>, needle: &str| {
+        haystack
+            .unwrap_or("")
+            .to_lowercase()
+            .contains(&needle.to_lowercase())
+    };
+    cfg.confirm.iter().map(|e| e.trim()).any(|entry| {
+        if entry.is_empty() {
+            return false;
+        }
+        if entry.eq_ignore_ascii_case(&ctrl.uuid) || cfg.aliases.get(entry) == Some(&ctrl.uuid) {
+            return true;
+        }
+        let (name, room) = match entry.strip_suffix(']').and_then(|e| e.rsplit_once('[')) {
+            Some((name, room)) => (name.trim(), Some(room.trim())),
+            None => (entry, None),
+        };
+        !name.is_empty()
+            && contains(Some(&ctrl.name), name)
+            && room.is_none_or(|r| contains(ctrl.room.as_deref(), r))
+    })
+}
+
 /// Does this action on this control need the user's confirmation?
 ///
 /// The action's own risk (doors, gate open/close, alarm arm/disarm), plus any
@@ -811,6 +839,33 @@ mod tests {
             };
             assert!(!needs_confirmation(&Action::Pulse, &c), "{icon}");
         }
+    }
+
+    #[test]
+    fn confirm_list_matches_uuid_alias_name_and_room() {
+        let cover = Control {
+            name: "Taster Pool Abdeckung Auf".into(),
+            uuid: "209765db-028a-3739-ffffed57184a04d2".into(),
+            room: Some("Pool".into()),
+            ..ctrl("Pushbutton")
+        };
+        let cfg = |entries: &[&str]| Config {
+            confirm: entries.iter().map(|e| e.to_string()).collect(),
+            aliases: [("cover".to_string(), cover.uuid.clone())].into(),
+            ..Default::default()
+        };
+        assert!(!on_confirm_list(&cfg(&[]), &cover));
+        assert!(on_confirm_list(&cfg(&["pool abdeckung"]), &cover));
+        assert!(on_confirm_list(&cfg(&["Pool Abdeckung [Pool]"]), &cover));
+        assert!(on_confirm_list(
+            &cfg(&["209765DB-028a-3739-ffffed57184a04d2"]),
+            &cover
+        ));
+        assert!(on_confirm_list(&cfg(&["cover"]), &cover));
+        assert!(!on_confirm_list(&cfg(&["Pool Abdeckung [Garten]"]), &cover));
+        assert!(!on_confirm_list(&cfg(&["Pumpe"]), &cover));
+        // a blank entry or a bare room must not match everything
+        assert!(!on_confirm_list(&cfg(&["", "  ", "[Pool]"]), &cover));
     }
 
     #[test]
