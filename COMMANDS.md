@@ -335,7 +335,8 @@ Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light
 High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
 Door openers wired as push-buttons are recognized by their door/gate/lock/key icons. To have any other control confirmed
-(e.g. a pool cover), list it under `confirm:` in the config (UUID, alias, or name with an optional `[Room]`; shown by `lox setup show`):
+(e.g. a pool cover), list it under `confirm:` in the config (UUID, alias, or name with an optional `[Room]`; shown by `lox setup show`).
+`lox tui` follows the same rules and asks before sending:
 
 ```yaml
 confirm:
@@ -428,7 +429,7 @@ lox --ctx office tui                   # another context; switch live with C or 
 ```
 
 Global `--no-color` (or `NO_COLOR`) selects the `mono` theme. Harmless actions (lights, blinds, moods) are
-instant; doors, gates, alarm and wallbox ask `y/N`; reboot and firmware update ask you to type the context name.
+instant; doors, gates, alarm, wallbox, door openers wired as push-buttons and controls on the config's `confirm:` list ask `y/N`; reboot and firmware update ask you to type the context name.
 
 Preferences live in `~/.lox/tui.yaml`:
 

@@ -459,6 +459,128 @@ fn j9_alarm_needs_confirmation() {
     assert_eq!(h.sends().len(), 1, "{:?}", h.fx);
 }
 
+/// The demo house plus what real installations have: a door opener wired as a
+/// plain push-button in a category with Loxone's door icon, and a pool cover.
+fn house_with_access_buttons() -> H {
+    let mut st = demo::structure();
+    let id_of = |st: &Value, key: &str, name: &str| {
+        st[key]
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, v)| v["name"] == name)
+            .map(|(k, _)| k.clone())
+            .unwrap()
+    };
+    let access = id_of(&st, "cats", "Access");
+    st["cats"][&access]["image"] = json!("IconsFilled/door-open.svg");
+    let (hallway, garden) = (
+        id_of(&st, "rooms", "Hallway"),
+        id_of(&st, "rooms", "Garden"),
+    );
+    let climate = id_of(&st, "cats", "Climate");
+    for (uuid, name, room, cat, state) in [
+        (
+            "1f00a0a0-0001-0000-ffff000000000001",
+            "Door opener",
+            &hallway,
+            &access,
+            "1f00a0a0-0001-0000-ffff0000000000f1",
+        ),
+        (
+            "1f00a0a0-0002-0000-ffff000000000002",
+            "Pool cover open",
+            &garden,
+            &climate,
+            "1f00a0a0-0002-0000-ffff0000000000f2",
+        ),
+    ] {
+        st["controls"][uuid] = json!({
+            "name": name, "type": "Pushbutton", "uuidAction": uuid, "room": room, "cat": cat,
+            "isFavorite": false, "isSecured": false, "states": { "active": state }, "details": {},
+        });
+    }
+    H::from_structure(
+        &st,
+        Opts {
+            read_only: false,
+            demo: true,
+            mouse: true,
+            motion: false,
+            nerd: false,
+        },
+        ThemeName::Night,
+        Depth::TrueColor,
+    )
+}
+
+/// J9b: a door opener wired as a push-button asks first, like the door lock.
+#[test]
+fn j9b_door_opener_push_button_needs_confirmation() {
+    let mut h = house_with_access_buttons();
+    let opener = h.cid("Door opener", "Hallway");
+    h.keys(&["2", "/"]).typed("hallway").keys(&["Enter", "l"]);
+    h.select(opener);
+    h.keys(&["Space"]);
+    assert!(h.sends().is_empty(), "nothing sent before confirming");
+    assert!(matches!(h.app.overlays.last(), Some(Overlay::Confirm(_))));
+    h.keys(&["y"]);
+    assert_eq!(
+        h.sends(),
+        vec![(
+            h.app.house.ctrls[opener].uuid.clone(),
+            vec!["pulse".to_string()]
+        )]
+    );
+}
+
+/// J9c: controls on the config's `confirm:` list ask first; others don't.
+#[test]
+fn j9c_confirm_list() {
+    let mut h = house_with_access_buttons();
+    let cover = h.cid("Pool cover", "Garden");
+    h.keys(&["2", "/"]).typed("garden").keys(&["Enter", "l"]);
+    h.select(cover);
+    h.keys(&["Space"]);
+    assert_eq!(h.sends().len(), 1, "not listed: sent straight away");
+
+    let mut h = house_with_access_buttons();
+    h.app
+        .house
+        .apply_confirm_list(&["pool cover [garden]".to_string()], &Default::default());
+    h.keys(&["2", "/"]).typed("garden").keys(&["Enter", "l"]);
+    h.select(cover);
+    h.keys(&["Space"]);
+    assert!(
+        h.sends().is_empty(),
+        "listed: nothing sent before confirming"
+    );
+    assert!(matches!(h.app.overlays.last(), Some(Overlay::Confirm(_))));
+    h.keys(&["Esc"]);
+    assert!(h.sends().is_empty(), "cancelled");
+}
+
+/// A listed control's sub-controls (e.g. a lighting controller's circuits) are listed too.
+#[test]
+fn confirm_list_covers_sub_controls() {
+    let mut h = H::new();
+    let parent = (0..h.app.house.ctrls.len())
+        .find(|&c| !h.app.house.ctrls[c].subs.is_empty())
+        .expect("demo has a control with sub-controls");
+    let uuid = h.app.house.ctrls[parent].uuid.clone();
+    h.app.house.apply_confirm_list(&[uuid], &Default::default());
+    assert!(h.app.house.ctrls[parent].listed);
+    for &s in &h.app.house.ctrls[parent].subs.clone() {
+        assert!(h.app.house.ctrls[s].listed, "{}", h.app.house.ctrls[s].name);
+    }
+    let others = h.app.house.ctrls.iter().filter(|c| c.listed).count();
+    assert_eq!(
+        others,
+        1 + h.app.house.ctrls[parent].subs.len(),
+        "nothing else"
+    );
+}
+
 /// J10: run a scene from the palette.
 #[test]
 fn j10_scene_from_palette() {

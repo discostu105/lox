@@ -4,6 +4,7 @@
 //! two can never disagree about what "blind down" or "set mood" sends.
 
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
 
 /// Standard Loxone mood ID for "off". System-defined, not configurable.
 pub const MOOD_OFF_ID: u32 = 778;
@@ -422,6 +423,91 @@ fn check_pct(p: f64, what: &str) -> Result<f64> {
         bail!("{} must be 0-100", what);
     }
     Ok(p)
+}
+
+// ── Risk on a specific control (shared by the TUI and `lox mcp`) ─────────────
+
+/// What the risk rules need to know about the control an action targets.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RiskTarget<'a> {
+    pub typ: &'a str,
+    /// The control's `defaultIcon`
+    pub icon: Option<&'a str>,
+    /// Its category's `image`
+    pub cat_icon: Option<&'a str>,
+    /// Loxone asks for the visualization password (`isSecured`)
+    pub is_secured: bool,
+    /// On the user's `confirm:` list (see [`on_confirm_list`])
+    pub listed: bool,
+}
+
+impl Action {
+    /// The risk of this action on a particular control: its own risk (doors,
+    /// gates, alarm, …), plus any generic command (on/off/pulse/raw/value) aimed
+    /// at a door lock, gate, alarm or a door opener wired as a plain switch, so
+    /// these cannot bypass the confirmation, plus anything on a listed control.
+    pub fn risk_on(&self, t: &RiskTarget) -> Risk {
+        let generic = matches!(
+            self,
+            Action::On | Action::Off | Action::Pulse | Action::Raw(_) | Action::Value(_)
+        );
+        let access = t.is_secured || is_access_icon(t.icon) || is_access_icon(t.cat_icon);
+        if self.risk() == Risk::Confirm || t.listed || (generic && (is_risky_type(t.typ) || access))
+        {
+            Risk::Confirm
+        } else {
+            Risk::None
+        }
+    }
+}
+
+/// Control types where a generic action (on/off/pulse/raw) can open a door,
+/// move a gate or change the alarm state.
+pub fn is_risky_type(typ: &str) -> bool {
+    matches!(typ, "Alarm" | "SmokeAlarm" | "Gate" | "CentralGate") || typ.contains("DoorLock")
+}
+
+/// An icon showing a door, gate, garage, lock or key (`IconsFilled/door-open.svg`,
+/// `login-key.svg`, `garage-closed-2.svg`). Installations often wire a door opener
+/// as a `Pushbutton`/`Switch`; category names are user-chosen and localized, the
+/// icons are not. Matched per word, so `alarm-clock.svg` is not a lock.
+pub fn is_access_icon(icon: Option<&str>) -> bool {
+    const ACCESS: &[&str] = &["door", "gate", "garage", "lock", "padlock", "key", "keypad"];
+    icon.is_some_and(|path| {
+        let file = path.rsplit('/').next().unwrap_or(path);
+        let stem = file.split('.').next().unwrap_or(file);
+        stem.to_lowercase()
+            .split(['-', '_'])
+            .any(|t| ACCESS.contains(&t))
+    })
+}
+
+/// Is a control on the user's `confirm:` list (config)? An entry matches the
+/// UUID, an alias of it, or the name as a case-insensitive substring with an
+/// optional `[Room]` qualifier ("Pool Abdeckung" covers both cover buttons).
+/// Over-matching only means one more question, so the match is deliberately loose.
+pub fn on_confirm_list(
+    confirm: &[String],
+    aliases: &HashMap<String, String>,
+    uuid: &str,
+    name: &str,
+    room: Option<&str>,
+) -> bool {
+    let contains =
+        |haystack: &str, needle: &str| haystack.to_lowercase().contains(&needle.to_lowercase());
+    confirm.iter().map(|e| e.trim()).any(|entry| {
+        if entry.is_empty() {
+            return false;
+        }
+        if entry.eq_ignore_ascii_case(uuid) || aliases.get(entry).is_some_and(|u| u == uuid) {
+            return true;
+        }
+        let (n, r) = match entry.strip_suffix(']').and_then(|e| e.rsplit_once('[')) {
+            Some((n, r)) => (n.trim(), Some(r.trim())),
+            None => (entry, None),
+        };
+        !n.is_empty() && contains(name, n) && r.is_none_or(|r| contains(room.unwrap_or(""), r))
+    })
 }
 
 // ── CLI argument parsers (shared with the TUI palette) ────────────────────────

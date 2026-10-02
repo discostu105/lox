@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use crate::actions::Action;
+use crate::actions::{self, Action, Risk, RiskTarget};
 use crate::client::{Control, LoxClient};
 use crate::commands::inspect::{is_energy_type, is_sensor_type};
 use crate::config::Config;
@@ -554,71 +554,29 @@ pub fn system_status(lox: &mut LoxClient) -> Result<SystemStatus> {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
-/// Control types where a generic action (on/off/pulse/raw) can open a door,
-/// move a gate or change the alarm state.
-pub fn is_risky_type(typ: &str) -> bool {
-    matches!(typ, "Alarm" | "SmokeAlarm" | "Gate" | "CentralGate") || typ.contains("DoorLock")
-}
-
-/// A plain switch or push-button that is really a door opener, gate or lock:
-/// installations often wire these as `Pushbutton`/`Switch`. Category names are
-/// user-chosen and localized, so this goes by the language-independent icons
-/// (`IconsFilled/door-open.svg`, `login-key.svg`, `garage-closed-2.svg`) and by
-/// Loxone's own `isSecured` flag (the control asks for the visualization password).
-pub fn is_access_control(ctrl: &Control) -> bool {
-    const ACCESS: &[&str] = &["door", "gate", "garage", "lock", "padlock", "key", "keypad"];
-    let is_access_icon = |icon: &Option<String>| {
-        icon.as_deref().is_some_and(|path| {
-            let file = path.rsplit('/').next().unwrap_or(path);
-            let stem = file.split('.').next().unwrap_or(file);
-            stem.to_lowercase()
-                .split(['-', '_'])
-                .any(|t| ACCESS.contains(&t))
-        })
-    };
-    ctrl.is_secured || is_access_icon(&ctrl.icon) || is_access_icon(&ctrl.cat_icon)
-}
-
-/// Is this control on the user's `confirm:` list in the config? An entry matches
-/// the UUID, an alias of it, or the name as a case-insensitive substring with an
-/// optional `[Room]` qualifier ("Pool Abdeckung" covers both cover buttons).
-/// Over-matching only means one more question, so the match is deliberately loose.
+/// Is this control on the user's `confirm:` list in the config?
+/// See [`actions::on_confirm_list`].
 pub fn on_confirm_list(cfg: &Config, ctrl: &Control) -> bool {
-    let contains = |haystack: Option<&str>, needle: &str| {
-        haystack
-            .unwrap_or("")
-            .to_lowercase()
-            .contains(&needle.to_lowercase())
-    };
-    cfg.confirm.iter().map(|e| e.trim()).any(|entry| {
-        if entry.is_empty() {
-            return false;
-        }
-        if entry.eq_ignore_ascii_case(&ctrl.uuid) || cfg.aliases.get(entry) == Some(&ctrl.uuid) {
-            return true;
-        }
-        let (name, room) = match entry.strip_suffix(']').and_then(|e| e.rsplit_once('[')) {
-            Some((name, room)) => (name.trim(), Some(room.trim())),
-            None => (entry, None),
-        };
-        !name.is_empty()
-            && contains(Some(&ctrl.name), name)
-            && room.is_none_or(|r| contains(ctrl.room.as_deref(), r))
-    })
+    actions::on_confirm_list(
+        &cfg.confirm,
+        &cfg.aliases,
+        &ctrl.uuid,
+        &ctrl.name,
+        ctrl.room.as_deref(),
+    )
 }
 
-/// Does this action on this control need the user's confirmation?
-///
-/// The action's own risk (doors, gate open/close, alarm arm/disarm), plus any
-/// generic action aimed at a risky control type or an access control, so
-/// `switch off` on a door lock, a raw command to a gate, or a pulse to a
-/// door-opener push-button cannot bypass the confirmation.
+/// Does this action on this control need the user's confirmation (before the
+/// `confirm:` list, which the caller checks)? See [`Action::risk_on`].
 pub fn needs_confirmation(action: &Action, ctrl: &Control) -> bool {
-    action.risk() == crate::actions::Risk::Confirm
-        || (matches!(
-            action,
-            Action::On | Action::Off | Action::Pulse | Action::Raw(_) | Action::Value(_)
-        ) && (is_risky_type(&ctrl.typ) || is_access_control(ctrl)))
+    let target = RiskTarget {
+        typ: &ctrl.typ,
+        icon: ctrl.icon.as_deref(),
+        cat_icon: ctrl.cat_icon.as_deref(),
+        is_secured: ctrl.is_secured,
+        listed: false,
+    };
+    action.risk_on(&target) == Risk::Confirm
 }
 
 /// Resolve the target of an action and check that the action fits its type.

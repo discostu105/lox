@@ -81,9 +81,14 @@ pub fn tz_offset() -> i64 {
     chrono::Local::now().offset().local_minus_utc() as i64
 }
 
-pub fn build_house(st: &Value, roles: &BTreeMap<String, String>) -> House {
+/// The house for a structure, with `tui.yaml` role overrides and, for a live
+/// Miniserver, the config's `confirm:` list.
+pub fn build_house(st: &Value, roles: &BTreeMap<String, String>, cfg: Option<&Config>) -> House {
     let mut h = House::from_structure(st);
     h.apply_role_overrides(roles);
+    if let Some(cfg) = cfg {
+        h.apply_confirm_list(&cfg.confirm, &cfg.aliases);
+    }
     h
 }
 
@@ -436,7 +441,7 @@ impl Live {
                         drop_blocking(client);
                         return;
                     }
-                    let house = build_house(&st, &roles);
+                    let house = build_house(&st, &roles, Some(&cfg));
                     let lm = house.last_modified.clone();
                     let epoch = next_epoch();
                     let _ = tx.send(Msg::NewHouse {
@@ -559,7 +564,7 @@ async fn stream_loop_inner(
                     if *stop.borrow() {
                         return;
                     }
-                    let house = build_house(&st, &roles);
+                    let house = build_house(&st, &roles, Some(&cfg));
                     last_modified = house.last_modified.clone();
                     epoch = next_epoch();
                     let _ = tx.send(Msg::NewHouse {
