@@ -1,7 +1,6 @@
 target/
 .git/
 .github/
-.beads/
 k8s/
 Formula/
 docs/

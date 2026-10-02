@@ -1,8 +1,1 @@
 /target
-
-# Dolt database files (added by bd init)
-.dolt/
-*.db
-
-# bv (beads viewer) local config and caches
-.bv/

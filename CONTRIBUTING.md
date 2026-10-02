@@ -24,31 +24,9 @@ cargo fmt --check
 No live Miniserver is needed for development. All unit tests use pure functions
 or mocked data. Integration tests (if added) use `wiremock`/`httpmock`.
 
-## Issue Tracking (beads)
+## Issue Tracking
 
-This project uses [beads](https://github.com/steveyegge/beads) (`bd`) for issue tracking.
-Issue data is stored as JSONL in `.beads/backup/` and committed to git — no separate account needed.
-
-```bash
-# Install beads (macOS/Linux)
-brew install beads
-
-# After cloning: restore issues from git into your local Dolt DB
-bd backup restore
-
-# Set up Claude Code hooks (AI contributors only)
-bd setup claude
-
-# Find available work
-bd ready
-```
-
-When finishing a session, beads auto-commits a backup on `git push`. You can also trigger it manually:
-
-```bash
-bd backup        # exports JSONL + commits
-git push
-```
+Bugs and feature requests are tracked in [GitHub Issues](https://github.com/discostu105/lox/issues).
 
 ## Manual Testing
 
