@@ -917,7 +917,7 @@ pub(crate) struct McpPolicy {
     /// Expose read tools only (no actions)
     #[arg(long, conflicts_with_all = ["allow_risky", "allow_raw"])]
     read_only: bool,
-    /// Run high-risk actions (doors, gates, alarm) without asking the user to confirm
+    /// Run high-risk actions (doors, gates, alarm, the `confirm:` list) without asking the user to confirm
     #[arg(long)]
     allow_risky: bool,
     /// Expose the send_command tool for raw Loxone commands

@@ -30,6 +30,7 @@ const SWITCH: &str = "0f1e2d3c-0005-1111-ffff000000000005";
 const ALARM: &str = "0f1e2d3c-0006-1111-ffff000000000006";
 const THERMO: &str = "0f1e2d3c-0007-1111-ffff000000000007";
 const OPENER: &str = "0f1e2d3c-0008-1111-ffff000000000008";
+const COVER: &str = "0f1e2d3c-000c-1111-ffff00000000000c";
 
 fn structure() -> Value {
     json!({
@@ -55,6 +56,7 @@ fn structure() -> Value {
             THERMO: { "name": "Zentral", "type": "IRoomControllerV2", "room": "r3" },
             "0f1e2d3c-000a-1111-ffff00000000000a": { "name": "Jalousie Zentral", "type": "Jalousie", "room": "r3" },
             "0f1e2d3c-000b-1111-ffff00000000000b": { "name": "Spots Küche", "type": "Dimmer", "room": "r2" },
+            COVER: { "name": "Pool Abdeckung Auf", "type": "Pushbutton", "room": "r3" },
             OPENER: { "name": "Tür öffnen", "type": "Pushbutton", "room": "r3", "cat": "c2" },
         }
     })
@@ -698,8 +700,28 @@ async fn invalid_arguments_are_tool_errors() {
     assert!(err);
     assert!(out["message"].as_str().unwrap().contains("0-100"));
 
-    let (_, err) = call(&client, "switch", json!({ "state": "on" })).await;
+    // arguments that don't fit the schema get the same envelope as other errors
+    let (out, err) = call(&client, "switch", json!({ "state": "on" })).await;
     assert!(err, "missing name");
+    assert_eq!(out["error"], "invalid_arguments", "{}", out);
+    assert!(
+        out["message"].as_str().unwrap().contains("`name`"),
+        "{}",
+        out
+    );
+    let (out, err) = call(
+        &client,
+        "blind",
+        json!({ "name": "Beschattung", "action": "fly" }),
+    )
+    .await;
+    assert!(err);
+    assert_eq!(out["error"], "invalid_arguments", "{}", out);
+    let message = out["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Invalid arguments: unknown variant `fly`"),
+        "{message}"
+    );
 
     let (out, err) = call(
         &client,
@@ -813,6 +835,73 @@ async fn risky_action_runs_after_the_user_confirms() {
     }
 }
 
+/// A session whose config lists the pool cover under `confirm:`.
+async fn confirm_list_session(ms: &MockServer, opts: ServerOptions, tc: TestClient) -> Client {
+    let cfg = Config {
+        confirm: vec!["pool abdeckung [Zentral]".into()],
+        ..config(ms, None)
+    };
+    connect(LoxMcp::with_config(opts, cfg), tc).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn controls_on_the_confirm_list_need_confirmation() {
+    let pulse = json!({ "name": "Pool Abdeckung Auf", "state": "pulse" });
+    // not listed: an ordinary push-button, sent straight away
+    let ms = miniserver().await;
+    let m = command(&ms, COVER, "pulse").await;
+    let (client, _) = confirm_session(&ms, Lifecycle::Modern, UserAnswer::CannotAsk).await;
+    let (out, err) = call(&client, "switch", pulse.clone()).await;
+    assert!(!err, "{}", out);
+    m.assert_hits_async(1).await;
+
+    for lifecycle in BOTH {
+        // listed, and the client cannot ask: refused, nothing sent
+        let ms = miniserver().await;
+        let m = any_command(&ms).await;
+        let tc = TestClient::new(lifecycle, UserAnswer::CannotAsk);
+        let client = confirm_list_session(&ms, ServerOptions::default(), tc).await;
+        let (out, err) = call(&client, "switch", pulse.clone()).await;
+        assert!(err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["error"], "action_not_allowed");
+        assert!(
+            out["message"].as_str().unwrap().contains("confirm:"),
+            "{}",
+            out
+        );
+        let mut dry = pulse.clone();
+        dry["dry_run"] = json!(true);
+        let (out, err) = call(&client, "switch", dry).await;
+        assert!(!err, "{}", out);
+        assert_eq!(out["needs_confirmation"], true);
+        m.assert_hits_async(0).await;
+
+        // listed, and the user confirms: sent once
+        let ms = miniserver().await;
+        let m = command(&ms, COVER, "pulse").await;
+        let tc = TestClient::new(lifecycle, UserAnswer::Accept);
+        let client = confirm_list_session(&ms, ServerOptions::default(), tc.clone()).await;
+        let (out, err) = call(&client, "switch", pulse.clone()).await;
+        assert!(!err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["confirmed"], true);
+        m.assert_hits_async(1).await;
+        assert_eq!(tc.questions.lock().unwrap().len(), 1);
+    }
+
+    // --allow-risky covers the list too
+    let ms = miniserver().await;
+    let m = command(&ms, COVER, "pulse").await;
+    let opts = ServerOptions {
+        allow_risky: true,
+        ..Default::default()
+    };
+    let tc = TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk);
+    let client = confirm_list_session(&ms, opts, tc).await;
+    let (out, err) = call(&client, "switch", pulse).await;
+    assert!(!err, "{}", out);
+    m.assert_hits_async(1).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn declined_risky_action_sends_nothing() {
     for lifecycle in BOTH {
@@ -883,6 +972,21 @@ async fn door_opener_push_buttons_need_confirmation() {
         assert!(err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["error"], "action_not_allowed");
         m.assert_hits_async(0).await;
+
+        // and once the user confirms, it is sent (2026-07-28: the retry carries requestState)
+        let ms = miniserver().await;
+        let m = command(&ms, OPENER, "pulse").await;
+        let (client, tc) = confirm_session(&ms, lifecycle, UserAnswer::Accept).await;
+        let (out, err) = call(
+            &client,
+            "switch",
+            json!({ "name": "Tür öffnen", "state": "pulse" }),
+        )
+        .await;
+        assert!(!err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["confirmed"], true);
+        m.assert_hits_async(1).await;
+        assert_eq!(tc.questions.lock().unwrap().len(), 1);
     }
     // an ordinary switch is not gated
     let ms = miniserver().await;

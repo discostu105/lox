@@ -6,14 +6,14 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     handler::server::{
         router::tool::ToolRouter,
-        tool::{InputResponses, RequestState, schema_for_output},
+        tool::{InputResponses, RequestState, ToolCallContext, schema_for_output},
         wrapper::Parameters,
     },
     model::{
-        CacheScope, CallToolResponse, CallToolResult, ContentBlock, ElicitRequest,
-        ElicitRequestParams, ElicitationSchema, Icon, Implementation, InputRequest, InputRequests,
-        InputRequiredResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam,
-        ProtocolVersion, ResultType, ServerCapabilities, ServerConfig,
+        CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+        ElicitRequest, ElicitRequestParams, ElicitationSchema, Icon, Implementation, InputRequest,
+        InputRequests, InputRequiredResult, ListToolsResult, PaginatedRequestParams,
+        ProgressNotificationParam, ProtocolVersion, ResultType, ServerCapabilities, ServerConfig,
     },
     service::{ElicitationError, RequestContext},
     tool, tool_handler, tool_router,
@@ -52,7 +52,8 @@ Address controls by name: a case-insensitive substring match. If a name is ambig
 pass `room` or write it as 'Name [Room]'. UUIDs work too.
 Read live values with get_control or list_sensors. Every action tool accepts dry_run=true \
 to preview the exact commands without sending them.
-Doors, gates and the alarm are high-risk: the user is asked to confirm each one. \
+Doors, gates, the alarm and controls the user listed for confirmation are high-risk: \
+the user is asked to confirm each one. \
 If the user declines, do not retry.";
 
 const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#6dc04b"/><path d="M14 33 32 17l18 16v15a2 2 0 0 1-2 2H38V38H26v12H16a2 2 0 0 1-2-2z" fill="#fff"/></svg>"##;
@@ -380,6 +381,23 @@ fn respond<T: Serialize>(result: anyhow::Result<T>) -> ToolResponse {
     }
 }
 
+/// rmcp reports arguments that don't fit the input schema (unknown enum value,
+/// missing field) as a plain-text tool error with this prefix.
+const ARGUMENT_ERROR_PREFIX: &str = "failed to deserialize parameters:";
+
+/// The message of rmcp's argument error, if this response is one.
+fn argument_error(response: &CallToolResponse) -> Option<String> {
+    let CallToolResponse::Complete(result) = response else {
+        return None;
+    };
+    if result.is_error != Some(true) {
+        return None;
+    }
+    let text = &result.content.first()?.as_text()?.text;
+    let detail = text.strip_prefix(ARGUMENT_ERROR_PREFIX)?.trim();
+    Some(format!("Invalid arguments: {}", detail))
+}
+
 /// A tool error the model sees: the CLI's JSON error envelope as text.
 fn fail(e: anyhow::Error) -> ToolResponse {
     let envelope = ops::error_envelope(&e);
@@ -480,9 +498,11 @@ impl LoxMcp {
         } = target;
         let dry_run = dry_run || self.opts.dry_run;
         let resolve_action = action.clone();
-        let ctrl = match self
+        let (ctrl, listed) = match self
             .blocking(move |lox| {
-                ops::resolve_for_action(lox, &name, room.as_deref(), &resolve_action)
+                let ctrl = ops::resolve_for_action(lox, &name, room.as_deref(), &resolve_action)?;
+                let listed = ops::on_confirm_list(&lox.cfg, &ctrl);
+                Ok((ctrl, listed))
             })
             .await
         {
@@ -491,7 +511,8 @@ impl LoxMcp {
         };
 
         let mut out = ops::planned(&ctrl, &action);
-        let needs_confirmation = ops::needs_confirmation(&action, &ctrl) && !self.opts.allow_risky;
+        let needs_confirmation =
+            (ops::needs_confirmation(&action, &ctrl) || listed) && !self.opts.allow_risky;
         if dry_run {
             out.dry_run = true;
             out.needs_confirmation = needs_confirmation;
@@ -518,8 +539,8 @@ impl LoxMcp {
                     return fail(tool_error(
                         "action_not_allowed",
                         format!(
-                            "Refused: '{}' on '{}' is a high-risk action (doors, gates, alarm) and \
-                             this MCP client cannot ask the user to confirm it. The user can run it \
+                            "Refused: '{}' on '{}' needs the user's confirmation (doors, gates, alarm, \
+                             and controls on the `confirm:` list in the lox config) and this MCP client cannot ask the user to confirm it. The user can run it \
                              themselves ({}) or restart the server with `lox mcp serve --allow-risky`.",
                             action.describe(),
                             ctrl.name,
@@ -787,13 +808,15 @@ impl LoxMcp {
         &self,
         Parameters(p): Parameters<SwitchParams>,
         ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
     ) -> ToolResponse {
         let action = match p.state {
             SwitchState::On => Action::On,
             SwitchState::Off => Action::Off,
             SwitchState::Pulse => Action::Pulse,
         };
-        self.act(p.target, Ok(action), ctx, None, None).await
+        self.act(p.target, Ok(action), ctx, state, responses).await
     }
 
     #[tool(
@@ -811,6 +834,8 @@ impl LoxMcp {
         &self,
         Parameters(p): Parameters<BlindParams>,
         ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
     ) -> ToolResponse {
         let action = match (p.action, p.value) {
             (BlindAction::Up, _) => actions::parse_blind("up", None),
@@ -821,7 +846,7 @@ impl LoxMcp {
             (BlindAction::Slats, Some(v)) => actions::parse_blind("shade", Some(v)),
             (BlindAction::Slats, None) => Err(anyhow!("slats requires a value 0-100")),
         };
-        self.act(p.target, action, ctx, None, None).await
+        self.act(p.target, action, ctx, state, responses).await
     }
 
     #[tool(
@@ -834,6 +859,8 @@ impl LoxMcp {
         &self,
         Parameters(p): Parameters<LightParams>,
         ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
     ) -> ToolResponse {
         let value = p.value.text();
         let action = match p.action {
@@ -844,7 +871,7 @@ impl LoxMcp {
                 .and_then(actions::parse_dim),
             LightAction::Color => actions::parse_color(&value),
         };
-        self.act(p.target, action, ctx, None, None).await
+        self.act(p.target, action, ctx, state, responses).await
     }
 
     #[tool(
@@ -862,6 +889,8 @@ impl LoxMcp {
         &self,
         Parameters(p): Parameters<ThermostatParams>,
         ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
     ) -> ToolResponse {
         let act = match p.action {
             ThermostatAction::Temp => "temp",
@@ -870,7 +899,7 @@ impl LoxMcp {
         };
         let value = p.value.text();
         let action = actions::parse_thermostat(act, Some(&value), p.minutes);
-        self.act(p.target, action, ctx, None, None).await
+        self.act(p.target, action, ctx, state, responses).await
     }
 
     #[tool(
@@ -1022,13 +1051,15 @@ impl LoxMcp {
         &self,
         Parameters(p): Parameters<SendParams>,
         ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
     ) -> ToolResponse {
         let action = if p.command.trim().is_empty() {
             Err(anyhow!("command must not be empty"))
         } else {
             Ok(Action::Raw(p.command))
         };
-        self.act(p.target, action, ctx, None, None).await
+        self.act(p.target, action, ctx, state, responses).await
     }
 }
 
@@ -1053,6 +1084,20 @@ impl ServerHandler for LoxMcp {
                     .with_website_url("https://github.com/discostu105/lox"),
             )
             .with_instructions(INSTRUCTIONS)
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> ToolResponse {
+        let tcc = ToolCallContext::new(self, request, context);
+        let response = self.tool_router.call(tcc).await?;
+        // schema errors get the same envelope as every other tool error
+        match argument_error(&response) {
+            Some(message) => fail(invalid(message)),
+            None => Ok(response),
+        }
     }
 
     async fn list_tools(

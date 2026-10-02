@@ -200,13 +200,22 @@ Equivalent command: lox door "Haustür" open -r Wohnzimmer
 ```
 
 Nothing is sent unless you confirm. A declined confirmation is reported to the model as
-`declined_by_user`. The same applies to `switch` or raw commands aimed at a door lock, gate or alarm.
+`declined_by_user`. The same applies to `switch` or raw commands aimed at a door lock, gate or alarm,
+and to push-buttons that open a door (recognized by their door/gate/lock/key icon).
+
+To have other controls confirmed too, list them in your config (`~/.lox/config.yaml`, or the context
+entry) by UUID, alias, or name with an optional `[Room]`; every action on them is then confirmed:
+
+```yaml
+confirm:
+  - Pool Abdeckung [Pool]   # both cover buttons
+```
 
 | Flag | Effect |
 |:-----|:-------|
 | *(none)* | Read tools and everyday actions. Risky actions need your confirmation; clients that cannot ask are refused (`action_not_allowed`). |
 | `--read-only` | Only read tools are listed and callable. |
-| `--allow-risky` | Risky actions run without asking. |
+| `--allow-risky` | Risky actions (including the `confirm:` list) run without asking. |
 | `--allow-raw` | Also `send_command` for raw Loxone commands. |
 
 The policy is fixed when the server starts; the model cannot change it. Risky tools carry

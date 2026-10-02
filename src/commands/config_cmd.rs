@@ -68,6 +68,12 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
                     println!("  {}: {}", name, uuid);
                 }
             }
+            if !cfg.confirm.is_empty() {
+                println!("confirm:");
+                for entry in &cfg.confirm {
+                    println!("  - {}", entry);
+                }
+            }
         }
     }
     Ok(())

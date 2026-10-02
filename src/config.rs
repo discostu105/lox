@@ -57,6 +57,11 @@ pub struct Config {
     /// Path to a git repository for config version tracking (`lox config init`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_repo: Option<String>,
+    /// Controls whose on/off/pulse/raw commands `lox mcp` always asks the user to
+    /// confirm, on top of doors, gates and the alarm: UUIDs, aliases, or names
+    /// (case-insensitive substring, optionally `"Name [Room]"`), e.g. a pool cover.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confirm: Vec<String>,
 
     // ── Runtime-only fields (not serialized) ─────────────────────────────
     /// Resolved base directory for this config's data (cache, token, scenes).
@@ -99,6 +104,8 @@ pub struct ContextEntry {
     pub verify_ssl: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_repo: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confirm: Vec<String>,
 }
 
 impl From<&Config> for ContextEntry {
@@ -111,6 +118,7 @@ impl From<&Config> for ContextEntry {
             aliases: cfg.aliases.clone(),
             verify_ssl: cfg.verify_ssl,
             config_repo: cfg.config_repo.clone(),
+            confirm: cfg.confirm.clone(),
         }
     }
 }
@@ -125,6 +133,7 @@ impl ContextEntry {
             aliases: self.aliases,
             verify_ssl: self.verify_ssl,
             config_repo: self.config_repo,
+            confirm: self.confirm,
             data_dir,
             context_name: Some(name.to_string()),
             is_local: false,
@@ -678,6 +687,7 @@ contexts:
             aliases: HashMap::from([("l".to_string(), "uuid-1".to_string())]),
             verify_ssl: Some(true),
             config_repo: None,
+            confirm: vec!["Pool Abdeckung".to_string()],
         };
         let cfg = entry.into_config("test", PathBuf::from("/tmp/test"));
         // Round-trip through ContextEntry
@@ -686,6 +696,7 @@ contexts:
         assert_eq!(entry2.serial, "SER123");
         assert_eq!(entry2.aliases.get("l"), Some(&"uuid-1".to_string()));
         assert_eq!(entry2.verify_ssl, Some(true));
+        assert_eq!(entry2.confirm, ["Pool Abdeckung"]);
     }
 
     #[test]

@@ -21,7 +21,8 @@ pub use server::LoxMcp;
 pub struct ServerOptions {
     /// Only read tools are listed and callable.
     pub read_only: bool,
-    /// Skip the user confirmation for high-risk actions (doors, gates, alarm).
+    /// Skip the user confirmation for high-risk actions (doors, gates, alarm,
+    /// and controls on the `confirm:` list in the config).
     pub allow_risky: bool,
     /// Expose `send_command` for raw Loxone commands.
     pub allow_raw: bool,
