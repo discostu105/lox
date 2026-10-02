@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::thread;
 use std::time::Duration;
 
-use crate::client::LoxClient;
+use crate::client::{Control, LoxClient};
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::stream;
@@ -481,12 +481,16 @@ pub fn cmd_modes(ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
-/// Does a control type belong to a sensor kind (`temperature`, `door-window`,
+/// Does a control belong to a sensor kind (`temperature`, `door-window`,
 /// `motion`, `smoke`; anything else means all sensor types)?
 /// Shared by `lox sensors` and the MCP `list_sensors` tool.
-pub fn is_sensor_type(kind: &str, typ: &str) -> bool {
+pub fn is_sensor_type(kind: &str, c: &Control) -> bool {
+    let typ = c.typ.as_str();
     match kind {
-        "temperature" | "temp" => typ == "InfoOnlyAnalog",
+        // InfoOnlyAnalog also carries CO2 (ppm), humidity (%), …: go by the unit
+        "temperature" | "temp" => {
+            typ == "InfoOnlyAnalog" && c.format.as_deref().is_none_or(|f| f.contains('°'))
+        }
         "door-window" | "doorwindow" => typ == "InfoOnlyDigital",
         "motion" => matches!(typ, "PresenceDetector" | "MotionSensor"),
         "smoke" => typ == "SmokeAlarm",
@@ -523,7 +527,7 @@ pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Re
     let controls = lox.list_controls(type_filter, room.as_deref())?;
     let filtered: Vec<_> = controls
         .iter()
-        .filter(|c| is_sensor_type(&type_lower, &c.typ))
+        .filter(|c| is_sensor_type(&type_lower, c))
         .collect();
     if ctx.json {
         let mut arr = Vec::new();

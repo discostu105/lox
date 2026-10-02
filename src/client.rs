@@ -120,6 +120,12 @@ pub struct Control {
     pub cat: Option<String>,
     pub is_favorite: bool,
     pub is_secured: bool,
+    /// Value format from `details.format`, e.g. `%.1f°C` or `%.0fppm`
+    pub format: Option<String>,
+    /// The control's `defaultIcon`, e.g. `IconsFilled/login-key.svg`
+    pub icon: Option<String>,
+    /// The category's `image`, e.g. `IconsFilled/door-open.svg`
+    pub cat_icon: Option<String>,
 }
 
 // ── LoxClient ─────────────────────────────────────────────────────────────────
@@ -416,11 +422,13 @@ impl LoxClient {
                 }
             }
         }
-        let mut cats: HashMap<String, String> = HashMap::new();
+        // category name and icon: names are user-chosen, icons are language-independent
+        let mut cats: HashMap<String, (String, Option<String>)> = HashMap::new();
         if let Some(map) = structure.get("cats").and_then(|c| c.as_object()) {
             for (uuid, cat) in map {
                 if let Some(name) = cat.get("name").and_then(|n| n.as_str()) {
-                    cats.insert(uuid.clone(), name.to_string());
+                    let image = cat.get("image").and_then(|i| i.as_str()).map(String::from);
+                    cats.insert(uuid.clone(), (name.to_string(), image));
                 }
             }
         }
@@ -448,7 +456,18 @@ impl LoxClient {
                     .unwrap_or("")
                     .to_string();
                 let room = rooms.get(&room_uuid).cloned();
-                let cat = cats.get(&cat_uuid).cloned();
+                let (cat, cat_icon) = match cats.get(&cat_uuid) {
+                    Some((name, image)) => (Some(name.clone()), image.clone()),
+                    None => (None, None),
+                };
+                let format = ctrl
+                    .pointer("/details/format")
+                    .and_then(|f| f.as_str())
+                    .map(String::from);
+                let icon = ctrl
+                    .get("defaultIcon")
+                    .and_then(|i| i.as_str())
+                    .map(String::from);
                 let is_favorite = ctrl
                     .get("isFavorite")
                     .and_then(|f| f.as_bool())
@@ -491,6 +510,9 @@ impl LoxClient {
                     cat,
                     is_favorite,
                     is_secured,
+                    format,
+                    icon,
+                    cat_icon,
                 });
             }
         }
@@ -555,6 +577,14 @@ impl LoxClient {
                 }
             })
             .collect();
+        // an exact name wins over names that merely contain it ("Zentral" vs "Jalousie EG Zentral")
+        let exact: Vec<&&Control> = matches
+            .iter()
+            .filter(|c| c.name.to_lowercase() == name_part.to_lowercase())
+            .collect();
+        if matches.len() > 1 && exact.len() == 1 {
+            return Ok(exact[0].uuid.clone());
+        }
         match matches.len() {
             0 => bail!("No control matching '{}'", name_or_uuid),
             1 => Ok(matches[0].uuid.clone()),

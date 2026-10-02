@@ -110,7 +110,7 @@ lox light mood "Licht Wohnzimmer" off       # turn off (mood 778)
 lox light mood "Licht Wohnzimmer" 704       # set by mood ID
 lox light moods "Licht Wohnzimmer"          # list available moods (via WebSocket)
 lox light moods "Licht" -o json             # moods as JSON with control metadata
-lox light dim "Stehlampe" 75                # set dimmer 0-100%
+lox light dim "Stehlampe" 75                # set dimmer 0-100% (Dimmer controls; use a mood for a lighting controller)
 lox light color "LED Strip" "#FF0000"       # hex RGB
 lox light color "LED Strip" "hsv(120,100,100)"  # HSV
 ```

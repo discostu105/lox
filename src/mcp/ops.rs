@@ -52,7 +52,15 @@ pub fn error_envelope(e: &anyhow::Error) -> Value {
         Some(te) => te.code,
         None => crate::categorize_error(e),
     };
-    json!({ "ok": false, "error": code, "message": format!("{:#}", e) })
+    let mut message = format!("{:#}", e);
+    if code == "ambiguous_control" {
+        // the resolver speaks CLI; tool callers pass `room` instead of `--room`
+        message = message.replace(
+            "Use [Room] qualifier or --room flag.",
+            "Pass `room`, write the name as 'Name [Room]', or use the UUID.",
+        );
+    }
+    json!({ "ok": false, "error": code, "message": message })
 }
 
 // ── Output types ──────────────────────────────────────────────────────────────
@@ -277,23 +285,36 @@ pub fn tool_for_type(typ: &str) -> Option<&'static str> {
 type ValueMap = BTreeMap<String, Value>;
 
 /// Parse `/dev/sps/io/{uuid}/all`: the main value, `State*`-style attributes,
-/// and named outputs (`n1`/`v1`, `n2`/`v2`, …).
+/// and named outputs. Outputs come either as `n1`/`v1`, `n2`/`v2`, … attributes
+/// on the root element, or as `<output name=".." nr=".." value=".."/>` children
+/// (LightControllerV2 circuits); a name used twice gets its `nr` appended.
 pub fn parse_all_xml(xml: &str) -> (Option<Value>, ValueMap, ValueMap) {
     use quick_xml::Reader;
-    use quick_xml::events::Event;
+    use quick_xml::events::{BytesStart, Event};
 
-    let mut attrs: Vec<(String, String)> = Vec::new();
+    let attrs_of = |e: &BytesStart| -> Vec<(String, String)> {
+        e.attributes()
+            .flatten()
+            .map(|a| {
+                let key = String::from_utf8_lossy(a.key.as_ref()).to_string();
+                let val = a
+                    .unescape_value()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(&a.value).to_string());
+                (key, val)
+            })
+            .collect()
+    };
+    let mut root: Option<Vec<(String, String)>> = None;
+    let mut children: Vec<Vec<(String, String)>> = Vec::new();
     let mut reader = Reader::from_str(xml);
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                for a in e.attributes().flatten() {
-                    let key = String::from_utf8_lossy(a.key.as_ref()).to_string();
-                    let val = a
-                        .unescape_value()
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|_| String::from_utf8_lossy(&a.value).to_string());
-                    attrs.push((key, val));
+                if root.is_none() {
+                    root = Some(attrs_of(&e));
+                } else if e.name().as_ref() == b"output" {
+                    children.push(attrs_of(&e));
                 }
             }
             Ok(Event::Eof) | Err(_) => break,
@@ -301,6 +322,7 @@ pub fn parse_all_xml(xml: &str) -> (Option<Value>, ValueMap, ValueMap) {
         }
     }
 
+    let attrs = root.unwrap_or_default();
     let get = |k: &str| attrs.iter().find(|(key, _)| key == k).map(|(_, v)| v);
     let value = get("value").map(|v| typed(v));
     let mut states = BTreeMap::new();
@@ -322,6 +344,28 @@ pub fn parse_all_xml(xml: &str) -> (Option<Value>, ValueMap, ValueMap) {
         } else {
             states.insert(k.clone(), typed(v));
         }
+    }
+    let field = |c: &[(String, String)], k: &str| {
+        c.iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    let named = |c: &&Vec<(String, String)>| !field(c, "name").is_empty();
+    for c in children.iter().filter(named) {
+        let name = field(c, "name");
+        let shared = children
+            .iter()
+            .filter(named)
+            .filter(|o| field(o, "name") == name)
+            .count()
+            > 1;
+        let key = if shared {
+            format!("{} ({})", name, field(c, "nr"))
+        } else {
+            name
+        };
+        outputs.insert(key, typed(&field(c, "value")));
     }
     (value, states, outputs)
 }
@@ -431,7 +475,7 @@ pub fn list_sensors(lox: &mut LoxClient, kind: &str, room: Option<&str>) -> Resu
         if kind == "energy" {
             is_energy_type(&c.typ)
         } else {
-            is_sensor_type(kind, &c.typ)
+            is_sensor_type(kind, c)
         }
     }) {
         let xml = lox.get_all(&c.uuid).unwrap_or_default();
@@ -516,17 +560,37 @@ pub fn is_risky_type(typ: &str) -> bool {
     matches!(typ, "Alarm" | "SmokeAlarm" | "Gate" | "CentralGate") || typ.contains("DoorLock")
 }
 
+/// A plain switch or push-button that is really a door opener, gate or lock:
+/// installations often wire these as `Pushbutton`/`Switch`. Category names are
+/// user-chosen and localized, so this goes by the language-independent icons
+/// (`IconsFilled/door-open.svg`, `login-key.svg`, `garage-closed-2.svg`) and by
+/// Loxone's own `isSecured` flag (the control asks for the visualization password).
+pub fn is_access_control(ctrl: &Control) -> bool {
+    const ACCESS: &[&str] = &["door", "gate", "garage", "lock", "padlock", "key", "keypad"];
+    let is_access_icon = |icon: &Option<String>| {
+        icon.as_deref().is_some_and(|path| {
+            let file = path.rsplit('/').next().unwrap_or(path);
+            let stem = file.split('.').next().unwrap_or(file);
+            stem.to_lowercase()
+                .split(['-', '_'])
+                .any(|t| ACCESS.contains(&t))
+        })
+    };
+    ctrl.is_secured || is_access_icon(&ctrl.icon) || is_access_icon(&ctrl.cat_icon)
+}
+
 /// Does this action on this control need the user's confirmation?
 ///
 /// The action's own risk (doors, gate open/close, alarm arm/disarm), plus any
-/// generic action aimed at a risky control type, so `switch off` on a door lock
-/// or a raw command to a gate cannot bypass the confirmation.
+/// generic action aimed at a risky control type or an access control, so
+/// `switch off` on a door lock, a raw command to a gate, or a pulse to a
+/// door-opener push-button cannot bypass the confirmation.
 pub fn needs_confirmation(action: &Action, ctrl: &Control) -> bool {
     action.risk() == crate::actions::Risk::Confirm
         || (matches!(
             action,
             Action::On | Action::Off | Action::Pulse | Action::Raw(_) | Action::Value(_)
-        ) && is_risky_type(&ctrl.typ))
+        ) && (is_risky_type(&ctrl.typ) || is_access_control(ctrl)))
 }
 
 /// Resolve the target of an action and check that the action fits its type.
@@ -643,6 +707,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_all_xml_reads_output_children() {
+        // LightControllerV2 as a Miniserver 17.2 answers `/all`
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<LL control="dev/sps/io/x/all" value="1.000" Code="200">
+    <output name="Relais Lichter Büro" nr="1" Type="Switch" value="383"/>
+    <output name="Relais Lichter Büro" nr="2" Type="Switch" value="383"/>
+    <output name="Spots" nr="3" Type="Dimmer" value="40"/>
+    <output name="" nr="4" Type="Switch" value="383"/>
+</LL>"#;
+        let (value, states, outputs) = parse_all_xml(xml);
+        assert_eq!(value, Some(json!(1.0)));
+        assert!(
+            states.is_empty(),
+            "child attributes are not states: {states:?}"
+        );
+        assert_eq!(outputs.get("Relais Lichter Büro (1)"), Some(&json!(383)));
+        assert_eq!(outputs.get("Relais Lichter Büro (2)"), Some(&json!(383)));
+        assert_eq!(outputs.get("Spots"), Some(&json!(40)));
+        assert_eq!(outputs.len(), 3, "unnamed outputs are skipped");
+    }
+
+    #[test]
     fn typed_values() {
         assert_eq!(typed("1"), json!(1));
         assert_eq!(typed("21.5"), json!(21.5));
@@ -658,9 +744,8 @@ mod tests {
         assert_eq!(visible_commands(&b), vec!["off/****"]);
     }
 
-    #[test]
-    fn generic_actions_on_risky_types_need_confirmation() {
-        let ctrl = |typ: &str| Control {
+    fn ctrl(typ: &str) -> Control {
+        Control {
             name: "x".into(),
             uuid: "u".into(),
             typ: typ.into(),
@@ -668,7 +753,14 @@ mod tests {
             cat: None,
             is_favorite: false,
             is_secured: false,
-        };
+            format: None,
+            icon: None,
+            cat_icon: None,
+        }
+    }
+
+    #[test]
+    fn generic_actions_on_risky_types_need_confirmation() {
         assert!(needs_confirmation(&Action::Off, &ctrl("DoorLock")));
         assert!(needs_confirmation(
             &Action::Raw("open".into()),
@@ -678,6 +770,47 @@ mod tests {
         assert!(!needs_confirmation(&Action::On, &ctrl("Switch")));
         let stop = actions::parse_gate("stop").unwrap();
         assert!(!needs_confirmation(&stop, &ctrl("Gate")));
+    }
+
+    #[test]
+    fn door_opener_push_buttons_need_confirmation() {
+        // "Tür öffnen": a Pushbutton in a category with the door-open icon
+        let opener = Control {
+            cat_icon: Some("IconsFilled/door-open.svg".into()),
+            ..ctrl("Pushbutton")
+        };
+        assert!(needs_confirmation(&Action::Pulse, &opener));
+        let keyed = Control {
+            icon: Some("IconsFilled/login-key.svg".into()),
+            ..ctrl("Pushbutton")
+        };
+        assert!(needs_confirmation(&Action::Pulse, &keyed));
+        let garage = Control {
+            cat_icon: Some("IconsFilled/garage-closed-2.svg".into()),
+            ..ctrl("Switch")
+        };
+        assert!(needs_confirmation(&Action::On, &garage));
+        let secured = Control {
+            is_secured: true,
+            ..ctrl("Switch")
+        };
+        assert!(needs_confirmation(&Action::Off, &secured));
+    }
+
+    #[test]
+    fn everyday_icons_do_not_need_confirmation() {
+        for icon in [
+            "IconsFilled/alarm-clock.svg", // "lock" inside "clock"
+            "IconsFilled/lightbulb-3.svg",
+            "IconsFilled/finger-tapping.svg",
+            "IconsFilled/keyboard.svg",
+        ] {
+            let c = Control {
+                cat_icon: Some(icon.into()),
+                ..ctrl("Pushbutton")
+            };
+            assert!(!needs_confirmation(&Action::Pulse, &c), "{icon}");
+        }
     }
 
     #[test]

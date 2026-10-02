@@ -55,7 +55,7 @@ lox light moods "Licht" -o json             # moods as JSON with control metadat
 ### Dimmer
 
 ```bash
-lox light dim "Stehlampe" 75               # set dimmer 0-100%
+lox light dim "Stehlampe" 75               # set dimmer 0-100% (Dimmer controls; use a mood for a lighting controller)
 ```
 
 ### Color
