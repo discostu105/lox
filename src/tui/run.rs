@@ -253,7 +253,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
     // Load everything that can fail *before* touching the terminal.
     let (house, ctx_name, data_dir, contexts, scenes, mut backend) = if args.demo {
         let st = demo::structure();
-        let house = exec::build_house(&st, &prefs.roles);
+        let house = exec::build_house(&st, &prefs.roles, None);
         let b = Backend::Demo(Box::new(Demo::new(rt.handle().clone(), tx.clone(), st)));
         let scenes = exec::DEMO_SCENES.iter().map(|s| s.to_string()).collect();
         (
@@ -274,7 +274,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
         eprint!("loading structure… ");
         let st = Live::load_structure(&cfg).context("could not load the structure file")?;
         eprintln!("ok");
-        let house = exec::build_house(&st, &prefs.roles);
+        let house = exec::build_house(&st, &prefs.roles, Some(&cfg));
         let name = cfg.context_name.clone().unwrap_or_else(|| "default".into());
         let mut contexts = exec::context_names();
         if !contexts.contains(&name) {

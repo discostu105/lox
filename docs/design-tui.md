@@ -28,7 +28,7 @@ Design principles, in priority order:
 | P1 | **Live by default** | Values come from the WebSocket stream, not polling. Nothing needs a manual refresh. |
 | P2 | **One vocabulary** | A small set of keys means the same *intent* everywhere, on every control type. |
 | P3 | **Always discoverable** | The focused pane's bottom border always shows what the keys do *here*. `?` shows everything. `a` opens a menu of every action on the selected item. |
-| P4 | **Safe** | Harmless actions are instant. Doors, alarms and gates ask for confirmation. Reboot and restore ask you to type a word. `--read-only` exists. |
+| P4 | **Safe** | Harmless actions are instant. Doors, alarms and gates ask for confirmation, as do door openers wired as push-buttons (door/lock/key icons) and controls on the config's `confirm:` list. Reboot and restore ask you to type a word. `--read-only` exists. |
 | P5 | **Scales** | 5 rooms or 80 rooms, 50 controls or 2,000, 1 event/s or 1,000: filters, grouping, virtualized lists, noise control. |
 | P6 | **Beautiful, calm** | A dark, restrained palette with one accent. Color carries meaning, not decoration. Motion only where something is really moving. |
 
@@ -892,7 +892,10 @@ pub fn to_cli(control: &Control, action: &Action) -> String;   // for `y` and to
 pub fn risk(control: &Control, action: &Action) -> Risk;       // None | Confirm | Typed
 ```
 
-The CLI handlers call the same `plan()`, so CLI and TUI can never disagree. The mapping table in §4.3 is
+The CLI handlers call the same `plan()`, so CLI and TUI can never disagree. Risk on a specific control is
+`Action::risk_on(&RiskTarget)` in `src/actions.rs`, shared with `lox mcp`: the action's own risk, generic
+commands on door locks, gates, alarms or controls with a door/gate/lock/key icon (or `isSecured`), and anything
+on the config's `confirm:` list (applied to the house, including sub-controls, when the structure loads). The mapping table in §4.3 is
 exactly this function, and it gets table-driven unit tests.
 
 ### 8.2 Modules

@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
 
+use crate::actions::{self, RiskTarget};
+
 use super::text::{clean, natural_key};
 
 /// Index into `House::ctrls`.
@@ -157,6 +159,10 @@ pub struct Ctrl {
     pub stat_power: bool,
     /// Number format from details (`format` or `actualFormat`)
     pub format: Option<String>,
+    /// `defaultIcon`, e.g. `IconsFilled/login-key.svg`
+    pub icon: Option<String>,
+    /// On the user's `confirm:` list (set by [`House::apply_confirm_list`])
+    pub listed: bool,
 }
 
 impl Ctrl {
@@ -189,6 +195,8 @@ pub struct Room {
 #[derive(Debug, Clone)]
 pub struct Cat {
     pub name: String,
+    /// `image`, e.g. `IconsFilled/door-open.svg` (names are localized, icons are not)
+    pub image: Option<String>,
 }
 
 /// Energy roles of an EFM node (from `details.nodes[].nodeType`).
@@ -285,7 +293,10 @@ impl House {
             list.sort_by_key(|(_, r)| natural_key(&s(r, "name")));
             for (uuid, c) in list {
                 cat_idx.insert(uuid.clone(), cats.len());
-                cats.push(Cat { name: s(c, "name") });
+                cats.push(Cat {
+                    name: s(c, "name"),
+                    image: c.get("image").and_then(|i| i.as_str()).map(String::from),
+                });
             }
         }
 
@@ -502,6 +513,11 @@ impl House {
                 // a meter's `actual` output is its power
                 || stat_v2.as_ref().is_some_and(|(_, o)| o == "actual"),
             format,
+            icon: c
+                .get("defaultIcon")
+                .and_then(|i| i.as_str())
+                .map(String::from),
+            listed: false,
         });
         self.by_uuid.insert(uuid.to_string(), cid);
         if let Some(subs) = c.get("subControls").and_then(|s| s.as_object()) {
@@ -562,6 +578,30 @@ impl House {
             });
         }
         out
+    }
+
+    /// Mark the controls on the `confirm:` list of the config; a listed control's
+    /// sub-controls (e.g. the circuits of a lighting controller) count as listed.
+    pub fn apply_confirm_list(&mut self, confirm: &[String], aliases: &HashMap<String, String>) {
+        for cid in 0..self.ctrls.len() {
+            let c = &self.ctrls[cid];
+            let room = c.room.map(|r| self.rooms[r].name.as_str());
+            let listed = actions::on_confirm_list(confirm, aliases, &c.uuid, &c.name, room)
+                || c.parent.is_some_and(|p| self.ctrls[p].listed);
+            self.ctrls[cid].listed = listed;
+        }
+    }
+
+    /// The risk rules' view of a control (icons, type, `confirm:` list).
+    pub fn risk_target(&self, cid: Cid) -> RiskTarget<'_> {
+        let c = &self.ctrls[cid];
+        RiskTarget {
+            typ: &c.typ,
+            icon: c.icon.as_deref(),
+            cat_icon: c.cat.and_then(|k| self.cats[k].image.as_deref()),
+            is_secured: c.is_secured,
+            listed: c.listed,
+        }
     }
 
     /// Apply role overrides from `tui.yaml`: meter name/UUID → role.

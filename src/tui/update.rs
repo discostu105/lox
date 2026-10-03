@@ -1657,7 +1657,11 @@ pub fn run_plans(app: &mut App, plans: Vec<Plan>) -> Vec<Effect> {
         });
         return Vec::new();
     }
-    let risky = ok.iter().any(|p| p.action.risk() != Risk::None);
+    // the action's own risk, generic commands on doors/gates/alarm or a door
+    // opener wired as a switch, and anything on the config's `confirm:` list
+    let risky = ok
+        .iter()
+        .any(|p| p.action.risk_on(&app.house.risk_target(p.cid)) != Risk::None);
     if risky || ok.len() > BULK_CONFIRM {
         let body = ok
             .iter()

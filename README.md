@@ -244,7 +244,7 @@ lox tui --read-only     # wall display: look, don't touch
 ```
 
 `:` opens a fuzzy palette for rooms, controls, scenes and any `lox` command; `?` shows the keys; `y` copies the
-equivalent `lox` command for scripting. Doors, alarms and gates ask for confirmation, reboot and update ask you to type
+equivalent `lox` command for scripting. Doors, alarms, gates and controls on your `confirm:` list ask for confirmation, reboot and update ask you to type
 the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
 
 The Wiring view and the semantic config diffs are built on [lxir](https://github.com/discostu105/lxir), which parses
