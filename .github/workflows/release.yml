@@ -123,6 +123,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: lox-*
           merge-multiple: true
 
       - name: Create Release
@@ -145,6 +146,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: lox-*
           merge-multiple: true
 
       - name: Prepare binaries
@@ -199,6 +201,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: lox-*
           merge-multiple: true
 
       - name: Update formula with checksums
