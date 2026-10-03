@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-03
+
+### Added
+- **MCP server** (`lox mcp`) — turns `lox` into a Model Context Protocol server over stdio, so Claude Desktop, Claude Code, Cursor, ChatGPT connectors, n8n and other MCP clients can control a Loxone installation
+  - `lox mcp serve [--read-only | --allow-risky] [--allow-raw]`, `lox mcp config` (client config snippets), `lox mcp tools`
+  - Built on rmcp; speaks MCP 2026-07-28 (stateless `server/discover`, `tools/list` cache hints) and every revision back to 2024-11-05
+  - Read tools (`list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`, `system_status`), action tools (`switch`, `blind`, `light`, `thermostat`, `run_scene`) and high-risk tools (`door`, `gate`, `alarm`, raw `send_command` with `--allow-raw`)
+  - Every action supports `dry_run` and returns the equivalent `lox` command line; every tool has an output schema and structured results
+  - High-risk actions need the user's confirmation (multi-round-trip `input_required` on 2026-07-28, `elicitation/create` on older revisions); confirmation state is a single-use, server-side nonce bound to the exact commands
+- `confirm:` list in the config — controls on it (UUID, alias or name, optional `[Room]`) always ask for confirmation, in `lox mcp` and `lox tui`
+
+### Changed
+- Door openers, locks and gates wired as generic switches or push buttons (door/gate/lock icon, `isSecured`) now need confirmation, too — in `lox mcp` and `lox tui`
+- Control resolution: among several substring matches, a single exact (case-insensitive) name match wins
+- MCP `get_control` returns a control's named outputs (e.g. LightControllerV2 relays) instead of flattening them into states
+- `lox sensors --type temperature` classifies by unit, so CO2 and humidity sensors no longer show up as temperatures
+- Dimming a LightControllerV2 to a bare level is refused with a hint to use moods (the Miniserver ignores it)
+
+### Fixed
+- Token auth: the HMAC algorithm follows the `hashAlg` the Miniserver reports (SHA-1 on firmware before 10.4), instead of always SHA-256
+- WebSocket sessions (`lox stream`, `lox otel serve`, `lox tui`) reuse the stored token via `authwithtoken` instead of minting a new long-lived token on every connect
+- `lox stream` and `lox otel serve` send keepalives and detect dead sockets, so the Miniserver's idle timeout no longer drops them; `lox otel serve` reconnects with backoff
+- `token.json` is written with mode 0600
+
 ## [0.12.0] — 2026-09-27
 
 ### Added
