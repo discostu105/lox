@@ -3158,11 +3158,11 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
                 go(app, Screen::Events);
             }
         }
-        "d" => {
-            if w.snap.is_none() && matches!(app.wiring, WiringDoc::Missing | WiringDoc::Failed(_)) {
-                app.wiring = WiringDoc::Loading;
-                return vec![Effect::LoadWiring { download: true }];
-            }
+        "d" if w.snap.is_none()
+            && matches!(app.wiring, WiringDoc::Missing | WiringDoc::Failed(_)) =>
+        {
+            app.wiring = WiringDoc::Loading;
+            return vec![Effect::LoadWiring { download: true }];
         }
         _ => {}
     }
