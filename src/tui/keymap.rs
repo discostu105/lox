@@ -149,8 +149,18 @@ pub static BINDINGS: &[Binding] = &[
         Cmd::Refresh,
         "refresh structure + reconnect"
     ),
-    b!(Global, ["q", "C-c"], Cmd::Quit, "quit"),
-    b!(Global, ["Esc"], Cmd::Back, "back"),
+    b!(
+        Global,
+        ["Esc", "Backspace"],
+        Cmd::Back,
+        "back: one step (popup → filter → pane → the screen you came from); never quits"
+    ),
+    b!(
+        Global,
+        ["q", "C-c"],
+        Cmd::Quit,
+        "close the popup; on a screen: quit"
+    ),
     // The action vocabulary (§4.3)
     b!(Item, ["Space"], Cmd::Verb(Verb::Primary), "primary action"),
     b!(Item, ["+"], Cmd::Verb(Verb::Plus), "step up", repeat),
@@ -281,6 +291,7 @@ pub fn display(code: &str) -> String {
         "Up" => "↑".into(),
         "Down" => "↓".into(),
         "Esc" => "Esc".into(),
+        "Backspace" => "⌫".into(),
         c if c.starts_with("C-") => format!("^{}", &c[2..]),
         c => c.into(),
     }

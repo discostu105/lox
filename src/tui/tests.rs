@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::app::{
     App, ChartData, ChartKey, Conn, Effect, Facet, FacetList, GKey, Msg, Opts, Overlay, PollKind,
-    Polled, Screen, Span, SysView,
+    Polled, Screen, Span, SysView, Trace,
 };
 use super::demo;
 use super::model::{House, Kind};
@@ -206,6 +206,9 @@ fn key(k: &str) -> KeyEvent {
         "Up" => (KeyCode::Up, KeyModifiers::NONE),
         "Left" => (KeyCode::Left, KeyModifiers::NONE),
         "Right" => (KeyCode::Right, KeyModifiers::NONE),
+        "Backspace" => (KeyCode::Backspace, KeyModifiers::NONE),
+        "PageUp" => (KeyCode::PageUp, KeyModifiers::NONE),
+        "PageDown" => (KeyCode::PageDown, KeyModifiers::NONE),
         s if s.starts_with("C-") => (
             KeyCode::Char(s.chars().nth(2).unwrap()),
             KeyModifiers::CONTROL,
@@ -358,6 +361,99 @@ fn wiring_live_header_detail_trace() {
     };
     assert_eq!(b.page.as_deref(), Some("Hallway"));
     assert!(h.render(140, 40).contains("▌ Hallway light"));
+}
+
+/// Wiring: `Esc` steps back through the followed blocks, then closes; `q`
+/// closes at once; `b` is not "back" any more.
+#[test]
+fn wiring_esc_steps_back_q_closes() {
+    let mut h = H::new();
+    let light = h.cid("Hallway light", "Hallway");
+    update::reveal(&mut h.app, light);
+    h.select(light);
+    h.keys(&["w"]);
+    let st = demo::structure();
+    let l = crate::logic::Logic::parse(demo::loxone_xml(&st).as_bytes()).unwrap();
+    let epoch = h.app.epoch;
+    h.msg(Msg::Wiring {
+        epoch,
+        doc: super::app::WiringDoc::Ready(std::sync::Arc::new(l), "demo.Loxone".into()),
+    });
+    let center = |h: &H| match h.app.top_overlay() {
+        Some(Overlay::Wiring(w)) => w.center.clone(),
+        o => panic!("{:?}", o),
+    };
+    let start = center(&h);
+    assert!(h.render(140, 40).contains("Esc close"));
+    h.keys(&["Enter"]);
+    let hop = center(&h);
+    assert_ne!(hop, start, "⏎ follows the wire");
+    assert!(h.render(140, 40).contains("Esc back"));
+    h.keys(&["b"]);
+    assert_eq!(center(&h), hop, "b does nothing");
+    h.keys(&["Esc"]);
+    assert_eq!(center(&h), start, "Esc: the previous block");
+    h.keys(&["Esc"]);
+    assert!(h.app.overlays.is_empty(), "Esc: then close");
+    // q closes from any depth
+    h.keys(&["w"]);
+    h.keys(&["Enter", "Enter", "q"]);
+    assert!(h.app.overlays.is_empty());
+    assert!(!h.app.quit);
+}
+
+/// `Esc` walks back the way a jump came: `e` on a control → Events with its
+/// facet; `Esc` clears the facet, the next `Esc` returns to Rooms. Number keys
+/// forget the way back.
+#[test]
+fn esc_returns_from_a_jump() {
+    let mut h = H::new();
+    h.keys(&["2", "l"]);
+    assert_eq!((h.app.screen, h.app.rooms.pane), (Screen::Rooms, 1));
+    h.keys(&["e"]);
+    assert_eq!(h.app.screen, Screen::Events);
+    assert!(!h.app.events.facets.is_empty());
+    let s = h.render(140, 40);
+    assert!(s.contains("Esc ← rooms"), "{}", s.lines().next().unwrap());
+    h.keys(&["Esc"]);
+    assert_eq!(h.app.screen, Screen::Events, "first the facet");
+    assert!(h.app.events.facets.is_empty());
+    h.keys(&["Esc"]);
+    assert_eq!((h.app.screen, h.app.rooms.pane), (Screen::Rooms, 1));
+    // ⌫ is back, too
+    h.keys(&["Backspace"]);
+    assert_eq!(h.app.rooms.pane, 0);
+    // Esc never quits, and goes nowhere without a jump
+    h.keys(&["Esc", "Esc"]);
+    assert_eq!(h.app.screen, Screen::Rooms);
+    assert!(!h.app.quit);
+    // a number key is a deliberate switch: no way back to remember
+    h.keys(&["l", "e", "1", "3", "Esc", "Esc"]);
+    assert_eq!(h.app.screen, Screen::Events);
+    // ⏎ on a room card jumps to Rooms; Esc: the room list, then Home
+    h.keys(&["1", "Enter"]);
+    assert_eq!((h.app.screen, h.app.rooms.pane), (Screen::Rooms, 1));
+    h.keys(&["Esc", "Esc"]);
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+/// `q` closes a popup; only on a screen does it quit — and a quick second
+/// press after closing a popup (a held key) does not.
+#[test]
+fn q_closes_popups_and_quits_from_a_screen() {
+    let mut h = H::new();
+    for open in [&["?"][..], &["C"], &["!"], &["2", "l", "a"]] {
+        h.keys(open);
+        assert!(!h.app.overlays.is_empty(), "{:?} opens a popup", open);
+        h.keys(&["q"]);
+        assert!(h.app.overlays.is_empty(), "q closes {:?}", open);
+        assert!(!h.app.quit);
+    }
+    h.keys(&["?", "q"]);
+    h.typed("q");
+    assert!(!h.app.quit, "a held q stops at the screen");
+    h.keys(&["q"]);
+    assert!(h.app.quit);
 }
 
 /// J4: is the Miniserver OK — System overview and sub-views poll what they show.
@@ -981,9 +1077,24 @@ fn config_snapshot_browser() {
     };
     assert!(title.contains("Stairs pulse"), "{}", title);
     assert!(text.starts_with("c3"), "added in c3: {}", text);
-    // Esc walks back out
+    // Esc walks back out one step at a time: the history, the trace, the wiring
     h.keys(&["Esc", "Esc"]);
-    assert!(matches!(h.app.top_overlay(), Some(Overlay::Browse(_))));
+    assert!(
+        matches!(h.app.top_overlay(), Some(Overlay::Wiring(w)) if w.trace == Trace::Off),
+        "{:?}",
+        h.app.top_overlay()
+    );
+    h.keys(&["Esc"]);
+    assert!(matches!(h.app.top_overlay(), Some(Overlay::Browse(b)) if b.page.is_some()));
+    // s → source; Esc: blocks, then pages
+    h.keys(&["s", "Esc"]);
+    assert!(
+        matches!(h.app.top_overlay(), Some(Overlay::Browse(b)) if !b.source && b.page.is_some())
+    );
+    // q closes the browser from inside a page, without quitting
+    h.keys(&["q"]);
+    assert!(h.app.overlays.is_empty());
+    assert!(!h.app.quit);
 }
 
 /// `m` marks a commit; selecting another compares the two; `w` on a diff
@@ -1706,8 +1817,8 @@ fn facets_rooms_this_room_or_and() {
     assert!(h.app.rooms.facets.is_empty());
 }
 
-/// Facet picker keys: ␣ toggles and stays open, C-x clears, Esc clears the
-/// query first, then closes.
+/// Facet picker keys: ␣ toggles and stays open, C-x clears, Esc closes like
+/// every other type-to-narrow popup.
 #[test]
 fn facets_picker_keys() {
     let mut h = H::new();
@@ -1729,11 +1840,6 @@ fn facets_picker_keys() {
     );
     h.keys(&["C-x"]);
     assert!(h.app.rooms.facets.is_empty());
-    h.keys(&["Esc"]);
-    let Some(Overlay::Facets { line, .. }) = h.app.overlays.last() else {
-        panic!("first Esc clears the query");
-    };
-    assert!(line.buf.is_empty());
     h.keys(&["Esc"]);
     assert!(h.app.overlays.is_empty());
 }
@@ -1839,8 +1945,8 @@ fn chart_timeframes_periods_compare() {
     assert_eq!(h.app.ui_state.chart_span, Some(Span::D7));
     assert!(h.fx.iter().any(|e| matches!(e, Effect::SaveState(_))));
     assert_eq!(chart_polls(&h.fx), [c.key(cid, false)]);
-    // ← one period back, compare with the one before it
-    h.keys(&["Left", "c"]);
+    // PgUp: one period back, compare with the one before it
+    h.keys(&["PageUp", "c"]);
     let Some(Overlay::Chart(c)) = h.app.overlays.last().cloned() else {
         panic!()
     };
@@ -1871,6 +1977,27 @@ fn chart_timeframes_periods_compare() {
     assert!(matches!(h.app.overlays.last(), Some(Overlay::Chart(c)) if c.cursor.is_none()));
     h.keys(&["Esc"]);
     assert!(h.app.overlays.is_empty());
+    // ← and h are the same cursor; past the left edge it carries on into the
+    // previous period, past the right edge back into the next one
+    h.keys(&["c", "Left"]);
+    let w = h.app.ui.borrow().chart_w.max(1);
+    let chart = |h: &H| match h.app.overlays.last() {
+        Some(Overlay::Chart(c)) => (c.back, c.cursor),
+        o => panic!("{:?}", o),
+    };
+    assert_eq!(chart(&h), (0, Some(w - 1)));
+    h.keys(&["h"]);
+    assert_eq!(chart(&h), (0, Some(w - 2)));
+    for _ in 0..w {
+        h.keys(&["Left"]);
+    }
+    assert_eq!(chart(&h), (1, Some(w - 2)));
+    h.keys(&["l", "Right"]);
+    assert_eq!(chart(&h), (0, Some(0)));
+    // q closes even with the cursor shown
+    h.keys(&["q"]);
+    assert!(h.app.overlays.is_empty());
+    assert!(!h.app.quit);
     // the next chart opens with the remembered timeframe
     h.keys(&["c"]);
     assert!(matches!(h.app.overlays.last(), Some(Overlay::Chart(c)) if c.span == Span::D7));

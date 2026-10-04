@@ -494,6 +494,17 @@ UI state (pins, mutes, palette history, last screen) is kept per context in `tui
 `?` shows the keys for where you are; every pane's bottom border shows the ones in reach. `:` (or `Ctrl-K`) opens
 the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 
+Getting around takes two keys:
+
+- **`Esc` (or `⌫`) goes back one step**, everywhere: in a popup to where you were before (the previous block in
+  the wiring, the page list in the config browser, the chart without its cursor), then it closes the popup; on a
+  screen it clears the filter, facets or marks, focuses the parent pane, and finally returns to the screen a jump
+  came from (`e`, `⏎` on a room or event, a palette result — the header shows `Esc ← rooms`). `Esc` never quits.
+- **`q` closes** the popup in one press, however deep you are in it. On a screen, with no popup open, `q` quits.
+  Holding `q` closes the popups but doesn't quit.
+
+In text fields (`/`, `:`, `=`, facets, search) letters are text: `Esc` cancels, `⏎` confirms.
+
 <!-- keys:start (generated from src/tui/keymap.rs) -->
 | Global | Action |
 |---|---|
@@ -522,8 +533,8 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 | `!` | message log |
 | `p` | pause live updates |
 | `^r` | refresh structure + reconnect |
-| `q` `^c` | quit |
-| `Esc` | back |
+| `Esc` `⌫` | back: one step (popup → filter → pane → the screen you came from); never quits |
+| `q` `^c` | close the popup; on a screen: quit |
 
 | Selected item | Action |
 |---|---|

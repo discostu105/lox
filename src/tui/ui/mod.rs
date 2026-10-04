@@ -158,10 +158,14 @@ fn render_header(app: &App, area: Rect, buf: &mut Buffer) {
         badges.push((format!(" ! {} ", app.unread_errors), th.s_badge(th.crit)));
     }
     let help = "? help";
-    let mut right_w: usize = parts
-        .iter()
-        .map(|(s, _)| super::text::width(s) + 2)
-        .sum::<usize>()
+    // where Esc leads after a jump
+    let back = app.came_from.map(|s| format!(" ← {}", s.title()));
+    let back_w = back.as_ref().map_or(0, |b| 3 + super::text::width(b) + 2);
+    let mut right_w: usize = back_w
+        + parts
+            .iter()
+            .map(|(s, _)| super::text::width(s) + 2)
+            .sum::<usize>()
         + badges
             .iter()
             .map(|(s, _)| super::text::width(s) + 1)
@@ -194,6 +198,17 @@ fn render_header(app: &App, area: Rect, buf: &mut Buffer) {
     }
     for (s, st) in parts {
         x = put(buf, area, x, area.y, &s, st) + 2;
+    }
+    if let Some(b) = &back {
+        x = put(
+            buf,
+            area,
+            x,
+            area.y,
+            "Esc",
+            th.s_accent().add_modifier(Modifier::BOLD),
+        );
+        x = put(buf, area, x, area.y, b, th.s_dim()) + 2;
     }
     let hx = put(
         buf,

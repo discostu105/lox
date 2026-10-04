@@ -210,7 +210,11 @@ fn help(app: &App, body: Rect, buf: &mut Buffer, scroll: usize, filter: &str) {
     } else {
         nb = nb.title(Notch::hot("/ search", '/'));
     }
-    nb = nb.hints(vec![Hint::new("j k", "scroll"), Hint::new("Esc", "close")]);
+    let mut hints = vec![Hint::new("j k", "scroll")];
+    hints.extend(common::close_hints(
+        (!filter.is_empty()).then_some("clear search"),
+    ));
+    nb = nb.hints(hints);
     let inner = boxed(app, r, buf, nb);
     let lines = help_lines(app, filter);
     let hgt = inner.height as usize;
@@ -858,7 +862,7 @@ fn input(
                 false,
                 r.width.saturating_sub(30) as usize,
             );
-            let hint = "⏎ keep  Esc clear  ↑↓ move";
+            let hint = "⏎ keep  Esc cancel  ↑↓ move";
             put(
                 buf,
                 r,
@@ -1173,7 +1177,7 @@ fn wiring(app: &App, body: Rect, buf: &mut Buffer, w: &WiringState) {
         Some(d) if !d.live => nb.meta(Notch::new(format!("◷ snapshot {}", clean(&d.label)))),
         _ => nb.meta(Notch::new("why is this on?")),
     };
-    nb = nb.hints(vec![
+    let mut hints = vec![
         Hint::new("⏎", "follow"),
         Hint::new("h l", "up · down"),
         Hint::new("t", "trace"),
@@ -1181,9 +1185,15 @@ fn wiring(app: &App, body: Rect, buf: &mut Buffer, w: &WiringState) {
         Hint::new("/", "find"),
         Hint::new("H", "history"),
         Hint::new("p", "params"),
-        Hint::new("b", "back"),
-        Hint::new("Esc", "close"),
-    ]);
+    ];
+    hints.extend(common::close_hints(if w.trace != Trace::Off {
+        Some("one hop")
+    } else if !w.back.is_empty() {
+        Some("back")
+    } else {
+        None
+    }));
+    nb = nb.hints(hints);
     if let Some(d) = doc.as_ref().filter(|d| d.live) {
         nb = nb.bottom_right(Notch::new(format!("lxir · {}", clean(&d.label))));
     }
@@ -1626,23 +1636,30 @@ fn browse(app: &App, body: Rect, buf: &mut Buffer, b: &BrowseState) {
             format!("◷ snapshot {}", clean(&b.doc.label))
         }));
     nb = nb.hints(match (&b.search, &b.page) {
+        // typing: `q` is a letter, `Esc` leaves the search
         (Some(_), _) => vec![
             Hint::new("↑↓", "select"),
             Hint::new("⏎", "wiring"),
-            Hint::new("Esc", "back"),
+            Hint::new("Esc", if b.from_search { "close" } else { "back" }),
         ],
-        (None, Some(_)) => vec![
-            Hint::new("⏎", "wiring"),
-            Hint::new("s", if b.source { "blocks" } else { "lxir source" }),
-            Hint::new("/", "find"),
-            Hint::new("Esc", "pages"),
-            Hint::new("q", "close"),
-        ],
-        (None, None) => vec![
-            Hint::new("⏎", "open page"),
-            Hint::new("/", "find a block"),
-            Hint::new("Esc", "close"),
-        ],
+        (None, Some(_)) => {
+            let mut v = vec![
+                Hint::new("⏎", "wiring"),
+                Hint::new("s", if b.source { "blocks" } else { "lxir source" }),
+                Hint::new("/", "find"),
+            ];
+            v.extend(common::close_hints(Some(if b.source {
+                "blocks"
+            } else {
+                "pages"
+            })));
+            v
+        }
+        (None, None) => {
+            let mut v = vec![Hint::new("⏎", "open page"), Hint::new("/", "find a block")];
+            v.extend(common::close_hints(None));
+            v
+        }
     });
     let inner = boxed(app, r, buf, nb);
     let tw = inner.width.saturating_sub(2) as usize;

@@ -327,6 +327,15 @@ fn short(s: &str) -> String {
     s.trim_start_matches(['▲', '▼', ' ']).to_string()
 }
 
+/// The way out of a popup: `Esc` goes back one step (`back` names it) and
+/// `q` closes, or `Esc` closes when there is no step left.
+pub fn close_hints(back: Option<&str>) -> Vec<Hint> {
+    match back {
+        Some(b) => vec![Hint::new("Esc", b.to_string()), Hint::new("q", "close")],
+        None => vec![Hint::new("Esc", "close")],
+    }
+}
+
 /// Hints from the keymap for a context (static labels).
 pub fn ctx_hints(ctx: Ctx, cmds: &[Cmd]) -> Vec<Hint> {
     cmds.iter()
