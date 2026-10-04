@@ -60,7 +60,7 @@ nav_order: 1
   <div class="feature-card">
     <span class="feature-icon">&#128196;</span>
     <div class="feature-title">Config versioning</div>
-    <div class="feature-desc">GitOps for your Miniserver. Track config changes with semantic diffs and git history.</div>
+    <div class="feature-desc">GitOps for your Miniserver. Track config changes with logic diffs and git history; inspect the wiring of any snapshot.</div>
   </div>
   <div class="feature-card">
     <span class="feature-icon">&#128279;</span>

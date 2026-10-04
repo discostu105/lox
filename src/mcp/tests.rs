@@ -394,6 +394,10 @@ fn output_schemas_do_not_require_fields_that_may_be_omitted() {
         if let Some(req) = v.get("required").and_then(|r| r.as_array()) {
             for r in req {
                 let name = r.as_str().unwrap_or("");
+                // a wiring's inputs/outputs are always there (maybe empty)
+                if tool == "get_wiring" && name == "outputs" {
+                    continue;
+                }
                 assert!(
                     !optional.contains(&name),
                     "{}: '{}' is required in the output schema but may be omitted",
@@ -1255,4 +1259,101 @@ async fn modern_confirmation_is_a_multi_round_trip_bound_to_the_action() {
     assert!(err, "{}", out);
     assert_eq!(out["error"], "confirmation_expired");
     m.assert_hits_async(0).await;
+}
+
+// ── Wiring ────────────────────────────────────────────────────────────────────
+
+/// A tiny `.Loxone` program: Präsenz → Licht Wohnzimmer (MoveOn 900) → AQ1
+/// → output ref → a Tree dimmer.
+fn wiring_config(dir: &std::path::Path) {
+    let xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\">\r\n\
+<C Type=\"Document\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000001\" Title=\"Test\">\r\n\
+<C Type=\"PlaceCaption\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000003\" Title=\"Rooms\">\r\n\
+<C Type=\"Place\" V=\"175\" U=\"2e000000-0000-0000-ffff0000000000a1\" Title=\"Wohnzimmer\"/>\r\n</C>\r\n\
+<C Type=\"LoxLIVE\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000004\" Title=\"MS\">\r\n\
+<C Type=\"LoxTree\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000007\" Title=\"Tree\">\r\n\
+<C Type=\"TreeDevice\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000009\" Title=\"Dimmer Tree\">\r\n\
+<C Type=\"TreeAactor\" V=\"175\" U=\"2e000000-0000-0000-ffff0000000000d1\" Title=\"Spots\">\r\n\
+<Co K=\"AI\" U=\"2e000000-0000-0000-ffff0000000000d2\"><In Input=\"2e000000-0000-0000-ffff0000000000c3\"/></Co>\r\n\
+<IoData Pr=\"2e000000-0000-0000-ffff0000000000a1\"/>\r\n</C>\r\n</C>\r\n</C>\r\n</C>\r\n\
+<C Type=\"Program\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000002\" Title=\"MS\">\r\n\
+<C Type=\"Page\" V=\"175\" U=\"2e000000-0000-0001-ffff000000000000\" Title=\"Wohnzimmer\">\r\n\
+<C Type=\"PresenceDetector\" V=\"175\" U=\"2e000000-0000-0000-ffff0000000000b1\" Title=\"Präsenz\">\r\n\
+<Co K=\"Q\" U=\"2e000000-0000-0000-ffff0000000000b2\"/>\r\n\
+<IoData Pr=\"2e000000-0000-0000-ffff0000000000a1\"/>\r\n</C>\r\n\
+<C Type=\"LightController2\" V=\"175\" U=\"{LIGHT}\" Title=\"Licht Wohnzimmer\">\r\n\
+<Co K=\"Mv\" U=\"2e000000-0000-0000-ffff0000000000e1\"><In Input=\"2e000000-0000-0000-ffff0000000000b2\"/></Co>\r\n\
+<Co K=\"MoveOn\" Def=\"900\" U=\"2e000000-0000-0000-ffff0000000000e2\"/>\r\n\
+<Co K=\"AQ1\" U=\"2e000000-0000-0000-ffff0000000000e3\"/>\r\n\
+<IoData Pr=\"2e000000-0000-0000-ffff0000000000a1\"/>\r\n</C>\r\n\
+<C Type=\"OutputRef\" V=\"175\" U=\"2e000000-0000-0000-ffff0000000000c1\" Title=\"Spots\" Ref=\"2e000000-0000-0000-ffff0000000000d1\">\r\n\
+<Co K=\"AI\" U=\"2e000000-0000-0000-ffff0000000000c2\"><In Input=\"2e000000-0000-0000-ffff0000000000e3\"/></Co>\r\n\
+<Co K=\"AQ\" U=\"2e000000-0000-0000-ffff0000000000c3\"/>\r\n</C>\r\n\
+</C>\r\n</C>\r\n</C>\r\n</ControlList>\r\n"
+    );
+    let cache = dir.join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("config.Loxone"), xml).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_wiring_explains_a_control_from_the_config() {
+    let ms = miniserver().await;
+    let dir = tempfile::tempdir().unwrap();
+    wiring_config(dir.path());
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    // the app name resolves to the block; params, inputs and outputs
+    let (out, err) = call(&client, "get_wiring", json!({ "name": "Licht Wohnzimmer" })).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["config"], "cached");
+    assert_eq!(out["block"]["uuid"], LIGHT);
+    assert_eq!(out["block"]["page"], "Wohnzimmer");
+    assert_eq!(out["control"]["tool"], "light");
+    assert_eq!(out["params"][0]["key"], "MoveOn");
+    assert!(
+        out["params"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("15 min"),
+        "{}",
+        out
+    );
+    assert_eq!(out["inputs"][0]["key"], "Mv");
+    assert_eq!(out["inputs"][0]["block"]["title"], "Präsenz");
+    // the output ref is folded away: AQ1 drives the dimmer on the Tree device
+    assert_eq!(out["outputs"][0]["block"]["title"], "Spots");
+    assert_eq!(out["outputs"][0]["block"]["device"], "Dimmer Tree");
+    // blocks that are no app control resolve by their config title
+    let (out, err) = call(
+        &client,
+        "get_wiring",
+        json!({ "name": "Präsenz", "trace": "down", "depth": 3 }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert!(out.get("control").is_none());
+    let down = out["downstream"].as_array().unwrap();
+    assert_eq!(down[0]["block"]["title"], "Licht Wohnzimmer");
+    assert_eq!(down[1]["depth"], 2);
+    assert_eq!(down[1]["block"]["title"], "Spots");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_wiring_without_a_config_says_how_to_get_one() {
+    let ms = miniserver().await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    let (out, err) = call(&client, "get_wiring", json!({ "name": "Licht Wohnzimmer" })).await;
+    assert!(err);
+    assert_eq!(out["error"], "config_unavailable");
+    assert!(out["message"].as_str().unwrap().contains("download=true"));
 }

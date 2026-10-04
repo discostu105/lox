@@ -174,6 +174,7 @@ Miniserver context.
 | `list_light_moods` | read | Mood IDs of a lighting controller |
 | `list_scenes` | read | Your `lox` scenes |
 | `system_status` | read | Firmware, PLC state, memory |
+| `get_wiring` | read | The Loxone Config logic around a control: what drives it, what it drives, parameters; `trace` up to the sensors or down to the actuators |
 | `switch` | action | `on`, `off`, `pulse` |
 | `blind` | action | `up`, `down`, `stop`, `shade`, `position`, `slats` |
 | `light` | action | `mood`, `dim`, `color` |

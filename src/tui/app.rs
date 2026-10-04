@@ -483,14 +483,82 @@ pub struct Confirm {
     pub input: Line,
 }
 
+/// A parsed config: the live one (`app.wiring`) or a snapshot of the repo.
 #[derive(Debug, Clone)]
+pub struct SnapDoc {
+    pub logic: std::sync::Arc<crate::logic::Logic>,
+    /// Where it came from: `gitops`, `cached`, `abc1234 · saved …`
+    pub label: String,
+    /// The running config: wires show live values
+    pub live: bool,
+}
+
+/// What to open once a snapshot is loaded.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SnapOpen {
+    Browse,
+    /// The wiring of this block at that snapshot
+    Wiring(String),
+}
+
+impl BrowseState {
+    pub fn new(doc: SnapDoc) -> BrowseState {
+        BrowseState {
+            doc,
+            page: None,
+            source: false,
+            sel: 0,
+            scroll: 0,
+            page_sel: 0,
+            search: None,
+            from_search: false,
+        }
+    }
+}
+
+/// `t` in the wiring overlay: the one-hop view, or a whole path.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Trace {
+    #[default]
+    Off,
+    /// To the sensors
+    Up,
+    /// To the actuators
+    Down,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct WiringState {
     /// Center block UUID
     pub center: String,
-    /// Selected wire row (inputs then outputs)
+    /// Selected wire row (inputs then outputs, or trace nodes)
     pub sel: usize,
     /// Navigation history for Esc/h
     pub back: Vec<String>,
+    pub trace: Trace,
+    /// `p`: parameters with default values too
+    pub all_params: bool,
+    /// A snapshot instead of the live config (no live values)
+    pub snap: Option<SnapDoc>,
+}
+
+/// The config browser: pages → a page (blocks or lxir source) → wiring.
+#[derive(Debug, Clone)]
+pub struct BrowseState {
+    pub doc: SnapDoc,
+    /// `None`: the page list
+    pub page: Option<String>,
+    /// Page view: lxir source instead of the block list
+    pub source: bool,
+    pub sel: usize,
+    /// Source view scroll
+    pub scroll: usize,
+    /// Selection in the page list, restored when leaving a page
+    pub page_sel: usize,
+    /// `/`: search over every block of the config
+    pub search: Option<Line>,
+    /// Opened by `/` in the wiring overlay: Esc returns there
+    pub from_search: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -534,6 +602,8 @@ pub enum Overlay {
         scroll: usize,
     },
     Wiring(WiringState),
+    /// Config browser (System › Config ⏎, wiring `o` and `/`)
+    Browse(BrowseState),
     /// History chart with timeframes
     Chart(ChartState),
     /// Full value of a state (pretty-printed JSON), scrollable
@@ -706,7 +776,8 @@ pub enum PollKind {
     /// Today's PV / consumption from meter statistics
     EnergyDay,
     ConfigLog,
-    /// Diff of a gitops commit against its parent
+    /// Diff of a gitops commit against the snapshot before it, or of two
+    /// snapshots (`old..new`)
     ConfigDiff(String),
 }
 
@@ -726,7 +797,7 @@ pub enum Polled {
     },
     /// history, and where pulls store `config.Loxone` (for the footer)
     ConfigLog(Result<Vec<Commit>, String>, Option<String>),
-    ConfigDiff(String, Vec<String>),
+    ConfigDiff(String, Vec<crate::logic::DiffLine>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -744,7 +815,8 @@ pub struct Commit {
 
 impl Commit {
     /// From `git log`: subject `Config backup 2026-09-25 18:39:01 (v273)` (as
-    /// `lox config pull` writes it) and a body listing the changed controls.
+    /// `lox config pull` writes it) and a body with the semantic diff (or,
+    /// from older versions, a list of changed controls).
     pub fn new(hash: &str, date: &str, subject: &str, body: &str) -> Commit {
         let saved = subject
             .strip_prefix("Config backup ")
@@ -763,8 +835,23 @@ impl Commit {
             lines.iter().filter(|l| l.starts_with("+ ")).count(),
             lines.iter().filter(|l| l.starts_with("- ")).count(),
         );
+        // the semantic body: `= totals`, then `# Page` and change lines
+        let changes: Vec<&&str> = lines
+            .iter()
+            .filter(|l| !l.starts_with("= ") && !l.starts_with("# "))
+            .collect();
         let summary = match lines.as_slice() {
             [] => String::new(),
+            [first, ..] if first.starts_with("= ") => match changes.as_slice() {
+                // `+ block  Name (Type)` → `+ Name (Type)`
+                [one] => one
+                    .replacen("block  ", "", 1)
+                    .replacen("param  ", "", 1)
+                    .replacen("wire   ", "", 1),
+                _ => first[2..].to_string(),
+            },
+            [one, ..] if one.starts_with("No logic changes") => "no logic changes".into(),
+            [one, ..] if one.starts_with("Initial config snapshot") => "initial snapshot".into(),
             [one] if one.starts_with("No structural") => "no structural changes".into(),
             // `+ Added control: "Name" (Type)` → `+ Name (Type)`
             [one] => one
@@ -844,6 +931,19 @@ pub enum Msg {
         epoch: u64,
         doc: WiringDoc,
     },
+    /// A snapshot of the config repo, parsed
+    Snapshot {
+        epoch: u64,
+        spec: String,
+        open: SnapOpen,
+        result: Result<SnapDoc, String>,
+    },
+    /// `H`: a block's history across the snapshots (text)
+    BlockHistory {
+        epoch: u64,
+        title: String,
+        result: Result<String, String>,
+    },
     /// A new house after a context switch or structure refresh
     NewHouse {
         epoch: u64,
@@ -881,6 +981,15 @@ pub enum Effect {
     RunScene(String),
     LoadWiring {
         download: bool,
+    },
+    /// Parse a snapshot: a commit, or `<commit>^` for the one before it
+    LoadSnapshot {
+        spec: String,
+        open: SnapOpen,
+    },
+    BlockHistory {
+        uuid: String,
+        title: String,
     },
     ConfigPull,
     Reboot,
@@ -1037,7 +1146,11 @@ pub struct App {
     pub insp_sel: usize,
     pub energy_day: Option<(Vec<f64>, Vec<f64>)>,
     pub commits: Option<Result<Vec<Commit>, String>>,
-    pub diffs: HashMap<String, Vec<String>>,
+    pub diffs: HashMap<String, Vec<crate::logic::DiffLine>>,
+    /// `m` in System › Config: the commit to compare the selected one with
+    pub config_mark: Option<String>,
+    /// Parsed snapshots by spec (commit or `<commit>^`)
+    pub snaps: HashMap<String, SnapDoc>,
     /// Diffs that failed (hash → error), shown instead of "loading"
     pub diff_errs: HashMap<String, String>,
     /// `P`: when the pull started or finished; `None` result = still running
@@ -1106,6 +1219,8 @@ impl App {
             energy_day: None,
             commits: None,
             diffs: HashMap::new(),
+            config_mark: None,
+            snaps: HashMap::new(),
             diff_errs: HashMap::new(),
             pull: None,
             config_file: None,

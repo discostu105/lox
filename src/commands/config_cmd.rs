@@ -6,13 +6,13 @@ use std::fs;
 use std::time::Duration;
 
 use crate::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
-use crate::commands::RunContext;
+use crate::commands::{RunContext, config_insight};
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
 use crate::{
     AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, detect_shell,
-    ftp, gitops, install_completions, json_val_str, load_config_xml, loxcc, loxone_xml,
+    ftp, gitops, install_completions, json_val_str, loxcc, loxone_xml,
 };
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
@@ -581,101 +581,20 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 println!("\n{} devices total", devices.len());
             }
         }
-        ConfigCmd::Diff { file1, file2 } => {
-            let xml1 = load_config_xml(&file1)?;
-            let xml2 = load_config_xml(&file2)?;
-            let s1 = loxone_xml::parse_config_summary(&xml1)?;
-            let s2 = loxone_xml::parse_config_summary(&xml2)?;
-            let diff = loxone_xml::diff_configs(&s1, &s2);
-
-            if ctx.json {
-                println!("{}", serde_json::to_string_pretty(&diff)?);
-            } else {
-                println!(
-                    "Config version: {} → {}",
-                    diff.version_old, diff.version_new
-                );
-                println!("Modified: {} → {}", diff.date_old, diff.date_new);
-
-                if !diff.controls_added.is_empty()
-                    || !diff.controls_removed.is_empty()
-                    || !diff.controls_changed.is_empty()
-                {
-                    println!("\nControls:");
-                    for c in &diff.controls_added {
-                        println!("  + Added: \"{}\" ({})", c.name, c.control_type);
-                    }
-                    for c in &diff.controls_changed {
-                        println!(
-                            "  ~ Changed: \"{}\" — {} \"{}\" → \"{}\"",
-                            c.name, c.field, c.old_value, c.new_value
-                        );
-                    }
-                    for c in &diff.controls_removed {
-                        println!("  - Removed: \"{}\" ({})", c.name, c.control_type);
-                    }
-                }
-
-                if !diff.rooms_added.is_empty()
-                    || !diff.rooms_removed.is_empty()
-                    || !diff.rooms_renamed.is_empty()
-                {
-                    println!("\nRooms:");
-                    for r in &diff.rooms_added {
-                        println!("  + Added: \"{}\"", r);
-                    }
-                    for r in &diff.rooms_renamed {
-                        println!("  ~ Renamed: \"{}\" → \"{}\"", r.old, r.new);
-                    }
-                    for r in &diff.rooms_removed {
-                        println!("  - Removed: \"{}\"", r);
-                    }
-                }
-
-                if !diff.categories_added.is_empty()
-                    || !diff.categories_removed.is_empty()
-                    || !diff.categories_renamed.is_empty()
-                {
-                    println!("\nCategories:");
-                    for c in &diff.categories_added {
-                        println!("  + Added: \"{}\"", c);
-                    }
-                    for c in &diff.categories_renamed {
-                        println!("  ~ Renamed: \"{}\" → \"{}\"", c.old, c.new);
-                    }
-                    for c in &diff.categories_removed {
-                        println!("  - Removed: \"{}\"", c);
-                    }
-                }
-
-                if !diff.users_added.is_empty() || !diff.users_removed.is_empty() {
-                    println!("\nUsers:");
-                    for u in &diff.users_added {
-                        println!("  + Added: \"{}\"", u);
-                    }
-                    for u in &diff.users_removed {
-                        println!("  - Removed: \"{}\"", u);
-                    }
-                }
-
-                let total = diff.controls_added.len()
-                    + diff.controls_removed.len()
-                    + diff.controls_changed.len()
-                    + diff.rooms_added.len()
-                    + diff.rooms_removed.len()
-                    + diff.rooms_renamed.len()
-                    + diff.categories_added.len()
-                    + diff.categories_removed.len()
-                    + diff.categories_renamed.len()
-                    + diff.users_added.len()
-                    + diff.users_removed.len();
-
-                if !diff.has_changes() {
-                    println!("\nNo structural changes.");
-                } else {
-                    println!("\n{} changes total", total);
-                }
-            }
+        ConfigCmd::Diff { old, new } => config_insight::cmd_diff(ctx, old, new)?,
+        ConfigCmd::Show { page, all, src } => config_insight::cmd_show(ctx, page, all, src)?,
+        ConfigCmd::Wiring {
+            name,
+            room,
+            trace,
+            depth,
+            all_params,
+            src,
+        } => config_insight::cmd_wiring(ctx, name, room, trace, depth, all_params, src)?,
+        ConfigCmd::Find { query, src } => config_insight::cmd_find(ctx, query, src)?,
+        ConfigCmd::Lint { src } => config_insight::cmd_lint(ctx, src)?,
+        ConfigCmd::History { name, room, count } => {
+            config_insight::cmd_history(ctx, name, room, count)?
         }
         ConfigCmd::Init { path } => {
             let cfg = Config::load()?;

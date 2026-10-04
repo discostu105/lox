@@ -5,7 +5,6 @@
 //! epoch (context switch, structure refresh).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -17,15 +16,15 @@ use tokio::runtime::Handle;
 use tokio::sync::watch;
 
 use super::app::{
-    App, ChartData, ChartKey, Commit, Conn, Effect, LogMsg, Msg, PollKind, Polled, ToastKind,
-    WiringDoc,
+    App, ChartData, ChartKey, Commit, Conn, Effect, LogMsg, Msg, PollKind, Polled, SnapDoc,
+    ToastKind, WiringDoc,
 };
 use super::data::{self, BusLan, Diag, MsInfo, Series, SiteStatus};
 use super::demo;
 use super::model::{Cid, House, Role};
 use crate::client::LoxClient;
 use crate::config::{Config, GlobalConfig};
-use crate::logic::Logic;
+use crate::logic::{DiffLine, Logic};
 use crate::stream::StateEvent;
 
 static EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -334,10 +333,35 @@ impl Live {
                     let _ = tx.send(Msg::Wiring { epoch, doc });
                 });
             }
+            Effect::LoadSnapshot { spec, open } => {
+                let cfg = self.cfg.clone();
+                self.rt.spawn_blocking(move || {
+                    let result = load_snapshot(&cfg, &spec);
+                    let _ = tx.send(Msg::Snapshot {
+                        epoch,
+                        spec,
+                        open,
+                        result,
+                    });
+                });
+            }
+            Effect::BlockHistory { uuid, title } => {
+                let cfg = self.cfg.clone();
+                self.rt.spawn_blocking(move || {
+                    let result = snapshot::block_history(&cfg, &uuid, None, 100)
+                        .map(|h| h.text())
+                        .map_err(|e| short_err(&e));
+                    let _ = tx.send(Msg::BlockHistory {
+                        epoch,
+                        title,
+                        result,
+                    });
+                });
+            }
             Effect::ConfigPull => {
                 let cfg = self.cfg.clone();
                 self.rt.spawn_blocking(move || {
-                    let r = match repo_dir(&cfg) {
+                    let r = match snapshot::repo_dir(&cfg) {
                         Some(repo) => {
                             crate::gitops::pull(&repo, &cfg, true).map_err(|e| short_err(&e))
                         }
@@ -740,12 +764,8 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
         PollKind::EnergyDay => energy_day(client, ctx),
         PollKind::ConfigLog => {
             let cfg = ctx.cfg.as_ref().context("no config")?;
-            let file = repo_dir(cfg).map(|r| {
-                r.join(crate::gitops::ms_dir(cfg))
-                    .join("config.Loxone")
-                    .display()
-                    .to_string()
-            });
+            let file = snapshot::repo_dir(cfg)
+                .map(|r| r.join(snapshot::config_path(cfg)).display().to_string());
             Polled::ConfigLog(config_log(cfg), file)
         }
         PollKind::ConfigDiff(hash) => {
@@ -1106,119 +1126,63 @@ fn energy_day(client: &LoxClient, ctx: &PollCtx) -> Polled {
 
 // ── Config repo (gitops) ────────────────────────────────────────────────────
 
-fn repo_dir(cfg: &Config) -> Option<PathBuf> {
-    let r = cfg.config_repo.as_ref()?;
-    let p = PathBuf::from(r);
-    p.join(".git").exists().then_some(p)
-}
-
-fn git(repo: &std::path::Path, args: &[&str]) -> Result<Vec<u8>> {
-    let out = std::process::Command::new("git")
-        .current_dir(repo)
-        .args(args)
-        .output()
-        .context("git not found")?;
-    if !out.status.success() {
-        bail!(
-            "git {}: {}",
-            args.first().unwrap_or(&""),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(out.stdout)
-}
+use crate::snapshot;
 
 fn config_log(cfg: &Config) -> Result<Vec<Commit>, String> {
-    let repo = repo_dir(cfg).ok_or_else(|| "no config repository for this context".to_string())?;
-    let ms = crate::gitops::ms_dir(cfg);
-    let prefix = format!("[{}] ", ms);
-    let out = git(
-        &repo,
-        &[
-            "log",
-            "-n",
-            "100",
-            "--format=%H%x09%ci%x09%s%x09%b%x1e",
-            "--",
-            &format!("{}/config.Loxone", ms),
-        ],
-    )
-    .map_err(|e| short_err(&e))?;
-    Ok(String::from_utf8_lossy(&out)
-        .split('\x1e')
-        .filter_map(|rec| {
-            let mut p = rec.trim_start_matches('\n').splitn(4, '\t');
-            let hash = p.next().filter(|h| !h.is_empty())?;
-            let date = p.next()?;
-            // `lox config pull` prefixes subjects with the Miniserver dir: redundant here
-            let subject =
-                crate::tui::text::clean(p.next().unwrap_or("").trim_start_matches(prefix.as_str()));
-            Some(Commit::new(hash, date, &subject, p.next().unwrap_or("")))
+    snapshot::commits(cfg, 100)
+        .map(|cs| {
+            cs.into_iter()
+                .map(|c| {
+                    Commit::new(
+                        &c.hash,
+                        &c.date,
+                        &crate::tui::text::clean(&c.subject),
+                        &c.body,
+                    )
+                })
+                .collect()
         })
-        .collect())
+        .map_err(|e| short_err(&e))
 }
 
-fn config_diff(cfg: &Config, hash: &str) -> Result<Vec<String>> {
-    let repo = repo_dir(cfg).context("no config repository")?;
-    let path = format!("{}/config.Loxone", crate::gitops::ms_dir(cfg));
-    let new = git(&repo, &["show", &format!("{}:{}", hash, path)])?;
-    let old = git(&repo, &["show", &format!("{}^:{}", hash, path)]).unwrap_or_default();
-    if old.is_empty() {
-        return Ok(vec!["+ initial config".into()]);
+/// `hash`: that commit against the snapshot before it; `old..new`: two snapshots.
+fn config_diff(cfg: &Config, key: &str) -> Result<Vec<DiffLine>> {
+    if let Some((a, b)) = key.split_once("..") {
+        let (a, b) = (snapshot::by_spec(cfg, a)?, snapshot::by_spec(cfg, b)?);
+        return crate::logic::diff(&a.bytes, &b.bytes);
     }
-    crate::logic::diff_lines(&old, &new)
+    let c = snapshot::resolve(cfg, key)?;
+    let new = snapshot::at_commit(cfg, &c)?;
+    match snapshot::before(cfg, &c)? {
+        Some((_, old)) => crate::logic::diff(&old.bytes, &new.bytes),
+        None => Ok(vec!["= initial snapshot".into()]),
+    }
+}
+
+fn load_snapshot(cfg: &Config, spec: &str) -> Result<SnapDoc, String> {
+    let snap = snapshot::by_spec(cfg, spec).map_err(|e| short_err(&e))?;
+    let l = Logic::parse(&snap.bytes).map_err(|e| short_err(&e))?;
+    Ok(SnapDoc {
+        logic: Arc::new(l),
+        label: snap.label,
+        live: false,
+    })
 }
 
 // ── Wiring source ───────────────────────────────────────────────────────────
 
-fn wiring_cache(cfg: &Config) -> PathBuf {
-    cfg.cache_dir().join("config.Loxone")
-}
-
 /// gitops checkout → per-context cache (keyed by structure version) → FTP download.
 fn load_wiring(cfg: &Config, version: &str, download: bool) -> WiringDoc {
-    let parse = |bytes: &[u8], src: String| match Logic::parse(bytes) {
-        Ok(l) => WiringDoc::Ready(Arc::new(l), src),
-        Err(e) => WiringDoc::Failed(short_err(&e)),
+    let snap = if download {
+        snapshot::download(cfg, Some(version))
+    } else {
+        match snapshot::current_with_version(cfg, Some(version)) {
+            Ok(s) => Ok(s),
+            Err(_) => return WiringDoc::Missing,
+        }
     };
-    if !download {
-        if let Some(repo) = repo_dir(cfg) {
-            let p = repo.join(crate::gitops::ms_dir(cfg)).join("config.Loxone");
-            if let Ok(b) = std::fs::read(&p) {
-                return parse(&b, "gitops".into());
-            }
-        }
-        let cache = wiring_cache(cfg);
-        let ver = std::fs::read_to_string(cache.with_extension("version")).unwrap_or_default();
-        if let Ok(b) = std::fs::read(&cache) {
-            let src = if ver.trim() == version.trim() {
-                "cached".to_string()
-            } else {
-                "cached · config may be stale".to_string()
-            };
-            return parse(&b, src);
-        }
-        return WiringDoc::Missing;
-    }
-    let r = (|| -> Result<(Vec<u8>, String)> {
-        let backups = crate::ftp::list_backups(cfg)?;
-        let newest = backups
-            .first()
-            .context("no config backups on the Miniserver")?;
-        let zip = crate::ftp::download_backup(cfg, &newest.filename)?;
-        let xml = crate::loxcc::extract_and_decompress(&zip)?;
-        Ok((xml, newest.filename.clone()))
-    })();
-    match r {
-        Ok((xml, name)) => {
-            let cache = wiring_cache(cfg);
-            if let Some(p) = cache.parent() {
-                let _ = std::fs::create_dir_all(p);
-            }
-            let _ = std::fs::write(&cache, &xml);
-            let _ = std::fs::write(cache.with_extension("version"), version);
-            parse(&xml, name)
-        }
+    match snap.and_then(|s| Ok((Logic::parse(&s.bytes)?, s.label))) {
+        Ok((l, label)) => WiringDoc::Ready(Arc::new(l), label),
         Err(e) => WiringDoc::Failed(short_err(&e)),
     }
 }
@@ -1392,10 +1356,12 @@ impl Demo {
                         Ok(Polled::EnergyDay { pv, usage })
                     }
                     PollKind::ConfigLog => Ok(Polled::ConfigLog(
-                        Ok(demo_commits()),
+                        Ok(demo_commits(&self.st)),
                         Some("~/loxone-config/demo/config.Loxone".into()),
                     )),
-                    PollKind::ConfigDiff(h) => Ok(Polled::ConfigDiff(h.clone(), demo_diff(h))),
+                    PollKind::ConfigDiff(h) => demo_diff(&self.st, h)
+                        .map(|d| Polled::ConfigDiff(h.clone(), d))
+                        .map_err(|e| short_err(&e)),
                 };
                 let delay = if matches!(
                     kind,
@@ -1433,6 +1399,25 @@ impl Demo {
                     Err(e) => WiringDoc::Failed(short_err(&e)),
                 };
                 let _ = tx.send(Msg::Wiring { epoch, doc });
+            }
+            Effect::LoadSnapshot { spec, open } => {
+                let result = demo_version(&spec)
+                    .and_then(|v| demo_snapshot(&self.st, v))
+                    .map_err(|e| short_err(&e));
+                let _ = tx.send(Msg::Snapshot {
+                    epoch,
+                    spec,
+                    open,
+                    result,
+                });
+            }
+            Effect::BlockHistory { uuid, title } => {
+                let result = demo_history(&self.st, &uuid).map_err(|e| short_err(&e));
+                let _ = tx.send(Msg::BlockHistory {
+                    epoch,
+                    title,
+                    result,
+                });
             }
             Effect::ConfigPull => {
                 let _ = tx.send(Msg::ConfigPulled(Ok(false)));
@@ -1535,49 +1520,110 @@ fn demo_scene(h: &House, name: &str) -> Vec<(String, String)> {
     out
 }
 
-fn demo_commits() -> Vec<Commit> {
-    vec![
-        Commit::new(
-            "c3",
-            "2026-09-24 21:10:02 +0200",
-            "Config backup 2026-09-24 21:08:40 (v112)",
-            "~ Changed control: \"Hallway light\" (LightController)",
-        ),
-        Commit::new(
-            "c2",
-            "2026-09-12 18:44:40 +0200",
-            "Config backup 2026-09-12 18:40:11 (v111)",
-            "+ Added control: \"Terrace spot\" (Switch)\n~ Changed control: \"Office blind\" (Jalousie)",
-        ),
-        Commit::new(
-            "c1",
-            "2026-08-30 09:02:13 +0200",
-            "Config backup 2026-08-30 09:01:57 (v110)",
-            "Initial config",
-        ),
-    ]
+// The demo config history: snapshots c1..c3 are versions of the demo config.
+const DEMO_COMMITS: [(&str, &str, &str); 3] = [
+    (
+        "c3",
+        "2026-09-24 21:10:02 +0200",
+        "Config backup 2026-09-24 21:08:40 (v112)",
+    ),
+    (
+        "c2",
+        "2026-09-12 18:44:40 +0200",
+        "Config backup 2026-09-12 18:40:11 (v111)",
+    ),
+    (
+        "c1",
+        "2026-08-30 09:02:13 +0200",
+        "Config backup 2026-08-30 09:01:57 (v110)",
+    ),
+];
+
+/// `c2` → 2, `c2^` → 1
+pub(super) fn demo_version(spec: &str) -> Result<u8> {
+    let (h, before) = match spec.strip_suffix('^') {
+        Some(h) => (h, 1),
+        None => (spec, 0),
+    };
+    let v = h
+        .strip_prefix('c')
+        .and_then(|n| n.parse::<u8>().ok())
+        .filter(|v| (1..=3).contains(v))
+        .with_context(|| format!("unknown snapshot {}", spec))?;
+    if v <= before {
+        bail!("this is the first snapshot — there is none before it");
+    }
+    Ok(v - before)
 }
 
-fn demo_diff(hash: &str) -> Vec<String> {
-    match hash {
-        "c3" => vec![
-            "= 1 renamed · 1 parameters · wires +1 −0".into(),
-            "# Hallway".into(),
-            "~ param  Hallway light · Off-delay  120 → 300".into(),
-            "~ rename Night → Night mode".into(),
-            "+ wire   Night mode.Q → Hallway light.DisP".into(),
-        ],
-        "c2" => vec![
-            "= 1 added · 1 renamed · 4 re-created · wires +1 −0".into(),
-            "# Terrace".into(),
-            "+ block  Terrace spot (Switch)".into(),
-            "+ wire   Terrace button.Q → Terrace spot.Tg".into(),
-            "# Office".into(),
-            "~ rename Blinds office → Office blind".into(),
-            "~ block  Click signal (OutputRef)  re-created  ×4".into(),
-        ],
-        _ => vec!["+ initial config".into()],
+pub(super) fn demo_snapshot(st: &Value, v: u8) -> Result<SnapDoc> {
+    Ok(SnapDoc {
+        logic: Arc::new(Logic::parse(demo::loxone_xml_at(st, v).as_bytes())?),
+        label: format!("c{} · demo snapshot", v),
+        live: false,
+    })
+}
+
+pub(super) fn demo_diff(st: &Value, key: &str) -> Result<Vec<DiffLine>> {
+    let xml = |v: u8| demo::loxone_xml_at(st, v);
+    if let Some((a, b)) = key.split_once("..") {
+        return crate::logic::diff(
+            xml(demo_version(a)?).as_bytes(),
+            xml(demo_version(b)?).as_bytes(),
+        );
     }
+    match demo_version(key)? {
+        1 => Ok(vec!["= initial snapshot".into()]),
+        v => crate::logic::diff(xml(v - 1).as_bytes(), xml(v).as_bytes()),
+    }
+}
+
+pub(super) fn demo_commits(st: &Value) -> Vec<Commit> {
+    DEMO_COMMITS
+        .iter()
+        .map(|(h, date, subject)| {
+            let body = match demo_diff(st, h) {
+                Ok(lines) if h != &"c1" => lines
+                    .into_iter()
+                    .map(|l| l.text)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => "Initial config snapshot.".into(),
+            };
+            Commit::new(h, date, subject, &body)
+        })
+        .collect()
+}
+
+pub(super) fn demo_history(st: &Value, uuid: &str) -> Result<String> {
+    let docs = (1..=3)
+        .map(|v| Logic::parse(demo::loxone_xml_at(st, v).as_bytes()))
+        .collect::<Result<Vec<_>>>()?;
+    let mut out = String::new();
+    for (i, (h, _, subject)) in DEMO_COMMITS.iter().enumerate() {
+        let v = 3 - i;
+        let lines = if v == 1 {
+            if docs[0].blocks.contains_key(uuid) {
+                vec!["= in the first snapshot".to_string()]
+            } else {
+                Vec::new()
+            }
+        } else {
+            crate::logic::block_changes(&docs[v - 2], &docs[v - 1], uuid)
+        };
+        if lines.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let saved = subject.strip_prefix("Config backup ").unwrap_or(subject);
+        out.push_str(&format!("{}  {}\n", h, saved.get(..19).unwrap_or(saved)));
+        for l in lines {
+            out.push_str(&format!("  {}\n", l));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

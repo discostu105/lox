@@ -77,6 +77,35 @@ pub fn update(app: &mut App, msg: Msg) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Msg::Snapshot {
+            epoch,
+            spec,
+            open,
+            result,
+        } => {
+            if epoch == app.epoch {
+                snapshot_loaded(app, spec, open, result);
+            }
+            Vec::new()
+        }
+        Msg::BlockHistory {
+            epoch,
+            title,
+            result,
+        } => {
+            if epoch == app.epoch {
+                match result {
+                    Ok(text) => app.overlays.push(Overlay::Text {
+                        title: format!("history · {}", title),
+                        sub: "lox config history".into(),
+                        text,
+                        scroll: 0,
+                    }),
+                    Err(e) => app.fail("block history", e, None),
+                }
+            }
+            Vec::new()
+        }
         Msg::NewHouse { epoch, house, ctx } => {
             new_house(app, epoch, *house, ctx);
             Vec::new()
@@ -234,6 +263,9 @@ fn new_house(app: &mut App, epoch: u64, house: super::model::House, ctx: String)
         app.energy_day = None;
         app.commits = None;
         app.diffs.clear();
+        app.diff_errs.clear();
+        app.config_mark = None;
+        app.snaps.clear();
         app.wiring = WiringDoc::None;
         app.overlays.clear();
     }
@@ -470,6 +502,15 @@ pub fn schedule(app: &mut App) -> Vec<Effect> {
     }
     if sys && view == SysView::Config {
         want.push((PollKind::ConfigLog, f64::INFINITY));
+        // a marked pair first: the user is looking at it
+        if let Some(key) = config_diff_key(app).filter(|k| k.contains(".."))
+            && !app.diffs.contains_key(&key)
+        {
+            let kind = PollKind::ConfigDiff(key);
+            if !app.polls.inflight.contains_key(&kind) {
+                want.push((kind, f64::INFINITY));
+            }
+        }
         // the selected commit's diff first, then the rest in the background
         // (two at a time: each parses two full configs)
         if let Some(Ok(commits)) = &app.commits {
@@ -889,7 +930,11 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
         Cmd::Mode => mode(app),
         Cmd::Menu => menu(app),
         Cmd::Inspect => return inspect(app),
+        Cmd::Wiring if app.screen == Screen::System && app.system.view == SysView::Config => {
+            return diff_wiring(app);
+        }
         Cmd::Wiring => return wiring(app),
+        Cmd::Compare => config_mark(app),
         Cmd::Pin => {
             if let Some(cid) = target_ctrl(app) {
                 let u = app.house.ctrls[cid].uuid.clone();
@@ -1144,12 +1189,8 @@ fn nav(app: &mut App, n: Nav, page: usize) {
         Screen::System => {
             let view = app.system.view;
             if view == SysView::Config && app.system.pane == 1 {
-                let len = app
-                    .commits
-                    .as_ref()
-                    .and_then(|c| c.as_ref().ok())
-                    .and_then(|c| c.get(app.system.sel.get(&view).copied().unwrap_or(0)))
-                    .and_then(|c| app.diffs.get(&c.hash))
+                let len = config_diff_key(app)
+                    .and_then(|k| app.diffs.get(&k))
                     .map_or(0, |d| d.len());
                 app.system.diff_scroll = moved(app.system.diff_scroll, len, n, page);
                 return;
@@ -1958,8 +1999,12 @@ fn inspect(app: &mut App) -> Vec<Effect> {
             if app.screen == Screen::System {
                 if let Some(o) = system_text(app) {
                     app.overlays.push(o);
-                } else if app.system.view == SysView::Config {
-                    app.system.pane = 1;
+                } else if app.system.view == SysView::Config
+                    && let Some(c) = selected_commit(app)
+                {
+                    // the snapshot browser: pages → logic → wiring at that commit
+                    let spec = c.hash.clone();
+                    return open_snapshot(app, spec, SnapOpen::Browse);
                 }
             }
         }
@@ -2008,12 +2053,15 @@ fn system_text(app: &App) -> Option<Overlay> {
         }
         SysView::Config if app.system.pane == 1 => {
             let c = selected_commit(app)?;
-            let l = app.diffs.get(&c.hash)?.get(app.system.diff_scroll)?;
+            let l = app
+                .diffs
+                .get(&config_diff_key(app)?)?
+                .get(app.system.diff_scroll)?;
             let saved = c.saved.clone().unwrap_or_else(|| c.date.clone());
             Some(text(
                 format!("config diff · {}", saved),
                 String::new(),
-                l.clone(),
+                l.text.clone(),
             ))
         }
         _ => None,
@@ -2023,6 +2071,113 @@ fn system_text(app: &App) -> Option<Overlay> {
 fn selected_commit(app: &App) -> Option<&crate::tui::app::Commit> {
     let s = app.system.sel.get(&SysView::Config).copied().unwrap_or(0);
     app.commits.as_ref()?.as_ref().ok()?.get(s)
+}
+
+/// The diff System › Config shows: the selected commit against the one
+/// before it, or `older..newer` when another commit is marked (`m`).
+pub fn config_diff_key(app: &App) -> Option<String> {
+    let commits = app.commits.as_ref()?.as_ref().ok()?;
+    let s = app.system.sel.get(&SysView::Config).copied().unwrap_or(0);
+    let c = commits.get(s)?;
+    let marked = app
+        .config_mark
+        .as_ref()
+        .and_then(|m| commits.iter().position(|x| x.hash == *m))
+        .filter(|&i| i != s);
+    Some(match marked {
+        // newest first: the higher index is the older snapshot
+        Some(i) if i > s => format!("{}..{}", commits[i].hash, c.hash),
+        Some(i) => format!("{}..{}", c.hash, commits[i].hash),
+        None => c.hash.clone(),
+    })
+}
+
+/// The two snapshot specs of a diff key: (old, new).
+fn diff_sides(key: &str) -> (String, String) {
+    match key.split_once("..") {
+        Some((a, b)) => (a.to_string(), b.to_string()),
+        None => (format!("{}^", key), key.to_string()),
+    }
+}
+
+/// `m` in System › Config: mark the selected commit to compare others with.
+fn config_mark(app: &mut App) {
+    let Some(c) = selected_commit(app).map(|c| c.hash.clone()) else {
+        return;
+    };
+    if app.config_mark.as_deref() == Some(c.as_str()) {
+        app.config_mark = None;
+        app.toast(ToastKind::Info, "compare mark cleared");
+    } else {
+        app.config_mark = Some(c);
+        app.toast(
+            ToastKind::Info,
+            "marked — select another commit to compare it with this one",
+        );
+    }
+    app.system.diff_scroll = 0;
+}
+
+/// Open a snapshot (cached, or load it first).
+fn open_snapshot(app: &mut App, spec: String, open: SnapOpen) -> Vec<Effect> {
+    if let Some(d) = app.snaps.get(&spec).cloned() {
+        snapshot_loaded(app, spec, open, Ok(d));
+        return Vec::new();
+    }
+    app.toast(ToastKind::Info, "reading the snapshot…");
+    vec![Effect::LoadSnapshot { spec, open }]
+}
+
+fn snapshot_loaded(app: &mut App, spec: String, open: SnapOpen, r: Result<SnapDoc, String>) {
+    let doc = match r {
+        Ok(d) => d,
+        Err(e) => {
+            app.fail("config snapshot", e, None);
+            return;
+        }
+    };
+    app.snaps.insert(spec, doc.clone());
+    match open {
+        SnapOpen::Browse => app.overlays.push(Overlay::Browse(BrowseState::new(doc))),
+        SnapOpen::Wiring(uuid) => {
+            if !doc.logic.blocks.contains_key(&uuid) {
+                app.toast(ToastKind::Info, "that block is not in this snapshot");
+                return;
+            }
+            app.overlays.push(Overlay::Wiring(WiringState {
+                center: uuid,
+                snap: Some(doc),
+                ..Default::default()
+            }));
+        }
+    }
+}
+
+/// `w` on a diff line: the block's wiring in the snapshot it lives in (the
+/// old one for removed blocks).
+fn diff_wiring(app: &mut App) -> Vec<Effect> {
+    let Some(key) = config_diff_key(app) else {
+        return Vec::new();
+    };
+    let Some(line) = app
+        .diffs
+        .get(&key)
+        .and_then(|d| d.get(app.system.diff_scroll))
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let Some(uuid) = line.block else {
+        app.toast(ToastKind::Info, "this line is not about one block");
+        return Vec::new();
+    };
+    let (old, new) = diff_sides(&key);
+    let spec = if line.text.starts_with("- ") {
+        old
+    } else {
+        new
+    };
+    open_snapshot(app, spec, SnapOpen::Wiring(uuid))
 }
 
 /// Go to Rooms with a control selected (its room, restoring place).
@@ -2051,8 +2206,7 @@ fn wiring(app: &mut App) -> Vec<Effect> {
     let top = app.house.top(cid);
     app.overlays.push(Overlay::Wiring(WiringState {
         center: app.house.ctrls[top].uuid.clone(),
-        sel: 0,
-        back: Vec::new(),
+        ..Default::default()
     }));
     if matches!(app.wiring, WiringDoc::None) {
         app.wiring = WiringDoc::Loading;
@@ -2270,6 +2424,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
             }
         }
         Overlay::Wiring(w) => return wiring_key(app, w, &code),
+        Overlay::Browse(b) => return browse_key(app, b, &k, &code),
         Overlay::Facets { list, line, sel } => facets_key(app, list, &line, sel, &k, &code),
         Overlay::Chart(c) => return chart_key(app, c, &code),
         Overlay::Value { cid, state, .. } => {
@@ -2815,19 +2970,79 @@ fn palette_run(app: &mut App, item: PalItem, input: &str) -> Vec<Effect> {
 }
 
 /// Rows of the wiring overlay: inputs, then outputs.
-pub fn wiring_rows(app: &App, w: &WiringState) -> Vec<(bool, crate::logic::Wire)> {
+/// The config a wiring overlay reads: its snapshot, or the live one.
+pub fn wiring_doc(app: &App, w: &WiringState) -> Option<SnapDoc> {
+    if let Some(s) = &w.snap {
+        return Some(s.clone());
+    }
     match &app.wiring {
-        WiringDoc::Ready(l, _) => l
+        WiringDoc::Ready(l, src) => Some(SnapDoc {
+            logic: l.clone(),
+            label: src.clone(),
+            live: true,
+        }),
+        _ => None,
+    }
+}
+
+/// One row of the wiring overlay: a wire at the center, or a trace node.
+#[derive(Debug, Clone)]
+pub struct WRow {
+    /// Upstream (an input of the center, or a trace towards the sensors)
+    pub input: bool,
+    pub wire: crate::logic::Wire,
+    /// Hops from the center (1 in the one-hop view)
+    pub depth: usize,
+    /// Trace: a feedback loop, shown once
+    pub cycle: bool,
+}
+
+/// How far `t` follows the wires.
+pub const TRACE_DEPTH: usize = 6;
+
+pub fn wiring_rows(app: &App, w: &WiringState) -> Vec<WRow> {
+    let Some(d) = wiring_doc(app, w) else {
+        return Vec::new();
+    };
+    let up = w.trace == Trace::Up;
+    match w.trace {
+        Trace::Off => d
+            .logic
             .neighborhood(&w.center)
             .map(|n| {
+                let row = |input: bool| {
+                    move |wire| WRow {
+                        input,
+                        wire,
+                        depth: 1,
+                        cycle: false,
+                    }
+                };
                 n.inputs
                     .into_iter()
-                    .map(|x| (true, x))
-                    .chain(n.outputs.into_iter().map(|x| (false, x)))
+                    .map(row(true))
+                    .chain(n.outputs.into_iter().map(row(false)))
                     .collect()
             })
             .unwrap_or_default(),
-        _ => Vec::new(),
+        Trace::Up | Trace::Down => d
+            .logic
+            .trace(&w.center, up, TRACE_DEPTH)
+            .into_iter()
+            .map(|t| WRow {
+                input: up,
+                wire: crate::logic::Wire {
+                    key: t.parent_key,
+                    other: t.block,
+                    other_key: t.key,
+                    source: t.source,
+                    via: None,
+                    also: Vec::new(),
+                },
+                depth: t.depth,
+                cycle: t.cycle,
+            })
+            .collect(),
     }
 }
 
@@ -2840,34 +3055,41 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
             ws.sel = 0;
         }
     };
+    let with = |app: &mut App, f: &dyn Fn(&mut WiringState)| {
+        if let Some(Overlay::Wiring(ws)) = app.overlays.last_mut() {
+            f(ws);
+        }
+    };
     match code {
         "Esc" | "q" | "w" => {
             app.overlays.pop();
         }
         "j" | "Down" => set_sel(app, (w.sel + 1).min(n.saturating_sub(1))),
         "k" | "Up" => set_sel(app, w.sel.saturating_sub(1)),
+        "g" | "Home" => set_sel(app, 0),
+        "G" | "End" => set_sel(app, n.saturating_sub(1)),
         "Enter" => {
-            if let Some((_, wire)) = rows.get(w.sel) {
-                move_to(app, wire.other.clone());
+            if let Some(r) = rows.get(w.sel) {
+                move_to(app, r.wire.other.clone());
             }
         }
         // upstream: the selected input (or the first one)
         "h" | "Left" => {
             let pick = rows
                 .get(w.sel)
-                .filter(|r| r.0)
-                .or_else(|| rows.iter().find(|r| r.0));
-            if let Some((_, wire)) = pick {
-                move_to(app, wire.other.clone());
+                .filter(|r| r.input)
+                .or_else(|| rows.iter().find(|r| r.input));
+            if let Some(r) = pick {
+                move_to(app, r.wire.other.clone());
             }
         }
         "l" | "Right" => {
             let pick = rows
                 .get(w.sel)
-                .filter(|r| !r.0)
-                .or_else(|| rows.iter().find(|r| !r.0));
-            if let Some((_, wire)) = pick {
-                move_to(app, wire.other.clone());
+                .filter(|r| !r.input)
+                .or_else(|| rows.iter().find(|r| !r.input));
+            if let Some(r) = pick {
+                move_to(app, r.wire.other.clone());
             }
         }
         "Backspace" | "b" => {
@@ -2878,6 +3100,56 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
                 ws.sel = 0;
             }
         }
+        // the whole path: to the sensors, to the actuators, back to one hop
+        "t" => with(app, &|ws| {
+            ws.trace = match ws.trace {
+                Trace::Off => Trace::Up,
+                Trace::Up => Trace::Down,
+                Trace::Down => Trace::Off,
+            };
+            ws.sel = 0;
+        }),
+        "p" => with(app, &|ws| ws.all_params = !ws.all_params),
+        // the page the block is placed on
+        "o" => {
+            if let Some(d) = wiring_doc(app, &w) {
+                let mut b = BrowseState::new(d.clone());
+                if let Some(page) = d.logic.blocks.get(&w.center).and_then(|x| x.page.clone()) {
+                    b.page_sel = d
+                        .logic
+                        .pages()
+                        .iter()
+                        .position(|p| p.title == page)
+                        .unwrap_or(0);
+                    b.sel = d
+                        .logic
+                        .page_blocks(&page)
+                        .iter()
+                        .position(|x| x.uuid == w.center)
+                        .unwrap_or(0);
+                    b.page = Some(page);
+                }
+                app.overlays.push(Overlay::Browse(b));
+            }
+        }
+        "/" => {
+            if let Some(d) = wiring_doc(app, &w) {
+                let mut b = BrowseState::new(d);
+                b.search = Some(Line::default());
+                b.from_search = true;
+                app.overlays.push(Overlay::Browse(b));
+            }
+        }
+        "H" => {
+            let title = wiring_doc(app, &w)
+                .and_then(|d| d.logic.blocks.get(&w.center).map(|b| b.title.clone()))
+                .unwrap_or_else(|| w.center.clone());
+            app.toast(ToastKind::Info, "reading the config history…");
+            return vec![Effect::BlockHistory {
+                uuid: w.center.clone(),
+                title,
+            }];
+        }
         "e" => {
             if let Some(&cid) = app.house.by_uuid.get(&w.center) {
                 app.overlays.clear();
@@ -2886,10 +3158,144 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
                 go(app, Screen::Events);
             }
         }
-        "d" => {
-            if matches!(app.wiring, WiringDoc::Missing | WiringDoc::Failed(_)) {
-                app.wiring = WiringDoc::Loading;
-                return vec![Effect::LoadWiring { download: true }];
+        "d" if w.snap.is_none()
+            && matches!(app.wiring, WiringDoc::Missing | WiringDoc::Failed(_)) =>
+        {
+            app.wiring = WiringDoc::Loading;
+            return vec![Effect::LoadWiring { download: true }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+// ── Config browser ──────────────────────────────────────────────────────────
+
+/// Rows of the browser's current list: pages, a page's blocks, or search hits.
+pub enum BrowseRows<'a> {
+    Pages(Vec<crate::logic::PageInfo>),
+    Blocks(Vec<&'a crate::logic::Block>),
+    Source(Vec<&'a str>),
+}
+
+pub fn browse_rows<'a>(b: &'a BrowseState, src: &'a str) -> BrowseRows<'a> {
+    let l = &b.doc.logic;
+    if let Some(q) = &b.search {
+        return BrowseRows::Blocks(if q.buf.trim().is_empty() {
+            Vec::new()
+        } else {
+            l.search(&q.buf)
+        });
+    }
+    match &b.page {
+        None => BrowseRows::Pages(l.pages()),
+        Some(_) if b.source => BrowseRows::Source(src.lines().collect()),
+        Some(p) => BrowseRows::Blocks(l.page_blocks(p)),
+    }
+}
+
+/// The lxir source of the browser's page (empty unless it shows source).
+pub fn browse_source(b: &BrowseState) -> String {
+    match (&b.page, b.source && b.search.is_none()) {
+        (Some(p), true) => b
+            .doc
+            .logic
+            .page_source(p)
+            .unwrap_or_else(|e| format!("# {}", e)),
+        _ => String::new(),
+    }
+}
+
+fn browse_key(app: &mut App, b: BrowseState, k: &KeyEvent, code: &str) -> Vec<Effect> {
+    let src = browse_source(&b);
+    let rows = browse_rows(&b, &src);
+    let len = match &rows {
+        BrowseRows::Pages(p) => p.len(),
+        BrowseRows::Blocks(v) => v.len(),
+        BrowseRows::Source(v) => v.len(),
+    };
+    let picked: Option<String> = match &rows {
+        BrowseRows::Blocks(v) => v.get(b.sel).map(|x| x.uuid.clone()),
+        _ => None,
+    };
+    let page_title = match &rows {
+        BrowseRows::Pages(p) => p.get(b.sel).map(|x| x.title.clone()),
+        _ => None,
+    };
+    let Some(Overlay::Browse(st)) = app.overlays.last_mut() else {
+        return Vec::new();
+    };
+    let page = app.ui.borrow().page.max(1);
+    let wiring_of = |st: &BrowseState, uuid: String| {
+        Overlay::Wiring(WiringState {
+            center: uuid,
+            // the live config keeps live values
+            snap: (!st.doc.live).then(|| st.doc.clone()),
+            ..Default::default()
+        })
+    };
+    if let Some(line) = &mut st.search {
+        match code {
+            "Esc" => {
+                st.search = None;
+                st.sel = 0;
+                if st.from_search {
+                    app.overlays.pop();
+                }
+            }
+            "Enter" => {
+                if let Some(u) = picked {
+                    let o = wiring_of(st, u);
+                    app.overlays.push(o);
+                }
+            }
+            "Down" | "C-n" => st.sel = (st.sel + 1).min(len.saturating_sub(1)),
+            "Up" | "C-p" => st.sel = st.sel.saturating_sub(1),
+            _ => {
+                edit_line(line, k);
+                st.sel = 0;
+            }
+        }
+        return Vec::new();
+    }
+    let source = matches!(rows, BrowseRows::Source(_));
+    match code {
+        "q" => {
+            app.overlays.pop();
+        }
+        "Esc" | "Backspace" | "h" | "Left" => {
+            if st.page.is_some() {
+                st.page = None;
+                st.source = false;
+                st.sel = st.page_sel;
+                st.scroll = 0;
+            } else if code == "Esc" || code == "Backspace" {
+                app.overlays.pop();
+            }
+        }
+        "/" => {
+            st.search = Some(Line::default());
+            st.sel = 0;
+        }
+        "s" if st.page.is_some() => {
+            st.source = !st.source;
+            st.scroll = 0;
+        }
+        _ if source => text_scroll(&mut st.scroll, code),
+        "j" | "Down" => st.sel = (st.sel + 1).min(len.saturating_sub(1)),
+        "k" | "Up" => st.sel = st.sel.saturating_sub(1),
+        "g" | "Home" => st.sel = 0,
+        "G" | "End" => st.sel = len.saturating_sub(1),
+        "C-d" | "PageDown" => st.sel = (st.sel + page / 2).min(len.saturating_sub(1)),
+        "C-u" | "PageUp" => st.sel = st.sel.saturating_sub(page / 2),
+        "Enter" | "l" | "Right" => {
+            if let Some(t) = page_title {
+                st.page_sel = st.sel;
+                st.page = Some(t);
+                st.sel = 0;
+            } else if let Some(u) = picked {
+                let o = wiring_of(st, u);
+                app.overlays.push(o);
             }
         }
         _ => {}

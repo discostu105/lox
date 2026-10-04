@@ -77,7 +77,8 @@ An agent can discover your home (`lox ls -o json`), read sensor values, control 
 **MCP server (Claude Desktop, ChatGPT, Cursor, …):** clients that only speak the
 [Model Context Protocol](https://modelcontextprotocol.io) can launch `lox mcp serve` directly.
 Built on the official Rust MCP SDK, it speaks MCP 2026-07-28 and every older revision, and exposes
-schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes) over stdio.
+schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes, and the config
+wiring behind a control — *why is this on?*) over stdio.
 Doors, gates, the alarm and any control you list under `confirm:` ask **you** to confirm in the MCP client before anything is sent.
 
 ```bash
@@ -204,10 +205,15 @@ lox otel serve --endpoint http://..   # Push metrics, logs & traces via OTLP
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
-lox config diff old.Loxone new.Loxone  # Compare two configs
 lox config init ~/loxone-config        # Init git repo for config versioning
 lox config pull                        # Download, diff & git-commit config
 lox config log                         # Show config change history
+lox config diff v271                   # What changed in the logic since version 271
+lox config wiring "Licht" --trace up   # What drives this light, back to the sensors
+lox config show -p Wohnzimmer          # A logic page as lxir source
+lox config find bewegung               # Search blocks by name, type, device, room
+lox config lint                        # Dead blocks, unwired inputs, duplicate names
+lox config history "Licht"             # How one block changed over time
 lox config restore abc123 --force      # Restore config from git history
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
@@ -232,9 +238,11 @@ What's in it:
 - **Rooms** — every control with its live value; `␣` toggles, `+`/`-` dim, `=` sets a value, `m` picks a mood, `a` shows all actions
 - **Events** — every state change as it happens, filterable, with "what happened just before" correlation
 - **Energy** — animated PV / home / grid / battery flow, meters, today's curve
-- **System** — CPU, heap, devices, CAN bus & LAN, the Miniserver log, and config history with semantic diffs
+- **System** — CPU, heap, devices, CAN bus & LAN, the Miniserver log, and config history with logic diffs:
+  `⏎` browses a snapshot (pages, blocks, lxir source, `/` search), `m` compares any two commits, `w` opens a changed block's wiring
 - **Sites** — all your Miniservers at a glance; switch live
 - **Wiring** (`w`) — the config program around a control, with live values on the wires: *why is this light on?*
+  Parameters, devices and rooms at a glance, `t` traces the path to the sensors or actuators, `H` shows the block's history
 - **History** (`c`) — any control's statistics over 6 h to a year, with period compare, a cursor and extra series
 
 ```bash
@@ -247,7 +255,7 @@ lox tui --read-only     # wall display: look, don't touch
 equivalent `lox` command for scripting. Doors, alarms, gates and controls on your `confirm:` list ask for confirmation, reboot and update ask you to type
 the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
 
-The Wiring view and the semantic config diffs are built on [lxir](https://github.com/discostu105/lxir), which parses
+The Wiring view, the snapshot browser and the logic diffs are built on [lxir](https://github.com/discostu105/lxir), which parses
 `.Loxone` configs into program blocks and wires.
 
 ---
@@ -319,15 +327,22 @@ lox config log
 lox config restore abc123 --force
 ```
 
-Each pull downloads the config via FTP, decompresses the proprietary LoxCC format to XML, generates a semantic diff (controls/rooms/users added/removed/renamed), and commits with a meaningful message like:
+Each pull downloads the config via FTP, decompresses the proprietary LoxCC format to XML, diffs the logic
+(blocks, parameters and wires, per page) against the previous snapshot, and commits with a meaningful message like:
 
 ```
 [504F94AABBCC] Config backup 2026-03-08 18:22:56 (v42)
 
-+ Added control: "Garage Light" (Switch)
-~ Light: "Licht EG" -> "Licht Erdgeschoss"
-- Removed user: "guest"
+= 1 added · 1 parameter · wires +1 −0
+
+# Garage
++ block  Garage light (Switch)
+~ param  Garage door · Runtime  20 s → 25 s
++ wire   Motion Garage.Q → Garage light.Tg
 ```
+
+Every snapshot stays inspectable: `lox config diff` between any two (commit, version, save date or file),
+`lox config show/wiring/find/lint --at v42` on an old one, `lox config history <block>` for one block over time.
 
 **Cron-friendly:** `lox config pull --quiet` for automated nightly backups.
 
@@ -356,7 +371,7 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 
 - **[lxir](https://github.com/discostu105/lxir)** — Loxone config-as-code: a text language compiled to `.Loxone` configs,
   with a lossless XML core, a UUID/identity model, compile/decompile/adopt, semantic diff and simulated tests.
-  `lox` uses it for the TUI's Wiring view and semantic config diffs.
+  `lox` uses it for the Wiring view, `lox config show/wiring/find/lint/history` and the logic diffs.
 
 ---
 

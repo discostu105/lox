@@ -518,6 +518,82 @@ pub fn list_scenes(cfg: &Config) -> Result<SceneList> {
     })
 }
 
+/// Which way `get_wiring` follows the wires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trace {
+    Up,
+    Down,
+    Both,
+}
+
+/// The logic around one block of the Loxone Config program.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Wiring {
+    /// The config the wiring was read from: `gitops` (newest snapshot of the
+    /// config repository), `cached` or `downloaded`
+    pub config: String,
+    /// The app control this block is, if it is visualized
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control: Option<ControlRef>,
+    #[serde(flatten)]
+    pub wiring: crate::logic::WiringView,
+}
+
+/// What is wired to a control or logic block: inputs, outputs, parameters,
+/// or the whole path up to the sensors / down to the actuators. Read-only:
+/// it reads the `.Loxone` config (repo, cache, or an FTP download).
+pub fn get_wiring(
+    lox: &mut LoxClient,
+    name: &str,
+    room: Option<&str>,
+    trace: Option<Trace>,
+    depth: usize,
+    all_params: bool,
+    download: bool,
+) -> Result<Wiring> {
+    let snap = if download {
+        crate::snapshot::download(&lox.cfg, None)
+    } else {
+        crate::snapshot::current(&lox.cfg)
+    }
+    .map_err(|e| {
+        tool_error(
+            "config_unavailable",
+            format!(
+                "{:#} — pass download=true to fetch the config from the Miniserver (read-only FTP)",
+                e
+            ),
+        )
+    })?;
+    let l = crate::logic::Logic::parse(&snap.bytes)?;
+    // app names, aliases and 'Name [Room]' first, then the config's own titles
+    let ctrl = resolve(lox, name, room)
+        .ok()
+        .filter(|c| l.blocks.contains_key(&c.uuid));
+    let uuid = match &ctrl {
+        Some(c) => c.uuid.clone(),
+        None => l
+            .resolve(name, room)
+            .map_err(|e| tool_error("not_found", format!("{:#}", e)))?
+            .uuid
+            .clone(),
+    };
+    let tr = trace.map(|t| (t != Trace::Down, t != Trace::Up, depth.clamp(1, 8)));
+    let wiring = l
+        .wiring_view(&uuid, all_params, tr)
+        .ok_or_else(|| tool_error("not_found", "the block has no wiring in the config"))?;
+    let control = ctrl.as_ref().map(ControlRef::from).or_else(|| {
+        lox.find_control(&wiring.block.uuid)
+            .ok()
+            .map(|c| ControlRef::from(&c))
+    });
+    Ok(Wiring {
+        config: snap.label,
+        control,
+        wiring,
+    })
+}
+
 pub fn system_status(lox: &mut LoxClient) -> Result<SystemStatus> {
     let read = |path: &str| -> Result<String> {
         let text = lox.get_text(path)?;

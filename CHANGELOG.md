@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Config logic insight** (read-only, built on lxir):
+  - `lox config show` (logic pages; `-p PAGE` as lxir source), `lox config wiring NAME` (inputs, outputs, non-default parameters with units, devices and rooms; `--trace up|down|both`), `lox config find`, `lox config lint` (dead blocks, unwired inputs, duplicate names, broken refs), `lox config history NAME` (a block across the snapshots)
+  - All of them read the config repo, the cached download, `--at SNAPSHOT`, `--file PATH` or `--download`; snapshots by commit, version (`v273`) or save date
+- MCP tool `get_wiring` — the config logic around a control (what drives it, what it drives, parameters, traced paths), read-only
+- TUI: System › Config snapshot browser (`⏎` on a commit: pages, blocks, lxir source, `/` search, wiring at that snapshot), compare any two commits (`m`), `w` on a diff line opens the block's wiring
+- TUI wiring overlay: block type, page, room and parameters in the header, the selected wire's device/room and fan-out (`also drives`), formatted live values, `t` trace to the sensors / actuators, `o` open the page, `/` search, `H` block history, `p` all parameters
+
+### Changed
+- `lox config diff` is a logic diff (blocks, parameters, wires per page, hardware refs folded) and takes snapshots of the config repo (`lox config diff`, `diff v271`, `diff A..B`) as well as files
+- `lox config pull` commit messages carry the logic diff with totals, grouped by page and capped at 80 lines; layout-only saves say "No logic changes"
+- lxir is always built (also with `--no-default-features`)
+
 ### Fixed
 - Piping output into a command that stops reading early (`lox ls | head -1`, `lox completions bash | head`) no longer panics with "Broken pipe"; `lox` exits quietly (#116)
 
