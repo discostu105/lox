@@ -1110,6 +1110,9 @@ pub struct App {
     pub conn_since: f64,
     pub paused: bool,
     pub screen: Screen,
+    /// The screen a jump (`e`, `⏎` on a room or event, palette) came from:
+    /// `Esc` returns there once the screen has nothing left to clear
+    pub came_from: Option<Screen>,
     pub size: (u16, u16),
     pub rooms: RoomsState,
     pub home: HomeState,
@@ -1187,6 +1190,7 @@ impl App {
             conn_since: now,
             paused: false,
             screen: Screen::Home,
+            came_from: None,
             size: (120, 36),
             rooms: RoomsState::default(),
             home: HomeState::default(),

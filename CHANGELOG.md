@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lox config diff` is a logic diff (blocks, parameters, wires per page, hardware refs folded) and takes snapshots of the config repo (`lox config diff`, `diff v271`, `diff A..B`) as well as files
 - `lox config pull` commit messages carry the logic diff with totals, grouped by page and capped at 80 lines; layout-only saves say "No logic changes"
 - lxir is always built (also with `--no-default-features`)
+- TUI keys, one pattern everywhere: `Esc` (or `⌫`) goes back one step — in the wiring the previously followed block (was `b`), in the config browser source → blocks → pages, in the chart the cursor, on a screen filter → pane → the screen a jump (`e`, `⏎` on a room or event, palette) came from (`Esc ← rooms` in the header); `q` closes a popup in one press and quits only from a screen, and a held `q` no longer quits after closing the popups
+- TUI chart: `←`/`→` and `h`/`l` both move the cursor, which carries on into the previous/next period at the edges; `PgUp`/`PgDn` move a whole period (was `←`/`→`)
+- TUI facet picker: `Esc` closes at once, like the other type-to-narrow popups (`C-u` clears the query)
 
 ### Fixed
 - Piping output into a command that stops reading early (`lox ls | head -1`, `lox completions bash | head`) no longer panics with "Broken pipe"; `lox` exits quietly (#116)

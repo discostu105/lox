@@ -652,6 +652,10 @@ fn key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         return Vec::new();
     }
     if !app.overlays.is_empty() {
+        if k.code == KeyCode::Char('q') {
+            // `q` closing a popup: a quick second `q` must not quit too
+            app.last_key = Some(("q".into(), app.now));
+        }
         return overlay_key(app, k);
     }
     let code = keymap::code(&k);
@@ -692,7 +696,7 @@ fn held(app: &mut App, k: &KeyEvent, code: String, cmd: Cmd, repeat: bool) -> bo
 }
 
 /// Commands that change the house or flip a toggle: a held key must not
-/// fire them twice.
+/// fire them twice. `q` too: holding it closes the popups, not the TUI.
 fn acts(cmd: Cmd) -> bool {
     matches!(
         cmd,
@@ -710,6 +714,7 @@ fn acts(cmd: Cmd) -> bool {
             | Cmd::Pause
             | Cmd::Follow
             | Cmd::Facets
+            | Cmd::Quit
     )
 }
 
@@ -955,7 +960,7 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
                 app.events.facets = vec![Facet::Ctrl(top)];
                 app.events.follow = true;
                 app.events.sel = None;
-                go(app, Screen::Events);
+                jump(app, Screen::Events);
             }
         }
         Cmd::Chart => {
@@ -996,7 +1001,23 @@ pub fn command(app: &mut App, cmd: Cmd) -> Vec<Effect> {
     Vec::new()
 }
 
+/// Switch screens on purpose (number keys, tab click, palette): forgets
+/// where a jump came from.
 pub fn go(app: &mut App, s: Screen) {
+    app.came_from = None;
+    show(app, s);
+}
+
+/// Follow something to another screen (`e`, `⏎` on a room or an event, a
+/// palette result): `Esc` comes back once there is nothing left to clear.
+fn jump(app: &mut App, s: Screen) {
+    if s != app.screen {
+        app.came_from = Some(app.screen);
+    }
+    show(app, s);
+}
+
+fn show(app: &mut App, s: Screen) {
     app.screen = s;
     if s == Screen::Rooms {
         freeze_rooms(app);
@@ -1014,30 +1035,47 @@ fn freeze_rooms(app: &mut App) {
     }
 }
 
+/// `Esc` on a screen: one step back — clear a filter, facets or marks, focus
+/// the parent pane, then return to the screen a jump came from. Never quits.
 fn back(app: &mut App) {
+    if !back_here(app)
+        && let Some(s) = app.came_from.take()
+    {
+        show(app, s);
+    }
+}
+
+/// One step back within the screen; false when there is nothing to undo.
+fn back_here(app: &mut App) -> bool {
     match app.screen {
         Screen::Rooms => {
-            if app.rooms.pane >= 1 && !app.rooms.filter_ctrls.is_empty() {
-                app.rooms.filter_ctrls.clear();
-            } else if !app.rooms.facets.is_empty() {
-                app.rooms.facets.clear();
-            } else if !app.rooms.marks.is_empty() {
-                app.rooms.marks.clear();
-            } else if app.rooms.pane == 0 && !app.rooms.filter_groups.is_empty() {
-                app.rooms.filter_groups.clear();
-            } else if app.rooms.pane > 0 {
-                app.rooms.pane -= 1;
+            let r = &mut app.rooms;
+            if r.pane >= 1 && !r.filter_ctrls.is_empty() {
+                r.filter_ctrls.clear();
+            } else if !r.facets.is_empty() {
+                r.facets.clear();
+            } else if !r.marks.is_empty() {
+                r.marks.clear();
+            } else if r.pane == 0 && !r.filter_groups.is_empty() {
+                r.filter_groups.clear();
+            } else if r.pane > 0 {
+                r.pane -= 1;
                 freeze_rooms(app);
+            } else {
+                return false;
             }
         }
         Screen::Events => {
-            if !app.events.filter.is_empty() {
-                app.events.filter.clear();
-            } else if !app.events.facets.is_empty() {
-                app.events.facets.clear();
-            } else if !app.events.follow {
-                app.events.follow = true;
-                app.events.sel = None;
+            let e = &mut app.events;
+            if !e.filter.is_empty() {
+                e.filter.clear();
+            } else if !e.facets.is_empty() {
+                e.facets.clear();
+            } else if !e.follow {
+                e.follow = true;
+                e.sel = None;
+            } else {
+                return false;
             }
         }
         Screen::System => {
@@ -1045,10 +1083,13 @@ fn back(app: &mut App) {
                 app.system.pane = 0;
             } else if !app.system.log_search.is_empty() {
                 app.system.log_search.clear();
+            } else {
+                return false;
             }
         }
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 fn pane(app: &mut App, d: i32, cycle: bool) {
@@ -1962,7 +2003,7 @@ fn inspect(app: &mut App) -> Vec<Effect> {
                 app.rooms.group = GroupBy::Room;
             }
             app.rooms.pane = 1;
-            go(app, Screen::Rooms);
+            jump(app, Screen::Rooms);
         }
         Target::Ctrl(cid) => {
             if app.screen == Screen::Rooms && app.rooms.pane == 1 && app.size.0 >= WIDE_ROOMS {
@@ -2195,7 +2236,7 @@ pub fn reveal(app: &mut App, cid: Cid) {
         .insert(key.clone(), app.house.ctrls[cid].uuid.clone());
     app.rooms.sel_group = Some(key);
     app.rooms.pane = 1;
-    go(app, Screen::Rooms);
+    jump(app, Screen::Rooms);
 }
 
 fn wiring(app: &mut App) -> Vec<Effect> {
@@ -2225,12 +2266,17 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
     let esc = k.code == KeyCode::Esc;
     let enter = k.code == KeyCode::Enter && k.kind == KeyEventKind::Press;
     match top {
-        Overlay::Help { .. } => {
+        Overlay::Help { filter, .. } => {
+            if !filter.is_empty() && matches!(code.as_str(), "Esc" | "Backspace") {
+                // back one step: the search first
+                set_filter(app, FilterTarget::Help, String::new());
+                return Vec::new();
+            }
             let Some(Overlay::Help { scroll, .. }) = app.overlays.last_mut() else {
                 return Vec::new();
             };
             match code.as_str() {
-                "Esc" | "?" | "q" => {
+                "Esc" | "Backspace" | "?" | "q" => {
                     app.overlays.pop();
                 }
                 "j" | "Down" => *scroll += 1,
@@ -2262,7 +2308,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
             let n = items.len();
             let pick = |i: usize| items.get(i).map(|(_, _, a)| a.clone());
             let chosen = match code.as_str() {
-                "Esc" | "q" | "a" => {
+                "Esc" | "Backspace" | "q" | "a" => {
                     app.overlays.pop();
                     None
                 }
@@ -2297,7 +2343,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
         } => {
             let n = choices.len();
             let chosen = match code.as_str() {
-                "Esc" | "q" | "m" => {
+                "Esc" | "Backspace" | "q" | "m" => {
                     app.overlays.pop();
                     None
                 }
@@ -2347,7 +2393,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
                         return confirmed(app, c);
                     }
                     // default is No
-                    "n" | "N" | "Enter" | "q" => {
+                    "n" | "N" | "Enter" | "q" | "Backspace" => {
                         app.overlays.pop();
                     }
                     _ => {}
@@ -2388,7 +2434,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
             sync_filter(app);
         }
         Overlay::Contexts { sel } => match code.as_str() {
-            "Esc" | "q" | "C" => {
+            "Esc" | "Backspace" | "q" | "C" => {
                 app.overlays.pop();
             }
             "j" | "Down" => {
@@ -2411,7 +2457,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
                 return Vec::new();
             };
             match code.as_str() {
-                "Esc" | "q" | "!" => {
+                "Esc" | "Backspace" | "q" | "!" => {
                     app.overlays.pop();
                 }
                 "j" | "Down" => *scroll += 1,
@@ -2438,7 +2484,7 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
                 }
             } else if let Some(Overlay::Value { scroll, .. }) = app.overlays.last_mut() {
                 text_scroll(scroll, &code);
-                if matches!(code.as_str(), "Esc" | "q" | "Enter") {
+                if matches!(code.as_str(), "Esc" | "Backspace" | "q" | "Enter") {
                     app.overlays.pop();
                 }
             }
@@ -2449,13 +2495,13 @@ fn overlay_key(app: &mut App, k: KeyEvent) -> Vec<Effect> {
                 return vec![Effect::Copy(text)];
             } else if let Some(Overlay::Text { scroll, .. }) = app.overlays.last_mut() {
                 text_scroll(scroll, &code);
-                if matches!(code.as_str(), "Esc" | "q" | "Enter") {
+                if matches!(code.as_str(), "Esc" | "Backspace" | "q" | "Enter") {
                     app.overlays.pop();
                 }
             }
         }
         Overlay::Inspector { cid, scroll } => match code.as_str() {
-            "Esc" | "q" => {
+            "Esc" | "Backspace" | "q" => {
                 app.overlays.pop();
             }
             "Enter" => {
@@ -2525,13 +2571,10 @@ fn chart_key(app: &mut App, c: ChartState, code: &str) -> Vec<Effect> {
     let mut c2 = c.clone();
     let mut fx = Vec::new();
     match code {
-        "Esc" | "q" => {
-            if c.cursor.is_some() {
-                c2.cursor = None;
-            } else {
-                app.overlays.pop();
-                return Vec::new();
-            }
+        "Esc" | "Backspace" if c.cursor.is_some() => c2.cursor = None,
+        "Esc" | "Backspace" | "q" => {
+            app.overlays.pop();
+            return Vec::new();
         }
         "1" | "2" | "3" | "4" | "5" => {
             c2.span = Span::ALL[code.parse::<usize>().unwrap_or(1) - 1];
@@ -2547,18 +2590,26 @@ fn chart_key(app: &mut App, c: ChartState, code: &str) -> Vec<Effect> {
             c2.span = Span::ALL[j];
             c2.back = 0;
         }
-        "Left" => c2.back += 1,
-        "Right" => c2.back = (c.back - 1).max(0),
+        // a whole period back / forward, or back to now
+        "PageUp" | "C-u" => c2.back += 1,
+        "PageDown" | "C-d" => c2.back = (c.back - 1).max(0),
         "." => c2.back = 0,
-        "h" | "l" | "H" | "L" => {
+        // the cursor; past the edge it carries on into the previous / next period
+        "h" | "l" | "H" | "L" | "Left" | "Right" => {
+            let left = matches!(code, "h" | "H" | "Left");
             let step = if code == "H" || code == "L" { 10 } else { 1 };
-            let cur = c.cursor.unwrap_or(w - 1);
-            c2.cursor = Some(if c.cursor.is_none() {
-                cur
-            } else if code.eq_ignore_ascii_case("h") {
-                cur.saturating_sub(step)
-            } else {
-                (cur + step).min(w - 1)
+            c2.cursor = Some(match c.cursor {
+                None => w - 1,
+                Some(0) if left => {
+                    c2.back += 1;
+                    w - 1
+                }
+                Some(cur) if !left && cur + 1 >= w && c.back > 0 => {
+                    c2.back -= 1;
+                    0
+                }
+                Some(cur) if left => cur.saturating_sub(step),
+                Some(cur) => (cur + step).min(w - 1),
             });
         }
         "c" => c2.compare = !c.compare,
@@ -2612,7 +2663,8 @@ fn chart_cli(app: &App, c: &ChartState) -> String {
     }
 }
 
-/// Keys of the facet picker: typing narrows, ␣ toggles, ⏎ toggles and closes.
+/// Keys of the facet picker: typing narrows, ␣ toggles, ⏎ toggles and closes,
+/// `Esc` closes (`C-u` clears the query).
 fn facets_key(app: &mut App, list: FacetList, line: &Line, sel: usize, k: &KeyEvent, code: &str) {
     let opts = lists::facet_options(app, list, &line.buf);
     let n = opts.len();
@@ -2628,12 +2680,7 @@ fn facets_key(app: &mut App, list: FacetList, line: &Line, sel: usize, k: &KeyEv
     };
     match code {
         "Esc" => {
-            if line.buf.is_empty() {
-                app.overlays.pop();
-            } else if let Some(Overlay::Facets { line, sel, .. }) = app.overlays.last_mut() {
-                line.kill();
-                *sel = 0;
-            }
+            app.overlays.pop();
         }
         "Enter" if k.kind == KeyEventKind::Press => {
             app.overlays.pop();
@@ -2933,7 +2980,7 @@ fn palette_run(app: &mut App, item: PalItem, input: &str) -> Vec<Effect> {
             app.rooms.group = GroupBy::Room;
             app.rooms.sel_group = Some(GKey::Room(r));
             app.rooms.pane = 1;
-            go(app, Screen::Rooms);
+            jump(app, Screen::Rooms);
             Vec::new()
         }
         PalItem::Screen(s) => {
@@ -3061,7 +3108,21 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
         }
     };
     match code {
-        "Esc" | "q" | "w" => {
+        // back one step: the trace, the previous block, then close
+        "Esc" | "Backspace" => {
+            if let Some(Overlay::Wiring(ws)) = app.overlays.last_mut() {
+                if ws.trace != Trace::Off {
+                    ws.trace = Trace::Off;
+                    ws.sel = 0;
+                } else if let Some(c) = ws.back.pop() {
+                    ws.center = c;
+                    ws.sel = 0;
+                } else {
+                    app.overlays.pop();
+                }
+            }
+        }
+        "q" | "w" => {
             app.overlays.pop();
         }
         "j" | "Down" => set_sel(app, (w.sel + 1).min(n.saturating_sub(1))),
@@ -3090,14 +3151,6 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
                 .or_else(|| rows.iter().find(|r| !r.input));
             if let Some(r) = pick {
                 move_to(app, r.wire.other.clone());
-            }
-        }
-        "Backspace" | "b" => {
-            if let Some(Overlay::Wiring(ws)) = app.overlays.last_mut()
-                && let Some(c) = ws.back.pop()
-            {
-                ws.center = c;
-                ws.sel = 0;
             }
         }
         // the whole path: to the sensors, to the actuators, back to one hop
@@ -3155,7 +3208,7 @@ fn wiring_key(app: &mut App, w: WiringState, code: &str) -> Vec<Effect> {
                 app.overlays.clear();
                 app.events.facets = vec![Facet::Ctrl(cid)];
                 app.events.follow = true;
-                go(app, Screen::Events);
+                jump(app, Screen::Events);
             }
         }
         "d" if w.snap.is_none()
@@ -3262,6 +3315,11 @@ fn browse_key(app: &mut App, b: BrowseState, k: &KeyEvent, code: &str) -> Vec<Ef
     match code {
         "q" => {
             app.overlays.pop();
+        }
+        // back one step: source → blocks → pages → close
+        "Esc" | "Backspace" if st.source => {
+            st.source = false;
+            st.scroll = 0;
         }
         "Esc" | "Backspace" | "h" | "Left" => {
             if st.page.is_some() {

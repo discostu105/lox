@@ -212,17 +212,20 @@ pub fn render(app: &App, body: Rect, buf: &mut Buffer, c: &ChartState) {
     let h = &app.house;
     let main = c.cids[0];
     let r = body;
+    let mut hints = vec![
+        Hint::new("1-5", "range"),
+        Hint::new("←→", "cursor"),
+        Hint::new("PgUp PgDn", "period"),
+        Hint::new("c", "compare"),
+        Hint::new("+-", "series"),
+        Hint::new("y", "copy cmd"),
+    ];
+    hints.extend(super::common::close_hints(
+        c.cursor.is_some().then_some("cursor off"),
+    ));
     let mut nb = NotchBox::new()
         .title(Notch::new(h.display_name(main)))
-        .hints(vec![
-            Hint::new("1-5", "range"),
-            Hint::new("←→", "period"),
-            Hint::new("hl", "cursor"),
-            Hint::new("c", "compare"),
-            Hint::new("+-", "series"),
-            Hint::new("y", "copy cmd"),
-            Hint::new("Esc", "close"),
-        ]);
+        .hints(hints);
     if let Some(room) = h.room_name(main) {
         nb = nb.title(Notch::new(room.to_string()));
     }

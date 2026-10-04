@@ -163,7 +163,7 @@ Hierarchy inside each screen: **Screen → Pane → Item → Action**.
 - A pane holds a list or a view with a **selected item**.
 - **Actions** apply to the selected item (or to marked items, see §4.4).
 - **Overlays** sit on top of all this: palette, help, action menu, confirm, value input, context switcher, wiring.
-  Overlays form a stack, and `Esc` always pops one level.
+  Overlays form a stack: `Esc` goes back one step (inside the overlay first, then pops it), `q` pops it.
 
 Screens and panes that don't apply are hidden or show a friendly empty state. There is no Energy
 screen content without meters ("No energy meters found — add a Meter block in Loxone Config"), and Sites
@@ -180,9 +180,13 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 2. **Action keys mean the same intent on every control type** (§4.3). The key hints show the concrete effect.
 3. **Lowercase acts, uppercase goes wider.** `y` copies the command, `Y` the UUID. `C` switches context.
    There are no hidden chords and no `g`-prefix sequences.
-4. **`Esc` always goes one level back**: close overlay → clear filter → unmark → focus parent pane.
-   `Esc` never quits.
-5. **`q` quits** from anywhere without an overlay (`Ctrl-C` always quits).
+4. **`Esc` always goes one step back** (`⌫` too): inside an overlay first (the previous block in the wiring,
+   blocks → pages in the config browser, the chart's cursor, the help search), then close it; on a screen: clear
+   filter → facets → unmark → focus parent pane → **return to the screen a jump came from** (`e`, `⏎` on a room
+   card or an event, a palette result; the header shows `Esc ← rooms`; number keys forget it). `Esc` never quits.
+5. **`q` closes, then quits**: in an overlay `q` closes it at once, however deep you are in it; on a screen
+   without an overlay it quits (`Ctrl-C` always quits). A held `q` closes the overlays but doesn't quit. There is
+   no third "back" key (the wiring's old `b` is gone).
 6. **One keymap table** in code (`tui/keymap.rs`) drives dispatch, the border key hints, the `?` overlay and the
    generated docs, and a unit test fails if two bindings collide in the same context.
 7. Text input (`/`, `:`, `=`) captures all printable keys. `Esc` cancels, `⏎` confirms.
@@ -213,7 +217,8 @@ The number of a hidden screen stays reserved, so muscle memory never breaks.
 | `!` | Message log: failures and connection events of this session (§5.1) |
 | `p` | Pause / resume live updates (the display freezes, events keep buffering) |
 | `Ctrl-r` | Refresh the structure cache and reconnect |
-| `q`, `Ctrl-c` | Quit |
+| `Esc`, `⌫` | One step back (rule 4) |
+| `q`, `Ctrl-c` | Close the overlay; on a screen: quit |
 | mouse | click selects/focuses; the wheel scrolls the pane under the pointer; click on a tab switches screen; drag selects text inside the pane it starts in and copies it on release (OSC 52), shown reversed until the next key. Shift+drag still gives the terminal's own selection in most terminals. `--no-mouse` turns capture off |
 
 ### 4.3 The action vocabulary
@@ -317,7 +322,7 @@ the list offers, grouped by dimension, with the number of items each would match
   Values with no match are hidden unless active.
 - `THIS` suggests the selected row's room and type (and control, on Events): `f ⏎` means "only this room".
 - Typing narrows the values (fuzzy); `␣` toggles and stays open, `⏎` toggles and closes, `⇥`/`S-⇥`
-  jump between dimensions, `C-x` clears all, `Esc` clears the query, then closes.
+  jump between dimensions, `C-x` clears all, `C-u` the query, `Esc` closes (like every type-to-narrow popup).
 - Active facets show as pills in the pane title (`room:Küche|Bad`, `type:Jalousie`); the controls
   pane's meta says `6 of 14 controls`. On Rooms, groups without a match are hidden.
 - `Esc` on the list clears the text filter first, then the facets. `e` on a control opens Events
@@ -641,12 +646,13 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
 │ ☼ Brightness Garden ━━━━━22.0k lx━━━━▶│Br               Qp │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▶ · Stairs light     │
 │                                       ╰────────────────────╯                                   │
 │ ━━▶ live value from the stream     ┄┄▶ block without visualization: topology only               │
-╰┘⏎ follow wire└┘h l upstream · downstream└┘e events└┘Esc close└──────────────┘lxir · r50.Loxone└─╯
+╰┘⏎ follow wire└┘h l upstream · downstream└┘e events└┘Esc back└┘q close└──────┘lxir · r50.Loxone└─╯
 ```
 
 - Opened with `w` on a control (Rooms, Home, palette result) or on an event (Events). It shows the **block that
   drives the control**, every input wire with its source, and every output wire with its sink, one hop each way.
-  `h`/`l` move the center one block upstream/downstream; `⏎` on a wire follows it.
+  `h`/`l` move the center one block upstream/downstream; `⏎` on a wire follows it. `Esc` goes back: the trace
+  to one hop, then the previously centered blocks one by one, then closes; `q` (or `w`) closes at once.
 - **Live values on wires**: a wire's source connector UUID *is* the state UUID the WebSocket streams (verified,
   §12.1). Live wires are solid in the source's color and carry the current value; the wire that fired last pulses
   briefly. Wires from blocks without a visualization have no stream value and are drawn dashed `┄┄▶` in
@@ -683,7 +689,8 @@ logic of that snapshot:
 
 - **Pages** (block and wire counts) → `⏎` a page's **blocks** (title, type, room or device) → `⏎` a block's
   wiring at that snapshot. `s` toggles the page between its blocks and its **lxir source** (`j`/`k`, `C-d`/`C-u`
-  scroll; names accented, comments faint). `Esc`/`h` go back a level.
+  scroll; names accented, comments faint). `Esc` goes back a level (source → blocks → pages → close), `h` goes up
+  to the pages, `q` closes.
 - `/` searches every block of the snapshot by name, type, device, room or page (all words match); `⏎` opens the
   wiring of the hit.
 - Snapshots are read with `git show` and parsed in the background, then cached for the session.
@@ -703,18 +710,18 @@ palette result) opens the full-screen chart:
 │       Tue 15.       Wed 16.       Thu 17.       Fri 18.       Sat 19.       Sun 20.         │
 │ ━━ Temperatur        min 20.3° 16.09. 03:05 · max 23.4° 14.09. 16:13 · ⌀ 21.5° · Δ⌀ +0.3°  │
 │ ▲ Sun 20.09. 23:51  ·  21.1° (prev 20.8°)                                                   │
-╰┘1-5 range└┘←→ period└┘hl cursor└┘c compare└┘+- series└┘y copy cmd└┘Esc close└──────────────╯
+╰┘1-5 range└┘←→ cursor└┘PgUp PgDn period└┘c compare└┘+- series└┘y copy cmd└┘Esc close└───────╯
 ```
 
 | Key | Action |
 |-----|--------|
 | `1`–`5`, `[` `]` | Timeframe 6 h · 24 h · 7 d · 30 d · 1 y (remembered across sessions in `tui-state.yaml`) |
-| `←` / `→`, `.` | One period back / forward; back to now |
-| `h` `l` / `H` `L` | Cursor by one / ten columns: time and value of every series under it |
+| `←` `→` / `h` `l`, `H` `L` | Cursor by one / ten columns: time and value of every series under it. Past the left edge it carries on into the previous period, past the right edge into the next |
+| `PgUp` / `PgDn` (`C-u` / `C-d`), `.` | One period back / forward; back to now |
 | `c` | Compare: the previous period as a faint line, `Δ⌀` in the summary |
 | `+` / `-` | Add a series (fuzzy name of any control with statistics) / remove the last one |
 | `y` | Copy the CLI equivalent (`lox history … --day/--month`) |
-| `Esc` | Hide the cursor, then close |
+| `Esc` | Hide the cursor, then close (`q` closes at once) |
 
 - Data: legacy statistics files per month (`/stats/{uuid}.{YYYYMM}`) for the window, or Statistics V2
   `getStatistic/…/raw/{from}/{to}`. The current window refreshes every 5 minutes, past ones are fetched once.
