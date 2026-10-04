@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Piping output into a command that stops reading early (`lox ls | head -1`, `lox completions bash | head`) no longer panics with "Broken pipe"; `lox` exits quietly (#116)
+
 ## [0.13.0] — 2026-10-03
 
 ### Added
