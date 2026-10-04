@@ -1608,7 +1608,10 @@ mod tests {
         let dn = l.neighborhood(&h.ctrls[door].uuid).unwrap();
         assert_eq!(dn.inputs.len(), 1, "{:?}", dn.inputs);
         let input = &l.blocks[&dn.inputs[0].other];
-        assert_eq!(input.typ, "DigitalIn", "AI → Q still reaches the Miniserver input");
+        assert_eq!(
+            input.typ, "DigitalIn",
+            "AI → Q still reaches the Miniserver input"
+        );
         let hn = l.neighborhood(&input.uuid).unwrap();
         assert_eq!(hn.outputs.len(), 1);
         assert_eq!(hn.outputs[0].other, h.ctrls[door].uuid);
