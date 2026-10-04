@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-04
+
 ### Added
 - **Config logic insight** (read-only, built on lxir):
   - `lox config show` (logic pages; `-p PAGE` as lxir source), `lox config wiring NAME` (inputs, outputs, non-default parameters with units, devices and rooms; `--trace up|down|both`), `lox config find`, `lox config lint` (dead blocks, unwired inputs, duplicate names, broken refs), `lox config history NAME` (a block across the snapshots)
