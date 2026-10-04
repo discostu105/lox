@@ -758,7 +758,10 @@ pub fn cmd_completions(
     if install {
         install_completions(sh, &mut cmd)?;
     } else {
-        generate(sh, &mut cmd, "lox", &mut std::io::stdout());
+        // Through `print!`, so `lox completions bash | head` exits quietly.
+        let mut buf = Vec::new();
+        generate(sh, &mut cmd, "lox", &mut buf);
+        print!("{}", String::from_utf8_lossy(&buf));
     }
     Ok(())
 }
