@@ -4,13 +4,13 @@ mod commands;
 mod config;
 mod ftp;
 mod gitops;
-#[cfg(feature = "tui")]
 mod logic;
 mod loxcc;
 mod loxone_xml;
 mod mcp;
 mod otel;
 mod scene;
+mod snapshot;
 mod statv2;
 mod stream;
 mod token;
@@ -1333,12 +1333,74 @@ pub(crate) enum ConfigCmd {
         /// Path to a .Loxone XML file (from `lox config extract`)
         file: String,
     },
-    /// Compare two config files (ZIP or .Loxone)
+    /// What changed in the logic: blocks, parameters and wires, page by page
+    ///
+    /// OLD and NEW are config files (ZIP or .Loxone) or snapshots of the config
+    /// repo: a commit (`abc1234`, `HEAD~1`), a version (`v273`) or a save date
+    /// (`2026-08-25`). No arguments: the last change. One: from OLD to the
+    /// newest config. `OLD..NEW` works too.
+    #[command(verbatim_doc_comment)]
     Diff {
-        /// First config file (older)
-        file1: String,
-        /// Second config file (newer)
-        file2: String,
+        /// Older config (file or snapshot)
+        old: Option<String>,
+        /// Newer config (file or snapshot)
+        new: Option<String>,
+    },
+    /// List the logic pages, or show a page as lxir source
+    Show {
+        /// Page to show as source (exact title or a unique part of it)
+        #[arg(long, short)]
+        page: Option<String>,
+        /// Show every page as source
+        #[arg(long, conflicts_with = "page")]
+        all: bool,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// What is wired to a block: inputs, outputs and parameters, with
+    /// hardware shown as the device and room it lives in
+    #[command(verbatim_doc_comment)]
+    Wiring {
+        /// Block name, `Name [room]` or UUID
+        name: String,
+        /// Room, page or device to disambiguate the name
+        #[arg(short, long)]
+        room: Option<String>,
+        /// Follow the wires up to the sensors, down to the actuators, or both
+        #[arg(long, value_enum)]
+        trace: Option<TraceDir>,
+        /// How many hops to follow with --trace
+        #[arg(long, default_value = "4")]
+        depth: usize,
+        /// Show parameters that still have their default value too
+        #[arg(long)]
+        all_params: bool,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Search the config's blocks by name, type, device, room or page
+    Find {
+        /// Words to search for (all must match)
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Check the logic for dead blocks, unused inputs and broken references
+    Lint {
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// How a block changed across the snapshots of the config repo
+    History {
+        /// Block name, `Name [room]` or UUID
+        name: String,
+        /// Room, page or device to disambiguate the name
+        #[arg(short, long)]
+        room: Option<String>,
+        /// Number of snapshots to look back
+        #[arg(short = 'n', long, default_value = "50")]
+        count: usize,
     },
     /// Initialize a git repository for config version tracking
     Init {
@@ -1365,6 +1427,27 @@ pub(crate) enum ConfigCmd {
         #[arg(long)]
         force: bool,
     },
+}
+
+/// Which config a `lox config show/wiring/find/lint` looks at.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub(crate) struct ConfigSource {
+    /// A snapshot of the config repo: commit, version (v273) or date (2026-08-25)
+    #[arg(long, value_name = "SNAPSHOT")]
+    pub at: Option<String>,
+    /// A config file (ZIP or .Loxone)
+    #[arg(long, value_name = "PATH", conflicts_with = "at")]
+    pub file: Option<String>,
+    /// Read the newest backup from the Miniserver via FTP (read-only)
+    #[arg(long, conflicts_with_all = ["at", "file"])]
+    pub download: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TraceDir {
+    Up,
+    Down,
+    Both,
 }
 
 // ── Error envelope ────────────────────────────────────────────────────────────

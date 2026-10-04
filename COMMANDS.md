@@ -257,7 +257,6 @@ lox config extract config.zip --save-as out.Loxone
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
-lox config diff old.Loxone new.Loxone  # compare two configs (accepts .zip or .Loxone)
 
 # Git-based config versioning
 lox config init ~/loxone-config        # initialize a git repo for config tracking
@@ -268,8 +267,53 @@ lox config log -n 5                    # last 5 entries
 lox config restore abc123 --force      # restore config from git history & upload
 ```
 
-The `pull` workflow: FTP download → LoxCC decompress → semantic diff → git commit with meaningful message.
+The `pull` workflow: FTP download → LoxCC decompress → logic diff → git commit with meaningful message.
 Multi-Miniserver: each serial gets its own subdirectory in the repo.
+
+### Inspecting the logic (read-only)
+
+The program inside a config — blocks, parameters and wires — read with [lxir](https://github.com/discostu105/lxir).
+Hardware references on the pages are folded away: a wire goes from the motion sensor to the light, not to an input ref.
+
+```bash
+lox config diff                        # the last change in the config repo
+lox config diff v271                   # from version 271 to the newest config
+lox config diff 2026-08-25 HEAD        # snapshots by save date, commit, version or file
+lox config diff a1b2c3d..e4f5a6b       # a range of commits
+lox config diff old.Loxone new.zip     # two files (.Loxone or backup ZIP)
+lox config show                        # the logic pages: blocks and wires per page
+lox config show -p Wohnzimmer          # one page as lxir source (--all: every page)
+lox config wiring "Licht Wohnzimmer"   # inputs, outputs and non-default parameters of a block
+lox config wiring Licht -r Küche --trace up      # the whole path up to the sensors (down, both)
+lox config wiring Licht --trace down --depth 6   # hops to follow (default 4)
+lox config wiring Licht --all-params   # parameters at their default value, too
+lox config find bewegung küche         # blocks by name, type, device, room or page (all words match)
+lox config lint                        # dead blocks, unwired inputs, duplicate names, broken refs
+lox config history "Licht Wohnzimmer"  # how one block changed across the snapshots
+lox config history Licht -n 200        # scan more snapshots (default 50)
+```
+
+`show`, `wiring`, `find` and `lint` read the newest config without the network: the config repo's working copy,
+else the cached download (`lox tui`'s wiring view keeps one). `--at SNAPSHOT` reads a snapshot of the repo
+(commit, `v273`, `2026-08-25`), `--file PATH` a `.Loxone` or backup ZIP, `--download` fetches the current config
+via FTP first (read-only). Names match like controls do: substring, `Name [Room]` (room, page or device) or UUID.
+
+The diff is per logic page, with totals first; layout-only saves (moved blocks) show as "No logic changes":
+
+```
+b11f0c7 · saved 2026-08-25 21:25:27 → 303191c · saved 2026-08-28 06:39:25
+
+= 1 added · 1 renamed · 1 parameter · wires +2 −0
+
+Hallway
+  + block  Stairs pulse (Monoflop)
+  ~ rename Night → Night mode
+  ~ param  Hallway light · MoveOn  600 s (10 min) → 900 s (15 min)
+  + wire   Motion.Q → Stairs pulse.InputTrigger
+  + wire   Night mode.Q → Hallway light.DisP
+```
+
+All of them take `-o json`.
 
 ---
 
@@ -330,7 +374,7 @@ lox --dry-run mcp serve               # every action is a dry run
 
 MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
 Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
-`system_status`, `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
+`system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
 (and `send_command` with `--allow-raw`). Every tool has input and output schemas; every action tool accepts `dry_run`.
 High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
@@ -523,7 +567,9 @@ the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 
 | System › Config | Action |
 |---|---|
-| `⏎` | diff: focus it, then the full line |
+| `⏎` | browse the snapshot (diff pane: the full line) |
+| `m` | mark: compare another commit with this one |
+| `w` | wiring of the diff line's block at that snapshot |
 | `n` | next change |
 | `N` | previous change |
 | `P` | pull: download the newest backup, commit it to git (read-only) |

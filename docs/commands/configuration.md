@@ -98,8 +98,26 @@ lox config extract config.zip --save-as out.Loxone
 lox config upload config.zip --force      # upload to Miniserver
 lox config users file.Loxone              # list user accounts
 lox config devices file.Loxone            # list hardware devices
-lox config diff old.Loxone new.Loxone     # compare two configs
 ```
+
+### Inspecting the logic
+
+Read-only views of the program in a config — blocks, parameters and wires, with hardware refs folded to
+the device and room they live in:
+
+```bash
+lox config diff                           # the last change in the config repo
+lox config diff v271 HEAD                 # two snapshots: commit, version, save date — or two files
+lox config show                           # logic pages with block and wire counts
+lox config show -p Wohnzimmer             # one page as lxir source
+lox config wiring "Licht" --trace up      # what drives a block, back to the sensors
+lox config find bewegung küche            # search blocks
+lox config lint                           # dead blocks, unwired inputs, duplicate names
+lox config history "Licht"                # how one block changed over time
+```
+
+They read the config repo's working copy or the cached download; `--at SNAPSHOT`, `--file PATH` or
+`--download` (read-only FTP) pick another config.
 
 ### Git-based config versioning
 

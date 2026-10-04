@@ -1745,6 +1745,14 @@ pub fn energy_today(hour_now: f64) -> (Vec<f64>, Vec<f64>) {
 /// UUIDs, output connectors carry the state UUIDs, plus a few internal blocks
 /// without visualization (memory flags, logic) to show dashed wires.
 pub fn loxone_xml(st: &Value) -> String {
+    loxone_xml_at(st, 3)
+}
+
+/// The demo config as it was at demo snapshot `v` (1–3, 3 = today), for the
+/// config history: v2 lacks the stairs pulse, v1 also has the night mode
+/// unwired and named "Night", and a shorter motion timeout. UUIDs stay
+/// stable across versions, like Loxone Config keeps them.
+pub fn loxone_xml_at(st: &Value, v: u8) -> String {
     let find = |room: &str, name: &str| -> Option<(String, Value)> {
         let rooms = st["rooms"].as_object()?;
         let ru = rooms
@@ -1770,7 +1778,7 @@ pub fn loxone_xml(st: &Value) -> String {
         n += 1;
         format!("2e{:06x}-0000-0000-ffff{:012x}", n, 0xabc000u64 + n as u64)
     };
-    let mut blocks: Vec<String> = Vec::new();
+    let mut blocks: Vec<(String, String)> = Vec::new();
     let co = |k: &str, u: &str, inputs: &[&str]| -> String {
         if inputs.is_empty() {
             format!("\t\t\t\t<Co K=\"{k}\" U=\"{u}\"/>\r\n")
@@ -1782,12 +1790,35 @@ pub fn loxone_xml(st: &Value) -> String {
             format!("\t\t\t\t<Co K=\"{k}\" U=\"{u}\">\r\n{ins}\t\t\t\t</Co>\r\n")
         }
     };
-    let block = |typ: &str, u: &str, title: &str, cos: &[String]| -> String {
+    let rooms_by_name: HashMap<String, String> = st["rooms"]
+        .as_object()
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (v["name"].as_str().unwrap_or("").to_string(), k.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let raw = |typ: &str,
+               u: &str,
+               title: &str,
+               extra: &str,
+               cos: &[String],
+               room: &str|
+     -> String {
+        let io = rooms_by_name
+            .get(room)
+            .map(|r| format!("\t\t\t\t<IoData Pr=\"{r}\"/>\r\n"))
+            .unwrap_or_default();
         format!(
-            "\t\t\t<C Type=\"{typ}\" V=\"175\" U=\"{u}\" Title=\"{title}\">\r\n{}\t\t\t</C>\r\n",
+            "\t\t\t<C Type=\"{typ}\" V=\"175\" U=\"{u}\" Title=\"{title}\"{extra}>\r\n{}{io}\t\t\t</C>\r\n",
             cos.concat()
         )
     };
+    // a block on the logic page of its room
+    let block_in =
+        |room: &str, typ: &str, u: &str, title: &str, cos: &[String]| -> (String, String) {
+            (room.to_string(), raw(typ, u, title, "", cos, room))
+        };
 
     // Hallway: Motion + Door contact + Night mode memory + Brightness → Hallway light
     let (mu, mc) = find("Hallway", "Motion").unwrap();
@@ -1799,40 +1830,81 @@ pub fn loxone_xml(st: &Value) -> String {
     let night = fresh();
     let leds_q = fresh();
     let stairs_q = fresh();
-    blocks.push(block(
+    // hardware lives outside the pages: a Tree dimmer in the hallway, an
+    // onboard input of the Miniserver, a virtual input
+    let mut tree_dev: Vec<String> = Vec::new();
+    let mut ms_inputs: Vec<String> = Vec::new();
+    let mut virtual_ins: Vec<String> = Vec::new();
+    blocks.push(block_in(
+        "Hallway",
         "PresenceDetector",
         &mu,
         "Motion",
         &[co("Q", &state(&mc, "active"), &[])],
     ));
-    blocks.push(block(
+    // Miniserver input 3 → InputRef on the page → Door contact
+    let (di, di_q) = (fresh(), fresh());
+    ms_inputs.push(raw(
+        "DigitalIn",
+        &di,
+        "Input 3",
+        " IName=\"I3\"",
+        &[co("Q", &di_q, &[])],
+        "Hallway",
+    ));
+    let (ir, ir_ai, ir_aq) = (fresh(), fresh(), fresh());
+    blocks.push((
+        "Hallway".into(),
+        raw(
+            "InputRef",
+            &ir,
+            "Input 3",
+            &format!(" Ref=\"{di}\""),
+            &[co("AI", &ir_ai, &[&di_q]), co("AQ", &ir_aq, &[])],
+            "",
+        ),
+    ));
+    blocks.push(block_in(
+        "Hallway",
         "InfoOnlyDigital",
         &du,
         "Door contact",
-        &[co("Q", &state(&dc, "active"), &[])],
+        &[
+            co("I", &fresh(), &[&ir_aq]),
+            co("Q", &state(&dc, "active"), &[]),
+        ],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Garden",
         "InfoOnlyAnalog",
         &bu,
         "Brightness",
         &[co("AQ", &state(&bc, "value"), &[])],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Hallway",
         "Memory",
         &night,
-        "Night mode",
+        if v >= 2 { "Night mode" } else { "Night" },
         &[co("Q", &night_q, &[])],
     ));
     let (hmv, htg, hdis, hbr) = (fresh(), fresh(), fresh(), fresh());
-    blocks.push(block(
+    let disp: Vec<&str> = if v >= 2 { vec![&night_q] } else { Vec::new() };
+    let param =
+        |k: &str, v: &str, u: String| format!("\t\t\t\t<Co K=\"{k}\" Def=\"{v}\" U=\"{u}\"/>\r\n");
+    blocks.push(block_in(
+        "Hallway",
         "LightController2",
         &hu,
         "Hallway light",
         &[
             co("Mv", &hmv, &[&state(&mc, "active")]),
             co("Tg", &htg, &[&state(&dc, "active")]),
-            co("DisP", &hdis, &[&night_q]),
+            co("DisP", &hdis, &disp),
             co("Br", &hbr, &[&state(&bc, "value")]),
+            param("MoveOn", if v >= 2 { "900" } else { "600" }, fresh()),
+            param("MoveIgnore", "300", fresh()),
+            param("MoveTimeout", "3600", fresh()),
             co(
                 "AQ1",
                 spots["states"]["position"].as_str().unwrap_or(""),
@@ -1842,23 +1914,69 @@ pub fn loxone_xml(st: &Value) -> String {
             co("Qp", &stairs_q, &[]),
         ],
     ));
-    let aq = |b: &mut Vec<String>, title: &str, src: &str, u1: String, u2: String| {
-        b.push(block("AnalogOutput", &u1, title, &[co("I", &u2, &[src])]));
-    };
-    aq(
-        &mut blocks,
-        "AQ Hallway spots",
-        spots["states"]["position"].as_str().unwrap_or(""),
-        fresh(),
-        fresh(),
+    // light outputs → OutputRef on the page → dimmer channel on the Tree device
+    for (title, src) in [
+        (
+            "Spots",
+            spots["states"]["position"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+        ),
+        ("LEDs", leds_q.clone()),
+        ("Stairs light", stairs_q.clone()),
+    ] {
+        let (act, act_i) = (fresh(), fresh());
+        let (or, or_ai, or_aq) = (fresh(), fresh(), fresh());
+        tree_dev.push(raw(
+            "TreeAactor",
+            &act,
+            title,
+            "",
+            &[co("AI", &act_i, &[&or_aq])],
+            "Hallway",
+        ));
+        blocks.push((
+            "Hallway".into(),
+            raw(
+                "OutputRef",
+                &or,
+                title,
+                &format!(" Ref=\"{act}\""),
+                &[co("AI", &or_ai, &[&src]), co("AQ", &or_aq, &[])],
+                "",
+            ),
+        ));
+    }
+    // a staircase pulse nobody finished wiring: dead logic for `lox config lint`
+    let pulse = block_in(
+        "Hallway",
+        "Monoflop",
+        &fresh(),
+        "Stairs pulse",
+        &[
+            co("InputTrigger", &fresh(), &[&state(&mc, "active")]),
+            param("Time", "120", fresh()),
+            co("Q", &fresh(), &[]),
+        ],
     );
-    aq(&mut blocks, "AQ Hallway LEDs", &leds_q, fresh(), fresh());
-    aq(&mut blocks, "Q Stairs light", &stairs_q, fresh(), fresh());
+    if v >= 3 {
+        blocks.push(pulse);
+    }
+    virtual_ins.push(raw(
+        "VirtualIn",
+        &fresh(),
+        "Party mode",
+        " IName=\"VI1\"",
+        &[co("Q", &fresh(), &[])],
+        "",
+    ));
 
     // Living room lighting: Presence → Lighting → three circuits
     let (pu, pc) = find("Living room", "Presence").unwrap();
     let (lu, lc) = find("Living room", "Lighting").unwrap();
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "PresenceDetector",
         &pu,
         "Presence",
@@ -1876,26 +1994,35 @@ pub fn loxone_xml(st: &Value) -> String {
             .unwrap_or("")
             .to_string();
         cos.push(co(&format!("AQ{}", i + 1), &out, &[]));
-        blocks.push(block(
+        blocks.push(block_in(
+            "Living room",
             "AnalogOutput",
             &fresh(),
             &format!("AQ {}", name),
             &[co("I", &fresh(), &[&out])],
         ));
     }
-    blocks.push(block("LightController2", &lu, "Lighting", &cos));
+    blocks.push(block_in(
+        "Living room",
+        "LightController2",
+        &lu,
+        "Lighting",
+        &cos,
+    ));
 
     // Blind South: shading automatic (internal) + brightness → Jalousie → motor
     let (su, sc) = find("Living room", "Blind South").unwrap();
     let auto = fresh();
     let auto_q = fresh();
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "AutoJalousie",
         &auto,
         "Shading automatic South",
         &[co("Qs", &auto_q, &[&state(&bc, "value")])],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "Jalousie",
         &su,
         "Blind South",
@@ -1907,13 +2034,15 @@ pub fn loxone_xml(st: &Value) -> String {
             co("Qd", &state(&sc, "down"), &[]),
         ],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "DigitalOutput",
         &fresh(),
         "Motor South up",
         &[co("I", &fresh(), &[&state(&sc, "up")])],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "DigitalOutput",
         &fresh(),
         "Motor South down",
@@ -1923,14 +2052,16 @@ pub fn loxone_xml(st: &Value) -> String {
     // Climate living room: Humidity + Window → IRC
     let (rcu, rcc) = find("Living room", "Room climate").unwrap();
     let (wu, wc) = find("Living room", "Window left").unwrap();
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "InfoOnlyDigital",
         &wu,
         "Window left",
         &[co("Q", &state(&wc, "active"), &[])],
     ));
     let valve = fresh();
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "IRoomControllerV2",
         &rcu,
         "Room climate",
@@ -1940,7 +2071,8 @@ pub fn loxone_xml(st: &Value) -> String {
             co("AQh", &valve, &[]),
         ],
     ));
-    blocks.push(block(
+    blocks.push(block_in(
+        "Living room",
         "AnalogOutput",
         &fresh(),
         "Valve Living room",
@@ -1951,7 +2083,7 @@ pub fn loxone_xml(st: &Value) -> String {
     // wall button (Touch / T5) wired to their input, like a typical install.
     let done: std::collections::HashSet<String> = blocks
         .iter()
-        .filter_map(|b| {
+        .filter_map(|(_, b)| {
             b.split("U=\"")
                 .nth(1)
                 .and_then(|r| r.split('"').next())
@@ -2000,7 +2132,8 @@ pub fn loxone_xml(st: &Value) -> String {
         let mut cos = Vec::new();
         if let Some(k) = input {
             let btn_q = fresh();
-            blocks.push(block(
+            blocks.push(block_in(
+                &room,
                 "Pushbutton",
                 &fresh(),
                 &format!("Button {}", room),
@@ -2011,7 +2144,7 @@ pub fn loxone_xml(st: &Value) -> String {
         for (k, su) in outs.iter().take(6) {
             cos.push(co(k, su, &[]));
         }
-        blocks.push(block(typ, &u, name, &cos));
+        blocks.push(block_in(&room, typ, &u, name, &cos));
         // sub-controls (light circuits) hang off the controller's outputs
         if let Some(subs) = c["subControls"].as_object() {
             for (su_u, sc) in subs {
@@ -2024,7 +2157,8 @@ pub fn loxone_xml(st: &Value) -> String {
                             .collect()
                     })
                     .unwrap_or_default();
-                blocks.push(block(
+                blocks.push(block_in(
+                    &room,
                     sc["type"].as_str().unwrap_or(""),
                     su_u,
                     sc["name"].as_str().unwrap_or(""),
@@ -2035,11 +2169,53 @@ pub fn loxone_xml(st: &Value) -> String {
     }
     let _ = sub;
 
+    // one logic page per room, in the order rooms first appear
+    let mut pages: Vec<(String, String)> = Vec::new();
+    for (room, b) in blocks {
+        let title = if room.is_empty() {
+            "Main".to_string()
+        } else {
+            room
+        };
+        match pages.iter_mut().find(|(t, _)| *t == title) {
+            Some((_, v)) => v.push_str(&b),
+            None => pages.push((title, b)),
+        }
+    }
+    let pages: String = pages
+        .iter()
+        .enumerate()
+        .map(|(i, (t, b))| {
+            format!(
+                "\t\t\t<C Type=\"Page\" V=\"175\" U=\"2e000000-0000-0001-ffff{:012x}\" Title=\"{t}\">\r\n{b}\t\t\t</C>\r\n",
+                i
+            )
+        })
+        .collect();
+    let mut rooms: Vec<(&String, &String)> = rooms_by_name.iter().collect();
+    rooms.sort();
+    let places: String = rooms
+        .iter()
+        .map(|(name, u)| {
+            format!("\t\t\t<C Type=\"Place\" V=\"175\" U=\"{u}\" Title=\"{name}\"/>\r\n")
+        })
+        .collect();
+
     format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\" NextObj=\"900\" NextConst=\"1\" NextNote=\"1\" NextMem=\"1\">\r\n\
 \t<C Type=\"Document\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000001\" Title=\"Demo House\" ConfigVersion=\"15030402\">\r\n\
-\t\t<C Type=\"Page\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000002\" Title=\"Main\">\r\n{}\t\t</C>\r\n\t</C>\r\n</ControlList>\r\n",
-        blocks.concat()
+\t\t<C Type=\"PlaceCaption\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000003\" Title=\"Rooms\">\r\n{places}\t\t</C>\r\n\
+\t\t<C Type=\"LoxLIVE\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000004\" Title=\"Demo Miniserver\">\r\n\
+\t\t\t<C Type=\"InputCaption\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000005\" Title=\"Digital inputs\">\r\n{}\t\t\t</C>\r\n\
+\t\t\t<C Type=\"VirtualInCaption\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000006\" Title=\"Virtual inputs\">\r\n{}\t\t\t</C>\r\n\
+\t\t\t<C Type=\"LoxTree\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000007\" Title=\"Tree\">\r\n\
+\t\t\t\t<C Type=\"LoxCaption\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000008\" Title=\"Tree branch\">\r\n\
+\t\t\t\t\t<C Type=\"TreeDevice\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000009\" Title=\"RGBW 24V Dimmer Tree\">\r\n{}\t\t\t\t\t</C>\r\n\
+\t\t\t\t</C>\r\n\t\t\t</C>\r\n\t\t</C>\r\n\
+\t\t<C Type=\"Program\" V=\"175\" U=\"2e000000-0000-0000-ffff000000000002\" Title=\"Demo Miniserver\">\r\n{pages}\t\t</C>\r\n\t</C>\r\n</ControlList>\r\n",
+        ms_inputs.concat(),
+        virtual_ins.concat(),
+        tree_dev.concat(),
     )
 }
 

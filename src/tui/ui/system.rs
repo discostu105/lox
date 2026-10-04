@@ -10,7 +10,7 @@ use crate::tui::data::{DiagSample, LogLevel, NetSample, is_error_counter};
 use crate::tui::keymap::{Cmd, Ctx};
 use crate::tui::text::{fit, rfit};
 use crate::tui::theme::Grad;
-use crate::tui::update::{list_id, log_rows, sys_len};
+use crate::tui::update::{config_diff_key, list_id, log_rows, sys_len};
 use crate::tui::widgets::braille::{GraphOpts, graph};
 use crate::tui::widgets::dotmeter::dotmeter;
 use crate::tui::widgets::dotspark::dotspark;
@@ -963,10 +963,15 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     let s = sel(app, SysView::Config);
     let len = sys_len(app, SysView::Config);
     let mut hints = if app.system.pane == 0 {
-        vec![Hint::new("⇥", "focus diff")]
+        vec![
+            Hint::new("⏎", "browse snapshot"),
+            Hint::new("m", "mark · compare"),
+            Hint::new("⇥", "focus diff"),
+        ]
     } else {
         vec![
             Hint::new("⏎", "full line"),
+            Hint::new("w", "wiring"),
             Hint::new("⇥", "back to history"),
         ]
     };
@@ -1055,7 +1060,15 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             .saved
             .clone()
             .unwrap_or_else(|| c.date.get(..16).unwrap_or(&c.date).to_string());
-        let mut x = put(buf, list, list.x + 1, y, &date, th.s_faint());
+        let marked = app.config_mark.as_deref() == Some(c.hash.as_str());
+        let mut x = put(
+            buf,
+            list,
+            list.x + 1,
+            y,
+            &date,
+            if marked { th.s_accent() } else { th.s_faint() },
+        );
         if let Some(v) = &c.version {
             x = put(buf, list, x + 1, y, &rfit(v, 4), th.s_dim());
         }
@@ -1064,6 +1077,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
         let changes: Vec<&String> = diff
             .into_iter()
             .flatten()
+            .map(|l| &l.text)
             .filter(|l| !l.starts_with("= ") && !l.starts_with("# "))
             .collect();
         // a single change reads better than its count
@@ -1071,7 +1085,7 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             .then(|| changes[0].split_whitespace().collect::<Vec<_>>().join(" "));
         let totals = single.as_deref().or_else(|| {
             diff.and_then(|d| d.first())
-                .and_then(|l| l.strip_prefix("= "))
+                .and_then(|l| l.text.strip_prefix("= "))
         });
         let (text, st) = if let Some(t) = totals {
             let st = match t.chars().next() {
@@ -1093,6 +1107,9 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             };
             (c.summary.as_str(), st)
         };
+        if marked {
+            x = put(buf, list, x + 1, y, "◆", th.s_accent());
+        }
         put(
             buf,
             list,
@@ -1170,21 +1187,27 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
         th.s_faint(),
     );
     let short = |h: &str| h.get(..7).unwrap_or(h).to_string();
-    let vs = match commits.get(s + 1) {
-        Some(p) => format!(
+    let key = config_diff_key(app).unwrap_or_else(|| c.hash.clone());
+    let vs = match (key.split_once(".."), commits.get(s + 1)) {
+        (Some((a, b)), _) => format!(
+            "lxir diff · {} → {} · ◆ marked (m again: unmark)",
+            short(a),
+            short(b)
+        ),
+        (None, Some(p)) => format!(
             "lxir diff · commit {} vs {} (the backup before)",
             short(&c.hash),
             short(&p.hash)
         ),
-        None => format!(
+        (None, None) => format!(
             "commit {} · the first backup, nothing before it",
             short(&c.hash)
         ),
     };
     put(buf, dr, dr.x + 1, dr.y + 1, &fit(&vs, dw), th.s_faint());
     let body = Rect::new(dr.x, dr.y + 3, dr.width, dr.height.saturating_sub(3));
-    let Some(diff) = app.diffs.get(&c.hash) else {
-        if let Some(e) = app.diff_errs.get(&c.hash) {
+    let Some(diff) = app.diffs.get(&key) else {
+        if let Some(e) = app.diff_errs.get(&key) {
             common::empty(
                 app,
                 buf,
@@ -1231,6 +1254,9 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             fill(buf, row, th.s_selected());
             cell(buf, body, body.x, y, "▌", th.s_accent());
         }
+        // the focused row of a block: `w` opens its wiring at this snapshot
+        let hint = app.system.pane == 1 && k == cur && l.block.is_some() && w > 40;
+        let l = l.text.as_str();
         if let Some(t) = l.strip_prefix("= ") {
             put(
                 buf,
@@ -1285,6 +1311,16 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
             _ => {
                 put(buf, body, body.x + 3, y, &fit(l, w.saturating_sub(2)), st);
             }
+        }
+        if hint {
+            put(
+                buf,
+                body,
+                body.right().saturating_sub(11),
+                y,
+                " w wiring ",
+                th.s_accent(),
+            );
         }
     }
 }

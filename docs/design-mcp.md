@@ -1,7 +1,7 @@
 # Design: `lox mcp` — Model Context Protocol server
 
 > **Status: IMPLEMENTED (v2)** — built on rmcp 3.5 (the official Rust SDK), speaks MCP **2026-07-28** and every
-> revision back to 2024-11-05 over stdio. 15 tools with input and output schemas, user confirmation for risky
+> revision back to 2024-11-05 over stdio. 16 tools with input and output schemas, user confirmation for risky
 > actions, progress and cancellation for scenes. Tracking issue: #107.
 > Out of scope for now: Streamable HTTP transport, resources and `subscriptions/listen`, the tasks extension (§10).
 
@@ -84,6 +84,7 @@ a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destr
 | `list_light_moods` | `name`, `room?` | mood IDs and names of a lighting controller (WebSocket) |
 | `list_scenes` | — | local `lox` scenes with description and step count |
 | `system_status` | — | firmware, PLC state, heap |
+| `get_wiring` | `name`, `room?`, `trace?` (up, down, both), `depth?`, `all_params?`, `download?` | the config logic around a control or block: inputs, outputs (hardware refs folded to the device and room), non-default parameters, optional traced paths, and the app control it is. Reads the config repo or the cached `.Loxone`; `download` fetches it via FTP (read-only) |
 
 ### 4.2 Action tools
 

@@ -50,8 +50,9 @@ Discover first: list_rooms, then list_controls (filter by room, type or name). \
 Each control in list_controls names the tool that operates it.
 Address controls by name: a case-insensitive substring match. If a name is ambiguous, \
 pass `room` or write it as 'Name [Room]'. UUIDs work too.
-Read live values with get_control or list_sensors. Every action tool accepts dry_run=true \
-to preview the exact commands without sending them.
+Read live values with get_control or list_sensors. To explain why something happened \
+(what drives a light, which sensors feed a block), use get_wiring. \
+Every action tool accepts dry_run=true to preview the exact commands without sending them.
 Doors, gates, the alarm and controls the user listed for confirmation are high-risk: \
 the user is asked to confirm each one. \
 If the user declines, do not retry.";
@@ -168,6 +169,36 @@ pub struct SensorQuery {
     /// Filter by room (substring)
     #[serde(default)]
     pub room: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
+pub enum TraceDirection {
+    Up,
+    Down,
+    Both,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WiringQuery {
+    /// Control or logic block name: case-insensitive substring, 'Name [Room]', alias, or UUID
+    pub name: String,
+    /// Room name (substring) to disambiguate
+    #[serde(default)]
+    pub room: Option<String>,
+    /// Follow the wires transitively: up (to the sensors), down (to the actuators) or both. Omit for one hop.
+    #[serde(default)]
+    pub trace: Option<TraceDirection>,
+    /// Hops to follow with `trace` (1–8, default 4)
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// Also list parameters left at their default value
+    #[serde(default)]
+    pub all_params: bool,
+    /// Download the current config from the Miniserver first (read-only FTP, a few seconds)
+    #[serde(default)]
+    pub download: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -793,6 +824,34 @@ impl LoxMcp {
     )]
     async fn system_status(&self) -> ToolResponse {
         respond(self.blocking(ops::system_status).await)
+    }
+
+    #[tool(
+        title = "Get wiring",
+        description = "Why does a control behave the way it does? Shows the Loxone Config logic around a control or logic block: what is wired to its inputs and outputs (sensors, other blocks, hardware), its non-default parameters, and with `trace` the whole path up to the sensors or down to the actuators. Read-only; reads the config program, not live values (use get_control for those).",
+        output_schema = schema_for_output::<ops::Wiring>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn get_wiring(&self, Parameters(q): Parameters<WiringQuery>) -> ToolResponse {
+        let trace = q.trace.map(|t| match t {
+            TraceDirection::Up => ops::Trace::Up,
+            TraceDirection::Down => ops::Trace::Down,
+            TraceDirection::Both => ops::Trace::Both,
+        });
+        respond(
+            self.blocking(move |lox| {
+                ops::get_wiring(
+                    lox,
+                    &q.name,
+                    q.room.as_deref(),
+                    trace,
+                    q.depth.unwrap_or(4),
+                    q.all_params,
+                    q.download,
+                )
+            })
+            .await,
+        )
     }
 
     // ── Action tools ──────────────────────────────────────────────────────────

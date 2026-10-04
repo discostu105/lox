@@ -317,6 +317,49 @@ fn j3_events_filter_detail_wiring() {
     assert!(s.contains("wiring"));
 }
 
+/// B: the live wiring — type, page and parameters in the header, values on
+/// the wires, the selected wire in full; `t` traces down to the actuators.
+#[test]
+fn wiring_live_header_detail_trace() {
+    let mut h = H::new();
+    h.run_sim(5.0);
+    let light = h.cid("Hallway light", "Hallway");
+    update::reveal(&mut h.app, light);
+    h.select(light);
+    h.keys(&["w"]);
+    let st = demo::structure();
+    let l = crate::logic::Logic::parse(demo::loxone_xml(&st).as_bytes()).unwrap();
+    let epoch = h.app.epoch;
+    h.msg(Msg::Wiring {
+        epoch,
+        doc: super::app::WiringDoc::Ready(std::sync::Arc::new(l), "demo.Loxone".into()),
+    });
+    let s = h.render(140, 40);
+    assert!(s.contains("LightController2 · page Hallway"), "{}", s);
+    assert!(s.contains("set MoveOn"), "non-default params: {}", s);
+    assert!(s.contains("why is this on"), "{}", s);
+    assert!(
+        s.contains("Mv ← Motion.Q"),
+        "detail of the first wire: {}",
+        s
+    );
+    // p: every parameter
+    h.keys(&["p"]);
+    assert!(h.render(140, 40).contains("MoveTimeout"));
+    // t t: down to the actuators, through the output refs to the Tree device
+    h.keys(&["t", "t"]);
+    let s = h.render(140, 40);
+    assert!(s.contains("trace → actuators"), "{}", s);
+    assert!(s.contains("Stairs light"), "{}", s);
+    // o: the page in the config browser, the block selected
+    h.keys(&["o"]);
+    let Some(Overlay::Browse(b)) = h.app.top_overlay() else {
+        panic!("no browser: {:?}", h.app.top_overlay());
+    };
+    assert_eq!(b.page.as_deref(), Some("Hallway"));
+    assert!(h.render(140, 40).contains("▌ Hallway light"));
+}
+
 /// J4: is the Miniserver OK — System overview and sub-views poll what they show.
 #[test]
 fn j4_system_views_poll() {
@@ -794,6 +837,196 @@ fn config_pull_refetches_diffs_and_shows_errors() {
         "{}",
         s
     );
+}
+
+/// System › Config with the demo history (c3 newest … c1).
+fn config_history() -> H {
+    let mut h = H::new();
+    h.keys(&["5"]);
+    while h.app.system.view != SysView::Config {
+        h.keys(&["]"]);
+    }
+    let st = demo::structure();
+    h.poll(
+        PollKind::ConfigLog,
+        Polled::ConfigLog(Ok(super::exec::demo_commits(&st)), None),
+    );
+    h
+}
+
+fn feed_diff(h: &mut H, key: &str) {
+    let st = demo::structure();
+    let lines = super::exec::demo_diff(&st, key).unwrap();
+    h.poll(
+        PollKind::ConfigDiff(key.into()),
+        Polled::ConfigDiff(key.into(), lines),
+    );
+}
+
+/// Answer the last LoadSnapshot effect like the demo backend does.
+fn feed_snapshot(h: &mut H) {
+    let Some((spec, open)) = h.fx.iter().find_map(|e| match e {
+        Effect::LoadSnapshot { spec, open } => Some((spec.clone(), open.clone())),
+        _ => None,
+    }) else {
+        panic!("no LoadSnapshot in {:?}", h.fx);
+    };
+    let st = demo::structure();
+    let result = super::exec::demo_version(&spec)
+        .and_then(|v| super::exec::demo_snapshot(&st, v))
+        .map_err(|e| e.to_string());
+    let epoch = h.app.epoch;
+    h.msg(Msg::Snapshot {
+        epoch,
+        spec,
+        open,
+        result,
+    });
+}
+
+/// C: ⏎ on a commit browses that snapshot — pages, a page's blocks and its
+/// lxir source, `/` search, then a block's wiring at that snapshot with trace
+/// and history.
+#[test]
+fn config_snapshot_browser() {
+    let mut h = config_history();
+    h.keys(&["Enter"]);
+    feed_snapshot(&mut h);
+    assert!(matches!(h.app.top_overlay(), Some(Overlay::Browse(_))));
+    let s = h.render(140, 36);
+    assert!(s.contains("◷ snapshot c3"), "{}", s);
+    assert!(
+        s.contains("Hallway") && s.contains("blocks"),
+        "pages: {}",
+        s
+    );
+    // the Hallway page: its blocks, then its lxir source
+    let Some(Overlay::Browse(b)) = h.app.top_overlay() else {
+        unreachable!()
+    };
+    let i = b
+        .doc
+        .logic
+        .pages()
+        .iter()
+        .position(|p| p.title == "Hallway")
+        .expect("a Hallway page");
+    for _ in 0..i {
+        h.keys(&["j"]);
+    }
+    h.keys(&["Enter"]);
+    assert!(
+        matches!(h.app.top_overlay(), Some(Overlay::Browse(b)) if b.page.as_deref() == Some("Hallway"))
+    );
+    let s = h.render(140, 36);
+    assert!(
+        s.contains("Hallway light") && s.contains("LightController2"),
+        "{}",
+        s
+    );
+    h.keys(&["s"]);
+    let s = h.render(140, 36);
+    assert!(s.contains("lxir"), "{}", s);
+    assert!(s.contains(" = "), "source: {}", s);
+    h.keys(&["s"]);
+    // search across the snapshot, ⏎ opens the wiring at that snapshot
+    h.keys(&["/"]).typed("stairs pu");
+    let s = h.render(140, 36);
+    assert!(s.contains("Stairs pulse"), "{}", s);
+    h.keys(&["Enter"]);
+    let Some(Overlay::Wiring(w)) = h.app.top_overlay() else {
+        panic!("no wiring: {:?}", h.app.top_overlay());
+    };
+    assert!(
+        w.snap.is_some(),
+        "wiring of the snapshot, not the live config"
+    );
+    let s = h.render(140, 36);
+    assert!(s.contains("◷ snapshot c3"), "{}", s);
+    assert!(
+        s.contains("Monoflop · page Hallway") || s.contains("Monoflop"),
+        "{}",
+        s
+    );
+    assert!(
+        s.contains("Time 120") || s.contains("Time"),
+        "params: {}",
+        s
+    );
+    assert!(!s.contains("why is this on"), "no live header: {}", s);
+    // t: trace up to the sensors
+    h.keys(&["t"]);
+    let s = h.render(140, 36);
+    assert!(s.contains("trace ← sensors"), "{}", s);
+    assert!(s.contains("Motion"), "{}", s);
+    // H: the block's history
+    h.keys(&["H"]);
+    let (uuid, title) =
+        h.fx.iter()
+            .find_map(|e| match e {
+                Effect::BlockHistory { uuid, title } => Some((uuid.clone(), title.clone())),
+                _ => None,
+            })
+            .expect("history effect");
+    let st = demo::structure();
+    let result = super::exec::demo_history(&st, &uuid).map_err(|e| e.to_string());
+    let epoch = h.app.epoch;
+    h.msg(Msg::BlockHistory {
+        epoch,
+        title,
+        result,
+    });
+    let Some(Overlay::Text { title, text, .. }) = h.app.top_overlay() else {
+        panic!("no history: {:?}", h.app.top_overlay());
+    };
+    assert!(title.contains("Stairs pulse"), "{}", title);
+    assert!(text.starts_with("c3"), "added in c3: {}", text);
+    // Esc walks back out
+    h.keys(&["Esc", "Esc"]);
+    assert!(matches!(h.app.top_overlay(), Some(Overlay::Browse(_))));
+}
+
+/// `m` marks a commit; selecting another compares the two; `w` on a diff
+/// line opens that block's wiring in the snapshot.
+#[test]
+fn config_compare_and_diff_wiring() {
+    let mut h = config_history();
+    h.keys(&["m", "j", "j"]);
+    assert_eq!(h.app.config_mark.as_deref(), Some("c3"));
+    assert_eq!(update::config_diff_key(&h.app).as_deref(), Some("c1..c3"));
+    h.tick(1.0);
+    assert!(
+        h.all.iter().any(
+            |e| matches!(e, Effect::Poll { kind: PollKind::ConfigDiff(c), .. } if c == "c1..c3")
+        )
+    );
+    feed_diff(&mut h, "c1..c3");
+    let s = h.render(140, 36);
+    assert!(s.contains("Night mode"), "rename across two commits: {}", s);
+    assert!(s.contains("Stairs pulse"), "{}", s);
+    // w on the added block: wiring at the newer side
+    h.keys(&["Tab"]);
+    let lines = h.app.diffs["c1..c3"].clone();
+    let i = lines
+        .iter()
+        .position(|l| l.text.contains("Stairs pulse") && l.block.is_some())
+        .expect("a line about the stairs pulse");
+    for _ in 0..i {
+        h.keys(&["j"]);
+    }
+    h.keys(&["w"]);
+    assert!(
+        h.fx.iter().any(
+            |e| matches!(e, Effect::LoadSnapshot { spec, open: super::app::SnapOpen::Wiring(_) } if spec == "c3")
+        ),
+        "{:?}",
+        h.fx
+    );
+    feed_snapshot(&mut h);
+    assert!(matches!(h.app.top_overlay(), Some(Overlay::Wiring(w)) if w.snap.is_some()));
+    // m again on the marked commit clears the mark
+    h.keys(&["Esc", "Tab", "k", "k", "m"]);
+    assert!(h.app.config_mark.is_none());
 }
 
 #[test]

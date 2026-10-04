@@ -1,7 +1,7 @@
 # Design: `lox tui` — Interactive Terminal UI
 
-> **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (lxir),
-> System › Config diffs, themes, mouse and `--demo`. Tested against a real Gen 2 Miniserver (read-only) and the
+> **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (lxir)
+> with trace and block history, System › Config diffs with the snapshot browser and compare, themes, mouse and `--demo`. Tested against a real Gen 2 Miniserver (read-only) and the
 > built-in demo house. The history chart (§5.10) and the facet picker (§4.5a) came from real use.
 > §13 records the decisions on the open questions, §14 what real data changed.
 > Not done yet: README GIF (`vhs`) and the 1,000 ev/s frame-time benchmark.
@@ -286,6 +286,7 @@ The few screen-specific keys don't collide with the vocabulary above:
 | Events | `F` | Follow mode on/off (auto-scroll to newest) |
 | System › Log | `n` / `N` | Next / previous match |
 | System › Config | `n` / `N` | Next / previous diff hunk; `P` = `lox config pull` now |
+| System › Config | `⏎` / `m` / `w` | Browse the snapshot (§5.9a); mark a commit to compare with another; wiring of the diff line's block |
 | System › Update | `R` | Reboot (typed confirmation); `U` install update (typed confirmation) |
 
 ### 4.5a Facets (`f`)
@@ -586,8 +587,14 @@ Round 3 (implemented) — only what the Miniserver actually reports:
     footer shows where the data comes from: each row is a git commit of `<ms>/config.Loxone` in `config_repo`
     (the repo is also in the frame's notch, `git · ~/…`). The diff header says what is compared: saved-in-Loxone-Config
     date, version, pull date, then `lxir diff · commit A vs B (the backup before)`.
-  - `⇥` (or `⏎`) focuses the diff: a cursor row appears, `j`/`k` move it, and `⏎` shows the full diff line.
-    `⇥` goes back to the history.
+  - `⇥` focuses the diff: a cursor row appears, `j`/`k` move it, and `⏎` shows the full diff line.
+    `w` opens the wiring of the line's block in that snapshot (the older one for removed blocks). `⇥` goes back
+    to the history.
+  - `⏎` on a commit browses that snapshot (§5.9a). `m` marks a commit (◆); selecting another then diffs the two
+    (`old..new`, any distance apart); `m` on the marked one clears it.
+  - The diff, the pull commit messages and `lox config diff` share one implementation (`logic::diff`): hardware
+    refs are folded (a re-placed input ref is no change), a removed and re-added wire with identical ends is one
+    `re-created` line, and layout-only saves say "No logic changes".
 - **Update**: firmware check, changelog link, `U` install and `R` reboot, both with **typed confirmation**
   (type the context name) and a progress/reconnect view through the out-of-service states.
 
@@ -647,8 +654,39 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
   that matter most here: sensors in, controls out.
 - Source: the `.Loxone` file from the gitops checkout (`lox config pull`) if present, otherwise the TUI offers
   "download config via FTP" once and caches it per context (structure-version keyed). Parsed with lxir.
-- Header line: the control's current value, since when, and the input whose change came last before it
-  ("triggered by"), from the event buffer.
+- Header: the control's current value, since when, and the input whose change came last before it
+  ("triggered by"), from the event buffer; then the block type, its page and room (or device and room for
+  hardware), and the parameters someone changed from their defaults with units (`MoveOn 900 s (15 min)`; `p`
+  shows all of them).
+- The line under the diagram spells out the selected wire: the other end's connector, its device or page and
+  room, and for an input whose source also drives other blocks, `also drives …` (marked `+N` on the wire).
+  Values on wires use the control's own format where known (`22000lx`, `21.5°`).
+- `t` cycles one hop → **trace ← sensors** → **trace → actuators**: the whole path as an indented tree (depth 6,
+  loops marked `↺`), every node with its place and live value. `o` opens the block's page in the config browser
+  (§5.9a) with the block selected, `/` searches the config, `H` shows the block's history across the snapshots
+  of the config repo (the same as `lox config history`).
+- Opened from a snapshot (§5.9a, or `w` on a diff line) the overlay shows that snapshot's wiring with a
+  `◷ snapshot <commit · date>` badge and no live values (topology only).
+
+### 5.9a Config snapshot browser
+
+`⏎` on a commit in System › Config (or `o`, `/` in the wiring overlay for the current config) opens the
+logic of that snapshot:
+
+```
+╭┐config┌┐pages┌─────────────────────────────────────────────┐◷ snapshot 303191c · 2026-08-28 06:39┌─╮
+│▌ EG Wohnzimmer             41 blocks    18 wires                                                 │
+│  Sicherheit                23 blocks    31 wires                                                 │
+│  Zentral                   57 blocks    44 wires                                                 │
+╰┘⏎ open page└┘/ find a block└┘Esc close└──────────────────────────────────────────────────────────╯
+```
+
+- **Pages** (block and wire counts) → `⏎` a page's **blocks** (title, type, room or device) → `⏎` a block's
+  wiring at that snapshot. `s` toggles the page between its blocks and its **lxir source** (`j`/`k`, `C-d`/`C-u`
+  scroll; names accented, comments faint). `Esc`/`h` go back a level.
+- `/` searches every block of the snapshot by name, type, device, room or page (all words match); `⏎` opens the
+  wiring of the hit.
+- Snapshots are read with `git show` and parsed in the background, then cached for the session.
 
 ### 5.10 History chart (`c`)
 

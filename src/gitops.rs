@@ -18,7 +18,7 @@ use std::process::Command;
 use crate::config::Config;
 use crate::ftp;
 use crate::loxcc;
-use crate::loxone_xml::{self, ConfigDiff};
+use crate::loxone_xml;
 
 /// Build a git Command with consistent config for the managed repo.
 /// Disables GPG signing and sets a fallback author if not configured,
@@ -161,14 +161,22 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     // 3. Parse new config summary
     let new_summary = loxone_xml::parse_config_summary(&xml_data)?;
 
-    // 4. Load previous config (if exists) for diffing
+    // 4. Semantic diff against the previous snapshot (lxir, refs folded)
     let xml_path = ms_path.join("config.Loxone");
-    let diff = if xml_path.exists() {
+    let change = if xml_path.exists() {
         let old_xml = std::fs::read(&xml_path)?;
-        let old_summary = loxone_xml::parse_config_summary(&old_xml)?;
-        Some(loxone_xml::diff_configs(&old_summary, &new_summary))
+        match crate::logic::diff_lines(&old_xml, &xml_data) {
+            Ok(lines) => Change::Logic(lines),
+            Err(e) => Change::Unavailable(format!("{:#}", e)),
+        }
     } else {
-        None
+        Change::Initial(crate::logic::Logic::parse(&xml_data).ok().map(|l| {
+            (
+                l.pages().len(),
+                l.browsable().count(),
+                l.folded_wires().len(),
+            )
+        }))
     };
 
     // 5. Write files
@@ -208,12 +216,13 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     }
 
     // 8. Generate commit message from diff
-    let commit_msg = build_commit_message(&ms, &metadata, diff.as_ref());
+    let commit_msg = build_commit_message(&ms, &metadata, &change);
     if !quiet {
         println!("{}", commit_msg);
     }
 
-    git(repo, &["commit", "-m", &commit_msg])?;
+    // page headers start with `#`: keep them even with commit.cleanup=strip
+    git(repo, &["commit", "--cleanup=whitespace", "-m", &commit_msg])?;
 
     if !quiet {
         println!("Committed.");
@@ -221,72 +230,63 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     Ok(true)
 }
 
+/// What changed since the previous snapshot, for the commit message.
+enum Change {
+    /// The first snapshot: page, block and wire counts (if lxir reads it)
+    Initial(Option<(usize, usize, usize)>),
+    /// Semantic diff lines (`logic::diff_lines`)
+    Logic(Vec<String>),
+    /// lxir could not read one of the configs
+    Unavailable(String),
+}
+
+/// Commit bodies stay readable in `git log`; the rest is `lox config diff`.
+const MAX_BODY_LINES: usize = 80;
+
 /// Build a semantic commit message from the config diff.
-fn build_commit_message(ms: &str, meta: &Metadata, diff: Option<&ConfigDiff>) -> String {
+fn build_commit_message(ms: &str, meta: &Metadata, change: &Change) -> String {
     let mut msg = format!(
         "[{}] Config backup {} (v{})",
         ms, meta.backup_date, meta.config_version
     );
 
-    match diff {
-        None => {
+    match change {
+        Change::Initial(logic) => {
             msg.push_str("\n\nInitial config snapshot.");
             msg.push_str(&format!(
                 "\n{} controls, {} rooms, {} categories, {} users",
                 meta.controls, meta.rooms, meta.categories, meta.users
             ));
+            if let Some((pages, blocks, wires)) = logic {
+                msg.push_str(&format!(
+                    "\n{} pages, {} blocks, {} wires",
+                    pages, blocks, wires
+                ));
+            }
         }
-        Some(d) if !d.has_changes() => {
-            msg.push_str("\n\nNo structural changes (metadata or internal IDs updated).");
+        Change::Logic(lines) if lines.is_empty() => {
+            msg.push_str("\n\nNo logic changes (layout or metadata only).");
         }
-        Some(d) => {
+        Change::Logic(lines) => {
             msg.push('\n');
-
-            for c in &d.controls_added {
-                msg.push_str(&format!(
-                    "\n+ Added control: \"{}\" ({})",
-                    c.name, c.control_type
-                ));
+            for (i, l) in lines.iter().enumerate() {
+                if i == MAX_BODY_LINES {
+                    msg.push_str(&format!(
+                        "\n… {} more lines — see `lox config diff`",
+                        lines.len() - i
+                    ));
+                    break;
+                }
+                // a blank line before each page
+                if l.starts_with("# ") {
+                    msg.push('\n');
+                }
+                msg.push('\n');
+                msg.push_str(l);
             }
-            for c in &d.controls_changed {
-                msg.push_str(&format!(
-                    "\n~ {}: \"{}\" -> \"{}\"",
-                    c.name, c.old_value, c.new_value
-                ));
-            }
-            for c in &d.controls_removed {
-                msg.push_str(&format!(
-                    "\n- Removed control: \"{}\" ({})",
-                    c.name, c.control_type
-                ));
-            }
-            for r in &d.rooms_added {
-                msg.push_str(&format!("\n+ Added room: \"{}\"", r));
-            }
-            for r in &d.rooms_renamed {
-                msg.push_str(&format!("\n~ Renamed room: \"{}\" -> \"{}\"", r.old, r.new));
-            }
-            for r in &d.rooms_removed {
-                msg.push_str(&format!("\n- Removed room: \"{}\"", r));
-            }
-            for c in &d.categories_added {
-                msg.push_str(&format!("\n+ Added category: \"{}\"", c));
-            }
-            for c in &d.categories_renamed {
-                msg.push_str(&format!(
-                    "\n~ Renamed category: \"{}\" -> \"{}\"",
-                    c.old, c.new
-                ));
-            }
-            for c in &d.categories_removed {
-                msg.push_str(&format!("\n- Removed category: \"{}\"", c));
-            }
-            for u in &d.users_added {
-                msg.push_str(&format!("\n+ Added user: \"{}\"", u));
-            }
-            for u in &d.users_removed {
-                msg.push_str(&format!("\n- Removed user: \"{}\"", u));
-            }
+        }
+        Change::Unavailable(e) => {
+            msg.push_str(&format!("\n\nLogic diff unavailable: {}", e));
         }
     }
 
@@ -401,9 +401,8 @@ mod tests {
         assert_eq!(ms_dir(&cfg), "192_168_1_77");
     }
 
-    #[test]
-    fn test_build_commit_message_initial() {
-        let meta = Metadata {
+    fn meta() -> Metadata {
+        Metadata {
             miniserver: "192.168.1.77".into(),
             serial: "ABC123".into(),
             backup_file: "sps_194_20260308182256.zip".into(),
@@ -414,85 +413,52 @@ mod tests {
             rooms: 12,
             categories: 8,
             users: 3,
-        };
-        let msg = build_commit_message("ABC123", &meta, None);
+        }
+    }
+
+    #[test]
+    fn test_build_commit_message_initial() {
+        let msg = build_commit_message("ABC123", &meta(), &Change::Initial(Some((19, 1229, 402))));
         assert!(msg.contains("[ABC123]"));
         assert!(msg.contains("v42"));
         assert!(msg.contains("Initial config snapshot"));
         assert!(msg.contains("150 controls"));
+        assert!(msg.contains("19 pages, 1229 blocks, 402 wires"));
     }
 
     #[test]
     fn test_build_commit_message_with_changes() {
-        let meta = Metadata {
-            miniserver: "192.168.1.77".into(),
-            serial: "ABC123".into(),
-            backup_file: "sps_195_20260309100000.zip".into(),
-            backup_date: "2026-03-09 10:00:00".into(),
-            config_version: "43".into(),
-            config_date: "2026-03-09".into(),
-            controls: 151,
-            rooms: 12,
-            categories: 8,
-            users: 3,
-        };
-        let diff = loxone_xml::ConfigDiff {
-            version_old: "42".into(),
-            version_new: "43".into(),
-            date_old: "2026-03-08".into(),
-            date_new: "2026-03-09".into(),
-            controls_added: vec![loxone_xml::ControlEntry {
-                name: "Garage Light".into(),
-                control_type: "Switch".into(),
-            }],
-            controls_removed: vec![],
-            controls_changed: vec![],
-            rooms_added: vec![],
-            rooms_removed: vec![],
-            rooms_renamed: vec![],
-            categories_added: vec![],
-            categories_removed: vec![],
-            categories_renamed: vec![],
-            users_added: vec![],
-            users_removed: vec![],
-        };
-        let msg = build_commit_message("ABC123", &meta, Some(&diff));
-        assert!(msg.contains("+ Added control: \"Garage Light\" (Switch)"));
+        let lines = vec![
+            "= 1 added · wires +1 −0".to_string(),
+            "# Garage".into(),
+            "+ block  Garage Light (Switch)".into(),
+            "+ wire   Taster.Q → Garage Light.On".into(),
+        ];
+        let msg = build_commit_message("ABC123", &meta(), &Change::Logic(lines));
+        assert!(
+            msg.ends_with(
+                "(v42)\n\n= 1 added · wires +1 −0\n\n# Garage\n+ block  Garage Light (Switch)\n+ wire   Taster.Q → Garage Light.On"
+            ),
+            "{}",
+            msg
+        );
     }
 
     #[test]
-    fn test_build_commit_message_no_structural_changes() {
-        let meta = Metadata {
-            miniserver: "192.168.1.77".into(),
-            serial: "ABC123".into(),
-            backup_file: "sps_195_20260309100000.zip".into(),
-            backup_date: "2026-03-09 10:00:00".into(),
-            config_version: "43".into(),
-            config_date: "2026-03-09".into(),
-            controls: 150,
-            rooms: 12,
-            categories: 8,
-            users: 3,
-        };
-        let diff = loxone_xml::ConfigDiff {
-            version_old: "42".into(),
-            version_new: "43".into(),
-            date_old: "2026-03-08".into(),
-            date_new: "2026-03-09".into(),
-            controls_added: vec![],
-            controls_removed: vec![],
-            controls_changed: vec![],
-            rooms_added: vec![],
-            rooms_removed: vec![],
-            rooms_renamed: vec![],
-            categories_added: vec![],
-            categories_removed: vec![],
-            categories_renamed: vec![],
-            users_added: vec![],
-            users_removed: vec![],
-        };
-        let msg = build_commit_message("ABC123", &meta, Some(&diff));
-        assert!(msg.contains("No structural changes"));
+    fn test_build_commit_message_caps_long_diffs() {
+        let mut lines = vec!["= 200 added".to_string(), "# Page".into()];
+        lines.extend((0..200).map(|i| format!("+ block  B{} (And)", i)));
+        let msg = build_commit_message("ABC123", &meta(), &Change::Logic(lines));
+        assert!(msg.contains("… 122 more lines"), "{}", msg);
+        assert!(msg.lines().count() < 90);
+    }
+
+    #[test]
+    fn test_build_commit_message_no_logic_changes() {
+        let msg = build_commit_message("ABC123", &meta(), &Change::Logic(Vec::new()));
+        assert!(msg.contains("No logic changes"));
+        let msg = build_commit_message("ABC123", &meta(), &Change::Unavailable("bad xml".into()));
+        assert!(msg.contains("Logic diff unavailable: bad xml"));
     }
 
     #[test]

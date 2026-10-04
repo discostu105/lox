@@ -80,6 +80,8 @@ pub enum Cmd {
     NextMatch,
     PrevMatch,
     Pull,
+    /// System › Config: mark a commit to compare with
+    Compare,
     Reboot,
     Install,
 }
@@ -193,7 +195,19 @@ pub static BINDINGS: &[Binding] = &[
         Config,
         ["Enter"],
         Cmd::Inspect,
-        "diff: focus it, then the full line"
+        "browse the snapshot (diff pane: the full line)"
+    ),
+    b!(
+        Config,
+        ["m"],
+        Cmd::Compare,
+        "mark: compare another commit with this one"
+    ),
+    b!(
+        Config,
+        ["w"],
+        Cmd::Wiring,
+        "wiring of the diff line's block at that snapshot"
     ),
     b!(Config, ["n"], Cmd::NextMatch, "next change"),
     b!(Config, ["N"], Cmd::PrevMatch, "previous change"),
