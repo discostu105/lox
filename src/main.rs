@@ -1,3 +1,16 @@
+// `print!`/`println!` for the whole crate: like std's, except that a closed
+// stdout (`lox … | head -1`) ends the process quietly instead of panicking
+// (#116). Tests keep std's macros so libtest still captures their output.
+#[cfg(not(test))]
+macro_rules! print {
+    ($($arg:tt)*) => { $crate::print_stdout(format_args!($($arg)*)) };
+}
+#[cfg(not(test))]
+macro_rules! println {
+    () => { $crate::print_stdout(format_args!("\n")) };
+    ($($arg:tt)*) => { $crate::print_stdout(format_args!("{}\n", format_args!($($arg)*))) };
+}
+
 mod actions;
 mod client;
 mod commands;
@@ -1475,6 +1488,19 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
         "connection_error"
     } else {
         "error"
+    }
+}
+
+/// Backs the crate's `print!`/`println!`: a reader that went away is a
+/// normal end of output, not an error.
+#[cfg(not(test))]
+fn print_stdout(args: std::fmt::Arguments) {
+    use std::io::Write;
+    if let Err(e) = std::io::stdout().write_fmt(args) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        panic!("failed printing to stdout: {e}");
     }
 }
 

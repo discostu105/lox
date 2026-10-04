@@ -318,3 +318,25 @@ fn mcp_config_prints_json_snippet() {
         ]
     );
 }
+
+// ── Closed stdout (#116) ────────────────────────────────────────────────────
+
+/// `lox … | head -1`: when the reader goes away, lox stops quietly instead of
+/// panicking with "failed printing to stdout: Broken pipe".
+#[cfg(unix)]
+#[test]
+fn closed_stdout_exits_quietly() {
+    use std::process::Stdio;
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("lox"))
+        .args(["completions", "bash"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Close the read end before lox writes its ~160 KB, more than a pipe holds.
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{:?}: {stderr}", out.status);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
