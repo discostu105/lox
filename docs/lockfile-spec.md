@@ -123,7 +123,9 @@ byte-for-byte, so lockfile diffs in review always mean something.
    the owning expression *is* the authorization.
 4. `counters` never decrease; they absorb the base document's counters
    (max) and advance by one per minted object.
-5. `externals` entries are dropped when the extern leaves the source;
+5. `externals` entries are dropped when the extern leaves the source,
+   and replaced when its `uuid:` matcher names a different object than
+   the pin (D38) — a title/iname pin survives renames of its object;
    `extern_wires` and `set_originals` are rebuilt each compile from what the
    source actually declares (teardown first, so nothing leaks).
 6. Withdrawals leave tombstones (D31): a block, extern wire, or Def write
@@ -133,6 +135,8 @@ byte-for-byte, so lockfile diffs in review always mean something.
    then the entry retires on its own. The compile → push → download
    window is therefore a lock **fixpoint**: the committed state recompiles
    byte-identically before and after the push.
+7. Identity is unique: a base whose `<C>`/`<Co>` UUIDs repeat is refused,
+   and an output that would repeat one is never returned (D38).
 
 ## Operations
 

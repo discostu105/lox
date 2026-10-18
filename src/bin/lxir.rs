@@ -1271,6 +1271,21 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
     };
     let a = read_doc(old)?;
     let b = read_doc(new)?;
+    // The diff keys on UUIDs: twins collapse into one entry, and wires
+    // between them read as moves. Say so rather than refuse — diffing a
+    // damaged config is how the damage gets investigated.
+    for (path, doc) in [(old, &a), (new, &b)] {
+        let dups = doc.duplicate_uuids();
+        if !dups.is_empty() {
+            eprintln!(
+                "warning: {path} carries {} duplicate UUID(s) ({}{}) — entries \
+                 sharing a UUID are conflated below",
+                dups.len(),
+                dups.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
+                if dups.len() > 3 { ", …" } else { "" }
+            );
+        }
+    }
     let d = lxir::diff::diff(&a, &b);
 
     for o in &d.added {
@@ -1380,6 +1395,17 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
             .filter(|(uuid, _)| present.contains(*uuid))
             .map(|(_, t)| t.slug.as_str())
             .collect();
+        // Repeated UUIDs never come out of a compile (it refuses them), so
+        // a config carrying them points at whatever handled the output
+        // after lxir (docs/loxone-format.md names the known producer).
+        let dups = doc.duplicate_uuids();
+        if !dups.is_empty() {
+            println!(
+                "note: {config} carries {} duplicate UUID(s), which lxir never \
+                 emits — see docs/loxone-format.md for the known producer",
+                dups.len()
+            );
+        }
         if pending.is_empty() {
             println!(
                 "drift: {config} no longer matches the fingerprint recorded in \

@@ -724,7 +724,8 @@ Anything unverified is an error, not a heuristic:
   format facts that shaped the mechanism
   ([loxone-format.md](loxone-format.md)): InputRef mirrors of one
   target *share* their output-port uuids — several same-page candidates
-  usually collapse to one signal port, no ambiguity in the bytes — and
+  usually collapse to one signal port, no ambiguity in the bytes
+  (*corrected by D38: a push-tool artifact, not the format*) — and
   API distribution wires are recorded in reverse (`<In>` on the block's
   output naming the extern input), so the OutputRef redirect also
   applies to a wire's *source* side. Gate: folding all 162 foldable ref
@@ -861,3 +862,34 @@ Anything unverified is an error, not a heuristic:
     Miniserver answer on whether it *executes* them — silent
     non-execution being the D8-class failure to rule out. Until all
     three exist, refuse-never-guess keeps the write side closed.
+- **D38 — UUIDs are unique; a `uuid:` edit re-points** (2026-10-18).
+  The r50 drift forensics of 2026-10-18 traced 38 duplicate UUIDs in
+  the live config to the first push on 2026-08-25: the upload tool
+  remapped every ref's ports by `Ref=` target plus connector key, so
+  all mirrors of one target received the same `AQ`/`Q` UUID; Loxone
+  Config healed them on its next open (2026-08-28) by re-minting the
+  later twins, which re-pointed their wires and surfaced as drift.
+  Every UUID-keyed step in lxir — extern matching, wiring, routing, the
+  semantic diff and fingerprint — silently picks one twin of such a
+  pair, and D34 had even recorded the sharing as a format fact (its
+  dedup branch in route picking is gone; the routing e2e test now
+  exercises what the GUI actually writes: twins with their own ports,
+  the drawn wire pinning the choice). Refuse-never-guess, applied to
+  identity: `compile` and `adopt` refuse a base in which any `<C>`
+  object or `<Co>` connector UUID repeats (`<SObj>` entries reuse their
+  object's UUID by design and are not counted; zero repeats
+  corpus-wide), naming the remedy — one Loxone Config open+save, which
+  heals the twins. `compile` also checks its own output before
+  returning it: a repeat there can only come from this compile (a mint
+  colliding with a base UUID minted in the same second under the same
+  serial, or a lock mapping two identities onto one UUID), and such an
+  output must never reach a push. `diff` warns instead of refusing —
+  diffing a damaged config is how the damage gets investigated — and
+  `drift` adds a note, since lxir never emits repeats. The same
+  forensics found the second gap: an edited `uuid:` value on an
+  already-pinned extern was silently ignored, because the lock pin
+  wins while its object exists. That tolerance exists for titles and
+  inames, which drift under a pin; a `uuid:` matcher *is* the identity,
+  so a value that differs from the pin can only be a source edit — the
+  extern now resolves afresh (a typo is a `NoMatch`). A matcher-*kind*
+  change keeps D32's rule and must still confirm the pinned object.

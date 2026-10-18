@@ -189,35 +189,12 @@ fn wires_route_through_same_page_mirrors() {
 }
 
 #[test]
-fn shared_output_mirrors_are_one_signal_port() {
-    // Corpus-universal: InputRef mirrors of one target share their
-    // AQ/Q connector uuids — several visual tags, one signal port. A
-    // second mirror must not make routing refuse as ambiguous.
-    let base = base_with_mirrors("routing-base-shared");
-    let xml = std::fs::read_to_string(&base).unwrap();
-    let at = xml.find("<C Type=\"InputRef\"").unwrap();
-    let end = at + xml[at..].find("</C>").unwrap() + 4;
-    let el = xml[at..end].to_string();
-    let u = el.find(" U=\"").unwrap() + 4;
-    let obj_uuid = &el[u..u + el[u..].find('"').unwrap()];
-    let clone = el
-        .replace(obj_uuid, "3000000a-0000-00a0-ffff504f94112233")
-        .replace(
-            &port_of(&el, "<C Type=\"InputRef\"", "AI"),
-            "3000000a-0000-00a1-ffff504f94112233",
-        )
-        .replace(
-            &port_of(&el, "<C Type=\"InputRef\"", "I"),
-            "3000000a-0000-00a2-ffff504f94112233",
-        );
-    let twinned = format!("{}{}{}", &xml[..end], clone, &xml[end..]);
-    let base2 = base.parent().unwrap().join("haus-twinned.Loxone");
-    std::fs::write(&base2, twinned).unwrap();
-
-    let dir = make_project(
-        "routing-shared",
-        "Beschattung",
-        "extern quelle = VirtualIn(iname: \"VI1\")\n\
+fn twin_mirrors_route_by_the_drawn_wire_or_refuse() {
+    // Two InputRef mirrors of one target on one page each carry their own
+    // ports — every corpus config does; a push tool once made them share
+    // (docs/loxone-format.md). The wire already drawn through one twin
+    // keeps it; a consumer without such a wire is refused.
+    let module = "extern quelle = VirtualIn(iname: \"VI1\")\n\
          extern aktor = VirtualIn(iname: \"VI3\")\n\
          \n\
          anzeige = And(\n\
@@ -225,19 +202,49 @@ fn shared_output_mirrors_are_one_signal_port() {
          \tI2: quelle.Qm,\n\
          )\n\
          \n\
-         aktor.Qm <- anzeige.Q\n",
-        Some(&base2),
-    );
-    let out = lxir(&dir, &["compile"]);
+         aktor.Qm <- anzeige.Q\n";
+    let base = base_with_mirrors("routing-base-twins");
+    let first = make_project("routing-twins-first", "Beschattung", module, Some(&base));
+    let out = lxir(&first, &["compile"]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let out_xml = std::fs::read_to_string(dir.join("out.Loxone")).unwrap();
-    // Both mirrors carry the same output ports; the consumer lands there.
-    let spiegel_aq = port_of(&out_xml, "<C Type=\"InputRef\"", "AQ");
-    let spiegel_q = port_of(&out_xml, "<C Type=\"InputRef\"", "Q");
+
+    // The GUI adds a second mirror next to the first: fresh object and
+    // port uuids throughout, the same feed wires.
+    let add_twin = |xml: &str| -> String {
+        let at = xml.find("<C Type=\"InputRef\"").unwrap();
+        let end = at + xml[at..].find("</C>").unwrap() + 4;
+        let mut clone = xml[at..end].to_string();
+        let mut olds = Vec::new();
+        let mut rest = clone.as_str();
+        while let Some(i) = rest.find(" U=\"") {
+            let v = &rest[i + 4..];
+            olds.push(v[..v.find('"').unwrap()].to_string());
+            rest = v;
+        }
+        for (n, old) in olds.iter().enumerate() {
+            clone = clone.replace(old, &format!("3000000a-0000-00a{n}-ffff504f94112233"));
+        }
+        format!("{}{}{}", &xml[..end], clone, &xml[end..])
+    };
+    let xml = std::fs::read_to_string(first.join("out.Loxone")).unwrap();
+    let spiegel_aq = port_of(&xml, "<C Type=\"InputRef\"", "AQ");
+    let spiegel_q = port_of(&xml, "<C Type=\"InputRef\"", "Q");
+    let base2 = first.join("haus-twinned.Loxone");
+    std::fs::write(&base2, add_twin(&xml)).unwrap();
+
+    let again = make_project("routing-twins-again", "Beschattung", module, Some(&base2));
+    std::fs::copy(first.join("haus.lock.json"), again.join("haus.lock.json")).unwrap();
+    let out = lxir(&again, &["compile"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out_xml = std::fs::read_to_string(again.join("out.Loxone")).unwrap();
     assert_eq!(
         inputs_of(&out_xml, "Title=\"anzeige\"", "I1"),
         vec![spiegel_aq]
@@ -245,6 +252,18 @@ fn shared_output_mirrors_are_one_signal_port() {
     assert_eq!(
         inputs_of(&out_xml, "Title=\"anzeige\"", "I2"),
         vec![spiegel_q]
+    );
+
+    // A consumer no wire pins yet (the twins added before it existed).
+    let base3 = first.join("haus-twinned-bare.Loxone");
+    std::fs::write(&base3, add_twin(&std::fs::read_to_string(&base).unwrap())).unwrap();
+    let fresh = make_project("routing-twins-fresh", "Beschattung", module, Some(&base3));
+    let out = lxir(&fresh, &["compile"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        err.contains("several mirrors") && err.contains("3000000a-0000-00a0-ffff504f94112233"),
+        "{err}"
     );
 }
 

@@ -248,8 +248,9 @@ impl Lift {
         // through the very same ref (same-page reuse, pinned by the base
         // wire). Maps a ref's consumer-facing port uuid to the target
         // (uuid, key) it stands for, plus the ref uuids carrying that
-        // port (InputRef mirrors share their output-port uuids); a wire
-        // folds only when its consumer shares a carrying ref's page.
+        // port (one in a sound config; several only where a push tool
+        // gave mirrors shared ports, D38); a wire folds only when its
+        // consumer shares a carrying ref's page.
         type Fold = (String, String, Vec<String>);
         let mut ref_fold: BTreeMap<String, Fold> = BTreeMap::new();
         for (&ri, &tgt) in &mirror_target {

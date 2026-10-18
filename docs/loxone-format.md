@@ -141,15 +141,18 @@ resolved):
   emitting these from the corpus-learned type table
   (`connectors::ref_link_type`); on unmanaged refs they stay carried
   verbatim.
-- **`InputRef` mirrors of one target share their output-port uuids**
-  (r50, 2026-08-25: 19/19 multi-mirror InputRef targets share `AQ`/`Q`
-  connector uuids verbatim; the `AI`/`I` connectors and their feed
-  wires stay per-ref). Several visual tags, one signal port — a
-  consumer wire cannot even express *which* tag it reads from.
-  `OutputRef` mirrors are the opposite: each carries its own `AQ`
-  (27/27 diverge) and draws its own distribution wire into the actor.
-  Open oracle question: what the GUI does to a *minted* second mirror
-  of an already-mirrored target (D33 mints fresh output uuids).
+- **Every mirror carries its own ports.** `InputRef`s of one target
+  have distinct `AQ`/`Q` connector uuids like any other object (r50
+  before 2026-08-25 and since 2026-08-28: 19/19 multi-mirror targets;
+  corpus-wide no connector uuid repeats), so a consumer wire names
+  which tag it reads from. `OutputRef` mirrors likewise each carry
+  their own `AQ` (27/27) and draw their own distribution wire into the
+  actor. D33's fresh output uuids for a minted mirror are therefore
+  what the GUI does too. *Correction (2026-10-18):* this note first
+  recorded the opposite — "mirrors of one target share their
+  output-port uuids, 19/19" — read off r50 snapshots of 2026-08-25
+  that the first push had already damaged (see *UUIDs are unique*
+  below).
 - **API distribution wires are recorded in reverse**: for
   `AutoJalousie.OutputAPI → ApiActor`-style links the `<In>` entry sits
   on the *block's output* connector and names the `OutputRef.AI` (or
@@ -301,6 +304,21 @@ survives *loading* but is **silently deleted on save, together with its
 wires**. Generalized: a save writes exactly the type descriptor's
 connector set; off-descriptor `<Co>`s are dropped without warning. Any
 tool inventing connectors will silently lose logic on the next GUI save.
+
+**UUIDs are unique — the GUI enforces it.** No two `<C>` objects or
+`<Co>` connectors share a `U=` anywhere in the corpus (~60 700 objects,
+~76 600 connectors); the only repeats are `<SObj>` entries, which point
+back at their object's UUID by design. Loxone Config treats a repeat as
+damage and heals it on open: it keeps the first occurrence and re-mints
+every later one (r50, 2026-08-28: 38 UUIDs carried 80 times → 38 kept,
+42 re-minted, with an object-shaped `ffff…` tail rather than the
+connector shape), so the next GUI save silently re-points whatever was
+wired to a later twin. The known producer is upload tooling that maps a
+ref's ports by its `Ref=` target plus connector key alone (lox-cli
+`config push`, 2026-08-25; fix proposed in
+[eisber/lox-cli#29](https://github.com/eisber/lox-cli/pull/29)): mirrors
+of one target share that key, so all of them got the same `AQ`/`Q` UUID. lxir refuses a base with repeats (`compile`,
+`adopt`) and checks its own output; `diff` warns, `drift` notes them.
 
 ## The three writers
 

@@ -573,6 +573,116 @@ fn config_version_pin_refuses_an_unqualified_release() {
     compile(&bumped, &module, &mut lock, &opts()).unwrap();
 }
 
+#[test]
+fn edited_uuid_matcher_repins_the_extern() {
+    const VI1: &str = "20000001-0000-0010-ffff504f94112233"; // Außentemperatur
+    const VI3: &str = "20000003-0000-0030-ffff504f94112233"; // Sonnenschein
+    let base = base();
+    let src_of = |matcher: &str| {
+        let src = std::fs::read_to_string("examples/ir/beschattung.lxir").unwrap();
+        Module::parse(&src.replace(
+            "VirtualIn(iname: \"VI3\")",
+            &format!("VirtualIn({matcher})"),
+        ))
+        .unwrap()
+    };
+    let mut lock = Lockfile::new();
+    compile(
+        &base,
+        &src_of(&format!("uuid: \"{VI3}\"")),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(lock.externals["sonne"].uuid, VI3);
+
+    // Editing the value re-points the extern: the pin follows the source,
+    // exactly as a fresh resolution would — same lock, same bytes.
+    let edited = src_of(&format!("uuid: \"{VI1}\""));
+    let mut repinned = lock.clone();
+    let out = compile(&base, &edited, &mut repinned, &opts()).unwrap();
+    let pin = &repinned.externals["sonne"];
+    assert_eq!(pin.uuid, VI1);
+    assert_eq!(pin.title_at_match.as_deref(), Some("Au\u{df}entemperatur"));
+    let mut fresh = Lockfile::new();
+    let out_fresh = compile(&base, &edited, &mut fresh, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), out_fresh.to_bytes());
+    assert_eq!(repinned.to_json(), fresh.to_json());
+
+    // A typo is a NoMatch, not a silent keep of the old pin.
+    let typo = src_of("uuid: \"20000003-0000-0030-ffff504f94112299\"");
+    let err = compile(&base, &typo, &mut lock.clone(), &opts()).unwrap_err();
+    assert!(err.to_string().contains("sonne"), "{err}");
+
+    // A matcher-*kind* change still has to confirm the pin (D32): an
+    // iname pin converted to a uuid naming another object is refused.
+    let mut by_iname = Lockfile::new();
+    compile(&base, &src_of("iname: \"VI3\""), &mut by_iname, &opts()).unwrap();
+    let err = compile(&base, &edited, &mut by_iname, &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("does not match the locked object"), "{err}");
+}
+
+#[test]
+fn duplicate_uuids_are_refused_in_base_and_output() {
+    const VI1: &str = "20000001-0000-0010-ffff504f94112233";
+    const VI3: &str = "20000003-0000-0030-ffff504f94112233";
+    let base = base();
+    assert!(base.duplicate_uuids().is_empty());
+    let text = String::from_utf8(base.to_bytes()).unwrap();
+
+    // `<SObj>` entries reuse their object's UUID by design.
+    let sobj = LoxoneDoc::parse(
+        text.replacen(
+            "</ControlList>",
+            &format!("<SObj T=\"0\" U=\"{VI1}\"/></ControlList>"),
+            1,
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(sobj.duplicate_uuids().is_empty());
+
+    // Two objects sharing one identity: every entry point refuses.
+    let twins = LoxoneDoc::parse(
+        text.replacen(&format!("U=\"{VI1}\""), &format!("U=\"{VI3}\""), 1)
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(twins.duplicate_uuids(), vec![VI3.to_string()]);
+    let err = compile(&twins, &module(), &mut Lockfile::new(), &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID") && err.contains(VI3), "{err}");
+    assert!(adopt(&twins).is_err());
+    assert!(adopt_pages(&twins).is_err());
+    let err = adopt_one(&twins, VI3, "x", &module(), &mut Lockfile::new())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID"), "{err}");
+
+    // A lock that maps a block port onto an existing connector's UUID
+    // would put twins into the output — the self-check stops it.
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &module(), &mut lock, &opts()).unwrap();
+    let vi1_port = lxir::doc::ports(out.element_at(&out.index().by_uuid[VI1]).unwrap())
+        .remove(0)
+        .uuid;
+    lock.objects
+        .get_mut("beschatten")
+        .unwrap()
+        .ports
+        .insert("I1".into(), vi1_port.clone());
+    let err = compile(&base, &module(), &mut lock, &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("output would carry") && err.contains(&vi1_port),
+        "{err}"
+    );
+}
+
 /// Synthetic config for the incremental-adopt tests: two VirtualIns, a
 /// managed And wired from the first — and slots for a GUI-drawn Or block
 /// plus its wire into the And's I2.

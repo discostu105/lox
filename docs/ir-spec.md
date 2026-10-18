@@ -160,7 +160,9 @@ must point at a `Place`/`Category` with that title
 `uuid:`, which pins exactly on its own. Once resolved, the UUID is
 pinned in the lockfile; subsequent compiles use the pin (even if the title
 has changed since) as long as an object with that UUID and type still
-exists.
+exists. Editing a `uuid:` value re-points the extern: the source names a
+different identity, so it resolves afresh (D38) — whereas a changed
+matcher *kind* must still match the pinned object (D32).
 
 Choosing a matcher: `uuid` pins exactly; `iname` (the `IName=` attribute,
 e.g. `VI1`, `AI3`) is locale-stable and preferred for built-in I/O

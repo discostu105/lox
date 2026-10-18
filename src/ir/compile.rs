@@ -182,6 +182,9 @@ pub fn compile(
             base_version.as_deref().unwrap_or("<version>")
         )));
     }
+    // --- Identity: everything below keys on UUIDs, so a base whose UUIDs
+    //     repeat would have each lookup silently pick one twin.
+    base.require_unique_uuids("base")?;
 
     // --- Apply `moved` statements to the lock (identity surgery, in
     //     source). Idempotent: once the new slug carries the entry, the
@@ -836,15 +839,9 @@ pub fn compile(
             [] => Ok(None),
             [one] => Ok(Some((*one).clone())),
             many => {
-                // InputRef mirrors of one target share their output-port
-                // uuids (corpus-universal): several visual tags, one signal
-                // port — no ambiguity in the emitted bytes.
-                let mut ports: Vec<&str> = many.iter().map(|c| c.port.as_str()).collect();
-                ports.sort_unstable();
-                ports.dedup();
-                if ports.len() == 1 {
-                    return Ok(Some((*many[0]).clone()));
-                }
+                // Each mirror carries its own output ports (a base where
+                // twins share them is refused up front), so several
+                // candidates are a real choice.
                 let hits: Vec<&&MirrorRoute> = many.iter().filter(|c| pinned(c)).collect();
                 match hits.as_slice() {
                     [one] => Ok(Some((**one).clone())),
@@ -1032,6 +1029,21 @@ pub fn compile(
     );
     lock.target.source_config_sha256 = Some(sha256_hex(&base.to_bytes()));
     lock.target.semantic_fingerprint = Some(crate::diff::semantic_fingerprint(&doc));
+    // Self-check: the base was unique, so a repeat here was introduced by
+    // this compile — a mint that hit a UUID the base already carries (the
+    // minter is time + counter + serial: another lock's output, minted in
+    // the same second), a lock that maps two identities onto one UUID, or
+    // a compiler bug. Never hand such an output to a push.
+    let dups = doc.duplicate_uuids();
+    if !dups.is_empty() {
+        return Err(Error::Compile(format!(
+            "output would carry duplicate UUID(s) {} — either a freshly minted \
+             UUID collides with one the base already carries (same serial and \
+             mint second; compile again, or pass another --time), or the \
+             lockfile maps two identities onto one UUID; nothing was written",
+            dups.join(", ")
+        )));
+    }
     Ok(doc)
 }
 
@@ -1209,10 +1221,15 @@ fn resolve_externs(
         // title (whose drift the pin deliberately tolerates), the claim
         // "this ref mirrors X" must stay true, or the source lies — and a
         // ref the GUI re-pointed elsewhere is drift worth stopping on.
+        // A `uuid:` matcher *is* the identity — no drift for a pin to
+        // tolerate — so an edited value means the source re-points: it
+        // resolves afresh (a typo is a NoMatch, not a silent no-op).
         if let Some(locked) = lock.externals.get_mut(&ext.slug)
             && objects
                 .iter()
                 .any(|o| o.uuid == locked.uuid && o.block_type == ext.block_type)
+            && !(locked.matched_by == "uuid"
+                && matches!(&ext.match_spec, MatchSpec::Uuid(u) if *u != locked.uuid))
         {
             if locked.matched_by != kind(&ext.match_spec)
                 || matches!(ext.match_spec, MatchSpec::Mirrors(_))

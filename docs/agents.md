@@ -150,6 +150,8 @@ it only when it matches what you intended.
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
 | `is an attribute parameter, not a connector` | wire aimed at e.g. `Formula:` | pass a value instead: `Formula: "I1+I2"` |
 | `warning: cannot adopt` (from `adopt`) | that block's rebuild would lose something (e.g. GUI input inversion `Inv=`) | leave it unmanaged, or remove the offending state in Loxone Config and re-adopt |
+| `base carries N duplicate UUID(s)` | two objects/connectors in the base share one identity (a push tool re-keyed refs) | open and save the config once in Loxone Config — it re-mints the later twins — then use that save as the base; never hand-edit UUIDs |
+| `output would carry duplicate UUID(s)` | this compile would emit a repeat: a fresh mint hit a base UUID minted in the same second, or the lock maps two identities onto one UUID | compile again (or another `--time`); if it persists, inspect the lock entries carrying the named UUIDs |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves

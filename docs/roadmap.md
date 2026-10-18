@@ -153,6 +153,12 @@ types) contradict each other. Results and methodology:
       value's canonical spelling. Deliberately *without* per-port unit
       checking: that stays blocked on the connector DB learning per-port
       units (a `Time: 70%` is accepted today).
+- [x] Identity hardening 2026-10-18 (D38): a base with repeated
+      `<C>`/`<Co>` UUIDs is refused by `compile`/`adopt`, the compile
+      output is self-checked, `diff` warns and `drift` notes repeats;
+      an edited `uuid:` value on a pinned extern re-points it instead of
+      being ignored. Found by the r50 drift forensics (a push tool had
+      given all mirrors of one target the same port UUIDs).
 
 ## Stufe 1 — Templates
 
