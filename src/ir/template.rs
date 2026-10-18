@@ -303,7 +303,7 @@ impl Module {
                     out.push(Item::Block(BlockDecl {
                         slug: format!("{}_{}", call.slug, b.slug),
                         block_type: b.block_type.clone(),
-                        title: b.title.as_deref().map(&map_title).transpose()?,
+                        title: b.title.as_deref().map(map_title).transpose()?,
                         args,
                         comment: b.comment.clone(),
                         close_comment: b.close_comment.clone(),
