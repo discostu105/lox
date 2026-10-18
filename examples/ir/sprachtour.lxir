@@ -164,6 +164,23 @@ stoerung = And(
 
 stoerlampe.On <- stoerung.Q
 
+# --- Attribute (D39): Titel, Raum und Kategorie eines Externs ----------
+# Geräte und ihre Ein-/Ausgänge legt Loxone Config an; die Quelle weist
+# ihnen Titel, Raum und Kategorie zu. Raum und Kategorie werden per
+# Titel genannt und müssen in der Basis existieren. Gepinnt wird per
+# uuid: — ein title:-Matcher neben `.title = …` würde sich selbst den
+# Boden wegziehen und wird abgewiesen (ebenso room:/category:).
+# Ein Raumwechsel nimmt die Kinder mit, die bisher im Raum des Geräts
+# lagen (Onlinestatus, Temperatur); "Batterie schwach" liegt im Raum
+# Pool und bleibt dort. Die Kategorie hier gilt nur dem einen Eingang.
+
+extern klimasensor = LoxAIRDevice(uuid: "3000000e-0000-00e0-ffff504f94112233")
+extern klima_temp = LoxAIRAsensor(uuid: "30000010-0000-0100-ffff504f94112233")
+
+klimasensor.title = "Raumklima Garten"
+klimasensor.room = "Garten"
+klima_temp.category = "Klima"
+
 # --- test (D36): clock, dt-Schritte, ~= --------------------------------
 # `lxir test` kompiliert im Speicher und spielt jedes Szenario mit
 # `lox sim` durch; Referenzen zeigen auf das flache Modul (Templates

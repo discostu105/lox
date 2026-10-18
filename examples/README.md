@@ -20,22 +20,27 @@ and by `category:`); block labels; fan-in (two wires on one port); the
 overrides and port forwarding; an expression wire with `or`, `and` and
 meaning-bearing parentheses; both mirror forms — a `mirrors:` extern on
 a GUI-drawn ref (D32) and a minted `InputRef(mirrors: …)` with its feed
-wire (D33); mirror routing (D34); a second `page` section; and `test`
-scenarios with `clock`, per-step `dt`, and `~=`.
+wire (D33); mirror routing (D34); a second `page` section; attribute
+claims on externs — `.title`, `.room` with followers, `.category` on
+an Air device and one of its inputs (D39); and `test` scenarios with
+`clock`, per-step `dt`, and `~=`.
 
 ## Base configs
 
 `configs/haus.Loxone` and `configs/pool.Loxone` are small synthetic
 fixtures (hand-written test data — real Miniserver configs are never
 committed). `pool.Loxone` carries two pages, rooms, categories, five
-virtual inputs, and one GUI-style mirror ref, so the matcher and mirror
-constructs have something real to resolve against.
+virtual inputs, one GUI-style mirror ref, and an Air device with three
+children (two in the device's room, one elsewhere), so the matcher,
+mirror and attribute-claim constructs have something real to resolve
+against.
 
 ## How they are kept honest
 
 Every module is pinned by the test suite (`tests/ir.rs`:
 `pool_showcase_compiles_end_to_end`, `sprachtour_compiles_end_to_end`,
-`lifecycle_stages_move_and_remove`, `project_example_is_current`):
+`lifecycle_stages_move_and_remove`, `project_example_is_current`;
+`tests/attrs.rs` for the attribute-claim lifecycle):
 canonical formatting, compile assertions down to `Def=` values and wire
 targets, and byte-identical recompiles. The committed artifacts are
 regenerated when compiler output changes: `cargo run --example compile`

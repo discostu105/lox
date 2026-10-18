@@ -1,4 +1,4 @@
-# Lockfile specification (v2)
+# Lockfile specification (v3)
 
 The lockfile is the persistent identity between IR source and compiled
 config — the analogue of `terraform.tfstate` / `package-lock.json`.
@@ -13,7 +13,7 @@ otherwise — a wrong port UUID silently breaks wire identity.
 
 ```jsonc
 {
-  "lockfile_version": 2,
+  "lockfile_version": 3,
 
   "target": {                       // informational metadata (nullable)
     "config_version": "17010727",   // ConfigVersion of the last base
@@ -82,6 +82,19 @@ otherwise — a wrong port UUID silently breaks wire identity.
   },                                // was absent). Restored when the
                                     // assignment leaves the source.
 
+  "attr_claims": {                  // attribute claims on externs (D39,
+    "<object-uuid>": {              // v3); omitted when empty
+      "room": {                     // "title" | "room" | "category"
+        "original": "<place-uuid>", // value before the claim (restored)
+        "written": "<place-uuid>",  // value the claim wrote (a title, or
+                                    // the Place/Category UUID)
+        "followers": [              // descendants that carried `original`
+          "<object-uuid>"           // and were rewritten with it; omitted
+        ]                           // when empty
+      }
+    }
+  },
+
   // Removal tombstones (D31, v2): everything the compiler *withdrew*
   // stays remembered until a compile sees a base that no longer carries
   // it — so recompiling against a base from before the withdrawal was
@@ -102,8 +115,16 @@ otherwise — a wrong port UUID silently breaks wire identity.
       "original": "100",           // what to restore (null = attr absent)
       "written": "70"              // the value we had written — the marker
     }                              // by which a pre-push base is
-  }                                // recognized; any third value means
+  },                               // recognized; any third value means
                                    // another writer took over (retires)
+  "removed_attrs": {               // withdrawn attribute claims (D39):
+    "<object-uuid>": {             // same shape as attr_claims; restored
+      "title": {                   // while the object still shows
+        "original": "Alt",         // `written`, retired otherwise
+        "written": "Neu"
+      }
+    }
+  }
 }
 ```
 
@@ -126,11 +147,15 @@ byte-for-byte, so lockfile diffs in review always mean something.
 5. `externals` entries are dropped when the extern leaves the source,
    and replaced when its `uuid:` matcher names a different object than
    the pin (D38) — a title/iname pin survives renames of its object;
-   `extern_wires` and `set_originals` are rebuilt each compile from what the
-   source actually declares (teardown first, so nothing leaks).
-6. Withdrawals leave tombstones (D31): a block, extern wire, or Def write
-   the compiler stops managing moves to `removed` / `removed_wires` /
-   `removed_sets` (if the base actually carried it) and keeps being
+   `extern_wires`, `set_originals` and `attr_claims` are rebuilt each
+   compile from what the source actually declares (teardown first, so
+   nothing leaks). A claim's followers are restored only while they still
+   show the written value — a follower changed in Loxone Config keeps the
+   GUI's value and drops out of the list.
+6. Withdrawals leave tombstones (D31): a block, extern wire, Def write, or
+   attribute claim the compiler stops managing moves to `removed` /
+   `removed_wires` / `removed_sets` / `removed_attrs` (if the base
+   actually carried it) and keeps being
    deleted/restored on every compile until a base without it is seen —
    then the entry retires on its own. The compile → push → download
    window is therefore a lock **fixpoint**: the committed state recompiles
@@ -160,3 +185,5 @@ History: **v2** (2026-08-25) added the removal tombstones (`removed`,
 `removed_wires`, `removed_sets`). v1 files load as v2 with empty tombstone
 maps; saving always writes the current version, so a v1-only binary refuses
 a v2 lock instead of silently dropping tombstones it does not understand.
+**v3** (2026-10-18) added attribute claims (`attr_claims`,
+`removed_attrs`, D39); a v1/v2 lock loads with both empty.

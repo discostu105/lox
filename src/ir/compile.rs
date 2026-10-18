@@ -1,6 +1,6 @@
 //! The compiler: base config + IR module + lockfile → new config.
 //!
-//! The compiler owns exactly three kinds of edits and touches nothing else
+//! The compiler owns exactly four kinds of edits and touches nothing else
 //! in the (losslessly parsed) base document:
 //!
 //! 1. **Managed blocks** — `slug = Type(…)` declarations are (re)built from
@@ -12,6 +12,10 @@
 //! 3. **Extern sets** — `target.Port = value` on an extern port rewrites its
 //!    `Def=`; the pre-set value is remembered and restored when the
 //!    statement disappears.
+//! 4. **Attribute claims** — `target.title|room|category = value` on an
+//!    extern rewrites its `Title=` or its `<IoData Pr=/Cr=>` binding (D39),
+//!    carrying along the descendants that shared the old room/category; the
+//!    originals are remembered and restored the same way.
 //!
 //! Everything is deterministic: same base + module + lock + options → the
 //! same output bytes. New UUIDs come from [`crate::uuid::Minter`] (no clock,
@@ -30,9 +34,11 @@
 use crate::connectors::{PortDir, attr_params, builtin, ref_link_type};
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
-use crate::ir::ast::{Item, MatchSpec, Module, Value};
+use crate::ir::ast::{Attr, Item, MatchSpec, Module, Value};
 use crate::ir::validate::{is_ref_type, suggest, validate_ports};
-use crate::lock::{Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex};
+use crate::lock::{
+    AttrClaim, Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex,
+};
 use crate::uuid::{Minter, entity_for_slug};
 use crate::xml::Element;
 use std::collections::{BTreeMap, BTreeSet};
@@ -345,6 +351,31 @@ pub fn compile(
             defs_written.insert(port_uuid.clone(), v);
         }
         restore_def(&mut doc, port_uuid, original.as_deref());
+    }
+    // Attribute claims (D39), the same two steps. Withdrawn first: an
+    // object still showing the value we wrote predates the deployment —
+    // restore again and keep the tombstone; any other value retires it.
+    for (uuid, claims) in lock.removed_attrs.iter_mut() {
+        claims.retain(|attr, c| {
+            if read_claimed(&doc, uuid, *attr).as_deref() == Some(c.written.as_str()) {
+                restore_claim(&mut doc, uuid, *attr, c);
+                return true;
+            }
+            false
+        });
+    }
+    lock.removed_attrs.retain(|_, claims| !claims.is_empty());
+    // Live claims: the object itself is source-owned and always restored;
+    // its followers only while they still carry the written value.
+    let old_claims = std::mem::take(&mut lock.attr_claims);
+    let mut claims_written: BTreeMap<(String, Attr), String> = BTreeMap::new();
+    for (uuid, claims) in &old_claims {
+        for (attr, c) in claims {
+            if let Some(v) = read_claimed(&doc, uuid, *attr) {
+                claims_written.insert((uuid.clone(), *attr), v);
+            }
+            restore_claim(&mut doc, uuid, *attr, c);
+        }
     }
 
     // --- Plan managed blocks: the builtin port list is the full port list
@@ -1013,6 +1044,97 @@ pub fn compile(
         }
     }
 
+    // --- Attribute claims on externs (D39). Planned against the torn-down
+    //     document before anything is written, so nested claims (a device
+    //     and one of its outputs) never record each other's write as their
+    //     original, and an explicitly claimed descendant is never a
+    //     follower.
+    let managed_uuids: BTreeSet<&str> = managed.values().map(|b| b.uuid.as_str()).collect();
+    let mut claimed: BTreeMap<(String, Attr), &str> = BTreeMap::new();
+    for a in module.attrs() {
+        let uuid = extern_uuid
+            .get(&a.slug)
+            .expect("validate admitted only extern targets");
+        if let Some(other) = claimed.insert((uuid.clone(), a.attr), &a.slug) {
+            return Err(Error::Compile(format!(
+                "`{}.{attr}` and `{other}.{attr}` claim the {attr} of the same \
+                 object ({uuid}) — keep one assignment",
+                a.slug,
+                attr = a.attr
+            )));
+        }
+    }
+    let mut planned_claims: Vec<(String, Attr, AttrClaim)> = Vec::new();
+    for a in module.attrs() {
+        let uuid = extern_uuid[&a.slug].clone();
+        let value = resolve(&a.value)?;
+        let written = match a.attr {
+            Attr::Title => value,
+            Attr::Room => taxonomy_uuid(&doc, "Place", "room", &value)?,
+            Attr::Category => taxonomy_uuid(&doc, "Category", "category", &value)?,
+        };
+        let original = read_claimed(&doc, &uuid, a.attr).ok_or_else(|| {
+            Error::Compile(format!(
+                "`{}.{}`: the object ({uuid}) carries no {} — lxir rewrites an \
+                 existing {}, it never adds one; set it once in Loxone Config",
+                a.slug,
+                a.attr,
+                claim_slot(a.attr),
+                claim_slot(a.attr)
+            ))
+        })?;
+        let followers = match a.attr {
+            Attr::Title => Vec::new(),
+            Attr::Room | Attr::Category => {
+                let stop = |u: &str| {
+                    managed_uuids.contains(u) || claimed.contains_key(&(u.to_string(), a.attr))
+                };
+                followers_of(&doc, &uuid, a.attr, &original, &stop)
+            }
+        };
+        planned_claims.push((
+            uuid,
+            a.attr,
+            AttrClaim {
+                original,
+                written,
+                followers,
+            },
+        ));
+    }
+    for (uuid, attr, c) in planned_claims {
+        write_claimed(&mut doc, &uuid, attr, &c.written);
+        for f in &c.followers {
+            write_claimed(&mut doc, f, attr, &c.written);
+        }
+        lock.attr_claims.entry(uuid).or_default().insert(attr, c);
+    }
+    // A claim that vanished from source was withdrawn — tombstone it (D31)
+    // unless it never changed the object's bytes in the first place.
+    for (uuid, claims) in &old_claims {
+        for (attr, c) in claims {
+            if lock
+                .attr_claims
+                .get(uuid)
+                .is_some_and(|m| m.contains_key(attr))
+            {
+                continue; // still claimed from source
+            }
+            if let Some(written) = claims_written.get(&(uuid.clone(), *attr))
+                && *written != c.original
+            {
+                lock.removed_attrs.entry(uuid.clone()).or_default().insert(
+                    *attr,
+                    AttrClaim {
+                        original: c.original.clone(),
+                        written: written.clone(),
+                        followers: c.followers.clone(),
+                    },
+                );
+            }
+        }
+    }
+
     // --- Counters and target metadata.
     doc.set_counters(Counters {
         next_obj: lock.counters.next_obj,
@@ -1538,6 +1660,141 @@ fn set_attr_ordered(el: &mut Element, name: &str, value: &str, before: &[&str]) 
             value: crate::xml::escape(value).into_owned(),
         },
     );
+}
+
+/// Where a claimed attribute lives, for messages.
+fn claim_slot(attr: Attr) -> &'static str {
+    match attr {
+        Attr::Title => "title (`Title=`)",
+        Attr::Room => "room binding (`<IoData Pr=…>`)",
+        Attr::Category => "category binding (`<IoData Cr=…>`)",
+    }
+}
+
+fn find_c<'a>(el: &'a Element, uuid: &str) -> Option<&'a Element> {
+    if el.name == "C" && el.attr("U") == Some(uuid) {
+        return Some(el);
+    }
+    el.child_elements().find_map(|c| find_c(c, uuid))
+}
+
+/// A claimed attribute on one `<C>`: the element's own `Title=`, or `Pr=`
+/// / `Cr=` on its `<IoData>` child.
+fn claimed_value(c: &Element, attr: Attr) -> Option<String> {
+    let v = match attr {
+        Attr::Title => c.attr_decoded("Title"),
+        Attr::Room | Attr::Category => c
+            .child_elements()
+            .find(|e| e.name == "IoData")?
+            .attr_decoded(if attr == Attr::Room { "Pr" } else { "Cr" }),
+    };
+    v.map(|v| v.into_owned())
+}
+
+fn read_claimed(doc: &LoxoneDoc, uuid: &str, attr: Attr) -> Option<String> {
+    claimed_value(find_c(&doc.xml.root, uuid)?, attr)
+}
+
+/// Rewrite a claimed attribute in place. Only ever called where the
+/// attribute exists (claims refuse objects without it), so position and
+/// form of the element are untouched.
+fn write_claimed(doc: &mut LoxoneDoc, uuid: &str, attr: Attr, value: &str) {
+    let Some(c) = find_c_mut(&mut doc.xml.root, uuid) else {
+        return;
+    };
+    let (el, name) = match attr {
+        Attr::Title => (Some(c), "Title"),
+        Attr::Room => (c.child_elements_mut().find(|e| e.name == "IoData"), "Pr"),
+        Attr::Category => (c.child_elements_mut().find(|e| e.name == "IoData"), "Cr"),
+    };
+    if let Some(el) = el
+        && el.attr(name).is_some()
+    {
+        el.set_attr(name, value);
+    }
+}
+
+/// Undo one claim: the object back to its original, and each follower that
+/// still shows the written value.
+fn restore_claim(doc: &mut LoxoneDoc, uuid: &str, attr: Attr, c: &AttrClaim) {
+    write_claimed(doc, uuid, attr, &c.original);
+    for f in &c.followers {
+        if read_claimed(doc, f, attr).as_deref() == Some(c.written.as_str()) {
+            write_claimed(doc, f, attr, &c.original);
+        }
+    }
+}
+
+/// The descendants of `uuid` whose room/category equals the object's
+/// `original` — those follow a claim on it (D39). `stop` excludes an
+/// object and its subtree: managed blocks (their binding is D19 residue)
+/// and descendants claimed explicitly for the same attribute.
+fn followers_of(
+    doc: &LoxoneDoc,
+    uuid: &str,
+    attr: Attr,
+    original: &str,
+    stop: &dyn Fn(&str) -> bool,
+) -> Vec<String> {
+    fn walk(
+        el: &Element,
+        attr: Attr,
+        original: &str,
+        stop: &dyn Fn(&str) -> bool,
+        out: &mut Vec<String>,
+    ) {
+        for c in el.child_elements().filter(|c| c.name == "C") {
+            let Some(u) = c.attr("U") else { continue };
+            if stop(u) {
+                continue;
+            }
+            if claimed_value(c, attr).as_deref() == Some(original) {
+                out.push(u.to_string());
+            }
+            walk(c, attr, original, stop, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(root) = find_c(&doc.xml.root, uuid) {
+        walk(root, attr, original, stop, &mut out);
+    }
+    out
+}
+
+/// The UUID of the one `Place`/`Category` titled `title` — zero or several
+/// are refused (a room is named by its title; there is nothing else to
+/// pick by).
+fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<String> {
+    let all: Vec<_> = doc
+        .objects()
+        .into_iter()
+        .filter(|o| o.block_type == ty)
+        .collect();
+    let hits: Vec<_> = all
+        .iter()
+        .filter(|o| o.title.as_deref() == Some(title))
+        .collect();
+    match hits.as_slice() {
+        [one] => Ok(one.uuid.clone()),
+        [] => {
+            let mut known: Vec<&str> = all.iter().filter_map(|o| o.title.as_deref()).collect();
+            known.sort_unstable();
+            let hint = suggest(title, known.iter().copied());
+            Err(Error::Compile(format!(
+                "no {what} titled {title:?} in the base{hint} — {what}s are created in \
+                 Loxone Config; known: {}",
+                known.join(", ")
+            )))
+        }
+        _ => Err(Error::Compile(format!(
+            "{} {what}s are titled {title:?} ({}) — rename one in Loxone Config",
+            hits.len(),
+            hits.iter()
+                .map(|o| o.uuid.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
 }
 
 /// First stacking position below every layout already in the lock, so new

@@ -256,7 +256,8 @@ fn sprachtour_compiles_end_to_end() {
     // construct the narrative showcase does not cover — uuid/category
     // matchers, fan-in, the `Formula:` attribute parameter, template
     // interpolation/override/forwarding, both mirror forms (D32/D33),
-    // mirror routing (D34), and a second page.
+    // mirror routing (D34), a second page, and attribute claims on
+    // externs (D39).
     let base = LoxoneDoc::parse(&std::fs::read("examples/configs/pool.Loxone").unwrap()).unwrap();
     let src = std::fs::read_to_string("examples/ir/sprachtour.lxir").unwrap();
     let module = Module::parse(&src).unwrap();
@@ -379,6 +380,48 @@ fn sprachtour_compiles_end_to_end() {
         lock.objects["kalt_technik"].page_uuid.as_deref(),
         Some("30000008-0000-0080-ffff504f94112233")
     );
+
+    // D39: the device took title and room; the children that shared its
+    // room followed, the one bound elsewhere stayed; the category claim
+    // touched only its own input.
+    const DEVICE: &str = "3000000e-0000-00e0-ffff504f94112233";
+    const ONLINE: &str = "3000000f-0000-00f0-ffff504f94112233";
+    const TEMP: &str = "30000010-0000-0100-ffff504f94112233";
+    const BATTERY: &str = "30000011-0000-0110-ffff504f94112233";
+    const TECHNIKRAUM: &str = "30000000-0000-0004-ffff504f94112233";
+    const GARTEN: &str = "30000000-0000-0009-ffff504f94112233";
+    const KLIMA: &str = "30000000-0000-000a-ffff504f94112233";
+    let io = |uuid: &str, slot: &str| -> Option<String> {
+        let path = out.objects().into_iter().find(|o| o.uuid == uuid)?.path;
+        let c = out.element_at(&path)?;
+        let io = c.child_elements().find(|e| e.name == "IoData")?;
+        io.attr(slot).map(str::to_string)
+    };
+    let title_of = |uuid: &str| {
+        out.objects()
+            .into_iter()
+            .find(|o| o.uuid == uuid)
+            .and_then(|o| o.title)
+    };
+    assert_eq!(title_of(DEVICE).as_deref(), Some("Raumklima Garten"));
+    for u in [DEVICE, ONLINE, TEMP] {
+        assert_eq!(io(u, "Pr").as_deref(), Some(GARTEN), "{u} in Garten");
+    }
+    assert_eq!(
+        io(BATTERY, "Pr").as_deref(),
+        Some("30000000-0000-0003-ffff504f94112233"),
+        "bound elsewhere, stays in Pool"
+    );
+    assert_eq!(io(TEMP, "Cr").as_deref(), Some(KLIMA));
+    assert_eq!(
+        io(ONLINE, "Cr").as_deref(),
+        Some("30000000-0000-000b-ffff504f94112233"),
+        "category claim has no followers here"
+    );
+    let room = &lock.attr_claims[DEVICE][&lxir::ir::Attr::Room];
+    assert_eq!(room.original, TECHNIKRAUM);
+    assert_eq!(room.written, GARTEN);
+    assert_eq!(room.followers, [ONLINE, TEMP]);
 
     // Fixpoint: recompiling against its own output changes nothing.
     let again = compile(&out, &module, &mut lock, &opts).unwrap();

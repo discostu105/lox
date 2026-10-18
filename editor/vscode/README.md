@@ -3,7 +3,8 @@
 Declarative VS Code extension for `.lxir` modules: syntax highlighting
 (TextMate grammar), comment/bracket configuration, and snippets for every
 statement form — `page`, `let`, `extern`, blocks, `template`/`end` and
-instances, wires (plain and expression), `set`, `removed`/`moved` — plus
+instances, wires (plain and expression), `set`, attribute assignments
+(`x.room = …`), `removed`/`moved` — plus
 unit-suffixed values (`30min`, `2700K`) and the expression operators
 (`and`/`or`/`not`, comparisons, arithmetic).
 

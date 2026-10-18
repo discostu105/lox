@@ -107,6 +107,11 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             rename_value(&mut s.value, old, new);
             sub_comment(&mut s.comment);
         }
+        Item::Attr(a) => {
+            sub(&mut a.slug);
+            rename_value(&mut a.value, old, new);
+            sub_comment(&mut a.comment);
+        }
         Item::Let(l) => {
             sub(&mut l.name);
             sub_comment(&mut l.comment);

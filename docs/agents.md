@@ -110,6 +110,9 @@ beschatten = And(                    # gates are fixed 2-input
 jal.AutoShade <- beschatten.Q        # wire onto an extern port
 jal.TargetPos = 70                   # Def= on an extern port; original
                                      # auto-restored when the line is removed
+extern sensor = LoxAIRDevice(uuid: "…")  # a device (created in Loxone Config)
+sensor.title = "Raumklima Bad"       # assign title, room, category (D39);
+sensor.room = "Bad"                  # children in the device's room follow
 
 removed old_gate                     # confirmed delete of a managed block
 moved beschatten -> schatten_gate    # slug rename, UUIDs survive
@@ -152,6 +155,11 @@ it only when it matches what you intended.
 | `warning: cannot adopt` (from `adopt`) | that block's rebuild would lose something (e.g. GUI input inversion `Inv=`) | leave it unmanaged, or remove the offending state in Loxone Config and re-adopt |
 | `base carries N duplicate UUID(s)` | two objects/connectors in the base share one identity (a push tool re-keyed refs) | open and save the config once in Loxone Config — it re-mints the later twins — then use that save as the base; never hand-edit UUIDs |
 | `output would carry duplicate UUID(s)` | this compile would emit a repeat: a fresh mint hit a base UUID minted in the same second, or the lock maps two identities onto one UUID | compile again (or another `--time`); if it persists, inspect the lock entries carrying the named UUIDs |
+| `targets managed block` + `give it a label` / `D19` | `.title`/`.room`/`.category` on a block you declared | title → the block's label; room/category stay with Loxone Config |
+| `rewrites what extern … is matched by` | the extern is matched by the attribute it claims | pin it by `uuid:` (or `iname:`) |
+| `no room titled` / `no category titled` | `.room`/`.category` names no `Place`/`Category` in the base | use a listed title, or create the room/category in Loxone Config first |
+| `carries no room binding` / `carries no category binding` | the object has no `<IoData Pr=/Cr=>` to rewrite | assign a room/category once in Loxone Config, then claim it from source |
+| `claim the … of the same object` | two externs resolve to one object and claim the same attribute | keep one assignment |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -164,7 +172,8 @@ only on success) — just fix and re-run.
 - Recompiling the compiler's own output is a no-op (fixpoint) — safe to
   re-run freely.
 - The compiler touches only: its managed blocks, wires it drew onto extern
-  ports (`<-`), `Def=` values it assigned on extern ports. Everything else
-  in the config is preserved byte-for-byte.
+  ports (`<-`), `Def=` values it assigned on extern ports, and the
+  title/room/category it claimed on externs (plus that claim's followers).
+  Everything else in the config is preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

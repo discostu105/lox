@@ -57,6 +57,12 @@ folds the whole calculation into ONE `Formula` block (`I1/1000`), ports
 as inputs, constants inlined. Physical values read as written —
 `Time: 30min`, `2700K`, `70%` — and compile to the port's base unit.
 
+Devices stay Loxone Config's to create, but their assignment can live
+in source: `sensor.title = "Raumklima Bad"`, `sensor.room = "Bad"`,
+`sensor.category = "Klima"` on an extern rewrite its title and its
+room/category binding — and a room change carries along the device's
+inputs and outputs that shared its room (D39).
+
 ## Why
 
 A Miniserver's entire behavior lives in one opaque `.Loxone` XML file,
@@ -82,8 +88,9 @@ rule today; the rest of the config never notices. See
 - **Three writers, one file.** Loxone Config, the Miniserver itself
   (app-created autopilots, device registrations), and this compiler all
   write the config. The compiler owns *only* its managed blocks, the wires
-  it drew onto extern ports, and the `Def=` values it assigned there —
-  everything else round-trips untouched through a byte-faithful XML layer.
+  it drew onto extern ports, the `Def=` values it assigned there, and the
+  title/room/category it assigned to externs — everything else
+  round-trips untouched through a byte-faithful XML layer.
 - **Identity is UUID, not title.** Titles are locale-volatile (one observed
   save renamed 111 built-ins). Externs match by `uuid` > `iname` > `title`,
   or a ref by its target (`mirrors: <slug>`, D32); once resolved, the
@@ -253,7 +260,7 @@ sets the simulated time for `DayTimer`-style logic.
 | `doc` | Semantic read layer: objects, ports, wires, counters, pages. |
 | `connectors` | Port-direction knowledge: a **verified** builtin table (gates, comparators, `Formula`, `Monoflop`, `PulseGen`, `AnalogThresholdTrigger` — see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
 | `ir` | The text language: constructor-style block declarations with inline wires/parameters, `extern`, `let`, `page` placement, templates with instances, boolean/comparison/arithmetic expressions (as arguments and on wires; arithmetic folds into `Formula` blocks), unit-suffixed values, lifecycle statements, `test … end` scenarios; parser, canonical printer, `compile` (base + module + lockfile → config), `decompile` (config → IR view), `adopt` (existing blocks → module + identity-pinning lockfile), `test` (compile in memory → `lox sim` → per-expect results). |
-| `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals. |
+| `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals, attribute claims. |
 | `diff` | Semantic diff between two configs, with locale-rename noise flagged. |
 
 **Out of scope** — deliberately: transport (FTP/HTTP to the Miniserver),
@@ -265,7 +272,7 @@ which are the intended consumers of this crate.
 | Doc | Contents |
 |---|---|
 | [docs/vision.md](docs/vision.md) | Why config-as-code for Loxone; the Terraform analogy; the two-masters workflow |
-| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D30 |
+| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D39 |
 | [docs/ir-spec.md](docs/ir-spec.md) | Normative spec of the `.lxir` language (v0) |
 | [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v2) and its invariants |
 | [docs/loxone-format.md](docs/loxone-format.md) | Validated reverse-engineering notes on the `.Loxone` format |

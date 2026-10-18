@@ -1332,6 +1332,24 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
             p.block_type, p.object_uuid, p.port_key, p.from, p.to
         );
     }
+    for p in &d.placements {
+        // Rooms and categories read by title; the raw UUID only where it
+        // resolves to nothing (a dangling binding).
+        let name = |title: &Option<String>, uuid: &Option<String>| match (title, uuid) {
+            (Some(t), _) => format!("{t:?}"),
+            (None, Some(u)) => u.clone(),
+            (None, None) => "none".to_string(),
+        };
+        println!(
+            "@ {} {} {:?} {}: {} -> {}",
+            p.block_type,
+            p.object_uuid,
+            p.title,
+            p.attr,
+            name(&p.from_title, &p.from),
+            name(&p.to_title, &p.to)
+        );
+    }
     for w in &d.wires_added {
         println!("+wire {} -> {}", w.from_port, w.to_port);
     }
@@ -1341,11 +1359,12 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
     let locale_noise = d.renamed.iter().filter(|r| r.locale_suspect).count();
     eprintln!(
         "{} added, {} removed, {} renamed ({locale_noise} locale-suspect), \
-         {} param changes, {}/{} wires added/removed",
+         {} param changes, {} room/category changes, {}/{} wires added/removed",
         d.added.len(),
         d.removed.len(),
         d.renamed.len(),
         d.param_changes.len(),
+        d.placements.len(),
         d.wires_added.len(),
         d.wires_removed.len()
     );
@@ -1381,6 +1400,15 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = lxir::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v1(&doc) == *recorded {
+        // Recorded before room/category bindings joined the projection
+        // (D39): in sync as far as that form can tell.
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to room/category bindings — the next compile \
+             records the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else {
         // Distinguish "another writer changed something" from "the last

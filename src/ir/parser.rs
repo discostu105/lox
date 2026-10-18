@@ -905,6 +905,12 @@ fn parse_ident_statement(
             Tok::LArrow,
             rest @ ..,
         ] => {
+            if let Some(attr) = Attr::parse(tp) {
+                return Err(err(format!(
+                    "`{ts}.{attr}` is an object attribute, not a port — attributes \
+                     are assigned (`{ts}.{attr} = \"…\"`), never wired"
+                )));
+            }
             let to = PortRef {
                 slug: ts.clone(),
                 port: tp.clone(),
@@ -942,6 +948,16 @@ fn parse_ident_statement(
         ] => Err(err(format!(
             "`{ts}.{tp} = {vs}.{vp}` — use `<-` to wire a port: `{ts}.{tp} <- {vs}.{vp}`"
         ))),
+        // slug.title|room|category = value — an attribute claim (D39).
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
+            items.push(Item::Attr(AttrDecl {
+                slug: ts.clone(),
+                attr: Attr::parse(tp).expect("guarded"),
+                value: value_of(val, lineno)?,
+                comment,
+            }));
+            Ok(())
+        }
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] => {
             items.push(Item::Set(SetDecl {
                 target: PortRef {

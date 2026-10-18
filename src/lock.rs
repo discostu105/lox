@@ -24,16 +24,18 @@
 //!    fixpoint through the whole compile → push → download window.
 
 use crate::error::{Error, Result};
+use crate::ir::Attr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// v2 adds the `removed` tombstone map (D31). v1 locks load fine (the map
-/// defaults to empty); saving always writes the current version, so an old
-/// binary — whose version check refuses v2 — can never silently drop
-/// tombstones it does not know about.
-pub const LOCKFILE_VERSION: u32 = 2;
+/// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
+/// externs (`attr_claims`/`removed_attrs`, D39). Older locks load fine (the
+/// maps default to empty); saving always writes the current version, so an
+/// old binary — whose version check refuses the newer number — can never
+/// silently drop state it does not know about.
+pub const LOCKFILE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -78,6 +80,34 @@ pub struct Lockfile {
     /// the original (or a third writer's value) retires the entry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub removed_sets: BTreeMap<String, RetiredSet>,
+    /// Attribute claims on extern objects (D39: `x.title|room|category =
+    /// …`), keyed by object UUID, then attribute. Each records what the
+    /// claim wrote over, so the statement's removal restores it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attr_claims: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
+    /// Withdrawn attribute claims (D31 lifecycle): restored again while a
+    /// base still shows the written value on the object; retired once a
+    /// base shows anything else.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub removed_attrs: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
+}
+
+/// One attribute claim (D39). Values are decoded: a title as text, a room
+/// or category as its `Place`/`Category` UUID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttrClaim {
+    /// The object's value before the first claim. Never absent: an object
+    /// without the attribute is refused, so restoring is always a rewrite.
+    pub original: String,
+    /// What the compiler wrote — the marker by which a later base shows
+    /// the claim (or a follower) still in force.
+    pub written: String,
+    /// Descendant objects (UUIDs, document order) that shared the original
+    /// room/category and were rewritten with the object — a device's
+    /// inputs and outputs. Restored with it while they still carry
+    /// `written`; one another writer moved since is left alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub followers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +307,40 @@ mod tests {
         let back: Lockfile = serde_json::from_str(&json).unwrap();
         assert_eq!(back, lock);
         assert_eq!(back.to_json(), json, "serialization must be stable");
+    }
+
+    #[test]
+    fn attribute_claims_roundtrip_and_stay_out_of_unclaimed_locks() {
+        let mut lock = Lockfile::new();
+        assert!(!lock.to_json().contains("attr_claims"));
+        lock.attr_claims.entry("dev".into()).or_default().insert(
+            Attr::Room,
+            AttrClaim {
+                original: "room-a".into(),
+                written: "room-b".into(),
+                followers: vec!["child".into()],
+            },
+        );
+        lock.removed_attrs.entry("dev".into()).or_default().insert(
+            Attr::Title,
+            AttrClaim {
+                original: "Alt".into(),
+                written: "Neu".into(),
+                followers: Vec::new(),
+            },
+        );
+        let json = lock.to_json();
+        assert!(
+            json.contains("\"room\": {"),
+            "attrs serialize lowercase:\n{json}"
+        );
+        assert!(
+            !json.contains("\"followers\": []"),
+            "empty followers elided"
+        );
+        let back: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, lock);
+        assert_eq!(back.to_json(), json);
     }
 
     #[test]
