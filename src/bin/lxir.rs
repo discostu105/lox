@@ -680,7 +680,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
         .arg(&cfg_path)
         .arg("--sim-file")
         .arg(&specs_path)
-        .args(["--json", "--non-interactive"])
+        .args(["--output", "json", "--non-interactive"])
         .output();
     let _ = std::fs::remove_dir_all(&tmp);
     let output = output?;
@@ -1271,6 +1271,21 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
     };
     let a = read_doc(old)?;
     let b = read_doc(new)?;
+    // The diff keys on UUIDs: twins collapse into one entry, and wires
+    // between them read as moves. Say so rather than refuse — diffing a
+    // damaged config is how the damage gets investigated.
+    for (path, doc) in [(old, &a), (new, &b)] {
+        let dups = doc.duplicate_uuids();
+        if !dups.is_empty() {
+            eprintln!(
+                "warning: {path} carries {} duplicate UUID(s) ({}{}) — entries \
+                 sharing a UUID are conflated below",
+                dups.len(),
+                dups.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
+                if dups.len() > 3 { ", …" } else { "" }
+            );
+        }
+    }
     let d = lxir::diff::diff(&a, &b);
 
     for o in &d.added {
@@ -1287,6 +1302,31 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
         );
     }
     for p in &d.param_changes {
+        // An Automatic Designer rule payload is a JSON blob — rendered
+        // as field-path changes instead of two full blobs.
+        if p.port_key == "APC"
+            && let (Some(from), Some(to)) = (&p.from, &p.to)
+            && let (Some(old), Some(new)) =
+                (lxir::autopilot::parse(from), lxir::autopilot::parse(to))
+        {
+            let lines = lxir::autopilot::changes(&old, &new);
+            if !lines.is_empty() {
+                let title = b
+                    .objects()
+                    .into_iter()
+                    .chain(a.objects())
+                    .find(|o| o.uuid == p.object_uuid)
+                    .and_then(|o| o.title);
+                println!(
+                    "* {} {} {:?} rule changed:",
+                    p.block_type, p.object_uuid, title
+                );
+                for line in lines {
+                    println!("    {line}");
+                }
+                continue;
+            }
+        }
         println!(
             "* {} {}.{}: {:?} -> {:?}",
             p.block_type, p.object_uuid, p.port_key, p.from, p.to
@@ -1355,6 +1395,17 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
             .filter(|(uuid, _)| present.contains(*uuid))
             .map(|(_, t)| t.slug.as_str())
             .collect();
+        // Repeated UUIDs never come out of a compile (it refuses them), so
+        // a config carrying them points at whatever handled the output
+        // after lxir (docs/loxone-format.md names the known producer).
+        let dups = doc.duplicate_uuids();
+        if !dups.is_empty() {
+            println!(
+                "note: {config} carries {} duplicate UUID(s), which lxir never \
+                 emits — see docs/loxone-format.md for the known producer",
+                dups.len()
+            );
+        }
         if pending.is_empty() {
             println!(
                 "drift: {config} no longer matches the fingerprint recorded in \

@@ -205,19 +205,23 @@ lock.save(std::path::Path::new("beschattung.lock.json"))?;
 ```
 
 Runnable examples (`cargo run --example …`): `compile`, `decompile`,
-`diff`, `observe`, `roundtrip_check`. The committed `examples/out/` files
-are the output of the `compile` example; running it again reproduces them
-byte-for-byte.
+`diff`, `observe`, `roundtrip_check`, `lifecycle`. The committed
+`examples/out/` files are the output of the `compile` example; running it
+again reproduces them byte-for-byte.
 
 For a complete end-to-end module, see `examples/ir/pool.lxir` against
-`examples/configs/pool.Loxone`: it exercises the whole language — `page`
+`examples/configs/pool.Loxone`: it exercises the core language — `page`
 placement, named constants, externs matched by iname and by composite
 `title` + `room:`, a template with an instance, an expression as an
 argument, a unit-suffixed value (`Time: 30min`), a boolean expression
 wired onto an extern port, an arithmetic binding folded into a
 `Formula` block, and two `test … end` scenarios runnable with
 `lxir test` — the sketch's pool idea, kept compiling by the
-test suite.
+test suite. [examples/README.md](examples/README.md) indexes the rest:
+`examples/ir/sprachtour.lxir` walks every remaining construct (matchers,
+mirrors, templates in full, units, fan-in), `examples/ir/lifecycle/`
+stages `moved`/`removed`, and `examples/project/` is a committed
+`lox.toml` project with fragment modules.
 
 Tests live in the module itself and simulate the *compiled* config:
 

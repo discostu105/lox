@@ -29,8 +29,10 @@ cargo run --bin lxir -- help      # the CLI
 - Format knowledge is documented, not guessed: check
   [docs/loxone-format.md](docs/loxone-format.md) before assuming anything
   about the XML.
-- Keep `cargo test`, clippy, and fmt clean; regenerate `examples/out/` via
-  `cargo run --example compile` when compiler output changes.
+- Keep `cargo test`, clippy, and fmt clean; when compiler output changes,
+  regenerate `examples/out/` via `cargo run --example compile` and the
+  project artifacts via `lxir compile --time 1767225600` inside
+  `examples/project/` ([examples/README.md](examples/README.md)).
 - Dual-licensed GPL-3.0-or-later / commercial (see [LICENSE](LICENSE)) —
   same scheme as the sibling `lox` repo. `publish = false` until crates.io
   publication is wanted.

@@ -1,0 +1,79 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ControlList Version="1" NextObj="302" NextConst="1" NextNote="1" NextMem="1">
+	<C Type="Document" V="17010727" U="30000000-0000-0001-ffff504f94112233" Title="Pool" ConfigVersion="17010727">
+		<C Type="PlaceCaption" V="175" U="30000000-0000-0002-ffff504f94112233" Title="Räume">
+			<C Type="Place" V="175" U="30000000-0000-0003-ffff504f94112233" Title="Pool"/>
+			<C Type="Place" V="175" U="30000000-0000-0004-ffff504f94112233" Title="Technikraum"/>
+		</C>
+		<C Type="CategoryCaption" V="175" U="30000000-0000-0006-ffff504f94112233" Title="Kategorien">
+			<C Type="Category" V="175" U="30000000-0000-0007-ffff504f94112233" Title="Heizung"/>
+			<C Type="Category" V="175" U="30000000-0000-0008-ffff504f94112233" Title="Filterung"/>
+		</C>
+		<C Type="VirtualInCaption" V="175" U="30000000-0000-0005-ffff504f94112233" Title="Virtuelle Eingänge">
+			<C Type="VirtualIn" V="175" U="30000001-0000-0010-ffff504f94112233" Title="Wassertemperatur" IName="VI1" Nio="2">
+				<Co K="Q" U="30000001-0000-0011-00ffaaaaaaaa0001"/>
+				<Co K="Qm" U="30000001-0000-0012-01ffaaaaaaaa0001"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="30000002-0000-0020-ffff504f94112233" Title="PV Überschuss" IName="VI2" Nio="2">
+				<Co K="Q" U="30000002-0000-0021-00ffaaaaaaaa0002"/>
+				<Co K="Qm" U="30000002-0000-0022-01ffaaaaaaaa0002"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="30000003-0000-0030-ffff504f94112233" Title="Abdeckung offen" IName="VI3" Nio="2">
+				<Co K="Q" U="30000003-0000-0031-00ffaaaaaaaa0003"/>
+				<Co K="Qm" U="30000003-0000-0032-01ffaaaaaaaa0003"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="30000007-0000-0070-ffff504f94112233" Title="Außentemperatur" IName="VI4" Nio="2">
+				<Co K="Q" U="30000007-0000-0071-00ffaaaaaaaa0007"/>
+				<Co K="Qm" U="30000007-0000-0072-01ffaaaaaaaa0007"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="3000000b-0000-00b0-ffff504f94112233" Title="Netzbezug" IName="VI5" Nio="2">
+				<Co K="Q" U="3000000b-0000-00b1-00ffaaaaaaaa000b"/>
+				<Co K="Qm" U="3000000b-0000-00b2-01ffaaaaaaaa000b"/>
+			</C>
+		</C>
+		<C Type="Page" V="175" U="30000004-0000-0040-ffff504f94112233" Title="Pool">
+			<C Type="Switch" V="175" U="30000005-0000-0050-ffff504f94112233" Title="Freigabe" Nio="2">
+				<Co K="On" Nc="1" U="30000005-0000-0051-00ffaaaaaaaa0005">
+					<In Input="1ff9b180-0000-0002-02ff81755fe5ba78"/>
+				</Co>
+				<Co K="Q" U="30000005-0000-0052-01ffaaaaaaaa0005"/>
+				<IoData Visu="true" Cr="30000000-0000-0008-ffff504f94112233" Pr="30000000-0000-0003-ffff504f94112233"/>
+			</C>
+			<C Type="Switch" V="175" U="30000006-0000-0060-ffff504f94112233" Title="Freigabe" Nio="2">
+				<Co K="On" U="30000006-0000-0061-00ffaaaaaaaa0006"/>
+				<Co K="Q" U="30000006-0000-0062-01ffaaaaaaaa0006"/>
+				<IoData Visu="true" Cr="30000000-0000-0007-ffff504f94112233" Pr="30000000-0000-0004-ffff504f94112233"/>
+			</C>
+			<C Type="Less" V="175" U="1ff9b180-0000-0003-ffff504f94112233" Title="Wasser unter Soll" Px="7392" Py="192" Px2="8736" Py2="888" Cl="141,255,112" Nio="3" WF="147456">
+				<Co K="Input1" Nc="1" U="1ff9b180-0000-0000-00ff81755fe5ba78">
+					<In Input="30000001-0000-0011-00ffaaaaaaaa0001"/>
+				</Co>
+				<Co K="Input2" Def="27" U="1ff9b180-0000-0001-01ff81755fe5ba78"/>
+				<Co K="Q" U="1ff9b180-0000-0002-02ff81755fe5ba78"/>
+			</C>
+		</C>
+		<C Type="Page" V="175" U="30000008-0000-0080-ffff504f94112233" Title="Technik">
+			<C Type="Switch" V="175" U="30000009-0000-0090-ffff504f94112233" Title="Störmeldung" Nio="2">
+				<Co K="On" Nc="1" U="30000009-0000-0091-00ffaaaaaaaa0009">
+					<In Input="1ff9b180-0000-0006-02ff2b7857011936"/>
+				</Co>
+				<Co K="Q" U="30000009-0000-0092-01ffaaaaaaaa0009"/>
+			</C>
+			<C Type="InputRef" V="175" U="3000000a-0000-00a0-ffff504f94112233" Title="Netzbezug" Nio="4" Ref="3000000b-0000-00b0-ffff504f94112233" LinkRefType="71">
+				<Co K="AI" Nc="1" U="3000000a-0000-00a1-00ffaaaaaaaa000a">
+					<In Input="3000000b-0000-00b1-00ffaaaaaaaa000b"/>
+				</Co>
+				<Co K="I" U="3000000a-0000-00a2-01ffaaaaaaaa000a"/>
+				<Co K="AQ" U="3000000a-0000-00a3-02ffaaaaaaaa000a"/>
+				<Co K="Q" U="3000000a-0000-00a4-03ffaaaaaaaa000a"/>
+			</C>
+			<C Type="GreaterEqual" V="175" U="1ff9b180-0000-0007-ffff504f94112233" Title="Netzbezug über 3 kW" Px="7392" Py="1080" Px2="8736" Py2="1776" Cl="141,255,112" Nio="3" WF="147456">
+				<Co K="Input1" Nc="1" U="1ff9b180-0000-0004-00ff2b7857011936">
+					<In Input="3000000a-0000-00a3-02ffaaaaaaaa000a"/>
+				</Co>
+				<Co K="Input2" Def="3000" U="1ff9b180-0000-0005-01ff2b7857011936"/>
+				<Co K="Q" U="1ff9b180-0000-0006-02ff2b7857011936"/>
+			</C>
+		</C>
+	</C>
+</ControlList>

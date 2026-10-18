@@ -298,6 +298,50 @@ impl LoxoneDoc {
         out
     }
 
+    /// UUIDs carried by more than one `<C>` object or `<Co>` connector,
+    /// sorted. Identity is the UUID, so a sound document has none
+    /// ([loxone-format.md](../docs/loxone-format.md)); `<SObj>` entries
+    /// reuse their object's UUID by design and are not counted.
+    pub fn duplicate_uuids(&self) -> Vec<String> {
+        fn walk<'a>(el: &'a Element, seen: &mut BTreeMap<&'a str, usize>) {
+            for child in el.child_elements() {
+                if matches!(child.name.as_str(), "C" | "Co")
+                    && let Some(u) = child.attr("U")
+                {
+                    *seen.entry(u).or_default() += 1;
+                }
+                walk(child, seen);
+            }
+        }
+        let mut seen = BTreeMap::new();
+        walk(&self.xml.root, &mut seen);
+        seen.into_iter()
+            .filter(|&(_, n)| n > 1)
+            .map(|(u, _)| u.to_string())
+            .collect()
+    }
+
+    /// Refuse a document with duplicate UUIDs ([`Self::duplicate_uuids`]):
+    /// every UUID-keyed step — extern matching, wiring, the semantic diff —
+    /// would silently pick one twin. `role` names the document in the
+    /// error ("base", "config").
+    pub fn require_unique_uuids(&self, role: &str) -> Result<()> {
+        let dups = self.duplicate_uuids();
+        if dups.is_empty() {
+            return Ok(());
+        }
+        Err(Error::Structure(format!(
+            "{role} carries {} duplicate UUID(s) ({}{}) — two objects or \
+             connectors share one identity, so wiring to either is \
+             ambiguous. Open and save the config once in Loxone Config \
+             (it keeps the first occurrence and re-mints the rest), then use \
+             that save; docs/loxone-format.md names the known cause",
+            dups.len(),
+            dups.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
+            if dups.len() > 3 { ", …" } else { "" }
+        )))
+    }
+
     /// Remove the `<C>` object with this UUID from wherever it is in the
     /// tree. Returns the removed element.
     pub fn remove_by_uuid(&mut self, uuid: &str) -> Option<Element> {

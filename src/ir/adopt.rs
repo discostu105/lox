@@ -54,6 +54,7 @@ pub struct AdoptReport {
 /// each extern's resolution, and a report. `compile(doc, module, lock)` is
 /// then a semantic no-op.
 pub fn adopt(doc: &LoxoneDoc) -> Result<(Module, Lockfile, AdoptReport)> {
+    doc.require_unique_uuids("config")?;
     let (lift, refused) = adopt_lift(doc);
     let module = lift.single_module();
     module.validate()?;
@@ -70,6 +71,7 @@ pub type PageFragments = Vec<(String, Module)>;
 /// namespace — written to a directory they are the `--module <dir>`
 /// form of exactly the module `adopt` returns.
 pub fn adopt_pages(doc: &LoxoneDoc) -> Result<(PageFragments, Lockfile, AdoptReport)> {
+    doc.require_unique_uuids("config")?;
     let (lift, refused) = adopt_lift(doc);
     // Fragments may cross-reference; validation runs on the merged whole,
     // exactly as `lxir compile --module <dir>` will.
@@ -105,10 +107,11 @@ pub struct AdoptedBlock {
 /// appended. Wired neighbors already pinned in the lock are referenced by
 /// their existing slugs.
 ///
-/// Refused with a hard error — nothing mutated — when the rebuild would
-/// not be faithful, the identity is already claimed, or the config wires
-/// the block into a managed sink that the module source does not declare
-/// (the fix is one argument-list line; the error spells it out).
+/// Refused with a hard error — nothing mutated — when the config repeats
+/// UUIDs, the rebuild would not be faithful, the identity is already
+/// claimed, or the config wires the block into a managed sink that the
+/// module source does not declare (the fix is one argument-list line; the
+/// error spells it out).
 pub fn adopt_one(
     doc: &LoxoneDoc,
     uuid: &str,
@@ -116,6 +119,7 @@ pub fn adopt_one(
     module: &Module,
     lock: &mut Lockfile,
 ) -> Result<AdoptedBlock> {
+    doc.require_unique_uuids("config")?;
     let fail = |m: String| Error::Compile(m);
     // Templates (D23) and expressions (D24): the checks below — slug
     // freshness, wires already declared on managed sinks — must see the

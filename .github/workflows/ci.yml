@@ -25,3 +25,11 @@ jobs:
           LOCK: examples/out/beschattung.lock.json
           EXPECTED: examples/out/haus-compiled.Loxone
         run: examples/ci.sh
+      - name: check path on the shipped project example
+        env:
+          LXIR: target/release/lxir
+          BASE: examples/configs/pool.Loxone
+          MODULE: examples/project/pages
+          LOCK: examples/project/pool.lock.json
+          EXPECTED: examples/project/out.Loxone
+        run: examples/ci.sh

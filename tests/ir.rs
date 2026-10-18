@@ -251,6 +251,223 @@ fn pool_showcase_compiles_end_to_end() {
 }
 
 #[test]
+fn sprachtour_compiles_end_to_end() {
+    // The systematic language tour (examples/ir/sprachtour.lxir): every
+    // construct the narrative showcase does not cover — uuid/category
+    // matchers, fan-in, the `Formula:` attribute parameter, template
+    // interpolation/override/forwarding, both mirror forms (D32/D33),
+    // mirror routing (D34), and a second page.
+    let base = LoxoneDoc::parse(&std::fs::read("examples/configs/pool.Loxone").unwrap()).unwrap();
+    let src = std::fs::read_to_string("examples/ir/sprachtour.lxir").unwrap();
+    let module = Module::parse(&src).unwrap();
+    assert_eq!(module.to_text(), src, "example stays canonical");
+
+    let opts = CompileOptions {
+        page_title: Some("Pool".into()),
+        ..opts()
+    };
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &module, &mut lock, &opts).unwrap();
+
+    // The matcher palette resolved: uuid pin, category vs room on the
+    // two "Freigabe" switches, `mirrors:` on the GUI-drawn ref.
+    assert_eq!(
+        lock.externals["wassertemp"].uuid,
+        "30000001-0000-0010-ffff504f94112233"
+    );
+    assert_eq!(
+        lock.externals["filterpumpe"].uuid,
+        "30000005-0000-0050-ffff504f94112233"
+    );
+    assert_eq!(
+        lock.externals["waermepumpe"].uuid,
+        "30000006-0000-0060-ffff504f94112233"
+    );
+    assert_eq!(
+        lock.externals["netz_spiegel"].uuid,
+        "3000000a-0000-00a0-ffff504f94112233"
+    );
+
+    // 11 declared blocks + 2 template-expanded + 5 desugared.
+    assert_eq!(lock.objects.len(), 18);
+    assert!(lock.objects["anforderung_i2__ge1"].expr_owned);
+    assert!(lock.objects["filterpumpe_on__and1"].expr_owned);
+    assert!(lock.objects["speicher_input__eq1"].expr_owned);
+
+    let element = |slug: &str| {
+        let uuid = &lock.objects[slug].uuid;
+        let obj = out
+            .objects()
+            .iter()
+            .find(|o| &o.uuid == uuid)
+            .unwrap()
+            .path
+            .clone();
+        out.element_at(&obj).unwrap().clone()
+    };
+    let def_of = |slug: &str, key: &str| {
+        lxir::doc::ports(&element(slug))
+            .into_iter()
+            .find(|p| p.key == key)
+            .unwrap()
+            .def
+    };
+
+    // Unit values compiled exactly (D27): 45min/1.5h/250ms/80%.
+    assert_eq!(def_of("takt", "TimeHigh").as_deref(), Some("2700"));
+    assert_eq!(def_of("takt", "TimeLow").as_deref(), Some("5400"));
+    assert_eq!(def_of("blitz", "TimeHigh").as_deref(), Some("0.25"));
+    assert_eq!(def_of("weit_offen", "Input2").as_deref(), Some("80"));
+
+    // Template machinery (D23): value-parameter override, port
+    // forwarding, and title interpolation from a string `let`.
+    assert_eq!(def_of("uebertemp_alarm", "On").as_deref(), Some("32"));
+    assert_eq!(
+        def_of("uebertemp_alarm", "PulseTime").as_deref(),
+        Some("10")
+    );
+    assert_eq!(
+        element("hitze_alarm").attr("Title"),
+        Some("Außenbereich: über Grenze")
+    );
+
+    // The `Formula:` attribute parameter with its Valid companion.
+    let formula = element("mitteltemp");
+    assert_eq!(formula.attr("Formula"), Some("(I1+I2)/2"));
+    assert_eq!(formula.attr("Valid"), Some("false"));
+
+    // Fan-in: two wires on the same gate input.
+    let anforderung = element("anforderung");
+    let i1 = lxir::doc::ports(&anforderung)
+        .into_iter()
+        .find(|p| p.key == "I1")
+        .unwrap();
+    assert_eq!(i1.inputs.len(), 2);
+
+    // D34: the wire naming `netzbezug.Q` routes through the base ref on
+    // the consuming page — the fixture ref's AQ, not the VirtualIn.
+    let netz_hoch = element("netz_hoch");
+    let routed = lxir::doc::ports(&netz_hoch)
+        .into_iter()
+        .find(|p| p.key == "Input1")
+        .unwrap();
+    assert_eq!(routed.inputs, vec!["3000000a-0000-00a3-02ffaaaaaaaa000a"]);
+
+    // D33: the minted mirror carries the target identity, and a wire
+    // naming the ref itself stays literal.
+    let spiegel = element("wasser_spiegel");
+    assert_eq!(
+        spiegel.attr("Ref"),
+        Some("30000001-0000-0010-ffff504f94112233")
+    );
+    assert_eq!(spiegel.attr("LinkRefType"), Some("71"));
+    let kalt = lxir::doc::ports(&element("kalt_technik"))
+        .into_iter()
+        .find(|p| p.key == "Input1")
+        .unwrap();
+    assert_eq!(
+        kalt.inputs,
+        vec![lock.objects["wasser_spiegel"].ports["AQ"].clone()]
+    );
+
+    // D28: the two page statements placed the blocks on their pages.
+    assert_eq!(
+        lock.objects["heizbedarf"].page_uuid.as_deref(),
+        Some("30000004-0000-0040-ffff504f94112233")
+    );
+    assert_eq!(
+        lock.objects["kalt_technik"].page_uuid.as_deref(),
+        Some("30000008-0000-0080-ffff504f94112233")
+    );
+
+    // Fixpoint: recompiling against its own output changes nothing.
+    let again = compile(&out, &module, &mut lock, &opts).unwrap();
+    assert_eq!(out.to_bytes(), again.to_bytes());
+}
+
+#[test]
+fn project_example_is_current() {
+    // The lox.toml project under examples/project/: compiling inside the
+    // directory (lock/out redirected to a scratch copy) changes nothing
+    // in the committed lock and reproduces the committed output byte for
+    // byte — the same invariants examples/ci.sh checks.
+    let root = env!("CARGO_MANIFEST_DIR");
+    let tmp = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("project-example");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let lock = tmp.join("lock.json");
+    let out = tmp.join("out.Loxone");
+    std::fs::copy(format!("{root}/examples/project/pool.lock.json"), &lock).unwrap();
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_lxir"))
+        .current_dir(format!("{root}/examples/project"))
+        .arg("compile")
+        .arg("--lock")
+        .arg(&lock)
+        .arg("--out")
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read(&lock).unwrap(),
+        std::fs::read(format!("{root}/examples/project/pool.lock.json")).unwrap(),
+        "committed lock is current"
+    );
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        std::fs::read(format!("{root}/examples/project/out.Loxone")).unwrap(),
+        "committed output reproduces byte-identically"
+    );
+}
+
+#[test]
+fn lifecycle_stages_move_and_remove() {
+    // The staged walkthrough under examples/ir/lifecycle/ (narrated by
+    // examples/lifecycle.rs): `moved` carries identity across a rename,
+    // an unauthorized disappearance refuses, `removed` deletes and
+    // tombstones (D31), and the tombstone retires once deployed.
+    let base = LoxoneDoc::parse(&std::fs::read("examples/configs/haus.Loxone").unwrap()).unwrap();
+    let stage = |n: u8| {
+        let src =
+            std::fs::read_to_string(format!("examples/ir/lifecycle/schritt{n}.lxir")).unwrap();
+        let m = Module::parse(&src).unwrap();
+        assert_eq!(m.to_text(), src, "stage {n} stays canonical");
+        m
+    };
+    let opts = CompileOptions {
+        page_title: Some("Beschattung".into()),
+        ..opts()
+    };
+    let mut lock = Lockfile::new();
+    let out1 = compile(&base, &stage(1), &mut lock, &opts).unwrap();
+    let born = lock.objects["wetter_ok"].uuid.clone();
+
+    let out2 = compile(&out1, &stage(2), &mut lock, &opts).unwrap();
+    assert_eq!(
+        lock.objects["wetter_sperre"].uuid, born,
+        "identity survives the rename"
+    );
+    assert!(!lock.objects.contains_key("wetter_ok"));
+
+    let unauthorized = Module::parse(
+        &std::fs::read_to_string("examples/ir/lifecycle/schritt3.lxir")
+            .unwrap()
+            .replace("removed altlast\n", ""),
+    )
+    .unwrap();
+    let err = compile(&out2, &unauthorized, &mut lock, &opts).unwrap_err();
+    assert!(err.to_string().contains("removed altlast"), "{err}");
+
+    let out3 = compile(&out2, &stage(3), &mut lock, &opts).unwrap();
+    assert!(!lock.objects.contains_key("altlast"));
+    assert_eq!(lock.removed.len(), 1);
+    assert_eq!(out3.objects().len(), out2.objects().len() - 1);
+
+    compile(&out3, &stage(3), &mut lock, &opts).unwrap();
+    assert!(lock.removed.is_empty(), "tombstone retires once deployed");
+}
+
+#[test]
 fn composite_extern_matching_narrows_by_room_and_category() {
     // Two identically-titled Switches in different rooms; the room lives
     // in `<IoData Pr=…>` pointing at a Place (docs/loxone-format.md).
@@ -354,6 +571,116 @@ fn config_version_pin_refuses_an_unqualified_release() {
     compile(&bumped, &module, &mut lock, &accept).unwrap();
     assert_eq!(lock.target.config_version.as_deref(), Some("17020101"));
     compile(&bumped, &module, &mut lock, &opts()).unwrap();
+}
+
+#[test]
+fn edited_uuid_matcher_repins_the_extern() {
+    const VI1: &str = "20000001-0000-0010-ffff504f94112233"; // Außentemperatur
+    const VI3: &str = "20000003-0000-0030-ffff504f94112233"; // Sonnenschein
+    let base = base();
+    let src_of = |matcher: &str| {
+        let src = std::fs::read_to_string("examples/ir/beschattung.lxir").unwrap();
+        Module::parse(&src.replace(
+            "VirtualIn(iname: \"VI3\")",
+            &format!("VirtualIn({matcher})"),
+        ))
+        .unwrap()
+    };
+    let mut lock = Lockfile::new();
+    compile(
+        &base,
+        &src_of(&format!("uuid: \"{VI3}\"")),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(lock.externals["sonne"].uuid, VI3);
+
+    // Editing the value re-points the extern: the pin follows the source,
+    // exactly as a fresh resolution would — same lock, same bytes.
+    let edited = src_of(&format!("uuid: \"{VI1}\""));
+    let mut repinned = lock.clone();
+    let out = compile(&base, &edited, &mut repinned, &opts()).unwrap();
+    let pin = &repinned.externals["sonne"];
+    assert_eq!(pin.uuid, VI1);
+    assert_eq!(pin.title_at_match.as_deref(), Some("Au\u{df}entemperatur"));
+    let mut fresh = Lockfile::new();
+    let out_fresh = compile(&base, &edited, &mut fresh, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), out_fresh.to_bytes());
+    assert_eq!(repinned.to_json(), fresh.to_json());
+
+    // A typo is a NoMatch, not a silent keep of the old pin.
+    let typo = src_of("uuid: \"20000003-0000-0030-ffff504f94112299\"");
+    let err = compile(&base, &typo, &mut lock.clone(), &opts()).unwrap_err();
+    assert!(err.to_string().contains("sonne"), "{err}");
+
+    // A matcher-*kind* change still has to confirm the pin (D32): an
+    // iname pin converted to a uuid naming another object is refused.
+    let mut by_iname = Lockfile::new();
+    compile(&base, &src_of("iname: \"VI3\""), &mut by_iname, &opts()).unwrap();
+    let err = compile(&base, &edited, &mut by_iname, &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("does not match the locked object"), "{err}");
+}
+
+#[test]
+fn duplicate_uuids_are_refused_in_base_and_output() {
+    const VI1: &str = "20000001-0000-0010-ffff504f94112233";
+    const VI3: &str = "20000003-0000-0030-ffff504f94112233";
+    let base = base();
+    assert!(base.duplicate_uuids().is_empty());
+    let text = String::from_utf8(base.to_bytes()).unwrap();
+
+    // `<SObj>` entries reuse their object's UUID by design.
+    let sobj = LoxoneDoc::parse(
+        text.replacen(
+            "</ControlList>",
+            &format!("<SObj T=\"0\" U=\"{VI1}\"/></ControlList>"),
+            1,
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(sobj.duplicate_uuids().is_empty());
+
+    // Two objects sharing one identity: every entry point refuses.
+    let twins = LoxoneDoc::parse(
+        text.replacen(&format!("U=\"{VI1}\""), &format!("U=\"{VI3}\""), 1)
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(twins.duplicate_uuids(), vec![VI3.to_string()]);
+    let err = compile(&twins, &module(), &mut Lockfile::new(), &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID") && err.contains(VI3), "{err}");
+    assert!(adopt(&twins).is_err());
+    assert!(adopt_pages(&twins).is_err());
+    let err = adopt_one(&twins, VI3, "x", &module(), &mut Lockfile::new())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID"), "{err}");
+
+    // A lock that maps a block port onto an existing connector's UUID
+    // would put twins into the output — the self-check stops it.
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &module(), &mut lock, &opts()).unwrap();
+    let vi1_port = lxir::doc::ports(out.element_at(&out.index().by_uuid[VI1]).unwrap())
+        .remove(0)
+        .uuid;
+    lock.objects
+        .get_mut("beschatten")
+        .unwrap()
+        .ports
+        .insert("I1".into(), vi1_port.clone());
+    let err = compile(&base, &module(), &mut lock, &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("output would carry") && err.contains(&vi1_port),
+        "{err}"
+    );
 }
 
 /// Synthetic config for the incremental-adopt tests: two VirtualIns, a
@@ -2570,4 +2897,53 @@ fn arithmetic_misuse_is_reported() {
         "jal.AutoShade <- a.Q + a.AQ + b.Q + b.AQ + jal.Q",
         "at most 4 inputs",
     );
+}
+
+#[test]
+fn full_view_renders_autopilot_rules_as_comments() {
+    // An `AutopilotRule` carries its whole rule as JSON in `APC=` —
+    // the full view renders it above the extern, resolving control
+    // UUIDs to titles; the adoptable view stays bare (D29 boundary).
+    let apc = "{&quot;type&quot;:1,&quot;active&quot;:true,&quot;invalid&quot;:false,\
+               &quot;name&quot;:&quot;Skimmer Ein&quot;,&quot;operator&quot;:3,\
+               &quot;eventGroups&quot;:[{&quot;operator&quot;:1,&quot;events&quot;:[\
+               {&quot;type&quot;:5,&quot;descID&quot;:272001,&quot;id&quot;:272,\
+               &quot;value&quot;:540,&quot;operator&quot;:1,&quot;forceEdge&quot;:false}]}],\
+               &quot;actions&quot;:[{&quot;type&quot;:0,&quot;descID&quot;:342101,\
+               &quot;id&quot;:&quot;40000001-0000-0010-ffff504f94112233&quot;,\
+               &quot;command&quot;:&quot;on&quot;}]}";
+    let s = format!(
+        "<ControlList Version=\"1\" NextObj=\"9\">\r\n\
+         \t<C Type=\"Document\" U=\"40000000-0000-0001-ffff504f94112233\">\r\n\
+         \t\t<C Type=\"Page\" U=\"40000000-0000-0002-ffff504f94112233\" Title=\"Automatik-Regeln\" SpNo=\"1\">\r\n\
+         \t\t\t<C Type=\"Switch\" U=\"40000001-0000-0010-ffff504f94112233\" Title=\"Pumpe\" Nio=\"2\">\r\n\
+         \t\t\t\t<Co K=\"On\" U=\"40000001-0000-0011-00ffaaaaaaaa0001\"/>\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000001-0000-0012-01ffaaaaaaaa0001\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"AutopilotRule\" U=\"40000002-0000-0020-ffff504f94112233\" Title=\"Skimmer Ein\" Nio=\"1\" APC=\"{apc}\" STA=\"1\">\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000002-0000-0021-00ffaaaaaaaa0002\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\
+         \t</C>\r\n\
+         </ControlList>\r\n"
+    );
+    let doc = LoxoneDoc::parse(s.as_bytes()).unwrap();
+
+    let (m, _) = decompile(&doc, &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    assert!(
+        text.contains("# when type 5, descID 272001, id 272: value 540"),
+        "time event rendered raw:\n{text}"
+    );
+    assert!(
+        text.contains("# then \"Pumpe\": on"),
+        "action resolves the control title:\n{text}"
+    );
+
+    let mo = DecompileOptions {
+        scope: DecompileScope::ManagedOnly,
+        ..Default::default()
+    };
+    let (m, _) = decompile(&doc, &mo).unwrap();
+    assert!(!m.to_text().contains("# when"), "adoptable view stays bare");
 }

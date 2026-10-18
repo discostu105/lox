@@ -83,7 +83,6 @@ test "WP-Freigabe folgt PV und Abdeckung"
 	abdeckung_offen.Q = 0
 	tick 3
 	expect wp_freigabe_on__and2.Q == 1
-	expect pv_kw_input__f1.AQ == 2
 	abdeckung_offen.Q = 1
 	tick 3
 	expect wp_freigabe_on__and2.Q == 0

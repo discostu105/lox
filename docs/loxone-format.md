@@ -29,9 +29,10 @@ Two deviations break conforming parsers:
 
 1. **Attribute names may start with digits**: `12hTF="true"`.
 2. **Attribute values may contain raw, unescaped newlines** — the `Code=`
-   attribute of a `Program` block holds multi-line PicoC source. A standard
-   parser normalizes these to spaces on re-serialization, corrupting the
-   program.
+   attribute of a `Program` block holds multi-line PicoC source, and two
+   of the house config's `AutopilotRule` `APC=` payloads carry a raw CRLF
+   inside the JSON. A standard parser normalizes these to spaces on
+   re-serialization, corrupting the program.
 
 Entities used: `&amp; &lt; &gt; &quot; &apos;` plus numeric character
 references. Text content appears only in `<Key>hex</Key>`-style elements and
@@ -140,20 +141,92 @@ resolved):
   emitting these from the corpus-learned type table
   (`connectors::ref_link_type`); on unmanaged refs they stay carried
   verbatim.
-- **`InputRef` mirrors of one target share their output-port uuids**
-  (r50, 2026-08-25: 19/19 multi-mirror InputRef targets share `AQ`/`Q`
-  connector uuids verbatim; the `AI`/`I` connectors and their feed
-  wires stay per-ref). Several visual tags, one signal port — a
-  consumer wire cannot even express *which* tag it reads from.
-  `OutputRef` mirrors are the opposite: each carries its own `AQ`
-  (27/27 diverge) and draws its own distribution wire into the actor.
-  Open oracle question: what the GUI does to a *minted* second mirror
-  of an already-mirrored target (D33 mints fresh output uuids).
+- **Every mirror carries its own ports.** `InputRef`s of one target
+  have distinct `AQ`/`Q` connector uuids like any other object (r50
+  before 2026-08-25 and since 2026-08-28: 19/19 multi-mirror targets;
+  corpus-wide no connector uuid repeats), so a consumer wire names
+  which tag it reads from. `OutputRef` mirrors likewise each carry
+  their own `AQ` (27/27) and draw their own distribution wire into the
+  actor. D33's fresh output uuids for a minted mirror are therefore
+  what the GUI does too. *Correction (2026-10-18):* this note first
+  recorded the opposite — "mirrors of one target share their
+  output-port uuids, 19/19" — read off r50 snapshots of 2026-08-25
+  that the first push had already damaged (see *UUIDs are unique*
+  below).
 - **API distribution wires are recorded in reverse**: for
   `AutoJalousie.OutputAPI → ApiActor`-style links the `<In>` entry sits
   on the *block's output* connector and names the `OutputRef.AI` (or
   `ApiActor.I`) as its `Input` — source and sink swap roles relative to
   every ordinary wire.
+
+## Automatic Designer rules: `<C Type="AutopilotRule" APC=…>`
+
+The app's *Automatic Designer* (German "Automatik Designer"; the feature
+and block family keep the older "Autopilot" name) stores each rule as an
+`AutopilotRule` block in the config. Rules are created in the app/web
+UI; the **Miniserver** writes them (UUID tail = its serial), and Loxone
+Config displays them — the official KB warns to *load from Miniserver*
+before saving so app-created rules are not lost. There is **no public
+spec**: the Structure File and Communicating-with-the-Miniserver PDFs
+(v17.0, checked 2026-08-26) mention the feature only in passing, and the
+rule schema below is corpus-derived. Evidence base: 10 rules — 5 in the
+r50 house config, 5 across three public use-case configs (V172–V175).
+
+- One **`AutoPilot` container** exists per config (present even with
+  zero rules, 100+ corpus configs): locale-volatile title
+  ("Automatik-Regeln"/"Automatic rules"/…), `Nio="2"` (`Input`,
+  `output`), `SpStates=`, sitting among the system objects. Each rule's
+  `ref=` attribute names this container's UUID.
+- **Rule element**: `Nio="7"` with connectors in index order
+  `InputTrigger, Reset, On, run, Q, A, OutputAPI` (matching the app's
+  documented Tr/R/O inputs and status outputs), an `<IoData>` child,
+  and the rule payload in `APC=`. Rules carry `Px/Py` like page blocks;
+  observed both on a dedicated special page (`<C Type="Page"
+  SpNo="1">`, house config) and on ordinary logic pages (use-case
+  corpus). `STA="1"` was present on exactly the rules whose payload
+  says `"active": true` (10/10) — observation, not verified semantics.
+- **`APC=` payload**: one JSON object (entity-escaped), schema observed
+  across all 10 rules:
+
+  ```json
+  {"type": 1, "id": "<rule object UUID>",
+   "active": true, "activeIfValid": false,
+   "name": "<display name, = Title>", "description": "",
+   "operator": 3, "invalid": false,
+   "eventGroups": [{"operator": 1, "events": [
+     {"type": 5, "descID": 272001, "id": 272, "value": 540,
+      "operator": 1, "forceEdge": false}]}],
+   "actions": [{"type": 0, "descID": 342101,
+     "id": "<target control object UUID>", "command": "on"}]}
+  ```
+
+  Validated: an **action's `id` and a control event's `controlUUID`
+  resolve to `<C>` objects in the same document** (every occurrence);
+  `command` is verbatim app command text (`on`, `off`, `pulse`,
+  `setMode/4`, …), with `arrValues` duplicating the command's numeric
+  argument where one exists. Observations short of validation: event
+  `type` selects the condition source (0 = control state with
+  `controlUUID`; 1 with `descID` 21001 looks operating-mode-shaped;
+  3 with `descID` 270001 weekday-shaped, weekday sets via `arrValues`
+  and a `9999999999` sentinel `value`; 5 with `descID` 272001
+  time-shaped, `value` = minutes since midnight — 540 on a rule titled
+  "Skimmer Ein", matching the `Time` singleton's unit); `descID` reads
+  as a per-control-type code × 1000 plus an offset (+001… events,
+  +101… actions: 342xxx on PushButton, 493xxx on PButtonT, 527xxx on
+  AcControl); the group/rule `operator` codes (observed only 1 and 3)
+  presumably encode the AND/OR combination. The full `descID`/`type`
+  tables ship inside the Loxone app bundle, not in any config.
+- The raw payload text is **not writer-stable**: two of the house
+  rules carry a raw CRLF *inside* the JSON (between tokens — the
+  parsed value is unaffected), the other eight are single-line. Any
+  comparison of `APC=` must therefore be structural, not textual.
+- **lxir's stance (design decision D37)**: rules are app/Miniserver-
+  owned — carried verbatim like all foreign content, compared by
+  `lxir diff`/`drift` (the `APC=` attribute joins the semantic
+  projection, canonicalized as parsed JSON per the point above), and
+  rendered as comment lines in the decompile full view. lxir never
+  writes them. Open oracle question: whether a GUI save preserves a
+  foreign-minted rule at all — prerequisite for any authoring work.
 
 ## Rooms and categories: `<IoData Cr=… Pr=…>`
 
@@ -231,6 +304,21 @@ survives *loading* but is **silently deleted on save, together with its
 wires**. Generalized: a save writes exactly the type descriptor's
 connector set; off-descriptor `<Co>`s are dropped without warning. Any
 tool inventing connectors will silently lose logic on the next GUI save.
+
+**UUIDs are unique — the GUI enforces it.** No two `<C>` objects or
+`<Co>` connectors share a `U=` anywhere in the corpus (~60 700 objects,
+~76 600 connectors); the only repeats are `<SObj>` entries, which point
+back at their object's UUID by design. Loxone Config treats a repeat as
+damage and heals it on open: it keeps the first occurrence and re-mints
+every later one (r50, 2026-08-28: 38 UUIDs carried 80 times → 38 kept,
+42 re-minted, with an object-shaped `ffff…` tail rather than the
+connector shape), so the next GUI save silently re-points whatever was
+wired to a later twin. The known producer is upload tooling that maps a
+ref's ports by its `Ref=` target plus connector key alone (lox-cli
+`config push`, 2026-08-25; fix proposed in
+[eisber/lox-cli#29](https://github.com/eisber/lox-cli/pull/29)): mirrors
+of one target share that key, so all of them got the same `AQ`/`Q` UUID. lxir refuses a base with repeats (`compile`,
+`adopt`) and checks its own output; `diff` warns, `drift` notes them.
 
 ## The three writers
 

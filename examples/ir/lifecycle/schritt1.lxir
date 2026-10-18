@@ -1,0 +1,15 @@
+# Lebenszyklus, Schritt 1 von 3: zwei Blöcke entstehen.
+# `cargo run --example lifecycle` spielt die drei Schritte gegen
+# examples/configs/haus.Loxone durch; die Schritte teilen sich EIN
+# Lockfile — wie eine Quelldatei, die zwischen Compiles editiert wird.
+
+extern sonne = VirtualIn(iname: "VI1")
+
+wetter_ok = Not(
+	I: sonne.Q,
+)
+
+altlast = And(
+	I1: sonne.Q,
+	I2: wetter_ok.Q,
+)
