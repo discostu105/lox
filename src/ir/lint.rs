@@ -104,6 +104,12 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                     let_refs.insert(name);
                 }
             }
+            Item::Attr(a) => {
+                object_refs.insert(&a.slug);
+                if let Value::Ref(name) = &a.value {
+                    let_refs.insert(name);
+                }
+            }
             Item::Extern(e) => {
                 if let MatchSpec::Mirrors(target) = &e.match_spec {
                     object_refs.insert(target);

@@ -18,7 +18,7 @@ errors.
 ```ebnf
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line
-           | wire | set | removed | moved | template | instance
+           | wire | set | attr | removed | moved | template | instance
            | page | test | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
@@ -43,6 +43,9 @@ wire       = slug "." port "<-" ( slug "." port | expr ) [ comment ] ;
                                     (* extern target; an expression RHS
                                        desugars into gate blocks (D24) *)
 set        = slug "." port "=" value [ comment ] ;            (* extern target *)
+attr       = slug "." attr-name "=" ( string | number | const-ref ) [ comment ] ;
+                                    (* extern target, top-level only (D39) *)
+attr-name  = "title" | "room" | "category" ;      (* lowercase: never a port key *)
 
 expr       = and-expr { "or" and-expr } ;
 and-expr   = unary { "and" unary } ;
@@ -301,6 +304,57 @@ Like `<-`, this is for **extern targets only**. A managed block's
 parameters belong in its argument list — assigning a managed port is a
 validation error pointing there. Assigning a port reference
 (`x.Port = y.Q`) is a parse error suggesting `<-`.
+
+### `.title` / `.room` / `.category` — assign an extern object (D39)
+
+```text
+extern klimasensor = LoxAIRDevice(uuid: "3000000e-0000-00e0-ffff504f94112233")
+extern klima_temp = LoxAIRAsensor(uuid: "30000010-0000-0100-ffff504f94112233")
+
+klimasensor.title = "Raumklima Garten"
+klimasensor.room = "Garten"
+klima_temp.category = "Klima"
+```
+
+Claims one attribute of an extern object — typically a device or one of
+its inputs/outputs, which only Loxone Config can create:
+
+- `.title` rewrites the object's `Title=`.
+- `.room` / `.category` name a `Place` / `Category` **by title**; it must
+  exist in the base exactly once (rooms and categories are created in
+  Loxone Config). The compiler writes its UUID into the object's
+  `<IoData Pr=…>` / `Cr=…`.
+
+The attribute must already exist on the object — lxir rewrites a
+binding, it never adds one (an object without it is refused: set it once
+in Loxone Config). Original and written value are recorded in the
+lockfile (`attr_claims`) and **restored** when the statement disappears
+(with a D31 tombstone until the base catches up).
+
+**Followers.** A room or category claim also rewrites every descendant
+(a device's inputs and outputs) whose binding equals the object's
+original value — the children that were "in the device's room" move
+with it, a child bound elsewhere stays. Managed blocks and descendants
+with their own claim for the same attribute (and their subtrees) are
+skipped. A follower changed in Loxone Config after the claim keeps the
+GUI's value and leaves the follower list on the next compile.
+
+Rules:
+
+- **Externs only.** A managed block's title is its label
+  (`slug = Type("…", …)`); its room/category stay with Loxone Config
+  (D19). Both are validation errors naming the remedy.
+- **Not what it is matched by.** `title:` matcher plus `.title`,
+  `room:` plus `.room`, `category:` plus `.category` are refused: after
+  the push the match would no longer find the object. Pin by `uuid:` or
+  `iname:`.
+- **One claim per object and attribute** — a duplicate statement is a
+  validation error; two slugs that resolve to the same object and claim
+  the same attribute are a compile error.
+- **Text, not units.** The value is a string, number or `let` reference;
+  a unit value is an error.
+- **Top-level only** — not inside a `template` body.
+- `x.room <- …` is a parse error: attributes are assigned, never wired.
 
 ### `removed` — authorize deleting a managed block
 
@@ -561,14 +615,14 @@ the generated SimSpec JSON instead of running.
   duplicates are an error.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
-- `<-` and port-`=` targets must be externs (see above).
+- `<-`, port-`=` and attribute-`=` targets must be externs (see above).
 - Duplicate parameter bindings, and duplicate identical wire bindings, in
   one argument list are errors.
 - `removed`/`moved` must not contradict declarations or each other
   (details under the statements).
 - Statement order is free; the conventional order is lets, externs,
-  blocks, extern wires, extern assignments, with lifecycle statements
-  (`moved`, `removed`) last.
+  blocks, extern wires, extern assignments (port and attribute), with
+  lifecycle statements (`moved`, `removed`) last.
 
 `lxir check` performs all of the above plus the static builtin-table
 checks (block types, port names, wire directions) — everything that does

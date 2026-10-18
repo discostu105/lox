@@ -69,9 +69,11 @@ big-bang.
 
 ## Non-goals
 
-- Replacing Loxone Config. Hardware setup, device pairing, room/category
-  taxonomy, and visualization stay in the GUI. The IR manages *logic blocks
-  and their wiring* — the part that benefits from being code.
+- Replacing Loxone Config. Hardware setup, device pairing, creating rooms
+  and categories, and visualization stay in the GUI. The IR manages *logic
+  blocks and their wiring* — the part that benefits from being code — plus
+  the *assignment* of existing objects: an extern's title, room and
+  category are plain facts a source file can hold (D39).
 - Transport. Talking to the Miniserver (FTP/HTTP, LoxCC compression,
   credentials) belongs to the `lox` / `lox-cli` CLIs, which consume this
   crate. The library stays pure: bytes in, bytes out.

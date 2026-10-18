@@ -239,10 +239,19 @@ occurrences across the house config and all 132 web configs sit on
 `IoData` and resolve to a Place/Category element (the only exceptions:
 one hand-written non-Config file carrying them on `<C>`, and dangling
 references inside template/fragment exports — so a resolver must treat
-an unresolvable `Pr`/`Cr` as "no room", not an error). `IoData` is D19
-GUI-owned residue: lxir never writes the assignment, only reads it for
-composite extern matching (`room:` / `category:` in
-[ir-spec.md](ir-spec.md)).
+an unresolvable `Pr`/`Cr` as "no room", not an error). On managed
+blocks `IoData` is D19 GUI-owned residue, carried forward unchanged. On
+externs lxir reads it for composite matching (`room:` / `category:`)
+and writes it for exactly one purpose: an attribute claim
+(`x.room = "…"` / `x.category = "…"`, D39 in [design.md](design.md)),
+which rewrites an existing `Pr=`/`Cr=` value in place — never adds the
+attribute or the element.
+
+Devices nest their inputs and outputs as child `<C>` elements, each with
+its own `<IoData Pr=…>`. In the house config 673 of 687 device children
+carry their device's room; the rest were moved individually. Loxone
+Config does not cascade a device's room change to its children (its UI
+strings have no such prompt) — the follower rule of D39 is lxir's own.
 
 ## Time functions: per-project singletons
 

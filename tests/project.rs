@@ -111,6 +111,31 @@ fn zero_flag_compile_inside_a_project() {
 }
 
 #[test]
+fn drift_accepts_a_fingerprint_recorded_by_an_older_lxir() {
+    // Locks written before D39 carry the v1 fingerprint, which is blind to
+    // room/category bindings. Upgrading lxir must not turn every project
+    // red: a v1 match is in sync, with a note; the next compile records v2.
+    let dir = make_project("drift-v1");
+    assert_ok(&lxir(&dir, &["compile"]), "compile");
+    let out = lxir::LoxoneDoc::parse(&std::fs::read(dir.join("out.Loxone")).unwrap()).unwrap();
+    let (v1, v2) = (
+        lxir::diff::semantic_fingerprint_v1(&out),
+        lxir::diff::semantic_fingerprint(&out),
+    );
+    let lock_path = dir.join("haus.lock.json");
+    let lock = std::fs::read_to_string(&lock_path).unwrap();
+    assert!(lock.contains(&v2));
+    std::fs::write(&lock_path, lock.replace(&v2, &v1)).unwrap();
+
+    let stdout = assert_ok(&lxir(&dir, &["drift", "out.Loxone"]), "drift v1");
+    assert!(stdout.contains("older lxir"), "stdout: {stdout}");
+    assert!(!lxir(&dir, &["drift", "haus.Loxone"]).status.success());
+
+    assert_ok(&lxir(&dir, &["compile"]), "recompile");
+    assert!(std::fs::read_to_string(&lock_path).unwrap().contains(&v2));
+}
+
+#[test]
 fn explicit_project_dir_and_missing_toml() {
     let dir = make_project("explicit-dir");
     let parent = dir.parent().unwrap().to_path_buf();

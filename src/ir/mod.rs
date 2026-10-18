@@ -49,10 +49,10 @@ mod validate;
 
 pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adopt_pages};
 pub use ast::{
-    ArgItem, Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl,
-    ExternDecl, Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef,
-    RemovedDecl, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    Value, WireDecl,
+    ArgItem, Attr, AttrDecl, Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr,
+    ExprWireDecl, ExternDecl, Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl,
+    PortRef, RemovedDecl, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem,
+    TickDecl, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{

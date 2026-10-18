@@ -34,7 +34,7 @@ format's validated facts).
 
 A config file has **three writers**: Loxone Config (the GUI), the Miniserver
 itself (app-created autopilot rules, device registrations), and this
-compiler. The compiler therefore claims ownership of exactly three kinds of
+compiler. The compiler therefore claims ownership of exactly four kinds of
 edit, and records each in the lockfile:
 
 1. **Managed blocks** (`slug = Type(…)` declarations) — created, rebuilt,
@@ -47,6 +47,12 @@ edit, and records each in the lockfile:
    rewrote on extern ports. The pre-set value is recorded in
    `lock.set_originals` and restored when the assignment disappears from
    source.
+4. **Attribute claims** (`target.title|room|category = value`) — the
+   title, or the room/category binding (`<IoData Pr=/Cr=>`), of an
+   *extern* object: devices and their inputs/outputs, which only Loxone
+   Config can create. Original, written value and the followers a
+   room/category claim carried along are recorded in `lock.attr_claims`
+   and restored when the claim disappears (D39).
 
 Everything else is somebody else's, and passes through unchanged.
 
@@ -59,8 +65,8 @@ Each compile:
 2. Resolves externs (lock pin first, then match spec; ambiguity is an error).
 3. **Tears down** its previous output from the base document: removes all
    locked managed objects, removes all locked extern wires, restores all
-   recorded set-originals. What remains is exactly the state owned by the
-   other two writers.
+   recorded set-originals and claimed attributes. What remains is exactly
+   the state owned by the other two writers.
 4. **Rebuilds** from source: plans port lists, mints missing UUIDs, emits
    managed `<C>` elements, applies wires and sets, records everything in the
    lock.
@@ -893,3 +899,49 @@ Anything unverified is an error, not a heuristic:
   so a value that differs from the pin can only be a source edit — the
   extern now resolves afresh (a typo is a `NoMatch`). A matcher-*kind*
   change keeps D32's rule and must still confirm the pinned object.
+- **D39 — attribute claims: externs get title, room and category from
+  source** (2026-10-18). Repurposing a device — a sensor moved to
+  another room and renamed — touched only objects lxir could match but
+  not change: the device, its outputs, their titles and room bindings.
+  The edit had to be a byte patch on the base plus an oracle check, the
+  exact workflow lxir exists to replace. Creating devices stays with
+  Loxone Config (pairing, serials and channel layout are the GUI's and
+  the Miniserver's); *assigning* an existing one is a plain fact a
+  source file can hold. Three statements, top-level only:
+  `x.title = "…"`, `x.room = "…"`, `x.category = "…"`, where `x` is an
+  extern. Rooms and categories are named by title and must exist in the
+  base exactly once (created in the GUI, like every other taxonomy
+  entry); the claim writes the `Place`/`Category` UUID into
+  `<IoData Pr=/Cr=>`, and only ever *rewrites* an attribute the object
+  already carries — an object without an `<IoData>` binding is refused
+  with the remedy (set it once in the GUI), so element shape and
+  attribute order are never invented. Managed blocks are refused:
+  their title is the block label, their bindings are D19 residue. An
+  extern may not claim what it is matched by (`title:` matcher plus
+  `.title`, `room:` plus `.room`, …): after the push the match would no
+  longer find its object — pin it by `uuid:` or `iname:`. **Followers:**
+  a device's inputs and outputs carry their own `Pr=`, and in the house
+  config 673 of 687 device children share their device's room. Loxone
+  Config has no cascade prompt for this, so lxir defines the rule: a
+  room/category claim also rewrites every descendant whose binding
+  equals the object's *original* value, skipping managed blocks and
+  descendants claimed explicitly for the same attribute (with their
+  subtrees). A child bound elsewhere stays where it is. The lock records
+  original, written value and the follower list (`attr_claims`);
+  teardown restores the object unconditionally and each follower only
+  while it still shows the written value — a follower moved in the GUI
+  after the claim keeps the GUI's choice and leaves the list on the next
+  compile. Withdrawal follows D31: a claim gone from source leaves a
+  `removed_attrs` tombstone that keeps restoring while the base still
+  shows the written value and retires once it does not. Claims are
+  planned against the torn-down document before anything is written, so
+  nested claims never record each other's write as their original. The
+  semantic diff and fingerprint now include room/category bindings
+  (fingerprint v2, `lxir-fingerprint-v2`; a diff blind to them would
+  call a moved device empty); `lxir drift` still accepts a v1
+  fingerprint recorded by an older lxir and notes it, and the next
+  compile records v2. Lockfile format bumped to v3. Validated against
+  the real config: the compiled claims equal the hand patch they
+  replace, and Loxone Config saves the output without a semantic
+  change. Not covered yet: membership lists such as the smoke alarm's
+  device list, which live in the alarm block, not in the device.

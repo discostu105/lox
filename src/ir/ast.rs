@@ -16,6 +16,9 @@ pub enum Item {
     Block(BlockDecl),
     Wire(WireDecl),
     Set(SetDecl),
+    /// `target.title|room|category = value` — claim one attribute of an
+    /// extern object (D39).
+    Attr(AttrDecl),
     Let(LetDecl),
     Removed(RemovedDecl),
     Moved(MovedDecl),
@@ -579,6 +582,68 @@ pub struct SetDecl {
     pub comment: Option<String>,
 }
 
+/// An object attribute an extern assignment can claim (D39). Lowercase
+/// names after the dot: no connector in the corpus carries these keys, and
+/// a port of that name could not be wired or set anyway (`=`/`<-` on it
+/// always mean the attribute).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Attr {
+    /// The object's `Title=`.
+    Title,
+    /// The room binding: `Pr=` on the object's `<IoData>` (a `Place` UUID).
+    Room,
+    /// The category binding: `Cr=` on the object's `<IoData>` (a
+    /// `Category` UUID).
+    Category,
+}
+
+impl Attr {
+    pub const ALL: [Attr; 3] = [Attr::Title, Attr::Room, Attr::Category];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Attr::Title => "title",
+            Attr::Room => "room",
+            Attr::Category => "category",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Attr> {
+        Attr::ALL.into_iter().find(|a| a.name() == s)
+    }
+}
+
+impl fmt::Display for Attr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// `target.title = "…"`, `target.room = "…"`, `target.category = "…"` —
+/// claim one attribute of an *extern* object (D39): its title, or its
+/// room/category binding. A room or category is named by the title of its
+/// `Place`/`Category`. The original is preserved in the lockfile and
+/// restored when the statement leaves the source, like a port assignment;
+/// a room/category change carries along the object's descendants that
+/// shared its old value (a device's inputs and outputs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttrDecl {
+    pub slug: String,
+    pub attr: Attr,
+    pub value: Value,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for AttrDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{} = {}", self.slug, self.attr, self.value)
+    }
+}
+
 /// `let name = value` — a named constant. Referenced by bare identifier in
 /// any value position (argument lists, extern assignments). Pure
 /// substitution: the compiler resolves references before emitting `Def=`
@@ -894,6 +959,14 @@ impl Module {
         })
     }
 
+    /// The attribute assignments on externs (D39).
+    pub fn attrs(&self) -> impl Iterator<Item = &AttrDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Attr(a) => Some(a),
+            _ => None,
+        })
+    }
+
     pub fn lets(&self) -> impl Iterator<Item = &LetDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Let(l) => Some(l),
@@ -1067,6 +1140,7 @@ impl Module {
             Ok(())
         };
 
+        let mut attrs_seen: BTreeSet<(&str, Attr)> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -1165,6 +1239,64 @@ impl Module {
                     }
                     value_refs(&s.value)?;
                 }
+                Item::Attr(a) => {
+                    let target = format!("{}.{}", a.slug, a.attr);
+                    match names.get(a.slug.as_str()) {
+                        Some(NameKind::Extern) => {}
+                        Some(NameKind::Block) => {
+                            let instead = match a.attr {
+                                Attr::Title => format!(
+                                    "give it a label instead (`{} = {}(\"…\", …)`)",
+                                    a.slug,
+                                    block_type(&a.slug)
+                                ),
+                                Attr::Room | Attr::Category => format!(
+                                    "a managed block's {} stays with Loxone Config \
+                                     (carried forward from the base, D19)",
+                                    a.attr
+                                ),
+                            };
+                            return compile_err(format!(
+                                "`{target} = …` targets managed block `{}` — {instead}; \
+                                 attribute assignment is for externs only",
+                                a.slug
+                            ));
+                        }
+                        _ => object_ref(&PortRef {
+                            slug: a.slug.clone(),
+                            port: a.attr.name().to_string(),
+                        })?,
+                    }
+                    // An assignment must not rewrite what its own extern is
+                    // matched by: once deployed, the match would no longer
+                    // find the object it pinned.
+                    if let Some(e) = self.externs().find(|e| e.slug == a.slug) {
+                        let matched_by_it = match a.attr {
+                            Attr::Title => matches!(e.match_spec, MatchSpec::Title(_)),
+                            Attr::Room => e.room.is_some(),
+                            Attr::Category => e.category.is_some(),
+                        };
+                        if matched_by_it {
+                            return compile_err(format!(
+                                "`{target} = …` rewrites what extern `{}` is matched by \
+                                 (`{}`) — after the push the match would no longer find \
+                                 the object; pin it by `uuid:` (or `iname:`) instead",
+                                a.slug,
+                                e.spec()
+                            ));
+                        }
+                    }
+                    if !attrs_seen.insert((a.slug.as_str(), a.attr)) {
+                        return compile_err(format!("duplicate assignment `{target} = …`"));
+                    }
+                    if let Value::Unit { .. } = a.value {
+                        return compile_err(format!(
+                            "`{a}` — a {} is text, not a unit value",
+                            a.attr
+                        ));
+                    }
+                    value_refs(&a.value)?;
+                }
                 // Unlike `Set`, a test may target managed blocks — driving
                 // their inputs (and overriding outputs) is the point. Slug
                 // references are deferred to the flattened view: tests may
@@ -1243,7 +1375,9 @@ impl Module {
                             _ => {
                                 return compile_err(format!(
                                     "template `{}`: only block declarations, wires, port \
-                                     assignments, and comments are allowed in a body",
+                                     assignments, and comments are allowed in a body \
+                                     (attribute assignments like `x.room = …` are \
+                                     top-level statements, D39)",
                                     t.name
                                 ));
                             }
@@ -1431,7 +1565,7 @@ impl Module {
                 Item::Extern(_) => 0,
                 Item::Block(_) => 1,
                 Item::Wire(_) | Item::ExprWire(_) => 2,
-                Item::Set(_) => 3,
+                Item::Set(_) | Item::Attr(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
                 Item::Moved(_) => 6,
@@ -1510,6 +1644,9 @@ impl Module {
                 }
                 Item::Set(s) => {
                     out.push_str(&format!("{} = {}{}\n", s.target, s.value, tail(&s.comment)));
+                }
+                Item::Attr(a) => {
+                    out.push_str(&format!("{a}{}\n", tail(&a.comment)));
                 }
                 Item::Let(l) => {
                     out.push_str(&format!(

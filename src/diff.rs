@@ -45,6 +45,8 @@ pub struct DocDiff {
     pub removed: Vec<ObjectSummary>,
     pub renamed: Vec<Rename>,
     pub param_changes: Vec<ParamChange>,
+    /// Room/category binding changes (D39).
+    pub placements: Vec<PlacementChange>,
     pub wires_added: Vec<WireView>,
     pub wires_removed: Vec<WireView>,
 }
@@ -55,6 +57,7 @@ impl DocDiff {
             && self.removed.is_empty()
             && self.renamed.is_empty()
             && self.param_changes.is_empty()
+            && self.placements.is_empty()
             && self.wires_added.is_empty()
             && self.wires_removed.is_empty()
     }
@@ -81,6 +84,42 @@ pub struct ParamChange {
     pub to: Option<String>,
 }
 
+/// A room or category binding change (`<IoData Pr=…>` / `Cr=…`) on an
+/// object present in both documents. The values are `Place`/`Category`
+/// UUIDs; the titles are resolved in each value's own document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlacementChange {
+    pub object_uuid: String,
+    pub block_type: String,
+    /// The object's title in the new document.
+    pub title: Option<String>,
+    /// `"room"` or `"category"`.
+    pub attr: &'static str,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub from_title: Option<String>,
+    pub to_title: Option<String>,
+}
+
+/// The room/category bindings of one object, from its `<IoData>` child —
+/// where every binding lives (docs/loxone-format.md). Since lxir can
+/// rewrite them (D39), they are part of the projection: a diff blind to
+/// them would call a moved device semantically empty.
+fn placement(doc: &LoxoneDoc, o: &ObjectSummary) -> [(&'static str, Option<String>); 2] {
+    let io = doc
+        .element_at(&o.path)
+        .and_then(|el| el.child_elements().find(|c| c.name == "IoData"));
+    let get = |name: &str| io.and_then(|io| io.attr_decoded(name).map(|v| v.into_owned()));
+    [("room", get("Pr")), ("category", get("Cr"))]
+}
+
+fn taxonomy_titles(objs: &BTreeMap<String, ObjectSummary>) -> BTreeMap<&str, &str> {
+    objs.values()
+        .filter(|o| matches!(o.block_type.as_str(), "Place" | "Category"))
+        .filter_map(|o| Some((o.uuid.as_str(), o.title.as_deref()?)))
+        .collect()
+}
+
 /// Compare two documents object-by-object (matched on UUID).
 pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
     let objs_a: BTreeMap<String, ObjectSummary> = a
@@ -95,6 +134,7 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
         .collect();
 
     let mut out = DocDiff::default();
+    let (names_a, names_b) = (taxonomy_titles(&objs_a), taxonomy_titles(&objs_b));
 
     for (uuid, ob) in &objs_b {
         match objs_a.get(uuid) {
@@ -134,6 +174,25 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                             port_key: key.clone(),
                             from: def_a.clone(),
                             to: None,
+                        });
+                    }
+                }
+                for ((attr, va), (_, vb)) in placement(a, oa).into_iter().zip(placement(b, ob)) {
+                    if va != vb {
+                        let title_in = |names: &BTreeMap<&str, &str>, v: &Option<String>| {
+                            v.as_deref()
+                                .and_then(|v| names.get(v))
+                                .map(|t| t.to_string())
+                        };
+                        out.placements.push(PlacementChange {
+                            object_uuid: uuid.clone(),
+                            block_type: ob.block_type.clone(),
+                            title: ob.title.clone(),
+                            attr,
+                            from_title: title_in(&names_a, &va),
+                            to_title: title_in(&names_b, &vb),
+                            from: va,
+                            to: vb,
                         });
                     }
                 }
@@ -181,13 +240,29 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// recomputes it over a fresh download to answer "did another writer
 /// change something?" from one parse, no reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, true)
+}
+
+/// The fingerprint as lxir wrote it before room/category bindings joined
+/// the projection (D39) — recorded in every lock compiled until then.
+/// `lxir drift` accepts it so an upgrade alone does not read as drift; the
+/// next compile records the current form.
+pub fn semantic_fingerprint_v1(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, false)
+}
+
+fn fingerprint(doc: &LoxoneDoc, with_placement: bool) -> String {
     // Length-prefixed fields make the byte stream unambiguous.
     fn field(buf: &mut Vec<u8>, tag: u8, s: &str) {
         buf.push(tag);
         buf.extend_from_slice(&(s.len() as u64).to_le_bytes());
         buf.extend_from_slice(s.as_bytes());
     }
-    let mut buf: Vec<u8> = b"lxir-fingerprint-v1".to_vec();
+    let mut buf: Vec<u8> = if with_placement {
+        b"lxir-fingerprint-v2".to_vec()
+    } else {
+        b"lxir-fingerprint-v1".to_vec()
+    };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     for o in &objects {
@@ -218,6 +293,14 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
             if let Some(v) = canonical_attr(name, &value) {
                 field(&mut buf, b'a', name);
                 field(&mut buf, b'v', &v);
+            }
+        }
+        if with_placement {
+            for (attr, v) in placement(doc, o) {
+                if let Some(v) = v {
+                    field(&mut buf, b'p', attr);
+                    field(&mut buf, b'v', &v);
+                }
             }
         }
     }
@@ -367,5 +450,38 @@ mod tests {
         assert_ne!(fp, semantic_fingerprint(&doc2("Y", "Cap", "1", true)));
         assert_ne!(fp, semantic_fingerprint(&doc2("X", "Cap", "2", true)));
         assert_ne!(fp, semantic_fingerprint(&doc2("X", "Cap", "1", false)));
+    }
+
+    #[test]
+    fn room_and_category_bindings_are_semantic() {
+        let doc_in = |room: &str| {
+            let s = format!(
+                "<ControlList Version=\"1\" NextObj=\"5\">\r\n\
+                 \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+                 \t\t<C Type=\"Place\" U=\"00000005-0000-0000-ffff000000000001\" Title=\"Bad\"/>\r\n\
+                 \t\t<C Type=\"Place\" U=\"00000006-0000-0000-ffff000000000001\" Title=\"Garten\"/>\r\n\
+                 \t\t<C Type=\"LoxAIRDevice\" U=\"00000007-0000-0000-ffff000000000001\" Title=\"Sensor\">\r\n\
+                 \t\t\t<IoData Pr=\"{room}\"/>\r\n\
+                 \t\t</C>\r\n\
+                 \t</C>\r\n\
+                 </ControlList>\r\n"
+            );
+            LoxoneDoc::parse(s.as_bytes()).unwrap()
+        };
+        let a = doc_in("00000005-0000-0000-ffff000000000001");
+        let b = doc_in("00000006-0000-0000-ffff000000000001");
+        let d = diff(&a, &b);
+        assert!(!d.is_empty());
+        assert_eq!(d.placements.len(), 1);
+        let p = &d.placements[0];
+        assert_eq!((p.attr, p.title.as_deref()), ("room", Some("Sensor")));
+        assert_eq!(p.from_title.as_deref(), Some("Bad"));
+        assert_eq!(p.to_title.as_deref(), Some("Garten"));
+
+        // v2 sees the move; v1 (what older lxir recorded, D21) does not —
+        // `lxir drift` accepts a v1 fingerprint against the v1 form only.
+        assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
+        assert_eq!(semantic_fingerprint_v1(&a), semantic_fingerprint_v1(&b));
+        assert_ne!(semantic_fingerprint(&a), semantic_fingerprint_v1(&a));
     }
 }

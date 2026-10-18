@@ -1,10 +1,10 @@
 {
-  "lockfile_version": 2,
+  "lockfile_version": 3,
   "target": {
     "config_version": "17010727",
     "miniserver_serial": "504F94112233",
     "source_config_sha256": "9f9cb562cebcd5b435b29bdb307fc07b5082adf58c3acb7d039b00a45b708511",
-    "semantic_fingerprint": "448795db6641f9cec6888706ef63e04b06619f5d447bc44593a4260ff6c851da"
+    "semantic_fingerprint": "6ffc61318ed0290270f31e1b1413e997aaa40092618df2aaf55065047998f08a"
   },
   "counters": {
     "next_obj": 202,

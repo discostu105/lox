@@ -335,6 +335,25 @@ haus/
       the fixed-two-input gate cascade (D8), and an extern wire.
       Kept compiling by `tests/ir.rs` (fixpoint + canonical form).
 
+## Devices: assignment from source
+
+Devices and their inputs/outputs are created in Loxone Config (pairing,
+serials, channel layout); what a source file can own is how existing
+ones are *assigned*.
+
+- [x] Attribute claims 2026-10-18 (D39): `x.title`, `x.room`,
+      `x.category` on externs, with followers (the device's children
+      that shared its room/category move along), D31 tombstones on
+      withdrawal, room/category bindings in the semantic diff and
+      fingerprint (v2), lockfile v3. Accepted against a real device
+      repurposing on the house config: the compiled claims equal the
+      hand patch they replace.
+- [ ] Membership lists: blocks that list devices they act on (the smoke
+      alarm's detector list and similar) keep that list inside the
+      block, not on the device. Needs a corpus survey of the list
+      formats and an oracle proof before a `members:`-style claim is
+      admitted.
+
 ## Automatic Designer (Automatik Designer)
 
 The app's rule engine; each rule is an `AutopilotRule` block whose whole

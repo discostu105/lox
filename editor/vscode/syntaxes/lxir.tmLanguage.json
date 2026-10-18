@@ -15,6 +15,7 @@
     { "include": "#block" },
     { "include": "#instance" },
     { "include": "#wire" },
+    { "include": "#attr" },
     { "include": "#set" },
     { "include": "#exprops" },
     { "include": "#portref" },
@@ -211,6 +212,15 @@
         "2": { "name": "punctuation.accessor.lxir" },
         "3": { "name": "variable.other.member.lxir" },
         "4": { "name": "keyword.operator.arrow.lxir" }
+      }
+    },
+    "attr": {
+      "match": "^\\s*([a-z][a-z0-9_]*)(\\.)(title|room|category)\\s*(=)",
+      "captures": {
+        "1": { "name": "variable.other.lxir" },
+        "2": { "name": "punctuation.accessor.lxir" },
+        "3": { "name": "support.type.property-name.lxir" },
+        "4": { "name": "keyword.operator.assignment.lxir" }
       }
     },
     "set": {
