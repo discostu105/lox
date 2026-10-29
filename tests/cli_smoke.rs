@@ -79,6 +79,7 @@ subcmd_help!(help_history, "history");
 subcmd_help!(help_autopilot, "autopilot");
 subcmd_help!(help_autopilot_ls, "autopilot", "ls");
 subcmd_help!(help_autopilot_state, "autopilot", "state");
+subcmd_help!(help_autopilot_changed, "autopilot", "changed");
 
 // System commands
 subcmd_help!(help_status, "status");

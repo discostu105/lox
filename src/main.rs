@@ -761,6 +761,12 @@ pub(crate) enum Cmd {
         room: Option<String>,
     },
     /// List and inspect automatic rules (Automatik-Regel / Autopilot)
+    ///
+    /// A rule created or edited in the app can live only in the Miniserver's
+    /// custom changes, not in the program file: `lox autopilot ls` and a config
+    /// download don't see it, and uploading a config discards it (the Miniserver
+    /// logs "Remove old custom changes"). Before an upload, check that
+    /// `lox autopilot changed` is older than the download the upload is based on.
     Autopilot {
         #[command(subcommand)]
         action: AutopilotCmd,
@@ -1051,11 +1057,24 @@ pub(crate) enum InputCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum AutopilotCmd {
-    /// List all automatic rules
+    /// List the rules in the program file: active, and whether their JSON is valid
+    ///
+    /// Reads the config like `lox config` does (config repo or cached download;
+    /// `--at`, `--file`, `--download`). Rules edited in the app since the last
+    /// upload may differ: see `lox autopilot changed`.
     #[command(alias = "list")]
-    Ls,
-    /// Show when a rule last fired
+    Ls {
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Show when a rule last ran (the Miniserver's rule history)
     State { name_or_uuid: String },
+    /// When the rules were last changed on the Miniserver (e.g. edited in the app)
+    ///
+    /// Reads the live `changed` state of the structure's autopilot entry (unix
+    /// seconds; 0 = never). `-o json` gives `{"changed": <unix>, "changed_at":
+    /// <RFC 3339 or null>, "uuid": ...}` for scripts.
+    Changed,
 }
 
 #[derive(Subcommand)]
@@ -1338,6 +1357,9 @@ pub(crate) enum ConfigCmd {
         save_as: Option<String>,
     },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
+    ///
+    /// The Miniserver then discards its custom changes, such as rules edited in
+    /// the app since the last upload: check `lox autopilot changed` first.
     Upload {
         /// Path to a config ZIP file
         file: String,
