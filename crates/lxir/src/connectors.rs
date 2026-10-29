@@ -467,6 +467,7 @@ pub enum RefValue {
     Analog,
     Text,
 }
+use RefValue::{Analog, Digital, Text};
 
 /// `LinkRefType=` code and value flag a ref carries for a mirrored
 /// object of the given XML type — Loxone Config's internal type-registry
@@ -483,33 +484,37 @@ pub enum RefValue {
 /// (8× digital, 1× analog); minted mirrors of blocks default to digital
 /// until evidence for a rule emerges.
 pub fn ref_link_type(target_type: &str) -> Option<(u32, RefValue)> {
-    use RefValue::{Analog, Digital, Text};
-    Some(match target_type {
-        "Online" => (2, Digital),
-        "DigitalIn" => (55, Digital),
-        "Actor" => (63, Digital),
-        "VirtualIn" => (71, Digital),
-        "VirtualUdpInCmd" => (79, Digital),
-        "VirtualTextIn" => (83, Text),
-        "VirtualHttpInCmd" => (87, Analog),
-        "Lox1wireAsensor" => (103, Analog),
-        "OvertempShutdown" => (109, Digital),
-        "ApiActor" => (136, Text),
-        "ModbusASensor" => (153, Analog),
-        "ModbusAActor" => (156, Analog),
-        "LoxAIRsensor" => (172, Digital),
-        "LoxAIRAsensor" => (173, Analog),
-        "LoxAIRactor" => (174, Digital),
-        "LoxAIRAactor" => (175, Analog),
-        "TreeSensor" => (182, Digital),
-        "TreeAsensor" => (183, Analog),
-        "TreeActor" => (184, Digital),
-        "TreeAactor" => (185, Analog),
-        "Daylight" => (281, Digital),
-        "Memory" => (320, Digital),
-        _ => return None,
-    })
+    REF_LINK_TYPES
+        .iter()
+        .find(|&&(t, ..)| t == target_type)
+        .map(|&(_, code, value)| (code, value))
 }
+
+/// The table behind `ref_link_type`: target type, code, value flag.
+const REF_LINK_TYPES: &[(&str, u32, RefValue)] = &[
+    ("Online", 2, Digital),
+    ("DigitalIn", 55, Digital),
+    ("Actor", 63, Digital),
+    ("VirtualIn", 71, Digital),
+    ("VirtualUdpInCmd", 79, Digital),
+    ("VirtualTextIn", 83, Text),
+    ("VirtualHttpInCmd", 87, Analog),
+    ("Lox1wireAsensor", 103, Analog),
+    ("OvertempShutdown", 109, Digital),
+    ("ApiActor", 136, Text),
+    ("ModbusASensor", 153, Analog),
+    ("ModbusAActor", 156, Analog),
+    ("LoxAIRsensor", 172, Digital),
+    ("LoxAIRAsensor", 173, Analog),
+    ("LoxAIRactor", 174, Digital),
+    ("LoxAIRAactor", 175, Analog),
+    ("TreeSensor", 182, Digital),
+    ("TreeAsensor", 183, Analog),
+    ("TreeActor", 184, Digital),
+    ("TreeAactor", 185, Analog),
+    ("Daylight", 281, Digital),
+    ("Memory", 320, Digital),
+];
 
 /// Every *logic* block type `builtin` knows. This is the default managed
 /// set for decompile/adopt; `InputRef`/`OutputRef` are mintable too (see
@@ -820,6 +825,19 @@ pub fn crosscheck(obs: &Observations, legacy: &LegacyDb) -> BTreeMap<String, Typ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ref_link_types_name_one_type_per_code() {
+        let mut types = std::collections::BTreeSet::new();
+        let mut codes = std::collections::BTreeSet::new();
+        for &(t, code, _) in REF_LINK_TYPES {
+            assert!(types.insert(t), "{t} listed twice");
+            assert!(codes.insert(code), "LinkRefType {code} listed twice");
+        }
+        assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
+        assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
+        assert_eq!(ref_link_type("And"), None);
+    }
 
     #[test]
     fn builtin_shapes() {
