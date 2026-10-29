@@ -4,6 +4,7 @@
 
 use crate::error::{Error, Result};
 use crate::xml::{Element, Node, XmlDocument};
+use serde::Serialize;
 use std::collections::BTreeMap;
 
 /// The `Next*` counters on the `<ControlList>` root. Loxone Config bumps
@@ -18,8 +19,9 @@ pub struct Counters {
 
 /// One `<C>` object, summarized. `path` addresses the element inside the
 /// XML tree (child indexes from the root, counting all nodes).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ObjectSummary {
+    #[serde(skip)]
     pub path: Vec<usize>,
     pub uuid: String,
     pub block_type: String,
@@ -47,7 +49,7 @@ pub struct PortView {
 }
 
 /// A resolved wire: source and sink port UUIDs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct WireView {
     pub from_port: String,
     pub to_port: String,
