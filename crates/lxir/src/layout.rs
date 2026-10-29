@@ -11,6 +11,7 @@
 //! Placement is deterministic (integer arithmetic, ordered collections,
 //! ties broken by source order) and incremental: it moves only the
 //! objects it is handed, everything else on the page is an obstacle.
+//! It keeps to the paper sheet the GUI draws the page on (D50).
 
 use crate::connectors::{PortDir, builtin};
 use crate::doc::{LoxoneDoc, ports};
@@ -35,6 +36,17 @@ const MARGIN: i64 = 384;
 const STACK_GAP: i64 = 2 * ROW;
 /// Placement cost of one wire running right to left — it loops around.
 const BACKWARD_COST: i64 = 4 * GAP;
+/// A cluster's (column gap, stacking gap), tried in order until it fits
+/// on the sheet: the GUI's own spacing first, then tighter (D50).
+const SPACINGS: [(i64, i64); 3] = [(GAP, STACK_GAP), (6 * GRID, STACK_GAP), (4 * GRID, ROW)];
+/// The drawable part of an A3 landscape sheet (420 × 297 mm in twips,
+/// on the grid), above the title block the GUI prints along its bottom.
+const A3_LANDSCAPE: Layout = Layout {
+    px: 0,
+    py: 0,
+    px2: 23808,
+    py2: 16032,
+};
 
 impl Layout {
     pub fn at(x: i64, y: i64, w: i64, h: i64) -> Layout {
@@ -70,6 +82,11 @@ impl Layout {
         self.px < o.px2 && o.px < self.px2 && self.py < o.py2 && o.py < self.py2
     }
 
+    /// Lies entirely inside `o`.
+    pub fn within(&self, o: &Layout) -> bool {
+        o.px <= self.px && self.px2 <= o.px2 && o.py <= self.py && self.py2 <= o.py2
+    }
+
     pub fn shift(&self, dx: i64, dy: i64) -> Layout {
         Layout::at(self.px + dx, self.py + dy, self.w(), self.h())
     }
@@ -102,6 +119,57 @@ impl Layout {
 
 fn snap(v: i64) -> i64 {
     v.div_euclid(GRID) * GRID
+}
+
+/// Where the GUI's paper sheet lets a page be drawn, from the document's
+/// `PaperFormat` (one sheet for every page). Only A3 landscape (`2`, the
+/// format of nearly every config in the corpus, and the largest the GUI
+/// offers) is known; any other format leaves pages unbounded.
+pub fn sheet(doc: &LoxoneDoc) -> Option<Layout> {
+    match doc.document()?.attr("PaperFormat")? {
+        "2" => Some(A3_LANDSCAPE),
+        _ => None,
+    }
+}
+
+/// Less than a grid unit past the edge is on the sheet: the GUI draws a
+/// block as tall as its rows, wherever it was dropped.
+fn on_sheet(r: &Layout, sheet: &Layout) -> bool {
+    r.within(&sheet.grow(GRID - 1, GRID - 1, GRID - 1))
+}
+
+/// Of the objects with these UUIDs, those drawn past the edge of the
+/// sheet (D50), labels included, by the title of their page — what
+/// [`PageGeometry::off_sheet`] says of each page that holds one. Empty
+/// when the sheet is unknown.
+pub fn off_sheet(doc: &LoxoneDoc, uuids: &BTreeSet<&str>) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if sheet(doc).is_none() {
+        return out;
+    }
+    let pages: BTreeSet<String> = doc
+        .objects()
+        .into_iter()
+        .filter(|o| uuids.contains(o.uuid.as_str()))
+        .filter_map(|o| {
+            let page = doc.element_at(&o.path[..o.path.len().checked_sub(1)?])?;
+            (page.name == "C" && page.attr("Type") == Some("Page"))
+                .then(|| page.attr("U").map(str::to_string))?
+        })
+        .collect();
+    for page in &pages {
+        let Some(geo) = PageGeometry::of(doc, page) else {
+            continue;
+        };
+        for i in geo.off_sheet() {
+            if uuids.contains(geo.objects[i].uuid.as_str()) {
+                out.entry(geo.title.clone())
+                    .or_default()
+                    .push(geo.objects[i].uuid.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Whether `tag` sits beside `block` the way the GUI sets a ref next to
@@ -282,6 +350,8 @@ pub struct PageGeometry {
     pub objects: Vec<GeoObject>,
     pub wires: Vec<GeoWire>,
     pub labels: Vec<GeoLabel>,
+    /// The drawable part of the paper sheet, if its format is known.
+    pub sheet: Option<Layout>,
 }
 
 impl PageGeometry {
@@ -427,6 +497,7 @@ impl PageGeometry {
             objects,
             wires: geo_wires,
             labels,
+            sheet: sheet(doc),
         })
     }
 
@@ -441,6 +512,21 @@ impl PageGeometry {
 
     pub fn index_of(&self, uuid: &str) -> Option<usize> {
         self.objects.iter().position(|o| o.uuid == uuid)
+    }
+
+    /// Objects drawn past the edge of the sheet, labels included.
+    pub fn off_sheet(&self) -> Vec<usize> {
+        let Some(sheet) = self.sheet else {
+            return Vec::new();
+        };
+        (0..self.objects.len())
+            .filter(|&i| {
+                let r = &self.objects[i].rect;
+                !std::iter::once(*r)
+                    .chain(self.label_rects(i, r))
+                    .all(|r| on_sheet(&r, &sheet))
+            })
+            .collect()
     }
 
     /// Room an object takes beyond its rectangle for off-page labels:
@@ -485,6 +571,10 @@ impl PageGeometry {
 /// the free spot that keeps its wires to the rest of the page shortest
 /// and running left to right. Free ref tags go beside the port they
 /// serve, stacked like the GUI stacks them.
+///
+/// Everything stays on the page's sheet (D50): a cluster with no room
+/// there at the GUI's spacing is packed tighter, and only one that fits
+/// nowhere even then goes past the edge, at the GUI's spacing.
 pub fn place(
     geo: &PageGeometry,
     free: &[usize],
@@ -561,8 +651,19 @@ pub fn place(
     };
     let mut out = BTreeMap::new();
     for nodes in &clusters {
-        let rel = layer_cluster(geo, nodes, &room);
-        let placed = settle(geo, nodes, &rel, &room, &at, &hard, &reserved, prev);
+        let settle_at = |(gap, stack): (i64, i64), bound: Option<Layout>| {
+            let rel = layer_cluster(geo, nodes, &room, gap, stack);
+            settle(geo, nodes, &rel, &room, &at, &hard, &reserved, prev, bound)
+        };
+        let placed = geo
+            .sheet
+            .and_then(|sheet| {
+                SPACINGS
+                    .iter()
+                    .find_map(|&spacing| settle_at(spacing, Some(sheet)))
+            })
+            .or_else(|| settle_at(SPACINGS[0], None))
+            .expect("an unbounded page has room below its content");
         for (&i, r) in &placed {
             at.insert(i, *r);
             hard.push(*r);
@@ -585,6 +686,11 @@ pub fn place(
             (!is_ref(other.0) && at.contains_key(&other.0)).then_some(other)
         });
         let (w, h) = geo.objects[t].size;
+        // A tag keeps to the sheet unless its block is past the edge: then
+        // it stays with the block.
+        let bound = geo
+            .sheet
+            .filter(|s| partner.is_none_or(|(o, _)| on_sheet(&at[&o], s)));
         let spot = partner.and_then(|(o, p)| {
             let (x, y) = geo.objects[o].port_at(p, &at[&o]);
             let x = match geo.objects[o].ports[p].side {
@@ -593,7 +699,8 @@ pub fn place(
             };
             let mut r = Layout::at(snap(x), snap(y - ROW / 2), w, h);
             for _ in 0..256 {
-                if r.px >= 0 && !hard.iter().any(|o| o.intersects(&r)) {
+                let on_page = bound.map_or(r.px >= 0, |s| r.within(&s));
+                if on_page && !hard.iter().any(|o| o.intersects(&r)) {
                     return Some(r);
                 }
                 r = r.shift(0, ROW);
@@ -602,7 +709,10 @@ pub fn place(
         });
         let r = spot.unwrap_or_else(|| {
             let rel = BTreeMap::from([(t, Layout::at(0, 0, w, h))]);
-            settle(geo, &[t], &rel, &room, &at, &hard, &reserved, prev)[&t]
+            bound
+                .and_then(|s| settle(geo, &[t], &rel, &room, &at, &hard, &reserved, prev, Some(s)))
+                .or_else(|| settle(geo, &[t], &rel, &room, &at, &hard, &reserved, prev, None))
+                .expect("an unbounded page has room below its content")[&t]
         });
         at.insert(t, r);
         hard.push(r);
@@ -614,11 +724,14 @@ pub fn place(
 /// A cluster's relative layout: columns by longest path over the wires
 /// (feedback edges broken by a depth-first walk in source order), order
 /// within a column by barycenter sweeps, each block aligned with the
-/// ports that feed it.
+/// ports that feed it. Columns are `gap` apart, blocks in a column
+/// `stack_gap`.
 fn layer_cluster(
     geo: &PageGeometry,
     nodes: &[usize],
     room: &dyn Fn(usize) -> (i64, i64),
+    gap: i64,
+    stack_gap: i64,
 ) -> BTreeMap<usize, Layout> {
     let local: BTreeMap<usize, usize> = nodes.iter().enumerate().map(|(k, &i)| (i, k)).collect();
     let n = nodes.len();
@@ -771,7 +884,7 @@ fn layer_cluster(
             .max()
             .unwrap_or(0);
         let width = columns[c].iter().map(|&k| size(k).0).max().unwrap_or(0);
-        cursor = x[c] + width + right + GAP;
+        cursor = x[c] + width + right + gap;
     }
 
     // Rows: each block level with the mean of the ports feeding it, never
@@ -793,7 +906,7 @@ fn layer_cluster(
             };
             let top = snap(want.max(floor) + GRID - 1);
             y[k] = Some(top);
-            floor = top + size(k).1 + STACK_GAP;
+            floor = top + size(k).1 + stack_gap;
         }
     }
     (0..n)
@@ -807,7 +920,10 @@ fn layer_cluster(
         .collect()
 }
 
-/// Moves a relatively laid-out cluster to its best free spot on the page.
+/// Moves a relatively laid-out cluster to its best free spot on the page,
+/// inside `bound` with its labels and tags — `None` if there is none
+/// there. Unbounded, the page's right and lower side go on forever: there
+/// is always a spot.
 #[allow(clippy::too_many_arguments)]
 fn settle(
     geo: &PageGeometry,
@@ -818,7 +934,8 @@ fn settle(
     hard: &[Layout],
     reserved: &[Layout],
     prev: &BTreeMap<usize, Layout>,
-) -> BTreeMap<usize, Layout> {
+    bound: Option<Layout>,
+) -> Option<BTreeMap<usize, Layout>> {
     let members: BTreeSet<usize> = nodes.iter().copied().collect();
     let bbox = rel
         .iter()
@@ -870,6 +987,12 @@ fn settle(
         ys.insert(o.py2 + MARGIN - bbox.py);
         ys.insert(o.py - MARGIN - bbox.py2);
     }
+    if let Some(b) = bound {
+        xs.insert(b.px - bbox.px);
+        xs.insert(b.px2 - bbox.px2);
+        ys.insert(b.py - bbox.py);
+        ys.insert(b.py2 - bbox.py2);
+    }
     let stay = nodes
         .first()
         .and_then(|i| Some((prev.get(i)?.px - rel[i].px, prev.get(i)?.py - rel[i].py)));
@@ -904,7 +1027,11 @@ fn settle(
     for &dy in &ys {
         for &dx in &xs {
             let (dx, dy) = (snap(dx), snap(dy));
-            if bbox.px + dx < 0 || bbox.py + dy < 0 {
+            let fits = match bound {
+                Some(b) => bbox.shift(dx, dy).within(&b),
+                None => bbox.px + dx >= 0 && bbox.py + dy >= 0,
+            };
+            if !fits {
                 continue;
             }
             candidates.push((cost(dx, dy), dy, dx));
@@ -916,16 +1043,16 @@ fn settle(
         let b = bbox.shift(dx, dy).grow(MARGIN, MARGIN, MARGIN);
         !hard.iter().chain(reserved).any(|o| o.intersects(&b))
     };
-    let (dx, dy) = candidates
-        .iter()
-        .find(|&&(_, dy, dx)| clear(dx, dy))
-        .map(|&(_, dy, dx)| (dx, dy))
-        .unwrap_or_else(|| {
+    let (dx, dy) = match candidates.iter().find(|&&(_, dy, dx)| clear(dx, dy)) {
+        Some(&(_, dy, dx)) => (dx, dy),
+        None if bound.is_some() => return None,
+        None => {
             // Below everything is always clear.
             let floor = content.map_or(0, |c| c.py2) + 2 * MARGIN;
             (snap(home.0 - bbox.px), snap(floor - bbox.py + GRID - 1))
-        });
-    rel.iter().map(|(&i, r)| (i, r.shift(dx, dy))).collect()
+        }
+    };
+    Some(rel.iter().map(|(&i, r)| (i, r.shift(dx, dy))).collect())
 }
 
 #[cfg(test)]
@@ -978,6 +1105,7 @@ mod tests {
                 .map(|&(from, to)| GeoWire { from, to })
                 .collect(),
             labels: Vec::new(),
+            sheet: None,
         }
     }
 
@@ -1105,6 +1233,126 @@ mod tests {
         assert_eq!(fresh[&2], Layout::at(1344 + GAP, 0, 1344, 696));
         let prev = BTreeMap::from([(2, Layout::at(1344 + GAP, 960, 1344, 696))]);
         assert_eq!(place(&geo, &[2], &prev)[&2], prev[&2]);
+    }
+
+    /// a → b → c, unwired to the rest, beside a wall on a 9600 × 4800
+    /// sheet: room for the chain only if its columns close up.
+    fn walled_sheet(wall_w: i64) -> PageGeometry {
+        let wall = object("wall", Shape::Large, Layout::at(0, 0, wall_w, 4800), &[]);
+        PageGeometry {
+            sheet: Some(Layout::at(0, 0, 9600, 4800)),
+            ..page(
+                vec![wall, small("a"), small("b"), small("c")],
+                &[((1, 2), (2, 0)), ((2, 2), (3, 0))],
+            )
+        }
+    }
+
+    #[test]
+    fn a_cluster_short_of_room_on_the_sheet_closes_up() {
+        // 4032..9600 is free: 5568, where the chain at the GUI's spacing
+        // takes 3·1344 + 2·960 = 5952.
+        let geo = walled_sheet(3648);
+        let placed = place(&geo, &[1, 2, 3], &BTreeMap::new());
+        let (a, b, c) = (placed[&1], placed[&2], placed[&3]);
+        let sheet = geo.sheet.unwrap();
+        for r in [a, b, c] {
+            assert!(r.within(&sheet), "{r:?}");
+            assert!(!r.intersects(&geo.objects[0].rect), "{r:?}");
+        }
+        assert!(a.px2 < b.px && b.px2 < c.px, "{a:?} {b:?} {c:?}");
+        assert!(b.px - a.px2 < GAP, "{a:?} {b:?}");
+        // Unbounded, the same chain keeps the GUI's spacing below the wall.
+        let open = PageGeometry { sheet: None, ..geo };
+        let placed = place(&open, &[1, 2, 3], &BTreeMap::new());
+        assert_eq!(placed[&2].px - placed[&1].px2, GAP);
+        assert!(placed[&1].py >= 4800, "{:?}", placed[&1]);
+    }
+
+    #[test]
+    fn a_cluster_that_fits_nowhere_on_the_sheet_goes_past_it() {
+        let geo = walled_sheet(9600);
+        let placed = place(&geo, &[1, 2, 3], &BTreeMap::new());
+        let (a, b) = (placed[&1], placed[&2]);
+        for r in placed.values() {
+            assert!(!r.intersects(&geo.objects[0].rect), "{r:?}");
+        }
+        assert!(!a.within(&geo.sheet.unwrap()), "{a:?}");
+        // Past the edge at the GUI's spacing, as if there were no sheet.
+        assert_eq!(b.px - a.px2, GAP);
+        assert_eq!(placed, place(&geo, &[1, 2, 3], &BTreeMap::new()));
+    }
+
+    #[test]
+    fn a_tag_with_no_room_beside_its_port_stays_on_the_sheet() {
+        // The block's right edge is the sheet's: a tag beside its output
+        // would hang off it.
+        let block = object(
+            "jal",
+            Shape::Large,
+            Layout::at(6912, 960, 2688, 1272),
+            &[("OutputAPI", Side::Right, 0)],
+        );
+        let tag = GeoObject {
+            block_type: "OutputRef".into(),
+            ..object(
+                "r1",
+                Shape::Tag,
+                Layout::at(0, 0, TAG_W, ROW),
+                &[("AI", Side::Left, 0)],
+            )
+        };
+        let geo = PageGeometry {
+            sheet: Some(Layout::at(0, 0, 9600, 4800)),
+            ..page(vec![block, tag], &[((0, 0), (1, 0))])
+        };
+        let r = place(&geo, &[1], &BTreeMap::new())[&1];
+        assert!(r.within(&geo.sheet.unwrap()), "{r:?}");
+        assert!(!r.intersects(&geo.objects[0].rect), "{r:?}");
+    }
+
+    #[test]
+    fn a_tag_of_a_block_past_the_edge_stays_with_it() {
+        let wall = object("wall", Shape::Large, Layout::at(0, 0, 9600, 4800), &[]);
+        let tag = GeoObject {
+            block_type: "OutputRef".into(),
+            ..object(
+                "r1",
+                Shape::Tag,
+                Layout::at(0, 0, TAG_W, ROW),
+                &[("AI", Side::Left, 0)],
+            )
+        };
+        let geo = PageGeometry {
+            sheet: Some(Layout::at(0, 0, 9600, 4800)),
+            ..page(vec![wall, small("a"), tag], &[((1, 2), (2, 0))])
+        };
+        let placed = place(&geo, &[1, 2], &BTreeMap::new());
+        let (a, r) = (placed[&1], placed[&2]);
+        assert!(!a.within(&geo.sheet.unwrap()), "{a:?}");
+        let (_, y) = geo.objects[1].port_at(2, &a);
+        assert_eq!(
+            (r.px, r.py),
+            (a.px2 + GAP, snap(y - ROW / 2)),
+            "{a:?} {r:?}"
+        );
+    }
+
+    #[test]
+    fn off_sheet_counts_labels_and_forgives_less_than_a_grid_unit() {
+        let mut near = small("near");
+        near.rect = Layout::at(0, 4200, 1344, 696); // past the edge by 96
+        let mut fine = small("fine");
+        fine.rect = Layout::at(2400, 4128, 1344, 696); // past it by 24
+        let mut labeled = small("labeled");
+        labeled.rect = Layout::at(8160, 0, 1344, 696); // its output label runs off
+        let mut geo = page(vec![near, fine, labeled], &[]);
+        geo.sheet = Some(Layout::at(0, 0, 9600, 4800));
+        geo.labels.push(GeoLabel {
+            at: (2, 2),
+            text: "far".into(),
+        });
+        assert_eq!(geo.off_sheet(), vec![0, 2]);
     }
 
     #[test]

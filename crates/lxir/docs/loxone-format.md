@@ -22,6 +22,14 @@ the reason the crate's parser is hand-rolled.
 - Inside: one `<C Type="Document">` (carrying `ConfigVersion=` among many
   attributes), containing caption/folder `<C>` elements, `<C Type="Page">`
   drawing pages, and the object tree.
+- `PaperFormat=` on the Document is the paper sheet every page is drawn
+  on; pages carry no size of their own. `2` is A3 landscape, the format
+  of 109 of 112 corpus configs and the largest the GUI offers. The GUI
+  draws the sheet at 420 × 297 mm in twips (1/1440 in): x 0..23808,
+  y 0..16800, with a title block printed along the bottom from
+  y ≈ 16080. Objects past the edge are drawn on
+  the grey canvas beyond it. `1` and `3` occur (one and two configs)
+  with unknown sizes (D50).
 
 ## Not actually XML
 

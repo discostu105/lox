@@ -441,6 +441,10 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
         places a page afresh, except blocks wired to refs drawn in the
         GUI. `lxir render` draws a page as SVG with layout metrics. On
         a kitchen page of the house, backward wires went from 15 to 5.
+  - [x] Placement keeps to the paper sheet, 2026-10-29 (D50). A3
+        landscape from the Document's `PaperFormat`. A cluster short of
+        room is packed tighter, and goes past the edge only if it fits
+        nowhere. `compile` warns about managed objects past the edge.
   - [ ] Oracle check: a relayouted page survives a Loxone Config save
         unchanged (footprints are from corpus statistics; the snap on
         save is observed, but no relayouted page has been through the

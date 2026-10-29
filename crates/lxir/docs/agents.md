@@ -73,7 +73,9 @@ lxir render out.Loxone --page "Beschattung" \
 Compile places new blocks beside what they wire to, and keeps a block
 where Loxone Config last dragged it. `--relayout "<page>"` places a
 page's managed blocks afresh. Blocks wired to a ref tag drawn in the GUI
-stay where they are (D42).
+stay where they are (D42). Placement keeps to the page's A3 sheet, packed
+tighter if it must be; compile warns about managed objects past its edge
+(D50).
 
 Present step 4's output when proposing a change: it shows added blocks,
 wires, and parameter changes in reviewable form, and flags locale-rename

@@ -1447,3 +1447,48 @@ Anything unverified is an error, not a heuristic:
   Config save; the Miniserver stores an uploaded `permissions.bin`
   unchanged, but whether it enforces that file or derives the rights
   from the program is a live test.
+- **D50 — placement keeps to the paper sheet** (2026-10-29). Loxone
+  Config draws every page on a paper sheet. D42 placed clusters on an
+  unbounded canvas: on a full page the best clear spot was past the
+  sheet's right edge. After a relayout of a kitchen page of the house
+  config, a chain of nine blocks sat at x 24192–35904; the sheet ends at
+  23808, so in the GUI the chain hung off the paper. Decision:
+  - **The sheet comes from the Document's `PaperFormat`** (one for all
+    pages). A3 landscape (`2`) is x 0..23808 × y 0..16032: the paper in
+    twips on the grid, less the title block along the bottom edge.
+    Other formats are not known, so their pages stay unbounded as
+    before.
+  - **A cluster goes to the best clear spot on the sheet**, with the
+    room its labels and tags need. The sheet's edges are candidate
+    positions next to the obstacle edges. Without room at the GUI's
+    spacing, the cluster is laid out tighter and tried again: columns
+    960 apart, then 576, then 384, with stacking 384 → 192 at the last
+    step. The GUI's spacing comes first because a far spot with room
+    to breathe reads better than a cramped one close by.
+  - **Past the edge only when nothing fits.** A cluster that fits
+    nowhere on the sheet even at the tightest spacing goes where D42
+    put it, at the GUI's spacing. A ref tag goes beside its port if it
+    stays on the sheet there; otherwise it takes the best clear spot on
+    the sheet like a cluster of one. A tag whose block is past the edge
+    stays beside the block.
+  - **Compile names what is past the edge.** After writing, `compile`
+    warns per page about managed objects past the sheet (by slug) and
+    names the `--relayout` that lays the page out afresh. An object is
+    past the edge if its footprint or one of its off-page labels is:
+    the same test as placement's, and the one `render` reports along
+    with the sheet's outline. Less than a grid unit over is on the
+    sheet: the GUI draws a block as tall as its rows wherever it was
+    dropped, and a GUI-placed block on the kitchen page ends 24 below
+    the title-block line. `lox config push` deploys the placement the
+    lock holds and places nothing, so it does not warn.
+
+  The A3 page is the limit: Loxone Config offers no larger format. A page
+  that is full stays full. Moving logic to a page of its own is a
+  module change, and moving GUI-owned objects to make room is not
+  placement's job (geometry claims, roadmap). On the kitchen page the
+  chain now sits in the top right, the only free region left, at the
+  tightest spacing, and the whole page is on the sheet. The price is
+  wires: the chain runs in a loop from two light controllers back into
+  them. Past the edge, right of the controllers, only the four wires
+  back into them ran right to left (5 backward wires on the page). Above
+  them, the four out of them do too (9).

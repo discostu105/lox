@@ -36,6 +36,10 @@ pub struct PageMetrics {
     pub wire_length: i64,
     /// The page's extent.
     pub extent: Option<Layout>,
+    /// The drawable part of the paper sheet, if its format is known.
+    pub sheet: Option<Layout>,
+    /// Objects drawn past the sheet's edge (titles).
+    pub off_sheet: Vec<String>,
 }
 
 impl std::fmt::Display for PageMetrics {
@@ -57,11 +61,25 @@ impl std::fmt::Display for PageMetrics {
         if let Some(e) = self.extent {
             writeln!(f, "extent {}..{} × {}..{}", e.px, e.px2, e.py, e.py2)?;
         }
+        if let Some(s) = self.sheet {
+            writeln!(
+                f,
+                "sheet {}..{} × {}..{}, {} objects off it",
+                s.px,
+                s.px2,
+                s.py,
+                s.py2,
+                self.off_sheet.len()
+            )?;
+        }
         for (a, b) in &self.overlaps {
             writeln!(f, "  overlap: {a} / {b}")?;
         }
         for (a, b) in &self.backward {
             writeln!(f, "  backward: {a} -> {b}")?;
+        }
+        for t in &self.off_sheet {
+            writeln!(f, "  off sheet: {t}")?;
         }
         Ok(())
     }
@@ -144,6 +162,12 @@ pub fn metrics(geo: &PageGeometry) -> PageMetrics {
             px2: a.px2.max(b.px2),
             py2: a.py2.max(b.py2),
         }),
+        sheet: geo.sheet,
+        off_sheet: geo
+            .off_sheet()
+            .into_iter()
+            .map(|i| geo.objects[i].title.clone())
+            .collect(),
         ..PageMetrics::default()
     };
     for (i, a) in geo.objects.iter().enumerate() {
@@ -201,6 +225,12 @@ fn esc(s: &str) -> String {
 pub fn svg(geo: &PageGeometry, managed: &BTreeSet<String>) -> String {
     let m = metrics(geo);
     let e = m.extent.unwrap_or(Layout::at(0, 0, 9600, 9600));
+    let e = m.sheet.map_or(e, |s| Layout {
+        px: e.px.min(s.px),
+        py: e.py.min(s.py),
+        px2: e.px2.max(s.px2),
+        py2: e.py2.max(s.py2),
+    });
     let pad = 2400;
     let (x0, y0) = (e.px - pad, e.py - pad - 1200);
     let (w, h) = (e.w() + 2 * pad, e.h() + 2 * pad + 1200);
@@ -215,6 +245,16 @@ pub fn svg(geo: &PageGeometry, managed: &BTreeSet<String>) -> String {
         s,
         r##"<rect x="{x0}" y="{y0}" width="{w}" height="{h}" fill="#ffffff"/>"##
     );
+    if let Some(sh) = m.sheet {
+        let _ = writeln!(
+            s,
+            r##"<rect x="{}" y="{}" width="{}" height="{}" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>"##,
+            sh.px,
+            sh.py,
+            sh.w(),
+            sh.h()
+        );
+    }
     let _ = writeln!(
         s,
         r##"<text x="{}" y="{}" font-size="360" fill="#0f172a">{}</text>"##,

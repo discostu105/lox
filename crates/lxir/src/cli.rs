@@ -631,6 +631,24 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         compiled.counters().next_obj,
         lock_path.display()
     );
+    // Placement keeps to the sheet where it can (D50); say what is past it.
+    let slug_of: std::collections::BTreeMap<&str, &str> = lock
+        .objects
+        .iter()
+        .map(|(slug, o)| (o.uuid.as_str(), slug.as_str()))
+        .collect();
+    let managed = slug_of.keys().copied().collect();
+    for (page, uuids) in lxir::layout::off_sheet(&compiled, &managed) {
+        let slugs: Vec<&str> = uuids.iter().map(|u| slug_of[u.as_str()]).collect();
+        eprintln!(
+            "warning: page {page:?}: {} managed object(s) past the edge of the A3 sheet: {} \
+             (`{} compile --relayout {page:?}` lays the page out afresh, on the sheet where \
+             there is room)",
+            slugs.len(),
+            slugs.join(", "),
+            prog()
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
