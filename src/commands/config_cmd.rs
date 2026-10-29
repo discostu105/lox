@@ -24,6 +24,7 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             serial,
             verify_ssl,
             no_verify_ssl,
+            visu_password_file,
         } => {
             let mut cfg = Config::load().unwrap_or_default();
             if let Some(h) = host {
@@ -47,6 +48,10 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             } else if no_verify_ssl {
                 cfg.verify_ssl = Some(false);
             }
+            if let Some(f) = visu_password_file {
+                // the path only; the file is read when a secured command needs it
+                cfg.visu_password_file = (!f.is_empty()).then_some(f);
+            }
             let path = cfg.save()?;
             if !ctx.quiet {
                 println!("✓  Config saved to {:?}", path);
@@ -67,6 +72,9 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
                 for (name, uuid) in aliases {
                     println!("  {}: {}", name, uuid);
                 }
+            }
+            if let Some(f) = &cfg.visu_password_file {
+                println!("visu_password_file: {}", f);
             }
             if !cfg.confirm.is_empty() {
                 println!("confirm:");

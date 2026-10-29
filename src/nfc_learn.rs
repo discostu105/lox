@@ -2,6 +2,8 @@
 //! Code Touch's learn mode over the WebSocket (`nfc/startlearn`), waits for
 //! its `nfcLearnResult` state to report a tag, and always ends learn mode
 //! again (`nfc/stoplearn`) — on success, error, timeout and cancel alike.
+//! A secured Code Touch (`isSecured`) takes both only as secured commands,
+//! each signed with a fresh key (see [`crate::visu`]).
 
 use anyhow::{Context, Result, bail};
 use futures_util::future::BoxFuture;
@@ -12,6 +14,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::stream::{Incoming, Session, StateEvent};
+use crate::visu::{self, VisuPassword};
 
 /// The two directions of a subscribed session: commands out, state events
 /// and command answers in. The WebSocket in production, a script in tests.
@@ -37,8 +40,14 @@ const SNAPSHOT_WAIT: Duration = Duration::from_secs(5);
 /// How long to wait for the answer to `nfc/stoplearn`.
 const STOP_WAIT: Duration = Duration::from_secs(2);
 
+/// How long to wait for the key and salt for a secured command.
+const SALT_WAIT: Duration = Duration::from_secs(5);
+
 /// The longest learn session lox asks for.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(300);
+
+const START: &str = "nfc/startlearn";
+const STOP: &str = "nfc/stoplearn";
 
 /// A Code Touch that can learn: its UUID, name and `nfcLearnResult` state.
 #[derive(Debug, Clone)]
@@ -46,14 +55,38 @@ pub struct Target {
     pub uuid: String,
     pub name: String,
     pub result_state: String,
+    /// `isSecured`: learn mode only as a secured command
+    pub secured: bool,
+    /// The user lox connects with, whose visualization password signs
+    /// secured commands
+    pub user: String,
+    /// That password; needed when `secured`
+    pub visu_password: Option<VisuPassword>,
 }
 
 impl Target {
-    pub fn start_cmd(&self) -> String {
-        format!("jdev/sps/io/{}/nfc/startlearn", self.uuid)
+    /// `action` as a plain command.
+    fn plain_cmd(&self, action: &str) -> String {
+        format!("jdev/sps/io/{}/{}", self.uuid, action)
     }
-    pub fn stop_cmd(&self) -> String {
-        format!("jdev/sps/io/{}/nfc/stoplearn", self.uuid)
+
+    /// `action` as it goes out, for a dry run: secured commands with a
+    /// placeholder for the hash.
+    fn shown_cmds(&self, action: &str) -> Vec<String> {
+        if self.secured {
+            vec![
+                format!("WS {}", visu::salt_cmd(&self.user)),
+                format!("WS jdev/sps/ios/<hash>/{}/{}", self.uuid, action),
+            ]
+        } else {
+            vec![format!("WS {}", self.plain_cmd(action))]
+        }
+    }
+
+    /// The error when a secured Code Touch has no password to sign with.
+    pub fn needs_password(&self) -> Option<anyhow::Error> {
+        (self.secured && self.visu_password.is_none())
+            .then(|| visu::missing(&self.name, &self.user))
     }
 }
 
@@ -76,6 +109,9 @@ pub fn target(lox: &mut crate::client::LoxClient, query: &str) -> Result<Target>
         uuid,
         name,
         result_state,
+        secured: ctrl["isSecured"].as_bool().unwrap_or(false),
+        user: lox.cfg.user.clone(),
+        visu_password: None,
     })
 }
 
@@ -123,6 +159,37 @@ pub fn parse_learn_result(text: &str) -> Result<Option<LearnResult>> {
     }))
 }
 
+/// An `nfcLearnResult` entry without an ID: `Some(true)` when it names a
+/// user, a tag name or a Code Touch. A tag that is already known opens the
+/// door in learn mode instead of being learned, and the Miniserver then
+/// reports such an entry. `None` for an entry with an ID, or no entry.
+fn entry_without_id(text: &str) -> Option<bool> {
+    let v: Value = serde_json::from_str(text.trim()).ok()?;
+    let tag = match &v {
+        Value::Array(list) => list.last()?,
+        Value::Object(_) => &v,
+        _ => return None,
+    };
+    if set_field(tag, "id").is_some() {
+        return None;
+    }
+    Some(
+        ["name", "userUuid", "deviceUuid"]
+            .iter()
+            .any(|k| set_field(tag, k).is_some()),
+    )
+}
+
+/// What to say about a tag that was not learned because it is known.
+fn known_tag_hint(touch: &str) -> String {
+    format!(
+        "the tag is probably known already: {} opened the door instead of learning it (it \
+         then reports no ID) — only tags that no user has are learned; `lox user show` \
+         lists a user's tags",
+        touch
+    )
+}
+
 /// The error an ID of zeros with a code in the last byte stands for.
 pub fn learn_error(id: &str) -> Option<String> {
     let bytes: Vec<&str> = id.split_whitespace().collect();
@@ -157,12 +224,21 @@ fn reply_code(text: &str, cmd_suffix: &str) -> Option<u16> {
 }
 
 /// Why `nfc/startlearn` was refused.
-fn start_refused(code: u16, touch: &str) -> anyhow::Error {
+fn start_refused(code: u16, target: &Target) -> anyhow::Error {
+    let touch = &target.name;
     match code {
         423 => anyhow::anyhow!(
             "{} cannot learn NFC tags right now (code 423): it is offline, not set up, or \
              battery powered (an NFC Code Touch Air cannot learn)",
             touch
+        ),
+        500 if target.secured => anyhow::anyhow!(
+            "the Miniserver refused the secured learn command at {} (code 500): wrong \
+             visualization password, or the user {} has none — check the password in \
+             LOX_VISU_PASSWORD or the visualization password file; set one for the user in \
+             Loxone Config or the app",
+            touch,
+            target.user
         ),
         401 | 403 | 500 => anyhow::anyhow!(
             "the Miniserver refused to start learning at {} (code {}) — the user lox \
@@ -216,15 +292,53 @@ async fn snapshot<I: LearnIo + ?Sized>(io: &mut I, state: &str) -> Result<Option
     }
 }
 
-/// Wait for a tag after `nfc/startlearn` was sent.
-async fn wait_for_tag<I: LearnIo + ?Sized>(io: &mut I, touch: &Target) -> Result<LearnResult> {
+/// Send `action` to the Code Touch: plain, or for a secured one, a fresh
+/// key and salt first and then the command signed with them.
+async fn send_action<I: LearnIo + ?Sized>(io: &mut I, touch: &Target, action: &str) -> Result<()> {
+    if !touch.secured {
+        return io.send(&touch.plain_cmd(action)).await;
+    }
+    let Some(password) = &touch.visu_password else {
+        return Err(visu::missing(&touch.name, &touch.user));
+    };
+    io.send(&visu::salt_cmd(&touch.user)).await?;
+    let answer = async {
+        while let Some(msg) = io.next().await? {
+            if let Incoming::Reply(text) = msg
+                && let Some(salt) = visu::parse_salt_reply(&text)
+            {
+                return salt;
+            }
+        }
+        bail!("the Miniserver closed the connection")
+    };
+    let salt = tokio::time::timeout(SALT_WAIT, answer)
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "the Miniserver did not answer getvisusalt within {} s",
+                SALT_WAIT.as_secs()
+            )
+        })??;
+    let cmd = visu::secured_cmd(password, &salt, &touch.uuid, action)?;
+    io.send(&cmd).await
+}
+
+/// Wait for a tag after `nfc/startlearn` was sent. `before` is the result
+/// state's value before; `no_id` is set when an entry without an ID came.
+async fn wait_for_tag<I: LearnIo + ?Sized>(
+    io: &mut I,
+    touch: &Target,
+    before: Option<&str>,
+    no_id: &mut bool,
+) -> Result<LearnResult> {
     while let Some(msg) = io.next().await? {
         match msg {
             Incoming::Reply(text) => {
-                if let Some(code) = reply_code(&text, "nfc/startlearn")
+                if let Some(code) = reply_code(&text, START)
                     && code != 200
                 {
-                    return Err(start_refused(code, &touch.name));
+                    return Err(start_refused(code, touch));
                 }
             }
             Incoming::States(events) => {
@@ -233,6 +347,14 @@ async fn wait_for_tag<I: LearnIo + ?Sized>(io: &mut I, touch: &Target) -> Result
                         continue;
                     };
                     if uuid != touch.result_state {
+                        continue;
+                    }
+                    if let Some(known) = entry_without_id(&text) {
+                        *no_id = true;
+                        // a known tag; the old value again proves nothing
+                        if known && before != Some(text.as_str()) {
+                            bail!("no tag was learned: {}", known_tag_hint(&touch.name));
+                        }
                         continue;
                     }
                     if let Some(tag) = parse_learn_result(&text)? {
@@ -256,13 +378,13 @@ async fn stop<I: LearnIo + ?Sized>(io: &mut I, touch: &Target) -> Option<String>
             touch.name, e
         ))
     };
-    if let Err(e) = io.send(&touch.stop_cmd()).await {
+    if let Err(e) = send_action(io, touch, STOP).await {
         return warn(format!("{:#}", e));
     }
     let answer = async {
         while let Ok(Some(msg)) = io.next().await {
             if let Incoming::Reply(text) = msg
-                && let Some(code) = reply_code(&text, "nfc/stoplearn")
+                && let Some(code) = reply_code(&text, STOP)
             {
                 return Some(code);
             }
@@ -288,11 +410,15 @@ where
     I: LearnIo + ?Sized,
     C: Future<Output = ()>,
 {
+    if let Some(e) = touch.needs_password() {
+        return Err(e);
+    }
     let before = snapshot(io, &touch.result_state).await?;
+    let mut no_id = false;
     let outcome = async {
-        io.send(&touch.start_cmd()).await?;
+        send_action(io, touch, START).await?;
         tokio::select! {
-            r = wait_for_tag(io, touch) => r,
+            r = wait_for_tag(io, touch, before.as_deref(), &mut no_id) => r,
             _ = tokio::time::sleep(timeout) => {
                 let mut msg = format!(
                     "no NFC tag was read at {} within {} s",
@@ -300,7 +426,9 @@ where
                     timeout.as_secs()
                 );
                 // the state may not change when the same tag is learned again
-                if let Some(Ok(Some(last))) = before.as_deref().map(parse_learn_result) {
+                if no_id {
+                    msg.push_str(&format!("; {}", known_tag_hint(&touch.name)));
+                } else if let Some(Ok(Some(last))) = before.as_deref().map(parse_learn_result) {
                     msg.push_str(&format!(
                         " (if it was the tag learned last, {}, the Miniserver may not \
                          report it again)",
@@ -364,15 +492,16 @@ impl LearnedTag {
             user: None,
             user_uuid: None,
             device_uuid: None,
-            would_send: vec![
-                format!("WS {}", touch.start_cmd()),
-                format!(
+            would_send: [
+                touch.shown_cmds(START),
+                vec![format!(
                     "(wait up to {} s for nfcLearnResult {})",
                     timeout.as_secs(),
                     touch.result_state
-                ),
-                format!("WS {}", touch.stop_cmd()),
-            ],
+                )],
+                touch.shown_cmds(STOP),
+            ]
+            .concat(),
             warnings: Vec::new(),
         }
     }
@@ -462,6 +591,9 @@ pub mod tests {
             if cmd.ends_with("nfc/stoplearn") {
                 self.queue.lock().unwrap().push_back(reply(cmd, "200"));
             }
+            if cmd.contains("getvisusalt") {
+                self.queue.lock().unwrap().push_back(salt_reply(cmd));
+            }
             Box::pin(async { Ok(()) })
         }
         fn next(&mut self) -> BoxFuture<'_, Result<Option<Incoming>>> {
@@ -489,11 +621,26 @@ pub mod tests {
         )
     }
 
+    /// A synthetic single-use key and salt.
+    pub fn salt_reply(cmd: &str) -> Incoming {
+        Incoming::Reply(
+            serde_json::json!({ "LL": { "control": cmd, "Code": "200", "value": {
+                "key": "0123456789abcdef0123456789abcdef",
+                "salt": "73616c7479",
+                "hashAlg": "SHA256",
+            } } })
+            .to_string(),
+        )
+    }
+
     pub fn target() -> Target {
         Target {
             uuid: TOUCH.to_string(),
             name: "Code Touch Eingang".to_string(),
             result_state: RESULT.to_string(),
+            secured: false,
+            user: "alice".to_string(),
+            visu_password: None,
         }
     }
 
@@ -531,7 +678,7 @@ pub mod tests {
         assert_eq!(learned.tag.name, None);
         assert_eq!(learned.tag.user_uuid, None);
         assert!(learned.stop_warning.is_none());
-        assert_eq!(sent(&io), vec![t.start_cmd(), t.stop_cmd()]);
+        assert_eq!(sent(&io), vec![t.plain_cmd(START), t.plain_cmd(STOP)]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -545,7 +692,7 @@ pub mod tests {
         let msg = format!("{:#}", err);
         assert!(msg.contains("no NFC tag was read"), "{}", msg);
         assert!(msg.contains("0A 0B 0C"), "names the last tag: {}", msg);
-        assert_eq!(sent(&io), vec![t.start_cmd(), t.stop_cmd()]);
+        assert_eq!(sent(&io), vec![t.plain_cmd(START), t.plain_cmd(STOP)]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -580,7 +727,7 @@ pub mod tests {
                 .await
                 .unwrap_err();
             assert!(format!("{:#}", err).contains(words), "{}: {:#}", code, err);
-            assert_eq!(sent(&io).last(), Some(&t.stop_cmd()));
+            assert_eq!(sent(&io).last(), Some(&t.plain_cmd(STOP)));
         }
     }
 
@@ -596,7 +743,7 @@ pub mod tests {
                 .await
                 .unwrap_err();
             assert!(format!("{:#}", err).contains(words), "{}: {:#}", code, err);
-            assert_eq!(sent(&io), vec![t.start_cmd(), t.stop_cmd()]);
+            assert_eq!(sent(&io), vec![t.plain_cmd(START), t.plain_cmd(STOP)]);
         }
     }
 
@@ -608,7 +755,129 @@ pub mod tests {
             .await
             .unwrap_err();
         assert!(format!("{:#}", err).contains("cancelled"));
-        assert_eq!(sent(&io), vec![t.start_cmd(), t.stop_cmd()]);
+        assert_eq!(sent(&io), vec![t.plain_cmd(START), t.plain_cmd(STOP)]);
+    }
+
+    fn secured() -> Target {
+        Target {
+            secured: true,
+            visu_password: Some(crate::visu::tests::password("correct horse")),
+            ..target()
+        }
+    }
+
+    // the hash of the synthetic key, salt and password (see visu::tests)
+    const HASH: &str = "14bcf905db0aba629be845ec52001f25b98c2f1a689cca7248f35bbc0d22a6e4";
+
+    #[tokio::test(start_paused = true)]
+    async fn a_secured_touch_gets_signed_commands_with_a_fresh_key_each() {
+        let t = secured();
+        let mut io = FakeIo::new(vec![], vec![text_state(RESULT, NEW)]);
+        let learned = learn(&mut io, &t, Duration::from_secs(5), never())
+            .await
+            .unwrap();
+        assert_eq!(learned.tag.id, "01 02 03 04 05 06 07 08 EC");
+        assert!(learned.stop_warning.is_none());
+        assert_eq!(
+            sent(&io),
+            vec![
+                "jdev/sys/getvisusalt/alice".to_string(),
+                format!("jdev/sps/ios/{}/{}/nfc/startlearn", HASH, TOUCH),
+                "jdev/sys/getvisusalt/alice".to_string(),
+                format!("jdev/sps/ios/{}/{}/nfc/stoplearn", HASH, TOUCH),
+            ]
+        );
+        assert!(sent(&io).iter().all(|c| !c.contains("correct horse")));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_secured_start_blames_the_visu_password() {
+        let t = secured();
+        let mut io = FakeIo::new(
+            vec![],
+            vec![reply(
+                &format!("dev/sps/ios/{}/{}/nfc/startlearn", HASH, TOUCH),
+                "500",
+            )],
+        );
+        let err = learn(&mut io, &t, Duration::from_secs(5), never())
+            .await
+            .unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("wrong visualization password"), "{}", msg);
+        assert!(msg.contains("alice"), "{}", msg);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_secured_touch_without_a_password_sends_nothing() {
+        let t = Target {
+            visu_password: None,
+            ..secured()
+        };
+        let mut io = FakeIo::new(vec![], vec![]);
+        let err = learn(&mut io, &t, Duration::from_secs(5), never())
+            .await
+            .unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("is secured") && msg.contains("LOX_VISU_PASSWORD"),
+            "{}",
+            msg
+        );
+        assert!(sent(&io).is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_known_tag_opens_the_door_instead_and_is_reported_at_once() {
+        let t = target();
+        let known = r#"{"id":"","name":"old tag","userUuid":"1a2b3c4d-0001-0002-ffff000000000002","deviceUuid":0}"#;
+        let mut io = FakeIo::new(vec![], vec![text_state(RESULT, known)]);
+        let err = learn(&mut io, &t, Duration::from_secs(60), never())
+            .await
+            .unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("known already"), "{}", msg);
+        assert!(!msg.contains("within"), "no timeout: {}", msg);
+        assert_eq!(sent(&io).last(), Some(&t.plain_cmd(STOP)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_entry_without_anything_is_named_at_the_timeout() {
+        let t = target();
+        let empty = r#"{"id":"","name":0,"userUuid":0,"deviceUuid":0}"#;
+        let mut io = FakeIo::new(vec![], vec![text_state(RESULT, empty)]);
+        let err = learn(&mut io, &t, Duration::from_secs(5), never())
+            .await
+            .unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("within 5 s"), "{}", msg);
+        assert!(msg.contains("known already"), "{}", msg);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_known_entry_from_before_the_start_is_not_taken_for_a_new_one() {
+        let t = target();
+        let known = r#"{"id":"","userUuid":"1a2b3c4d-0001-0002-ffff000000000002"}"#;
+        let mut io = FakeIo::new(
+            vec![text_state(RESULT, known)],
+            vec![text_state(RESULT, known), text_state(RESULT, NEW)],
+        );
+        let learned = learn(&mut io, &t, Duration::from_secs(5), never())
+            .await
+            .unwrap();
+        assert_eq!(learned.tag.id, "01 02 03 04 05 06 07 08 EC");
+    }
+
+    #[test]
+    fn a_dry_run_of_a_secured_touch_shows_placeholders() {
+        let tag = LearnedTag::planned(&secured(), Duration::from_secs(60));
+        assert_eq!(tag.would_send[0], "WS jdev/sys/getvisusalt/alice");
+        assert_eq!(
+            tag.would_send[1],
+            format!("WS jdev/sps/ios/<hash>/{}/nfc/startlearn", TOUCH)
+        );
+        assert!(tag.would_send[4].ends_with("nfc/stoplearn"));
+        assert!(tag.would_send.iter().all(|c| !c.contains("correct horse")));
     }
 
     #[test]

@@ -95,6 +95,7 @@ LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 | `LOX_USER` | `user` |
 | `LOX_PASS` | `pass` |
 | `LOX_SERIAL` | `serial` |
+| `LOX_VISU_PASSWORD` | the visualization password itself, for secured controls (or `visu_password_file`) |
 
 ---
 

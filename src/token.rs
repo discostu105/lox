@@ -183,6 +183,21 @@ fn token_auth_hash(token: &str, s: &UserSalt) -> String {
     s.alg.hmac_hex(&s.key, token.as_bytes())
 }
 
+/// Hash for a secured command (`jdev/sps/ios/{hash}/{uuid}/{cmd}`) from the
+/// answer to `jdev/sys/getvisusalt/{user}` and the user's visualization
+/// password: `HMAC-alg(key, UPPER(alg(visuPw + ":" + salt)))`, hex. The key
+/// is single-use, so every secured command needs a fresh `getvisusalt`.
+pub(crate) fn visu_hash(visu_password: &str, getvisusalt: &serde_json::Value) -> Result<String> {
+    let s = UserSalt::parse(getvisusalt)?;
+    if s.key.is_empty() {
+        anyhow::bail!("getvisusalt answered without a key");
+    }
+    let pw_hash = s
+        .alg
+        .digest_upper_hex(format!("{}:{}", visu_password, s.salt).as_bytes());
+    Ok(s.alg.hmac_hex(&s.key, pw_hash.as_bytes()))
+}
+
 /// Fetch the Miniserver's RSA public key over HTTP (not available on the WS).
 async fn fetch_public_key(cfg: &Config) -> Result<RsaPublicKey> {
     let cfg2 = cfg.clone();
@@ -536,6 +551,40 @@ mod tests {
             credential_hash("admin", "secret", &salt(HashAlg::Sha1)),
             "bc7e6d3a8d20d7b7ff377f5669d491537f690613"
         );
+    }
+
+    // Synthetic password, key and salt; expected values computed independently
+    // with Python: hmac.new(bytes.fromhex(key),
+    //   hashlib.new(alg, f"{pw}:{salt}".encode()).hexdigest().upper().encode(), alg)
+    #[test]
+    fn test_visu_hash_sha256() {
+        let salt = serde_json::json!({
+            "key": "0123456789abcdef0123456789abcdef",
+            "salt": "73616c7479",
+            "hashAlg": "SHA256",
+        });
+        assert_eq!(
+            visu_hash("correct horse", &salt).unwrap(),
+            "14bcf905db0aba629be845ec52001f25b98c2f1a689cca7248f35bbc0d22a6e4"
+        );
+    }
+
+    #[test]
+    fn test_visu_hash_sha1_when_the_alg_is_missing() {
+        let salt = serde_json::json!({
+            "key": "0123456789abcdef0123456789abcdef",
+            "salt": "73616c7479",
+        });
+        assert_eq!(
+            visu_hash("correct horse", &salt).unwrap(),
+            "0cb2e603662c7396945b45b13da96feec20fc3cc"
+        );
+    }
+
+    #[test]
+    fn test_visu_hash_needs_a_key() {
+        assert!(visu_hash("pw", &serde_json::json!({"salt": "00"})).is_err());
+        assert!(visu_hash("pw", &serde_json::json!({"key": "zz", "salt": "00"})).is_err());
     }
 
     #[test]

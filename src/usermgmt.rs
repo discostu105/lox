@@ -57,7 +57,7 @@ pub struct User {
     /// `state` in words
     pub state_text: String,
     pub is_admin: bool,
-    /// Loxone time (seconds since 2009-01-01) of the last change
+    /// Time of the last change: seconds since 2009-01-01 UTC
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_edit: Option<i64>,
     /// Loxone time the user becomes valid (states 3 and 4)

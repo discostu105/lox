@@ -89,7 +89,8 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
                 println!("  {:<13} {}", "Valid until", t);
             }
             println!("  {:<13} {}", "Admin", yes_no(u.is_admin));
-            if let Some(t) = time(u.last_edit) {
+            // lastEdit counts from 2009-01-01 UTC, unlike the validity times
+            if let Some(t) = u.last_edit.map(crate::lox_utc_timestamp_to_string) {
                 println!("  {:<13} {}", "Last edit", t);
             }
             if let Some(t) = &u.trust_member {
@@ -272,11 +273,12 @@ fn cmd_learn(
     user: Option<&str>,
     name: Option<&str>,
     timeout: &str,
+    visu_password_file: Option<&std::path::Path>,
     yes: bool,
 ) -> Result<()> {
     let timeout = learn_timeout(timeout)?;
     let mut lox = LoxClient::new(Config::load()?)?;
-    let target = nfc_learn::target(&mut lox, code_touch)?;
+    let mut target = nfc_learn::target(&mut lox, code_touch)?;
     let owner = match user {
         Some(q) => Some(usermgmt::resolve_user(&lox, q)?),
         None => None,
@@ -303,6 +305,13 @@ fn cmd_learn(
     // fail before the user holds a tag to the reader for nothing
     if owner.is_some() && !yes && !can_ask(ctx) {
         bail!("pairing the tag requires --yes: there is no terminal to confirm it on");
+    }
+    if target.secured {
+        target.visu_password = match crate::visu::from_settings(visu_password_file, &lox.cfg)? {
+            Some(pw) => Some(pw),
+            None if can_ask(ctx) => Some(crate::visu::prompt(&lox.cfg.user)?),
+            None => return Err(target.needs_password().expect("secured, no password")),
+        };
     }
 
     if !ctx.quiet {
@@ -455,6 +464,7 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
             name,
             timeout,
             yes,
+            visu_password_file,
         } => {
             cmd_learn(
                 ctx,
@@ -462,6 +472,7 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
                 user.as_deref(),
                 name.as_deref(),
                 &timeout,
+                visu_password_file.as_deref(),
                 yes,
             )?;
         }
