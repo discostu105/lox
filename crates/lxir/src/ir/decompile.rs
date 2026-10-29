@@ -39,7 +39,8 @@ use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
-    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, RightKind, Value, WireDecl,
+    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind,
+    RuleDecl, Value, WireDecl,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -194,6 +195,9 @@ pub(super) struct Lift {
     /// The `access` declaration of each NFC Code Touch extern with access
     /// rights (D49), or why its rights cannot be written as one.
     access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>>,
+    /// The `rule` declaration of each Automatic Designer rule whose
+    /// payload reads as the documented shapes (D57).
+    rule_decls: BTreeMap<usize, RuleDecl>,
 }
 
 /// One page's (or the periphery's) share of the lifted items, as indexes
@@ -457,6 +461,49 @@ impl Lift {
             }
         }
 
+        // Automatic Designer rules whose payload reads as the documented
+        // shapes (D57), in both scopes: the `rule` declaration needs the
+        // rule and its action targets as externs.
+        let uuid_index: BTreeMap<&str, usize> = objects
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (o.uuid.as_str(), i))
+            .collect();
+        let mut liftable_rules: Vec<(usize, String)> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type != RULE_BLOCK_TYPE || opts.exclude.contains(&o.uuid) {
+                continue;
+            }
+            let Some(apc) = doc
+                .element_at(&o.path)
+                .and_then(|el| el.attr_decoded("APC"))
+                .map(|a| a.into_owned())
+            else {
+                continue;
+            };
+            let Some(rule) =
+                crate::autopilot::parse(&apc).and_then(|v| crate::autopilot::interpret(&v).ok())
+            else {
+                continue;
+            };
+            let targets: Option<Vec<usize>> = rule
+                .actions
+                .iter()
+                .map(|a| uuid_index.get(a.target.as_str()).copied())
+                .collect();
+            let Some(targets) = targets else { continue };
+            if rule.events.is_empty() || rule.actions.is_empty() {
+                continue;
+            }
+            for j in std::iter::once(i).chain(targets) {
+                if !lifted[j] {
+                    lifted[j] = true;
+                    externs.push(j);
+                }
+            }
+            liftable_rules.push((i, apc));
+        }
+
         // Slug assignment: managed first (document order), then externs
         // (seed order, then order of first wire reference), all in one
         // namespace.
@@ -580,6 +627,15 @@ impl Lift {
             .map(|&i| {
                 let slug = &slug_of[&objects[i].uuid];
                 (i, access_decl(&access, &rights, &objects[i].uuid, slug))
+            })
+            .collect();
+
+        let rule_decls: BTreeMap<usize, RuleDecl> = liftable_rules
+            .iter()
+            .filter_map(|(i, apc)| {
+                let slug = &slug_of[&objects[*i].uuid];
+                let decl = super::rule::lift(slug, apc, &|u| slug_of.get(u).cloned()).ok()?;
+                Some((*i, decl))
             })
             .collect();
 
@@ -774,6 +830,7 @@ impl Lift {
             default_params_elided,
             rule_notes,
             access_decls,
+            rule_decls,
         }
     }
 
@@ -801,6 +858,15 @@ impl Lift {
                     self.slug_of[&self.objects[*i].uuid]
                 ))),
                 None => {}
+            }
+        }
+    }
+
+    /// The `rule` declarations of the given externs (D57).
+    fn push_rules(&self, externs: &[usize], items: &mut Vec<Item>) {
+        for i in externs {
+            if let Some(decl) = self.rule_decls.get(i) {
+                items.push(Item::Rule(decl.clone()));
             }
         }
     }
@@ -858,6 +924,7 @@ impl Lift {
             items.push(Item::Wire(self.wires[wi].0.clone()));
         }
         self.push_access(&b.externs, &mut items);
+        self.push_rules(&b.externs, &mut items);
         items
     }
 
@@ -975,6 +1042,7 @@ impl Lift {
                 items.push(Item::Wire(self.wires[wi].0.clone()));
             }
             self.push_access(&b.externs, &mut items);
+            self.push_rules(&b.externs, &mut items);
 
             let module = Module { items };
             module.validate()?;

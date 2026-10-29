@@ -153,6 +153,14 @@ access tuer                          # who may open it, under which schedule
 	group "Residents": "Workdays"    # by title; the rest lose access
 end
 
+extern regel = AutopilotRule(title: "Pumpe Ein")
+rule regel                           # an app rule (D57): active, all
+	active                           # `when`s must hold, `then`s in order
+	when weekday weekdays
+	when time 09:00
+	then pumpe "on"
+end
+
 removed old_gate                     # confirmed delete of a managed block
 moved beschatten -> schatten_gate    # slug rename, UUIDs survive
 ```
@@ -218,6 +226,9 @@ it only when it matches what you intended.
 | `was created by the compiler as … the base titles it` | a page lxir created was renamed in Loxone Config | write the new title in the source (without the arguments the page is Loxone Config's), or rename it back |
 | `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
 | `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
+| `a rule belongs to an Automatic Designer rule` / `not an Automatic Designer rule` | `rule` on a block of another type | declare `rule` only on an `AutopilotRule` extern |
+| `lxir writes only the documented shapes` | the rule has conditions lxir cannot write (a control's state, an operating mode, OR groups) | drop the declaration; edit that rule in the app |
+| `knows no action code (descID)` | a `then` to a block type/command no rule of the config uses yet | create one rule action of that kind in the app once; the compile copies its code |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -234,7 +245,8 @@ only on success) — just fix and re-run.
   title/room/category it claimed on externs (plus that claim's followers),
   tile programs it declared, access rights (`TIM=`) on Code Touches
   with an `access` declaration, and recipients (`ACT=`) of notifications
-  with a `recipients` declaration. Everything else in the config is
+  with a `recipients` declaration, and the `APC=`/`STA=` of rules with a
+  `rule` declaration whose content changed. Everything else in the config is
   preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

@@ -460,12 +460,17 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       byte-identically (key order/whitespace), and does it preserve a
       foreign-minted rule at all? Cheap to answer with
       `scripts/oracle.sh`; prerequisite for any write-side work.
-- [ ] Authoring (`rule` statements compiling to `AutopilotRule` blocks)
-      is gated on evidence that does not exist yet: the `descID`/
-      event-type tables (they ship only inside the Loxone app bundle),
-      the oracle answer above, and a live-Miniserver check that a
-      compiled rule actually *executes* (silent non-execution is the
-      D8-class risk). Until then: refuse.
+- [x] Editing rules from source 2026-10-29 (D57): `rule <slug>` with
+      `active`/`inactive`, `when time`, `when weekday`, `then <slug>
+      "<cmd>"`; lifted by decompile/adopt, written only on change, as the
+      app's edit. Action codes come from document evidence or the
+      observed PushButton/PButtonT triples, else refused. Validated
+      live: a compiled rule executes at its time.
+- [ ] More rule shapes: control-state conditions (`type` 0 with
+      `controlUUID`), operating modes, OR groups — each needs its corpus
+      evidence first.
+- [ ] Creating rules from source (minting an `AutopilotRule`): needs
+      the oracle answer above.
 
 ## Tooling & ecosystem
 

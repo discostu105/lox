@@ -58,6 +58,7 @@ mod desugar;
 mod lint;
 mod parser;
 mod rename;
+mod rule;
 mod schedule;
 mod simtest;
 mod template;
@@ -70,10 +71,10 @@ pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adop
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl, Binding,
     BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl, ExternDecl, Interval,
-    Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef, RemovedDecl,
-    RightKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, TemplateDecl,
-    TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl,
-    TilesItem, Value, WireDecl,
+    Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE,
+    RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim,
+    ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp,
+    TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{

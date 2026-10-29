@@ -20,7 +20,7 @@ module     = { line } ;
 line       = comment | let | extern | block-head | arg-line
            | wire | set | attr | removed | moved | template | instance
            | page | test | tiles | tiles-claim | access | schedule
-           | schedule-claim | blank ;
+           | schedule-claim | rule | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number | string ) [ comment ] ;
@@ -111,6 +111,15 @@ interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
 schedule-claim = slug "." "schedule" "=" slug [ comment ] ;
                                     (* DayTimer, extern or managed; top-level only *)
+rule       = "rule" slug [ comment ]               (* Automatic Designer rule (D57) *)
+             { comment | rule-line }
+             "end" [ comment ] ;
+rule-line  = ( "active" | "inactive"
+             | "when" "time" time                  (* 00:00 … 23:59 *)
+             | "when" "weekday" rule-day { rule-day }
+             | "then" slug string ) [ comment ] ;
+rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
+           | "weekdays" | "weekend" | "daily" ;
 
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
@@ -158,6 +167,7 @@ Notes:
   `wire`, `set`, and `use` (migration errors) — none can be declared as
   a name. `access` is a keyword only where a line starts with `access
   <slug>`; elsewhere it stays an ordinary slug (`access = Switch()`).
+  `rule` likewise, only in front of a slug.
 - An instantiation is distinguished from a block declaration by the case
   of the callee: `sued = fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
@@ -924,6 +934,41 @@ grouped under the day words (`DayTimer "Schaltuhr" schedule daily:
 22:00-24:00 activate`), a user mode by its title, a column one side
 lacks as none. The semantic fingerprint includes the schedule, so
 `lxir drift` reports one changed in Loxone Config or the app.
+
+### `rule` — an Automatic Designer rule (D57)
+
+```text
+extern pumpe = PushButton(title: "Pumpe")
+extern pumpe_ein = AutopilotRule(title: "Pumpe Ein")
+
+rule pumpe_ein                      # weekday mornings
+	active
+	when weekday weekdays
+	when time 09:00
+	then pumpe "on"
+end
+```
+
+A `rule` states what an existing rule of the app's Automatic Designer
+does: whether it is `active`, its conditions (all must hold) and its
+actions, in order. The slug is an `AutopilotRule` extern — rules are
+created, named and deleted in the app; the declaration edits one.
+
+- **`when time HH:MM`** — at that time of day.
+- **`when weekday <days>`** — on those days (`mon` … `sun`, `weekdays`,
+  `weekend`, `daily`; no day twice).
+- **`then <slug> "<command>"`** — the app's command text to a block:
+  `on`/`off` to a `PushButton`, `pulse` to a `PButtonT`, or any
+  target type and command some rule of the config already sends (the
+  compile copies that action's code). Anything else is refused.
+
+Compiling writes the rule's `APC=` payload only when the declaration
+differs from the rule as read, and then as the app's edit: unchanged
+conditions and actions keep their JSON, `STA` follows `active`.
+`decompile`/`adopt` lift every rule of these shapes into a declaration;
+a rule with other conditions (a control's state, an operating mode, OR
+groups) stays a comment and must not be declared. Removing a
+declaration leaves the rule as last written. Top-level only.
 
 ### Push notifications: `OutputRefLM` and `recipients` (D51)
 

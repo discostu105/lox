@@ -12,7 +12,7 @@
 //! documentation, an app-visible state block), which is why lint reports
 //! and never blocks a compile.
 
-use super::ast::{BindingKind, Item, MatchSpec, Module, TestItem, Value};
+use super::ast::{BindingKind, Item, MatchSpec, Module, RuleStmtKind, TestItem, Value};
 use crate::doc::{LoxoneDoc, ports};
 use crate::error::Result;
 use crate::lock::Lockfile;
@@ -153,6 +153,15 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             }
             Item::ScheduleClaim(c) => {
                 object_refs.insert(&c.slug);
+            }
+            // A rule uses its own block and its action targets (D57).
+            Item::Rule(r) => {
+                object_refs.insert(&r.slug);
+                for st in r.stmts() {
+                    if let RuleStmtKind::Then { target, .. } = &st.kind {
+                        object_refs.insert(target);
+                    }
+                }
             }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {

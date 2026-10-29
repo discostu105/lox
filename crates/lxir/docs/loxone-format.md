@@ -353,9 +353,29 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   owned — carried verbatim like all foreign content, compared by
   `lxir diff`/`drift` (the `APC=` attribute joins the semantic
   projection, canonicalized as parsed JSON per the point above), and
-  rendered as comment lines in the decompile full view. lxir never
-  writes them. Open oracle question: whether a GUI save preserves a
-  foreign-minted rule at all — prerequisite for any authoring work.
+  rendered as comment lines in the decompile full view. Since D57 a
+  `rule` declaration edits the rules of the documented shapes (time,
+  weekday; actions with an observed `descID`); lxir never creates or
+  deletes one.
+- **Activation is two flags** (live, 2026-10-30): the engine runs a
+  rule only with `"active": true` *and* `"activeIfValid": true`. Rules
+  with `active` alone (the house's for three months, and compiled
+  ones) never ran; the app's activation set both and the rule ran at
+  its time. The app saves an edited rule as a custom change, not into
+  the program: `/sys/custom/<rule-uuid>.LoxCC`, a one-element LoxCC
+  (`<C Type="AutopilotRule" V="178" …>` with a `<TPC UL="" GL="…"/>`
+  child) — the raw CRLF inside the JSON comes from this writer. Runs
+  are logged to `/log/<AutoPilot-container-uuid>.txt` and the
+  container's `history` state (`YYYY-MM-DD HH:MM:SS <uuid> <name>`).
+- **Edits, as the app makes them** (house config history and a live
+  push, 2026-10-29): deactivating a rule in the app changed exactly
+  `"active": true → false` and removed `STA`; a compiled payload in the
+  app's key order (`type, descID, id, controlUUID, active,
+  activeIfValid, name, description, value, operator, invalid,
+  forceEdge, command, arrValues, eventGroups, events, actions`,
+  compact) with `STA="1"` right after `APC=` was accepted by the
+  Miniserver and came back byte-identical in the verifying download. Weekday indices count from Monday = 0 (`arrValues`
+  `[3, 4]` = Thursday, Friday).
 
 ## Touch Pure Flex tiles: `<btns>` on a `TreeDevice`
 
