@@ -1151,11 +1151,11 @@ pub(crate) enum FilesCmd {
         #[arg(default_value = "/")]
         path: String,
     },
-    /// Download a file
+    /// Download a file (into the current directory unless --save-as is given)
     Get {
         /// Path on the Miniserver filesystem
         path: String,
-        /// Local output path (defaults to filename)
+        /// Local output path, `-` for stdout [default: the file's name, in the current directory]
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
