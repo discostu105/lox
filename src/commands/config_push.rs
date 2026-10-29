@@ -35,9 +35,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// The file name the Miniserver loads as its new config on start.
-const UPLOAD_NAME: &str = "sps_new.zip";
-
 /// What a push needs from the Miniserver — a trait, so the whole flow also
 /// runs against a fake in tests.
 pub(crate) trait Miniserver {
@@ -79,7 +76,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn upload(&self, zip: &[u8]) -> Result<()> {
-        ftp::upload_backup(&self.cfg, UPLOAD_NAME, zip)
+        ftp::upload_config(&self.cfg, zip)
     }
 
     fn reboot(&self) -> Result<()> {
@@ -277,7 +274,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     }
 
     // 6. Upload, reboot, wait.
-    say(&format!("Uploading as {UPLOAD_NAME}..."));
+    say(&format!("Uploading as {}...", ftp::CONFIG_UPLOAD_NAME));
     ms.upload(&staged)?;
     say("Rebooting the Miniserver...");
     ms.reboot()?;

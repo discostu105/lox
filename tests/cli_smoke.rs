@@ -456,6 +456,30 @@ fn config_compress_refuses_a_zip() {
         .stderr(predicate::str::contains("already compressed"));
 }
 
+/// The Miniserver starts from whatever lands in `sps_new.zip`: `config upload`
+/// refuses anything but a config ZIP, before it loads settings or connects.
+#[test]
+fn config_upload_refuses_what_is_not_a_config_zip() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.Loxone"), "<C Type=\"Memory\"/>\n").unwrap();
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.path().join("other.zip")).unwrap());
+    zip.start_file("Music.json", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"{}").unwrap();
+    zip.finish().unwrap();
+
+    for file in ["config.Loxone", "other.zip"] {
+        lox()
+            .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+            .args(["config", "upload", "--force"])
+            .arg(dir.path().join(file))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("is not a config ZIP"));
+    }
+}
+
 // ── autopilot ls reads the rules from a config file ────────────────────────
 
 #[test]

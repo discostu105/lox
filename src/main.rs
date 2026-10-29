@@ -1419,8 +1419,10 @@ pub(crate) enum ConfigCmd {
     },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     ///
-    /// The Miniserver then discards its custom changes, such as rules edited in
-    /// the app since the last upload: check `lox autopilot changed` first.
+    /// The ZIP goes to /prog/sps_new.zip, which the Miniserver loads on its
+    /// next start (`lox reboot`). It then discards its custom changes, such as
+    /// rules edited in the app since the last upload: check `lox autopilot
+    /// changed` first.
     Upload {
         /// Path to a config ZIP file
         file: String,
@@ -1526,6 +1528,9 @@ pub(crate) enum ConfigCmd {
         count: usize,
     },
     /// Restore a previous config version from git and upload to Miniserver
+    ///
+    /// Uploaded as /prog/sps_new.zip, which the Miniserver loads on its next
+    /// start (`lox reboot`).
     Restore {
         /// Git commit hash to restore from
         commit: String,

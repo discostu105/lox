@@ -545,7 +545,16 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             }
         }
         ConfigCmd::Upload { file, force } => {
-            let cfg = Config::load()?;
+            let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+            // The Miniserver starts from whatever sps_new.zip holds.
+            if let Err(e) = loxcc::extract_and_decompress(&data) {
+                bail!(
+                    "{} is not a config ZIP ({:#}). A .Loxone file becomes one with \
+                     `lox config compress FILE --template DOWNLOAD.zip`.",
+                    file,
+                    e
+                );
+            }
             if !force {
                 eprintln!(
                     "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
@@ -559,15 +568,16 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 );
                 std::process::exit(1);
             }
-            let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-            let filename = std::path::Path::new(&file)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&file);
-            eprintln!("Uploading {} ({} KB)...", filename, data.len() / 1024);
-            ftp::upload_backup(&cfg, filename, &data)?;
+            let cfg = Config::load()?;
+            eprintln!(
+                "Uploading {} as /prog/{} ({} KB)...",
+                file,
+                ftp::CONFIG_UPLOAD_NAME,
+                data.len() / 1024
+            );
+            ftp::upload_config(&cfg, &data)?;
             println!("Upload complete.");
-            println!("Reboot the Miniserver to apply: lox reboot");
+            println!("Reboot the Miniserver to load it: lox reboot");
         }
         ConfigCmd::Users { file } => {
             if file.ends_with(".zip") {

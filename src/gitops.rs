@@ -109,7 +109,7 @@ pub fn init(path: &Path, cfg: &Config) -> Result<PathBuf> {
 }
 
 /// Metadata stored alongside each config snapshot.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize)]
 struct Metadata {
     miniserver: String,
     serial: String,
@@ -311,7 +311,8 @@ pub fn log(repo: &Path, ms_filter: Option<&str>, count: usize) -> Result<String>
 }
 
 /// Restore a config from a specific commit.
-/// Checks out the backup.zip from that commit and uploads it via FTP.
+/// Checks out the backup.zip from that commit and uploads it via FTP as
+/// `sps_new.zip`, which the Miniserver loads on its next start.
 pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<()> {
     let ms = ms_dir(cfg);
     let zip_rel = format!("{}/backup.zip", ms);
@@ -353,26 +354,19 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
         bail!("Failed to read {} from commit {}", zip_rel, commit);
     }
     let zip_data = show_output.stdout;
+    // The Miniserver starts from whatever sps_new.zip holds (a Git LFS
+    // pointer, say, would be fatal).
+    loxcc::extract_and_decompress(&zip_data)
+        .with_context(|| format!("{} at {} is not a config ZIP", zip_rel, commit))?;
 
-    // Determine the filename from metadata at that commit
-    let meta_blob = format!("{}:{}/metadata.yaml", commit, ms);
-    let filename = Command::new("git")
-        .args(["show", &meta_blob])
-        .current_dir(repo)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let text = String::from_utf8_lossy(&o.stdout).to_string();
-            let meta: Metadata = serde_yaml::from_str(&text).ok()?;
-            Some(meta.backup_file)
-        })
-        .unwrap_or_else(|| "restore.zip".to_string());
-
-    eprintln!("Uploading {} ({} KB)...", filename, zip_data.len() / 1024);
-    ftp::upload_backup(cfg, &filename, &zip_data)?;
+    eprintln!(
+        "Uploading as /prog/{} ({} KB)...",
+        ftp::CONFIG_UPLOAD_NAME,
+        zip_data.len() / 1024
+    );
+    ftp::upload_config(cfg, &zip_data)?;
     println!("Upload complete.");
-    println!("Reboot the Miniserver to apply: lox reboot");
+    println!("Reboot the Miniserver to load it: lox reboot");
 
     Ok(())
 }
@@ -459,6 +453,28 @@ mod tests {
         assert!(msg.contains("No logic changes"));
         let msg = build_commit_message("ABC123", &meta(), &Change::Unavailable("bad xml".into()));
         assert!(msg.contains("Logic diff unavailable: bad xml"));
+    }
+
+    #[test]
+    fn test_restore_refuses_what_is_not_a_config_zip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            serial: "TEST123".into(),
+            // Nothing listens there: the check must fail before any upload.
+            host: "https://127.0.0.1:9".into(),
+            ..Default::default()
+        };
+        let repo = init(tmp.path(), &cfg).unwrap();
+        let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n";
+        std::fs::write(repo.join("TEST123/backup.zip"), pointer).unwrap();
+        git(&repo, &["add", "TEST123/backup.zip"]).unwrap();
+        git(&repo, &["commit", "-m", "pull"]).unwrap();
+
+        let err = restore(&repo, &cfg, "HEAD", true).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("TEST123/backup.zip at HEAD is not a config ZIP"),
+            "{err:#}"
+        );
     }
 
     #[test]
