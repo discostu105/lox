@@ -112,7 +112,7 @@ lox config show                           # logic pages with block and wire coun
 lox config show -p Wohnzimmer             # one page as lxir source
 lox config wiring "Licht" --trace up      # what drives a block, back to the sensors
 lox config find bewegung küche            # search blocks
-lox config lint                           # dead blocks, unwired inputs, duplicate names
+lox config lint                           # dead blocks, unwired inputs and motors, duplicate names
 lox config history "Licht"                # how one block changed over time
 ```
 

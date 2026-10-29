@@ -159,7 +159,7 @@ lox config show --at v271                 # the logic pages of an old snapshot
 lox config show -p Garage --at v271       # a page as lxir source
 lox config wiring "Garage light" --at v271 --trace up   # its wiring back then
 lox config history "Garage light"         # every snapshot that changed this block
-lox config lint                           # dead blocks, unwired inputs, duplicate names
+lox config lint                           # dead blocks, unwired inputs and motors, duplicate names
 ```
 
 In `lox tui`, *System › Config* lists the snapshots with their diffs: `⏎` browses a snapshot (pages,
