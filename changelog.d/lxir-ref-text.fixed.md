@@ -1,1 +1,0 @@
-- `lox ir compile` writes `Text="true"` on the refs it mints for an `ApiActor` or a `VirtualTextIn`, as Loxone Config does; a save in Loxone Config used to add it (lxir D48). With this, a recompile right after a save in Loxone Config 17.2 reproduces the saved config byte for byte

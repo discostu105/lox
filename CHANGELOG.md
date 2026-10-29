@@ -10,6 +10,34 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-29
+
+### Added
+- **Users and door access, read-only** (#136): `lox user ls`, `lox user show <user>` (state, validity, groups,
+  NFC tags, number of access codes) and `lox user groups` read the Miniserver's user management.
+  `lox access log <code-touch>` decodes an NFC Code Touch's access log (who opened when, with which tag or code,
+  denied attempts). `lox access check <user> [<code-touch>]` says why a user may or may not open a Code Touch:
+  it joins the live user with the access rights in a freshly downloaded program file and answers `granted`
+  (schedule, direct or through a group), `no-access-right`, `no-credential`, `user-disabled` or
+  `unknown-full-access`, with warnings where the file and the live state disagree. `lox access perms <control>`
+  lists the users and groups assigned to a control. All with `-o json`; new MCP tools `list_users`, `get_user`,
+  `access_log` and `access_check`.
+- `lox config users` also shows each user's UUID, number of NFC tags and access codes, tag names, groups, own
+  access rights and `last_edit`, and reads backup ZIPs too.
+- `lox ir diff` has a users/access section: users and groups added, removed or renamed, group membership, NFC
+  tags, access codes and passwords (as names, counts and short fingerprints, never the stored hashes), last
+  edits, access rights per Code Touch with their schedule, and UI rights in summary. `--json` prints the whole
+  diff as JSON; `--exit-code` counts the new section. `lox config diff` and the System › Config view list the
+  same changes under *(users & access)*.
+
+### Changed
+- `lox config push` no longer refuses when the live config differs from the base only in users, groups,
+  credentials or access rights. The push compiles against the live download, so those stay as they are live;
+  the report lists them as "kept as live" (`kept_as_live` in `-o json`).
+
+### Fixed
+- `lox ir compile` writes `Text="true"` on the refs it mints for an `ApiActor` or a `VirtualTextIn`, as Loxone Config does; a save in Loxone Config used to add it (lxir D48). With this, a recompile right after a save in Loxone Config 17.2 reproduces the saved config byte for byte
+
 ## [0.15.2] — 2026-10-29
 
 ### Fixed
