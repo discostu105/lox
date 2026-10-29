@@ -267,7 +267,7 @@ lox config extract config.zip --save-as out.Loxone
 lox config compress out.Loxone         # compress .Loxone XML → out.LoxCC (sps0.LoxCC format)
 lox config compress out.Loxone --save-as sps0.LoxCC
 lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
-lox config upload config.zip --force   # upload to Miniserver (dangerous)
+lox config upload config.zip --force   # upload as sps_new.zip, loaded on the next reboot (dangerous)
 lox config push --force                # deploy an lxir project, verified (see Config as Code)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
@@ -283,6 +283,10 @@ lox config restore abc123 --force      # restore config from git history & uploa
 
 The `pull` workflow: FTP download → LoxCC decompress → logic diff → git commit with meaningful message.
 Multi-Miniserver: each serial gets its own subdirectory in the repo.
+
+`upload` and `restore` write the ZIP to `/prog/sps_new.zip`, the file the Miniserver loads on its next start; `lox reboot` applies it.
+Both refuse a file that is not a config ZIP. A `.Loxone` file becomes one with `lox config compress FILE --template DOWNLOAD.zip`.
+To upload, reboot and verify in one go, deploy with `lox config push` instead.
 
 ### Inspecting the logic (read-only)
 
@@ -388,6 +392,9 @@ Each step stops the push when it fails:
 
 A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:
 nothing re-serializes the XML on the way.
+
+To go back to the config from before a push, upload its download again:
+`lox config upload backups/<stamp>-pre-push.zip --force && lox reboot`.
 
 ---
 

@@ -129,10 +129,16 @@ pub fn download_backup(cfg: &Config, filename: &str) -> Result<Vec<u8>> {
     })
 }
 
-/// Upload a backup file to the Miniserver.
-pub fn upload_backup(cfg: &Config, filename: &str, data: &[u8]) -> Result<()> {
+/// The file name the Miniserver loads as its new config on start (it logs
+/// `Loading sps_new.zip`). Loxone Config uploads under this name too; a
+/// backup re-uploaded under its own name is not loaded.
+pub const CONFIG_UPLOAD_NAME: &str = "sps_new.zip";
+
+/// Upload a config ZIP as `/prog/sps_new.zip`, the config the Miniserver
+/// starts from after its next reboot.
+pub fn upload_config(cfg: &Config, data: &[u8]) -> Result<()> {
     let host = ftp_host(cfg);
-    let path = format!("/prog/{}", filename);
+    let path = format!("/prog/{}", CONFIG_UPLOAD_NAME);
     ftp_with_retry(|| {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
