@@ -1359,6 +1359,29 @@ pub(crate) enum ConfigCmd {
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
+    /// Deploy an lxir project: drift check, compile, stage, upload, reboot,
+    /// verify (requires --force to upload)
+    Push {
+        /// Project directory (holds lox.toml)
+        #[arg(default_value = ".")]
+        project: String,
+        /// Upload the staged config and reboot the Miniserver
+        #[arg(long)]
+        force: bool,
+        /// The base is a byte patch of this download (.Loxone); the live
+        /// config must still be exactly it
+        #[arg(long, value_name = "FILE")]
+        patched_from: Option<String>,
+        /// Delete managed blocks missing from the module (see `lox ir help`)
+        #[arg(long)]
+        allow_removals: bool,
+        /// Accept a base saved by a new Loxone Config release (its exact version)
+        #[arg(long, value_name = "VERSION")]
+        accept_version: Option<String>,
+        /// Where downloads and push artifacts go (default: PROJECT/backups)
+        #[arg(long, value_name = "DIR")]
+        backup_dir: Option<String>,
+    },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     Upload {
         /// Path to a config ZIP file

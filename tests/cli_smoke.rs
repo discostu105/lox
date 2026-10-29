@@ -130,6 +130,7 @@ subcmd_help!(help_config_download, "config", "download");
 subcmd_help!(help_config_ls, "config", "ls");
 subcmd_help!(help_config_extract, "config", "extract");
 subcmd_help!(help_config_compress, "config", "compress");
+subcmd_help!(help_config_push, "config", "push");
 subcmd_help!(help_config_upload, "config", "upload");
 subcmd_help!(help_config_users, "config", "users");
 subcmd_help!(help_config_devices, "config", "devices");

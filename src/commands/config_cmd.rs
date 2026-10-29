@@ -6,7 +6,7 @@ use std::fs;
 use std::time::Duration;
 
 use crate::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
-use crate::commands::{RunContext, config_insight};
+use crate::commands::{RunContext, config_insight, config_push};
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
@@ -520,6 +520,28 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                         ""
                     }
                 );
+            }
+        }
+        ConfigCmd::Push {
+            project,
+            force,
+            patched_from,
+            allow_removals,
+            accept_version,
+            backup_dir,
+        } => {
+            let ms = config_push::LiveMiniserver::new(Config::load()?);
+            let opts = config_push::PushOptions {
+                project: project.into(),
+                force: force && !ctx.dry_run,
+                patched_from: patched_from.map(Into::into),
+                allow_removals,
+                accept_version,
+                backup_dir: backup_dir.map(Into::into),
+            };
+            let report = config_push::push(&ms, &opts, ctx.quiet)?;
+            if ctx.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
         ConfigCmd::Upload { file, force } => {

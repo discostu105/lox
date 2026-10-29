@@ -206,6 +206,7 @@ lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
 lox config compress out.Loxone --template dl.zip  # Upload ZIP from a download, only sps0.LoxCC replaced
+lox config push --force                # Deploy an lxir project: compile, upload, reboot, verify
 lox config init ~/loxone-config        # Init git repo for config versioning
 lox config pull                        # Download, diff & git-commit config
 lox config log                         # Show config change history
@@ -367,7 +368,9 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 `lox ir compile` writes exactly the XML Loxone Config would have drawn and pins every UUID it mints in a
 lockfile, so the next compile changes only what you changed. Everything you don't manage — hardware, rooms,
 visualization, other logic — passes through byte for byte. `lox ir diff` proves it, `lox ir drift` tells you
-when the GUI or the app wrote to the config since. See [COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the
+when the GUI or the app wrote to the config since. `lox config push --force` deploys a project end to end: drift
+check, compile against the live config, byte-exact upload, reboot, and a download that proves the Miniserver runs
+exactly the compiled file. See [COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the
 [lxir docs](crates/lxir/README.md) (language, lockfile, workflow).
 
 The toolchain is the [`lxir`](crates/lxir) crate in this repository: a network-free library (also on
