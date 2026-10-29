@@ -107,6 +107,17 @@ check its type, build an `actions::Action`, confirm it if needed (§5), and send
 | `run_scene` | scene name | — (user-authored); reports progress, stops on cancel |
 | `send_command` | raw Loxone command | only listed with `--allow-raw`; confirmed on risky types |
 
+User-management tools take their own arguments; every one is confirmed (§5) and accepts `dry_run`.
+Each change is sent once, without retries, and its result carries the note that the change may live
+only in the Miniserver's custom changes until Loxone Config saves the program.
+
+| Tool | Arguments | Does |
+|------|-----------|------|
+| `learn_nfc_tag` | `code_touch`, `timeout_secs?` (60, at most 300) | starts the Code Touch's learn mode over the WebSocket (`nfc/startlearn`), waits for a new `nfcLearnResult` (the value in the initial state dump is the last learned tag and ignored), ends learn mode (`nfc/stoplearn`) on success, error, timeout and cancel; returns the ID and, for a known tag, name and user. The confirmation tells the user to hold the tag or unlocked phone to the reader; a progress notification repeats it when the call carries a progress token |
+| `assign_nfc_tag` | `user`, `id`, `name` | `addusernfc`; refuses a tag the user has already |
+| `remove_nfc_tag` | `user`, `tag` (ID or name) | `removeusernfc` |
+| `set_access_code` | `user`, `code` (2–8 digits) | `updateuseraccesscode`; the code is masked (`****`) in results, errors, `dry_run` and the confirmation, and bound to the confirmation by hash only; `code_in_use` when another user has it |
+
 Results are structured content matching the tool's `outputSchema`: the resolved control, the action
 as text, the commands sent (PINs masked), the Miniserver response, and the equivalent `lox` command
 line (`cli`).
@@ -141,6 +152,10 @@ confirm:
   - Pool Abdeckung [Pool]
 ```
 
+The user-management tools (`learn_nfc_tag`, `assign_nfc_tag`, `remove_nfc_tag`, `set_access_code`)
+are always confirmed; their confirmation is bound to the change's requests (for `set_access_code`, to
+a SHA-256 of the code, not the code).
+
 `--allow-risky` skips all of these confirmations. Dry runs are never gated; they report
 `needs_confirmation: true`.
 
@@ -160,8 +175,8 @@ confirm:
 A declined confirmation returns `declined_by_user` and tells the model not to retry.
 
 Other rules: risky tools carry `destructiveHint`, so clients that confirm destructive calls will ask
-too; credentials never pass through tool arguments; alarm PINs are passed to the Miniserver and never
-echoed back.
+too; credentials never pass through tool arguments; alarm PINs and access codes are passed to the
+Miniserver and never echoed back.
 
 ## 6. Errors
 
@@ -173,7 +188,8 @@ them and can correct itself:
 ```
 
 Codes match `lox -o json` (`control_not_found`, `ambiguous_control`, `config_not_found`,
-`unauthorized`, `connection_error`, …) plus `invalid_arguments`, `action_not_allowed`,
+`unauthorized`, `connection_error`, `tag_not_found`, `code_in_use`, `learn_timeout`, …) plus
+`invalid_arguments`, `action_not_allowed`,
 `declined_by_user`, `confirmation_expired` and `confirmation_mismatch`. Arguments that do not match the
 input schema (wrong enum value, missing field) are tool errors too, not protocol errors: rmcp's
 plain-text message is wrapped in the envelope as `invalid_arguments`

@@ -296,6 +296,40 @@ impl LoxClient {
         })
     }
 
+    /// One GET that changes something on the Miniserver: no retry (a retry
+    /// could apply the change twice), and the answer comes back whatever its
+    /// status, for the caller to interpret. `mask` is (secret part of the
+    /// path, what to show instead): it keeps a secret out of the -v/-vv log,
+    /// the returned answer (which may echo the path) and errors.
+    pub fn get_once(&self, path: &str, mask: Option<(&str, &str)>) -> Result<(u16, String)> {
+        let hide = |s: &str| match mask {
+            Some((secret, shown)) => s.replace(secret, shown),
+            None => s.to_string(),
+        };
+        let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        if verbose() >= 1 {
+            eprintln!("GET {}", redact_url(&hide(&url)));
+        }
+        // reqwest's errors name the URL; a masked path must not reappear there
+        let resp = self
+            .apply_auth(self.client.get(&url))
+            .send()
+            .map_err(|e| e.without_url())?;
+        let status = resp.status();
+        if verbose() >= 1 {
+            eprintln!(
+                "  → {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("")
+            );
+        }
+        let body = hide(&resp.text().map_err(|e| e.without_url())?);
+        if verbose() >= 2 {
+            log_body(&body);
+        }
+        Ok((status.as_u16(), body))
+    }
+
     /// Retry a request up to 3 times with exponential backoff on network errors.
     /// Does not retry on 4xx client errors (only on connection/timeout/5xx).
     fn request_with_retry<T, F>(&self, f: F) -> Result<T>

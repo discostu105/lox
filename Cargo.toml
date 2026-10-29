@@ -52,6 +52,8 @@ rand = "0.8"
 chrono = { version = "0.4", features = ["clock"] }
 byteorder = "1"
 uuid = { version = "1", features = ["v4"] }
+# hidden prompt for `lox user code set`
+rpassword = "7"
 
 # MCP server (`lox mcp`)
 rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io", "elicitation"] }
@@ -85,6 +87,8 @@ predicates = "3"
 tempfile = "3"
 httpmock = "0.7"
 tokio-test = "0.4"
+# paused clock for the timeouts of `lox access learn`
+tokio = { version = "1", features = ["test-util"] }
 insta = "1"
 portable-pty = "0.9"
 

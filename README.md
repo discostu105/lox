@@ -79,7 +79,8 @@ An agent can discover your home (`lox ls -o json`), read sensor values, control 
 Built on the official Rust MCP SDK, it speaks MCP 2026-07-28 and every older revision, and exposes
 schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes, the config
 wiring behind a control — *why is this on?* — and door access: *why can't she open the door?*) over stdio.
-Doors, gates, the alarm and any control you list under `confirm:` ask **you** to confirm in the MCP client before anything is sent.
+It can also learn NFC tags at a Code Touch and pair them with users, and set access codes.
+Doors, gates, the alarm, every change to users and any control you list under `confirm:` ask **you** to confirm in the MCP client before anything is sent.
 
 ```bash
 lox mcp config                        # print a ready-to-paste client config
@@ -228,6 +229,8 @@ lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
 lox access check alice                 # Why alice may (not) open the NFC Code Touch
 lox access log "Code Touch"            # Who opened when, denied attempts
+lox access learn "Code Touch" --user alice --name "alice phone"  # Read an NFC tag, pair it
+lox user code set alice                # New access code (hidden prompt)
 lox schema blind                       # Command schema for AI agent discovery
 lox mcp serve                          # MCP server for Claude Desktop, ChatGPT, Cursor, …
 lox completions bash                   # Generate shell completions

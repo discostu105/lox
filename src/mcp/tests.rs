@@ -1375,6 +1375,7 @@ const FAMILY: &str = "1a2b3c4d-0002-0001-ffff000000000001";
 const FULL_ACCESS: &str = "1a2b3c4d-0002-0002-ffff000000000002";
 const TOUCH: &str = "0f1e2d3c-000d-1111-ffff00000000000d";
 const ALWAYS: &str = "1a2b3c4d-0004-0001-ffff000000000001";
+const LEARN_RESULT: &str = crate::nfc_learn::tests::RESULT;
 
 /// A user-management answer: JSON in a string in the LL envelope.
 fn ll(control: &str, value: Value) -> Value {
@@ -1386,8 +1387,10 @@ fn ll(control: &str, value: Value) -> Value {
 async fn access_miniserver() -> MockServer {
     let server = MockServer::start_async().await;
     let mut s = structure();
-    s["controls"][TOUCH] =
-        json!({ "name": "Code Touch Eingang", "type": "NfcCodeTouch", "room": "r3" });
+    s["controls"][TOUCH] = json!({
+        "name": "Code Touch Eingang", "type": "NfcCodeTouch", "room": "r3",
+        "states": { "nfcLearnResult": LEARN_RESULT }
+    });
     server
         .mock_async(|when, then| {
             when.method(GET).path("/data/LoxApp3.json");
@@ -1626,4 +1629,351 @@ async fn refused_user_management_says_which_right_is_missing() {
         "{}",
         out
     );
+}
+
+// ── User management changes ──────────────────────────────────────────────────
+
+const USER_TOOLS: [&str; 4] = [
+    "learn_nfc_tag",
+    "assign_nfc_tag",
+    "remove_nfc_tag",
+    "set_access_code",
+];
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_changes_are_action_tools_hidden_read_only() {
+    let ms = access_miniserver().await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    let names = tool_names(&client).await;
+    for t in USER_TOOLS {
+        assert!(names.contains(&t.to_string()), "missing {}", t);
+    }
+    let opts = ServerOptions {
+        read_only: true,
+        ..Default::default()
+    };
+    let client = session(&ms, opts, Lifecycle::Modern).await;
+    let names = tool_names(&client).await;
+    for t in USER_TOOLS {
+        assert!(!names.contains(&t.to_string()), "{} with --read-only", t);
+    }
+    let tools = LoxMcp::new(ServerOptions::default()).tools();
+    for t in USER_TOOLS {
+        let tool = tools.iter().find(|x| x.name == t).unwrap();
+        let v = serde_json::to_value(tool).unwrap();
+        assert_eq!(v["annotations"]["destructiveHint"], true, "{}", t);
+    }
+}
+
+/// Mock one user-management change; the path as it goes over the wire.
+async fn change<'a>(ms: &'a MockServer, path: String, code: &str) -> httpmock::Mock<'a> {
+    let body =
+        json!({ "LL": { "control": path.trim_start_matches("/j"), "value": "", "Code": code } });
+    ms.mock_async(|when, then| {
+        when.method(GET).path(path);
+        then.status(200).json_body(body);
+    })
+    .await
+}
+
+async fn user_session(
+    ms: &MockServer,
+    lifecycle: Lifecycle,
+    answer: UserAnswer,
+) -> (Client, TestClient) {
+    let tc = TestClient::new(lifecycle, answer);
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(ms, None)),
+        tc.clone(),
+    )
+    .await;
+    (client, tc)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn assign_nfc_tag_pairs_after_the_user_confirms() {
+    let args = json!({ "user": "bob", "id": "aa bb cc dd ee ff 11", "name": "bob card" });
+    let path = format!(
+        "/jdev/sps/addusernfc/{}/AA%20BB%20CC%20DD%20EE%20FF%2011/bob%20card",
+        BOB
+    );
+    for lifecycle in BOTH {
+        let ms = access_miniserver().await;
+        let m = change(&ms, path.clone(), "200").await;
+        let (client, tc) = user_session(&ms, lifecycle, UserAnswer::Accept).await;
+        let (out, err) = call(&client, "assign_nfc_tag", args.clone()).await;
+        assert!(!err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["confirmed"], true);
+        assert_eq!(out["tag"]["id"], "AA BB CC DD EE FF 11");
+        assert!(
+            out["note"]
+                .as_str()
+                .unwrap()
+                .contains("Loxone Config saves")
+        );
+        m.assert_hits_async(1).await;
+        let questions = tc.questions.lock().unwrap().clone();
+        assert_eq!(questions.len(), 1);
+        assert!(questions[0].contains("bob card"), "{}", questions[0]);
+        assert!(
+            questions[0].contains("lox user nfc add bob"),
+            "{}",
+            questions[0]
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_changes_without_a_yes_send_nothing() {
+    let args = json!({ "user": "bob", "id": "AABBCCDD", "name": "bob card" });
+    for (answer, error) in [
+        (UserAnswer::Decline, "declined_by_user"),
+        (UserAnswer::CannotAsk, "action_not_allowed"),
+    ] {
+        for lifecycle in BOTH {
+            let ms = access_miniserver().await;
+            let m = ms
+                .mock_async(|when, then| {
+                    when.method(GET).path_contains("usernfc");
+                    then.status(200);
+                })
+                .await;
+            let (client, _) = user_session(&ms, lifecycle, answer).await;
+            let (out, err) = call(&client, "assign_nfc_tag", args.clone()).await;
+            assert!(err, "{:?}: {}", lifecycle, out);
+            assert_eq!(out["error"], error);
+            let (out, err) = call(
+                &client,
+                "remove_nfc_tag",
+                json!({ "user": "alice", "tag": "alice phone" }),
+            )
+            .await;
+            assert!(err, "{:?}: {}", lifecycle, out);
+            assert_eq!(out["error"], error);
+            m.assert_hits_async(0).await;
+        }
+    }
+    // dry run: the request, nothing sent, nobody asked
+    let ms = access_miniserver().await;
+    let (client, tc) = user_session(&ms, Lifecycle::Modern, UserAnswer::Accept).await;
+    let mut dry = args.clone();
+    dry["dry_run"] = json!(true);
+    let (out, err) = call(&client, "assign_nfc_tag", dry).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["dry_run"], true);
+    assert!(out["requests"][0].as_str().unwrap().contains("addusernfc"));
+    assert!(tc.questions.lock().unwrap().is_empty());
+    // a tag alice has already, in another spelling: refused before asking
+    let (out, err) = call(
+        &client,
+        "assign_nfc_tag",
+        json!({ "user": "alice", "id": "0102030405060708ec", "name": "again" }),
+    )
+    .await;
+    assert!(err, "{}", out);
+    assert!(
+        out["message"].as_str().unwrap().contains("already"),
+        "{}",
+        out
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_nfc_tag_finds_the_tag_by_name() {
+    let ms = access_miniserver().await;
+    let path = format!(
+        "/jdev/sps/removeusernfc/{}/01%2002%2003%2004%2005%2006%2007%2008%20EC",
+        ALICE
+    );
+    let m = change(&ms, path, "200").await;
+    let (client, _) = user_session(&ms, Lifecycle::Legacy, UserAnswer::Accept).await;
+    let (out, err) = call(
+        &client,
+        "remove_nfc_tag",
+        json!({ "user": "alice", "tag": "Alice Phone" }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["tag"]["name"], "alice phone");
+    m.assert_hits_async(1).await;
+    let (out, err) = call(
+        &client,
+        "remove_nfc_tag",
+        json!({ "user": "bob", "tag": "x" }),
+    )
+    .await;
+    assert!(err, "{}", out);
+    assert_eq!(out["error"], "tag_not_found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_access_code_never_shows_the_code() {
+    let code = "73519";
+    let path = format!("/jdev/sps/updateuseraccesscode/{}/{}", BOB, code);
+    for (answer, error) in [("200", None), ("201", None), ("409", Some("code_in_use"))] {
+        let ms = access_miniserver().await;
+        let m = change(&ms, path.clone(), answer).await;
+        let (client, tc) = user_session(&ms, Lifecycle::Modern, UserAnswer::Accept).await;
+        let (out, err) = call(
+            &client,
+            "set_access_code",
+            json!({ "user": "bob", "code": code }),
+        )
+        .await;
+        assert_eq!(err, error.is_some(), "{}: {}", answer, out);
+        if let Some(e) = error {
+            assert_eq!(out["error"], e);
+        } else {
+            // bob has a code: the new one replaces it
+            assert!(!out["warnings"].as_array().unwrap().is_empty(), "{}", out);
+        }
+        assert!(
+            !out.to_string().contains(code),
+            "{}: the code leaks: {}",
+            answer,
+            out
+        );
+        let questions = tc.questions.lock().unwrap().clone();
+        assert!(!questions[0].contains(code), "{}", questions[0]);
+        m.assert_hits_async(1).await;
+    }
+    // dry run and a malformed code: nothing sent, nothing echoed
+    let ms = access_miniserver().await;
+    let m = ms
+        .mock_async(|when, then| {
+            when.method(GET).path_contains("updateuseraccesscode");
+            then.status(200);
+        })
+        .await;
+    let (client, _) = user_session(&ms, Lifecycle::Modern, UserAnswer::Accept).await;
+    let (out, err) = call(
+        &client,
+        "set_access_code",
+        json!({ "user": "bob", "code": code, "dry_run": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert!(
+        out["requests"][0].as_str().unwrap().ends_with("/****"),
+        "{}",
+        out
+    );
+    assert!(!out.to_string().contains(code));
+    let (out, err) = call(
+        &client,
+        "set_access_code",
+        json!({ "user": "bob", "code": "12a45" }),
+    )
+    .await;
+    assert!(err);
+    assert_eq!(out["error"], "invalid_arguments");
+    assert!(!out.to_string().contains("12a45"), "{}", out);
+    m.assert_hits_async(0).await;
+}
+
+/// A server whose NFC learn sessions run on `io`; counts the sessions.
+fn learn_server(
+    ms: &MockServer,
+    io: &crate::nfc_learn::tests::FakeIo,
+) -> (LoxMcp, Arc<AtomicUsize>) {
+    let io = io.clone();
+    let opened = Arc::new(AtomicUsize::new(0));
+    let count = opened.clone();
+    let connector: super::server::LearnConnector = Arc::new(move |_cfg| {
+        count.fetch_add(1, Ordering::SeqCst);
+        let io = io.clone();
+        Box::pin(async move { Ok(Box::new(io) as Box<dyn crate::nfc_learn::LearnIo>) })
+    });
+    let server =
+        LoxMcp::with_config(ServerOptions::default(), config(ms, None)).with_learn_io(connector);
+    (server, opened)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn learn_nfc_tag_reads_a_tag_and_ends_learn_mode() {
+    use crate::nfc_learn::tests::{FakeIo, reply, text_state};
+    let known = format!(
+        r#"{{"id":"01 02 03 04 05 06 07 08 EC","name":"alice phone","userUuid":"{}","deviceUuid":0}}"#,
+        ALICE
+    );
+    for lifecycle in BOTH {
+        let ms = access_miniserver().await;
+        let io = FakeIo::new(
+            vec![text_state(
+                LEARN_RESULT,
+                r#"{"id":"0A 0B 0C 0D","name":0,"userUuid":0}"#,
+            )],
+            vec![
+                reply(&format!("jdev/sps/io/{}/nfc/startlearn", TOUCH), "200"),
+                text_state(LEARN_RESULT, &known),
+            ],
+        );
+        let (server, opened) = learn_server(&ms, &io);
+        let tc = TestClient::new(lifecycle, UserAnswer::Accept);
+        let client = connect(server, tc.clone()).await;
+        let (out, err) = call(&client, "learn_nfc_tag", json!({ "code_touch": "eingang" })).await;
+        assert!(!err, "{:?}: {}", lifecycle, out);
+        assert_eq!(out["id"], "01 02 03 04 05 06 07 08 EC");
+        assert_eq!(out["known"], true);
+        assert_eq!(out["user"], "alice");
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
+        let sent = io.sent.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![
+                format!("jdev/sps/io/{}/nfc/startlearn", TOUCH),
+                format!("jdev/sps/io/{}/nfc/stoplearn", TOUCH),
+            ]
+        );
+        let questions = tc.questions.lock().unwrap().clone();
+        assert!(
+            questions[0].contains("hold the NFC tag"),
+            "{}",
+            questions[0]
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn learn_nfc_tag_starts_nothing_without_a_yes() {
+    let ms = access_miniserver().await;
+    let io = crate::nfc_learn::tests::FakeIo::new(vec![], vec![]);
+    for answer in [UserAnswer::Decline, UserAnswer::CannotAsk] {
+        let (server, opened) = learn_server(&ms, &io);
+        let client = connect(server, TestClient::new(Lifecycle::Modern, answer)).await;
+        let (out, err) = call(&client, "learn_nfc_tag", json!({ "code_touch": "eingang" })).await;
+        assert!(err, "{}", out);
+        assert_eq!(opened.load(Ordering::SeqCst), 0);
+    }
+    let (server, opened) = learn_server(&ms, &io);
+    let client = connect(
+        server,
+        TestClient::new(Lifecycle::Modern, UserAnswer::Accept),
+    )
+    .await;
+    let (out, err) = call(
+        &client,
+        "learn_nfc_tag",
+        json!({ "code_touch": "eingang", "dry_run": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert!(
+        out["would_send"][0]
+            .as_str()
+            .unwrap()
+            .ends_with("nfc/startlearn"),
+        "{}",
+        out
+    );
+    let (out, err) = call(
+        &client,
+        "learn_nfc_tag",
+        json!({ "code_touch": "eingang", "timeout_secs": 0 }),
+    )
+    .await;
+    assert!(err);
+    assert_eq!(out["error"], "invalid_arguments");
+    assert_eq!(opened.load(Ordering::SeqCst), 0);
+    assert!(io.sent.lock().unwrap().is_empty());
 }

@@ -30,6 +30,8 @@ use super::ops::{self, ActionResult, ControlFilter, SceneRun, invalid, tool_erro
 use crate::actions::{self, Action};
 use crate::client::{Control, LoxClient};
 use crate::config::Config;
+use crate::nfc_learn::{self, LearnIo, LearnedTag};
+use crate::usermgmt::{self, UserChange};
 
 /// How long a `LoxClient` (and its in-memory structure) is reused before it is
 /// rebuilt from config — picks up `lox cache refresh` and changed credentials.
@@ -54,9 +56,12 @@ Read live values with get_control or list_sensors. To explain why something happ
 (what drives a light, which sensors feed a block), use get_wiring. \
 For door access at NFC Code Touches: access_check says why a user may or may not open, \
 access_log shows who opened when. \
+To give someone an NFC tag: learn_nfc_tag reads its ID at a Code Touch (tell the user \
+first to have the tag or their unlocked phone ready), then assign_nfc_tag pairs it with \
+the user. \
 Every action tool accepts dry_run=true to preview the exact commands without sending them.
-Doors, gates, the alarm and controls the user listed for confirmation are high-risk: \
-the user is asked to confirm each one. \
+Doors, gates, the alarm, changes to users (NFC tags, access codes) and controls the \
+user listed for confirmation are high-risk: the user is asked to confirm each one. \
 If the user declines, do not retry.";
 
 const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#6dc04b"/><path d="M14 33 32 17l18 16v15a2 2 0 0 1-2 2H38V38H26v12H16a2 2 0 0 1-2-2z" fill="#fff"/></svg>"##;
@@ -407,6 +412,53 @@ pub struct SendParams {
     pub command: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LearnParams {
+    /// NFC Code Touch: name (or a unique part of it), alias or UUID
+    pub code_touch: String,
+    /// Seconds to wait for a tag after the user confirms (default 60, at most 300)
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    /// Resolve the Code Touch and return the commands without starting learn mode
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AssignNfcParams {
+    /// User name (exact, or a unique part of it) or UUID
+    pub user: String,
+    /// Tag ID as learn_nfc_tag returned it (hex bytes, spaces optional)
+    pub id: String,
+    /// Name for the tag, e.g. 'alice phone'
+    pub name: String,
+    /// Check the change and return the request without sending it
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoveNfcParams {
+    /// User name (exact, or a unique part of it) or UUID
+    pub user: String,
+    /// The tag: its ID or its name
+    pub tag: String,
+    /// Check the change and return the request without sending it
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AccessCodeParams {
+    /// User name (exact, or a unique part of it) or UUID
+    pub user: String,
+    /// The new code: 2 to 8 digits. Never repeated in results or errors.
+    pub code: String,
+    /// Check the change and return the request (code masked) without sending it
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
 /// The form the user fills in to confirm a high-risk action.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Confirm {
@@ -470,11 +522,29 @@ fn modern(ctx: &RequestContext<RoleServer>) -> bool {
         .is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
 }
 
+/// Opens the session an NFC learn runs on: the Miniserver's WebSocket, or a
+/// script in tests.
+pub type LearnConnector = Arc<
+    dyn Fn(Config) -> futures_util::future::BoxFuture<'static, anyhow::Result<Box<dyn LearnIo>>>
+        + Send
+        + Sync,
+>;
+
+fn websocket_learn() -> LearnConnector {
+    Arc::new(|cfg| {
+        Box::pin(async move {
+            let session = crate::stream::Session::open(&cfg, Duration::from_secs(20)).await?;
+            Ok(Box::new(session) as Box<dyn LearnIo>)
+        })
+    })
+}
+
 #[derive(Clone)]
 pub struct LoxMcp {
     opts: ServerOptions,
     state: Arc<Mutex<State>>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
+    learn_io: LearnConnector,
     tool_router: ToolRouter<Self>,
 }
 
@@ -489,6 +559,10 @@ const ACTION_TOOLS: &[&str] = &[
     "door",
     "run_scene",
     "send_command",
+    "learn_nfc_tag",
+    "assign_nfc_tag",
+    "remove_nfc_tag",
+    "set_access_code",
 ];
 
 impl LoxMcp {
@@ -499,6 +573,13 @@ impl LoxMcp {
     #[cfg(test)]
     pub fn with_config(opts: ServerOptions, cfg: Config) -> Self {
         Self::build(opts, Some(cfg))
+    }
+
+    /// Learn NFC tags on `connector`'s sessions instead of the WebSocket.
+    #[cfg(test)]
+    pub fn with_learn_io(mut self, connector: LearnConnector) -> Self {
+        self.learn_io = connector;
+        self
     }
 
     fn build(opts: ServerOptions, cfg: Option<Config>) -> Self {
@@ -514,6 +595,7 @@ impl LoxMcp {
             opts,
             state: Arc::new(Mutex::new(State { cfg, lox: None })),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            learn_io: websocket_learn(),
             tool_router,
         }
     }
@@ -651,7 +733,20 @@ impl LoxMcp {
             action.describe(),
             action.to_cli(&ctrl.name, ctrl.room.as_deref()),
         );
+        self.ask(ctx, fingerprint, message, request_state, input_responses)
+            .await
+    }
 
+    /// Ask the user to confirm `message`; `fingerprint` binds a multi-round-trip
+    /// answer to exactly what was asked.
+    async fn ask(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        fingerprint: String,
+        message: String,
+        request_state: Option<String>,
+        input_responses: Option<rmcp::model::InputResponses>,
+    ) -> anyhow::Result<Confirmation> {
         if modern(ctx) {
             if let Some(state) = request_state {
                 let pending = self
@@ -733,6 +828,101 @@ impl LoxMcp {
             Err(ElicitationError::CapabilityNotSupported) => Ok(Confirmation::Unsupported),
             Err(e) => Err(anyhow!("confirmation failed: {}", e)),
         }
+    }
+}
+
+impl LoxMcp {
+    /// Confirm a user-management change or a learn session unless
+    /// `--allow-risky`. `None`: go ahead; `Some`: the response to return
+    /// (the question, a refusal).
+    async fn confirm_change(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        fingerprint: String,
+        question: String,
+        cli: &str,
+        request_state: Option<String>,
+        input_responses: Option<rmcp::model::InputResponses>,
+    ) -> Option<ToolResponse> {
+        if self.opts.allow_risky {
+            return None;
+        }
+        let message = format!("{}\n\nEquivalent command: {}", question, cli);
+        match self
+            .ask(ctx, fingerprint, message, request_state, input_responses)
+            .await
+        {
+            Ok(Confirmation::Confirmed) => None,
+            Ok(Confirmation::Ask(input)) => Some(Ok(input.into())),
+            Ok(Confirmation::Declined) => Some(fail(tool_error(
+                "declined_by_user",
+                format!(
+                    "The user declined: {} Do not retry unless they ask again.",
+                    question
+                ),
+            ))),
+            Ok(Confirmation::Unsupported) => Some(fail(tool_error(
+                "action_not_allowed",
+                format!(
+                    "Refused: changes to users and NFC learning need the user's confirmation, \
+                     and this MCP client cannot ask the user to confirm. The user can run it \
+                     themselves ({}) or restart the server with `lox mcp serve --allow-risky`.",
+                    cli
+                ),
+            ))),
+            Err(e) => Some(fail(e)),
+        }
+    }
+
+    /// Plan, confirm and carry out a change to a user. `code` is the secret of
+    /// set_access_code: it is bound to the confirmation by hash only.
+    async fn change_user<F>(
+        &self,
+        plan: F,
+        code: Option<String>,
+        dry_run: bool,
+        ctx: RequestContext<RoleServer>,
+        request_state: Option<String>,
+        input_responses: Option<rmcp::model::InputResponses>,
+    ) -> ToolResponse
+    where
+        F: FnOnce(&mut LoxClient) -> anyhow::Result<UserChange> + Send + 'static,
+    {
+        let mut change = match self.blocking(plan).await {
+            Ok(c) => c,
+            Err(e) => return fail(e),
+        };
+        if dry_run || self.opts.dry_run {
+            change.dry_run = true;
+            return respond(Ok(change));
+        }
+        let mut fingerprint = change.requests.join("|");
+        if let Some(code) = &code {
+            use sha2::Digest;
+            fingerprint.push('|');
+            fingerprint.push_str(&hex::encode(sha2::Sha256::digest(code.as_bytes())));
+        }
+        if let Some(response) = self
+            .confirm_change(
+                &ctx,
+                fingerprint,
+                change.question(),
+                &change.cli(),
+                request_state,
+                input_responses,
+            )
+            .await
+        {
+            return response;
+        }
+        change.confirmed = !self.opts.allow_risky;
+        respond(
+            self.blocking(move |lox| {
+                usermgmt::apply(lox, &mut change, code.as_deref())?;
+                Ok(change)
+            })
+            .await,
+        )
     }
 }
 
@@ -1198,6 +1388,163 @@ impl LoxMcp {
             Ok(Action::Raw(p.command))
         };
         self.act(p.target, action, ctx, state, responses).await
+    }
+
+    // ── User management ───────────────────────────────────────────────────────
+
+    #[tool(
+        title = "Learn NFC tag",
+        description = "Read an NFC tag's ID at an NFC Code Touch (its learn mode). Tell the user BEFORE calling: have the NFC tag or the unlocked phone ready and hold it to the reader right after confirming — learn mode waits timeout_secs (default 60). Returns the ID and, for a known tag, its name and user. Learn mode always ends again. Pair the tag with assign_nfc_tag. High-risk: the user is asked to confirm.",
+        output_schema = schema_for_output::<LearnedTag>(),
+        annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
+    )]
+    async fn learn_nfc_tag(
+        &self,
+        Parameters(p): Parameters<LearnParams>,
+        ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
+    ) -> ToolResponse {
+        let secs = p.timeout_secs.unwrap_or(60);
+        if secs == 0 || secs > nfc_learn::MAX_TIMEOUT.as_secs() {
+            return fail(invalid("timeout_secs must be between 1 and 300"));
+        }
+        let timeout = Duration::from_secs(secs);
+        let query = p.code_touch.clone();
+        let (target, cfg) = match self
+            .blocking(move |lox| Ok((nfc_learn::target(lox, &query)?, lox.cfg.clone())))
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => return fail(e),
+        };
+        if p.dry_run || self.opts.dry_run {
+            return respond(Ok(LearnedTag::planned(&target, timeout)));
+        }
+        let question = format!(
+            "Learn an NFC tag at {}? After confirming, hold the NFC tag or the unlocked \
+             phone to the reader within {} s.",
+            target.name, secs
+        );
+        let cli = format!("lox access learn \"{}\"", target.name);
+        if let Some(response) = self
+            .confirm_change(
+                &ctx,
+                format!("learn|{}", target.uuid),
+                question,
+                &cli,
+                state,
+                responses,
+            )
+            .await
+        {
+            return response;
+        }
+        if let Some(token) = ctx.meta.get_progress_token() {
+            let _ = ctx
+                .peer
+                .notify_progress(
+                    ProgressNotificationParam::new(token, 0.0).with_message(format!(
+                        "Hold the NFC tag or the unlocked phone to {} now",
+                        target.name
+                    )),
+                )
+                .await;
+        }
+        let learned = async {
+            let mut io = (self.learn_io)(cfg).await?;
+            nfc_learn::learn(io.as_mut(), &target, timeout, ctx.ct.cancelled()).await
+        }
+        .await;
+        let learned = match learned {
+            Ok(l) => l,
+            Err(e) => return fail(e),
+        };
+        // names for the IDs; the tag is read even when the list is not
+        let users = self
+            .blocking(|lox| Ok(usermgmt::user_list(lox).unwrap_or_default()))
+            .await
+            .unwrap_or_default();
+        respond(Ok(LearnedTag::new(&target, learned, &users)))
+    }
+
+    #[tool(
+        title = "Assign NFC tag",
+        description = "Pair an NFC tag (ID from learn_nfc_tag) with a user under a name. Refuses a tag the user has already. The change may live only in the Miniserver's custom changes until Loxone Config saves the program. High-risk: the user is asked to confirm.",
+        output_schema = schema_for_output::<UserChange>(),
+        annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
+    )]
+    async fn assign_nfc_tag(
+        &self,
+        Parameters(p): Parameters<AssignNfcParams>,
+        ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
+    ) -> ToolResponse {
+        let AssignNfcParams {
+            user,
+            id,
+            name,
+            dry_run,
+        } = p;
+        let plan = move |lox: &mut LoxClient| {
+            let u = usermgmt::resolve_user(lox, &user)?;
+            usermgmt::plan_add_nfc(&u, &id, &name)
+        };
+        self.change_user(plan, None, dry_run, ctx, state, responses)
+            .await
+    }
+
+    #[tool(
+        title = "Remove NFC tag",
+        description = "Remove one of a user's NFC tags, by ID or name. The change may live only in the Miniserver's custom changes until Loxone Config saves the program. High-risk: the user is asked to confirm.",
+        output_schema = schema_for_output::<UserChange>(),
+        annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
+    )]
+    async fn remove_nfc_tag(
+        &self,
+        Parameters(p): Parameters<RemoveNfcParams>,
+        ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
+    ) -> ToolResponse {
+        let RemoveNfcParams { user, tag, dry_run } = p;
+        let plan = move |lox: &mut LoxClient| {
+            let u = usermgmt::resolve_user(lox, &user)?;
+            usermgmt::plan_remove_nfc(&u, &tag)
+        };
+        self.change_user(plan, None, dry_run, ctx, state, responses)
+            .await
+    }
+
+    #[tool(
+        title = "Set access code",
+        description = "Set a user's access code for NFC Code Touch keypads (2-8 digits), replacing the current one. The code never appears in results or errors. Fails with code_in_use when another user has it. The change may live only in the Miniserver's custom changes until Loxone Config saves the program. High-risk: the user is asked to confirm.",
+        output_schema = schema_for_output::<UserChange>(),
+        annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
+    )]
+    async fn set_access_code(
+        &self,
+        Parameters(p): Parameters<AccessCodeParams>,
+        ctx: RequestContext<RoleServer>,
+        RequestState(state): RequestState,
+        InputResponses(responses): InputResponses,
+    ) -> ToolResponse {
+        let AccessCodeParams {
+            user,
+            code,
+            dry_run,
+        } = p;
+        let code = code.trim().to_string();
+        if let Err(e) = usermgmt::validate_access_code(&code) {
+            return fail(invalid(e));
+        }
+        let plan = move |lox: &mut LoxClient| {
+            let u = usermgmt::resolve_user(lox, &user)?;
+            Ok(usermgmt::plan_set_code(&u))
+        };
+        self.change_user(plan, Some(code), dry_run, ctx, state, responses)
+            .await
     }
 }
 

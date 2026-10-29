@@ -100,7 +100,12 @@ Error codes:
 | `control_not_found` | No control matches the name |
 | `ambiguous_control` | Multiple controls match — use `--room` to disambiguate |
 | `config_not_found` | Missing config file |
-| `confirmation_required` | Command needs `--yes` (reboot, firmware update) |
+| `confirmation_required` | Command needs `--yes` (reboot, firmware update; user and access changes without a terminal) |
+| `declined_by_user` | The confirmation was answered with no |
+| `user_not_found` | No user matches the name |
+| `tag_not_found` | The user has no NFC tag with that name or ID |
+| `code_in_use` | Another user has this access code already |
+| `learn_timeout` | No NFC tag was held to the Code Touch in time |
 | `unauthorized` | Invalid credentials |
 | `forbidden` | Insufficient permissions |
 | `not_found` | Resource not found |
@@ -205,6 +210,10 @@ Miniserver context.
 | `alarm` | risky | `arm`, `arm-home`, `disarm` (confirmed), `quit` |
 | `door` | risky | `lock`, `unlock`, `open` (all confirmed) |
 | `send_command` | risky | Raw Loxone command, only with `--allow-raw` |
+| `learn_nfc_tag` | risky | Read an NFC tag's ID at a Code Touch (confirmed; tell the user to have the tag or unlocked phone ready) |
+| `assign_nfc_tag` | risky | Pair an NFC tag with a user (confirmed) |
+| `remove_nfc_tag` | risky | Remove a user's NFC tag (confirmed) |
+| `set_access_code` | risky | Set a user's access code; the code is never echoed (confirmed) |
 
 Controls are addressed exactly like on the command line: a name substring, `Name [Room]`, an alias
 or a UUID, with an optional `room` argument. Every tool publishes input and output schemas; every
