@@ -79,6 +79,7 @@ subcmd_help!(help_history, "history");
 subcmd_help!(help_autopilot, "autopilot");
 subcmd_help!(help_autopilot_ls, "autopilot", "ls");
 subcmd_help!(help_autopilot_state, "autopilot", "state");
+subcmd_help!(help_autopilot_changed, "autopilot", "changed");
 
 // System commands
 subcmd_help!(help_status, "status");
@@ -339,4 +340,45 @@ fn closed_stdout_exits_quietly() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{:?}: {stderr}", out.status);
     assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+// ── autopilot ls reads the rules from a config file ────────────────────────
+
+#[test]
+fn autopilot_ls_from_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rules.Loxone");
+    let apc = r#"{"name":"Morning","active":true,"invalid":false}"#.replace('"', "&quot;");
+    std::fs::write(
+        &path,
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\">\r\n\
+             <C Type=\"Document\" V=\"175\" U=\"2e000000-0000-0004-ffff000000000000\" Title=\"Test\">\r\n\
+             <C Type=\"AutopilotRule\" V=\"175\" U=\"2e000000-0000-0004-ffff000000000001\" Title=\"Morning\" APC=\"{apc}\"/>\r\n\
+             <C Type=\"AutopilotRule\" V=\"175\" U=\"2e000000-0000-0004-ffff000000000002\" Title=\"Broken\" APC=\"{{\"/>\r\n\
+             </C>\r\n</ControlList>\r\n"
+        ),
+    )
+    .unwrap();
+    let out = lox()
+        .args(["autopilot", "ls", "-o", "json", "--file"])
+        .arg(&path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let rules = v["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0]["name"], "Morning");
+    assert_eq!(rules[0]["active"], true);
+    assert_eq!(rules[0]["apc_valid"], true);
+    assert_eq!(rules[1]["apc_valid"], false);
+    lox()
+        .args(["autopilot", "ls", "--file"])
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Broken").and(predicate::str::contains("2 rules")));
 }

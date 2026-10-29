@@ -1,6 +1,27 @@
 # Design: `lox autopilot` — Automatik-Regel CLI Support
 
-> **Status: IMPLEMENTED** — `lox autopilot list` and `lox autopilot state` are fully implemented.
+> **Status: IMPLEMENTED**, revised after testing against a real Miniserver (see
+> *Findings* below): `lox autopilot ls` reads the rules from the program file,
+> `state` reads the `history` state, `changed` the `changed` state.
+
+## Findings (verified on a Miniserver, firmware 17.2)
+
+- The structure's `autopilot` key holds **one container** for all rules (named
+  after the locale, e.g. "Automatic rules"), not one entry per rule. The rules
+  exist only in the program file, as `<C Type="AutopilotRule" Title=… APC="{json}">`;
+  the JSON carries `name`, `active`, `invalid`, `eventGroups`, `actions`, …
+  `lox autopilot ls` reads them through the `lox config` sources.
+- States can't be read over HTTP: `/jdev/sps/io/<state uuid>/state` answers 404.
+  Both states arrive in the WebSocket's initial state dump.
+- `changed` is a value state: **unix seconds** of the last rule change (it
+  ticked when rules were re-saved in the app), not of the last run.
+- `history` is a text state: `|`-separated runs, each
+  `YYYY-MM-DD HH:MM:SS <rule uuid> <rule name>` (local time), the recent runs only.
+- A rule re-saved in the app did not produce a new program file in `/prog`,
+  and a download still had the old rule. Such edits live in the Miniserver's
+  custom changes; an upload logs `Loading sps_new.zip - Remove old custom changes`.
+  So before uploading, check `lox autopilot changed` against the time of the
+  download the upload is based on.
 
 ## Background
 
@@ -37,9 +58,9 @@ unrelated to the `autopilot` section itself.
 
 | Operation | Feasibility |
 |---|---|
-| List all rules (name, UUID) | ✅ Parse `autopilot` section of structure cache |
-| Show last-fired timestamp | ✅ Read `states.changed` UUID via state API |
-| Show execution history | ⚠️ Format undocumented — deferred |
+| List all rules (name, UUID, active, JSON valid) | ✅ `AutopilotRule` objects in the program file |
+| Show last-fired timestamp | ✅ `history` state (WebSocket) |
+| When rules last changed | ✅ `changed` state (WebSocket) |
 | Trigger / activate a rule | ❌ No public API |
 | Create / edit a rule | ❌ App-only |
 
