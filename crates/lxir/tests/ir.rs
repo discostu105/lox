@@ -3529,3 +3529,42 @@ fn decompile_names_repeated_uuids_instead_of_a_slug_clash() {
     assert!(err.contains("duplicate UUID"), "{err}");
     assert!(err.contains("20000001-0000-0010-ffff504f94112233"), "{err}");
 }
+
+#[test]
+fn diff_summary_is_a_commit_message_in_names() {
+    let read = |p: &str| LoxoneDoc::parse(&std::fs::read(p).unwrap()).unwrap();
+    let (base, out) = (
+        read("examples/configs/haus.Loxone"),
+        read("examples/out/haus-compiled.Loxone"),
+    );
+    let summary = |a: &LoxoneDoc, b: &LoxoneDoc| lxir::diff::summary(a, b, &lxir::diff::diff(a, b));
+    assert_eq!(
+        summary(&base, &out),
+        "Beschattung: add 2 blocks, change 1 parameter, add 5 wires\n\
+         \n\
+         Added:\n\
+         - GreaterEqual \"Temp über 28\" (page \"Beschattung\")\n\
+         - And \"beschatten\" (page \"Beschattung\")\n\
+         \n\
+         Changed:\n\
+         - AutoJalousie \"Beschattung Süd\" TargetPos: 100 -> 70\n\
+         \n\
+         Wires added:\n\
+         - \"Temp über 28\".Q -> \"beschatten\".I1\n\
+         - \"beschatten\".Q -> \"Beschattung Süd\".AutoShade\n\
+         - \"Außentemperatur\".Q -> \"Temp über 28\".Input1\n\
+         - \"Windalarm\".Q -> \"Beschattung Süd\".Safety\n\
+         - \"Sonnenschein\".Q -> \"beschatten\".I2\n"
+    );
+    // Backwards, the removed side is named from the old document.
+    let back = summary(&out, &base);
+    assert!(
+        back.starts_with("Beschattung: remove 2 blocks, change 1 parameter, remove 5 wires\n"),
+        "{back}"
+    );
+    assert!(
+        back.contains("Wires removed:\n- \"Temp über 28\".Q -> \"beschatten\".I1\n"),
+        "{back}"
+    );
+    assert_eq!(summary(&base, &base), "no semantic change\n");
+}

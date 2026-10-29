@@ -66,6 +66,7 @@ lxir compile --base current.Loxone \
 
 # 4. Show your work as a SEMANTIC diff, never an XML diff:
 lxir diff current.Loxone out.Loxone
+lxir diff --summary current.Loxone out.Loxone   # by name: a commit message
 
 # 5. Sanity: the output must round-trip.
 lxir roundtrip out.Loxone
@@ -89,6 +90,8 @@ noise (`[locale?]`) so it isn't mistaken for a real edit. Users, groups,
 credentials and access rights come in a section of their own (`user`,
 `group`, `access code`, `NFC tag` lines); credentials show as names,
 counts and short fingerprints only. `--json` gives the same diff as JSON.
+`--summary` says it by block title and port name — the form to show a
+human, and the commit message for the module change.
 
 The decompile view is for **reading, not compiling**: compiling it against
 the same base would mint duplicates of every managed block and claim

@@ -80,6 +80,9 @@ types) contradict each other. Results and methodology:
       scenarios so solutions carry their own checks.
 - [x] `lxir scan` (2026-10-29): personal data in a config, located but
       never quoted; CI fails on any finding in a committed `.Loxone`.
+- [x] `lxir diff --summary` (2026-10-29): the semantic diff as a commit
+      message — subject counting the changes per page, body by title and
+      port name.
 - [x] Device-narrowed extern matching (2026-10-29, D55):
       `device: "<serial>"` beside `room:`/`category:`; decompile uses it
       before falling back to `uuid:`. Open: Air devices (their id is in

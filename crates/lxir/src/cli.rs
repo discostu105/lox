@@ -133,13 +133,16 @@ USAGE:
         already be declared in that block's argument list — the error
         says exactly which line to add.
 
-  lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>
+  lxir diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>
         Semantic diff: objects, parameters, rooms/categories, wires, and
         a users/access section (users and groups, membership, NFC tags,
         codes, passwords, last edit, access and UI rights). Credentials
         show as names, counts and short fingerprints, never as the stored
         hash. --exit-code exits 1 when the docs differ, users/access
-        included. --json prints the diff as one JSON object.
+        included. --json prints the diff as one JSON object. --summary
+        writes it as a commit message instead: a subject line counting
+        the changes (prefixed with the page if they all sit on one), then
+        the changes by type, title and port name.
 
   lxir drift <cfg.Loxone> [--lock <lock.json>]
         Check a config (typically a fresh download) against the semantic
@@ -1397,12 +1400,20 @@ fn cmd_adopt_one(
 }
 
 fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str = "usage: lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>";
+    const USAGE: &str =
+        "usage: lxir diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>";
     let (flags, files): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| a.starts_with("--"));
-    let (exit_code, json) = (flags.contains(&"--exit-code"), flags.contains(&"--json"));
+    let (exit_code, json, summary) = (
+        flags.contains(&"--exit-code"),
+        flags.contains(&"--json"),
+        flags.contains(&"--summary"),
+    );
     let (old, new) = match (
         files.as_slice(),
-        flags.iter().all(|f| ["--exit-code", "--json"].contains(f)),
+        flags
+            .iter()
+            .all(|f| ["--exit-code", "--json", "--summary"].contains(f))
+            && !(json && summary),
     ) {
         ([old, new], true) => (*old, *new),
         _ => return Err(USAGE.into()),
@@ -1425,8 +1436,12 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
     }
     let d = lxir::diff::diff(&a, &b);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&d)?);
+    if json || summary {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&d)?);
+        } else {
+            print!("{}", lxir::diff::summary(&a, &b, &d));
+        }
         return Ok(if exit_code && !d.is_empty() {
             ExitCode::FAILURE
         } else {

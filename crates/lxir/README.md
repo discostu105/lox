@@ -179,6 +179,8 @@ lxir lint                            # advisory: unused names, blocks whose
                                      # NFC tags that open no Code Touch
 lxir diff current.Loxone out.Loxone  # semantic diff, locale noise flagged,
                                      # users/access section; --json
+lxir diff --summary current.Loxone out.Loxone  # the same as a commit
+                                     # message, by name instead of UUID
 lxir render out.Loxone --page Beschattung --out page.svg
                                      # a page as SVG + layout metrics
 lxir compile --relayout Beschattung  # place the page's managed blocks
