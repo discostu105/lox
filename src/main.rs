@@ -1408,7 +1408,8 @@ pub(crate) enum ConfigCmd {
         #[command(flatten)]
         src: ConfigSource,
     },
-    /// Check the logic for dead blocks, unused inputs and broken references
+    /// Check the logic for dead blocks, unused inputs, broken references and
+    /// blinds or gates whose motor outputs are wired to nothing
     Lint {
         #[command(flatten)]
         src: ConfigSource,

@@ -272,6 +272,23 @@ const FUNCTION_BLOCKS: &[&str] = &[
     "Maximum",
 ];
 
+/// Drive blocks and the outputs that move their motor. With none of them
+/// wired the block still runs its position model and the app shows it
+/// moving, but nothing switches.
+const MOTOR_OUTPUTS: &[(&str, &[&str])] = &[
+    ("AutoJalousie", &["OutputUp", "OutputDown"]),
+    ("JalousieUpDown2", &["OutputUp", "OutputDown"]),
+    ("Door", &["OutputOpen", "OutputClose", "OutputTrigger"]),
+];
+
+/// Further outputs that switch a motor when wired at all (one signal for
+/// actuators that take up and down combined).
+const OTHER_DRIVES: &[&str] = &["OutputCombined"];
+
+/// Position outputs: they move a motor only when they reach hardware (an
+/// analog actuator); wired into logic they are just status.
+const POSITION_OUTPUTS: &[&str] = &["OutputPos", "OutputLPos"];
+
 /// The paired connector on a ref: what comes in on `AI` leaves on `AQ`.
 fn ref_pair(key: &str) -> Option<&'static str> {
     Some(match key {
@@ -1043,6 +1060,102 @@ impl Logic {
             .any(|(_, p)| self.wires_in.get(p).is_some_and(|v| !v.is_empty()))
     }
 
+    /// Blocks owning the sinks of a block's output `key`, refs folded.
+    fn driven_by(&self, block: &str, key: &str) -> Vec<&Block> {
+        let Some(port) = self.port_of(block, key) else {
+            return Vec::new();
+        };
+        let mut out: Vec<&Block> = Vec::new();
+        for d in self.sinks_of(port) {
+            if let Some(b) = self
+                .port_owner
+                .get(&d)
+                .and_then(|(b, _)| self.blocks.get(b))
+                && !out.iter().any(|o| o.uuid == b.uuid)
+            {
+                out.push(b);
+            }
+        }
+        out
+    }
+
+    /// Page blocks whose output wires reach `block` (refs folded).
+    fn fed_by(&self, block: &str) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for (_, p) in self.ports.get(block).into_iter().flatten() {
+            for src in self.wires_in.get(p).into_iter().flatten() {
+                for s in self.upstream(src, 0) {
+                    if let Some((b, _)) = self.port_owner.get(&s)
+                        && self.blocks.get(b).is_some_and(|bl| bl.page.is_some())
+                        && !out.contains(&b.as_str())
+                    {
+                        out.push(b);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Does a drive block move a motor? Through its motor outputs, a
+    /// position output that reaches hardware, or its API connector linked to
+    /// a device that serves this block alone (a smart actuator such as a Tree
+    /// or Air blind motor). A device API-linked to several blocks is a panel
+    /// (Touch Pure Flex tiles) that commands the block, not its motor.
+    fn moves_motor(&self, block: &str, motor: &[&str]) -> bool {
+        motor
+            .iter()
+            .chain(OTHER_DRIVES)
+            .any(|k| !self.driven_by(block, k).is_empty())
+            || POSITION_OUTPUTS
+                .iter()
+                .flat_map(|k| self.driven_by(block, k))
+                .any(|b| b.page.is_none())
+            || self
+                .driven_by(block, "OutputAPI")
+                .iter()
+                .any(|d| d.page.is_none() && self.fed_by(&d.uuid) == [block])
+    }
+
+    /// The `unwired-motor` message, naming the outputs placed on the same
+    /// page that nothing drives: usually the relays meant for the motor.
+    fn unwired_motor_message(&self, b: &Block, motor: &[&str]) -> String {
+        let keys: Vec<&str> = motor
+            .iter()
+            .copied()
+            .filter(|k| self.port_of(&b.uuid, k).is_some())
+            .collect();
+        let mut msg = format!(
+            "{} drive nothing: the block reports positions, but no motor moves",
+            keys.join("/")
+        );
+        let idle: Vec<&str> = self
+            .order
+            .iter()
+            .map(|u| &self.blocks[u])
+            .filter(|o| {
+                o.typ == "OutputRef"
+                    && o.page == b.page
+                    && o.mirrors
+                        .as_ref()
+                        .is_some_and(|m| self.blocks.contains_key(m))
+                    && !self.has_inputs(&o.uuid)
+            })
+            .map(|o| o.title.as_str())
+            .collect();
+        const SHOW: usize = 4;
+        if !idle.is_empty() {
+            msg.push_str(&format!(
+                "; unwired outputs on this page: {}",
+                idle[..idle.len().min(SHOW)].join(", ")
+            ));
+            if idle.len() > SHOW {
+                msg.push_str(&format!(" (+{} more)", idle.len() - SHOW));
+            }
+        }
+        msg
+    }
+
     /// Advisory checks: logic that drives nothing, inputs nobody reads,
     /// broken or unused refs, duplicate names in a room.
     pub fn lint(&self) -> Vec<Finding> {
@@ -1063,6 +1176,18 @@ impl Logic {
                     severity: "warn",
                     block: uuid.clone(),
                     message: format!("{} has inputs but its outputs drive nothing", t),
+                });
+            }
+            if let Some((_, motor)) = MOTOR_OUTPUTS.iter().find(|(m, _)| *m == t)
+                && b.page.is_some()
+                && motor.iter().any(|k| self.port_of(uuid, k).is_some())
+                && !self.moves_motor(uuid, motor)
+            {
+                out.push(Finding {
+                    kind: "unwired-motor",
+                    severity: "warn",
+                    block: uuid.clone(),
+                    message: self.unwired_motor_message(b, motor),
                 });
             }
             if t.starts_with("VirtualIn") && t != "VirtualInCaption" && !self.drives_anything(uuid)
@@ -1722,6 +1847,206 @@ mod tests {
             kinds.contains(&("unused-input", "Party mode")),
             "{:?}",
             kinds
+        );
+    }
+
+    fn uid(n: u32) -> String {
+        format!("2e000000-0000-0002-ffff{:012}", n)
+    }
+
+    fn xco(k: &str, u: u32, from: &[u32]) -> String {
+        let ins: String = from
+            .iter()
+            .map(|f| format!("<In Input=\"{}\"/>", uid(*f)))
+            .collect();
+        format!("<Co K=\"{k}\" U=\"{}\">{ins}</Co>", uid(u))
+    }
+
+    fn xc(typ: &str, u: u32, title: &str, attrs: &str, body: &[String]) -> String {
+        format!(
+            "<C Type=\"{typ}\" V=\"175\" U=\"{}\" Title=\"{title}\"{attrs}>{}</C>\r\n",
+            uid(u),
+            body.concat()
+        )
+    }
+
+    /// A page mirror of hardware output `target`: `AI` fed by `from`, `AQ`
+    /// distributed to the target. Connectors are `n*10+1` and `n*10+2`.
+    fn xref(n: u32, target: u32, title: &str, from: &[u32]) -> String {
+        xc(
+            "OutputRef",
+            n,
+            title,
+            &format!(" Ref=\"{}\"", uid(target)),
+            &[xco("AI", n * 10 + 1, from), xco("AQ", n * 10 + 2, &[])],
+        )
+    }
+
+    /// Drive blocks on one page: relays on a Tree branch, a wall panel and a
+    /// smart blind motor linked through API connectors.
+    fn motor_logic() -> Logic {
+        let relays: String = (1..=4)
+            .map(|i| {
+                let act = 10 + i;
+                xc(
+                    "TreeActor",
+                    act,
+                    &format!("Relay {i}"),
+                    "",
+                    &[xco("I", act * 10 + 1, &[(50 + i) * 10 + 2])],
+                )
+            })
+            .collect();
+        let panel_api = xc(
+            "ApiActor",
+            21,
+            "API Connector",
+            "",
+            &[xco("I", 211, &[612, 622])],
+        );
+        let motor_api = xc(
+            "ApiActor",
+            31,
+            "API Connector",
+            "",
+            &[xco("I", 311, &[632])],
+        );
+        let page = [
+            // up/down wired to two relays: fine
+            xc(
+                "AutoJalousie",
+                41,
+                "Wired blind",
+                "",
+                &[
+                    xco("OutputUp", 411, &[]),
+                    xco("OutputDown", 412, &[]),
+                    xco("OutputAPI", 413, &[611]),
+                ],
+            ),
+            xref(51, 11, "Relay 1", &[411]),
+            xref(52, 12, "Relay 2", &[412]),
+            // placed for a motor, never wired
+            xref(53, 13, "Relay 3", &[]),
+            xref(54, 14, "Relay 4", &[]),
+            // only the panel's tiles are linked: it simulates, nothing moves
+            xc(
+                "AutoJalousie",
+                42,
+                "Panel blind",
+                "",
+                &[
+                    xco("OutputUp", 421, &[]),
+                    xco("OutputDown", 422, &[]),
+                    xco("OutputAPI", 423, &[621]),
+                ],
+            ),
+            xref(61, 21, "API Connector", &[413]),
+            xref(62, 21, "API Connector", &[423]),
+            // a smart motor serves its block alone through the API: fine
+            xc(
+                "AutoJalousie",
+                43,
+                "Smart blind",
+                "",
+                &[
+                    xco("OutputUp", 431, &[]),
+                    xco("OutputDown", 432, &[]),
+                    xco("OutputAPI", 433, &[631]),
+                ],
+            ),
+            xref(63, 31, "API Connector", &[433]),
+            // a gate whose position only feeds logic
+            xc(
+                "Door",
+                44,
+                "Garage",
+                "",
+                &[
+                    xco("OutputOpen", 441, &[]),
+                    xco("OutputClose", 442, &[]),
+                    xco("OutputPos", 443, &[]),
+                ],
+            ),
+            xc(
+                "Equal",
+                45,
+                "Garage closed",
+                "",
+                &[xco("Input1", 451, &[443]), xco("Q", 452, &[])],
+            ),
+        ]
+        .concat();
+        let xml = format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\">\r\n{}\r\n</ControlList>\r\n",
+            xc(
+                "Document",
+                1,
+                "Test",
+                "",
+                &[
+                    xc(
+                        "LoxLIVE",
+                        2,
+                        "Miniserver",
+                        "",
+                        &[xc(
+                            "LoxTree",
+                            3,
+                            "Tree",
+                            "",
+                            &[
+                                xc("TreeDevice", 10, "Relay Extension", "", &[relays]),
+                                xc("TreeDevice", 20, "Wall Panel", "", &[panel_api]),
+                                xc("TreeDevice", 30, "Blind Motor", "", &[motor_api]),
+                            ],
+                        )],
+                    ),
+                    xc(
+                        "Program",
+                        4,
+                        "Miniserver",
+                        "",
+                        &[xc("Page", 40, "Ground floor", "", &[page])],
+                    ),
+                ],
+            )
+        );
+        Logic::parse(xml.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn lint_unwired_motor() {
+        let l = motor_logic();
+        let lint = l.lint();
+        let motor: Vec<(&str, &str)> = lint
+            .iter()
+            .filter(|f| f.kind == "unwired-motor")
+            .map(|f| (l.blocks[&f.block].title.as_str(), f.message.as_str()))
+            .collect();
+        let titles: Vec<&str> = motor.iter().map(|(t, _)| *t).collect();
+        assert_eq!(titles, ["Panel blind", "Garage"], "{:?}", lint);
+        assert!(
+            lint.iter()
+                .all(|f| f.kind != "unwired-motor" || f.severity == "warn")
+        );
+        // the outputs nobody drives are the likely candidates
+        let (_, panel) = motor[0];
+        assert!(
+            panel.starts_with("OutputUp/OutputDown drive nothing"),
+            "{}",
+            panel
+        );
+        assert!(
+            panel.ends_with("unwired outputs on this page: Relay 3, Relay 4"),
+            "{}",
+            panel
+        );
+        let (_, garage) = motor[1];
+        assert!(
+            garage.starts_with("OutputOpen/OutputClose drive nothing"),
+            "{}",
+            garage
         );
     }
 

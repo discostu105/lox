@@ -212,7 +212,7 @@ lox config diff v271                   # What changed in the logic since version
 lox config wiring "Licht" --trace up   # What drives this light, back to the sensors
 lox config show -p Wohnzimmer          # A logic page as lxir source
 lox config find bewegung               # Search blocks by name, type, device, room
-lox config lint                        # Dead blocks, unwired inputs, duplicate names
+lox config lint                        # Dead blocks, unwired inputs and motors, duplicate names
 lox config history "Licht"             # How one block changed over time
 lox config restore abc123 --force      # Restore config from git history
 lox run abend                          # Run a scene
