@@ -10,6 +10,9 @@ when it is released.
 
 ## [Unreleased]
 
+### Fixed
+- `lox ir compile` keeps the order Loxone Config gave the blocks it manages: their place among the objects of their page, their attributes and their connectors (lxir D47). It used to append them at the end of the page in its own attribute and connector order, so after a save in Loxone Config, `lox config push` found bytes to upload where the logic had not changed
+
 ## [0.15.1] — 2026-10-29
 
 ### Fixed

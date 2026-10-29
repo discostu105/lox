@@ -1285,10 +1285,10 @@ Anything unverified is an error, not a heuristic:
   output is a base like any other. Not covered: a save also rewrites
   what the rebuild emits for a managed block. Loxone Config 17.2
   stamps every block `V="178"` where the rebuild writes the verified
-  `V="175"` (settled by D46), writes `Desc=` right after `Type=`, moves blocks within a
-  page, and adds `Text="true"` to some minted refs. A recompile of a
-  config saved with 17.2 still differs in those bytes, though not in
-  logic.
+  `V="175"` (settled by D46), writes `Desc=` right after `Type=` and
+  moves blocks within a page (both settled by D47), and adds
+  `Text="true"` to some minted refs. A recompile of a config saved with
+  17.2 still differs in those bytes, though not in logic.
 - **D46 — managed blocks carry the document's block version**
   (2026-10-29). Every `<C>` carries `V=`, a block-format version, and
   across the corpus each file has exactly one: Loxone Config writes
@@ -1320,3 +1320,31 @@ Anything unverified is an error, not a heuristic:
     under it, then its version joins the list.
   The release pin (D22) is unchanged: `--accept-version` still accepts
   a release, and D46 only decides which `V` the managed blocks get.
+- **D47 — a rebuilt block keeps the base's order** (2026-10-29). D45
+  for the block itself. A Loxone Config save also orders what the
+  rebuild writes for a managed block, and the rebuild wrote its own
+  order:
+  - objects within their page: the rebuild appended its blocks at the
+    end of the page;
+  - attributes: Loxone Config writes `Desc=` right after `Type=`, the
+    rebuild wrote it behind the position attributes;
+  - connectors: 17.2 writes AnalogThresholdTrigger's `Remanence` after
+    `Off` (D46), the rebuild in table order.
+  None of it means anything, but each kept a recompile of a saved
+  config from reproducing it. Decision: the teardown records each
+  block's attribute names and connector keys in base order with its
+  D19 residue, and before that each page's objects in base order. The
+  rebuild follows them:
+  - **Attributes and connectors** go into base order. One the base did
+    not have, such as a parameter or a connector new to the block,
+    stays right behind the item it followed as emitted.
+  - **A block goes back to its place in the page**: before the first
+    object the base listed after it, or did not have, and otherwise
+    behind the page's last object. A page's `<IoData>`, which Loxone
+    Config writes before the objects on some pages and after them on
+    others, stays where it is. A block new to the page, minted or moved
+    there from another page, is appended as before.
+  Compiling the compiler's own output is still a fixpoint. With D45
+  and D46, compiling a config that Loxone Config 17.2 saved reproduces
+  it byte for byte, apart from `Text="true"` on minted ApiActor refs,
+  which D33 does not emit.
