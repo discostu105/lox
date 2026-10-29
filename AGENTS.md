@@ -48,8 +48,8 @@ and `release.yml` builds the binaries, the Docker image and the Homebrew formula
 
 **Changelog: never edit CHANGELOG.md in a PR.** Add the entry as a new file `changelog.d/<branch>.<section>.md`
 (section `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`; content: the bullet as it should read
-in the changelog). New files never conflict; the release merges them into CHANGELOG.md and deletes them. See
-[changelog.d/README.md](changelog.d/README.md).
+in the changelog). New files never conflict; the release merges them into CHANGELOG.md and deletes them. CI fails
+a PR that writes under `[Unreleased]`. See [changelog.d/README.md](changelog.d/README.md).
 
 - Bump: PR label `release:major`, `release:minor`, `release:patch` or `no-release` (in a direct push: the same
   words in brackets in the commit message, `[release:minor]`). Without a `release:*` label: minor when
