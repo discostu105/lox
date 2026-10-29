@@ -110,11 +110,13 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
 
-      # --follow-exec: the CLI tests (tests/cli_smoke.rs) run the lox binary
-      # as a subprocess; without it their coverage is lost and codecov/patch
-      # fails PRs whose code is tested only that way.
+      # --engine llvm: the CLI tests (tests/cli_smoke.rs) run the lox binary
+      # as a subprocess; without its coverage codecov/patch fails PRs whose
+      # code is tested only that way. The llvm engine instruments that binary
+      # too. The ptrace engine's --follow-exec segfaulted in the lxir tests
+      # that spawn lxir.
       - name: Generate coverage
-        run: cargo tarpaulin --follow-exec --out xml --output-dir coverage --root ${{ github.workspace }}
+        run: cargo tarpaulin --engine llvm --out xml --output-dir coverage --root ${{ github.workspace }}
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v7
