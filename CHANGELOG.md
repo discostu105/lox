@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-29
+
 ### Added
 - `lox stream --reconnect` keeps streaming across Miniserver reboots and dropped connections: it waits until the Miniserver answers again (backoff 1–30 s, gives up after 30 min), re-reads the structure, logs in again and resumes the same output. The gap is reported on stderr and, with `-o json`, as `{"event":"disconnected"}` / `{"event":"reconnected"}` lines; states that changed while offline are printed after the reconnect, and `--initial` prints the full snapshot again
 - `lox config lint` warns about drive blocks that move no motor (`unwired-motor`): an `AutoJalousie` or `JalousieUpDown2` with neither `OutputUp` nor `OutputDown` wired, a `Door` with no open/close/trigger output wired. Such a block still runs its position model and the app shows it moving, but nothing switches. The finding names the outputs on the same page that nothing drives, usually the relays meant for the motor. A position output into hardware, or an API link to a device that serves this block alone (a Tree/Air smart motor), counts as driving; a panel API-linked to several blocks does not
