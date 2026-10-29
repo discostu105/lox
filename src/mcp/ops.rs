@@ -16,6 +16,7 @@ use crate::commands::inspect::{is_energy_type, is_sensor_type};
 use crate::config::Config;
 use crate::json_val_str;
 use crate::scene::{Scene, SceneStep};
+use crate::usermgmt;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -592,6 +593,58 @@ pub fn get_wiring(
         control,
         wiring,
     })
+}
+
+// ── Users and access ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct UserList {
+    pub count: usize,
+    pub users: Vec<usermgmt::UserSummary>,
+}
+
+pub fn list_users(lox: &mut LoxClient) -> Result<UserList> {
+    let mut users = usermgmt::user_list(lox)?;
+    users.sort_by_key(|u| u.name.to_lowercase());
+    Ok(UserList {
+        count: users.len(),
+        users,
+    })
+}
+
+pub fn get_user(lox: &mut LoxClient, name: &str) -> Result<usermgmt::User> {
+    usermgmt::resolve_user(lox, name)
+}
+
+/// Join the live user with the access rights of the program file: a fresh
+/// FTP download (read-only), or the cached config with `cached`.
+pub fn access_check(
+    lox: &mut LoxClient,
+    user: &str,
+    code_touch: Option<&str>,
+    cached: bool,
+) -> Result<usermgmt::AccessReport> {
+    let u = usermgmt::resolve_user(lox, user)?;
+    let snap = if cached {
+        crate::snapshot::current(&lox.cfg)
+    } else {
+        crate::snapshot::download(&lox.cfg, None)
+    }
+    .map_err(|e| {
+        tool_error(
+            "config_unavailable",
+            format!(
+                "{:#} — the access rights are in the Loxone Config program; {}",
+                e,
+                if cached {
+                    "pass cached=false to download it from the Miniserver (read-only FTP)"
+                } else {
+                    "check the FTP access of the Miniserver"
+                }
+            ),
+        )
+    })?;
+    usermgmt::access_report(lox, &u, code_touch, &snap.bytes, &snap.label)
 }
 
 pub fn system_status(lox: &mut LoxClient) -> Result<SystemStatus> {

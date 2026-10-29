@@ -77,8 +77,8 @@ An agent can discover your home (`lox ls -o json`), read sensor values, control 
 **MCP server (Claude Desktop, ChatGPT, Cursor, …):** clients that only speak the
 [Model Context Protocol](https://modelcontextprotocol.io) can launch `lox mcp serve` directly.
 Built on the official Rust MCP SDK, it speaks MCP 2026-07-28 and every older revision, and exposes
-schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes, and the config
-wiring behind a control — *why is this on?*) over stdio.
+schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes, the config
+wiring behind a control — *why is this on?* — and door access: *why can't she open the door?*) over stdio.
 Doors, gates, the alarm and any control you list under `confirm:` ask **you** to confirm in the MCP client before anything is sent.
 
 ```bash
@@ -221,6 +221,8 @@ lox ir compile                         # Config as code: compile .lxir modules i
 lox ir drift current.Loxone            # Has anyone else changed the config since?
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
+lox access check alice                 # Why alice may (not) open the NFC Code Touch
+lox access log "Code Touch"            # Who opened when, denied attempts
 lox schema blind                       # Command schema for AI agent discovery
 lox mcp serve                          # MCP server for Claude Desktop, ChatGPT, Cursor, …
 lox completions bash                   # Generate shell completions

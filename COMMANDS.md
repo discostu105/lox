@@ -269,7 +269,7 @@ lox config compress out.Loxone --save-as sps0.LoxCC
 lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
 lox config upload config.zip --force   # upload as sps_new.zip, loaded on the next reboot (dangerous)
 lox config push --force                # deploy an lxir project, verified (see Config as Code)
-lox config users file.Loxone           # list user accounts from config XML
+lox config users file.Loxone           # users of a config: NFC tags, codes, groups, access rights
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
 
 # Git-based config versioning
@@ -414,6 +414,51 @@ lox log -n 100                         # custom line count
 
 ---
 
+## Users & Door Access
+
+Reads the Miniserver's user management. The user lox connects with needs the right to manage users
+(an admin); otherwise the commands fail with `forbidden` and say so.
+
+```bash
+lox user ls                            # users: state (enabled, disabled, enabled until …), admin, UUID
+lox user show alice                    # one user: validity, groups, NFC tags (name + ID), number of access codes
+lox user groups                        # user groups and their type (normal, full access, …)
+lox access log "Code Touch"            # NFC Code Touch access log: who opened when, denied attempts (last 50)
+lox access log "Code Touch" -n 0       # the whole log
+lox access check alice                 # why alice may (not) open each NFC Code Touch
+lox access check alice "Code Touch"    # … one Code Touch
+lox access check alice --cached        # use the cached config instead of downloading it
+lox access check alice --file sps.zip  # … or a config file (--at <snapshot>: the config repo)
+lox access perms "Code Touch"          # users and groups the Miniserver lists as assigned to a control
+```
+
+Users and Code Touches are found by exact name (any case), a unique part of the name, or UUID.
+`access log` shows time (local), result (`granted`, `denied`, `first-factor` for the first step of
+two-factor access), the output opened, how (NFC tag, code, app, external) and the user and tag or code name.
+
+`access check` joins the live user (state and validity, groups, NFC tags, access codes) with the access rights
+in the program file, which it downloads fresh from the Miniserver (read-only FTP) unless `--cached`, `--file` or
+`--at` says otherwise. An access right is a user's or group's right on the Code Touch with a schedule; group
+rights count through the live group membership. Verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `granted` | an access right, direct or through a group, with its schedule (a right on the built-in "never" schedule does not count) |
+| `no-access-right` | neither the user nor one of their groups has an access right on this Code Touch |
+| `no-credential` | the user has no NFC tag and no access code |
+| `user-disabled` | disabled, expired (`enabled until`) or not yet valid (`enabled from`) |
+| `unknown-full-access` | the only path is the full-access group, which is not verified to open Code Touches: give the user an access right to be sure |
+
+Warnings say where the program file and the live state disagree: the user changed after the file was saved
+(`lastEdit`), the user or a group is missing from it, or the Miniserver's assignment list for the Code Touch
+(`access perms`) contradicts the file. With NFC tags, a granted check reminds that a phone must be unlocked
+when held to the reader. `-o json` returns the verdict, reason, rights, warnings and hints per Code Touch.
+
+`access perms` lists direct assignments only, UI and access rights alike (the Miniserver does not say which),
+and not the members of the listed groups.
+
+---
+
 ## Device Health
 
 ```bash
@@ -455,7 +500,9 @@ lox --dry-run mcp serve               # every action is a dry run
 
 MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
 Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
-`system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
+`system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down),
+`list_users`, `get_user`, `access_log`, `access_check` (see [Users & Door Access](#users--door-access); `access_check`
+downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
 (and `send_command` with `--allow-raw`). Every tool has input and output schemas; every action tool accepts `dry_run`.
 High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
@@ -485,7 +532,7 @@ When using `-o json`, errors return structured envelopes instead of plain text:
 }
 ```
 
-Error codes: `control_not_found`, `ambiguous_control`, `config_not_found`, `confirmation_required`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
+Error codes: `control_not_found`, `ambiguous_control`, `user_not_found`, `ambiguous_user`, `config_not_found`, `confirmation_required`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
 
 ---
 
