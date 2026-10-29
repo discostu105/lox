@@ -401,6 +401,72 @@ all three, D47), and minted ApiActor refs gain `Text="true"`, which
 GUI-created ApiActor refs carry under 17.1 too and D33 did not emit
 (D48 does).
 
+## The timer/edge/state batch (sessions 16–17) — passed
+
+Ran 2026-10-29 against a copy of the house config (Loxone Config
+17.2.8.28). Question: what connector descriptor does Config 17 write
+for eight types the corpus holds almost only in pre-17 generations
+(OnPulseDelay, OffDelay, OnDelay, StairwayLS, EdgeDetection,
+AnalogMultiplexer2, SRFlipFlop, State)? One page minted all eight as a
+wired chain (VirtualIn → OnPulseDelay → OffDelay → OnDelay → StairwayLS
+→ EdgeDetection → SRFlipFlop via `RisingEdge`/`FallingEdge`/`Edge` →
+AnalogMultiplexer2.Select → State → Not), with parameters on each.
+
+- **Session 16:** seven types came back with the identical connector
+  keys, order and UUIDs; State gained the GUI-owned `IoData`,
+  `Display` and `<StateTexts>` children (StateTexts is now in
+  `GUI_OWNED_CHILDREN`). StairwayLS minted in the newest corpus order
+  (V151) was **rewritten**: the save reordered the connectors to
+  `InputTrigger, On, Reset, InputDisable, TimeHigh, TimeWarn,
+  Remanence, WarnTime, Q` and appended `OutputAPI` with a GUI-minted
+  UUID, keeping every existing UUID, and added `IoData`/`PSD`/
+  `SpStates`. That is the D8 law seen from the other side: the save
+  writes the type descriptor's connector set, in descriptor order. The
+  semantic diff was still empty. The table took the saved order.
+- **Session 17:** StairwayLS minted in that order, plus a wire drawn
+  *from* its `OutputAPI`, and wires drawn from `CentralShade.OutOpen`/
+  `OutClose` and `CentralLight.OutActive` (admitted as inert-flag
+  inputs; documented as outputs). Everything came back identical,
+  connector order and UUIDs included, all four wires kept; the semantic
+  diff was empty. The three Central* ports are outputs since.
+
+These runs predate D46 here: the compiler still emitted `V="175"` and
+the save re-stamped the blocks `V="178"`, which session 14 settled.
+
+## Schedules and virtual inputs (session 18, D53/D54) — passed, with one heal
+
+Ran 2026-10-29 against a copy of the house config (Loxone Config
+17.2.8.28), in a reflink clone of the oracle prefix on its own display
+because another session held the shared one. One probe carried schedule
+claims on an extern DayTimer and on fresh ones, and two minted
+VirtualIns (digital, analog with range and default) wired to page
+blocks.
+
+- **Pass a:** the extern timer's twelve entries came back unchanged,
+  with `UserModes="2"` added before `N=`. The fresh timer, whose
+  schedule named only Monday and Sunday (`Modes=` with two columns),
+  came back with **all ten** columns: every missing one filled with an
+  all-day `<Entry To="1440" V="1"/>`, i.e. switched on — a silent
+  change of meaning. Corpus check: the seven weekdays are in every
+  `Modes=` list, and `UserModes=` is always the count of modes beyond
+  them (absent at zero). **Heal:** the compiler now writes all seven
+  weekday columns (a weekday the schedule does not name is an empty
+  column, off) and `UserModes=`. The VirtualIns kept their identity,
+  wires and claimed values; the save set `WF="147456"`, added
+  `MaxVal="1" MinChange="0.5" MinTime="10"` to the digital one and
+  `EnVal="true"` to the analog one (corpus: `EnVal` goes with
+  `Analog="true"`, never without), wrote the analog range in the order
+  `EnVal, DefVal, MinVal, MaxVal`, and appended
+  `<IoData Visu="true" St="2"/>` and
+  `<Display Type="1" Unit="&lt;v.1&gt;" StateOnly="true"/>`. A fresh
+  mint now writes exactly this.
+- **Pass b:** with the heal, plus a fresh timer with a holiday column
+  and `daily`: every `<Entry>`, `Modes=`, `UserModes=` and `N=` came
+  back byte-identical, and both VirtualIns came back identical except
+  the version stamp. The semantic diff was empty. The fresh timers
+  gained the GUI-owned `On`/`Off`/`SpStates`, `IoData` and `Display`,
+  as every minted DayTimer does.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

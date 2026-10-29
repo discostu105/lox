@@ -19,7 +19,8 @@ errors.
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line
            | wire | set | attr | removed | moved | template | instance
-           | page | test | tiles | tiles-claim | access | blank ;
+           | page | test | tiles | tiles-claim | access | schedule
+           | schedule-claim | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number | string ) [ comment ] ;
@@ -97,6 +98,17 @@ access     = "access" slug [ comment ]             (* NFC Code Touch (D49) *)
              "end" [ comment ] ;
 grant      = ( "user" | "group" ) string ":" string [ comment ] ;
                                     (* principal title : schedule title *)
+schedule   = "schedule" slug [ comment ]           (* DayTimer schedule (D53) *)
+             { comment | sched-line }
+             "end" [ comment ] ;
+sched-line = day { day } ( "off" | interval { "," interval } ) [ comment ] ;
+day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
+           | "holiday" | "vacation" | "dayoff"
+           | "weekdays" | "weekend" | "daily" ;
+interval   = time "-" time [ "=" number ] [ "activate" ] ;
+time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
+schedule-claim = slug "." "schedule" "=" slug [ comment ] ;
+                                    (* DayTimer, extern or managed; top-level only *)
 
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
@@ -126,14 +138,20 @@ Notes:
   quoted.
 - A number may carry a **unit suffix** (D27), written immediately
   adjacent: `40s`, `250ms`, `90min`, `1.5h`, `2700K`, `70%`. Time units
-  scale exactly into Loxone's base unit, seconds (`1.5h` compiles to
-  `Def="5400"`, byte-identical to writing `5400`); `K` (color
-  temperature) and `%` are annotations with factor 1. The suffix is part
+  scale exactly into the unit the port is documented in (D52): seconds
+  by default (`1.5h` compiles to `Def="5400"`, byte-identical to writing
+  `5400`), minutes on a minutes port (`AutoShadeTime: 2h` compiles to
+  `120`; a value that is no exact decimal number of minutes, `10s`, is
+  an error). `%` and `K` (color temperature) carry factor 1 and are
+  accepted only on a port documented in that unit, or undocumented; a
+  time suffix on a `%`/`K`/`°` port is an error. A suffixed `let`
+  scales per use, into each port's unit. `lxir types <Type>` shows
+  every port's documented unit. The suffix is part
   of the value's canonical spelling — `1.5h` stays `1.5h` in source and
   through `fmt`. An unknown suffix is a parse error. A *quoted* `"40s"`
   stays a string — two spellings, two meanings.
 - The keywords `let`, `extern`, `removed`, `moved`, `template`, `end`,
-  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, and the expression
+  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, `schedule`, and the expression
   operators `and`, `or`, `not` are reserved, as are v0's `block`,
   `wire`, `set`, and `use` (migration errors) — none can be declared as
   a name. `access` is a keyword only where a line starts with `access
@@ -164,6 +182,7 @@ extern sonne = VirtualIn(iname: "VI3")
 extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 extern boiler = Switch(uuid: "1d844a67-0333-5301-ffffed57184a04d2")
 extern licht_buero = LightController2(title: "Deckenlicht", room: "Büro")
+extern taster_flur = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
 extern status_alarm_ref = InputRef(mirrors: status_alarm)
 ```
 
@@ -177,7 +196,13 @@ an `AmbiguousMatch` error listing candidates. Where titles repeat per
 room (every floor has a "Deckenlicht"), `room:` and/or `category:`
 narrow an `iname`/`title` match: the object's `<IoData Pr=…>`/`Cr=…`
 must point at a `Place`/`Category` with that title
-([loxone-format.md](loxone-format.md)). They never combine with
+([loxone-format.md](loxone-format.md)). Where identical hardware
+repeats its I/O titles (every Tree push-button interface has a
+"Taster 1"), `device: "<serial>"` narrows the match to the objects of
+that device: the `Serial=` of the object's nearest enclosing element
+that carries one — a Tree device, an extension, or for the
+Miniserver's own I/Os and virtual folders the Miniserver (D55). Serials
+compare case-insensitively. These constraints never combine with
 `uuid:`, which pins exactly on its own. Once resolved, the UUID is
 pinned in the lockfile; subsequent compiles use the pin (even if the title
 has changed since) as long as an object with that UUID and type still
@@ -202,7 +227,7 @@ keep `uuid:` for, say, two refs of one flag on the same page. Unlike the
 other matchers, a pinned `mirrors:` re-confirms on every compile: the
 claim "this ref mirrors X" must stay true, so a ref the GUI re-pointed
 elsewhere stops the compile instead of being quietly tolerated.
-`room:`/`category:` never combine with it. `decompile`/`adopt` emit
+`room:`/`category:`/`device:` never combine with it. `decompile`/`adopt` emit
 `mirrors:` on their own where the target has a slug in the module and
 the match is unique.
 
@@ -304,7 +329,7 @@ Rules:
 - The type must be in the verified builtin table
   (gates `And`/`Or`/`Not`, the comparator family `Equal`/`NotEqual`/
   `Greater`/`GreaterEqual`/`Less`/`LessEqual`, `Formula`, `Monoflop`,
-  `PulseGen`, `AnalogThresholdTrigger` — see
+  `PulseGen`, `AnalogThresholdTrigger`, … `lxir types` lists them — see
   [connector-db.md](connector-db.md)) — anything else is an error. See
   [design.md](design.md) "Refuse, never guess".
 - `And`/`Or` are fixed two-input blocks (`I1`, `I2`, `Q`): binding `I3`+
@@ -329,6 +354,33 @@ Rules:
   Write it this way where D34 cannot pick one of several mirrors of the
   actor on the page; with one mirror (or none) `OutputAPI: flex_api.I`
   is enough. Any other input as a source stays an error.
+
+### Virtual inputs — minted into the "Virtual Inputs" folder (D54)
+
+```text
+party = VirtualIn("Partymodus")
+soll = VirtualIn("Sollwert", Analog: "true", MinVal: 5, MaxVal: 30, DefVal: 21)
+licht = And(I1: party.Q)
+```
+
+`VirtualIn` is a block type like any other, except where it lives: the
+element is appended to the base's `<C Type="VirtualInCaption">` (the
+folder Loxone Config calls "Virtual Inputs"), not drawn on a page. It
+has no position, ignores `page` statements, and its `Q`/`Qm` outputs
+wire directly into blocks on any page.
+
+- `IName=` (`VI<n>`, the designation the GUI shows) is minted once,
+  one past the highest number in use, and kept from then on.
+- `Analog:` (`"true"`/`"false"`, default `"false"`), `MinVal:`,
+  `MaxVal:`, `DefVal:` are attribute parameters. Each is a claim: written
+  while bound, the GUI's value otherwise (like `Code:`). Make the range
+  cover what the input will receive: a value outside it is reported to
+  read 0 ([loxone-format.md](loxone-format.md)).
+- The room/category binding (`<IoData>`) and display settings stay
+  with Loxone Config.
+- A base without the folder is a compile error. Existing virtual inputs
+  are referenced as externs (`extern x = VirtualIn(iname: "VI3")`);
+  `adopt` does not take them over.
 
 ### `<-` — wire onto an extern port
 
@@ -796,11 +848,57 @@ NFC tag or access code but no access right on any Code Touch, neither
 directly nor through a group: the tag opens nothing. Membership of the
 *Full access* group does not count, since it grants no access right.
 
+### `schedule` — the switching times of a DayTimer (D53)
+
+```
+schedule abendlicht                 # living-room evening light
+	weekdays 06:00-07:30, 17:00-22:30
+	weekend 08:00-23:00
+	holiday vacation off
+end
+
+schaltuhr.schedule = abendlicht
+```
+
+A `schedule` names a weekly program; a claim
+`<timer>.schedule = <name>` writes it onto one DayTimer — an extern or a
+managed `DayTimer` block — and one schedule may be claimed by several
+timers. Each line lists days, then the intervals the timer is on:
+
+- **Days** are the built-in operating modes: `mon` … `sun`, `holiday`
+  (Feiertag), `vacation` (Urlaub), `dayoff` (Freier Tag/Schulferien),
+  and the groups `weekdays` (mon–fri), `weekend` (sat, sun), `daily`
+  (mon–sun). A day may appear on several lines; its intervals merge.
+  The timer always has a column for each of the seven weekdays — a
+  weekday the schedule does not name is **off all day** — plus one for
+  each of `holiday`, `vacation`, `dayoff` the schedule names (one it
+  does not name gets no column). User-defined
+  operating modes are not supported yet.
+- **Intervals** are `HH:MM-HH:MM`, minute precision, `24:00` for
+  midnight at the end of the day. Per day they must not overlap
+  (touching is fine); an interval cannot wrap past midnight — split it.
+- **`= <value>`** sets the output value of an *analog* timer
+  (`Analog` ticked in Loxone Config) and is required there; a digital
+  timer takes no value.
+- **`activate`** marks an interval that needs activation (Loxone
+  Config's *Aktivierung erforderlich*): the output switches on only
+  after a pulse on the timer's activation input (`Act`) inside the
+  interval.
+- **`off`** names days with no on-interval.
+
+The claim replaces the timer's whole schedule (`Modes=`, `UserModes=`,
+`N=` and its `<Entry>` list); everything else on the timer — analog mode, default
+value, room, visualization — stays with Loxone Config. Like a tiles
+claim it keeps no lock state: removing it leaves the last written
+schedule in place, editable in the app again. Only one schedule per
+timer; two externs resolving to the same timer are a compile error.
+Top-level only.
+
 ## Name resolution and validation
 
-- Externs, blocks, `let` constants, templates and `tiles` sets share one
-  namespace per module; duplicates are an error. An `access` declaration
-  names an extern and declares nothing.
+- Externs, blocks, `let` constants, templates, `tiles` sets and
+  schedules share one namespace per module; duplicates are an error. An
+  `access` declaration names an extern and declares nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).
@@ -882,7 +980,7 @@ with remedies in [agents.md](agents.md#errors-and-remedies).
 
 This is v1; there are no v0 files in the wild (pre-release revision).
 Anything not specified here (template nesting and template-local
-declarations, the `formula` expression backend, per-port unit checking)
+declarations, the `formula` expression backend)
 is future work —
 see [roadmap.md](roadmap.md). Future versions will keep v1 files parsing
 unchanged or provide a migration tool.

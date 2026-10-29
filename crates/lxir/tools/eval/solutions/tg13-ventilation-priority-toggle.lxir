@@ -1,0 +1,9 @@
+page "Bad"
+
+extern ein = VirtualIn(iname: "VI0")
+extern aus = VirtualIn(iname: "VI1")
+extern luefter = VirtualOut(title: "Lüfter Bad")
+
+# SR flip-flop: set wins over reset
+vent = SRFlipFlop("Vent Bad", InputS: ein.Q, InputR: aus.Q)
+luefter.I1 <- vent.Q

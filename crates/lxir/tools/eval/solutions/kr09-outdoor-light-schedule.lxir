@@ -1,0 +1,11 @@
+page "Garten"
+
+extern licht = LightController2(title: "Gartenbeleuchtung")
+
+schedule abends
+	daily 20:00-24:00
+end
+
+uhr = DayTimer("Gartenlicht abends")
+uhr.schedule = abends
+licht.I1 <- uhr.AQ

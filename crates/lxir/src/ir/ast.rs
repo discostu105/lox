@@ -1,6 +1,7 @@
 //! IR abstract syntax and canonical text emission.
 
 pub use crate::access::PrincipalKind;
+use crate::connectors::{PortUnit, port_unit};
 use crate::error::{Error, Result};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,6 +55,11 @@ pub enum Item {
     /// `access <slug>` … `end` — who may open an extern NFC Code Touch,
     /// and when (D49).
     Access(AccessDecl),
+    /// `schedule <name>` … `end` — a named DayTimer schedule (D53).
+    Schedule(ScheduleDecl),
+    /// `<timer>.schedule = <name>` — write a schedule onto a DayTimer,
+    /// extern or managed (D53).
+    ScheduleClaim(ScheduleClaim),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -139,6 +145,98 @@ impl fmt::Display for Unit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.suffix())
     }
+}
+
+/// Resolve a suffixed value for a port whose documented unit is
+/// `port_unit` (D52): time suffixes scale into the port's own time unit
+/// (seconds or minutes), `%` and `K` bind only where they mean what the
+/// port is in. `None` (undocumented port) keeps the D27 reading. The
+/// error is the reason, without the port's name (callers add it).
+pub(crate) fn scale_for_port(
+    number: &str,
+    unit: Unit,
+    port_unit: Option<PortUnit>,
+) -> std::result::Result<String, String> {
+    let overflow = || format!("`{number}{unit}` overflows its unit");
+    let is_time = matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H);
+    let mismatch = |pu: PortUnit| {
+        Err(format!(
+            "`{number}{unit}` does not fit — the port is documented in {}",
+            pu.describe()
+        ))
+    };
+    match port_unit {
+        None => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Seconds) if is_time => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Minutes) if is_time => {
+            let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
+            divide_exact(&seconds, 60).ok_or_else(|| {
+                format!(
+                    "`{number}{unit}` is no exact decimal number of minutes — \
+                     the port is documented in minutes; write it in `min`"
+                )
+            })
+        }
+        Some(PortUnit::Percent) if unit == Unit::Pct => Ok(number.to_string()),
+        Some(PortUnit::Kelvin) if unit == Unit::K => Ok(number.to_string()),
+        Some(pu) => mismatch(pu),
+    }
+}
+
+/// `decimal / divisor` as an exact decimal literal, or `None` when the
+/// quotient does not terminate (`10 / 60`).
+fn divide_exact(decimal: &str, divisor: u128) -> Option<String> {
+    let (neg, rest) = match decimal.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, decimal),
+    };
+    let (int, frac) = rest.split_once('.').unwrap_or((rest, ""));
+    let mut num: u128 = format!("{int}{frac}").parse().ok()?;
+    let mut den = divisor.checked_mul(10u128.checked_pow(frac.len() as u32)?)?;
+    let g = gcd(num, den);
+    num /= g;
+    den /= g;
+    // Terminating iff the reduced denominator is 2^a·5^b; then
+    // num/den = num·(10^k/den) / 10^k with k = max(a, b).
+    let (mut twos, mut fives, mut rest) = (0u32, 0u32, den);
+    while rest % 2 == 0 {
+        rest /= 2;
+        twos += 1;
+    }
+    while rest % 5 == 0 {
+        rest /= 5;
+        fives += 1;
+    }
+    if rest != 1 {
+        return None;
+    }
+    let point = twos.max(fives);
+    let num = num.checked_mul(10u128.checked_pow(point)? / den)?;
+    let digits = num.to_string();
+    let point = point as usize;
+    let mut out = if point == 0 {
+        digits
+    } else {
+        let (i, f) = if digits.len() > point {
+            let split = digits.len() - point;
+            (digits[..split].to_string(), digits[split..].to_string())
+        } else {
+            ("0".to_string(), format!("{digits:0>point$}"))
+        };
+        let f = f.trim_end_matches('0');
+        if f.is_empty() { i } else { format!("{i}.{f}") }
+    };
+    if neg && out != "0" {
+        out.insert(0, '-');
+    }
+    Some(out)
+}
+
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
 }
 
 /// Scale a number literal (`-?digits(.digits)?`) by a unit's factor,
@@ -240,6 +338,12 @@ pub struct ExternDecl {
     /// Category constraint (`category: "Beleuchtung"`): the object's
     /// `<IoData Cr=…>` must point at a `Category` with this title.
     pub category: Option<String>,
+    /// Device constraint (`device: "B0123456"`, D55): the serial number of
+    /// the hardware the object belongs to — the `Serial=` of its nearest
+    /// enclosing Tree device, extension or Miniserver. Narrows
+    /// `iname`/`title` matching where identical devices repeat their I/O
+    /// titles; unlike a room or a title, it does not change in the GUI.
+    pub device: Option<String>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
 }
@@ -253,6 +357,9 @@ impl ExternDecl {
         }
         if let Some(c) = &self.category {
             s.push_str(&format!(", category: {}", quote(c)));
+        }
+        if let Some(d) = &self.device {
+            s.push_str(&format!(", device: {}", quote(d)));
         }
         s
     }
@@ -1017,6 +1124,109 @@ impl fmt::Display for AccessGrant {
     }
 }
 
+/// `schedule <name>` … `end` — a named DayTimer schedule (D53): per
+/// operating mode, the intervals the timer is on and their values. Like a
+/// `tiles` set it declares nothing by itself; each
+/// `<timer>.schedule = <name>` claim writes it onto one DayTimer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleDecl {
+    pub name: String,
+    pub body: Vec<ScheduleItem>,
+    /// Trailing `#` comment on the header line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the `end` line, verbatim.
+    pub end_comment: Option<String>,
+}
+
+impl ScheduleDecl {
+    pub fn lines(&self) -> impl Iterator<Item = &ScheduleLine> {
+        self.body.iter().filter_map(|i| match i {
+            ScheduleItem::Line(l) => Some(l),
+            ScheduleItem::Comment(_) => None,
+        })
+    }
+}
+
+/// One statement of a `schedule` body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleItem {
+    Line(ScheduleLine),
+    /// Whole-line `#` comment, verbatim.
+    Comment(String),
+}
+
+/// `mon tue 06:00-08:00 = 21.5, 17:00-22:00` — the days (operating-mode
+/// keywords, kept as written: `weekdays` stays `weekdays`) and their
+/// intervals. No intervals (`holiday off`) lists the modes with the timer
+/// off all day.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleLine {
+    pub days: Vec<String>,
+    pub intervals: Vec<Interval>,
+    /// Trailing `#` comment, verbatim.
+    pub comment: Option<String>,
+}
+
+/// `HH:MM-HH:MM [= value] [activate]`, times in minutes of the day
+/// (`24:00` = 1440).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Interval {
+    pub from: u16,
+    pub to: u16,
+    /// The output value while on, as a number literal; `None` is a digital
+    /// timer's `1`.
+    pub value: Option<String>,
+    /// `activate` — the interval needs an activation (`NeedActivate`).
+    pub activate: bool,
+}
+
+impl fmt::Display for Interval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hm = |m: u16| format!("{:02}:{:02}", m / 60, m % 60);
+        write!(f, "{}-{}", hm(self.from), hm(self.to))?;
+        if let Some(v) = &self.value {
+            write!(f, " = {v}")?;
+        }
+        if self.activate {
+            f.write_str(" activate")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ScheduleLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.days.join(" "))?;
+        if self.intervals.is_empty() {
+            f.write_str(" off")?;
+        }
+        for (i, iv) in self.intervals.iter().enumerate() {
+            write!(f, "{}{iv}", if i == 0 { " " } else { ", " })?;
+        }
+        if let Some(c) = &self.comment {
+            write!(f, " #{c}")?;
+        }
+        Ok(())
+    }
+}
+
+/// `<timer>.schedule = <name>` — claim the schedule of a DayTimer (D53).
+/// No lock state, like a tiles claim: withdrawing it leaves the last
+/// written schedule in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleClaim {
+    pub slug: String,
+    pub schedule: String,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for ScheduleClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.schedule = {}", self.slug, self.schedule)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortRef {
     pub slug: String,
@@ -1043,6 +1253,7 @@ enum NameKind {
     Template,
     Instance,
     Tiles,
+    Schedule,
 }
 
 impl NameKind {
@@ -1054,6 +1265,7 @@ impl NameKind {
             NameKind::Template => "a template",
             NameKind::Instance => "a template instance",
             NameKind::Tiles => "a `tiles` set",
+            NameKind::Schedule => "a `schedule`",
         }
     }
 }
@@ -1166,6 +1378,20 @@ impl Module {
         })
     }
 
+    pub fn schedules(&self) -> impl Iterator<Item = &ScheduleDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Schedule(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    pub fn schedule_claims(&self) -> impl Iterator<Item = &ScheduleClaim> {
+        self.items.iter().filter_map(|i| match i {
+            Item::ScheduleClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
     pub fn tiles_claims(&self) -> impl Iterator<Item = &TilesClaim> {
         self.items.iter().filter_map(|i| match i {
             Item::TilesClaim(c) => Some(c),
@@ -1248,6 +1474,38 @@ impl Module {
         }
     }
 
+    /// [`Self::resolve_value`] for a value bound to `port` of a block of
+    /// `block_type`: a suffixed value — written inline or through a `let`
+    /// — scales into the port's documented unit (D52), and a suffix that
+    /// cannot mean what the port is in is refused. `slug` names the
+    /// binding in the error.
+    pub fn resolve_value_for<'m>(
+        &'m self,
+        value: &'m Value,
+        block_type: &str,
+        slug: &str,
+        port: &str,
+    ) -> Result<Cow<'m, str>> {
+        let suffixed = match value {
+            Value::Unit { number, unit } => Some((number, *unit)),
+            Value::Ref(name) => {
+                self.lets()
+                    .find(|l| l.name == *name)
+                    .and_then(|l| match &l.value {
+                        Value::Unit { number, unit } => Some((number, *unit)),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        };
+        match suffixed {
+            Some((number, unit)) => scale_for_port(number, unit, port_unit(block_type, port))
+                .map(Cow::Owned)
+                .map_err(|why| Error::Compile(format!("`{slug}.{port}`: {why}"))),
+            None => self.resolve_value(value),
+        }
+    }
+
     /// Name uniqueness, reference resolution, and statement-level
     /// consistency (no base config needed). Port existence and directions
     /// on managed blocks are checked separately by
@@ -1265,6 +1523,7 @@ impl Module {
                 Item::Template(t) => (t.name.as_str(), NameKind::Template),
                 Item::Instance(b) => (b.slug.as_str(), NameKind::Instance),
                 Item::Tiles(t) => (t.name.as_str(), NameKind::Tiles),
+                Item::Schedule(t) => (t.name.as_str(), NameKind::Schedule),
                 _ => continue,
             };
             if names.insert(name, kind).is_some() {
@@ -1366,6 +1625,7 @@ impl Module {
         let mut attrs_seen: BTreeSet<(&str, Attr)> = BTreeSet::new();
         let mut tiles_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut access_declared: BTreeSet<&str> = BTreeSet::new();
+        let mut schedules_claimed: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -1877,6 +2137,80 @@ impl Module {
                         }
                     }
                 }
+                Item::Schedule(t) => {
+                    super::schedule::program(t)
+                        .map_err(|m| Error::Compile(format!("`schedule {}`: {m}", t.name)))?;
+                }
+                Item::ScheduleClaim(c) => {
+                    match names.get(c.slug.as_str()) {
+                        Some(NameKind::Extern) => {
+                            let ty = self
+                                .externs()
+                                .find(|e| e.slug == c.slug)
+                                .map_or("", |e| e.block_type.as_str());
+                            if ty != "DayTimer" {
+                                return compile_err(format!(
+                                    "`{c}`: a schedule belongs to a `DayTimer` — `{}` is \
+                                     declared as `{ty}`",
+                                    c.slug
+                                ));
+                            }
+                        }
+                        Some(NameKind::Block) => {
+                            let ty = block_type(&c.slug);
+                            if ty != "DayTimer" {
+                                return compile_err(format!(
+                                    "`{c}`: a schedule belongs to a `DayTimer` — `{}` is \
+                                     a `{ty}`",
+                                    c.slug
+                                ));
+                            }
+                        }
+                        None if !flattened => {}
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {} — a schedule is claimed on a DayTimer \
+                                 (an extern or a managed block)",
+                                c.slug,
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            return compile_err(format!(
+                                "`{c}`: undeclared slug `{}` — declare the timer as \
+                                 `extern {} = DayTimer(…)` or as a block",
+                                c.slug, c.slug
+                            ));
+                        }
+                    }
+                    match names.get(c.schedule.as_str()) {
+                        Some(NameKind::Schedule) => {}
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {}, not a `schedule`",
+                                c.schedule,
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            let hint = super::validate::suggest(
+                                &c.schedule,
+                                self.schedules().map(|t| t.name.as_str()),
+                            );
+                            return compile_err(format!(
+                                "`{c}`: no `schedule {}` is declared{hint}",
+                                c.schedule
+                            ));
+                        }
+                    }
+                    if !schedules_claimed.insert(&c.slug) {
+                        return compile_err(format!(
+                            "duplicate assignment `{}.schedule = …` — a timer takes one \
+                             schedule",
+                            c.slug
+                        ));
+                    }
+                }
                 Item::Page(p) if p.title.is_empty() => {
                     return compile_err("`page \"\"`: the page title must not be empty".into());
                 }
@@ -1961,7 +2295,7 @@ impl Module {
                 Item::Extern(_) => 0,
                 Item::Block(_) => 1,
                 Item::Wire(_) | Item::ExprWire(_) => 2,
-                Item::Set(_) | Item::Attr(_) | Item::TilesClaim(_) => 3,
+                Item::Set(_) | Item::Attr(_) | Item::TilesClaim(_) | Item::ScheduleClaim(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
                 Item::Moved(_) => 6,
@@ -1974,6 +2308,7 @@ impl Module {
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
+                Item::Schedule(_) => 14,
             }
         }
         let mut out = String::new();
@@ -2156,6 +2491,20 @@ impl Module {
                     out.push_str(&format!("end{}\n", tail(&a.end_comment)));
                     prev_multiline = true;
                 }
+                Item::Schedule(t) => {
+                    out.push_str(&format!("schedule {}{}\n", t.name, tail(&t.comment)));
+                    for stmt in &t.body {
+                        match stmt {
+                            ScheduleItem::Line(l) => out.push_str(&format!("\t{l}\n")),
+                            ScheduleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                        }
+                    }
+                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                    prev_multiline = true;
+                }
+                Item::ScheduleClaim(c) => {
+                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+                }
                 Item::Comment(text) => {
                     out.push_str(&format!("#{text}\n"));
                 }
@@ -2178,4 +2527,50 @@ fn quote(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn divide_exact_terminates_or_refuses() {
+        assert_eq!(divide_exact("7200", 60).as_deref(), Some("120"));
+        assert_eq!(divide_exact("90", 60).as_deref(), Some("1.5"));
+        assert_eq!(divide_exact("7.5", 60).as_deref(), Some("0.125"));
+        assert_eq!(divide_exact("-1800", 60).as_deref(), Some("-30"));
+        assert_eq!(divide_exact("0.25", 60), None);
+        assert_eq!(divide_exact("10", 60), None);
+        assert_eq!(divide_exact("0", 60).as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn suffixes_scale_into_the_documented_unit() {
+        let seconds = Some(PortUnit::Seconds);
+        let minutes = Some(PortUnit::Minutes);
+        assert_eq!(scale_for_port("1.5", Unit::H, seconds).unwrap(), "5400");
+        assert_eq!(scale_for_port("2", Unit::H, minutes).unwrap(), "120");
+        assert_eq!(scale_for_port("90", Unit::S, minutes).unwrap(), "1.5");
+        assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
+        let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
+        assert!(err.contains("documented in minutes"), "{err}");
+
+        assert_eq!(
+            scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),
+            "70"
+        );
+        assert_eq!(
+            scale_for_port("2700", Unit::K, Some(PortUnit::Kelvin)).unwrap(),
+            "2700"
+        );
+        let err = scale_for_port("70", Unit::Pct, seconds).unwrap_err();
+        assert!(err.contains("documented in seconds"), "{err}");
+        let err = scale_for_port("5", Unit::S, Some(PortUnit::Percent)).unwrap_err();
+        assert!(err.contains("`5s` does not fit"), "{err}");
+        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Other("°"))).is_err());
+
+        // Undocumented ports keep the D27 reading.
+        assert_eq!(scale_for_port("45", Unit::Min, None).unwrap(), "2700");
+        assert_eq!(scale_for_port("80", Unit::Pct, None).unwrap(), "80");
+    }
 }

@@ -57,7 +57,8 @@ jal_sued.TargetPos = 70                              # a parameter
 ```
 
 - `extern` names an object Loxone Config owns (matched by `uuid`, `iname` or `title`); you can wire to it, not
-  create it.
+  create it. A title that repeats can be narrowed by `room:`, `category:` or `device:` (the hardware serial of the
+  Extension or Tree device it hangs off).
 - A plain declaration (`temp_hoch = GreaterEqual(…)`) is a block the compiler owns.
 - `<-` draws a wire, `=` sets a parameter. Expressions (`and`, `>=`, `/ 1000`) compile to real blocks, units read as
   written (`Time: 30min`, `70%`), and `template … end` stamps out repeated rules.
@@ -80,6 +81,25 @@ The declaration owns that Code Touch's access: whoever it leaves out loses the r
 schedules, NFC tags and codes are still created in Loxone Config or the app; a title the config doesn't have stops
 the compile. `lox ir adopt` and `lox ir decompile` write the declarations for the rights the config has, and
 `lox ir lint` names users whose tag or code opens no Code Touch.
+
+### Switching times and app switches
+
+A `schedule` is a DayTimer's week in source; a claim writes it onto a timer, extern or managed:
+
+```text
+schedule abendlicht
+	weekdays 06:00-07:30, 17:00-22:30
+	weekend 08:00-23:00
+	holiday vacation off
+end
+
+schaltuhr.schedule = abendlicht
+
+party = VirtualIn("Partymodus")          # a new switch in the app, in the Virtual Inputs folder
+```
+
+The claim replaces the timer's switching times and nothing else; edits made in the app are overwritten on the next
+push, and removing the claim hands the times back to the app. A new `VirtualIn` gets the next free `VI<n>`.
 
 The full language: [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md).
 Worked examples: [crates/lxir/examples](https://github.com/discostu105/lox/tree/main/crates/lxir/examples).
@@ -132,7 +152,8 @@ lox ir lint                           # unused names, blocks whose outputs feed 
 ```
 
 `lox config diff` is the readable review: names, pages and values. `lox ir diff --exit-code` is the same
-comparison by UUID, with exit code 1 when anything differs (for scripts and CI).
+comparison by UUID, with exit code 1 when anything differs (for scripts and CI). `lox ir diff --summary` says it
+as a commit message, by title and port name: its first line is the subject.
 
 ```
 base.Loxone → out.Loxone
@@ -225,6 +246,8 @@ touched a managed block, bring the module up to date first (or `lox ir adopt --u
 - **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/lxir/examples/ci.sh) checks
   parsing, formatting, lock currency and byte-determinism; `--sync` also requires the sources to match the deployed
   config.
+- **No personal data in git:** a real config carries the address, users, codes and serials. `lox ir scan <file|dir>`
+  lists where (element and attribute, never the value) and exits 1, so a CI step or pre-commit hook can refuse it.
 - **Rename safely:** `lox ir rename old_slug new_slug` renames across all files and the lock, identities kept.
 - **VS Code:** syntax highlighting and snippets in
   [editor/vscode](https://github.com/discostu105/lox/tree/main/crates/lxir/editor/vscode).

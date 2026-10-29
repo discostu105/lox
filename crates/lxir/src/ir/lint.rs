@@ -3,7 +3,8 @@
 //! feed nothing.
 //!
 //! Two layers. [`lint_source`] needs only the module: unused externs and
-//! constants, uninstantiated templates. [`lint_dead_outputs`] needs the
+//! constants, uninstantiated templates, values outside a port's
+//! documented range. [`lint_dead_outputs`] needs the
 //! compiled result too, because a managed block's consumers may live
 //! outside the source — GUI-drawn wires survive in the compiled config,
 //! so only there is "nothing reads this block" a real statement. Both are
@@ -15,6 +16,7 @@ use super::ast::{BindingKind, Item, MatchSpec, Module, TestItem, Value};
 use crate::doc::{LoxoneDoc, ports};
 use crate::error::Result;
 use crate::lock::Lockfile;
+use crate::port_meta::port_meta;
 use crate::xml::Node;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -32,6 +34,8 @@ pub enum LintKind {
     /// A user with an NFC tag or access code and no access right on any
     /// NFC Code Touch (D49).
     NoAccessRight,
+    /// A parameter value outside the port's documented range (D52).
+    OutOfRange,
 }
 
 impl LintKind {
@@ -44,6 +48,7 @@ impl LintKind {
             LintKind::TileBroadcast => "tile-broadcast",
             LintKind::TileDeadCommand => "tile-dead-command",
             LintKind::NoAccessRight => "no-access-right",
+            LintKind::OutOfRange => "out-of-range",
         }
     }
 }
@@ -143,6 +148,9 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             Item::Access(a) => {
                 object_refs.insert(&a.slug);
             }
+            Item::ScheduleClaim(c) => {
+                object_refs.insert(&c.slug);
+            }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {
                 for stmt in &t.body {
@@ -178,6 +186,57 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                 });
             }
             _ => {}
+        }
+    }
+
+    // Documented ranges (D52): advisory, because the documentation is the
+    // weakest evidence tier — Loxone Config itself clamps or accepts.
+    let extern_types: BTreeMap<&str, &str> = flat
+        .externs()
+        .map(|e| (e.slug.as_str(), e.block_type.as_str()))
+        .collect();
+    let mut values: Vec<(&str, &str, &str, &Value)> = Vec::new();
+    for item in &flat.items {
+        match item {
+            Item::Block(b) => {
+                for (k, v) in b.params() {
+                    values.push((&b.slug, &b.block_type, k, v));
+                }
+            }
+            Item::Set(s) => {
+                if let Some(t) = extern_types.get(s.target.slug.as_str()) {
+                    values.push((&s.target.slug, t, &s.target.port, &s.value));
+                }
+            }
+            _ => {}
+        }
+    }
+    for (slug, block_type, port, value) in values {
+        let Some(meta) = port_meta(block_type, port) else {
+            continue;
+        };
+        let Ok(v) = flat.resolve_value_for(value, block_type, slug, port) else {
+            continue;
+        };
+        let Ok(x) = v.parse::<f64>() else {
+            continue;
+        };
+        let below = meta
+            .min
+            .and_then(|m| m.parse::<f64>().ok())
+            .filter(|m| x < *m);
+        let above = meta
+            .max
+            .and_then(|m| m.parse::<f64>().ok())
+            .filter(|m| x > *m);
+        if below.is_some() || above.is_some() {
+            let unit = meta.unit.map(|u| format!(" {u}")).unwrap_or_default();
+            let range = format!("{} … {}", meta.min.unwrap_or("−∞"), meta.max.unwrap_or("∞"));
+            findings.push(LintFinding {
+                kind: LintKind::OutOfRange,
+                slug: slug.to_string(),
+                detail: format!("{port} = {v}{unit} is outside the documented range {range}{unit}"),
+            });
         }
     }
     Ok(findings)

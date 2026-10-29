@@ -4,6 +4,12 @@ Operational guidance for AI agents (and automation generally) authoring
 Loxone logic through this toolchain. The IR exists so you never have to edit
 `.Loxone` XML — and you must not.
 
+A condensed version ships as a Claude Code skill,
+[skills/lxir/SKILL.md](../skills/lxir/SKILL.md): link the directory into
+`~/.claude/skills/` (or a house repository's `.claude/skills/`) and an
+agent there loads it when the task is Loxone logic. `tests/skill.rs`
+keeps its example module valid.
+
 ## Hard rules
 
 1. **Never edit `.Loxone` files directly.** All config changes go through
@@ -15,9 +21,9 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
    with the module.
 3. **Never invent block types or port names.** Valid types for a block
    declaration (`slug = Type(…)`) are exactly the builtin table
-   (`src/connectors.rs`: gates, the comparator
-   family, `Formula`, `Monoflop`, `PulseGen`, `AnalogThresholdTrigger`).
-   Valid ports on an extern are whatever the base config actually has —
+   (`src/connectors.rs`) — list it with `lxir types`, and read one
+   type's ports, directions, units, canvas labels and ranges with
+   `lxir types <Type>` (`--json` for machines). Valid ports on an extern are whatever the base config actually has —
    discover them with `lxir decompile` / `lxir observe`, or read them from
    the error, which lists them (and suggests the closest name for typos).
    `lxir check` catches wrong types/ports/directions on managed blocks
@@ -27,9 +33,14 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
    crate).
    Treat everything here as read-only toward the house.
 5. **Prefer `iname`/`uuid` matching over `title`** for externs — titles are
-   locale-volatile and may change under you.
+   locale-volatile and may change under you. Where identical devices
+   repeat a title ("Taster 1"), narrow it with `device: "<serial>"`.
 6. Treat `NoMatch` / `AmbiguousMatch` as **stop-and-ask**: choosing among
    candidates is a human decision unless instructions already cover it.
+7. **Keep real configs out of repositories.** A house config carries the
+   owner's address, users, access codes and serials. `lxir scan <file or
+   dir>` lists where (never what); exit 1 means it must not be committed.
+   Synthetic fixtures scan clean.
 
 ## The loop
 
@@ -38,6 +49,7 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
 lxir decompile current.Loxone            # full IR view, `page` sections
 lxir decompile --out-dir view/ current.Loxone   # one module per page
 lxir observe current.Loxone              # port evidence per block type
+lxir types Monoflop                       # ports, units, labels of a mintable type
 
 # 1. Edit the module (.lxir). Whole-line # comments are preserved.
 
@@ -60,6 +72,7 @@ lxir compile --base current.Loxone \
 
 # 4. Show your work as a SEMANTIC diff, never an XML diff:
 lxir diff current.Loxone out.Loxone
+lxir diff --summary current.Loxone out.Loxone   # by name: a commit message
 
 # 5. Sanity: the output must round-trip.
 lxir roundtrip out.Loxone
@@ -83,6 +96,8 @@ noise (`[locale?]`) so it isn't mistaken for a real edit. Users, groups,
 credentials and access rights come in a section of their own (`user`,
 `group`, `access code`, `NFC tag` lines); credentials show as names,
 counts and short fingerprints only. `--json` gives the same diff as JSON.
+`--summary` says it by block title and port name — the form to show a
+human, and the commit message for the module change.
 
 The decompile view is for **reading, not compiling**: compiling it against
 the same base would mint duplicates of every managed block and claim
@@ -111,6 +126,8 @@ See [ir-spec.md](ir-spec.md) for the full spec.
 let schwelle = 28                    # named constant
 
 extern sonne = VirtualIn(iname: "VI3")           # existing object, not yours
+party = VirtualIn("Partymodus")      # a new app switch, minted into the
+                                     # "Virtual Inputs" folder (D54)
 extern jal = AutoJalousie(title: "Beschattung Süd")
 
 temp_hoch = GreaterEqual(            # yours, compiler-owned; the argument
@@ -164,6 +181,16 @@ it only when it matches what you intended.
 | `ambiguous` + candidate UUIDs | several objects match | switch to `uuid: "<one of the candidates>"` — ask if unclear |
 | `not in the verified builtin table` | block type can't be minted in v0 | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
+| `is the label Loxone Config shows on the canvas` | a canvas label (`Tr`, `D`) used as a port name | use the key the error names (`InputTrigger`, `Time`) |
+| `does not fit — the port is documented in …` | unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`lxir types <Type>`) |
+| `is no exact decimal number of minutes` | time value on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a representable value |
+| `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |
+| `the timer is analog — … needs a value` / `the timer is digital` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
+| `user-defined operating modes are not supported yet` | a quoted mode title in a schedule line | use the built-in days; user modes stay with Loxone Config |
+| `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
+| `` `Analog:` is "true" or "false" `` | a VirtualIn's `Analog:` got another value | write `Analog: "true"` (or drop it: digital) |
+| `cannot adopt VirtualIn …: … minted from source but not adopted` | `adopt` pointed at an existing virtual input | reference it as `extern x = VirtualIn(iname: "VI3")` |
+| `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |

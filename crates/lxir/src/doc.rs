@@ -152,7 +152,9 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
 /// editor), `<LSConfig>` the scene-behavior settings (`OpM=`/`ScMv=`
 /// reference the scenes' SIDs), `<HCL>` the human-centric-lighting
 /// color-temperature curve, and `<SeqConf>` RGB color sequences (nested
-/// `<seq0>`/`<Sequence>`/`<Col>`, carried wholesale).
+/// `<seq0>`/`<Sequence>`/`<Col>`, carried wholesale). `<StateTexts>`
+/// holds a State block's per-value status texts, authored in the GUI
+/// (the save adds one to a minted State, oracle session 16).
 pub const GUI_OWNED_CHILDREN: &[&str] = &[
     "IoData",
     "Display",
@@ -163,6 +165,7 @@ pub const GUI_OWNED_CHILDREN: &[&str] = &[
     "LSConfig",
     "HCL",
     "SeqConf",
+    "StateTexts",
 ];
 
 /// Lookup tables built in one pass over the document.
@@ -276,6 +279,16 @@ impl LoxoneDoc {
             }
         }
         Some(cur)
+    }
+
+    /// Serial number of the hardware the object at `path` belongs to: the
+    /// `Serial=` of its nearest enclosing element that carries one (a
+    /// Tree device, an extension, a Miniserver).
+    pub fn device_serial(&self, path: &[usize]) -> Option<&str> {
+        (0..path.len())
+            .rev()
+            .filter_map(|k| self.element_at(&path[..k])?.attr("Serial"))
+            .find(|s| !s.is_empty())
     }
 
     pub fn element_at_mut(&mut self, path: &[usize]) -> Option<&mut Element> {

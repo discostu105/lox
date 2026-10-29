@@ -501,6 +501,238 @@ fn locale_suspect(obj: &ObjectSummary) -> bool {
         )
 }
 
+/// The diff as a commit message: a subject line counting the changes
+/// (prefixed with the pages when they sit on at most three), then the changes by
+/// name — `Type "Title"`, ports as `"Title".Port`, rooms by title — instead
+/// of UUIDs. Locale renames are counted, not listed: they are noise
+/// ([`Rename::locale_suspect`]). Read-only and deterministic, for `lxir
+/// diff --summary`.
+pub fn summary(a: &LoxoneDoc, b: &LoxoneDoc, d: &DocDiff) -> String {
+    let (va, vb) = (Names::new(a), Names::new(b));
+    // Look an object up in the new document first, else the old one.
+    let object = |uuid: &str| vb.object(uuid).or_else(|| va.object(uuid));
+    let mut pages = BTreeSet::new();
+    let mut touch = |names: &Names, uuid: &str| {
+        if let Some(p) = names.page_of(uuid) {
+            pages.insert(p.to_string());
+        }
+    };
+    let mut body: Vec<(&str, Vec<String>)> = Vec::new();
+
+    let listed = |objs: &[ObjectSummary], names: &Names| -> Vec<String> {
+        objs.iter()
+            .map(|o| match names.page_of(&o.uuid) {
+                Some(p) => format!("{} (page {p:?})", names.name(o)),
+                None => names.name(o),
+            })
+            .collect()
+    };
+    body.push(("Added", listed(&d.added, &vb)));
+    body.push(("Removed", listed(&d.removed, &va)));
+    d.added.iter().for_each(|o| touch(&vb, &o.uuid));
+    d.removed.iter().for_each(|o| touch(&va, &o.uuid));
+
+    let (locale, renames): (Vec<&Rename>, Vec<&Rename>) =
+        d.renamed.iter().partition(|r| r.locale_suspect);
+    let title = |t: &Option<String>| t.as_deref().map_or("(none)".into(), |t| format!("{t:?}"));
+    body.push((
+        "Renamed",
+        renames
+            .iter()
+            .map(|r| {
+                touch(&vb, &r.uuid);
+                format!("{} {} -> {}", r.block_type, title(&r.from), title(&r.to))
+            })
+            .collect(),
+    ));
+
+    let value = |v: &Option<String>| v.clone().unwrap_or_else(|| "(unset)".into());
+    let mut changed = Vec::new();
+    for p in &d.param_changes {
+        touch(&vb, &p.object_uuid);
+        let who = object(&p.object_uuid).unwrap_or_else(|| p.block_type.clone());
+        let (from, to) = (p.from.as_deref(), p.to.as_deref());
+        let what = if p.port_key == "APC" {
+            let n = match (
+                from.and_then(crate::autopilot::parse),
+                to.and_then(crate::autopilot::parse),
+            ) {
+                (Some(old), Some(new)) => crate::autopilot::changes(&old, &new).len(),
+                _ => 1,
+            };
+            format!("rule changed ({n} field{})", if n == 1 { "" } else { "s" })
+        } else if file_params(&p.block_type).contains(&p.port_key.as_str()) {
+            let lines = text_changes(from.unwrap_or(""), to.unwrap_or(""));
+            let count = |c: char| lines.iter().skip(1).filter(|l| l.starts_with(c)).count();
+            format!(
+                "{} changed (-{} +{} lines)",
+                p.port_key,
+                count('-'),
+                count('+')
+            )
+        } else {
+            format!("{}: {} -> {}", p.port_key, value(&p.from), value(&p.to))
+        };
+        changed.push(format!("{who} {what}"));
+    }
+    for p in &d.placements {
+        touch(&vb, &p.object_uuid);
+        let who = object(&p.object_uuid).unwrap_or_else(|| p.block_type.clone());
+        let side = |t: &Option<String>, u: &Option<String>| match (t, u) {
+            (Some(t), _) => format!("{t:?}"),
+            (None, Some(u)) => u.clone(),
+            (None, None) => "(none)".into(),
+        };
+        changed.push(format!(
+            "{who} {}: {} -> {}",
+            p.attr,
+            side(&p.from_title, &p.from),
+            side(&p.to_title, &p.to)
+        ));
+    }
+    body.push(("Changed", changed));
+
+    for (heading, list, names) in [
+        ("Wires added", &d.wires_added, &vb),
+        ("Wires removed", &d.wires_removed, &va),
+    ] {
+        let mut wires = Vec::new();
+        for w in list {
+            if let Some((owner, _)) = names.idx.port_owner.get(&w.to_port) {
+                touch(names, owner);
+            }
+            wires.push(format!(
+                "{} -> {}",
+                names.port(&w.from_port),
+                names.port(&w.to_port)
+            ));
+        }
+        body.push((heading, wires));
+    }
+    // Users and groups name themselves; credentials stay fingerprints.
+    body.push((
+        "Users and access",
+        d.access.iter().map(ToString::to_string).collect(),
+    ));
+
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let parts: Vec<String> = [
+        (d.added.len(), "add", "block", "blocks"),
+        (d.removed.len(), "remove", "block", "blocks"),
+        (renames.len(), "rename", "block", "blocks"),
+        (d.param_changes.len(), "change", "parameter", "parameters"),
+        (
+            d.placements.len(),
+            "rebind",
+            "room/category",
+            "rooms/categories",
+        ),
+        (d.wires_added.len(), "add", "wire", "wires"),
+        (d.wires_removed.len(), "remove", "wire", "wires"),
+        (
+            d.access.len(),
+            "change",
+            "user/access entry",
+            "users/access entries",
+        ),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, verb, one, many)| format!("{verb} {}", plural(n, one, many)))
+    .collect();
+    let mut subject = if parts.is_empty() {
+        "no semantic change".to_string()
+    } else {
+        parts.join(", ")
+    };
+    if (1..=3).contains(&pages.len()) && !parts.is_empty() {
+        let pages: Vec<&str> = pages.iter().map(String::as_str).collect();
+        subject = format!("{}: {subject}", pages.join(", "));
+    }
+    let mut out = subject;
+    for (heading, lines) in body.iter().filter(|(_, l)| !l.is_empty()) {
+        out.push_str(&format!("\n\n{heading}:"));
+        for line in lines {
+            out.push_str(&format!("\n- {line}"));
+        }
+    }
+    if !locale.is_empty() {
+        out.push_str(&format!(
+            "\n\n{} locale rename(s) of built-in titles not listed.",
+            locale.len()
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Object, port and page names of one document, for [`summary`].
+struct Names {
+    objects: BTreeMap<String, ObjectSummary>,
+    idx: crate::doc::DocIndex,
+    /// Page paths with their titles.
+    pages: Vec<(Vec<usize>, String)>,
+}
+
+impl Names {
+    fn new(doc: &LoxoneDoc) -> Names {
+        let objects: BTreeMap<String, ObjectSummary> = doc
+            .objects()
+            .into_iter()
+            .map(|o| (o.uuid.clone(), o))
+            .collect();
+        let pages = objects
+            .values()
+            .filter(|o| o.block_type == "Page")
+            .map(|o| (o.path.clone(), o.title.clone().unwrap_or_default()))
+            .collect();
+        Names {
+            objects,
+            idx: doc.index(),
+            pages,
+        }
+    }
+
+    /// `Type "Title"`, else `Type IName`, else `Type <uuid>`.
+    fn name(&self, o: &ObjectSummary) -> String {
+        match (&o.title, &o.iname) {
+            (Some(t), _) => format!("{} {t:?}", o.block_type),
+            (None, Some(i)) => format!("{} {i}", o.block_type),
+            (None, None) => format!("{} {}", o.block_type, o.uuid),
+        }
+    }
+
+    fn object(&self, uuid: &str) -> Option<String> {
+        self.objects.get(uuid).map(|o| self.name(o))
+    }
+
+    /// `"Title".Port` (falling back like [`Names::name`]), or the raw
+    /// port UUID if it belongs to no object.
+    fn port(&self, port: &str) -> String {
+        let Some((owner, key)) = self.idx.port_owner.get(port) else {
+            return port.to_string();
+        };
+        let label = match self.objects.get(owner) {
+            Some(ObjectSummary { title: Some(t), .. }) => format!("{t:?}"),
+            Some(ObjectSummary { iname: Some(i), .. }) => i.clone(),
+            Some(o) => o.block_type.clone(),
+            None => owner.clone(),
+        };
+        format!("{label}.{key}")
+    }
+
+    /// Title of the innermost page containing the object.
+    fn page_of(&self, uuid: &str) -> Option<&str> {
+        let path = &self.objects.get(uuid)?.path;
+        self.pages
+            .iter()
+            .filter(|(p, _)| path.len() > p.len() && path.starts_with(p))
+            .max_by_key(|(p, _)| p.len())
+            .map(|(_, t)| t.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

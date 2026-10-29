@@ -711,6 +711,107 @@ fn composite_extern_matching_narrows_by_room_and_category() {
 }
 
 #[test]
+fn extern_matching_narrows_by_device_serial() {
+    // Two identical Tree devices, each with a "Taster 1" (D55): the
+    // device's serial tells them apart; the title alone cannot.
+    let sensor = |dev: u32, n: u32| {
+        format!(
+            "\t\t\t\t\t<C Type=\"TreeSensor\" U=\"0000001{dev}-0000-000{n}-ffff000000000001\" \
+             Title=\"Taster {n}\">\r\n\
+             \t\t\t\t\t\t<Co K=\"Q\" U=\"0000001{dev}-0000-000{n}-01ff000000000001\"/>\r\n\
+             \t\t\t\t\t</C>\r\n"
+        )
+    };
+    let device = |dev: u32, serial: &str| {
+        format!(
+            "\t\t\t\t<C Type=\"TreeDevice\" U=\"0000000{dev}-0000-0000-ffff000000000001\" \
+             Title=\"Tasterschnittstelle\" Serial=\"{serial}\">\r\n{}{}\t\t\t\t</C>\r\n",
+            sensor(dev, 1),
+            sensor(dev, 2)
+        )
+    };
+    let base = LoxoneDoc::parse(
+        format!(
+            "<ControlList Version=\"1\" NextObj=\"20\">\r\n\
+             \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+             \t\t<C Type=\"LoxLIVE\" U=\"00000002-0000-0000-ffff000000000001\" Serial=\"504F94000001\">\r\n\
+             \t\t\t<C Type=\"LoxTree\" U=\"00000003-0000-0000-ffff000000000001\" Serial=\"B0000000\">\r\n\
+             {}{}\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n\
+             \t\t<C Type=\"Page\" U=\"00000006-0000-0000-ffff000000000001\" Title=\"P\">\r\n\
+             \t\t\t<C Type=\"And\" U=\"00000007-0000-0000-ffff000000000001\" Title=\"Beide\">\r\n\
+             \t\t\t\t<Co K=\"I1\" U=\"00000007-0000-0001-01ff000000000001\">\r\n\
+             \t\t\t\t\t<In Input=\"00000014-0000-0001-01ff000000000001\"/>\r\n\
+             \t\t\t\t</Co>\r\n\
+             \t\t\t\t<Co K=\"I2\" U=\"00000007-0000-0002-01ff000000000001\">\r\n\
+             \t\t\t\t\t<In Input=\"00000015-0000-0001-01ff000000000001\"/>\r\n\
+             \t\t\t\t</Co>\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"00000007-0000-0003-01ff000000000001\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n\
+             \t</C>\r\n\
+             </ControlList>\r\n",
+            device(4, "B0A1B2C3"),
+            device(5, "B0D4E5F6")
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        base.device_serial(&base.objects()[4].path),
+        Some("B0A1B2C3"),
+        "nearest enclosing Serial=, not the Tree branch or the Miniserver"
+    );
+
+    let resolve = |src: &str| {
+        let m = Module::parse(src)?;
+        let mut lock = Lockfile::new();
+        compile(&base, &m, &mut lock, &opts())?;
+        Ok::<_, Box<dyn std::error::Error>>(lock.externals["t"].uuid.clone())
+    };
+    let err = resolve("extern t = TreeSensor(title: \"Taster 1\")\n").unwrap_err();
+    assert!(err.to_string().contains("2"), "{err}");
+    assert_eq!(
+        resolve("extern t = TreeSensor(title: \"Taster 1\", device: \"b0d4e5f6\")\n").unwrap(),
+        "00000015-0000-0001-ffff000000000001",
+        "serials compare case-insensitively"
+    );
+    let err =
+        resolve("extern t = TreeSensor(title: \"Taster 1\", device: \"B0FFFFFF\")\n").unwrap_err();
+    assert!(err.to_string().contains("device: \"B0FFFFFF\""), "{err}");
+    assert!(
+        Module::parse(
+            "extern t = TreeSensor(uuid: \"00000014-0000-0001-ffff000000000001\", device: \"B0A1B2C3\")\n"
+        )
+        .is_err()
+    );
+    let src = "extern t = TreeSensor(title: \"Taster 1\", room: \"Flur\", device: \"B0A1B2C3\")\n";
+    assert_eq!(Module::parse(src).unwrap().to_text(), src);
+
+    // Decompile says the same: a repeated title gets its device, and the
+    // lifted externs resolve to the objects they were lifted from.
+    let (m, _) = decompile(&base, &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    let externs: Vec<&str> = text.lines().filter(|l| l.starts_with("extern ")).collect();
+    assert_eq!(
+        externs,
+        [
+            "extern taster_1 = TreeSensor(title: \"Taster 1\", device: \"B0A1B2C3\")",
+            "extern taster_1_2 = TreeSensor(title: \"Taster 1\", device: \"B0D4E5F6\")",
+        ],
+        "{text}"
+    );
+    let m = Module::parse(&(externs.join("\n") + "\n")).unwrap();
+    let mut lock = Lockfile::new();
+    compile(&base, &m, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        lock.externals["taster_1_2"].uuid,
+        "00000015-0000-0001-ffff000000000001"
+    );
+}
+
+#[test]
 fn config_version_pin_refuses_an_unqualified_release() {
     let base = base(); // ConfigVersion="17010727"
     let module = module();
@@ -1033,7 +1134,10 @@ fn incremental_adopt_refuses_claimed_or_unverified_identities() {
         .uuid
         .clone();
     let err = adopt_one(&base, &vi, "x", &module, &mut lock.clone()).unwrap_err();
-    assert!(err.to_string().contains("builtin table"), "{err}");
+    assert!(
+        err.to_string().contains("reference it as an extern"),
+        "{err}"
+    );
 }
 
 const FASSADE_MODULE: &str = "\
@@ -3121,4 +3225,346 @@ fn full_view_renders_autopilot_rules_as_comments() {
     };
     let (m, _) = decompile(&doc, &mo).unwrap();
     assert!(!m.to_text().contains("# when"), "adoptable view stays bare");
+}
+
+#[test]
+fn unit_suffixes_follow_the_documented_port_unit() {
+    // D52: `AutoShadeTime` is documented in minutes — `2h` is 120 there,
+    // not 7200; a `let` carries its unit to the port that uses it; an
+    // extern's port is checked against the extern's declared type.
+    let src = "page \"Beschattung\"\n\
+               let nachlauf = 90s\n\
+               extern sonne = VirtualIn(iname: \"VI3\")\n\
+               extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n\
+               puls = Monoflop(InputTrigger: sonne.Q, Time: 1.5h)\n\
+               jal = AutoJalousie(AutoShadeTime: 2h, SRoff: nachlauf)\n\
+               jal_sued.TargetPos = 70%\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let def_of = |uuid: &str, key: &str| {
+        let obj = out
+            .objects()
+            .iter()
+            .find(|o| o.uuid == uuid)
+            .unwrap()
+            .path
+            .clone();
+        lxir::doc::ports(out.element_at(&obj).unwrap())
+            .into_iter()
+            .find(|p| p.key == key)
+            .unwrap()
+            .def
+    };
+    let jal = lock.objects["jal"].uuid.clone();
+    assert_eq!(def_of(&jal, "AutoShadeTime").as_deref(), Some("120"));
+    assert_eq!(def_of(&jal, "SRoff").as_deref(), Some("1.5"));
+    let puls = lock.objects["puls"].uuid.clone();
+    assert_eq!(def_of(&puls, "Time").as_deref(), Some("5400"));
+    let jal_sued = lock.externals["jal_sued"].uuid.clone();
+    assert_eq!(def_of(&jal_sued, "TargetPos").as_deref(), Some("70"));
+
+    // A suffix that cannot mean the port's unit is refused, by name.
+    for (bad, needle) in [
+        (
+            "puls = Monoflop(InputTrigger: sonne.Q, Time: 70%)",
+            "`puls.Time`: `70%` does not fit",
+        ),
+        (
+            "jal = AutoJalousie(AutoShadeTime: 10s)",
+            "`jal.AutoShadeTime`: `10s` is no exact",
+        ),
+        (
+            "jal_sued.TargetPos = 5s",
+            "`jal_sued.TargetPos`: `5s` does not fit",
+        ),
+    ] {
+        let src = format!(
+            "page \"Beschattung\"\n\
+             extern sonne = VirtualIn(iname: \"VI3\")\n\
+             extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n{bad}\n"
+        );
+        let module = Module::parse(&src).unwrap();
+        let err = compile(&base(), &module, &mut Lockfile::new(), &opts())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn canvas_labels_point_at_the_port_key() {
+    let src = "extern sonne = VirtualIn(iname: \"VI3\")\n\
+               puls = Monoflop(Tr: sonne.Q)\n";
+    let module = Module::parse(src).unwrap();
+    let err = compile(&base(), &module, &mut Lockfile::new(), &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(
+            "`Tr` is the label Loxone Config shows on the canvas — the port is `InputTrigger`"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn schedules_write_modes_and_entries_onto_a_day_timer() {
+    // D53: a schedule claim rewrites `Modes=`, `N=` and the `<Entry>`
+    // children of the DayTimer — by mode index, then start.
+    let src = "page \"Beschattung\"\n\
+               schedule abend\n\
+               \tweekend 08:00-23:00 activate\n\
+               \tmon 06:00-07:30, 17:00-22:00\n\
+               \tholiday off\n\
+               end\n\
+               uhr = DayTimer(\"Abendlicht\")\n\
+               uhr.schedule = abend\n";
+    let module = Module::parse(src).unwrap();
+    assert_eq!(
+        Module::parse(&module.to_text()).unwrap(),
+        module,
+        "fmt round-trips"
+    );
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let uuid = &lock.objects["uhr"].uuid;
+    let path = out
+        .objects()
+        .iter()
+        .find(|o| &o.uuid == uuid)
+        .unwrap()
+        .path
+        .clone();
+    let el = out.element_at(&path).unwrap();
+    assert_eq!(
+        el.attr("Modes"),
+        Some(
+            "00000000-0000-0001-1500000000000000,00000000-0000-0004-1500000000000000,\
+             00000000-0000-0005-1500000000000000,00000000-0000-0006-1500000000000000,\
+             00000000-0000-0007-1500000000000000,00000000-0000-0008-1500000000000000,\
+             00000000-0000-0009-1500000000000000,00000000-0000-000a-1500000000000000"
+        ),
+        "every weekday has a column — unnamed ones are off"
+    );
+    assert_eq!(el.attr("N"), Some("4"));
+    // `UserModes=` counts the modes beyond the weekdays, right before `N=`.
+    let names: Vec<&str> = el.attrs.iter().map(|a| a.name.as_str()).collect();
+    let n = names.iter().position(|&a| a == "N").unwrap();
+    assert_eq!(names[n - 1], "UserModes");
+    assert_eq!(el.attr("UserModes"), Some("1"));
+    let entries: Vec<String> = el
+        .child_elements()
+        .filter(|e| e.name == "Entry")
+        .map(|e| {
+            e.attrs
+                .iter()
+                .map(|a| format!("{}={}", a.name, a.value))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            "From=360 To=450 Ix=1 V=1",
+            "From=1020 To=1320 Ix=1 V=1",
+            "From=480 To=1380 Ix=6 NeedActivate=true V=1",
+            "From=480 To=1380 Ix=7 NeedActivate=true V=1",
+        ]
+    );
+    // Recompiling the output converges: the claim rewrites in place.
+    let again = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+
+    // A digital timer takes no values; claims are checked by type.
+    for (bad, needle) in [
+        (
+            "uhr.schedule = abend\nschedule abend\n\tmon 06:00-07:00 = 21\nend",
+            "the timer is digital",
+        ),
+        (
+            "p = Monoflop(\"x\")\np.schedule = abend\nschedule abend\n\tmon off\nend",
+            "a schedule belongs to a `DayTimer`",
+        ),
+        (
+            "uhr.schedule = abnd\nschedule abend\n\tmon off\nend",
+            "did you mean `abend`?",
+        ),
+    ] {
+        let src = format!("uhr = DayTimer(\"Abendlicht\")\n{bad}\n");
+        let err = Module::parse(&src)
+            .and_then(|m| compile(&base(), &m, &mut Lockfile::new(), &opts()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn virtual_inputs_are_minted_into_their_folder() {
+    // D54: a VirtualIn is an object of the "Virtuelle Eingänge" folder,
+    // not a page block — appended there with the next free `VI<n>`, no
+    // position, and wired across to the page like any extern source.
+    let src = "page \"Beschattung\"\n\
+               party = VirtualIn(\"Partymodus\")\n\
+               soll = VirtualIn(\"Sollwert\", Analog: \"true\", MinVal: 5, MaxVal: 30, DefVal: 21)\n\
+               licht = And(I1: party.Q)\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let objects = out.objects();
+    let find = |slug: &str| {
+        let uuid = &lock.objects[slug].uuid;
+        objects.iter().find(|o| &o.uuid == uuid).unwrap()
+    };
+    let folder = objects
+        .iter()
+        .find(|o| o.block_type == "VirtualInCaption")
+        .unwrap();
+    for slug in ["party", "soll"] {
+        assert_eq!(
+            find(slug).path[..folder.path.len()],
+            folder.path[..],
+            "{slug}"
+        );
+        assert_eq!(lock.objects[slug].page_uuid, None);
+        assert_eq!(lock.objects[slug].layout, None);
+    }
+    let el = |slug: &str| out.element_at(&find(slug).path).unwrap();
+    let names = |slug: &str| {
+        el(slug)
+            .attrs
+            .iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names("party"),
+        [
+            "Type",
+            "IName",
+            "V",
+            "U",
+            "Title",
+            "Cl",
+            "Nio",
+            "WF",
+            "Analog",
+            "MaxVal",
+            "MinChange",
+            "MinTime"
+        ],
+        "a save fills these in for a digital input"
+    );
+    assert_eq!(
+        names("soll")[8..],
+        ["Analog", "EnVal", "DefVal", "MinVal", "MaxVal"],
+        "the order a save writes"
+    );
+    let kids = |slug: &str| {
+        el(slug)
+            .child_elements()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kids("party"), ["Co", "Co", "IoData", "Display"]);
+    assert_eq!(el("party").attr("IName"), Some("VI4"), "haus has VI1..VI3");
+    assert_eq!(el("party").attr("Analog"), Some("false"));
+    assert_eq!(el("soll").attr("IName"), Some("VI5"));
+    assert_eq!(el("soll").attr("Analog"), Some("true"));
+    assert_eq!(el("soll").attr("MaxVal"), Some("30"));
+    // The page block reads the folder object's output directly (D34).
+    let q = &lock.objects["party"].ports["Q"];
+    let and = el("licht");
+    let i1 = and
+        .child_elements()
+        .find(|c| c.attr("K") == Some("I1"))
+        .unwrap();
+    assert!(i1.child_elements().any(|i| i.attr("Input") == Some(q)));
+
+    // Converges, and the designation is kept once minted — even when an
+    // earlier VirtualIn takes the next number first.
+    let again = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+    let first = Module::parse(&format!("{src}neu = VirtualIn(\"Neu\")\n")).unwrap();
+    let out2 = compile(&out, &first, &mut lock, &opts()).unwrap();
+    let iname = |slug: &str| {
+        let uuid = &lock.objects[slug].uuid;
+        let o = out2
+            .objects()
+            .into_iter()
+            .find(|o| &o.uuid == uuid)
+            .unwrap();
+        out2.element_at(&o.path)
+            .unwrap()
+            .attr("IName")
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        [iname("party"), iname("soll"), iname("neu")],
+        ["VI4", "VI5", "VI6"]
+    );
+
+    let bad = Module::parse("x = VirtualIn(Analog: \"ja\")\n").unwrap();
+    let err = compile(&base(), &bad, &mut Lockfile::new(), &opts()).unwrap_err();
+    assert!(err.to_string().contains("\"true\" or \"false\""), "{err}");
+}
+
+#[test]
+fn decompile_names_repeated_uuids_instead_of_a_slug_clash() {
+    // Two objects sharing one UUID (seen in lox-cli's eval fixture) used
+    // to surface as `duplicate name` from the lifted module.
+    let text = String::from_utf8(std::fs::read("examples/configs/haus.Loxone").unwrap())
+        .unwrap()
+        .replace(
+            "U=\"20000002-0000-0020-ffff504f94112233\"",
+            "U=\"20000001-0000-0010-ffff504f94112233\"",
+        );
+    let doc = LoxoneDoc::parse(text.as_bytes()).unwrap();
+    let err = decompile(&doc, &DecompileOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID"), "{err}");
+    assert!(err.contains("20000001-0000-0010-ffff504f94112233"), "{err}");
+}
+
+#[test]
+fn diff_summary_is_a_commit_message_in_names() {
+    let read = |p: &str| LoxoneDoc::parse(&std::fs::read(p).unwrap()).unwrap();
+    let (base, out) = (
+        read("examples/configs/haus.Loxone"),
+        read("examples/out/haus-compiled.Loxone"),
+    );
+    let summary = |a: &LoxoneDoc, b: &LoxoneDoc| lxir::diff::summary(a, b, &lxir::diff::diff(a, b));
+    assert_eq!(
+        summary(&base, &out),
+        "Beschattung: add 2 blocks, change 1 parameter, add 5 wires\n\
+         \n\
+         Added:\n\
+         - GreaterEqual \"Temp über 28\" (page \"Beschattung\")\n\
+         - And \"beschatten\" (page \"Beschattung\")\n\
+         \n\
+         Changed:\n\
+         - AutoJalousie \"Beschattung Süd\" TargetPos: 100 -> 70\n\
+         \n\
+         Wires added:\n\
+         - \"Temp über 28\".Q -> \"beschatten\".I1\n\
+         - \"beschatten\".Q -> \"Beschattung Süd\".AutoShade\n\
+         - \"Außentemperatur\".Q -> \"Temp über 28\".Input1\n\
+         - \"Windalarm\".Q -> \"Beschattung Süd\".Safety\n\
+         - \"Sonnenschein\".Q -> \"beschatten\".I2\n"
+    );
+    // Backwards, the removed side is named from the old document.
+    let back = summary(&out, &base);
+    assert!(
+        back.starts_with("Beschattung: remove 2 blocks, change 1 parameter, remove 5 wires\n"),
+        "{back}"
+    );
+    assert!(
+        back.contains("Wires removed:\n- \"Temp über 28\".Q -> \"beschatten\".I1\n"),
+        "{back}"
+    );
+    assert_eq!(summary(&base, &base), "no semantic change\n");
 }

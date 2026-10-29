@@ -17,7 +17,7 @@
 
 use super::ast::{
     AccessItem, ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, Module, Operand,
-    TemplateDecl, TestItem, TilesItem, Value,
+    ScheduleItem, TemplateDecl, TestItem, TilesItem, Value,
 };
 use crate::error::{Error, Result};
 use crate::lock::Lockfile;
@@ -203,6 +203,22 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             }
             sub_comment(&mut a.comment);
             sub_comment(&mut a.end_comment);
+        }
+        Item::Schedule(t) => {
+            sub(&mut t.name);
+            for stmt in &mut t.body {
+                match stmt {
+                    ScheduleItem::Line(l) => sub_comment(&mut l.comment),
+                    ScheduleItem::Comment(text) => sub_text(text, old, new),
+                }
+            }
+            sub_comment(&mut t.comment);
+            sub_comment(&mut t.end_comment);
+        }
+        Item::ScheduleClaim(c) => {
+            sub(&mut c.slug);
+            sub(&mut c.schedule);
+            sub_comment(&mut c.comment);
         }
         Item::Comment(text) => sub_text(text, old, new),
     }

@@ -133,13 +133,16 @@ USAGE:
         already be declared in that block's argument list — the error
         says exactly which line to add.
 
-  lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>
+  lxir diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>
         Semantic diff: objects, parameters, rooms/categories, wires, and
         a users/access section (users and groups, membership, NFC tags,
         codes, passwords, last edit, access and UI rights). Credentials
         show as names, counts and short fingerprints, never as the stored
         hash. --exit-code exits 1 when the docs differ, users/access
-        included. --json prints the diff as one JSON object.
+        included. --json prints the diff as one JSON object. --summary
+        writes it as a commit message instead: a subject line counting
+        the changes (prefixed with the page if they all sit on one), then
+        the changes by type, title and port name.
 
   lxir drift <cfg.Loxone> [--lock <lock.json>]
         Check a config (typically a fresh download) against the semantic
@@ -161,12 +164,32 @@ USAGE:
         other byte is copied unchanged. Recompile against the repaired
         base before pushing it.
 
+  lxir scan [--json] <cfg.Loxone | dir>...
+        List the personal data in configs (directories are searched for
+        *.Loxone): installation address and coordinates, users' names,
+        mail addresses, phone numbers and access codes, credentials, the
+        remote-access address, MAC and public IP addresses, hardware
+        serials. Shows where each sits, never the value. Exits 1 when it
+        finds any: a guard against committing a real config.
+
   lxir observe <cfg.Loxone>... [--crosscheck <legacy.json>]...
         Port-direction evidence per block type, as JSON. Multiple configs
         merge into one corpus-level view. --crosscheck compares the
         evidence against a legacy connector database (connector-map.json
-        shape: type -> {c: [keys], t: {key: \"I\"|\"O\"}}) and reports
-        agreements, conflicts, and coverage gaps per type.
+        shape: type -> {c: [keys], t: {key: \"I\"|\"O\"}}) or against
+        Loxone's documented connectors (loxone-block-types-full.json
+        shape: type -> {connectors: [{name, type}]}, `%d` names expanded
+        against the observed keys) and reports agreements, conflicts,
+        and coverage gaps per type.
+
+  lxir types [<Type>] [--json]
+        The builtin block types the compiler mints, and per type its
+        ports: key, direction, and — where Loxone documents them (D52) —
+        the unit a value is in (a suffixed value scales into it: `2h` is
+        `120` on a minutes port), the canvas label (`Tr` for
+        `InputTrigger`), the documented range (checked by `lxir lint`)
+        and default, plus the corpus-observed GUI default (D30) and the
+        attribute parameters. Without a type: one line per type.
 
   lxir roundtrip <cfg.Loxone>
         Verify the file re-serializes byte-identically (exit 1 if not).
@@ -238,7 +261,9 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["diff", rest @ ..] => cmd_diff(rest),
         ["drift", rest @ ..] => cmd_drift(rest),
         ["repair", rest @ ..] => cmd_repair(rest),
+        ["scan", rest @ ..] => cmd_scan(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
+        ["types", rest @ ..] => cmd_types(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
         ["render", rest @ ..] => cmd_render(rest),
         [cmd, ..] => {
@@ -1375,12 +1400,20 @@ fn cmd_adopt_one(
 }
 
 fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str = "usage: lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>";
+    const USAGE: &str =
+        "usage: lxir diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>";
     let (flags, files): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| a.starts_with("--"));
-    let (exit_code, json) = (flags.contains(&"--exit-code"), flags.contains(&"--json"));
+    let (exit_code, json, summary) = (
+        flags.contains(&"--exit-code"),
+        flags.contains(&"--json"),
+        flags.contains(&"--summary"),
+    );
     let (old, new) = match (
         files.as_slice(),
-        flags.iter().all(|f| ["--exit-code", "--json"].contains(f)),
+        flags
+            .iter()
+            .all(|f| ["--exit-code", "--json", "--summary"].contains(f))
+            && !(json && summary),
     ) {
         ([old, new], true) => (*old, *new),
         _ => return Err(USAGE.into()),
@@ -1403,8 +1436,12 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
     }
     let d = lxir::diff::diff(&a, &b);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&d)?);
+    if json || summary {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&d)?);
+        } else {
+            print!("{}", lxir::diff::summary(&a, &b, &d));
+        }
         return Ok(if exit_code && !d.is_empty() {
             ExitCode::FAILURE
         } else {
@@ -1665,6 +1702,115 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     }
 }
 
+/// `lxir types`: the builtin table with its documented port facts — the
+/// reference an author (or agent) writes a block against.
+fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
+    use lxir::connectors;
+    let json = args.contains(&"--json");
+    let names: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    let dir = |d: connectors::PortDir| match d {
+        connectors::PortDir::Input => "input",
+        connectors::PortDir::Output => "output",
+        connectors::PortDir::Param => "param",
+        connectors::PortDir::Api => "api",
+    };
+    let describe = |t: &str| -> Option<serde_json::Value> {
+        let ports: Vec<serde_json::Value> = connectors::builtin(t)?
+            .iter()
+            .map(|spec| {
+                let meta = lxir::port_meta::port_meta(t, spec.key);
+                serde_json::json!({
+                    "key": spec.key,
+                    "dir": dir(spec.dir),
+                    "unit": meta.and_then(|m| m.unit),
+                    "label": meta.and_then(|m| m.label),
+                    "min": meta.and_then(|m| m.min),
+                    "max": meta.and_then(|m| m.max),
+                    "documented_default": meta.and_then(|m| m.default),
+                    "observed_default": lxir::observed_defaults::observed_default(t, spec.key),
+                })
+            })
+            .collect();
+        Some(serde_json::json!({
+            "type": t,
+            "ports": ports,
+            "attr_params": connectors::attr_params(t),
+        }))
+    };
+    match names.as_slice() {
+        [] => {
+            if json {
+                let all: Vec<_> = connectors::BUILTIN_TYPES
+                    .iter()
+                    .filter_map(|t| describe(t))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&all)?);
+            } else {
+                for t in connectors::BUILTIN_TYPES {
+                    let ports = connectors::builtin(t).unwrap_or_default();
+                    let count = |d| ports.iter().filter(|p| p.dir == d).count();
+                    println!(
+                        "{t:<24} {:>2} in  {:>2} out  {:>2} param",
+                        count(connectors::PortDir::Input) + count(connectors::PortDir::Api),
+                        count(connectors::PortDir::Output),
+                        count(connectors::PortDir::Param),
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        [t] => {
+            let Some(desc) = describe(t) else {
+                let hint = connectors::BUILTIN_TYPES
+                    .iter()
+                    .find(|b| b.eq_ignore_ascii_case(t))
+                    .map(|b| format!(" — did you mean `{b}`?"))
+                    .unwrap_or_default();
+                return Err(
+                    format!("`{t}` is not a builtin type{hint} (`lxir types` lists them)").into(),
+                );
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&desc)?);
+                return Ok(ExitCode::SUCCESS);
+            }
+            println!("{t}");
+            let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+            for port in desc["ports"].as_array().into_iter().flatten() {
+                let range = match (port["min"].as_str(), port["max"].as_str()) {
+                    (None, None) => String::new(),
+                    (lo, hi) => format!("{} … {}", lo.unwrap_or("−∞"), hi.unwrap_or("∞")),
+                };
+                let mut default = s(&port["documented_default"]);
+                if let Some(o) = port["observed_default"].as_str()
+                    && o != default
+                {
+                    default = if default.is_empty() {
+                        format!("{o} (observed)")
+                    } else {
+                        format!("{default} (observed {o})")
+                    };
+                }
+                let line = format!(
+                    "  {:<18} {:<6} {:<5} {:<7} {:<14} {}",
+                    s(&port["key"]),
+                    s(&port["dir"]),
+                    s(&port["unit"]),
+                    s(&port["label"]),
+                    range,
+                    default,
+                );
+                println!("{}", line.trim_end());
+            }
+            for a in desc["attr_params"].as_array().into_iter().flatten() {
+                println!("  {:<18} attr", s(a));
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => Err("usage: lxir types [<Type>] [--json]".into()),
+    }
+}
+
 fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
     use lxir::connectors::{self, LegacyDb, Observations};
 
@@ -1695,7 +1841,10 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
     let mut checks = serde_json::Map::new();
     for lp in legacy_paths {
         let bytes = std::fs::read(lp).map_err(|e| format!("{lp}: {e}"))?;
-        let legacy: LegacyDb = serde_json::from_slice(&bytes).map_err(|e| format!("{lp}: {e}"))?;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| format!("{lp}: {e}"))?;
+        let legacy: LegacyDb =
+            connectors::legacy_db_from_json(&json, &obs).map_err(|e| format!("{lp}: {e}"))?;
         let only_corpus: Vec<&String> = obs.keys().filter(|t| !legacy.contains_key(*t)).collect();
         let only_legacy: Vec<&String> = legacy.keys().filter(|t| !obs.contains_key(*t)).collect();
         checks.insert(
@@ -1715,6 +1864,92 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
         }))?
     );
     Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
+    let json = args.contains(&"--json");
+    let paths: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
+        return Err("usage: lxir scan [--json] <cfg.Loxone | dir>...".into());
+    }
+    let mut files = Vec::new();
+    for p in &paths {
+        collect_configs(std::path::Path::new(p), &mut files).map_err(|e| format!("{p}: {e}"))?;
+    }
+    let mut report = serde_json::Map::new();
+    let (mut total, mut unreadable) = (0, 0);
+    for f in &files {
+        let name = f.display().to_string();
+        // An unreadable file cannot be cleared: report it, scan the rest.
+        let doc = match std::fs::read(f)
+            .map_err(AnyError::from)
+            .and_then(|b| LoxoneDoc::parse(&b).map_err(AnyError::from))
+        {
+            Ok(doc) => doc,
+            Err(e) => {
+                eprintln!("{name}: not scanned: {e}");
+                unreadable += 1;
+                continue;
+            }
+        };
+        let findings = lxir::scan::scan(&doc);
+        total += findings.len();
+        if !json {
+            for x in &findings {
+                println!(
+                    "{name}: {}: {} {} ({} chars)",
+                    x.rule, x.object, x.attr, x.len
+                );
+            }
+        }
+        report.insert(name, serde_json::to_value(&findings)?);
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "{total} finding(s) in {} config(s){}{}",
+            files.len() - unreadable,
+            if unreadable > 0 {
+                format!(", {unreadable} not scanned")
+            } else {
+                String::new()
+            },
+            if total > 0 {
+                " — personal data: keep these files out of the repository"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(if total + unreadable > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `path` itself if it is a file, else every `*.Loxone` below it.
+fn collect_configs(
+    path: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+) -> std::io::Result<()> {
+    if !path.is_dir() {
+        out.push(path.to_path_buf());
+        return Ok(());
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(path)?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<std::io::Result<_>>()?;
+    entries.sort();
+    for e in entries {
+        if e.is_dir() {
+            collect_configs(&e, out)?;
+        } else if e.extension().is_some_and(|x| x == "Loxone") {
+            out.push(e);
+        }
+    }
+    Ok(())
 }
 
 fn cmd_repair(args: &[&str]) -> Result<ExitCode, AnyError> {

@@ -389,6 +389,23 @@ carry their device's room; the rest were moved individually. Loxone
 Config does not cascade a device's room change to its children (its UI
 strings have no such prompt) — the follower rule of D39 is lxir's own.
 
+## Hardware identity: `Serial=`
+
+Hardware elements carry their serial number in `Serial=`, written as
+hex digits in upper case (web corpus, 2026-10-29; four Miniservers end
+in a placeholder `X` instead): 12 digits on the Miniserver (`LoxLIVE`; the same serial forms the tail
+of the UUIDs it mints, see below), 8 on everything else — Tree
+Extensions (`LoxTree`) and Tree devices (`TreeDevice`), the Air base
+(`LoxAIR`), Extensions (`LoxMORE`, `LoxDIMM`, `LoxAout`, `LoxOCEAN`),
+and the bus interfaces (`Comm485`, `Comm1wire`, `CommDMX`, `CommIR`,
+`EIBline`). They nest the way the hardware is cabled: a Tree device
+inside its Tree Extension inside the Miniserver, each with its own
+serial, the I/O objects as children of the innermost. An empty
+`Serial=` occurs (`LoxDMXdevice`) and means none. Air devices
+(`LoxAIRDevice`) have no `Serial=`; a 32-digit hex `IP=` identifies
+them. lxir reads `Serial=` for `device:` extern matching (D55) and
+`lxir scan` reports it as personal data.
+
 ## Time functions: per-project singletons
 
 The GUI's *Zeitfunktionen* periphery folder is a `TimeCaption` element
@@ -631,6 +648,62 @@ of one target share that key, so all of them got the same `AQ`/`Q` UUID. lxir re
 
 Any tooling that assumes it is the only writer, or that titles are stable,
 breaks against 1 and 2.
+
+## Reported by lox-cli, checked against the corpus
+
+lox-cli's backlog files (`REQUIREMENTS-*.md` in eisber/lox-cli, read
+2026-10-29) record what its authors saw on a live Miniserver. The
+claims below are restated in our words with the corpus check run here
+(web corpus, 132 configs). A fact this document relies on elsewhere has
+its own evidence; these are leads, marked by how far they hold.
+
+- **The GUI repairs malformed blocks by re-minting connectors.** A
+  block written without layout attributes and with a partial connector
+  set (a `Formula` with `Nio="4"` and only two inputs) came back from a
+  GUI save with `Nio="6"`, all connectors in canonical order, and
+  *fresh UUIDs on the regenerated ones*: the wires on them were lost,
+  and a live light stuck off. Consistent with the connector facts above
+  (Loxone writes every connector); lxir always writes the full set in
+  canonical order plus layout, which is why it never saw this. Not
+  reproduced with the oracle.
+- **`Formula=` grammar.** Inputs `I1`–`I4`; `+ - * / ^`; comparisons
+  `== != > >= < <=`; `IF(cond;a;b)` with `;` as argument separator;
+  functions such as `ABS SQRT INT SIGN MIN MAX LN LOG EXP`, the trig
+  family, `PI`; no boolean `&&`/`||`/`!` (nest `IF` or use arithmetic).
+  Corpus: `ABS`, `SQRT`, `INT`, `SIN`, `COS`, `ARCTAN`, `IF` occur, `IF`
+  with `;`. **Decimal separator:** six corpus formulas use a decimal
+  comma (`0,5`), none a decimal point, and lox-cli reports the comma in
+  Loxone's own examples. D35's expression folding writes constants
+  with a point (`I1*0.5`); whether the Miniserver reads that is
+  **unverified** (roadmap). Integer constants are unaffected.
+- **`AnalogMultiplexer2` selects 1-based.** Live: `Select=0` drove the
+  output to 0, `1` passed `Input1`, `2` `Input2` — like the four-way
+  `AnalogMultiplexer`, and unlike lox-sim's model (`0`→`Input1`,
+  `1`→`Input2`). A digital flag on `Select` therefore switches between
+  off and `Input1`. Not checkable from configs; recorded in
+  [connector-db.md](connector-db.md).
+- **A `VirtualIn` outside its range reads 0.** An analog virtual input
+  with `MaxVal="1000"` fed air pressure (~1024 hPa) read 0 until
+  `MaxVal` was raised. `MinVal=`/`MaxVal=` are attribute parameters
+  (D54); set them to cover the values the input will receive.
+- **LightController2 moods** (`<LightscenesC Num= Outputs= FC=>` holding
+  `<LightsceneC Name= UUID= SID= CID= Outputs= Q1=…>`). An RGB output's
+  `Q<n>` packs percent channels as `0x60000000 + R + 1000·G +
+  1000000·B` (each 0–100), unlike an RGB actor's 0–255 composite; 22
+  corpus values carry that prefix, beside 372 smaller non-zero values
+  of other output kinds. Built-in moods: corpus `SID="778"` is "Off"/
+  "Aus" (11×), `SID="777"` "Viel Licht"/"Bright"/"Cleaning" (6×).
+  lox-cli numbers new moods from `SID` 2 and `CID` 9, treating 1 and
+  776 as reserved; the corpus has user moods at `SID="1"` (6×) and
+  `CID` 7 and 8, so that rule does not hold for every config. Input
+  for the moods item on the roadmap.
+- **Only eight Program blocks run.** Reported: the Miniserver executes
+  the first eight `Code1`/`Code4`/`Code8`/`Code16` blocks and ignores
+  the rest; Loxone Config warns on save. No corpus config has more than
+  five, so unconfirmed here; a lint candidate.
+- **Operating-mode UUIDs are short system forms**
+  (`00000000-0000-000N-…`), not minted with a serial — as documented
+  under UUID anatomy; a checker must not flag them.
 
 ## Related, out of crate scope
 

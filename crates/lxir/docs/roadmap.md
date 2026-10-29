@@ -51,6 +51,63 @@ types) contradict each other. Results and methodology:
       `LXIR_CORPUS=corpus/web cargo test --release --test corpus`
       re-checks every admitted classification against every corpus
       config.
+- [x] Demand-ranked batch (2026-10-29): `OnPulseDelay`, `OffDelay`,
+      `OnDelay`, `StairwayLS`, `EdgeDetection`, `AnalogMultiplexer2`,
+      `SRFlipFlop`, `State` — the most-needed unmintable types by
+      lox-cli's 473-task eval set; descriptors decided by the save
+      oracle (sessions 16–17; StairwayLS took the saved order), and
+      the Central* `Out*` ports flipped to Output on surviving wires.
+      Documented port facts (TechDoc) joined as the weakest evidence
+      tier (D52).
+- [x] DayTimer schedules from source (2026-10-29, D53): `schedule`
+      sets claimed onto extern or managed DayTimers, the ten built-in
+      operating modes, analog values, `activate`; all seven weekday
+      columns always written (oracle session 18: a save fills missing
+      ones with "on all day"). Open: user-defined modes (resolve the
+      config's mode objects by title), and `lxir diff` does not show
+      schedule changes yet (GUI-owned content).
+- [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
+      land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
+      input range as claimed attribute parameters, and the defaults a
+      save writes (oracle session 18). Open: adopting existing ones
+      (they stay externs); a room/category for minted ones (the D39
+      claims work on externs only).
+- [x] Eval harness over lox-cli's task set (2026-10-29,
+      `tools/eval/`): 260 of 475 tasks use only mintable types; a
+      10-case sample passes 9, and the failure is lox-sim's DayTimer model
+      (it ignores `From=`/`Modes=`, so it is worth reporting upstream).
+      Open: a larger sample; `test` blocks generated from a case's
+      scenarios so solutions carry their own checks.
+- [x] `lxir scan` (2026-10-29): personal data in a config, located but
+      never quoted; CI fails on any finding in a committed `.Loxone`.
+- [x] Agent skill (2026-10-29, `skills/lxir/SKILL.md`): agents.md
+      condensed for Claude Code; its example module is under test.
+- [x] `lxir diff --summary` (2026-10-29): the semantic diff as a commit
+      message — subject counting the changes per page, body by title and
+      port name.
+- [x] Device-narrowed extern matching (2026-10-29, D55):
+      `device: "<serial>"` beside `room:`/`category:`; decompile uses it
+      before falling back to `uuid:`. Open: Air devices (their id is in
+      `IP=`, not `Serial=`); decompile narrowing by room, which would
+      resolve more repeated Tree titles than the serial does.
+- [ ] LightController2 moods from source. Surveyed 2026-10-29: a mood
+      is a `<LightsceneC>` in `<LightscenesC Num= Outputs= FC=>` with a
+      minted `UUID=`, a scene id `SID=` that `<LSConfig OpM= ScMv=>`
+      references (777/778 are the built-in "Viel Licht"/"Aus"), a `CID=`
+      of unknown meaning, `ReadOnly`/`Move` flags, and one `Q<n>=` per
+      circuit whose encoding follows the circuit type (dimmer 0–100,
+      switch 0/1, packed colour: `0x60000000 + R + 1000·G + 1000000·B`
+      in percent, per lox-cli; see loxone-format.md for how far the
+      corpus bears out its numbering rules). Needs an oracle-driven design before
+      it can be claimed; values on *existing* moods by name are the
+      likely first step.
+- [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
+      `I1*0.5`, every corpus formula with a fraction writes `0,5`.
+      Verify which the Miniserver reads (oracle: does the GUI rewrite or
+      flag it; live: the value) before an agent relies on fractions;
+      integer constants are unaffected.
+- [ ] Lint: more than eight Program blocks (`Code1`–`Code16`), which
+      lox-cli reports the Miniserver ignores beyond the eighth.
 
 ## Stufe 0 — Hardening the v0 pipeline
 
@@ -150,9 +207,10 @@ types) contradict each other. Results and methodology:
 - [x] Unit-suffixed values 2026-08-25 (D27): `Time: 90min`, `1.5h`,
       `250ms`, `2700K`, `70%` — the suffix scales exactly into the base
       unit at compile (byte-identical to the plain number) and is the
-      value's canonical spelling. Deliberately *without* per-port unit
-      checking: that stays blocked on the connector DB learning per-port
-      units (a `Time: 70%` is accepted today).
+      value's canonical spelling. Per-port units followed 2026-10-29
+      (D52): suffixes scale into the documented unit (minutes ports
+      too), `Time: 70%` is refused, ranges are linted, `lxir types`
+      shows the table.
 - [x] Identity hardening 2026-10-18 (D38): a base with repeated
       `<C>`/`<Co>` UUIDs is refused by `compile`/`adopt`, the compile
       output is self-checked, `diff` warns and `drift` notes repeats;

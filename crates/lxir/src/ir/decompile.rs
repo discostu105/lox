@@ -34,7 +34,7 @@
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
 
-use crate::connectors::{BUILTIN_TYPES, attr_params};
+use crate::connectors::{BUILTIN_TYPES, attr_params, container_type};
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
@@ -77,7 +77,13 @@ pub struct DecompileOptions {
 impl Default for DecompileOptions {
     fn default() -> Self {
         DecompileOptions {
-            managed_types: BUILTIN_TYPES.iter().map(|t| String::from(*t)).collect(),
+            // Objects of the object tree (a VirtualIn, D54) can be minted
+            // but are not adopted — existing ones stay externs.
+            managed_types: BUILTIN_TYPES
+                .iter()
+                .filter(|t| container_type(t).is_none())
+                .map(|t| String::from(*t))
+                .collect(),
             scope: DecompileScope::Full,
             exclude: BTreeSet::new(),
             all_params: false,
@@ -126,6 +132,9 @@ pub struct PageModule {
 /// `page "Title"` statements (objects not on any logic page lead in a
 /// `# periphery` section).
 pub fn decompile(doc: &LoxoneDoc, opts: &DecompileOptions) -> Result<(Module, DecompileReport)> {
+    // Repeated UUIDs would surface as a confusing duplicate-slug error
+    // on the lifted module; name the cause instead.
+    doc.require_unique_uuids("config")?;
     let lift = Lift::build(doc, opts);
     let module = lift.single_module();
     module.validate()?;
@@ -139,6 +148,7 @@ pub fn decompile_pages(
     doc: &LoxoneDoc,
     opts: &DecompileOptions,
 ) -> Result<(Vec<PageModule>, DecompileReport)> {
+    doc.require_unique_uuids("config")?;
     let lift = Lift::build(doc, opts);
     let pages = lift.page_modules()?;
     Ok((pages, lift.report()))
@@ -168,6 +178,8 @@ pub(super) struct Lift {
     pub(super) extern_decls: BTreeMap<usize, ExternDecl>,
     pub(super) block_decls: BTreeMap<usize, BlockDecl>,
     pub(super) match_specs: BTreeMap<usize, MatchSpec>,
+    /// `device:` constraints (D55) for the title matches that need one.
+    devices: BTreeMap<usize, String>,
     /// `<-` statements with the sink and source object indexes,
     /// deduplicated — document order in the adoptable view, sorted by
     /// (sink, source) in the full view (D29).
@@ -464,7 +476,26 @@ impl Lift {
         // target has a slug in this module says so semantically (D32,
         // `mirrors:`) — but only when it is the sole ref of its type on
         // that target, so resolution cannot need more than the slug.
-        let match_spec = |i: usize| -> MatchSpec {
+        // A title that repeats across identical devices, but not within
+        // its own: `title:` narrowed by the device's serial (D55).
+        let device_unique = |i: usize| -> Option<&str> {
+            let obj = &objects[i];
+            let title = obj.title.as_deref()?;
+            let serial = doc.device_serial(&obj.path)?;
+            (objects
+                .iter()
+                .filter(|o| {
+                    o.block_type == obj.block_type
+                        && o.title.as_deref() == Some(title)
+                        && doc
+                            .device_serial(&o.path)
+                            .is_some_and(|s| s.eq_ignore_ascii_case(serial))
+                })
+                .count()
+                == 1)
+                .then_some(serial)
+        };
+        let match_spec = |i: usize| -> (MatchSpec, Option<String>) {
             let obj = &objects[i];
             if let Some(&target) = mirror_target.get(&i)
                 && let Some(slug) = slug_of.get(target)
@@ -479,7 +510,7 @@ impl Lift {
                     .count()
                     == 1
             {
-                return MatchSpec::Mirrors(slug.clone());
+                return (MatchSpec::Mirrors(slug.clone()), None);
             }
             let unique = |get: fn(&ObjectSummary) -> Option<&str>| {
                 get(obj).filter(|v| {
@@ -491,17 +522,27 @@ impl Lift {
                 })
             };
             if let Some(iname) = unique(|o| o.iname.as_deref()) {
-                MatchSpec::IName(iname.to_string())
+                (MatchSpec::IName(iname.to_string()), None)
             } else if let Some(title) = unique(|o| o.title.as_deref()) {
-                MatchSpec::Title(title.to_string())
+                (MatchSpec::Title(title.to_string()), None)
+            } else if let Some(title) = obj.title.as_deref()
+                && let Some(serial) = device_unique(i)
+            {
+                let device = Some(serial.to_string());
+                (MatchSpec::Title(title.to_string()), device)
             } else {
-                MatchSpec::Uuid(obj.uuid.clone())
+                (MatchSpec::Uuid(obj.uuid.clone()), None)
             }
         };
+        let mut devices: BTreeMap<usize, String> = BTreeMap::new();
         let match_specs: BTreeMap<usize, MatchSpec> = managed
             .iter()
             .chain(&externs)
-            .map(|&i| (i, match_spec(i)))
+            .map(|&i| {
+                let (spec, device) = match_spec(i);
+                devices.extend(device.map(|d| (i, d)));
+                (i, spec)
+            })
             .collect();
         // A ref extern says what it mirrors (D29) — the plumbing wires
         // that carried that fact were folded above.
@@ -519,6 +560,7 @@ impl Lift {
                     ExternDecl {
                         room: None,
                         category: None,
+                        device: devices.get(&i).cloned(),
                         slug: slug_of[&objects[i].uuid].clone(),
                         block_type: objects[i].block_type.clone(),
                         match_spec: match_specs[&i].clone(),
@@ -726,6 +768,7 @@ impl Lift {
             extern_decls,
             block_decls,
             match_specs,
+            devices,
             wires,
             ref_wires_folded,
             default_params_elided,
@@ -909,6 +952,7 @@ impl Lift {
                     ExternDecl {
                         room: None,
                         category: None,
+                        device: self.devices.get(&i).cloned(),
                         slug: self.slug_of[&self.objects[i].uuid].clone(),
                         block_type: self.objects[i].block_type.clone(),
                         match_spec: self.match_specs[&i].clone(),
@@ -1038,7 +1082,7 @@ fn is_ident(s: &str) -> bool {
 /// hands them out and the parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile",
+    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule",
 ];
 
 /// Slug generation with umlaut transliteration and `_2`-style

@@ -1,0 +1,7 @@
+page "Garage"
+
+extern tor = VirtualIn(iname: "VI5")
+extern licht = LightController2(title: "Garagenlicht")
+
+treppe = StairwayLS("Garagenlicht 5 min", InputTrigger: tor.Q, TimeHigh: 5min)
+licht.I1 <- treppe.Q

@@ -179,6 +179,8 @@ lxir lint                            # advisory: unused names, blocks whose
                                      # NFC tags that open no Code Touch
 lxir diff current.Loxone out.Loxone  # semantic diff, locale noise flagged,
                                      # users/access section; --json
+lxir diff --summary current.Loxone out.Loxone  # the same as a commit
+                                     # message, by name instead of UUID
 lxir render out.Loxone --page Beschattung --out page.svg
                                      # a page as SVG + layout metrics
 lxir compile --relayout Beschattung  # place the page's managed blocks
@@ -190,9 +192,12 @@ lxir adopt current.Loxone --out-module modules/haus.lxir \
 lxir adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
      --lock modules/haus.lock.json  # adopt one freshly drawn block
 lxir observe current.Loxone          # port-direction evidence (JSON)
+lxir types [<Type>]                  # mintable types: ports, units, labels, ranges
 lxir roundtrip current.Loxone        # byte-fidelity self-check
 lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
                                      # writer back to raw line breaks
+lxir scan configs/                   # personal data in configs: where, never
+                                     # what; exit 1 if any (CI guard)
 lxir test                            # run the module's `test … end` blocks
                                      # through lox-cli's `lox sim` (--lox/$LOX)
 ```
@@ -282,7 +287,7 @@ sets the simulated time for `DayTimer`-style logic.
 | `xml` | Lossless concrete-syntax parser/writer for `.Loxone` XML. Handles Loxone's spec-violations (attribute names starting with digits, raw newlines inside attribute values) that break conforming XML parsers. |
 | `uuid` | The anatomy of Loxone UUIDs — creation time, mint counters, minting-machine id, connector index — plus a deterministic minter (no clock, no RNG). |
 | `doc` | Semantic read layer: objects, ports, wires, counters, pages. |
-| `connectors` | Port-direction knowledge: a **verified** builtin table (gates, comparators, `Formula`, `Monoflop`, `PulseGen`, `AnalogThresholdTrigger` — see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
+| `connectors` | Port-direction knowledge: a **verified** builtin table (33 types — gates, comparators, timers, `Formula`, `AutoJalousie`, `LightController2`, `State`, `VirtualIn`, … — `lxir types` lists them; see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
 | `ir` | The text language: constructor-style block declarations with inline wires/parameters, `extern`, `let`, `page` placement, templates with instances, boolean/comparison/arithmetic expressions (as arguments and on wires; arithmetic folds into `Formula` blocks), unit-suffixed values, lifecycle statements, `test … end` scenarios; parser, canonical printer, `compile` (base + module + lockfile → config), `decompile` (config → IR view), `adopt` (existing blocks → module + identity-pinning lockfile), `test` (compile in memory → `lox sim` → per-expect results). |
 | `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals, attribute claims. |
 | `diff` | Semantic diff between two configs, with locale-rename noise flagged. |
@@ -304,6 +309,7 @@ which are the intended consumers of this crate.
 | [docs/connector-db.md](docs/connector-db.md) | The consolidated connector database: methodology, findings, admission rules |
 | [docs/oracle-wine.md](docs/oracle-wine.md) | The save oracle: driving Loxone Config under Wine, and what a save changes |
 | [docs/agents.md](docs/agents.md) | Operational guide for AI agents using the toolchain |
+| [skills/lxir/SKILL.md](skills/lxir/SKILL.md) | The same, condensed as a Claude Code skill (link into `~/.claude/skills/`) |
 | [docs/roadmap.md](docs/roadmap.md) | Stufen −1…4: hardening, templates, expressions, verification, multi-module |
 
 [`AGENTS.md`](AGENTS.md) at the repo root gives agents the build/test

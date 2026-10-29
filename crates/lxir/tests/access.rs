@@ -215,6 +215,17 @@ fn users_and_groups_live_in_the_access_section() {
     // bob left with his removal; Residents lost him as a member, which the
     // removal already says.
     assert!(!lines.iter().any(|l| l.contains("left group")), "{lines:?}");
+
+    // `lxir diff --summary` lists the same lines and counts them.
+    let summary = lxir::diff::summary(&parse(&a), &parse(&b), &d);
+    assert!(
+        summary.starts_with(&format!(
+            "change {} users/access entries\n\nUsers and access:\n",
+            lines.len()
+        )),
+        "{summary}"
+    );
+    assert!(summary.contains("\n- user \"carol\": added\n"), "{summary}");
 }
 
 #[test]
