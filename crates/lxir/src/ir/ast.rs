@@ -805,11 +805,18 @@ pub struct RemovedDecl {
 /// governed block is pinned to a base page with this title — a pin that
 /// still matches a page so titled is kept (titles need not be unique), any
 /// other moves to the first matching page in document order, and a title no
-/// page carries is a compile error.
+/// page carries is a compile error — unless the statement names a room
+/// (`page "<Title>" (room: "…")`): then the compiler creates the page (D56).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageDecl {
     /// Display title of a `<C Type="Page">` in the base config.
     pub title: String,
+    /// `room:` — the `Place` a page the compiler creates is assigned to
+    /// (D56). Only consulted when no page carries the title.
+    pub room: Option<String>,
+    /// `category:` — the created page's `Category`; default: the
+    /// unassigned one.
+    pub category: Option<String>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
 }
@@ -2429,7 +2436,23 @@ impl Module {
                     prev_multiline = true;
                 }
                 Item::Page(p) => {
-                    out.push_str(&format!("page {}{}\n", quote(&p.title), tail(&p.comment)));
+                    let mut args = Vec::new();
+                    if let Some(r) = &p.room {
+                        args.push(format!("room: {}", quote(r)));
+                    }
+                    if let Some(c) = &p.category {
+                        args.push(format!("category: {}", quote(c)));
+                    }
+                    let args = if args.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", args.join(", "))
+                    };
+                    out.push_str(&format!(
+                        "page {}{args}{}\n",
+                        quote(&p.title),
+                        tail(&p.comment)
+                    ));
                 }
                 Item::Test(t) => {
                     out.push_str(&format!("test {}{}\n", quote(&t.name), tail(&t.comment)));

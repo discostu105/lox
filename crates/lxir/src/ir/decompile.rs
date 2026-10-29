@@ -841,6 +841,8 @@ impl Lift {
         let mut items = vec![match page {
             Some(p) => Item::Page(PageDecl {
                 title: self.page_titles[p].clone(),
+                room: None,
+                category: None,
                 comment: None,
             }),
             None => Item::Comment(" periphery (not placed on a page)".to_string()),
@@ -904,6 +906,8 @@ impl Lift {
             };
             let mut items: Vec<Item> = vec![Item::Page(PageDecl {
                 title: self.page_titles[p].clone(),
+                room: None,
+                category: None,
                 comment: None,
             })];
             for &i in &b.externs {

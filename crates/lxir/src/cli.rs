@@ -1359,6 +1359,8 @@ fn cmd_adopt_one(
         text = Module {
             items: vec![lxir::ir::Item::Page(lxir::ir::PageDecl {
                 title: adopted.page_title.clone(),
+                room: None,
+                category: None,
                 comment: None,
             })],
         }
