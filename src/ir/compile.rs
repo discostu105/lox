@@ -35,7 +35,7 @@ use crate::connectors::{PortDir, attr_params, builtin, ref_link_type};
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
 use crate::ir::ast::{Attr, Item, MatchSpec, Module, Value};
-use crate::ir::validate::{is_ref_type, suggest, validate_ports};
+use crate::ir::validate::{api_mirror_entry, is_ref_type, suggest, validate_ports};
 use crate::lock::{
     AttrClaim, Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex,
 };
@@ -593,6 +593,8 @@ pub fn compile(
         /// session 11: a save rewrites whatever else stands there) — the
         /// compiler emits the derived title so the file converges.
         title: String,
+        /// The mirrored object's XML type.
+        target_type: String,
     }
     let mut mirror_of: BTreeMap<String, Mirror> = BTreeMap::new();
     for block in module.blocks() {
@@ -645,6 +647,7 @@ pub fn compile(
                 link_type: code,
                 analog,
                 title: target_title,
+                target_type,
             },
         );
     }
@@ -888,13 +891,45 @@ pub fn compile(
     // --- Wires: block argument bindings (sink = the declaring block) and
     //     `<-` statements (sink = an extern port), in source order.
     for (from_ref, to_ref) in module.wire_pairs() {
+        // The reverse half of an API link through a minted `OutputRef`
+        // names the ref's `AI` as its source (`api_mirror_entry`); it
+        // lands on the block's API connector, `OutputAPI` — never one the
+        // builtin table proves output-only.
+        let sink_type = managed
+            .get(&to_ref.slug)
+            .map(|p| p.block_type.as_str())
+            .or_else(|| {
+                extern_uuid
+                    .get(&to_ref.slug)
+                    .and_then(|u| type_by_uuid.get(u))
+                    .map(|(t, _)| t.as_str())
+            });
+        let api_sink = to_ref.port == "OutputAPI"
+            && !sink_type
+                .and_then(builtin)
+                .and_then(|specs| specs.iter().find(|s| s.key == "OutputAPI"))
+                .is_some_and(|s| s.dir == PortDir::Output);
+        let reverse_api = api_sink
+            && managed.get(&from_ref.slug).is_some_and(|p| {
+                api_mirror_entry(
+                    &p.block_type,
+                    &from_ref.port,
+                    mirror_of
+                        .get(&from_ref.slug)
+                        .map(|m| m.target_type.as_str()),
+                )
+            });
         let mut from = resolve_port(
             &doc,
             &managed,
             &extern_uuid,
             &from_ref.slug,
             &from_ref.port,
-            PortDir::Output,
+            if reverse_api {
+                PortDir::Input
+            } else {
+                PortDir::Output
+            },
         )?;
         let mut to = resolve_port(
             &doc,
@@ -1137,6 +1172,17 @@ pub fn compile(
             }
         }
     }
+
+    // --- Touch Pure Flex tiles (D41). Last of the writes: a `to:` target
+    //     must be API-linked to the device, and that link may be a wire
+    //     this compile just drew. Like `Code:` (D40) the claim keeps no
+    //     lock state — a withdrawn claim leaves the pushed programs.
+    let uuid_of: BTreeMap<String, String> = extern_uuid
+        .iter()
+        .map(|(s, u)| (s.clone(), u.clone()))
+        .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
+        .collect();
+    super::tiles::apply(&mut doc, module, &uuid_of)?;
 
     // --- Counters and target metadata.
     doc.set_counters(Counters {

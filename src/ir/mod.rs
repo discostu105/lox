@@ -24,6 +24,12 @@
 //! <slug>  = <name>(<param>: <arg>, …)          (instantiate: lowercase callee
 //!                                               = template, body slug `b`
 //!                                               expands to `<slug>_b`)
+//! tiles   <name>                               (D41: Touch Pure Flex tile
+//!     tile <i>(click|up|down: "<command>",      programs; `text:`, `to: <slug>`
+//!              text: "…", to: <slug>, …)        apply to every command)
+//! end
+//! <slug>.tiles = <name>                        (write the set onto an extern
+//!                                               TreeDevice)
 //! ```
 //!
 //! In a block's argument list, the value decides the meaning: a literal or
@@ -45,6 +51,7 @@ mod parser;
 mod rename;
 mod simtest;
 mod template;
+mod tiles;
 mod validate;
 
 pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adopt_pages};
@@ -52,7 +59,7 @@ pub use ast::{
     ArgItem, Attr, AttrDecl, Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr,
     ExprWireDecl, ExternDecl, Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl,
     PortRef, RemovedDecl, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem,
-    TickDecl, Value, WireDecl,
+    TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{
@@ -65,4 +72,5 @@ pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid
 pub use simtest::{
     PlannedExpect, PlannedStep, TestPlan, TestResult, TestRun, plan_tests, read_results,
 };
+pub use tiles::{TileFunction, TileProgram, abbreviations, lint_tiles, program as tile_program};
 pub use validate::validate_ports;

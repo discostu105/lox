@@ -16,6 +16,31 @@ pub(super) fn is_ref_type(block_type: &str) -> bool {
     matches!(block_type, "InputRef" | "OutputRef")
 }
 
+/// The one input port that may be a wire source: the `AI` of an
+/// `OutputRef` mirroring an `ApiActor`, read by a block's API connector
+/// `OutputAPI`. The GUI records an API link drawn through such a mirror
+/// twice — forward on the ref's `AI`, and in reverse on the block's
+/// `OutputAPI`, naming the ref's `AI` (docs/loxone-format.md, "API
+/// distribution wires are recorded in reverse"; 61 of 61 such reverse
+/// wires in the corpus and the house config sit on `OutputAPI`). Callers
+/// check the sink side.
+pub(super) fn api_mirror_entry(ref_type: &str, port: &str, mirrored: Option<&str>) -> bool {
+    ref_type == "OutputRef" && port == "AI" && mirrored == Some("ApiActor")
+}
+
+/// The declared type of a minted ref's `mirrors:` target, when it is an
+/// extern (an `ApiActor` never is a managed block).
+fn mirrored_type<'m>(module: &'m Module, block: &super::ast::BlockDecl) -> Option<&'m str> {
+    let target = block.params().find_map(|(k, v)| match (k, v) {
+        ("mirrors", Value::Ref(t)) => Some(t),
+        _ => None,
+    })?;
+    module
+        .externs()
+        .find(|e| &e.slug == target)
+        .map(|e| e.block_type.as_str())
+}
+
 /// Check every managed block's type, port names, and wire directions
 /// against the builtin table. Extern ports are open-world (they exist or
 /// not in the base config) and are checked by `compile` instead.
@@ -116,10 +141,21 @@ pub fn validate_ports(module: &Module) -> Result<()> {
     // statements alike: the port must exist and its direction must fit
     // (source = output; sink = input or param).
     for (from, to) in module.wire_pairs() {
+        // The reverse half of an API link drawn through a minted mirror
+        // (see `api_mirror_entry`). The sink's own direction is checked
+        // below (managed) or by compile (extern).
+        let reverse_api = to.port == "OutputAPI"
+            && module.blocks().any(|b| {
+                b.slug == from.slug
+                    && api_mirror_entry(&b.block_type, &from.port, mirrored_type(module, b))
+            });
         for (endpoint, want) in [(&from, PortDir::Output), (&to, PortDir::Input)] {
             let Some(block) = module.blocks().find(|b| b.slug == endpoint.slug) else {
                 continue; // extern — checked against the base config later
             };
+            if reverse_api && want == PortDir::Output {
+                continue;
+            }
             if attr_params(&block.block_type).contains(&endpoint.port.as_str()) {
                 return Err(Error::Compile(format!(
                     "`{endpoint}` is an attribute parameter, not a connector — \

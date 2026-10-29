@@ -169,7 +169,19 @@ resolved):
   `AutoJalousie.OutputAPI → ApiActor`-style links the `<In>` entry sits
   on the *block's output* connector and names the `OutputRef.AI` (or
   `ApiActor.I`) as its `Input` — source and sink swap roles relative to
-  every ordinary wire.
+  every ordinary wire. A link drawn through a mirror is three wires,
+  without exception (61 links: 45 across 24 public corpus configs, 16
+  in the house config, 2026-10-29): the forward `OutputRef.AI ←
+  block.OutputAPI`, the reverse `block.OutputAPI ← OutputRef.AI`, and
+  the mirror's distribution `ApiActor.I ← OutputRef.AQ`; every such
+  mirror's `Ref=` is an `ApiActor`, and every reverse wire sits on a
+  connector keyed `OutputAPI` (12 block types, `AutoJalousie`,
+  `AcControl`, `NfcCodeTouch`, `TpfController`, … — six more reverse
+  wires sit on connectors keyed `API`). `FLG="1"` marks all 16 house
+  reverse wires and none of the 45 public ones, so the flag is not part
+  of the link. lxir writes the reverse wire as an argument naming the
+  mirror's `AI` (ir-spec, *Block declaration*) and mints it without
+  `FLG=`.
 
 ## Automatic Designer rules: `<C Type="AutopilotRule" APC=…>`
 
@@ -239,6 +251,81 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   rendered as comment lines in the decompile full view. lxir never
   writes them. Open oracle question: whether a GUI save preserves a
   foreign-minted rule at all — prerequisite for any authoring work.
+
+## Touch Pure Flex tiles: `<btns>` on a `TreeDevice`
+
+A Touch Pure Flex is a Tree device (`<C Type="TreeDevice">` with
+`SubType`/`TreeType="32799"`, a `cfgId=`, an `Artn=` article number and
+an `img=` PNG of the face as a hex blob). Its tiles are not `<C>`
+objects: they sit in a `<btns>` child next to the device's API
+connector:
+
+```xml
+<C Type="TreeDevice" … TreeType="32799" cfgId="…" Artn="…" img="89504E47…">
+	<C Type="ApiActor" … Title="API Connector">
+		<Co K="I" U="…"/>
+	</C>
+	<btns>
+		<btn i="2" x="6" y="7" h="13" w="15">
+			<f1></f1>
+			<f2 bT="1"/>
+			<f3 bT="2"/>
+		</btn>
+		<btn ci="1" i="3" x="37" y="7" h="13" w="15">
+			<f1 api="SET(As;Tg;pulse)" cT="=ECHO(As)" ctrls="…,…"/>
+			<f2 api="SET(As;Co;pulse)" cT="=ECHO(As)" bT="1" ctrls="…"/>
+			<f3 api="SET(As;Cc;pulse)" cT="=ECHO(As)" bT="2" ctrls="…"/>
+		</btn>
+	</btns>
+</C>
+```
+
+Evidence: three public corpus configs with 16 tiles in all
+(`gh_eisber_lox-cli_no-cleaning-room-email`, 9;
+`…_UseCase-AC-TouchPureFlex`, 6; `…_Fan_Control_-_Presence_and_Temperature_Support`,
+1), plus the house config.
+
+- **`<btn>`** — one tile. `i` is its index (lxir addresses tiles by it);
+  `x`/`y`/`h`/`w` are its place and size on the face, and `ci` a
+  running number the first tile lacks. The layout is Loxone Config's.
+- **`f1`, `f2`, `f3`** — the tile's three functions, always all three,
+  in this order. `f1` is the click; `f2` carries `bT="1"` and `f3`
+  `bT="2"`.
+- **Attributes, in this order:** `api` (the command), `cT` (the status
+  text), `bT` (on `f2`/`f3`), `ctrls` (comma-separated UUIDs of the
+  blocks the command addresses). No function has `cT` without `api`,
+  and no `ctrls` is empty.
+- **An empty function** is `<f1></f1>` for the click (3 of 16 tiles) and
+  `<f2 bT="1"/>` / `<f3 bT="2"/>` for the arrows (13 of 16).
+- **Commands** are the app's command language: `NAME(arg;…)` calls
+  chained with `&` (`SET(Lico;M+;pulse)&WAIT(500)&MENU(Lico;Mood)`),
+  escaped with `&amp;`/`&quot;`; a status text is an expression such as
+  `=ECHO(As)` or `=WAIT(500) & GETOUTPUT(Sw;O;1:On;0:Off)`. Unicode
+  and trailing spaces occur. The first argument of a multi-argument call
+  is a block-type abbreviation: in the house config `As` addresses
+  `AutoJalousie` blocks and `Lico` a `LightController2`.
+- **Arrows are up and down.** The shading tile of the no-cleaning-room
+  config sends `SET(As;Co;pulse)` (complete open) on `bT="1"` and
+  `SET(As;Cc;pulse)` (complete close) on `bT="2"`, click
+  `SET(As;Tg;pulse)`; the fan tile of the fan-control config opens a
+  menu on click and puts the same `SET(Sts;+;Pulse)` step on both
+  arrows. So `f2` is the arrow up, `f3` the arrow down.
+- **`ctrls`** narrows a command to those blocks. Without it a command
+  reaches every block of its type that is API-linked to the device —
+  the house config showed shade tiles without `ctrls` moving every
+  linked shade. The corpus's `ctrls` UUIDs point at blocks the published
+  configs no longer contain.
+- **API link**: a block is linked to the device when its `OutputAPI`
+  is wired to the device's `ApiActor.I`, directly or through an
+  `OutputRef` mirroring the actor (*API distribution wires are recorded
+  in reverse*, above). Two corpus Flex devices have a linked block, both
+  through an `OutputRef`: a `PushButton` (no-cleaning-room) and a
+  `StepSel` (fan control — the block behind the fan tile's `Sts`).
+- `TPFC="true"` on the device occurs only in the house config; the
+  corpus devices lack it.
+
+lxir rewrites the functions of existing tiles and carries the rest of
+`<btns>` byte for byte (D41).
 
 ## Rooms and categories: `<IoData Cr=… Pr=…>`
 

@@ -44,6 +44,12 @@ pub enum Item {
     /// `compile` ignores it entirely; `lxir test` compiles the module in
     /// memory and replays the body against `lox sim run` (lox-cli).
     Test(TestDecl),
+    /// `tiles <name>` … `end` — a named set of Touch Pure Flex tile
+    /// programs (D41).
+    Tiles(TilesDecl),
+    /// `<device>.tiles = <name>` — write a tiles set onto an extern Touch
+    /// Pure Flex (D41).
+    TilesClaim(TilesClaim),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -880,6 +886,77 @@ impl fmt::Display for TestItem {
     }
 }
 
+/// `tiles <name>` … `end` — a named set of Touch Pure Flex tile programs
+/// (D41). Declares nothing in the config by itself; each
+/// `<device>.tiles = <name>` claim writes it onto one device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TilesDecl {
+    pub name: String,
+    pub body: Vec<TilesItem>,
+    /// Trailing `#` comment on the header line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the `end` line, verbatim.
+    pub end_comment: Option<String>,
+}
+
+impl TilesDecl {
+    pub fn tiles(&self) -> impl Iterator<Item = &TileDecl> {
+        self.body.iter().filter_map(|i| match i {
+            TilesItem::Tile(t) => Some(t),
+            TilesItem::Comment(_) => None,
+        })
+    }
+}
+
+/// One statement of a `tiles` body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TilesItem {
+    Tile(TileDecl),
+    /// Whole-line `#` comment, verbatim.
+    Comment(String),
+}
+
+/// `tile <i>(click: "…", up: "…", down: "…", text: "…", to: <slug>, …)` —
+/// the program of the existing tile `i="<i>"`. Shares the argument-list
+/// shape of a block declaration (multi-line, comments); the keys and
+/// their meaning are D41's ([`super::tiles::program`]). `tile <i>()`
+/// clears every function of the tile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TileDecl {
+    pub index: u32,
+    pub args: Vec<ArgItem>,
+    /// Trailing `#` comment on the `tile` line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the closing `)` line of a multi-line list.
+    pub close_comment: Option<String>,
+}
+
+impl TileDecl {
+    pub fn bindings(&self) -> impl Iterator<Item = &Binding> {
+        self.args.iter().filter_map(|a| match a {
+            ArgItem::Binding(b) => Some(b),
+            ArgItem::Comment(_) => None,
+        })
+    }
+}
+
+/// `<device>.tiles = <set>` — claim the tile programs of an extern Touch
+/// Pure Flex (D41). Like a `Code:` program (D40) the claim keeps no lock
+/// state: withdrawing it leaves the last pushed programs in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TilesClaim {
+    pub slug: String,
+    pub tiles: String,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for TilesClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.tiles = {}", self.slug, self.tiles)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortRef {
     pub slug: String,
@@ -900,6 +977,7 @@ enum NameKind {
     Let,
     Template,
     Instance,
+    Tiles,
 }
 
 impl NameKind {
@@ -910,6 +988,7 @@ impl NameKind {
             NameKind::Let => "a `let` constant",
             NameKind::Template => "a template",
             NameKind::Instance => "a template instance",
+            NameKind::Tiles => "a `tiles` set",
         }
     }
 }
@@ -1015,6 +1094,20 @@ impl Module {
         })
     }
 
+    pub fn tiles_sets(&self) -> impl Iterator<Item = &TilesDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Tiles(t) => Some(t),
+            _ => None,
+        })
+    }
+
+    pub fn tiles_claims(&self) -> impl Iterator<Item = &TilesClaim> {
+        self.items.iter().filter_map(|i| match i {
+            Item::TilesClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
     pub fn lets(&self) -> impl Iterator<Item = &LetDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Let(l) => Some(l),
@@ -1099,6 +1192,7 @@ impl Module {
                 Item::Let(l) => (l.name.as_str(), NameKind::Let),
                 Item::Template(t) => (t.name.as_str(), NameKind::Template),
                 Item::Instance(b) => (b.slug.as_str(), NameKind::Instance),
+                Item::Tiles(t) => (t.name.as_str(), NameKind::Tiles),
                 _ => continue,
             };
             if names.insert(name, kind).is_some() {
@@ -1140,6 +1234,10 @@ impl Module {
                      reference one of its blocks by its expanded name \
                      (`{slug}_<block>`) (in `{r}`)",
                     slug = r.slug
+                )),
+                Some(NameKind::Tiles) => compile_err(format!(
+                    "`{}` is a `tiles` set, not an object (in `{r}`)",
+                    r.slug
                 )),
                 Some(_) => Ok(()),
             }
@@ -1194,6 +1292,7 @@ impl Module {
         };
 
         let mut attrs_seen: BTreeSet<(&str, Attr)> = BTreeSet::new();
+        let mut tiles_claimed: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -1534,6 +1633,113 @@ impl Module {
                         }
                     }
                 }
+                // `to:` targets name blocks, which may be template-expanded
+                // (`<instance>_jal`) — an unknown slug is judged on the
+                // flattened view only, like test references.
+                Item::Tiles(t) => {
+                    let mut indices: BTreeSet<u32> = BTreeSet::new();
+                    for tile in t.tiles() {
+                        let ctx = format!("tiles {}, tile {}", t.name, tile.index);
+                        if !indices.insert(tile.index) {
+                            return compile_err(format!(
+                                "`tiles {}`: tile {} is programmed twice",
+                                t.name, tile.index
+                            ));
+                        }
+                        let program = super::tiles::program(tile)
+                            .map_err(|m| Error::Compile(format!("{ctx}: {m}")))?;
+                        for slug in program.targets() {
+                            match names.get(slug) {
+                                Some(NameKind::Extern | NameKind::Block) => {}
+                                None if !flattened => {}
+                                None => {
+                                    let hint = super::validate::suggest(
+                                        slug,
+                                        self.externs()
+                                            .map(|e| e.slug.as_str())
+                                            .chain(self.blocks().map(|b| b.slug.as_str())),
+                                    );
+                                    return compile_err(format!(
+                                        "{ctx}: `to: {slug}` names an undeclared slug{hint}"
+                                    ));
+                                }
+                                Some(NameKind::Instance) => {
+                                    return compile_err(format!(
+                                        "{ctx}: `to: {slug}` names a template instance — \
+                                         name the block that receives the command by its \
+                                         expanded name (`{slug}_<block>`)"
+                                    ));
+                                }
+                                Some(kind) => {
+                                    return compile_err(format!(
+                                        "{ctx}: `to: {slug}` names {}, not a block",
+                                        kind.describe()
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                Item::TilesClaim(c) => {
+                    match names.get(c.slug.as_str()) {
+                        Some(NameKind::Extern) => {
+                            let ty = self
+                                .externs()
+                                .find(|e| e.slug == c.slug)
+                                .map_or("", |e| e.block_type.as_str());
+                            if ty != "TreeDevice" {
+                                return compile_err(format!(
+                                    "`{c}`: tiles belong to a Touch Pure Flex, a \
+                                     `TreeDevice` — `{}` is declared as `{ty}`",
+                                    c.slug
+                                ));
+                            }
+                        }
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {} — tiles are claimed on an extern \
+                                 Touch Pure Flex (`extern {} = TreeDevice(uuid: \"…\")`)",
+                                c.slug,
+                                kind.describe(),
+                                c.slug
+                            ));
+                        }
+                        None => {
+                            return compile_err(format!(
+                                "`{c}`: undeclared slug `{}` — declare the device as \
+                                 `extern {} = TreeDevice(uuid: \"…\")`",
+                                c.slug, c.slug
+                            ));
+                        }
+                    }
+                    match names.get(c.tiles.as_str()) {
+                        Some(NameKind::Tiles) => {}
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {}, not a `tiles` set",
+                                c.tiles,
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            let hint = super::validate::suggest(
+                                &c.tiles,
+                                self.tiles_sets().map(|t| t.name.as_str()),
+                            );
+                            return compile_err(format!(
+                                "`{c}`: no `tiles {}` set is declared{hint}",
+                                c.tiles
+                            ));
+                        }
+                    }
+                    if !tiles_claimed.insert(&c.slug) {
+                        return compile_err(format!(
+                            "duplicate assignment `{}.tiles = …` — a device takes one \
+                             tiles set",
+                            c.slug
+                        ));
+                    }
+                }
                 Item::Page(p) if p.title.is_empty() => {
                     return compile_err("`page \"\"`: the page title must not be empty".into());
                 }
@@ -1618,7 +1824,7 @@ impl Module {
                 Item::Extern(_) => 0,
                 Item::Block(_) => 1,
                 Item::Wire(_) | Item::ExprWire(_) => 2,
-                Item::Set(_) | Item::Attr(_) => 3,
+                Item::Set(_) | Item::Attr(_) | Item::TilesClaim(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
                 Item::Moved(_) => 6,
@@ -1629,6 +1835,7 @@ impl Module {
                 // line on both sides comes from the family change.
                 Item::Page(_) => 10,
                 Item::Test(_) => 11,
+                Item::Tiles(_) => 12,
             }
         }
         let mut out = String::new();
@@ -1758,6 +1965,45 @@ impl Module {
                     }
                     out.push_str(&format!("end{}\n", tail(&t.end_comment)));
                     prev_multiline = true;
+                }
+                Item::Tiles(t) => {
+                    out.push_str(&format!("tiles {}{}\n", t.name, tail(&t.comment)));
+                    for stmt in &t.body {
+                        match stmt {
+                            TilesItem::Tile(tile) => {
+                                out.push_str(&format!("\ttile {}(", tile.index));
+                                if tile.args.is_empty() {
+                                    out.push(')');
+                                    out.push_str(&tail(&tile.comment));
+                                } else {
+                                    out.push_str(&tail(&tile.comment));
+                                    out.push('\n');
+                                    for arg in &tile.args {
+                                        match arg {
+                                            ArgItem::Binding(x) => out.push_str(&format!(
+                                                "\t\t{}: {},{}\n",
+                                                x.port,
+                                                x.kind,
+                                                tail(&x.comment)
+                                            )),
+                                            ArgItem::Comment(text) => {
+                                                out.push_str(&format!("\t\t#{text}\n"));
+                                            }
+                                        }
+                                    }
+                                    out.push_str("\t)");
+                                    out.push_str(&tail(&tile.close_comment));
+                                }
+                                out.push('\n');
+                            }
+                            TilesItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                        }
+                    }
+                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                    prev_multiline = true;
+                }
+                Item::TilesClaim(c) => {
+                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
                 }
                 Item::Comment(text) => {
                     out.push_str(&format!("#{text}\n"));

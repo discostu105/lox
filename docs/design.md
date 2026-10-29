@@ -998,3 +998,89 @@ Anything unverified is an error, not a heuristic:
   change, the program going from 1 line back to 503. The damaged
   `APC=` and `NDOC=` attributes are still not authorable: they need a
   Loxone Config fix, and the drift note keeps them visible until then.
+- **D41 — Touch Pure Flex tiles from source** (2026-10-29). The tiles
+  of a Touch Pure Flex were GUI-only state: a `<btns>` child of the
+  `TreeDevice` with one `<btn>` per tile and three functions each
+  ([loxone-format.md](loxone-format.md)). In the house, three Flex
+  devices in one room share a tile layout whose shade tiles carry no
+  `ctrls=`; such a command reaches every shade linked to the device, so
+  a shade tile moved all linked shades. Decision:
+  - **Syntax.** A named set `tiles <name>` … `end` lists
+    `tile <i>(click:, up:, down:, text:, to:, …)` programs; a claim
+    `<device>.tiles = <name>` writes it onto an extern `TreeDevice`, and
+    one set may be claimed by several devices. `click`/`up`/`down` are
+    `f1`/`f2` (`bT="1"`)/`f3` (`bT="2"`); the corpus shows `Co` (open)
+    on `bT="1"` and `Cc` (close) on `bT="2"`. `text:` and `to:` apply to
+    every function with a command; `<fn>_text:`/`<fn>_to:` override one
+    function. `to:` is repeated rather than a list, like a fan-in. The
+    device stays a plain extern — tree devices have free-text titles,
+    so it is pinned by `uuid:` — and no new extern kind is needed.
+    Commands and texts are quoted strings written as Loxone Config
+    shows them; lxir does not parse the command language beyond the
+    abbreviations below.
+  - **Rewrite existing tiles only.** Tiles are addressed by `i`. A
+    named index the device lacks is an error that lists the indices it
+    has; unlisted tiles are carried byte for byte. Creating tiles and
+    the layout (`x`/`y`/`h`/`w`, `ci`, icons) stay with Loxone Config.
+    A written function emits `api`, `cT`, `bT`, `ctrls` in the GUI's
+    order, keeps the raw bytes of a value that decodes unchanged,
+    carries unknown attributes after them, and writes an empty click as
+    `<f1></f1>`. A `bT=` that is not the slot's is refused.
+  - **`to:` targets must be API-linked** to the device in the compiled
+    output: a wire, in either direction, between the target's
+    `OutputAPI` and the device's `ApiActor.I`, or the `AI` of an
+    `OutputRef` mirroring that actor whose `AQ` distributes into
+    `ApiActor.I`. Both directions count because API distribution wires
+    are recorded in reverse. The check runs after all wires of the
+    compile are drawn, so a link written in the same source counts.
+    A target is resolved like any wire endpoint (extern, managed block,
+    template body block by flattened name).
+  - **New API links through an explicit mirror.** A page that already
+    holds several mirrors of the actor leaves D34 no choice for
+    `OutputAPI: flex_api.I`. The source then mints the mirror and draws
+    the link's three wires itself: the forward
+    `OutputRef(mirrors: flex_api, AI: blk.OutputAPI)`, the distribution
+    `flex_api.I <- ref.AQ`, and the reverse `OutputAPI: ref.AI`. The
+    reverse wire names an input port as its source, which the direction
+    check refused. It is now admitted for exactly that shape: the `AI`
+    of an `OutputRef` whose `mirrors:` target is an `ApiActor`, read by
+    an `OutputAPI` connector that takes wires. Evidence: all 61 links
+    through a mirror in the corpus and the house config have these
+    three wires, all reverse wires sit on `OutputAPI` (or a connector
+    keyed `API`), all mirrors mirror an `ApiActor`. An extern ref's
+    `AI` was already accepted as a source (extern ports are
+    open-world). `FLG="1"` marks the house's 16 reverse wires and none
+    of the corpus's 45; the oracle showed the flag inert (D19), so a
+    minted reverse wire carries none. A flag already present is carried
+    as residue.
+  - **Type check from abbreviations.** The first argument of a
+    multi-argument call (`SET(As;Co;pulse)`) names the addressed block
+    type. lxir knows `As` = `AutoJalousie` and `Lico` =
+    `LightController2`, both observed in the house config. When every
+    abbreviation in a command is known, a target of another type is
+    refused; unknown abbreviations are written unchecked. The corpus
+    fan tile's `Sts` sits on a Flex linked to a `StepSel` — a single
+    observation, not added.
+  - **Warnings are lint.** Compile has no warning channel, so the
+    advisory checks are `lxir lint` kinds over the compiled config,
+    for every Flex, claimed or not: `tile-broadcast` (a command without
+    `ctrls` while two or more linked blocks of its type receive it) and
+    `tile-dead-command` (no linked block of its type, among `ctrls`
+    when given). Both need a known abbreviation.
+  - **No lock state, no restore.** Like `Code:` (D40), a withdrawn
+    claim leaves the last written programs in the device, and the base
+    holds them; there is nothing to tombstone.
+  - **Diff and fingerprint see tile programs.** Each non-empty function
+    projects to a param keyed `tile <i> click|up|down` (attributes
+    except `bT`). The fingerprint moves to v4 and includes them; drift
+    still accepts v3 and notes that it is blind to tile programs. The
+    layout stays outside the projection, as GUI state.
+  - **Decompile and adopt do not lift tiles.** A set is per-device data
+    whose `ctrls` name blocks that need slugs, and the device itself
+    needs an extern; lifting would add externs to every decompiled
+    view for state that works unclaimed. As with D40, programs move into
+    source on purpose; an unclaimed `<btns>` is carried verbatim.
+  Not covered: creating or moving tiles, display-only tiles (a text
+  without a command; no corpus evidence), and checking abbreviations
+  beyond `As`/`Lico` (the house also has `TpfController` blocks on
+  Flex API connectors, whose commands lxir writes unchecked).

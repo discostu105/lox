@@ -11,7 +11,7 @@
 //! documentation, an app-visible state block), which is why lint reports
 //! and never blocks a compile.
 
-use super::ast::{Item, MatchSpec, Module, TestItem, Value};
+use super::ast::{BindingKind, Item, MatchSpec, Module, TestItem, Value};
 use crate::doc::{LoxoneDoc, ports};
 use crate::error::Result;
 use crate::lock::Lockfile;
@@ -24,6 +24,11 @@ pub enum LintKind {
     UnusedLet,
     UnusedTemplate,
     DeadOutputs,
+    /// A Touch Pure Flex command that names no target while several
+    /// API-linked blocks answer to its abbreviation (D41).
+    TileBroadcast,
+    /// A Touch Pure Flex command no API-linked block receives (D41).
+    TileDeadCommand,
 }
 
 impl LintKind {
@@ -33,6 +38,8 @@ impl LintKind {
             LintKind::UnusedLet => "unused-let",
             LintKind::UnusedTemplate => "unused-template",
             LintKind::DeadOutputs => "dead-outputs",
+            LintKind::TileBroadcast => "tile-broadcast",
+            LintKind::TileDeadCommand => "tile-dead-command",
         }
     }
 }
@@ -114,6 +121,19 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                 if let MatchSpec::Mirrors(target) = &e.match_spec {
                     object_refs.insert(target);
                 }
+            }
+            // A tile target and a tiles claim use their slugs (D41).
+            Item::Tiles(t) => {
+                for tile in t.tiles() {
+                    for b in tile.bindings() {
+                        if let BindingKind::Param(Value::Ref(slug)) = &b.kind {
+                            object_refs.insert(slug);
+                        }
+                    }
+                }
+            }
+            Item::TilesClaim(c) => {
+                object_refs.insert(&c.slug);
             }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {

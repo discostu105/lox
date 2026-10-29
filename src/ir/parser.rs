@@ -279,6 +279,25 @@ fn sink<'a>(
     }
 }
 
+/// A closed `tile <i>(…)` argument list becomes the tile (D41).
+fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
+    if call.title.is_some() {
+        return Err(Error::IrParse {
+            line: lineno,
+            msg: format!(
+                "`tile {index}(…)` takes no label string — the status text is \
+                 `text: \"…\"`"
+            ),
+        });
+    }
+    Ok(TileDecl {
+        index,
+        args: call.args,
+        comment: call.comment,
+        close_comment: call.close_comment,
+    })
+}
+
 /// A closed call becomes a block declaration or — lowercase callee — a
 /// template instantiation.
 fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
@@ -315,6 +334,10 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut open_template: Option<TemplateDecl> = None;
     // A `test` whose body is still open (until `end`) — D36.
     let mut open_test: Option<TestDecl> = None;
+    // A `tiles` set whose body is still open (until `end`) — D41.
+    let mut open_tiles: Option<TilesDecl> = None;
+    // The index of the `tile` whose argument list `open_call` carries.
+    let mut open_tile: Option<u32> = None;
 
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
@@ -332,6 +355,12 @@ pub fn parse(src: &str) -> Result<Module> {
             let outcome = parse_call_args(call, &toks, lineno)?;
             if outcome.closed {
                 call.close_comment = comment;
+                if let Some(index) = open_tile.take() {
+                    let tile = finish_tile(open_call.take().unwrap(), index, lineno)?;
+                    let tiles = open_tiles.as_mut().expect("a tile is open only in a set");
+                    tiles.body.push(TilesItem::Tile(tile));
+                    continue;
+                }
                 let in_template = open_template.is_some();
                 let item = finish_call(open_call.take().unwrap(), in_template, lineno)?;
                 sink(&mut open_template, &mut items).push(item);
@@ -348,9 +377,60 @@ pub fn parse(src: &str) -> Result<Module> {
             // Blank line, or a whole-line comment — kept verbatim as an
             // item so formatting is non-destructive.
             if let Some(text) = comment {
+                if let Some(t) = open_tiles.as_mut() {
+                    t.body.push(TilesItem::Comment(text));
+                    continue;
+                }
                 match open_test.as_mut() {
                     Some(t) => t.body.push(TestItem::Comment(text)),
                     None => sink(&mut open_template, &mut items).push(Item::Comment(text)),
+                }
+            }
+            continue;
+        }
+
+        // Inside a `tiles` body every line is a `tile` (or `end`).
+        if let Some(t) = open_tiles.as_mut() {
+            match toks.as_slice() {
+                [Tok::Ident(kw)] if kw == "end" => {
+                    let mut t = open_tiles.take().unwrap();
+                    t.end_comment = comment;
+                    items.push(Item::Tiles(t));
+                }
+                [Tok::Ident(kw), Tok::Num(n), Tok::LParen, rest @ ..] if kw == "tile" => {
+                    let index = match n.parse::<u32>() {
+                        Ok(i) if i > 0 => i,
+                        _ => {
+                            return Err(err(format!(
+                                "`tile {n}` — a tile index is a positive whole number \
+                                 (the tile's `i=` in the config)"
+                            )));
+                        }
+                    };
+                    let mut call = BlockDecl {
+                        slug: "tile".into(),
+                        block_type: n.clone(),
+                        title: None,
+                        args: Vec::new(),
+                        comment: None,
+                        close_comment: None,
+                    };
+                    let outcome = parse_call_args(&mut call, rest, lineno)?;
+                    call.comment = comment;
+                    if outcome.closed {
+                        t.body
+                            .push(TilesItem::Tile(finish_tile(call, index, lineno)?));
+                    } else {
+                        open_call = Some(call);
+                        open_tile = Some(index);
+                    }
+                }
+                _ => {
+                    return Err(err(format!(
+                        "expected `tile <i>(click: \"…\", up: \"…\", down: \"…\", \
+                         text: \"…\", to: <slug>, …)` or `end` in `tiles {}`",
+                        t.name
+                    )));
                 }
             }
             continue;
@@ -383,6 +463,8 @@ pub fn parse(src: &str) -> Result<Module> {
                     | "tick"
                     | "expect"
                     | "clock"
+                    | "tiles"
+                    | "tile"
             )
         {
             return Err(err(format!(
@@ -468,6 +550,22 @@ pub fn parse(src: &str) -> Result<Module> {
                     comment,
                     end_comment: None,
                 });
+            }
+            Tok::Ident(kw) if kw == "tiles" => {
+                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                    return Err(err("expected `tiles <name>`".into()));
+                };
+                open_tiles = Some(TilesDecl {
+                    name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "tile" => {
+                return Err(err(
+                    "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
+                ));
             }
             Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
                 return Err(err(format!(
@@ -707,9 +805,19 @@ pub fn parse(src: &str) -> Result<Module> {
     }
 
     if let Some(call) = open_call {
+        let what = match open_tile {
+            Some(i) => format!("tile {i}(…"),
+            None => format!("{} = {}(…", call.slug, call.block_type),
+        };
         return Err(Error::IrParse {
             line: src.lines().count(),
-            msg: format!("unclosed `(` in `{} = {}(…`", call.slug, call.block_type),
+            msg: format!("unclosed `(` in `{what}`"),
+        });
+    }
+    if let Some(t) = open_tiles {
+        return Err(Error::IrParse {
+            line: src.lines().count(),
+            msg: format!("unclosed `tiles {}` — missing `end`", t.name),
         });
     }
     if let Some(t) = open_template {
@@ -911,6 +1019,11 @@ fn parse_ident_statement(
                      are assigned (`{ts}.{attr} = \"…\"`), never wired"
                 )));
             }
+            if tp == "tiles" {
+                return Err(err(format!(
+                    "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
+                )));
+            }
             let to = PortRef {
                 slug: ts.clone(),
                 port: tp.clone(),
@@ -948,6 +1061,27 @@ fn parse_ident_statement(
         ] => Err(err(format!(
             "`{ts}.{tp} = {vs}.{vp}` — use `<-` to wire a port: `{ts}.{tp} <- {vs}.{vp}`"
         ))),
+        // slug.tiles = set — a Touch Pure Flex tiles claim (D41).
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "tiles" => {
+            let [Tok::Ident(set)] = rest else {
+                return Err(err(format!(
+                    "expected `{ts}.tiles = <name>` — the name of a `tiles` set"
+                )));
+            };
+            if in_template {
+                return Err(err(
+                    "`.tiles` is not allowed inside a template body — claim tiles at \
+                     module level"
+                        .into(),
+                ));
+            }
+            items.push(Item::TilesClaim(TilesClaim {
+                slug: ts.clone(),
+                tiles: set.clone(),
+                comment,
+            }));
+            Ok(())
+        }
         // slug.title|room|category = value — an attribute claim (D39).
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
             items.push(Item::Attr(AttrDecl {

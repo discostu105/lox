@@ -17,7 +17,7 @@
 
 use super::ast::{
     ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, Module, Operand, TemplateDecl,
-    TestItem, Value,
+    TestItem, TilesItem, Value,
 };
 use crate::error::{Error, Result};
 use crate::lock::Lockfile;
@@ -159,6 +159,38 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             }
             sub_comment(&mut t.comment);
             sub_comment(&mut t.end_comment);
+        }
+        // `to:` targets are slugs; every other tile value is a quoted
+        // string, which `rename_value` leaves alone.
+        Item::Tiles(t) => {
+            sub(&mut t.name);
+            for stmt in &mut t.body {
+                match stmt {
+                    TilesItem::Tile(tile) => {
+                        for arg in &mut tile.args {
+                            match arg {
+                                ArgItem::Binding(b) => {
+                                    if let BindingKind::Param(v) = &mut b.kind {
+                                        rename_value(v, old, new);
+                                    }
+                                    sub_comment(&mut b.comment);
+                                }
+                                ArgItem::Comment(text) => sub_text(text, old, new),
+                            }
+                        }
+                        sub_comment(&mut tile.comment);
+                        sub_comment(&mut tile.close_comment);
+                    }
+                    TilesItem::Comment(text) => sub_text(text, old, new),
+                }
+            }
+            sub_comment(&mut t.comment);
+            sub_comment(&mut t.end_comment);
+        }
+        Item::TilesClaim(c) => {
+            sub(&mut c.slug);
+            sub(&mut c.tiles);
+            sub_comment(&mut c.comment);
         }
         Item::Comment(text) => sub_text(text, old, new),
     }
