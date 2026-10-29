@@ -51,6 +51,18 @@ types) contradict each other. Results and methodology:
       `LXIR_CORPUS=corpus/web cargo test --release --test corpus`
       re-checks every admitted classification against every corpus
       config.
+- [x] Demand-ranked batch (2026-10-29): `OnPulseDelay`, `OffDelay`,
+      `OnDelay`, `StairwayLS`, `EdgeDetection`, `AnalogMultiplexer2`,
+      `SRFlipFlop`, `State` — the most-needed unmintable types by
+      lox-cli's 473-task eval set; descriptors decided by the save
+      oracle (sessions 16–17; StairwayLS took the saved order), and
+      the Central* `Out*` ports flipped to Output on surviving wires.
+      Documented port facts (TechDoc) joined as the weakest evidence
+      tier (D52).
+- [ ] Block `V=` on Config 17.2: the save writes `V="178"`; the
+      compiler emits `175` and `adopt` refuses any other value, so
+      blocks saved by 17.2 cannot be adopted yet. Needs a per-release
+      table of descriptor versions (oracle per release), not a bump.
 
 ## Stufe 0 — Hardening the v0 pipeline
 
@@ -150,9 +162,10 @@ types) contradict each other. Results and methodology:
 - [x] Unit-suffixed values 2026-08-25 (D27): `Time: 90min`, `1.5h`,
       `250ms`, `2700K`, `70%` — the suffix scales exactly into the base
       unit at compile (byte-identical to the plain number) and is the
-      value's canonical spelling. Deliberately *without* per-port unit
-      checking: that stays blocked on the connector DB learning per-port
-      units (a `Time: 70%` is accepted today).
+      value's canonical spelling. Per-port units followed 2026-10-29
+      (D52): suffixes scale into the documented unit (minutes ports
+      too), `Time: 70%` is refused, ranges are linted, `lxir types`
+      shows the table.
 - [x] Identity hardening 2026-10-18 (D38): a base with repeated
       `<C>`/`<Co>` UUIDs is refused by `compile`/`adopt`, the compile
       output is self-checked, `diff` warns and `drift` notes repeats;

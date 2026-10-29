@@ -126,9 +126,15 @@ Notes:
   quoted.
 - A number may carry a **unit suffix** (D27), written immediately
   adjacent: `40s`, `250ms`, `90min`, `1.5h`, `2700K`, `70%`. Time units
-  scale exactly into Loxone's base unit, seconds (`1.5h` compiles to
-  `Def="5400"`, byte-identical to writing `5400`); `K` (color
-  temperature) and `%` are annotations with factor 1. The suffix is part
+  scale exactly into the unit the port is documented in (D52): seconds
+  by default (`1.5h` compiles to `Def="5400"`, byte-identical to writing
+  `5400`), minutes on a minutes port (`AutoShadeTime: 2h` compiles to
+  `120`; a value that is no exact decimal number of minutes, `10s`, is
+  an error). `%` and `K` (color temperature) carry factor 1 and are
+  accepted only on a port documented in that unit, or undocumented; a
+  time suffix on a `%`/`K`/`°` port is an error. A suffixed `let`
+  scales per use, into each port's unit. `lxir types <Type>` shows
+  every port's documented unit. The suffix is part
   of the value's canonical spelling — `1.5h` stays `1.5h` in source and
   through `fmt`. An unknown suffix is a parse error. A *quoted* `"40s"`
   stays a string — two spellings, two meanings.
@@ -882,7 +888,7 @@ with remedies in [agents.md](agents.md#errors-and-remedies).
 
 This is v1; there are no v0 files in the wild (pre-release revision).
 Anything not specified here (template nesting and template-local
-declarations, the `formula` expression backend, per-port unit checking)
+declarations, the `formula` expression backend)
 is future work —
 see [roadmap.md](roadmap.md). Future versions will keep v1 files parsing
 unchanged or provide a migration tool.

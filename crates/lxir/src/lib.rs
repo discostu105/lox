@@ -46,6 +46,7 @@ pub mod layout;
 pub mod lock;
 pub mod observed_defaults;
 pub mod permissions;
+pub mod port_meta;
 pub mod project;
 pub mod render;
 pub mod uuid;

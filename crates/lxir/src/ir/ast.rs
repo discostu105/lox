@@ -1,6 +1,7 @@
 //! IR abstract syntax and canonical text emission.
 
 pub use crate::access::PrincipalKind;
+use crate::connectors::{PortUnit, port_unit};
 use crate::error::{Error, Result};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -139,6 +140,98 @@ impl fmt::Display for Unit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.suffix())
     }
+}
+
+/// Resolve a suffixed value for a port whose documented unit is
+/// `port_unit` (D52): time suffixes scale into the port's own time unit
+/// (seconds or minutes), `%` and `K` bind only where they mean what the
+/// port is in. `None` (undocumented port) keeps the D27 reading. The
+/// error is the reason, without the port's name (callers add it).
+pub(crate) fn scale_for_port(
+    number: &str,
+    unit: Unit,
+    port_unit: Option<PortUnit>,
+) -> std::result::Result<String, String> {
+    let overflow = || format!("`{number}{unit}` overflows its unit");
+    let is_time = matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H);
+    let mismatch = |pu: PortUnit| {
+        Err(format!(
+            "`{number}{unit}` does not fit — the port is documented in {}",
+            pu.describe()
+        ))
+    };
+    match port_unit {
+        None => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Seconds) if is_time => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Minutes) if is_time => {
+            let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
+            divide_exact(&seconds, 60).ok_or_else(|| {
+                format!(
+                    "`{number}{unit}` is no exact decimal number of minutes — \
+                     the port is documented in minutes; write it in `min`"
+                )
+            })
+        }
+        Some(PortUnit::Percent) if unit == Unit::Pct => Ok(number.to_string()),
+        Some(PortUnit::Kelvin) if unit == Unit::K => Ok(number.to_string()),
+        Some(pu) => mismatch(pu),
+    }
+}
+
+/// `decimal / divisor` as an exact decimal literal, or `None` when the
+/// quotient does not terminate (`10 / 60`).
+fn divide_exact(decimal: &str, divisor: u128) -> Option<String> {
+    let (neg, rest) = match decimal.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, decimal),
+    };
+    let (int, frac) = rest.split_once('.').unwrap_or((rest, ""));
+    let mut num: u128 = format!("{int}{frac}").parse().ok()?;
+    let mut den = divisor.checked_mul(10u128.checked_pow(frac.len() as u32)?)?;
+    let g = gcd(num, den);
+    num /= g;
+    den /= g;
+    // Terminating iff the reduced denominator is 2^a·5^b; then
+    // num/den = num·(10^k/den) / 10^k with k = max(a, b).
+    let (mut twos, mut fives, mut rest) = (0u32, 0u32, den);
+    while rest % 2 == 0 {
+        rest /= 2;
+        twos += 1;
+    }
+    while rest % 5 == 0 {
+        rest /= 5;
+        fives += 1;
+    }
+    if rest != 1 {
+        return None;
+    }
+    let point = twos.max(fives);
+    let num = num.checked_mul(10u128.checked_pow(point)? / den)?;
+    let digits = num.to_string();
+    let point = point as usize;
+    let mut out = if point == 0 {
+        digits
+    } else {
+        let (i, f) = if digits.len() > point {
+            let split = digits.len() - point;
+            (digits[..split].to_string(), digits[split..].to_string())
+        } else {
+            ("0".to_string(), format!("{digits:0>point$}"))
+        };
+        let f = f.trim_end_matches('0');
+        if f.is_empty() { i } else { format!("{i}.{f}") }
+    };
+    if neg && out != "0" {
+        out.insert(0, '-');
+    }
+    Some(out)
+}
+
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
 }
 
 /// Scale a number literal (`-?digits(.digits)?`) by a unit's factor,
@@ -1248,6 +1341,38 @@ impl Module {
         }
     }
 
+    /// [`Self::resolve_value`] for a value bound to `port` of a block of
+    /// `block_type`: a suffixed value — written inline or through a `let`
+    /// — scales into the port's documented unit (D52), and a suffix that
+    /// cannot mean what the port is in is refused. `slug` names the
+    /// binding in the error.
+    pub fn resolve_value_for<'m>(
+        &'m self,
+        value: &'m Value,
+        block_type: &str,
+        slug: &str,
+        port: &str,
+    ) -> Result<Cow<'m, str>> {
+        let suffixed = match value {
+            Value::Unit { number, unit } => Some((number, *unit)),
+            Value::Ref(name) => {
+                self.lets()
+                    .find(|l| l.name == *name)
+                    .and_then(|l| match &l.value {
+                        Value::Unit { number, unit } => Some((number, *unit)),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        };
+        match suffixed {
+            Some((number, unit)) => scale_for_port(number, unit, port_unit(block_type, port))
+                .map(Cow::Owned)
+                .map_err(|why| Error::Compile(format!("`{slug}.{port}`: {why}"))),
+            None => self.resolve_value(value),
+        }
+    }
+
     /// Name uniqueness, reference resolution, and statement-level
     /// consistency (no base config needed). Port existence and directions
     /// on managed blocks are checked separately by
@@ -2178,4 +2303,50 @@ fn quote(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn divide_exact_terminates_or_refuses() {
+        assert_eq!(divide_exact("7200", 60).as_deref(), Some("120"));
+        assert_eq!(divide_exact("90", 60).as_deref(), Some("1.5"));
+        assert_eq!(divide_exact("7.5", 60).as_deref(), Some("0.125"));
+        assert_eq!(divide_exact("-1800", 60).as_deref(), Some("-30"));
+        assert_eq!(divide_exact("0.25", 60), None);
+        assert_eq!(divide_exact("10", 60), None);
+        assert_eq!(divide_exact("0", 60).as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn suffixes_scale_into_the_documented_unit() {
+        let seconds = Some(PortUnit::Seconds);
+        let minutes = Some(PortUnit::Minutes);
+        assert_eq!(scale_for_port("1.5", Unit::H, seconds).unwrap(), "5400");
+        assert_eq!(scale_for_port("2", Unit::H, minutes).unwrap(), "120");
+        assert_eq!(scale_for_port("90", Unit::S, minutes).unwrap(), "1.5");
+        assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
+        let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
+        assert!(err.contains("documented in minutes"), "{err}");
+
+        assert_eq!(
+            scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),
+            "70"
+        );
+        assert_eq!(
+            scale_for_port("2700", Unit::K, Some(PortUnit::Kelvin)).unwrap(),
+            "2700"
+        );
+        let err = scale_for_port("70", Unit::Pct, seconds).unwrap_err();
+        assert!(err.contains("documented in seconds"), "{err}");
+        let err = scale_for_port("5", Unit::S, Some(PortUnit::Percent)).unwrap_err();
+        assert!(err.contains("`5s` does not fit"), "{err}");
+        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Other("°"))).is_err());
+
+        // Undocumented ports keep the D27 reading.
+        assert_eq!(scale_for_port("45", Unit::Min, None).unwrap(), "2700");
+        assert_eq!(scale_for_port("80", Unit::Pct, None).unwrap(), "80");
+    }
 }

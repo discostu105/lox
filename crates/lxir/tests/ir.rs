@@ -3122,3 +3122,84 @@ fn full_view_renders_autopilot_rules_as_comments() {
     let (m, _) = decompile(&doc, &mo).unwrap();
     assert!(!m.to_text().contains("# when"), "adoptable view stays bare");
 }
+
+#[test]
+fn unit_suffixes_follow_the_documented_port_unit() {
+    // D52: `AutoShadeTime` is documented in minutes — `2h` is 120 there,
+    // not 7200; a `let` carries its unit to the port that uses it; an
+    // extern's port is checked against the extern's declared type.
+    let src = "page \"Beschattung\"\n\
+               let nachlauf = 90s\n\
+               extern sonne = VirtualIn(iname: \"VI3\")\n\
+               extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n\
+               puls = Monoflop(InputTrigger: sonne.Q, Time: 1.5h)\n\
+               jal = AutoJalousie(AutoShadeTime: 2h, SRoff: nachlauf)\n\
+               jal_sued.TargetPos = 70%\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let def_of = |uuid: &str, key: &str| {
+        let obj = out
+            .objects()
+            .iter()
+            .find(|o| o.uuid == uuid)
+            .unwrap()
+            .path
+            .clone();
+        lxir::doc::ports(out.element_at(&obj).unwrap())
+            .into_iter()
+            .find(|p| p.key == key)
+            .unwrap()
+            .def
+    };
+    let jal = lock.objects["jal"].uuid.clone();
+    assert_eq!(def_of(&jal, "AutoShadeTime").as_deref(), Some("120"));
+    assert_eq!(def_of(&jal, "SRoff").as_deref(), Some("1.5"));
+    let puls = lock.objects["puls"].uuid.clone();
+    assert_eq!(def_of(&puls, "Time").as_deref(), Some("5400"));
+    let jal_sued = lock.externals["jal_sued"].uuid.clone();
+    assert_eq!(def_of(&jal_sued, "TargetPos").as_deref(), Some("70"));
+
+    // A suffix that cannot mean the port's unit is refused, by name.
+    for (bad, needle) in [
+        (
+            "puls = Monoflop(InputTrigger: sonne.Q, Time: 70%)",
+            "`puls.Time`: `70%` does not fit",
+        ),
+        (
+            "jal = AutoJalousie(AutoShadeTime: 10s)",
+            "`jal.AutoShadeTime`: `10s` is no exact",
+        ),
+        (
+            "jal_sued.TargetPos = 5s",
+            "`jal_sued.TargetPos`: `5s` does not fit",
+        ),
+    ] {
+        let src = format!(
+            "page \"Beschattung\"\n\
+             extern sonne = VirtualIn(iname: \"VI3\")\n\
+             extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n{bad}\n"
+        );
+        let module = Module::parse(&src).unwrap();
+        let err = compile(&base(), &module, &mut Lockfile::new(), &opts())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn canvas_labels_point_at_the_port_key() {
+    let src = "extern sonne = VirtualIn(iname: \"VI3\")\n\
+               puls = Monoflop(Tr: sonne.Q)\n";
+    let module = Module::parse(src).unwrap();
+    let err = compile(&base(), &module, &mut Lockfile::new(), &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(
+            "`Tr` is the label Loxone Config shows on the canvas — the port is `InputTrigger`"
+        ),
+        "{err}"
+    );
+}

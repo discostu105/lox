@@ -15,9 +15,9 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
    with the module.
 3. **Never invent block types or port names.** Valid types for a block
    declaration (`slug = Type(…)`) are exactly the builtin table
-   (`src/connectors.rs`: gates, the comparator
-   family, `Formula`, `Monoflop`, `PulseGen`, `AnalogThresholdTrigger`).
-   Valid ports on an extern are whatever the base config actually has —
+   (`src/connectors.rs`) — list it with `lxir types`, and read one
+   type's ports, directions, units, canvas labels and ranges with
+   `lxir types <Type>` (`--json` for machines). Valid ports on an extern are whatever the base config actually has —
    discover them with `lxir decompile` / `lxir observe`, or read them from
    the error, which lists them (and suggests the closest name for typos).
    `lxir check` catches wrong types/ports/directions on managed blocks
@@ -38,6 +38,7 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
 lxir decompile current.Loxone            # full IR view, `page` sections
 lxir decompile --out-dir view/ current.Loxone   # one module per page
 lxir observe current.Loxone              # port evidence per block type
+lxir types Monoflop                       # ports, units, labels of a mintable type
 
 # 1. Edit the module (.lxir). Whole-line # comments are preserved.
 
@@ -164,6 +165,10 @@ it only when it matches what you intended.
 | `ambiguous` + candidate UUIDs | several objects match | switch to `uuid: "<one of the candidates>"` — ask if unclear |
 | `not in the verified builtin table` | block type can't be minted in v0 | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
+| `is the label Loxone Config shows on the canvas` | a canvas label (`Tr`, `D`) used as a port name | use the key the error names (`InputTrigger`, `Time`) |
+| `does not fit — the port is documented in …` | unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`lxir types <Type>`) |
+| `is no exact decimal number of minutes` | time value on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a representable value |
+| `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |

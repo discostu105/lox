@@ -13,6 +13,7 @@ observe output), `sha2` (slug entities, config hashes), `thiserror`.
 | `src/doc.rs` | `LoxoneDoc` + read views: `objects()`, `ports()`, `wires()`, `index()`, counters, `page_path`, `remove_by_uuid`, `duplicate_uuids()` (D38) | views derive from the tree on demand; nothing caches |
 | `src/connectors.rs` | verified `builtin()` table, evidence `observe()` | only live-verified types in `builtin` |
 | `src/observed_defaults.rs` | GENERATED corpus-observed GUI defaults (D30, `tools/extract-defaults.py`) | view-only: full-view elision, never affects compile |
+| `src/port_meta.rs` | GENERATED documented port facts — unit, canvas label, range, default (D52, `tools/extract-port-meta.py` over lox-cli's TechDoc scrape, read from a path, never vendored) | units scale suffixes and refuse mismatches; labels are error hints only; ranges are lint only |
 | `src/lock.rs` | `Lockfile` (spec: [lockfile-spec.md](lockfile-spec.md)); load/save/stable JSON; `remove_object`/`rename_object`/`absorb_counters` | serialization is deterministic (BTreeMaps) |
 | `src/ir/parser.rs` | line-oriented lexer + parser (block `( … )` argument lists span lines) | errors carry 1-based line numbers; v0 keywords give migration errors |
 | `src/ir/ast.rs` | `Module`, `Item` (incl. `Comment`), decls, argument `Binding`s (param vs. wire), typed `Value`; `validate()`; canonical `to_text()` | `parse(to_text(m)) == m`; `to_text` is a fixpoint |

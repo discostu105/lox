@@ -190,6 +190,7 @@ lxir adopt current.Loxone --out-module modules/haus.lxir \
 lxir adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
      --lock modules/haus.lock.json  # adopt one freshly drawn block
 lxir observe current.Loxone          # port-direction evidence (JSON)
+lxir types [<Type>]                  # mintable types: ports, units, labels, ranges
 lxir roundtrip current.Loxone        # byte-fidelity self-check
 lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
                                      # writer back to raw line breaks
@@ -282,7 +283,7 @@ sets the simulated time for `DayTimer`-style logic.
 | `xml` | Lossless concrete-syntax parser/writer for `.Loxone` XML. Handles Loxone's spec-violations (attribute names starting with digits, raw newlines inside attribute values) that break conforming XML parsers. |
 | `uuid` | The anatomy of Loxone UUIDs — creation time, mint counters, minting-machine id, connector index — plus a deterministic minter (no clock, no RNG). |
 | `doc` | Semantic read layer: objects, ports, wires, counters, pages. |
-| `connectors` | Port-direction knowledge: a **verified** builtin table (gates, comparators, `Formula`, `Monoflop`, `PulseGen`, `AnalogThresholdTrigger` — see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
+| `connectors` | Port-direction knowledge: a **verified** builtin table (32 types — gates, comparators, timers, `Formula`, `AutoJalousie`, `LightController2`, `State`, … — `lxir types` lists them; see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
 | `ir` | The text language: constructor-style block declarations with inline wires/parameters, `extern`, `let`, `page` placement, templates with instances, boolean/comparison/arithmetic expressions (as arguments and on wires; arithmetic folds into `Formula` blocks), unit-suffixed values, lifecycle statements, `test … end` scenarios; parser, canonical printer, `compile` (base + module + lockfile → config), `decompile` (config → IR view), `adopt` (existing blocks → module + identity-pinning lockfile), `test` (compile in memory → `lox sim` → per-expect results). |
 | `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals, attribute claims. |
 | `diff` | Semantic diff between two configs, with locale-rename noise flagged. |

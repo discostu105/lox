@@ -348,7 +348,10 @@ const SWITCH2_BUTTON: &[PortSpec] = &[
 // pair lacks the appended OutOpen/OutClose). EndUp/EndDown/AutoShade/
 // Safety/Gesture corpus-sink; every other classic input agreed I by
 // connector-map with zero contradiction; OutputAPI connector-map O, zero
-// contradiction; OutOpen/OutClose zero-evidence → inert-flag Input.
+// contradiction. OutOpen/OutClose had no wire evidence and were admitted
+// as inert-flag Input; Loxone's documentation lists them as outputs, and
+// oracle session 17 confirmed it: wires drawn *from* both survive a
+// Loxone Config 17.2 save unchanged → Output (2026-10-29).
 const CENTRAL_SHADE: &[PortSpec] = &[
     p("InputTrigger", Input),
     p("InputTriggerUp", Input),
@@ -365,15 +368,16 @@ const CENTRAL_SHADE: &[PortSpec] = &[
     p("ManualLamelle", Input),
     p("Gesture", Input),
     p("InputDisable", Input),
-    p("OutOpen", Input),
-    p("OutClose", Input),
+    p("OutOpen", Output),
+    p("OutClose", Output),
     p("OutputAPI", Output),
 ];
 
 // CentralLight: 9 occurrences (2 modern house instances; V254–259 corpus
 // trio lacks the appended OutActive). Reset/On/Alarm corpus-sink; the
 // rest connector-map I with zero contradiction; OutputAPI connector-map
-// O; OutActive zero-evidence → inert-flag Input.
+// O. OutActive: inert-flag Input at admission; documented as output, and
+// a wire drawn from it survives the save (oracle session 17) → Output.
 const CENTRAL_LIGHT: &[PortSpec] = &[
     p("I1", Input),
     p("I2", Input),
@@ -397,7 +401,7 @@ const CENTRAL_LIGHT: &[PortSpec] = &[
     p("AlarmClock", Input),
     p("InputDisable", Input),
     p("RtD", Input),
-    p("OutActive", Input),
+    p("OutActive", Output),
     p("OutputAPI", Output),
 ];
 
@@ -441,6 +445,81 @@ const CODE16: &[PortSpec] = &[
     p("AQ12", Output),
     p("AQ13", Output),
     p("TeQ", Output),
+];
+
+// The timer/edge/state batch (2026-10-29), prioritized by demand: the
+// block types an agent most often needs for everyday automations
+// (lox-cli's 473-case eval set, counted by required block type) that the
+// table could not mint yet. Shapes and directions from the 145-file web
+// corpus plus the house config; per-type rationale in
+// docs/connector-db.md. The corpus holds no Config-17 instance of most of
+// them, so the save oracle (sessions 16/17, Loxone Config 17.2) decided
+// each descriptor: every set below saves with identical connector keys,
+// order and UUIDs. StairwayLS is the one the GUI rewrote from the corpus
+// order (V151: Reset before On, no OutputAPI) — its table is the order
+// the save writes, OutputAPI included (a wire drawn from it survives).
+// Directions by corpus wires (sink/source counts), else inert-flag Input;
+// Def-only ports without wire evidence are Param.
+const ON_PULSE_DELAY: &[PortSpec] = &[
+    p("InputTrigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("Delay", Input),
+    p("Time", Input),
+    p("Q", Output),
+];
+const OFF_DELAY: &[PortSpec] = &[
+    p("InputTrigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("Time", Param),
+    p("Q", Output),
+];
+const STAIRWAY_LS: &[PortSpec] = &[
+    p("InputTrigger", Input),
+    p("On", Param),
+    p("Reset", Input),
+    p("InputDisable", Input),
+    p("TimeHigh", Input),
+    p("TimeWarn", Param),
+    p("Remanence", Param),
+    p("WarnTime", Param),
+    p("Q", Output),
+    p("OutputAPI", Output),
+];
+const EDGE_DETECTION: &[PortSpec] = &[
+    p("Input", Input),
+    p("PulseTime", Param),
+    p("Edge", Output),
+    p("RisingEdge", Output),
+    p("FallingEdge", Output),
+];
+const ANALOG_MULTIPLEXER2: &[PortSpec] = &[
+    p("Select", Input),
+    p("Input1", Input),
+    p("Input2", Input),
+    p("InputDisable", Input),
+    p("AQ", Output),
+];
+const SR_FLIP_FLOP: &[PortSpec] = &[
+    p("InputS", Input),
+    p("InputTrigger", Input),
+    p("InputR", Input),
+    p("Remanence", Input),
+    p("Q", Output),
+];
+const STATE: &[PortSpec] = &[
+    p("I1", Input),
+    p("I2", Input),
+    p("I3", Input),
+    p("I4", Input),
+    p("I5", Input),
+    p("I6", Input),
+    p("I7", Input),
+    p("I8", Input),
+    p("TQ", Output),
+    p("AQ", Output),
+    p("OutputAPI", Input),
 ];
 
 // Mirror blocks: the on-page visual representation of an object living
@@ -545,6 +624,14 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "CentralShade",
     "CentralLight",
     "Code16",
+    "OnPulseDelay",
+    "OffDelay",
+    "OnDelay",
+    "StairwayLS",
+    "EdgeDetection",
+    "AnalogMultiplexer2",
+    "SRFlipFlop",
+    "State",
 ];
 
 /// Block versions (`V=` on `<C>`) the builtin table is verified for,
@@ -583,6 +670,44 @@ pub fn file_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// The unit a port's value is in, as far as a suffixed value is concerned
+/// (D52). Known only where Loxone's documentation states one
+/// ([`crate::port_meta`]); an undocumented port keeps the D27 behavior
+/// (time suffixes scale into seconds, `%`/`K` are annotations).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortUnit {
+    Seconds,
+    Minutes,
+    Percent,
+    Kelvin,
+    /// A documented unit lxir has no suffix for (`°`, `mm`, `lux`, …).
+    Other(&'static str),
+}
+
+impl PortUnit {
+    pub fn describe(self) -> String {
+        match self {
+            PortUnit::Seconds => "seconds".into(),
+            PortUnit::Minutes => "minutes".into(),
+            PortUnit::Percent => "percent".into(),
+            PortUnit::Kelvin => "kelvin".into(),
+            PortUnit::Other(u) => format!("`{u}`"),
+        }
+    }
+}
+
+/// The documented unit of a block type's port, if any.
+pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
+    let unit = crate::port_meta::port_meta(block_type, port)?.unit?;
+    Some(match unit {
+        "s" => PortUnit::Seconds,
+        "min" => PortUnit::Minutes,
+        "%" => PortUnit::Percent,
+        "K" => PortUnit::Kelvin,
+        other => PortUnit::Other(other),
+    })
+}
+
 /// Verified port tables for the block types the compiler may create.
 /// Order = connector-index order.
 pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
@@ -605,6 +730,13 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "CentralShade" => Some(CENTRAL_SHADE),
         "CentralLight" => Some(CENTRAL_LIGHT),
         "Code16" => Some(CODE16),
+        "OnPulseDelay" => Some(ON_PULSE_DELAY),
+        "OffDelay" | "OnDelay" => Some(OFF_DELAY),
+        "StairwayLS" => Some(STAIRWAY_LS),
+        "EdgeDetection" => Some(EDGE_DETECTION),
+        "AnalogMultiplexer2" => Some(ANALOG_MULTIPLEXER2),
+        "SRFlipFlop" => Some(SR_FLIP_FLOP),
+        "State" => Some(STATE),
         "InputRef" => Some(INPUT_REF),
         "OutputRef" => Some(OUTPUT_REF),
         _ => None,
@@ -730,7 +862,7 @@ pub fn merge(into: &mut Observations, other: Observations) {
 /// shape used by lox-cli: `c` = canonical connector order, `t` = port key →
 /// `"I"` / `"O"`. (lox-sim's `block_signature` table converts into the same
 /// shape: inputs+params as `"I"`, outputs as `"O"`.)
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct LegacyType {
     #[serde(default)]
     pub c: Vec<String>,
@@ -740,6 +872,76 @@ pub struct LegacyType {
 
 /// Block type → legacy entry.
 pub type LegacyDb = BTreeMap<String, LegacyType>;
+
+/// Read a cross-check database in either accepted shape. The
+/// connector-map shape (`type -> {c, t}`) is taken as is. The documented
+/// shape — Loxone's TechDoc as scraped into
+/// `loxone-block-types-full.json` (`type -> {connectors: [{name, type:
+/// "Input"|"Output"|"Parameter"}]}`) — is folded into it (D52): a
+/// `%d`-patterned name (`AQ%d`) expands to the observed keys it matches,
+/// and stays a literal pattern when none does, so it surfaces as
+/// legacy-only.
+pub fn legacy_db_from_json(
+    value: &serde_json::Value,
+    obs: &Observations,
+) -> std::result::Result<LegacyDb, String> {
+    let map = value
+        .as_object()
+        .ok_or("a cross-check database is a JSON object: type -> entry")?;
+    let documented = map
+        .values()
+        .any(|e| e.get("connectors").is_some_and(|c| c.is_array()));
+    if !documented {
+        return serde_json::from_value(value.clone()).map_err(|e| e.to_string());
+    }
+    let mut db = LegacyDb::new();
+    for (ty, entry) in map {
+        let Some(conns) = entry.get("connectors").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        let observed: Vec<&String> = obs.get(ty).map(|p| p.keys().collect()).unwrap_or_default();
+        let mut l = LegacyType::default();
+        for c in conns {
+            let Some(name) = c.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            let dir = match c.get("type").and_then(|t| t.as_str()) {
+                Some("Output") => "O",
+                Some("Parameter") => "P",
+                _ => "I",
+            };
+            let keys: Vec<String> = match name.split_once("%d") {
+                Some((pre, post)) => {
+                    let hits: Vec<String> = observed
+                        .iter()
+                        .filter(|k| {
+                            k.strip_prefix(pre)
+                                .and_then(|r| r.strip_suffix(post))
+                                .is_some_and(|d| {
+                                    !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())
+                                })
+                        })
+                        .map(|k| k.to_string())
+                        .collect();
+                    if hits.is_empty() {
+                        vec![name.to_string()]
+                    } else {
+                        hits
+                    }
+                }
+                None => vec![name.to_string()],
+            };
+            for k in keys {
+                if !l.t.contains_key(&k) {
+                    l.c.push(k.clone());
+                    l.t.insert(k, dir.to_string());
+                }
+            }
+        }
+        db.insert(ty.clone(), l);
+    }
+    Ok(db)
+}
 
 /// Comparison of corpus evidence against one legacy entry, for one type.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -877,6 +1079,22 @@ mod tests {
         assert_eq!((pa[4].key, pa[4].dir), ("OutputAPI", PortDir::Input));
         // DayTimer: the V259+ element order (PulseTime moved to index 3
         // by a schema migration that kept its port UUID).
+        // The timer/edge/state batch (oracle-decided descriptors).
+        let stair = builtin("StairwayLS").unwrap();
+        assert_eq!(stair.len(), 10);
+        assert_eq!((stair[1].key, stair[1].dir), ("On", PortDir::Param));
+        assert_eq!((stair[2].key, stair[2].dir), ("Reset", PortDir::Input));
+        assert_eq!((stair[9].key, stair[9].dir), ("OutputAPI", PortDir::Output));
+        assert_eq!(builtin("OnDelay"), builtin("OffDelay"));
+        assert_eq!(builtin("OnPulseDelay").unwrap().len(), 6);
+        let mux = builtin("AnalogMultiplexer2").unwrap();
+        assert_eq!((mux[0].key, mux[4].key), ("Select", "AQ"));
+        let edge = builtin("EdgeDetection").unwrap();
+        assert_eq!((edge[1].key, edge[1].dir), ("PulseTime", PortDir::Param));
+        assert_eq!(builtin("SRFlipFlop").unwrap()[0].key, "InputS");
+        let state = builtin("State").unwrap();
+        assert_eq!(state.len(), 11);
+        assert_eq!((state[9].key, state[9].dir), ("AQ", PortDir::Output));
         let dt = builtin("DayTimer").unwrap();
         assert_eq!(dt.len(), 13);
         assert_eq!((dt[3].key, dt[3].dir), ("PulseTime", PortDir::Param));
@@ -931,13 +1149,14 @@ mod tests {
         let cs = builtin("CentralShade").unwrap();
         assert_eq!(cs.len(), 18);
         assert_eq!((cs[3].key, cs[3].dir), ("EndUp", PortDir::Input));
-        // Zero-evidence appended keys -> inert-flag Input.
-        assert_eq!((cs[15].key, cs[15].dir), ("OutOpen", PortDir::Input));
+        // Appended keys: inert-flag Input at admission, Output since
+        // oracle session 17 (wires drawn from them survive the save).
+        assert_eq!((cs[15].key, cs[15].dir), ("OutOpen", PortDir::Output));
         assert_eq!((cs[17].key, cs[17].dir), ("OutputAPI", PortDir::Output));
         let cl = builtin("CentralLight").unwrap();
         assert_eq!(cl.len(), 24);
         assert_eq!((cl[18].key, cl[18].dir), ("Alarm", PortDir::Input));
-        assert_eq!((cl[22].key, cl[22].dir), ("OutActive", PortDir::Input));
+        assert_eq!((cl[22].key, cl[22].dir), ("OutActive", PortDir::Output));
         assert_eq!((cl[23].key, cl[23].dir), ("OutputAPI", PortDir::Output));
         let c16 = builtin("Code16").unwrap();
         assert_eq!(c16.len(), 34);
@@ -1026,5 +1245,38 @@ mod tests {
         assert_eq!(o.inferred_dir(), Some(PortDir::Output));
         o.wired_as_sink = 3;
         assert_eq!(o.inferred_dir(), Some(PortDir::Input));
+    }
+
+    #[test]
+    fn documented_shape_folds_into_a_legacy_entry() {
+        let port = |sink, source| ObservedPort {
+            index: None,
+            index_conflict: false,
+            wired_as_sink: sink,
+            wired_as_source: source,
+            has_def: 0,
+            occurrences: 1,
+        };
+        let mut obs = Observations::new();
+        let ports = obs.entry("Mux".into()).or_default();
+        ports.insert("I1".into(), port(1, 0));
+        ports.insert("I2".into(), port(1, 0));
+        ports.insert("Q".into(), port(0, 1));
+        let doc = serde_json::json!({ "Mux": { "connectors": [
+            { "name": "I%d", "type": "Input" },
+            { "name": "T", "type": "Parameter" },
+            { "name": "Q", "type": "Output" },
+            { "name": "AQ%d", "type": "Output" },
+        ]}});
+        let db = legacy_db_from_json(&doc, &obs).unwrap();
+        assert_eq!(db["Mux"].c, ["I1", "I2", "T", "Q", "AQ%d"]);
+        assert_eq!(db["Mux"].t["T"], "P");
+        let check = &crosscheck(&obs, &db)["Mux"];
+        assert_eq!(check.dir_agreements, 3);
+        assert_eq!(check.only_in_legacy, ["AQ%d", "T"]);
+
+        // The connector-map shape still reads as before.
+        let map = serde_json::json!({ "Mux": { "c": ["I1"], "t": { "I1": "I" } } });
+        assert_eq!(legacy_db_from_json(&map, &obs).unwrap()["Mux"].c, ["I1"]);
     }
 }

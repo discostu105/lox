@@ -656,7 +656,8 @@ pub fn compile(
             } else {
                 &mut managed_defs
             };
-            target.insert((block.slug.clone(), k.to_string()), resolve(v)?);
+            let value = module.resolve_value_for(v, &block.block_type, &block.slug, k)?;
+            target.insert((block.slug.clone(), k.to_string()), value.into_owned());
         }
     }
 
@@ -1172,7 +1173,13 @@ pub fn compile(
             &s.target.port,
             PortDir::Param,
         )?;
-        let value = resolve(&s.value)?;
+        let extern_type = module
+            .externs()
+            .find(|e| e.slug == s.target.slug)
+            .map_or("", |e| e.block_type.as_str());
+        let value = module
+            .resolve_value_for(&s.value, extern_type, &s.target.slug, &s.target.port)?
+            .into_owned();
         let original = apply_def(&mut doc, &target.owner_uuid, &target.port_uuid, &value)?;
         lock.set_originals
             .entry(target.port_uuid)

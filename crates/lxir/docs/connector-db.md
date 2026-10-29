@@ -6,13 +6,14 @@ a test case. This doc records the methodology, the first consolidation run,
 and the admission rules that gate `connectors::builtin` (the table of
 mintable types).
 
-## The three knowledge sources
+## The knowledge sources
 
 | Source | Shape | Trust |
 |---|---|---|
 | **Corpus evidence** (`lxir observe`) | per type/key: connector index from the port UUID, wired-as-sink / wired-as-source / `Def=` counts | ground truth for whatever it covers |
 | lox-cli `docs/schemas/connector-map.json` (195 types) | `type → {c: [order], t: {key: I/O/P}}` | good ordering info; several corrupt entries (see findings) |
 | lox-sim `block_signature` (237 types, extracted via [`tools/extract-sim-signature.py`](../tools/extract-sim-signature.py)) | (inputs, outputs, params) per type | best direction coverage; some simulator-internal key names diverge from XML keys; no index order |
+| Loxone TechDoc, as scraped by lox-cli into `docs/schemas/loxone-block-types-full.json` | per type: connectors with direction, unit, canvas label, range, default (`%d` patterns for numbered ports) | weakest tier: never admits or decides a direction; the only source for **units** (D52) — generated into `src/port_meta.rs` by [`tools/extract-port-meta.py`](../tools/extract-port-meta.py), cross-checked against table and corpus on every run |
 
 ## Reproducing the run
 
@@ -20,7 +21,10 @@ mintable types).
 tools/extract-sim-signature.py ~/repos/my/lox-cli > sim-signature.json
 lxir observe corpus/*.Loxone \
     --crosscheck ~/repos/my/lox-cli/docs/schemas/connector-map.json \
-    --crosscheck sim-signature.json > corpus-report.json
+    --crosscheck sim-signature.json \
+    --crosscheck ~/repos/my/lox-cli/docs/schemas/loxone-block-types-full.json \
+    > corpus-report.json
+tools/extract-port-meta.py ~/repos/my/lox-cli/docs/schemas/loxone-block-types-full.json
 ```
 
 The merged evidence (no identity data — types, keys, indexes, counts only)
@@ -229,8 +233,8 @@ story), one swap (Switch2Button `On`/`Reset`). Every key resolved with
 |---|---|---|
 | `LightController2` | 75 | The largest admitted type. 23 house instances, one identical order; 86 corpus occurrences. 17 corpus-sink inputs (`Sel1` ×47, `Brightness` ×19, `Move` ×15); 16 Def-on-every-instance params + 5 connector-map-agreed; `AQ1`–`AQ20`/`Scene`/`OutputReset`/`OutputResetAll` connector-map O (`AQ1` corpus-source ×131); `MoveOn` carries Def everywhere *plus* one sink wire — wire evidence precedes, Input still admits the Def; `OutputAPI` zero-evidence → inert-flag Input |
 | `Switch2Button` | 9 | 49 occurrences; `InputTrigger` sink on every instance, `Q`/`Qon`/`Qoff` corpus-source ×16/×33/×15, `Time` Def everywhere, rest inert-flag |
-| `CentralShade` | 18 | 11 occurrences; `EndUp`/`EndDown`/`AutoShade`/`Safety`/`Gesture` corpus-sink, classic inputs connector-map I, `OutputAPI` connector-map O, appended `OutOpen`/`OutClose` inert-flag Input |
-| `CentralLight` | 24 | 9 occurrences; `Reset`/`On`/`Alarm` corpus-sink, rest connector-map I, `OutputAPI` connector-map O, appended `OutActive` inert-flag Input |
+| `CentralShade` | 18 | 11 occurrences; `EndUp`/`EndDown`/`AutoShade`/`Safety`/`Gesture` corpus-sink, classic inputs connector-map I, `OutputAPI` connector-map O, appended `OutOpen`/`OutClose` inert-flag Input at admission, Output since oracle session 17 (wires from them survive the save; documented as outputs) |
+| `CentralLight` | 24 | 9 occurrences; `Reset`/`On`/`Alarm` corpus-sink, rest connector-map I, `OutputAPI` connector-map O, appended `OutActive` inert-flag Input at admission, Output since oracle session 17 |
 | `Code16` | 34 | The most stable shape in the corpus: ONE identical element order across V99–V273 (12 instances, 8 files, house included). `AI1`–`AI13` corpus-sink, `TQ1`/`AQ1`–`AQ13`/`TeQ` connector-map O mostly corpus-source, `Remanence` inert-flag |
 
 The batch surfaced three new **GUI-owned content** classes, all carried
@@ -275,6 +279,32 @@ their exact connector sets. The GUI backfills absent GUI-owned content
 entries) rather than rejecting the block; central blocks are legal
 with no `rec=`, Code16 with no `Code=`. Details in
 [oracle-wine.md](oracle-wine.md).
+
+## The timer/edge/state batch (2026-10-29), demand-ranked
+
+Which types to admit next was decided by demand rather than by corpus
+frequency: lox-cli's eval set (473 natural-language automation tasks,
+each naming the block types a correct solution needs) counted by
+required type, minus what the table could already mint. The top of
+that list: OnPulseDelay (41 tasks), StairwayLS (35), State (25),
+EdgeDetection (19), OffDelay (15), a flip-flop (15), AnalogMultiplexer2
+(13), OnDelay (9). The eval set was only counted, never copied.
+
+| Type | Keys | Basis |
+|---|---|---|
+| `OnPulseDelay` | 6 | 14 corpus instances, one order (V70–V172). `InputTrigger` sink ×14, `Q` source ×14; `Delay`/`Time` carry Def on every instance *and* a sink wire → Input; `Reset`/`Remanence` inert-flag |
+| `OffDelay`, `OnDelay` | 5 | one shared shape, 11 + 9 instances, one order each. `InputTrigger` sink on every instance, `Q` source; `Time` Def-only → Param |
+| `StairwayLS` | 10 | 30 instances (V126–V151), one order — **not** the Config-17 order: the save oracle reordered it and appended `OutputAPI` (session 16); the table is the saved order. `InputTrigger`/`Reset`/`TimeHigh` sink ×30, `InputDisable` sink ×8, `Q` source ×30; `On`/`TimeWarn`/`Remanence`/`WarnTime` Def-only → Param; `OutputAPI` connector-map O, confirmed by a surviving wire from it (session 17) |
+| `EdgeDetection` | 5 | 6 instances (V172), one order. `Input` sink ×6; `RisingEdge`/`FallingEdge` source ×4; `Edge` connector-map O; `PulseTime` Def-only → Param |
+| `AnalogMultiplexer2` | 5 | 67 instances in two orders: V70–V172 `Input1, Input2, InputDisable, Select, AQ` and V174 `Select, Input1, Input2, InputDisable, AQ` (6 instances, identical key set). The table takes V174; the oracle kept it. `Select` sink ×67, `AQ` source ×66 |
+| `SRFlipFlop` | 5 | 3 instances (V126/V141), exactly the admission minimum. `InputS`/`InputR` sink, `Q` source; `InputTrigger`/`Remanence` inert-flag. The eval set's "flip-flop" maps here; `RSFlipFlop` has no corpus instance and stays out |
+| `State` | 11 | 251 instances in four generations; the V175 shape (7 instances) adds `I5`–`I8` to the V161+ order. `I1`–`I4` sink, `AQ`/`TQ` source; `I5`–`I8` and `OutputAPI` inert-flag Input. The status texts (`<StateTexts>`) are GUI-owned, carried verbatim |
+
+**Mint-validated (oracle sessions 16–17):** all eight types survive an
+open+save with their exact connector sets, order and UUIDs, in a wired
+chain with parameters on every block; details in
+[oracle-wine.md](oracle-wine.md). The corpus counterexample test
+passes over all 144 corpus files.
 
 ## Growing the table
 

@@ -9,6 +9,7 @@
 use super::ast::{Module, Value};
 use crate::connectors::{BUILTIN_TYPES, PortDir, attr_params, builtin, file_params};
 use crate::error::{Error, Result};
+use crate::port_meta::port_meta;
 
 /// `InputRef`/`OutputRef` — block types whose managed form mirrors
 /// another object (`mirrors:` binding, design.md D33).
@@ -95,6 +96,8 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 continue;
             }
             known_port(module, &block.slug, key)?;
+            // A suffixed value must fit the port's documented unit (D52).
+            module.resolve_value_for(v, &block.block_type, &block.slug, key)?;
         }
         if is_ref_type(&block.block_type) {
             if mirrors.is_none() {
@@ -114,6 +117,19 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                     block.slug, block.block_type
                 )));
             }
+        }
+    }
+
+    // Port assignments on externs: the extern's declared type documents
+    // the port's unit as well as a managed block's would (D52).
+    for set in module.sets() {
+        if let Some(e) = module.externs().find(|e| e.slug == set.target.slug) {
+            module.resolve_value_for(
+                &set.value,
+                &e.block_type,
+                &set.target.slug,
+                &set.target.port,
+            )?;
         }
     }
 
@@ -220,13 +236,27 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
     } else {
         ""
     };
-    let hint = suggest(
-        key,
-        specs
-            .iter()
-            .map(|s| s.key)
-            .chain(attr_params(&block.block_type).iter().copied()),
-    );
+    // The canvas shows short labels (`Tr`, `Don`), not connector keys — a
+    // name copied off the screen gets pointed at its key (D52).
+    let labeled: Vec<&str> = specs
+        .iter()
+        .filter(|s| port_meta(&block.block_type, s.key).and_then(|m| m.label) == Some(key))
+        .map(|s| s.key)
+        .collect();
+    let hint = if labeled.is_empty() {
+        suggest(
+            key,
+            specs
+                .iter()
+                .map(|s| s.key)
+                .chain(attr_params(&block.block_type).iter().copied()),
+        )
+    } else {
+        format!(
+            "; `{key}` is the label Loxone Config shows on the canvas — the port is `{}`",
+            labeled.join("` or `")
+        )
+    };
     Err(Error::Compile(format!(
         "unknown port `{key}` on block `{slug}` (type `{}`); known ports: {}{hint}{gate_hint}",
         block.block_type,

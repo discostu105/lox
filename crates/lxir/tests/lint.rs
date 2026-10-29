@@ -101,3 +101,31 @@ fn lint_reports_and_clears() {
     assert!(!stdout.contains("dead-outputs"), "{stdout}");
     assert!(stderr.contains("dead-output analysis skipped"), "{stderr}");
 }
+
+#[test]
+fn values_outside_the_documented_range_are_flagged() {
+    // D52: the range check reads the value in the port's own unit —
+    // `2h` on a minutes port is 120 min, past the documented 60.
+    let src = lxir::ir::Module::parse(
+        "extern vi = VirtualIn(iname: \"VI1\")\n\
+         extern jal = AutoJalousie(title: \"J\")\n\
+         puls = Monoflop(InputTrigger: vi.Q, Time: 30s)\n\
+         lc = LightController2(I1: puls.Q, AlarmClockPeriod: 2h)\n\
+         jal.Safety <- puls.Q\n\
+         jal.TargetPos = 120%\n",
+    )
+    .unwrap();
+    let findings = lxir::ir::lint_source(&src).unwrap();
+    let range: Vec<String> = findings
+        .iter()
+        .filter(|f| f.kind == lxir::ir::LintKind::OutOfRange)
+        .map(|f| format!("{}: {}", f.slug, f.detail))
+        .collect();
+    assert_eq!(
+        range,
+        [
+            "lc: AlarmClockPeriod = 120 min is outside the documented range 0 … 60 min",
+            "jal: TargetPos = 120 % is outside the documented range 0 … 100 %",
+        ]
+    );
+}
