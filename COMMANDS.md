@@ -437,10 +437,14 @@ Each step stops the push when it fails:
    visualization stay as they are live. Live identical to the compiled config: nothing to push.
 4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
    replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
-   `--dry-run`) the push ends here.
+   `--dry-run`) the push ends here. The ZIP's app catalogue (`LoxAPP3.json`, what the app shows) is Loxone Config's
+   from before: controls of the app the push renames, moves to another room or category, or deletes are named
+   (`app_catalogue_stale` in `-o json`). A save from Loxone Config rewrites the catalogue.
 5. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
 6. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
-   fails and the project is left as it was.
+   fails and the project is left as it was. When app controls changed, the push also reads the catalogue the
+   Miniserver serves and says whether it is still the uploaded one (same `lastModified`: the app shows the old
+   names) or rebuilt (`app_catalogue_rebuilt`).
 7. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
 
 A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:

@@ -150,7 +150,9 @@ Each step stops the push when it fails:
    the push refuses and names the `lox ir diff` to run.
 3. Compile against the live download, so users, passwords and layout stay as they are live.
 4. Show the changes and stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to
-   exactly the compiled file. Without `--force` the push ends here.
+   exactly the compiled file. The app's catalogue in it stays as Loxone Config wrote it, so the push names the app
+   controls it renames, moves or deletes: the app may keep showing them as before until Loxone Config saves.
+   Without `--force` the push ends here.
 5. Upload as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
 6. Download again: the Miniserver must run exactly the compiled file, or the push fails and the project stays as it
    was.

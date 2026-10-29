@@ -12,6 +12,7 @@ macro_rules! println {
 }
 
 mod actions;
+mod app_catalogue;
 mod client;
 mod commands;
 mod config;
