@@ -538,6 +538,13 @@ const INPUT_REF: &[PortSpec] = &[
 ];
 const OUTPUT_REF: &[PortSpec] = &[p("AI", Input), p("AQ", Output)];
 
+/// The XML type a minted message ref (`OutputRefLM`, D51) may mirror: a
+/// push notification of the *Messages* tree. Loxone Config draws the
+/// notification on a page as an `OutputRefLM` with the `OutputRef` shape
+/// plus a `<LoggerMailer>` child carrying the message (oracle session 15,
+/// Config 17.2); it has no `LinkRefType=` and no value flag.
+pub const MESSAGE_REF_TARGET: &str = "Notification";
+
 /// What a ref says about its mirrored object's value: nothing for a
 /// digital one, `Analog="true"` or `Text="true"` (D33, D48).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -704,6 +711,18 @@ pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// Message parameters per block type (D51): the `<LoggerMailer>` child of
+/// an `OutputRefLM` holds what a notification says when its input turns
+/// on (`On=`) and off (`Off=`), and the least time between two messages
+/// (`MinimumTime=`, milliseconds in the XML, seconds in the IR like every
+/// duration). They bind like attribute parameters and never take a wire.
+pub fn message_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "OutputRefLM" => &["On", "Off", "MinimumTime"],
+        _ => &[],
+    }
+}
+
 /// Attribute parameters holding program text — the only bindings that
 /// take a `file("…")` value (D40): a PicoC program is hundreds of lines,
 /// which the line-oriented IR cannot hold inline.
@@ -782,7 +801,7 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "SRFlipFlop" => Some(SR_FLIP_FLOP),
         "State" => Some(STATE),
         "InputRef" => Some(INPUT_REF),
-        "OutputRef" => Some(OUTPUT_REF),
+        "OutputRef" | "OutputRefLM" => Some(OUTPUT_REF),
         "VirtualIn" => Some(VIRTUAL_IN),
         _ => None,
     }

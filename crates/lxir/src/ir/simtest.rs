@@ -210,7 +210,10 @@ impl TitleTable {
             let Some((_, block_type, refs)) = self.info_of.get(uuid) else {
                 return false;
             };
-            if !matches!(block_type.as_str(), "InputRef" | "OutputRef") {
+            if !matches!(
+                block_type.as_str(),
+                "InputRef" | "OutputRef" | "OutputRefLM"
+            ) {
                 if source.is_some() {
                     return false; // two distinct non-ref sources
                 }

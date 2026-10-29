@@ -208,7 +208,7 @@ fn mirror_refusals() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(
-        err.contains("applies to InputRef/OutputRef only, not And"),
+        err.contains("applies to InputRef/OutputRef/OutputRefLM only, not And"),
         "{err}"
     );
 

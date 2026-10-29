@@ -188,6 +188,13 @@ resolved):
   output-port uuids, 19/19" — read off r50 snapshots of 2026-08-25
   that the first push had already damaged (see *UUIDs are unique*
   below).
+- **An `InputRef` of an input carries both of its outputs.** The ref's
+  `AI` reads the input's `AQ` and its `I` reads `Q`: house config, all
+  143 `InputRef`s of sensors and virtual inputs (10 types, `LoxAIRsensor`
+  to `VirtualIn`); refs of `Memory`, `OvertempShutdown` and other block
+  outputs wire `AI` only. Oracle session 15: a minted ref of a
+  `LoxAIRAsensor` with only `AI` wired gained `I ← Q` on save. A module
+  writes both (`AI: x.AQ, I: x.Q`).
 - **A ref's `Title=` is derived from its target.** Loxone Config
   rewrites it to the mirrored object's title on every save, whatever it
   held — minted refs (oracle session 11) and the GUI's own alike,
@@ -219,6 +226,56 @@ resolved):
   of the link. lxir writes the reverse wire as an argument naming the
   mirror's `AI` (ir-spec, *Block declaration*) and mints it without
   `FLG=`.
+
+## Push notifications: `Notification`, `OutputRefLM`, `<LoggerMailer>`
+
+Evidence: oracle session 15 (Loxone Config 17.2.8, 2026-10-29: a
+notification created in *Messages*, placed on a page, a recipient
+ticked, saved; see oracle-wine.md), the house config and the 133 corpus
+configs (113 with at least one `Notification`).
+
+```xml
+<!-- Messages tree, right after the Loxone Cloud Mailer -->
+<C Type="Notification" V="178" U="…" Title="Frostwarnung Garten" WF="16384" Entries="10">
+	<IoData Cr="<category>"/>
+</C>
+
+<!-- on a page -->
+<C Type="OutputRefLM" V="178" U="…" Title="Frostwarnung Garten" Px=… Py=… Px2=… Py2=…
+   Cl="0,0,0" Nio="2" Ref="<Notification>">
+	<Co K="AI" U="…"/>
+	<Co K="AQ" U="…"/>
+	<LoggerMailer RefNotification="<Notification>" On="text" Off="text" MinimumTime="5000" NL="1"/>
+</C>
+```
+
+- **The notification is periphery.** A new one goes at the end of the
+  *Messages* tree (after the Cloud Mailer) and counts in `NumO=`; its
+  UUID is minted like any GUI object. Placing it on a page sets
+  `WF="16400"` on it (in the probe also `Cl="238,238,238"`).
+- **The page object is an `OutputRefLM`**, a ref (`Ref=` = the
+  notification) with an `AI` input and an `AQ`. Freshly placed it has
+  `Cl="0,0,0"` and no `WF=` and no `LinkRefType=`; a later save may add
+  `WF="147456"` (the known save fingerprint, oracle-wine.md). Its title
+  follows the notification's.
+- **The message is a `<LoggerMailer>` child** after the connectors:
+  `RefNotification=` repeats the notification, `On=`/`Off=` are the texts
+  sent when `AI` turns on and off, `MinimumTime=` the least time between
+  two messages in milliseconds (GUI default `5000`, also 53 times in
+  the corpus), `NL="1"` always with `RefNotification=`. An empty `Off`
+  text is not written. The GUI's defaults for `On`/`Off` are `<v>`.
+  Inputs and outputs that log, mail or notify carry the same child with
+  other `Ref…=` attributes (`RefLogger`, `RefMailer`, …); lxir compares
+  all of it (`message <attr>` in the diff).
+- **Recipients are `ACT=` rights** on the notification: ticking a user
+  in Config 17.2 appends `<PRM REF="<Notification>" ACT="3"/>` to the
+  user's `<PH>` list and raises `NUM=` — the same edit as an access
+  right (see *Users, groups and access rights*). Public corpus configs
+  hold `ACT="1"` on notifications (5 entries in 4 configs), two of them
+  together with a `TIM=`. Members of the *Full access* group show as
+  inherited recipients that cannot be unticked, and get no `<PRM>`.
+  **Unverified:** whether the Miniserver delivers to a recipient that
+  `permissions.bin` does not list; Config writes both.
 
 ## Automatic Designer rules: `<C Type="AutopilotRule" APC=…>`
 
@@ -433,7 +490,8 @@ objects (196 in the corpus, among them the built-in *Always* and
 *Never*). Loxone Config, the app and the Miniserver's user management
 API all write this tree. lxir reads it (`lxir::access`, the users/access
 section of `lxir diff`) and writes only access rights on NFC Code
-Touches, for an `access` declaration (D49).
+Touches, for an `access` declaration (D49), and the recipients of push
+notifications, for a `recipients` declaration (D51).
 
 Evidence: the 132 public web configs (154 users in 131 configs, 402
 groups) and the house config, Config 12 – 17.

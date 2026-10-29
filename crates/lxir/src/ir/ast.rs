@@ -1070,11 +1070,15 @@ impl fmt::Display for TilesClaim {
 
 /// `access <slug>` … `end` — the access rights (`TIM=`) on an extern NFC
 /// Code Touch (D49): every user and group that may open it, each with the
-/// access schedule that says when. The declaration owns the block's whole
-/// set of access rights; users, groups and schedules stay with Loxone
-/// Config and the app and are named by title.
+/// access schedule that says when. `recipients <slug>` … `end` — the
+/// recipients (`ACT=`) of an extern push notification (D51). The
+/// declaration owns the block's whole set of these rights; users, groups
+/// and schedules stay with Loxone Config and the app and are named by
+/// title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessDecl {
+    /// Which right the declaration owns.
+    pub right: RightKind,
     pub slug: String,
     pub body: Vec<AccessItem>,
     /// Trailing `#` comment on the header line, verbatim.
@@ -1100,27 +1104,62 @@ pub enum AccessItem {
     Comment(String),
 }
 
-/// `user "<title>": "<schedule>"` or `group "<title>": "<schedule>"`.
+/// The right a rights declaration owns: the attribute of `<PRM>` it
+/// writes, on which block type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RightKind {
+    /// `access`: `TIM=` on an NFC Code Touch (D49).
+    Access,
+    /// `recipients`: `ACT=` on a push notification (D51).
+    Recipients,
+}
+
+impl RightKind {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            RightKind::Access => "access",
+            RightKind::Recipients => "recipients",
+        }
+    }
+
+    /// The block type the declaration applies to.
+    pub fn block_type(self) -> &'static str {
+        match self {
+            RightKind::Access => ACCESS_BLOCK_TYPE,
+            RightKind::Recipients => crate::connectors::MESSAGE_REF_TARGET,
+        }
+    }
+
+    /// What the block is called in messages.
+    pub fn block_noun(self) -> &'static str {
+        match self {
+            RightKind::Access => "an NFC Code Touch",
+            RightKind::Recipients => "a push notification",
+        }
+    }
+}
+
+/// `user "<title>": "<schedule>"` or `group "<title>": "<schedule>"` in an
+/// `access` body; `user "<title>"` or `group "<title>"` in a `recipients`
+/// body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessGrant {
     pub kind: PrincipalKind,
     /// The user's or group's title.
     pub principal: String,
-    /// The access schedule's title.
-    pub schedule: String,
+    /// The access schedule's title; `None` in a `recipients` body.
+    pub schedule: Option<String>,
     /// Trailing `#` comment, verbatim.
     pub comment: Option<String>,
 }
 
 impl fmt::Display for AccessGrant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {}: {}",
-            self.kind.as_str(),
-            quote(&self.principal),
-            quote(&self.schedule)
-        )
+        write!(f, "{} {}", self.kind.as_str(), quote(&self.principal))?;
+        match &self.schedule {
+            Some(schedule) => write!(f, ": {}", quote(schedule)),
+            None => Ok(()),
+        }
     }
 }
 
@@ -1641,10 +1680,13 @@ impl Module {
                                 // type the key is a mistake worth a message
                                 // clearer than the constant-resolution one.
                                 if binding.port == "mirrors" {
-                                    if !matches!(b.block_type.as_str(), "InputRef" | "OutputRef") {
+                                    if !matches!(
+                                        b.block_type.as_str(),
+                                        "InputRef" | "OutputRef" | "OutputRefLM"
+                                    ) {
                                         return compile_err(format!(
                                             "`mirrors:` applies to InputRef/\
-                                             OutputRef only, not {} (in `{} = \
+                                             OutputRef/OutputRefLM only, not {} (in `{} = \
                                              {}(…)`)",
                                             b.block_type, b.slug, b.block_type
                                         ));
@@ -2074,17 +2116,25 @@ impl Module {
                     }
                 }
                 Item::Access(a) => {
-                    let ctx = format!("`access {}`", a.slug);
+                    let (kw, ty_want, noun) = (
+                        a.right.keyword(),
+                        a.right.block_type(),
+                        a.right.block_noun(),
+                    );
+                    let ctx = format!("`{kw} {}`", a.slug);
+                    let what = match a.right {
+                        RightKind::Access => "access rights with a schedule belong to",
+                        RightKind::Recipients => "recipients belong to",
+                    };
                     match names.get(a.slug.as_str()) {
                         Some(NameKind::Extern) => {
                             let ty = self
                                 .externs()
                                 .find(|e| e.slug == a.slug)
                                 .map_or("", |e| e.block_type.as_str());
-                            if ty != ACCESS_BLOCK_TYPE {
+                            if ty != ty_want {
                                 return compile_err(format!(
-                                    "{ctx}: access rights with a schedule belong to an NFC \
-                                     Code Touch, a `{ACCESS_BLOCK_TYPE}` — `{}` is declared \
+                                    "{ctx}: {what} {noun}, a `{ty_want}` — `{}` is declared \
                                      as `{ty}`",
                                     a.slug
                                 ));
@@ -2092,8 +2142,8 @@ impl Module {
                         }
                         Some(kind) => {
                             return compile_err(format!(
-                                "{ctx}: `{}` is {} — access is declared on an extern NFC \
-                                 Code Touch (`extern {} = {ACCESS_BLOCK_TYPE}(…)`)",
+                                "{ctx}: `{}` is {} — {kw} is declared on an extern \
+                                 (`extern {} = {ty_want}(…)`)",
                                 a.slug,
                                 kind.describe(),
                                 a.slug
@@ -2106,33 +2156,55 @@ impl Module {
                             );
                             return compile_err(format!(
                                 "{ctx}: undeclared slug `{}`{hint} — declare the block as \
-                                 `extern {} = {ACCESS_BLOCK_TYPE}(…)`",
+                                 `extern {} = {ty_want}(…)`",
                                 a.slug, a.slug
                             ));
                         }
                     }
                     if !access_declared.insert(&a.slug) {
                         return compile_err(format!(
-                            "{ctx} is declared twice — one declaration holds all access \
-                             rights of the block"
+                            "{ctx} is declared twice — one declaration holds all {} of \
+                             the block",
+                            match a.right {
+                                RightKind::Access => "access rights",
+                                RightKind::Recipients => "recipients",
+                            }
                         ));
                     }
                     let mut principals: BTreeSet<(PrincipalKind, &str)> = BTreeSet::new();
                     for g in a.grants() {
-                        if g.principal.is_empty() || g.schedule.is_empty() {
-                            return compile_err(format!(
-                                "{ctx}: `{g}` — name the {} and the access schedule by \
-                                 their titles",
-                                g.kind.as_str()
-                            ));
+                        match (a.right, &g.schedule) {
+                            (RightKind::Access, Some(s))
+                                if !g.principal.is_empty() && !s.is_empty() => {}
+                            (RightKind::Access, _) => {
+                                return compile_err(format!(
+                                    "{ctx}: `{g}` — name the {} and the access schedule by \
+                                     their titles (`{} \"<title>\": \"<schedule>\"`)",
+                                    g.kind.as_str(),
+                                    g.kind.as_str()
+                                ));
+                            }
+                            (RightKind::Recipients, None) if !g.principal.is_empty() => {}
+                            (RightKind::Recipients, None) => {
+                                return compile_err(format!(
+                                    "{ctx}: `{g}` — name the {} by its title",
+                                    g.kind.as_str()
+                                ));
+                            }
+                            (RightKind::Recipients, Some(_)) => {
+                                return compile_err(format!(
+                                    "{ctx}: `{g}` — a recipient takes no schedule; write \
+                                     `{} {}`",
+                                    g.kind.as_str(),
+                                    quote(&g.principal)
+                                ));
+                            }
                         }
                         if !principals.insert((g.kind, &g.principal)) {
                             return compile_err(format!(
-                                "{ctx}: {} {} is listed twice — a {} has one access \
-                                 schedule per block",
+                                "{ctx}: {} {} is listed twice",
                                 g.kind.as_str(),
                                 quote(&g.principal),
-                                g.kind.as_str()
                             ));
                         }
                     }
@@ -2479,7 +2551,12 @@ impl Module {
                     out.push_str(&format!("{c}{}\n", tail(&c.comment)));
                 }
                 Item::Access(a) => {
-                    out.push_str(&format!("access {}{}\n", a.slug, tail(&a.comment)));
+                    out.push_str(&format!(
+                        "{} {}{}\n",
+                        a.right.keyword(),
+                        a.slug,
+                        tail(&a.comment)
+                    ));
                     for stmt in &a.body {
                         match stmt {
                             AccessItem::Grant(g) => {

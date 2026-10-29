@@ -216,7 +216,7 @@ objects; `title` is human-friendly but locale-volatile — use it only for
 objects you named yourself.
 
 **`mirrors:` — match a ref by what it mirrors (D32).** For
-`InputRef`/`OutputRef` externs only: `mirrors: <slug>` (a bare slug, no
+`InputRef`/`OutputRef`/`OutputRefLM` externs only: `mirrors: <slug>` (a bare slug, no
 quotes) matches the ref object whose `Ref=` attribute names the object
 that slug resolves to — a managed block with a locked identity, or a
 plain-matched extern of the module
@@ -894,11 +894,58 @@ schedule in place, editable in the app again. Only one schedule per
 timer; two externs resolving to the same timer are a compile error.
 Top-level only.
 
+### Push notifications: `OutputRefLM` and `recipients` (D51)
+
+```text
+extern frost = Notification(title: "Frostwarnung Garten")
+
+warn = OutputRefLM(
+	mirrors: frost,
+	AI: zu_kalt.Q,
+	On: "Frost im Garten",
+	Off: "Kein Frost mehr",                      # optional
+	MinimumTime: 12h,                            # optional, default 5 s
+)
+
+recipients frost
+	user "alice"
+	group "Familie"
+end
+```
+
+A push notification (*Benachrichtigung*, type `Notification`) is
+periphery: Loxone Config creates it under *Messages*, and the module
+names it as an extern. Two things about it come from source:
+
+- **What it says, and when.** An `OutputRefLM` block is the notification
+  drawn on a page — a minted mirror (`mirrors:` names the extern
+  `Notification`) with the message parameters Config keeps in its
+  `<LoggerMailer>` child: `On:` is sent when `AI` turns on, `Off:` when it
+  turns off (no text, no message), and `MinimumTime:` is the least time
+  between two messages, a duration (`12h`, `30m`, or seconds as a number)
+  that compiles to milliseconds. The parameters take values, never wires.
+  The block's title follows the notification's, like every ref's.
+- **Who gets it.** A `recipients` declaration owns the recipients of one
+  extern `Notification`: every user and group it lists gets the message,
+  and nobody else. It works like `access`, without schedules: compiling
+  grants what it lists (`ACT=` on the notification), and revokes the
+  users and groups it leaves out. Notifications without a declaration
+  keep their recipients. Members of the *Full access* group get every
+  notification whatever the declaration says; Loxone Config shows them
+  as inherited recipients.
+
+Rules for `recipients` are those of `access` — extern of the right type
+(here `Notification`), one declaration per extern, each principal once,
+titles that name exactly one user or group, no lock state, top-level
+only — and a recipient takes no schedule. Decompile does not lift
+recipients, and leaves `OutputRefLM` blocks with the GUI.
+
 ## Name resolution and validation
 
 - Externs, blocks, `let` constants, templates, `tiles` sets and
   schedules share one namespace per module; duplicates are an error. An
-  `access` declaration names an extern and declares nothing.
+  `access` or `recipients` declaration names an extern and declares
+  nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).

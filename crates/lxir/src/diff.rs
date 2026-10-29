@@ -179,6 +179,29 @@ fn tile_functions(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String
     out
 }
 
+/// What an object's `<LoggerMailer>` does (D51): the notification,
+/// logger, mailer, caller or tracker it reports to, the texts it sends on
+/// and off, and the least time between two messages — one entry per
+/// attribute, keyed `message <attr>`. A message ref (`OutputRefLM`) is one
+/// of these; Loxone Config puts the same child on inputs and outputs that
+/// log or notify. An object without one projects nothing.
+fn message_fields(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String> {
+    doc.element_at(&o.path)
+        .and_then(|el| el.child_elements().find(|c| c.name == "LoggerMailer"))
+        .map(|lm| {
+            lm.attrs
+                .iter()
+                .map(|a| {
+                    (
+                        format!("message {}", a.name),
+                        crate::xml::unescape(&a.value).into_owned(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn taxonomy_titles(objs: &BTreeMap<String, ObjectSummary>) -> BTreeMap<&str, &str> {
     objs.values()
         .filter(|o| matches!(o.block_type.as_str(), "Place" | "Category"))
@@ -270,7 +293,10 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                 // payload (`APC=`); see `diff_attrs`.
                 // Touch Pure Flex tile programs (D41), one change per
                 // function.
-                let (ta, tb) = (tile_functions(a, oa), tile_functions(b, ob));
+                let (mut ta, mut tb) = (tile_functions(a, oa), tile_functions(b, ob));
+                // …and the message of a `<LoggerMailer>` (D51).
+                ta.extend(message_fields(a, oa));
+                tb.extend(message_fields(b, ob));
                 for key in ta.keys().chain(tb.keys()).collect::<BTreeSet<_>>() {
                     let (from, to) = (ta.get(key), tb.get(key));
                     if from != to {
@@ -335,6 +361,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// answer "did another writer change something?" from one parse, no
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 5)
+}
+
+/// The fingerprint as lxir wrote it before messages (`<LoggerMailer>`)
+/// joined the projection (D51). `lxir drift` accepts it so an upgrade
+/// alone does not read as drift; the next compile records the current
+/// form.
+pub fn semantic_fingerprint_v4(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 4)
 }
 
@@ -372,7 +406,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         1 => b"lxir-fingerprint-v1".to_vec(),
         2 => b"lxir-fingerprint-v2".to_vec(),
         3 => b"lxir-fingerprint-v3".to_vec(),
-        _ => b"lxir-fingerprint-v4".to_vec(),
+        4 => b"lxir-fingerprint-v4".to_vec(),
+        _ => b"lxir-fingerprint-v5".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -420,6 +455,12 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         if version >= 4 {
             for (key, v) in tile_functions(doc, o) {
                 field(&mut buf, b'b', &key);
+                field(&mut buf, b'v', &v);
+            }
+        }
+        if version >= 5 {
+            for (key, v) in message_fields(doc, o) {
+                field(&mut buf, b'm', &key);
                 field(&mut buf, b'v', &v);
             }
         }
