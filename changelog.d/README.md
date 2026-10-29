@@ -21,6 +21,9 @@ fine too).
 ```
 
 An `added` fragment makes the release a minor one unless a `release:*` PR label says otherwise. A PR that
-changes only docs or CI is not released by itself; its fragment waits for the next release. CI checks the file
-names (`prepare_release.py --check`); `python3 .github/scripts/prepare_release.py --dry-run` shows the next
-release and its notes.
+changes only docs or CI is not released by itself; its fragment waits for the next release.
+
+CI (`prepare_release.py --check`) checks the file names and fails a PR that writes under `[Unreleased]` in
+`CHANGELOG.md`. Git merges such a PR by text, so after a release it would put the entry into the version just
+released, without a conflict. Corrections to released sections are fine.
+`python3 .github/scripts/prepare_release.py --dry-run` shows the next release and its notes.
