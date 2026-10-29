@@ -25,6 +25,7 @@ observe output), `sha2` (slug entities, config hashes), `thiserror`.
 | `src/diff.rs` | UUID-keyed semantic diff, `locale_suspect` heuristic; compares attribute parameters (`Formula=`) and canonicalized `APC=` rule payloads (D37) | `diff(a, a).is_empty()` |
 | `src/layout.rs` | page geometry as the GUI draws it (`PageGeometry`: footprints, visible port rows, wires, off-page labels) and `place` (D42: clusters as layered graphs, ref tags beside their port; D50: on the paper sheet, packed tighter where room is short) | deterministic; moves only the objects it is handed |
 | `src/render.rs` | `lxir render`: one page as SVG, `PageMetrics` (overlaps, backward and long wires, crossings, wire length) | read-only |
+| `src/scan.rs` | `lxir scan`: personal data in a config by rule (location, person, access code, credential, remote access, mail, network, hardware serial) | reports element, attribute and length only, never a value; CI runs it over every committed `.Loxone` |
 | `src/autopilot.rs` | Automatic Designer `APC=` payload: parse/canonicalize, view summary, field-path change list (D37) | read-only; untyped JSON so unknown fields still diff |
 | `src/project.rs` | `Project`: `lox.toml` load/parse (strict flat TOML subset), path resolution against the file's directory | refuses everything outside the subset with pointed errors (D25) |
 | `src/bin/lxir.rs` | CLI; thin wrappers over the public API only | no semantics of its own |
@@ -50,7 +51,9 @@ Three layers, all run by `cargo test`:
    ```
 
    Real configs contain personal data (addresses, key hashes) — **never
-   commit them**; `.gitignore` blocks `/corpus`. Every new real config is a
+   commit them**; `.gitignore` blocks `/corpus`, and CI runs `lxir scan`
+   over every committed `.Loxone`, failing on any finding (run it before
+   adding a fixture). Every new real config is a
    free test case: drop it in the corpus dir and run the suite.
 
 QA bar for changes: `cargo test && cargo clippy --all-targets && cargo fmt

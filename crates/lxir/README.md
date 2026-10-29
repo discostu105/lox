@@ -194,6 +194,8 @@ lxir types [<Type>]                  # mintable types: ports, units, labels, ran
 lxir roundtrip current.Loxone        # byte-fidelity self-check
 lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
                                      # writer back to raw line breaks
+lxir scan configs/                   # personal data in configs: where, never
+                                     # what; exit 1 if any (CI guard)
 lxir test                            # run the module's `test … end` blocks
                                      # through lox-cli's `lox sim` (--lox/$LOX)
 ```

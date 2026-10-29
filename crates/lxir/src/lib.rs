@@ -49,6 +49,7 @@ pub mod permissions;
 pub mod port_meta;
 pub mod project;
 pub mod render;
+pub mod scan;
 pub mod uuid;
 pub mod xml;
 

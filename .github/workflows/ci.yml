@@ -98,6 +98,12 @@ jobs:
           EXPECTED: crates/lxir/examples/project/out.Loxone
         run: crates/lxir/examples/ci.sh
 
+      # Real Miniserver configs carry personal data; every committed one
+      # must be synthetic (`lxir scan` exits 1 on any finding).
+      - name: no personal data in committed configs
+        if: runner.os == 'Linux'
+        run: git ls-files -z '*.Loxone' | xargs -0 -r target/release/lxir scan
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

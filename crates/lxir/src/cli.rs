@@ -161,6 +161,14 @@ USAGE:
         other byte is copied unchanged. Recompile against the repaired
         base before pushing it.
 
+  lxir scan [--json] <cfg.Loxone | dir>...
+        List the personal data in configs (directories are searched for
+        *.Loxone): installation address and coordinates, users' names,
+        mail addresses, phone numbers and access codes, credentials, the
+        remote-access address, MAC and public IP addresses, hardware
+        serials. Shows where each sits, never the value. Exits 1 when it
+        finds any: a guard against committing a real config.
+
   lxir observe <cfg.Loxone>... [--crosscheck <legacy.json>]...
         Port-direction evidence per block type, as JSON. Multiple configs
         merge into one corpus-level view. --crosscheck compares the
@@ -250,6 +258,7 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["diff", rest @ ..] => cmd_diff(rest),
         ["drift", rest @ ..] => cmd_drift(rest),
         ["repair", rest @ ..] => cmd_repair(rest),
+        ["scan", rest @ ..] => cmd_scan(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
         ["types", rest @ ..] => cmd_types(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
@@ -1840,6 +1849,92 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
         }))?
     );
     Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
+    let json = args.contains(&"--json");
+    let paths: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
+        return Err("usage: lxir scan [--json] <cfg.Loxone | dir>...".into());
+    }
+    let mut files = Vec::new();
+    for p in &paths {
+        collect_configs(std::path::Path::new(p), &mut files).map_err(|e| format!("{p}: {e}"))?;
+    }
+    let mut report = serde_json::Map::new();
+    let (mut total, mut unreadable) = (0, 0);
+    for f in &files {
+        let name = f.display().to_string();
+        // An unreadable file cannot be cleared: report it, scan the rest.
+        let doc = match std::fs::read(f)
+            .map_err(AnyError::from)
+            .and_then(|b| LoxoneDoc::parse(&b).map_err(AnyError::from))
+        {
+            Ok(doc) => doc,
+            Err(e) => {
+                eprintln!("{name}: not scanned: {e}");
+                unreadable += 1;
+                continue;
+            }
+        };
+        let findings = lxir::scan::scan(&doc);
+        total += findings.len();
+        if !json {
+            for x in &findings {
+                println!(
+                    "{name}: {}: {} {} ({} chars)",
+                    x.rule, x.object, x.attr, x.len
+                );
+            }
+        }
+        report.insert(name, serde_json::to_value(&findings)?);
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "{total} finding(s) in {} config(s){}{}",
+            files.len() - unreadable,
+            if unreadable > 0 {
+                format!(", {unreadable} not scanned")
+            } else {
+                String::new()
+            },
+            if total > 0 {
+                " — personal data: keep these files out of the repository"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(if total + unreadable > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `path` itself if it is a file, else every `*.Loxone` below it.
+fn collect_configs(
+    path: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+) -> std::io::Result<()> {
+    if !path.is_dir() {
+        out.push(path.to_path_buf());
+        return Ok(());
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(path)?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<std::io::Result<_>>()?;
+    entries.sort();
+    for e in entries {
+        if e.is_dir() {
+            collect_configs(&e, out)?;
+        } else if e.extension().is_some_and(|x| x == "Loxone") {
+            out.push(e);
+        }
+    }
+    Ok(())
 }
 
 fn cmd_repair(args: &[&str]) -> Result<ExitCode, AnyError> {

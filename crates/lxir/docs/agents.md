@@ -30,6 +30,10 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
    locale-volatile and may change under you.
 6. Treat `NoMatch` / `AmbiguousMatch` as **stop-and-ask**: choosing among
    candidates is a human decision unless instructions already cover it.
+7. **Keep real configs out of repositories.** A house config carries the
+   owner's address, users, access codes and serials. `lxir scan <file or
+   dir>` lists where (never what); exit 1 means it must not be committed.
+   Synthetic fixtures scan clean.
 
 ## The loop
 
