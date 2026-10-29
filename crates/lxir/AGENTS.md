@@ -1,4 +1,4 @@
-# Agent notes for this repository
+# Agent notes for the lxir crate
 
 `lxir` is a Rust library + CLI that treats Loxone Miniserver configs
 (`.Loxone` XML) as source code: a text IR (`.lxir` files) compiles against a
@@ -9,11 +9,11 @@ toolchain (the loop, hard rules, error remedies).
 ## Build & test
 
 ```sh
-cargo test                       # 37+ tests: unit, pipeline, roundtrip
-cargo clippy --all-targets       # must be warning-free
+cargo test -p lxir               # unit, pipeline, roundtrip
+cargo clippy -p lxir --all-targets   # must be warning-free
 cargo fmt --check
-LXIR_CORPUS=<dir> cargo test --test roundtrip   # opt-in: real configs
-cargo run --bin lxir -- help      # the CLI
+LXIR_CORPUS=<dir> cargo test -p lxir --test roundtrip   # opt-in: real configs
+cargo run --bin lxir -- help     # the CLI (also: lox ir help)
 ```
 
 ## Rules that matter here
@@ -34,8 +34,11 @@ cargo run --bin lxir -- help      # the CLI
   project artifacts via `lxir compile --time 1767225600` inside
   `examples/project/` ([examples/README.md](examples/README.md)).
 - Dual-licensed GPL-3.0-or-later / commercial (see [LICENSE](LICENSE)) —
-  same scheme as the sibling `lox` repo. `publish = false` until crates.io
-  publication is wanted.
+  same scheme as lox. Published on crates.io as `lxir`; lox itself uses
+  it by path.
+- This crate lives in the lox workspace (`crates/lxir`). It stays
+  network-free: transport, LoxCC and credentials belong to lox (`src/`).
+  The CLI is `src/cli.rs`, run by the `lxir` binary and by `lox ir`.
 
 ## Doc map
 

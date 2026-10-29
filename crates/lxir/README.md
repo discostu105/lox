@@ -111,16 +111,18 @@ rule today; the rest of the config never notices. See
 ## Try it on your own config
 
 lxir never talks to a Miniserver — it only reads and writes `.Loxone`
-files. Transport is [`lox-cli`](https://github.com/eisber/lox-cli)'s job
-(`lox config download` / `extract` / `push`), or simply Loxone Config's
-own save. A careful first loop:
+files. Transport is [`lox`](https://github.com/discostu105/lox)'s job,
+the CLI this crate lives in: every `lxir` command below also runs as
+`lox ir …`. A careful first loop:
 
 ```sh
-cargo install --git https://github.com/discostu105/lxir   # or a release binary
+brew tap discostu105/lox https://github.com/discostu105/lox
+brew install discostu105/lox/lox   # or a release binary of lox;
+                                   # `cargo install lxir` for lxir alone
 
 # 1. Get the deployed config as XML (or use the .Loxone file
 #    Loxone Config saves locally):
-lox config download && lox config extract <downloaded.zip>
+lox config download --extract --save-as current.zip   # writes current.zip.Loxone
 
 # 2. Look around — decompile is a read-only view of every page:
 lxir decompile current.Loxone | less
@@ -138,9 +140,9 @@ lxir compile --base current.Loxone --module modules/ \
 # 5. Trust nothing — read the diff. It must show exactly your change:
 lxir diff current.Loxone out.Loxone
 
-# 6. Deploy: push the XML back (recompress + upload), or open
-#    out.Loxone in Loxone Config and upload from there:
-lox config push out.Loxone   # take a backup first
+# 6. Deploy: open out.Loxone in Loxone Config and upload from there.
+#    Upload exactly the file you diffed — a tool that re-serializes
+#    or re-wires on the way (lox-cli's `config push`) can change it.
 ```
 
 After a push, download again and keep that file as the new base —
@@ -152,7 +154,7 @@ step 5 is the proof, every time.
 ## Quickstart (CLI)
 
 ```sh
-cargo run --bin lxir -- help         # or: cargo install --path .
+cargo run --bin lxir -- help         # in the lox repo; or `lox ir help`
 
 lxir check modules/beschattung.lxir  # parse + validate (line-numbered errors)
 lxir fmt --write modules/beschattung.lxir
@@ -174,7 +176,7 @@ lxir adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
 lxir observe current.Loxone          # port-direction evidence (JSON)
 lxir roundtrip current.Loxone        # byte-fidelity self-check
 lxir test                            # run the module's `test … end` blocks
-                                     # through `lox sim` (eisber/lox-cli)
+                                     # through lox-cli's `lox sim` (--lox/$LOX)
 ```
 
 A directory with a `lox.toml` — flat `key = "value"` lines naming the
@@ -189,9 +191,9 @@ For a repo holding your `.lxir` sources, [examples/ci.sh](examples/ci.sh)
 is the CI check path: parse/validate, canonical formatting, lock currency,
 byte-determinism, optionally byte-comparison against a committed expected
 output — and `--sync` mode, which additionally requires the sources to
-equal the deployed state (empty semantic diff, drift green). This repo's
-own [workflow](.github/workflows/ci.yml) runs it against the shipped
-example.
+equal the deployed state (empty semantic diff, drift green). The lox
+repo's [workflow](../../.github/workflows/ci.yml) runs it against the
+shipped examples.
 
 ## Quickstart (library)
 
@@ -324,14 +326,14 @@ cover the validation loop.
 
 ## Relationship to `lox` / `lox-cli`
 
-[`lox`](https://github.com/discostu105/lox) (server API, transport, LoxCC)
-and [`lox-cli`](https://github.com/eisber/lox-cli) (Markus Cozowicz's fork:
-config manipulation CLI, DOM-level writer, `lox sim` simulator) already
-exist.
-This crate is the missing foundation both lack: byte-faithful
-serialization, the UUID/identity model, and the IR/lockfile pipeline. The
-intended end state is `lox-cli` (or a successor) depending on `lxir` for
-everything config-model-related.
+lxir lives in the [`lox`](https://github.com/discostu105/lox) repository
+as `crates/lxir`. lox (server API, transport, LoxCC) depends on it for
+everything config-model-related — `lox config diff/show/wiring/lint`, and
+the whole toolchain as `lox ir`. The crate stays a separate, network-free
+library, published on crates.io for anyone else to build on.
+[`lox-cli`](https://github.com/eisber/lox-cli) (Markus Cozowicz's fork of
+lox: config manipulation CLI, DOM-level writer, `lox sim` simulator) is
+where `lxir test` gets its simulator.
 
 ## License
 

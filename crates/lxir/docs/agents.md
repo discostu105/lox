@@ -23,7 +23,8 @@ Loxone logic through this toolchain. The IR exists so you never have to edit
    `lxir check` catches wrong types/ports/directions on managed blocks
    without needing the base config.
 4. **Do not upload.** Compiling produces a file; sending it to a Miniserver
-   is a separate, human-gated step (`lox`/`lox-cli`, outside this crate).
+   is a separate, human-gated step (lox's `config` commands, outside this
+   crate).
    Treat everything here as read-only toward the house.
 5. **Prefer `iname`/`uuid` matching over `title`** for externs — titles are
    locale-volatile and may change under you.

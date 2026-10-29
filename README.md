@@ -215,6 +215,8 @@ lox config find bewegung               # Search blocks by name, type, device, ro
 lox config lint                        # Dead blocks, unwired inputs and motors, duplicate names
 lox config history "Licht"             # How one block changed over time
 lox config restore abc123 --force      # Restore config from git history
+lox ir compile                         # Config as code: compile .lxir modules into the config
+lox ir drift current.Loxone            # Has anyone else changed the config since?
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
 lox schema blind                       # Command schema for AI agent discovery
@@ -255,7 +257,7 @@ lox tui --read-only     # wall display: look, don't touch
 equivalent `lox` command for scripting. Doors, alarms, gates and controls on your `confirm:` list ask for confirmation, reboot and update ask you to type
 the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
 
-The Wiring view, the snapshot browser and the logic diffs are built on [lxir](https://github.com/discostu105/lxir), which parses
+The Wiring view, the snapshot browser and the logic diffs are built on [lxir](crates/lxir), which parses
 `.Loxone` configs into program blocks and wires.
 
 ---
@@ -352,6 +354,27 @@ Every snapshot stays inspectable: `lox config diff` between any two (commit, ver
 
 ---
 
+## Config as Code (lxir)
+
+Write Miniserver logic as text, review it in a pull request, compile it into the real config:
+
+```text
+temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: 28)
+jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
+```
+
+`lox ir compile` writes exactly the XML Loxone Config would have drawn and pins every UUID it mints in a
+lockfile, so the next compile changes only what you changed. Everything you don't manage — hardware, rooms,
+visualization, other logic — passes through byte for byte. `lox ir diff` proves it, `lox ir drift` tells you
+when the GUI or the app wrote to the config since. See [COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the
+[lxir docs](crates/lxir/README.md) (language, lockfile, workflow).
+
+The toolchain is the [`lxir`](crates/lxir) crate in this repository: a network-free library (also on
+[crates.io](https://crates.io/crates/lxir)) that `lox` builds on for `lox ir`, the logic diffs, the Wiring view
+and `lox config show/wiring/find/lint/history`.
+
+---
+
 ## Architecture
 
 ```
@@ -364,14 +387,6 @@ Every snapshot stays inspectable: `lox config diff` between any two (commit, ver
 ```
 
 Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted. Works on Windows, macOS, and Linux.
-
----
-
-## Related Projects
-
-- **[lxir](https://github.com/discostu105/lxir)** — Loxone config-as-code: a text language compiled to `.Loxone` configs,
-  with a lossless XML core, a UUID/identity model, compile/decompile/adopt, semantic diff and simulated tests.
-  `lox` uses it for the Wiring view, `lox config show/wiring/find/lint/history` and the logic diffs.
 
 ---
 
