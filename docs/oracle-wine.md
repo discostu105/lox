@@ -337,9 +337,11 @@ Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):
 scripts/oracle.sh run compiled.Loxone --out saved.Loxone   # open → save → diff
 ```
 
-starts Xvfb, opens a **copy** in the isolated wineprefix, answers the
-recovery dialog with No, unmaps the news overlay, saves via Ctrl+S
-(md5-polled), runs `lxir diff` compiled → GUI-saved, and tears the rig
+starts Xvfb, seeds the prefix's ProgramData from the installed package
+(as the packaged launcher does for its own prefix), opens a **copy** in
+the isolated wineprefix, answers the recovery dialog with No, unmaps the
+news overlay, saves via Ctrl+S (md5-polled), runs `lxir diff` compiled →
+GUI-saved, and tears the rig
 down (`--keep` to leave it warm; `up`/`open`/`save`/`shot`/`status`/
 `down` subcommands drive the pieces for interactive sessions).
 Paths are env-configurable (`ORACLE_PREFIX`, `ORACLE_EXE`,
@@ -365,6 +367,23 @@ semantic diff.
 - An auto-backup recovery dialog ("Soll diese wiederhergestellt
   werden?") may appear for a project identity that was open before —
   answer **No** (`Alt+N`) so the file opens as compiled.
+- **ProgramData must match the installed version.** Loxone Config
+  reads its icon library, block images and templates from
+  `ProgramData/Loxone/Loxone Config <version>`. The packaged launcher
+  (`/usr/bin/loxone-config`) copies them from
+  `/opt/loxone-config-bin/programdata` into *its* prefix whenever the
+  package version changes, stamped in `.loxone-config-bin-version`. The
+  oracle runs the exe directly, so after the update from 17.1.7.27 to
+  17.2.8.28 its prefix had no ProgramData for the new version.
+  - Seen 2026-10-29: loading took 10+ minutes at full CPU and ended in a
+    message box, "Die Icon Library konnte nicht geladen werden". The
+    `Ctrl+S` sent meanwhile never saved.
+  - The 18.10. runs happened to save in time.
+  - `oracle.sh up` now seeds the prefix the same way and with the same
+    stamp. A full r50 open+save then takes 17 s.
+- Loxone Config's message boxes carry the main window's caption
+  (`Loxone Config`, ~84 px high). `oracle.sh` tells the main window
+  apart by height, and a failed save says when a message box is up.
 - **Keyboard injection works** on KDE Wayland: activate the window via a
   KWin script (`workspace.activeWindow = w` over qdbus, matching caption
   `Loxone Config`), then send X11 XTEST key events (python-xlib) —
