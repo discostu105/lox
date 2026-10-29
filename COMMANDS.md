@@ -603,7 +603,20 @@ lox stream --type LightControllerV2    # filter by control type
 lox stream --control "Kitchen Light"   # filter by control name
 lox stream --initial                   # include initial state snapshot
 lox stream --json                      # output as NDJSON (one JSON object per line)
+lox stream --reconnect                 # keep streaming across Miniserver reboots
 ```
+
+Without `--reconnect` the stream ends when the Miniserver goes offline (reboot after a config upload, firmware update) or drops the connection. With `--reconnect` it waits until the Miniserver answers again (retries back off from 1 s to 30 s, gives up after 30 min), re-reads the structure (the reboot may have loaded a new program), logs in again and resumes the same output:
+
+- The gap is reported on stderr (`✗ disconnected: …`, `✓ reconnected after 2m 14s offline`; not with `-q`). With `-o json` it is also part of the output, as event lines between the state lines:
+  ```json
+  {"timestamp":"…","event":"disconnected","reason":"out_of_service","message":"Miniserver going offline (reboot or firmware update)"}
+  {"timestamp":"…","event":"reconnected","offline_secs":134}
+  ```
+  `reason` is `out_of_service` (announced by the Miniserver), `closed` or `error`. CSV output has no marker rows.
+- States that changed while the stream was down are printed right after the reconnect (compared with the last value seen), as are states that are new in the reloaded program.
+- With `--initial` the full snapshot is printed again after every reconnect, so a consumer that rebuilds its state from it starts over from the rebooted Miniserver.
+- The first connection must succeed; a wrong host or credentials still fail at once.
 
 ---
 
