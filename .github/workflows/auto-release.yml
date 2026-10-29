@@ -42,13 +42,17 @@ jobs:
           fetch-depth: 0
 
       # Only the newest green commit releases: if main moved on, the CI run
-      # of the newer commit releases this one along with it.
+      # of the newer commit releases this one along with it. Commits the
+      # release flow pushed itself (the Homebrew formula, "Release vX.Y.Z")
+      # start no CI run, so they don't count: a merge that lands while a
+      # release is running would otherwise wait for the next merge.
       - name: Still the head of main?
         id: head
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ "$(git rev-parse HEAD)" = "$SHA" ]; then
+          newer=$(git log --format=%an "$SHA..HEAD" | grep -cv '^github-actions\[bot\]$' || true)
+          if git merge-base --is-ancestor "$SHA" HEAD && [ "$newer" = 0 ]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::main moved on past $SHA; the next CI run releases it"

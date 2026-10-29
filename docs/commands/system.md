@@ -25,7 +25,7 @@ lox status --net             # network config (IP, MAC, DNS1/2, DHCP, NTP)
 lox status --bus             # CAN bus statistics (incl. parity errors)
 lox status --lan             # LAN statistics (incl. exhaustion, no-buffer)
 lox status --all             # all diagnostic sections
-lox status --energy          # energy dashboard
+lox status -o json | jq .plc_running
 ```
 
 | Flag | Description |
@@ -35,7 +35,8 @@ lox status --energy          # energy dashboard
 | `--bus` | CAN bus statistics (packets, receive/frame/parity errors, overruns) |
 | `--lan` | LAN statistics (TX/RX packets, errors, collisions, underruns, exhaustion, no-buffers) |
 | `--all` | All diagnostic sections |
-| `--energy` | Energy meter dashboard |
+
+Energy meters moved to [`lox energy`](inspection#energy).
 
 ---
 
@@ -46,7 +47,7 @@ lox log                      # last 50 lines
 lox log -n 100               # last 100 lines
 ```
 
-Requires admin user credentials.
+Requires admin user credentials. For the full file: `lox files get /log/def.log`.
 
 ---
 
@@ -109,7 +110,9 @@ lox reboot --yes             # reboot Miniserver (requires --yes)
 ```
 
 {: .warning }
-The `reboot` and `update install` commands affect your live system. Always have a backup.
+The `reboot` and `update install` commands affect your live system. Always have a backup (`lox config pull`).
+
+After `lox config upload` or `restore`, the reboot is what loads the new config.
 
 ---
 
@@ -120,6 +123,21 @@ Browse and download files from the Miniserver:
 ```bash
 lox files ls /               # list root directory
 lox files ls /log            # list log directory
-lox files get /log/def.log   # download a file
+lox files get /log/def.log   # download into the current directory (./def.log)
 lox files get /log/def.log --save-as local.log
+lox files get /log/def.log --save-as - | grep -i error   # to stdout
 ```
+
+`lox files ls` without a path lists `/`. The confirmation shows where the file went; with `-o json`:
+`{"ok": true, "path": …, "saved_as": …, "bytes": …}`.
+
+---
+
+## Terminal UI
+
+```bash
+lox tui                      # live dashboard: rooms, events, energy, system
+lox tui --demo               # without a Miniserver
+```
+
+See the [Terminal UI guide](/lox/guides/tui).

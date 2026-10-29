@@ -398,6 +398,84 @@ so they differ between projects. The operating modes (`Mode` under
 `ModeCaption`) share the singleton nature but use deterministic
 `00000000-…` system UUIDs, identical across projects.
 
+## Users, groups and access rights
+
+The GUI's *Users and Permissions* folder is a `LoxCaption
+CaptionType="20"`. It holds the users (`User`, under a `UserCaption`),
+the user groups (`UserGroup`, under a `UserGroupCaption`) and, in a
+`LoxCaption CaptionType="11"`, the access schedules: `SwitchingTimer`
+objects (196 in the corpus, among them the built-in *Always* and
+*Never*). Loxone Config, the app and the Miniserver's user management
+API all write this tree; lxir only reads it (`lxir::access`, the
+users/access section of `lxir diff`).
+
+Evidence: the 132 public web configs (154 users in 131 configs, 402
+groups) and the house config, Config 12 – 17.
+
+```xml
+<C Type="User" … Title="alice" UsR="-1" LastEdit="562500000"
+   NFCArr="<64 hex>" NFCNArr="Key fob" CodeArr="<32 hex>" iBtnArr="" EAIdArr="">
+	<HP H="<hash>" Sc="2" S="<salt>" Alg="1"/>
+	<HP H="" Sc="-2" S="" Alg="1"/>
+	<PH NUM="2">
+		<PRM REF="<Code Touch block>" TIM="<SwitchingTimer>" ACT="3"/>
+		<PRM REF="<some block>" ACT="3"/>
+	</PH>
+</C>
+<C Type="UserGroup" … Title="Residents" Rights="129" User="<user>,<user>" UserGroups="" LEd="…" TMR="…">
+	<PH NUM="1">…</PH>
+</C>
+```
+
+- **`LastEdit=`** (126 of 154 users) is a Loxone time, seconds since
+  2009-01-01 00:00 local time — the `lastEdit` the user management API
+  reports. Groups carry the same as `LEd=`.
+- **Credentials are attributes.** `NFCArr=` holds the hashed NFC tag
+  IDs (64 hex digits each), `NFCNArr=` their names at the same
+  positions; `CodeArr=` the hashed access codes (32 hex digits, 6
+  users), `iBtnArr=` iButtons, `EAIdArr=` external access IDs. Several
+  tags are joined by `;` — one corpus user has two
+  (`gh_eisber_lox-cli_UseCase_Wallbox-Billing-Exosphere-Database-Connector`:
+  `NFCNArr="…;…"` and two 64-digit hashes in `NFCArr=`). **Unverified:**
+  the separator of several access codes (one config of the old `V="126"`
+  generation has a single 96-digit `CodeArr=`, three codes' worth without
+  a separator) and what `iBtnArr="0"` (9 users) means. lxir splits on
+  `;` and reads a value without one as one entry.
+- **Passwords are `<HP>` children**, two per user: the first is the
+  password, the second the visualization password — the `Sc=` score of
+  each matched `scorePWD`/`scoreVisuPWD` of the user management API on
+  a live Miniserver (FW 17.x, two users). `H=` is the hash, `S=` its
+  salt, `Alg=` the algorithm; an empty `H=` means no password.
+  Attribute orders: `H Sc S Alg` (218), `H Sc S` (60), `H S Sc` (16),
+  `H S` (10). Old configs carry `Pwd=`/`Pwd2=` attributes instead.
+- **Rights are a `<PH NUM=n>` list of `<PRM>`** on users (92 lists) and
+  groups (96), never self-closing. `NUM=` is the number of `PRM`
+  children in all 188 lists, and no list names the same `REF=` twice.
+  `REF=` is the object the right is on. `ACT=` is a UI right (`3` in
+  642 entries, `1` in 5); `TIM=` makes the entry an access right
+  (*Zutritt*) under the access schedule it names — always a
+  `SwitchingTimer`. One entry may carry both. Attribute orders: `REF
+  ACT` (547), `REF TIM ACT` (100), `REF TIM` (6). In Config 16 and 17
+  `TIM=` sits only on `NfcCodeTouch` blocks (8 entries); Config 12
+  configs also carry it on modes, actors, inputs and right groups.
+- **Group membership** is the group's `User=` (comma-separated user
+  UUIDs; 9 groups with several members) and `UserGroups=` (nested
+  groups; always empty in the corpus). `Rights=` and the user's `UsR=`
+  are bit masks (`-1` = all). `UgType="3"` marks the *Nobody* group
+  (131), `UgType="4"` *Full access* (80); `1` and `2` occur 51 times
+  each, meaning unverified.
+- **Full access is no access right.** A user in the full access group
+  without a `TIM=` right on a Code Touch is refused there (live
+  Miniserver, FW 17.x).
+- **Named credentials** of a Code Touch are objects: `Keycode` (access
+  codes) and `NFCID` (tags), in a `KeycodeCaption`/`NFCIDCaption` of the
+  device or as children of the `NfcCodeTouch` block, with the hashed
+  value in `Cde=` and an optional validity window in `StartT=`/`EndT=`.
+
+lxir treats every hash and salt as secret: the diff shows a credential
+as a name, a count or an eight-digit fingerprint (a SHA-256 over the
+stored value), never the value itself.
+
 ## UUID anatomy
 
 Format `{8}-{4}-{4}-{16}` hex — the last segment is 8 bytes, so these are

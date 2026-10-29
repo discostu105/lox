@@ -27,7 +27,8 @@ prints the tag and, in Actions, writes `tag=…` to $GITHUB_OUTPUT. With
 nothing to release it leaves every file alone.
 
 `--dry-run` prints the decision and the notes and changes nothing.
-`--check` only checks the fragments' names (CI runs it on every PR). Needs
+`--check` only checks the fragments' names and that CHANGELOG.md has
+nothing under Unreleased (CI runs it on every PR). Needs
 `gh` (with GH_TOKEN in Actions) for the PR labels and titles.
 """
 
@@ -190,6 +191,23 @@ def release_notes(body, entries):
     return "\n\n".join(p for p in parts if p)
 
 
+def check():
+    """What CI checks on every PR: the fragments' names, and that nothing is
+    written under [Unreleased]. A PR that adds entries there is merged by
+    text, so once a release commit moved the section under a version, the
+    entries land in that version's notes, without a conflict."""
+    entries = fragments()
+    with open("CHANGELOG.md", encoding="utf-8") as f:
+        changelog = f.read()
+    start, end = unreleased(changelog)
+    if changelog[start:end].strip():
+        sys.exit(
+            "CHANGELOG.md: [Unreleased] must stay empty. Put the entry in a new file "
+            f"{FRAGMENT_DIR}/<branch>.<section>.md instead (see {FRAGMENT_DIR}/README.md)."
+        )
+    print(f"{len(entries)} changelog fragment(s) in {FRAGMENT_DIR}/, names OK; [Unreleased] empty")
+
+
 def unreleased(changelog):
     """(start, end) of the Unreleased section's body."""
     m = re.search(r"^## \[Unreleased\][^\n]*\n", changelog, re.M)
@@ -241,7 +259,7 @@ def set_versions(version):
 def main():
     dry_run = "--dry-run" in sys.argv[1:]
     if "--check" in sys.argv[1:]:
-        print(f"{len(fragments())} changelog fragment(s) in {FRAGMENT_DIR}/, names OK")
+        check()
         return
     try:
         tag = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*").strip()

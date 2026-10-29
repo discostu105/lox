@@ -5,11 +5,13 @@
 //!
 //! 1. Download the config the Miniserver runs now (kept under `backups/`).
 //! 2. Drift check: the live config must still be the project's base, at least
-//!    semantically (`lox ir diff` would be empty). A change saved from Loxone
-//!    Config or the app since then is never overwritten.
+//!    semantically (`lox ir diff` would show no logic changes). A change saved
+//!    from Loxone Config or the app since then is never overwritten. Users,
+//!    groups and access rights may differ: the report lists them as kept.
 //! 3. Compile the module against the live download, with a scratch copy of the
-//!    lock. What lxir does not diff — users and their passwords, layout,
-//!    visualization — stays as it is live instead of reverting to the base.
+//!    lock. What the module does not own — users, their passwords and access
+//!    rights, layout, visualization — stays as it is live instead of reverting
+//!    to the base.
 //! 4. Show what the push changes. Nothing to push ends here.
 //! 5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced,
 //!    verified to extract to exactly the compiled file. Without `--force` the
@@ -129,6 +131,10 @@ pub(crate) struct PushReport {
     /// Live differed from the base outside the logic, so the module was
     /// compiled against the live download
     pub rebased: bool,
+    /// Users, groups and access rights that differ between the base and the
+    /// live config; the push compiles against live, so they stay as they are
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept_as_live: Vec<String>,
     /// Logic changes from live to the compiled config
     pub changes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,6 +187,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     fs::write(&live_path, &live_xml)?;
 
     // 2. Drift: nobody else may have changed the logic since the base.
+    let mut kept_as_live = Vec::new();
     let (compile_base, rebased) = match &opts.patched_from {
         Some(source) => {
             let source_xml =
@@ -200,7 +207,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
                 .with_context(|| format!("Cannot read the base {}", project.base.display()))?;
             if base_xml != live_xml {
                 let drift = lxir::diff::diff(&parse(&base_xml)?, &parse(&live_xml)?);
-                if !drift.is_empty() {
+                if !drift.logic_is_empty() {
                     bail!(
                         "The live config changed since the base: {}. Someone saved from \
                          Loxone Config or the app. See what with `lox ir diff {} {}`, \
@@ -215,6 +222,15 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
                     "The live config differs from the base outside the logic (users, layout, \
                      visualization or save noise); compiling against the live download keeps it.",
                 );
+                // Users and access rights belong to Loxone Config and the app:
+                // whatever changed there since the base is kept, and named.
+                kept_as_live = drift.access.iter().map(|c| c.to_string()).collect();
+                if !quiet && !kept_as_live.is_empty() {
+                    eprintln!("Kept as live (users and access, base → live):");
+                    for line in &kept_as_live {
+                        eprintln!("  {line}");
+                    }
+                }
             }
             let rebased = base_xml != live_xml;
             (live_xml.clone(), rebased)
@@ -239,6 +255,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         outcome: "nothing-to-push",
         live: live_path,
         rebased,
+        kept_as_live,
         changes: Vec::new(),
         compiled: None,
         staged: None,
@@ -384,6 +401,7 @@ fn summary(d: &lxir::diff::DocDiff) -> String {
         (d.placements.len(), "room/category changes"),
         (d.wires_added.len(), "wires added"),
         (d.wires_removed.len(), "wires removed"),
+        (d.access.len(), "user/access changes"),
     ];
     parts
         .iter()
@@ -683,6 +701,48 @@ mod tests {
             live.matches("Visu=\"true\"").count(),
             "the live visualization setting is kept"
         );
+    }
+
+    #[test]
+    fn push_keeps_users_and_access_as_live() {
+        let dir = project();
+        // Base and live both have a user; since the base, the app gave her
+        // a second tag and access to a Code Touch (synthetic values).
+        let user = "\t\t<C Type=\"LoxCaption\" V=\"175\" U=\"50000000-0000-0001-ffff504f94112233\" \
+                    Title=\"Users and Permissions\" CaptionType=\"20\" SubType=\"20\">\r\n\
+                    \t\t\t<C Type=\"User\" V=\"175\" U=\"50000001-0000-0010-ffff504f94112233\" \
+                    Title=\"alice\" LastEdit=\"562500000\" NFCArr=\"0A1B\" NFCNArr=\"Key fob\"/>\r\n\
+                    \t\t</C>\r\n";
+        let anchor = "\t\t<C Type=\"VirtualInCaption\"";
+        let base_xml = String::from_utf8(base(dir.path())).unwrap().replacen(
+            anchor,
+            &format!("{user}{anchor}"),
+            1,
+        );
+        fs::write(dir.path().join("pool.Loxone"), &base_xml).unwrap();
+        let live = base_xml.replacen(
+            r#"LastEdit="562500000" NFCArr="0A1B" NFCNArr="Key fob"/>"#,
+            r#"LastEdit="562522922" NFCArr="0A1B;2C3D" NFCNArr="Key fob;Phone"/>"#,
+            1,
+        );
+        assert_ne!(live, base_xml);
+        let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
+
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "staged");
+        assert!(report.rebased);
+        assert_eq!(report.kept_as_live.len(), 2, "{:?}", report.kept_as_live);
+        assert!(report.kept_as_live[0].starts_with(r#"user "alice": NFC tag "Phone" added"#));
+        assert!(report.kept_as_live[1].starts_with(r#"user "alice": last edit"#));
+        let compiled = fs::read(report.compiled.as_ref().unwrap()).unwrap();
+        let compiled = String::from_utf8(compiled).unwrap();
+        assert!(
+            compiled.contains(r#"NFCNArr="Key fob;Phone""#),
+            "live users stay"
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["kept_as_live"].as_array().unwrap().len(), 2);
     }
 
     #[test]

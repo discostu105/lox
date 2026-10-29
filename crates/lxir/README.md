@@ -122,7 +122,7 @@ brew install discostu105/lox/lox   # or a release binary of lox;
 
 # 1. Get the deployed config as XML (or use the .Loxone file
 #    Loxone Config saves locally):
-lox config download --extract --save-as current.zip   # writes current.zip.Loxone
+lox config download --extract --save-as current.zip   # writes current.Loxone
 
 # 2. Look around — decompile is a read-only view of every page:
 lxir decompile current.Loxone | less
@@ -170,7 +170,8 @@ lxir rename alter_name neuer_name    # refactor: sources + lockfile together,
                                      # identities kept, output verified
 lxir lint                            # advisory: unused names, blocks whose
                                      # outputs feed nothing (GUI wires count)
-lxir diff current.Loxone out.Loxone  # semantic diff, locale noise flagged
+lxir diff current.Loxone out.Loxone  # semantic diff, locale noise flagged,
+                                     # users/access section; --json
 lxir render out.Loxone --page Beschattung --out page.svg
                                      # a page as SVG + layout metrics
 lxir compile --relayout Beschattung  # place the page's managed blocks
@@ -288,9 +289,9 @@ which are the intended consumers of this crate.
 | Doc | Contents |
 |---|---|
 | [docs/vision.md](docs/vision.md) | Why config-as-code for Loxone; the Terraform analogy; the two-masters workflow |
-| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D39 |
-| [docs/ir-spec.md](docs/ir-spec.md) | Normative spec of the `.lxir` language (v0) |
-| [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v2) and its invariants |
+| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D45 |
+| [docs/ir-spec.md](docs/ir-spec.md) | Normative spec of the `.lxir` language (v1) |
+| [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v4) and its invariants |
 | [docs/loxone-format.md](docs/loxone-format.md) | Validated reverse-engineering notes on the `.Loxone` format |
 | [docs/implementation.md](docs/implementation.md) | Module map, testing strategy, how to extend |
 | [docs/connector-db.md](docs/connector-db.md) | The consolidated connector database: methodology, findings, admission rules |

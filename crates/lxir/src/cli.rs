@@ -132,8 +132,13 @@ USAGE:
         already be declared in that block's argument list — the error
         says exactly which line to add.
 
-  lxir diff [--exit-code] <old.Loxone> <new.Loxone>
-        Semantic diff. --exit-code exits 1 when the docs differ.
+  lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>
+        Semantic diff: objects, parameters, rooms/categories, wires, and
+        a users/access section (users and groups, membership, NFC tags,
+        codes, passwords, last edit, access and UI rights). Credentials
+        show as names, counts and short fingerprints, never as the stored
+        hash. --exit-code exits 1 when the docs differ, users/access
+        included. --json prints the diff as one JSON object.
 
   lxir drift <cfg.Loxone> [--lock <lock.json>]
         Check a config (typically a fresh download) against the semantic
@@ -1350,10 +1355,15 @@ fn cmd_adopt_one(
 }
 
 fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
-    let (exit_code, old, new) = match args {
-        [old, new] => (false, *old, *new),
-        ["--exit-code", old, new] => (true, *old, *new),
-        _ => return Err("usage: lxir diff [--exit-code] <old.Loxone> <new.Loxone>".into()),
+    const USAGE: &str = "usage: lxir diff [--exit-code] [--json] <old.Loxone> <new.Loxone>";
+    let (flags, files): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| a.starts_with("--"));
+    let (exit_code, json) = (flags.contains(&"--exit-code"), flags.contains(&"--json"));
+    let (old, new) = match (
+        files.as_slice(),
+        flags.iter().all(|f| ["--exit-code", "--json"].contains(f)),
+    ) {
+        ([old, new], true) => (*old, *new),
+        _ => return Err(USAGE.into()),
     };
     let a = read_doc(old)?;
     let b = read_doc(new)?;
@@ -1373,6 +1383,14 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
     }
     let d = lxir::diff::diff(&a, &b);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&d)?);
+        return Ok(if exit_code && !d.is_empty() {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        });
+    }
 
     for o in &d.added {
         println!("+ {} {} {:?}", o.block_type, o.uuid, o.title);
@@ -1467,17 +1485,33 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
     for w in &d.wires_removed {
         println!("-wire {} -> {}", w.from_port, w.to_port);
     }
+    // Users and access: `+user "alice" <uuid>`, `~group "Kids" <uuid>: …`.
+    for c in &d.access {
+        let head = format!(
+            "{}{} {} {}",
+            c.sign(),
+            c.subject.as_str(),
+            c.label(),
+            c.uuid
+        );
+        match c.change {
+            lxir::access::Change::Added | lxir::access::Change::Removed => println!("{head}"),
+            _ => println!("{head}: {}", c.change.describe()),
+        }
+    }
     let locale_noise = d.renamed.iter().filter(|r| r.locale_suspect).count();
     eprintln!(
         "{} added, {} removed, {} renamed ({locale_noise} locale-suspect), \
-         {} param changes, {} room/category changes, {}/{} wires added/removed",
+         {} param changes, {} room/category changes, {}/{} wires added/removed, \
+         {} user/access changes",
         d.added.len(),
         d.removed.len(),
         d.renamed.len(),
         d.param_changes.len(),
         d.placements.len(),
         d.wires_added.len(),
-        d.wires_removed.len()
+        d.wires_removed.len(),
+        d.access.len()
     );
     if exit_code && !d.is_empty() {
         return Ok(ExitCode::FAILURE);

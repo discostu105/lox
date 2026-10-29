@@ -10,10 +10,17 @@ when it is released.
 
 ## [Unreleased]
 
-## [0.15.1] — 2026-10-29
+## [0.15.2] — 2026-10-29
 
 ### Fixed
+- `lox ir compile` keeps the order Loxone Config gave the blocks it manages: their place among the objects of their page, their attributes and their connectors (lxir D47). It used to append them at the end of the page in its own attribute and connector order, so after a save in Loxone Config, `lox config push` found bytes to upload where the logic had not changed
 - `lox ir compile` writes its blocks at the block version of the config it compiles against (`V="178"` under Loxone Config 17.2), so a save in Loxone Config no longer restamps them. It used to write a fixed `V="175"`. `lox ir adopt` accepts 17.2 configs, which it refused block by block. The connector table is verified for 17.2 with the save oracle (lxir D46)
+- Docs: a Config as Code (lxir) guide and a Terminal UI guide on the docs site; README, COMMANDS.md and the site
+  brought in line with the CLI (license, `--serial`, `lox energy`, `config log -c`, `stream -o json`, blinds,
+  charger limit in kWh, token auth, per-context scenes)
+- `lox thermostat --help` lists the real operating modes; `lox ctx add --help` says what `--serial` is for
+
+## [0.15.1] — 2026-10-29
 
 ### Fixed
 - `lox ir compile` puts each wire it rebuilds back where the base had it among the connector's inputs (lxir D45). Loxone Config sorts a connector's inputs when it saves, and the compile used to move its own wires to the end, so after a save in Loxone Config, `lox config push` found bytes to upload where the logic had not changed

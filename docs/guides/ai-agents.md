@@ -2,7 +2,7 @@
 title: AI Agent Integration
 layout: default
 parent: Guides
-nav_order: 2
+nav_order: 3
 ---
 
 # AI Agent Integration
@@ -44,7 +44,7 @@ Give your LLM a shell tool:
   "parameters": {
     "command": {
       "type": "string",
-      "description": "e.g. 'on Wohnzimmer', 'blind Sudseite pos 50', 'status --energy'"
+      "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'sensors --type door-window'"
     }
   }
 }
@@ -100,7 +100,7 @@ Error codes:
 | `control_not_found` | No control matches the name |
 | `ambiguous_control` | Multiple controls match — use `--room` to disambiguate |
 | `config_not_found` | Missing config file |
-| `confirmation_required` | Command needs `--yes` flag |
+| `confirmation_required` | Command needs `--yes` (reboot, firmware update; user and access changes without a terminal) |
 | `declined_by_user` | The confirmation was answered with no |
 | `user_not_found` | No user matches the name |
 | `tag_not_found` | The user has no NFC tag with that name or ID |
@@ -112,6 +112,23 @@ Error codes:
 | `http_error` | HTTP request failed |
 | `connection_error` | Cannot reach Miniserver |
 | `error` | Generic error |
+
+## Explaining behavior
+
+To answer *why is this light on?*, an agent can read the config logic instead of guessing:
+
+```bash
+lox config wiring "Licht Gang" --trace up -o json    # inputs, sensors, parameters upstream
+lox config find bewegung -o json                     # blocks by name, type, device, room
+lox config diff -o json                              # the last config change
+```
+
+## Writing logic
+
+Agents can also author Miniserver logic as [lxir](config-as-code) text: `lox ir check --json` returns
+line-numbered errors, `lox config diff base.Loxone out.Loxone` shows the result by name, and only
+`lox config push --force` (a step for the human) touches the Miniserver. Rules for agents:
+[crates/lxir/docs/agents.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/agents.md).
 
 ## Conditional logic
 
@@ -128,7 +145,7 @@ lox if "Schalter" eq 1 && lox on "Licht"
 For continuous monitoring, use WebSocket streaming:
 
 ```bash
-lox stream -o json                       # NDJSON stream of all changes
+lox stream -o json --reconnect           # NDJSON stream of all changes, across reboots
 lox stream --room "Kitchen" -o json      # filtered by room
 lox stream --type LightControllerV2      # filtered by type
 ```

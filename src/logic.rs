@@ -1487,6 +1487,26 @@ impl From<&str> for DiffLine {
 }
 
 const PERIPHERY: &str = "(devices & periphery)";
+const ACCESS: &str = "(users & access)";
+
+/// The word a users/access diff line starts with, after its sign.
+fn access_word(subject: lxir::access::Subject) -> &'static str {
+    use lxir::access::Subject;
+    match subject {
+        Subject::User => "user",
+        Subject::Group => "group",
+        Subject::AccessCode => "code",
+        Subject::NfcTag => "tag",
+    }
+}
+
+fn is_access_line(text: &str) -> bool {
+    text.get(2..).is_some_and(|rest| {
+        ["user ", "group ", "code ", "tag "]
+            .iter()
+            .any(|w| rest.starts_with(w))
+    })
+}
 
 /// Semantic config diff as human-readable lines (System › Config, `lox config
 /// diff`, commit messages of `lox config pull`).
@@ -1621,12 +1641,26 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
         let (p, t, o) = wire_line(a, w, '-');
         push(p, t, o);
     }
+    // users, groups and access rights: their own group, after the periphery
+    for c in &d.access {
+        let who = format!(
+            "{} {:<6} {}",
+            c.sign(),
+            access_word(c.subject),
+            c.title.clone().unwrap_or_else(|| c.uuid.clone())
+        );
+        let text = match c.change {
+            lxir::access::Change::Added | lxir::access::Change::Removed => who,
+            _ => format!("{who} · {}", c.change.describe()),
+        };
+        push(ACCESS.into(), text, Some(c.uuid.clone()));
+    }
     let mut out: Vec<DiffLine> = Vec::new();
     if by_page.is_empty() {
         return out;
     }
     // totals: filled from the collapsed lines, so re-created pairs count once
-    let mut tot = [0usize; 8];
+    let mut tot = [0usize; 9];
     // loose blocks and wires last
     by_page.sort_by_key(|(p, _)| p.starts_with('('));
     for (page, lines) in by_page {
@@ -1679,7 +1713,9 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
         for (mut l, n) in shown {
             let t = &l.text;
             // re-created wires follow their blocks: not counted on their own
-            let k = if t.ends_with("re-created") {
+            let k = if is_access_line(t) {
+                8
+            } else if t.ends_with("re-created") {
                 if t.starts_with("~ block") { 4 } else { 7 }
             } else if t.starts_with("+ block") {
                 0
@@ -1717,6 +1753,10 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
     }
     if tot[5] + tot[6] > 0 {
         parts.push(format!("wires +{} −{}", tot[5], tot[6]));
+    }
+    if tot[8] > 0 {
+        let what = if tot[8] == 1 { "change" } else { "changes" };
+        parts.push(format!("{} user/access {what}", tot[8]));
     }
     if parts.is_empty() {
         // only re-created wires: nothing a person changed
@@ -2234,6 +2274,37 @@ mod tests {
             "{:?}",
             lines
         );
+    }
+
+    #[test]
+    fn diff_lists_users_and_access_in_their_own_group() {
+        let st = demo::structure();
+        let a = demo::loxone_xml(&st);
+        // A synthetic user, then the same user with a second tag.
+        let user = |tags: &str, names: &str| {
+            format!(
+                "<C Type=\"User\" V=\"175\" U=\"50000001-0000-0010-ffff504f94112233\" \
+                 Title=\"alice\" NFCArr=\"{tags}\" NFCNArr=\"{names}\"/>"
+            )
+        };
+        let close = a.rfind("</C>").unwrap();
+        let with = |u: String| format!("{}{u}{}", &a[..close], &a[close..]);
+        let (old, new) = (
+            with(user("0A1B", "Key fob")),
+            with(user("0A1B;2C3D", "Key fob;Phone")),
+        );
+        let lines = diff_lines(old.as_bytes(), new.as_bytes()).unwrap();
+        assert_eq!(lines[0], "= 1 user/access change");
+        assert_eq!(lines[1], "# (users & access)");
+        assert!(
+            lines[2].starts_with("~ user   alice · NFC tag \"Phone\" added ["),
+            "{lines:?}"
+        );
+        // A new user comes with what it brings.
+        let added = diff_lines(a.as_bytes(), old.as_bytes()).unwrap();
+        assert_eq!(added[0], "= 2 user/access changes");
+        assert_eq!(added[2], "+ user   alice");
+        assert!(added[3].starts_with("~ user   alice · NFC tag \"Key fob\" added ["));
     }
 
     #[test]

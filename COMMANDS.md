@@ -43,13 +43,15 @@ lox --trace-id "abc-123" on "Licht"    # correlation ID for agent tracing
 
 ```bash
 lox setup set --host https://192.168.1.100 --user admin --pass secret
-lox setup set --serial YOUR_SERIAL     # enables correct TLS hostname
+lox setup set --serial 504F94112233   # names the config repo folder, OTel device.id; checked by config push
 lox setup set --verify-ssl             # enable cert verification
 lox setup set --no-verify-ssl          # disable (default, self-signed)
 lox setup show                         # show config (password redacted)
 ```
 
-All config fields also support env vars: `LOX_HOST`, `LOX_USER`, `LOX_PASS`, `LOX_SERIAL`
+`setup set` changes only the fields you pass. All of them also read env vars (`LOX_HOST`, `LOX_USER`, `LOX_PASS`,
+`LOX_SERIAL`). `read -rs LOX_PASS && export LOX_PASS` keeps the password out of the process list and your shell
+history:
 ```bash
 LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 ```
@@ -74,14 +76,14 @@ lox ls -t Jalousie                     # filter by type
 lox ls -r "Wohnzimmer"                 # filter by room
 lox ls -c "Beleuchtung"                # filter by category
 lox ls -f                              # only favorites
-lox ls -v                              # include live values (slower)
+lox ls --values                        # include live values (one request per control: slower)
 
 lox get "Licht Wohnzimmer"            # full state of one control
 lox info "Licht Wohnzimmer"           # detailed: sub-controls, states, moods
 
 lox rooms                             # list all rooms
 lox categories                        # list all categories
-lox globals                           # global states (operating mode, sunrise, etc.)
+lox globals                           # global states (operating mode, sunrise/sunset, wind/rain warnings)
 lox modes                             # operating modes
 lox extensions                        # connected extensions and devices
 lox discover                          # find Miniservers on local network (UDP)
@@ -93,6 +95,18 @@ lox health --problems                 # show only devices with issues
 
 lox schema                            # list all commands with metadata (for AI agents)
 lox schema blind                      # show schema for a specific command
+```
+
+---
+
+## Sensors & Energy
+
+```bash
+lox sensors                           # all readings: temperature, door/window, motion, smoke
+lox sensors --type door-window        # what's open (also: temperature, motion, smoke)
+lox sensors -r "Wohnzimmer"           # one room
+lox energy                            # energy meters (power, totals)
+lox energy -r Keller
 ```
 
 ---
@@ -113,6 +127,7 @@ lox light moods "Licht" -o json             # moods as JSON with control metadat
 lox light dim "Stehlampe" 75                # set dimmer 0-100% (Dimmer controls; use a mood for a lighting controller)
 lox light color "LED Strip" "#FF0000"       # hex RGB
 lox light color "LED Strip" "hsv(120,100,100)"  # HSV
+lox light color "LED Strip" "temp(80,2700)"     # white: brightness %, color temperature K
 ```
 
 ---
@@ -148,7 +163,7 @@ lox gate "Garagentor" stop
 ```bash
 lox thermostat "Heizung" temp 22.5                 # set comfort temp
 lox thermostat "Heizung" mode auto                  # auto|manual|auto-heat|auto-cool|manual-heat|manual-cool
-lox thermostat "Heizung" override 24 120            # override 24°C for 120 min
+lox thermostat "Heizung" override 24 120            # override 24°C for 120 min (default 60)
 lox thermostat "Heizung"                            # show current state
 lox weather                                         # current weather data
 lox weather --forecast                              # 7-day forecast
@@ -161,13 +176,25 @@ lox weather --forecast                              # 7-day forecast
 ```bash
 lox alarm "Alarmanlage" arm            # arm alarm
 lox alarm "Alarmanlage" arm --no-motion  # arm without motion detection
-lox alarm "Alarmanlage" disarm
+lox alarm "Alarmanlage" arm-home       # arm in home mode
+lox alarm "Alarmanlage" disarm --code 1234
 lox alarm "Alarmanlage" quit           # acknowledge/silence
 lox door "Haustür" lock                # lock a door lock
 lox door "Haustür" unlock              # unlock
 lox door "Haustür" open                # open (e.g. electric strike)
-lox lock "Heizung" --reason "Wartung"  # lock a control (admin)
+lox intercom "Türklingel" answer        # also: hangup, open
+lox lock "Heizung" --reason "Wartung"  # lock a control against changes (admin, firmware 11.3.2.11+)
 lox unlock "Heizung"
+```
+
+---
+
+## EV Charger
+
+```bash
+lox charger "Wallbox" start
+lox charger "Wallbox" start --limit 20   # stop after 20 kWh
+lox charger "Wallbox" pause              # also: stop
 ```
 
 ---
@@ -188,6 +215,7 @@ lox history "Temperatur" -o csv        # CSV output
 ```bash
 lox if "Temperatur Außen" gt 25        # exit 0=true, 1=false
 lox if "Schalter" eq 1 && lox on "Licht"
+lox if "Temperatur" lt 19 -r Bad && lox thermostat "Heizung Bad" override 23 30
 ```
 
 Operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
@@ -209,9 +237,13 @@ lox input pulse "Taster"
 ```bash
 lox music play                         # play zone 1
 lox music pause 2                      # pause zone 2
-lox music stop
-lox music volume 50                    # volume 0-100
+lox music volume 50                    # volume 0-100 (zone 1)
+lox music volume 30 2                  # volume 30 in zone 2
+lox music next                         # also: prev, stop, mute, unmute
 ```
+
+Every music command takes an optional zone number (default 1). It talks to the Music Server's unofficial API on
+port 7091 of the host.
 
 ---
 
@@ -269,16 +301,16 @@ lox config compress out.Loxone --save-as sps0.LoxCC
 lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
 lox config upload config.zip --force   # upload as sps_new.zip, loaded on the next reboot (dangerous)
 lox config push --force                # deploy an lxir project, verified (see Config as Code)
-lox config users file.Loxone           # users of a config: NFC tags, codes, groups, access rights
-lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
+lox config users file.Loxone           # users in a .Loxone file: NFC tags, codes, groups, access rights
+lox config devices file.Loxone         # hardware devices in it (Tree/Air/Network)
 
 # Git-based config versioning
 lox config init ~/loxone-config        # initialize a git repo for config tracking
 lox config pull                        # download, decompress, diff & git-commit
 lox config pull --quiet                # cron-friendly (no output unless error)
 lox config log                         # show config change history
-lox config log -n 5                    # last 5 entries
-lox config restore abc123 --force      # restore config from git history & upload
+lox config log -c 5                    # last 5 entries (default 20)
+lox config restore abc123 --force      # upload a config from git history (applied on the next reboot)
 ```
 
 The `pull` workflow: FTP download → LoxCC decompress → logic diff → git commit with meaningful message.
@@ -349,6 +381,7 @@ lox ir compile                         # in a lox.toml project: base + module + 
 lox ir compile --base current.Loxone --module pages/ --lock haus.lock.json \
                --out out.Loxone --serial 504F94112233
 lox ir diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
+lox ir diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
 lox ir drift current.Loxone            # did another writer change the config since the last compile?
 lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
 lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
@@ -359,9 +392,21 @@ lox ir test --lox ~/lox-cli/lox        # `test … end` blocks through lox-cli's
 ```
 
 Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.
-A directory with a `lox.toml` (`base`, `module`, `lock`, `out`, `serial`, `page`) is a project: inside it
-`compile` needs no flags and `check`/`fmt`/`drift` use its module and lock. The language, the lockfile and the
-workflow are documented in [crates/lxir](crates/lxir/README.md).
+
+A directory with a `lox.toml` is a project: inside it `compile` needs no flags and `check`/`fmt`/`drift`/`lint`
+use its module and lock. Paths are relative to the file:
+
+```toml
+base   = "base.Loxone"       # the deployed config (required) — lox config download --extract --save-as base.zip
+module = "pages"             # a .lxir file or a directory of them (required)
+lock   = "lxir.lock.json"    # default
+out    = "out.Loxone"        # default
+serial = "504F94112233"      # optional; config push refuses a Miniserver with another serial
+```
+
+Review a compile by name with `lox config diff base.Loxone out.Loxone` (`lox ir diff` lists UUIDs).
+Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). The language and the lockfile:
+[crates/lxir](crates/lxir/README.md).
 
 ### Deploying a project: `lox config push`
 
@@ -380,8 +425,10 @@ Each step stops the push when it fails:
 1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`).
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
    since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
-3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, layout and
-   visualization stay as they are live. Live identical to the compiled config: nothing to push.
+   Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
+   (`kept_as_live` in the JSON report) and goes on.
+3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, access
+   rights, layout and visualization stay as they are live. Live identical to the compiled config: nothing to push.
 4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
    replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
    `--dry-run`) the push ends here.
@@ -756,12 +803,12 @@ In text fields (`/`, `:`, `=`, facets, search) letters are text: `Esc` cancels, 
 ## Streaming
 
 ```bash
-lox stream                             # stream all state changes via WebSocket (NDJSON with --json)
+lox stream                             # stream all state changes via WebSocket
 lox stream --room "Kitchen"            # filter by room
 lox stream --type LightControllerV2    # filter by control type
 lox stream --control "Kitchen Light"   # filter by control name
 lox stream --initial                   # include initial state snapshot
-lox stream --json                      # output as NDJSON (one JSON object per line)
+lox stream -o json                     # NDJSON: one JSON object per line (pipe into jq)
 lox stream --reconnect                 # keep streaming across Miniserver reboots
 ```
 
@@ -811,6 +858,9 @@ lox otel push --endpoint http://localhost:4318
 lox otel push --endpoint http://localhost:4318 --no-logs
 ```
 
+`--endpoint` defaults to `http://localhost:4318`. Dynatrace and some other backends need `--delta` (delta
+temporality for counters). See the [OpenTelemetry guide](docs/guides/opentelemetry.md) for the metric list.
+
 ---
 
 ## Context Management
@@ -819,7 +869,7 @@ Manage multiple Miniserver connections, similar to `kubectl config use-context`:
 
 ```bash
 lox ctx add home --host https://192.168.1.100 --user admin --pass secret
-lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret --serial 504F94AABBCC
 lox ctx use home                    # switch active context
 lox ctx home                        # shortcut for `lox ctx use home`
 lox ctx list                        # list contexts (* = active)
@@ -879,7 +929,7 @@ contexts:
 ```bash
 lox update check                       # check for updates
 lox update install --yes               # install update
-lox reboot --yes                       # reboot Miniserver
+lox reboot --yes                       # reboot Miniserver (refuses without --yes)
 ```
 
 ---
@@ -887,9 +937,11 @@ lox reboot --yes                       # reboot Miniserver
 ## Shell Completions
 
 ```bash
-lox completions bash                   # generate bash completions
-lox completions zsh                    # generate zsh completions
-lox completions fish                   # generate fish completions
+lox completions --install              # detect your shell and install (Homebrew does this for you)
+lox completions bash                   # print: bash | zsh | fish | powershell | elvish
+
+# PowerShell: add to $PROFILE
+lox completions powershell | Out-String | Invoke-Expression
 
 # Install (bash):
 lox completions bash > /etc/bash_completion.d/lox

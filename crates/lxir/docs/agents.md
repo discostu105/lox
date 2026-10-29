@@ -77,7 +77,10 @@ stay where they are (D42).
 
 Present step 4's output when proposing a change: it shows added blocks,
 wires, and parameter changes in reviewable form, and flags locale-rename
-noise (`[locale?]`) so it isn't mistaken for a real edit.
+noise (`[locale?]`) so it isn't mistaken for a real edit. Users, groups,
+credentials and access rights come in a section of their own (`user`,
+`group`, `access code`, `NFC tag` lines); credentials show as names,
+counts and short fingerprints only. `--json` gives the same diff as JSON.
 
 The decompile view is for **reading, not compiling**: compiling it against
 the same base would mint duplicates of every managed block and claim
