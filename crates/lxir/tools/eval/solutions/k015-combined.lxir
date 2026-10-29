@@ -1,0 +1,7 @@
+page "Wohnzimmer"
+
+extern sonne = SysVar(title: "Sonnenschein")
+extern aussentemp = SysVar(title: "Außentemperatur")
+extern jalousie = JalousieUpDown2(uuid: "70000011-0011-0001-ffff000000000001")
+
+jalousie.InputTriggerDown <- sonne.AQ and aussentemp.AQ >= 25

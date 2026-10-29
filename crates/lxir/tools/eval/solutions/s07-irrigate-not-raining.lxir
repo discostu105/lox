@@ -1,0 +1,10 @@
+page "Garten"
+
+extern feuchte = VirtualIn(iname: "VI3")
+extern regen = SysVar(title: "Regen")
+extern ventil = VirtualOut(title: "Bewässerungsventil")
+
+trocken = Less("Boden trocken", Input1: feuchte.AQ, Input2: 30)
+kein_regen = Not(I: regen.AQ)
+giessen = And("Gießen", I1: trocken.Q, I2: kein_regen.Q)
+ventil.I1 <- giessen.Q

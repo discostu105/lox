@@ -72,6 +72,12 @@ types) contradict each other. Results and methodology:
       save writes (oracle session 18). Open: adopting existing ones
       (they stay externs); a room/category for minted ones (the D39
       claims work on externs only).
+- [x] Eval harness over lox-cli's task set (2026-10-29,
+      `tools/eval/`): 260 of 475 tasks use only mintable types; a
+      10-case sample passes 9, and the failure is lox-sim's DayTimer model
+      (it ignores `From=`/`Modes=`, so it is worth reporting upstream).
+      Open: a larger sample; `test` blocks generated from a case's
+      scenarios so solutions carry their own checks.
 - [ ] LightController2 moods from source. Surveyed 2026-10-29: a mood
       is a `<LightsceneC>` in `<LightscenesC Num= Outputs= FC=>` with a
       minted `UUID=`, a scene id `SID=` that `<LSConfig OpM= ScMv=>`

@@ -56,6 +56,11 @@ Three layers, all run by `cargo test`:
 QA bar for changes: `cargo test && cargo clippy --all-targets && cargo fmt
 --check`, all clean.
 
+Outside `cargo test`, **`tools/eval/`** grades IR solutions to lox-cli's
+natural-language automation tasks (blocks, wires, parameters, simulator
+scenarios), reading the cases from a lox-cli checkout. It measures the IR
+as an agent's tool; see [tools/eval/README.md](../tools/eval/README.md).
+
 ## How to add a block type to the builtin table
 
 The table (`connectors::builtin`) is the compiler's license to mint. Grow it

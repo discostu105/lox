@@ -3410,3 +3410,21 @@ fn virtual_inputs_are_minted_into_their_folder() {
     let err = compile(&base(), &bad, &mut Lockfile::new(), &opts()).unwrap_err();
     assert!(err.to_string().contains("\"true\" or \"false\""), "{err}");
 }
+
+#[test]
+fn decompile_names_repeated_uuids_instead_of_a_slug_clash() {
+    // Two objects sharing one UUID (seen in lox-cli's eval fixture) used
+    // to surface as `duplicate name` from the lifted module.
+    let text = String::from_utf8(std::fs::read("examples/configs/haus.Loxone").unwrap())
+        .unwrap()
+        .replace(
+            "U=\"20000002-0000-0020-ffff504f94112233\"",
+            "U=\"20000001-0000-0010-ffff504f94112233\"",
+        );
+    let doc = LoxoneDoc::parse(text.as_bytes()).unwrap();
+    let err = decompile(&doc, &DecompileOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("duplicate UUID"), "{err}");
+    assert!(err.contains("20000001-0000-0010-ffff504f94112233"), "{err}");
+}

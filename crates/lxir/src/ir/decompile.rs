@@ -132,6 +132,9 @@ pub struct PageModule {
 /// `page "Title"` statements (objects not on any logic page lead in a
 /// `# periphery` section).
 pub fn decompile(doc: &LoxoneDoc, opts: &DecompileOptions) -> Result<(Module, DecompileReport)> {
+    // Repeated UUIDs would surface as a confusing duplicate-slug error
+    // on the lifted module; name the cause instead.
+    doc.require_unique_uuids("config")?;
     let lift = Lift::build(doc, opts);
     let module = lift.single_module();
     module.validate()?;
@@ -145,6 +148,7 @@ pub fn decompile_pages(
     doc: &LoxoneDoc,
     opts: &DecompileOptions,
 ) -> Result<(Vec<PageModule>, DecompileReport)> {
+    doc.require_unique_uuids("config")?;
     let lift = Lift::build(doc, opts);
     let pages = lift.page_modules()?;
     Ok((pages, lift.report()))
