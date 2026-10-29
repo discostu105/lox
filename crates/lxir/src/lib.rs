@@ -19,11 +19,17 @@
 //! - [`project`] — `lox.toml` project files: one directory, one deployment
 //!   target, zero flags.
 //!
-//! Transport (FTP, LoxCC compression, push) is deliberately **out of scope**;
-//! it lives in the `lox` / `lox-cli` CLIs, which are the intended consumers
-//! of this crate.
+//! - [`cli`] — the toolchain's command line (the `lxir` binary, `lox ir`).
+//!
+//! Transport (FTP, LoxCC compression, push) is deliberately **out of scope**:
+//! it lives in the `lox` CLI (same repository), which consumes this crate.
+
+// `cli` was the `lxir` binary's main file and still names the crate as
+// `lxir::…`, the way a dependent does.
+extern crate self as lxir;
 
 pub mod autopilot;
+pub mod cli;
 pub mod connectors;
 pub mod diff;
 pub mod doc;

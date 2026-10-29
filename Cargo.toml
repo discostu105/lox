@@ -1,3 +1,8 @@
+[workspace]
+members = [".", "crates/lxir"]
+# Plain `cargo build/test/clippy` cover both crates.
+default-members = [".", "crates/lxir"]
+
 [package]
 name = "lox"
 version = "0.14.0"
@@ -8,8 +13,12 @@ repository = "https://github.com/discostu105/lox"
 homepage = "https://github.com/discostu105/lox"
 keywords = ["loxone", "smarthome", "home-automation", "cli", "miniserver"]
 categories = ["command-line-utilities", "network-programming"]
-license = "GPL-3.0-or-later AND LicenseRef-Commercial"
+license = "GPL-3.0-or-later OR LicenseRef-Commercial"
 readme = "README.md"
+# The crates.io name `lox` belongs to another project; lox ships as release
+# binaries and through Homebrew.
+publish = false
+default-run = "lox"
 
 [[bin]]
 name = "lox"
@@ -61,7 +70,7 @@ quick-xml = "0.37"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color"], optional = true }
 crossterm = { version = "0.29", features = ["event-stream"], optional = true }
 nucleo-matcher = { version = "0.3", optional = true }
-lxir = "0.1"
+lxir = { path = "crates/lxir", version = "0.1.0" }
 unicode-width = { version = "0.2", optional = true }
 unicode-segmentation = { version = "1", optional = true }
 libc = { version = "0.2", optional = true }

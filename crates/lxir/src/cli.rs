@@ -1,5 +1,6 @@
-//! `lxir` — command-line interface over the library, so the IR pipeline is
-//! usable without writing Rust: by humans, scripts, and AI agents alike.
+//! Command-line interface over the library, so the IR pipeline is usable
+//! without writing Rust: by humans, scripts, and AI agents alike. The
+//! `lxir` binary runs it, and so does `lox ir` inside the lox CLI.
 //!
 //! Every subcommand is a thin wrapper over one public library entry point;
 //! nothing here has semantics of its own.
@@ -160,8 +161,29 @@ PROJECT FILE (lox.toml):
 
 type AnyError = Box<dyn std::error::Error>;
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// How help and error hints spell the command: `lxir` for the standalone
+/// binary, `lox ir` inside lox.
+static PROG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn prog() -> &'static str {
+    PROG.get().map_or("lxir", String::as_str)
+}
+
+/// The usage text, spelled for [`prog`].
+fn usage() -> String {
+    let p = prog();
+    USAGE
+        .replacen("lxir —", &format!("{p} —"), 1)
+        .replace("\n  lxir ", &format!("\n  {p} "))
+        .replace("`lxir ", &format!("`{p} "))
+}
+
+/// Run one command line (without the program name) and return its exit
+/// code: 0 success, 1 a failure or finding (check errors, a diff, drift,
+/// a failed test), 2 a usage error. `prog` is the command as the user
+/// typed it, for help and hints.
+pub fn main_with(prog: &str, args: &[String]) -> ExitCode {
+    let _ = PROG.set(prog.to_string());
     let argrefs: Vec<&str> = args.iter().map(String::as_str).collect();
     match run(&argrefs) {
         Ok(code) => code,
@@ -175,7 +197,7 @@ fn main() -> ExitCode {
 fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
     match args {
         [] | ["help"] | ["--help"] | ["-h"] => {
-            print!("{USAGE}");
+            print!("{}", usage());
             Ok(ExitCode::from(if args.is_empty() { 2 } else { 0 }))
         }
         ["check", rest @ ..] => cmd_check(rest),
@@ -191,7 +213,10 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["observe", rest @ ..] => cmd_observe(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
         [cmd, ..] => {
-            eprintln!("unknown or malformed command `{cmd}` — run `lxir help`");
+            eprintln!(
+                "unknown or malformed command `{cmd}` — run `{} help`",
+                prog()
+            );
             Ok(ExitCode::from(2))
         }
     }
@@ -451,7 +476,10 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             _check => {
                 if src != canonical {
-                    eprintln!("{name}: not canonical (run `lxir fmt --write {name}`)");
+                    eprintln!(
+                        "{name}: not canonical (run `{} fmt --write {name}`)",
+                        prog()
+                    );
                     dirty = true;
                 } else {
                     println!("{name}: canonical");
@@ -497,7 +525,7 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
-            other => return Err(format!("unknown flag `{other}` — run `lxir help`").into()),
+            other => return Err(format!("unknown flag `{other}` — run `{} help`", prog()).into()),
         }
     }
     // Project resolution: an explicit <project-dir> must hold a lox.toml;
@@ -525,9 +553,12 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
             let (Some(base), Some(module), Some(lock_path), Some(out)) =
                 (base, module, lock_path, out)
             else {
-                return Err("compile requires --base, --module, --lock, and --out \
-                     (or a lox.toml project — run `lxir help`)"
-                    .into());
+                return Err(format!(
+                    "compile requires --base, --module, --lock, and --out \
+                     (or a lox.toml project — run `{} help`)",
+                    prog()
+                )
+                .into());
             };
             (base, module, lock_path, out)
         }
@@ -599,7 +630,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
-            other => return Err(format!("unknown flag `{other}` — run `lxir help`").into()),
+            other => return Err(format!("unknown flag `{other}` — run `{} help`", prog()).into()),
         }
     }
     let project = match &project_dir {
@@ -620,9 +651,12 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
         ),
         None => {
             let (Some(base), Some(module), Some(lock_path)) = (base, module, lock_path) else {
-                return Err("test requires --base, --module, and --lock \
-                     (or a lox.toml project — run `lxir help`)"
-                    .into());
+                return Err(format!(
+                    "test requires --base, --module, and --lock \
+                     (or a lox.toml project — run `{} help`)",
+                    prog()
+                )
+                .into());
             };
             (base, module, lock_path)
         }
@@ -822,9 +856,12 @@ fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {
     let out_old = compile(&base_doc, &merged_old, &mut lock_a, &opts)
         .map_err(|e| format!("baseline compile failed — fix that first: {e}"))?;
     if lock_a.to_json() != disk_lock.to_json() {
-        return Err("the lockfile is not current (a compile would change it) — \
-             run `lxir compile`, commit, then rename"
-            .into());
+        return Err(format!(
+            "the lockfile is not current (a compile would change it) — \
+             run `{} compile`, commit, then rename",
+            prog()
+        )
+        .into());
     }
     let mut lock_new = disk_lock.clone();
     let moved = apply_rekeys(&mut lock_new, &rekeys)?;
@@ -1006,7 +1043,7 @@ fn cmd_decompile(args: &[&str]) -> Result<ExitCode, AnyError> {
                 ));
             }
             flag if flag.starts_with("--") => {
-                return Err(format!("unknown flag `{flag}` — run `lxir help`").into());
+                return Err(format!("unknown flag `{flag}` — run `{} help`", prog()).into());
             }
             p if path.is_none() => path = Some(p),
             _ => {
@@ -1105,7 +1142,7 @@ fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
             "--module" => module_path = Some(value()?),
             "--lock" => lock_path = Some(value()?),
             flag if flag.starts_with("--") => {
-                return Err(format!("unknown flag `{flag}` — run `lxir help`").into());
+                return Err(format!("unknown flag `{flag}` — run `{} help`", prog()).into());
             }
             p if path.is_none() => path = Some(p),
             _ => return Err(USAGE.into()),
@@ -1177,13 +1214,14 @@ fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
         .or(out_dir.as_ref())
         .expect("one is set");
     println!(
-        "wrote {} and {}\nnext: lxir compile --base {path} --module {} --lock {} \
-         --serial <miniserver-serial> --out <out.Loxone>, then `lxir diff {path} \
+        "wrote {} and {}\nnext: {p} compile --base {path} --module {} --lock {} \
+         --serial <miniserver-serial> --out <out.Loxone>, then `{p} diff {path} \
          <out.Loxone>` — it should be empty",
         module_arg.display(),
         out_lock.display(),
         module_arg.display(),
-        out_lock.display()
+        out_lock.display(),
+        p = prog()
     );
     Ok(ExitCode::SUCCESS)
 }
@@ -1522,16 +1560,18 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
             println!(
                 "drift: {config} no longer matches the fingerprint recorded in \
                  {lock_path} — another writer changed something since the last \
-                 adopt/compile; run `lxir diff <last-compiled.Loxone> {config}` \
-                 to see what"
+                 adopt/compile; run `{p} diff <last-compiled.Loxone> {config}` \
+                 to see what",
+                p = prog()
             );
         } else {
             println!(
                 "drift: {config} no longer matches the fingerprint recorded in \
                  {lock_path} — pending removal of {} not yet deployed (push the \
                  compiled output, then download); if the config also changed \
-                 elsewhere, `lxir diff <last-compiled.Loxone> {config}` shows it",
-                pending.join(", ")
+                 elsewhere, `{p} diff <last-compiled.Loxone> {config}` shows it",
+                pending.join(", "),
+                p = prog()
             );
         }
         Ok(ExitCode::FAILURE)
