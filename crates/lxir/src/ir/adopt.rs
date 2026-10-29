@@ -348,7 +348,8 @@ pub fn adopt_one(
             uuid: uuid.to_string(),
             block_type: o.block_type.clone(),
             ports: ports(el).into_iter().map(|p| (p.key, p.uuid)).collect(),
-            layout: Some(layout_of(el).expect("verified numeric")),
+            layout: Some(Layout::of_element(el).expect("verified numeric")),
+            superseded_layout: None,
             page_uuid: Some(lift.page_uuids[page].clone()),
             expr_owned: false,
         },
@@ -414,7 +415,8 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 uuid: o.uuid.clone(),
                 block_type: o.block_type.clone(),
                 ports: ports(el).into_iter().map(|p| (p.key, p.uuid)).collect(),
-                layout: Some(layout_of(el).expect("verified numeric")),
+                layout: Some(Layout::of_element(el).expect("verified numeric")),
+                superseded_layout: None,
                 page_uuid: Some(lift.page_uuids[page].clone()),
                 expr_owned: false,
             },
@@ -491,7 +493,7 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             el.attr("V").unwrap_or("")
         ));
     }
-    if layout_of(el).is_none() {
+    if Layout::of_element(el).is_none() {
         return Err("its position (Px/Py/Px2/Py2) is not numeric".to_string());
     }
 
@@ -586,14 +588,4 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
         ));
     }
     Ok(())
-}
-
-fn layout_of(el: &Element) -> Option<Layout> {
-    let coord = |name: &str| el.attr(name)?.parse().ok();
-    Some(Layout {
-        px: coord("Px")?,
-        py: coord("Py")?,
-        px2: coord("Px2")?,
-        py2: coord("Py2")?,
-    })
 }

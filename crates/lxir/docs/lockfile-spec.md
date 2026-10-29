@@ -13,7 +13,7 @@ otherwise — a wrong port UUID silently breaks wire identity.
 
 ```jsonc
 {
-  "lockfile_version": 3,
+  "lockfile_version": 4,
 
   "target": {                       // informational metadata (nullable)
     "config_version": "17010727",   // ConfigVersion of the last base
@@ -46,10 +46,18 @@ otherwise — a wrong port UUID silently breaks wire identity.
         "I2": "…-01ff…",            // these must never change
         "Q":  "…-02ff…"
       },
-      "layout": {                   // drawing rectangle; kept stable so
-        "px": 7392, "py": 1080,     // recompiles don't shuffle the page
-        "px2": 8736, "py2": 1776
-      },
+      "layout": {                   // drawing rectangle (D42); kept
+        "px": 7392, "py": 1080,     // stable so recompiles don't shuffle
+        "px2": 8736, "py2": 1776    // the page. Placed by compile when
+      },                            // absent; a GUI drag in the base
+                                    // replaces it (harvested at teardown).
+      "superseded_layout": { … },   // the base's position that the last
+                                    // placement (relayout) replaced. A
+                                    // base still showing it is stale, not
+                                    // a drag. Cleared whenever a base
+                                    // position is taken over (the new one
+                                    // arrived, or a drag); rewritten by
+                                    // every placement. Usually absent.
       "page_uuid": "…",             // <C Type="Page"> the block lives on;
                                     // pinned on first compile (options'
                                     // page) or by adopt (original page).
@@ -88,9 +96,10 @@ otherwise — a wrong port UUID silently breaks wire identity.
         "original": "<place-uuid>", // value before the claim (restored)
         "written": "<place-uuid>",  // value the claim wrote (a title, or
                                     // the Place/Category UUID)
-        "followers": [              // descendants that carried `original`
-          "<object-uuid>"           // and were rewritten with it; omitted
-        ]                           // when empty
+        "followers": [              // room/category: descendants that
+          "<object-uuid>"           // carried `original`; title: the refs
+        ]                           // of the object (D43). Rewritten with
+                                    // it; omitted when empty
       }
     }
   },
@@ -187,3 +196,5 @@ maps; saving always writes the current version, so a v1-only binary refuses
 a v2 lock instead of silently dropping tombstones it does not understand.
 **v3** (2026-10-18) added attribute claims (`attr_claims`,
 `removed_attrs`, D39); a v1/v2 lock loads with both empty.
+**v4** (2026-10-29) added `superseded_layout` (D42); a v1–v3 lock loads
+without it.

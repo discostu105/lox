@@ -46,7 +46,11 @@ been one comment line since; two `APC=` payloads and ten Modbus `NDOC=` texts
 went the same way. No config in the 133-file corpus contains a numeric
 reference. A writer must therefore emit line breaks raw (deviation 2) and
 escape only the five named entities. lxir reads `&#…;` as literal text, and
-`lxir drift` lists every attribute that holds one (design decision D40). Text
+`lxir drift` lists every attribute that holds one (design decision D40).
+`lxir repair` writes a copy with each reference replaced by the raw
+character it names (D44). Loxone Config keeps such repaired `APC=`,
+`NDOC=` and `Code=` values byte-identical on open+save (oracle session 13).
+Text
 content appears only in `<Key>hex</Key>`-style elements and is rendered
 inline (`<Key>2B35</Key>`).
 
@@ -66,9 +70,18 @@ inline (`<Key>2B35</Key>`).
   objects (Modes, weather fields, caption folders) in one observed save.
   Never use titles as identity.
 - `IName` — internal name for I/O objects (`VI1`, `AI3`); locale-stable.
-- `Px/Py/Px2/Py2` — drawing rectangle. Grid unit 96; logic blocks are 1344
-  wide and `504 + 192·(ports−2)` tall (Or with 3 ports: 696; Not with 2:
-  504).
+- `Px/Py/Px2/Py2` — drawing rectangle. Grid unit 96, port rows 192
+  apart. Small logic blocks (gates, Monoflop, …) are 1344 wide
+  and `312 + 192·rows` tall: Not 504, And/Or with two inputs 696. Their
+  first port row is 288 below the top. Function blocks (PushButton,
+  LightController2, AutoJalousie, …) are 2688 wide and `504 + 192·rows`
+  tall, with the first row at 480: PushButton 1272 (4 rows), LC2 1656
+  (6). `rows` counts the rows the GUI shows, the larger of the two
+  sides. Some types show at least a set number of rows; on others a
+  param appears only once it is wired (D42 has the rules). Ref tags
+  (`InputRef`/`OutputRef`) are 2112 × 192 and sit 960 off the block
+  edge, level with the port. `Memory` draws as the same 2112 × 192 tag. The GUI snaps `Py` to the grid on save and
+  recomputes `Px2`/`Py2` from the type.
 - `Cl` — RGB display color (logic green: `141,255,112`).
 - `Nio` — connector count. Matches the number of `<Co>` children: Loxone
   emits **all** connectors, including unwired outputs and inputs without
@@ -165,6 +178,20 @@ resolved):
   output-port uuids, 19/19" — read off r50 snapshots of 2026-08-25
   that the first push had already damaged (see *UUIDs are unique*
   below).
+- **A ref's `Title=` is derived from its target.** Loxone Config
+  rewrites it to the mirrored object's title on every save, whatever it
+  held — minted refs (oracle session 11) and the GUI's own alike,
+  visible or not, stale ones included (session 12, 2026-10-29). The one
+  exception are the inputs an alarm block (`SmokeAlarm`, `Alarm`)
+  collected into its sensor list: `InputRef`s with `WF` bit 0x1000
+  (house config: 46 of 189 InputRefs, all wired into such a block, 33
+  of them titled "<input> <device>", the rest a plain copy). The GUI
+  keeps their titles through a rename of the target or of its device.
+  `WF` is the GUI's own bookkeeping: a hand-flipped 0x1000/0x0800 is
+  restored on save, adding or removing `Px`/`Py` changes neither bit
+  nor title. The `OutputRef`s those blocks use also carry 0x1000
+  (54 in the house) and follow their target like any other ref. lxir
+  keeps refs in step with title claims (D43).
 - **API distribution wires are recorded in reverse**: for
   `AutoJalousie.OutputAPI → ApiActor`-style links the `<In>` entry sits
   on the *block's output* connector and names the `OutputRef.AI` (or

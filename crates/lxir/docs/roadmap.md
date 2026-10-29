@@ -348,6 +348,11 @@ ones are *assigned*.
       fingerprint (v2), lockfile v3. Accepted against a real device
       repurposing on the house config: the compiled claims equal the
       hand patch they replace.
+- [x] Ref titles follow title claims 2026-10-29 (D43): a `.title` claim
+      rewrites the refs whose title the GUI derives from the object (all
+      but an alarm block's collected inputs), and minted mirrors take
+      the claimed title — the next GUI save no longer shows the old
+      title on refs as drift.
 - [ ] Membership lists: blocks that list devices they act on (the smoke
       alarm's detector list and similar) keep that list inside the
       block, not on the device. Needs a corpus survey of the list
@@ -364,10 +369,14 @@ ones are *assigned*.
       fingerprint (v3). Accepted on the house config: it restored the
       Hue program that an `&#xA;`-encoding push had collapsed to a
       single comment line, byte for byte.
-- [ ] Oracle probe: does a Loxone Config open+save keep a compiled
-      program byte-identical? The compiled text equals what Loxone
-      Config itself wrote before 2026-08-25, so the answer should be
-      yes; `scripts/oracle.sh` would confirm it.
+- [x] Repair 2026-10-29 (D44): `lxir repair <cfg> --out <out>` writes a
+      copy with numeric-reference text (`&amp;#xA;`, `&#xA;`) replaced
+      by the raw characters, byte-exact elsewhere, listing each
+      attribute it rewrote. Covers the damage `Code:` cannot claim:
+      `APC=` rules, `NDOC=` texts, programs left with the GUI.
+- [x] Oracle probe: does a Loxone Config open+save keep a compiled
+      program byte-identical? Yes (session 13, D44): the house's
+      compiled program and a corpus program both came back unchanged.
 - [ ] `Task=` (the program's run schedule) stays GUI-owned until a
       corpus survey shows its format.
 
@@ -424,6 +433,20 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
         compile path (reference externs kept as documentation are a
         legitimate pattern). First run on the house config surfaced one
         real dead block and three suspicious app-visible tasters.
+- **Layout**
+  - [x] Placement in the GUI's geometry, 2026-10-29 (D42). New blocks
+        go beside what they wire to, per page, as left-to-right layered
+        clusters, and minted ref tags go beside their port. A drag in
+        Loxone Config is taken over into the lock. `--relayout <page>`
+        places a page afresh, except blocks wired to refs drawn in the
+        GUI. `lxir render` draws a page as SVG with layout metrics. On
+        a kitchen page of the house, backward wires went from 15 to 5.
+  - [ ] Oracle check: a relayouted page survives a Loxone Config save
+        unchanged (footprints are from corpus statistics; the snap on
+        save is observed, but no relayouted page has been through the
+        oracle yet).
+  - [ ] Geometry claims: let the source move ref tags and extern blocks
+        that the GUI owns. Today a relayout moves only managed blocks.
 - **Editor**
   - [x] VS Code: syntax highlighting + snippets (`editor/vscode/`).
   - [ ] LSP server (`lxir lsp`): diagnostics from `Module::parse`/`validate`

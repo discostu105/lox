@@ -63,7 +63,17 @@ lxir diff current.Loxone out.Loxone
 
 # 5. Sanity: the output must round-trip.
 lxir roundtrip out.Loxone
+
+# 6. Look at a page you changed: metrics, plus an SVG with the managed
+#    blocks in blue and backward wires in red.
+lxir render out.Loxone --page "Beschattung" \
+            --lock modules/beschattung.lock.json --out page.svg
 ```
+
+Compile places new blocks beside what they wire to, and keeps a block
+where Loxone Config last dragged it. `--relayout "<page>"` places a
+page's managed blocks afresh. Blocks wired to a ref tag drawn in the GUI
+stay where they are (D42).
 
 Present step 4's output when proposing a change: it shows added blocks,
 wires, and parameter changes in reviewable form, and flags locale-rename
@@ -161,6 +171,7 @@ it only when it matches what you intended.
 | `no room titled` / `no category titled` | `.room`/`.category` names no `Place`/`Category` in the base | use a listed title, or create the room/category in Loxone Config first |
 | `carries no room binding` / `carries no category binding` | the object has no `<IoData Pr=/Cr=>` to rewrite | assign a room/category once in Loxone Config, then claim it from source |
 | `claim the … of the same object` | two externs resolve to one object and claim the same attribute | keep one assignment |
+| `numeric character references as literal text` (from `drift`) | a foreign XML writer left `&#xA;` text in programs, rules or descriptions; Loxone reads it verbatim | `lxir repair <cfg> --out <fixed>`, then compile against `<fixed>` as the base |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves

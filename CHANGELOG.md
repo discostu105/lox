@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config as code: `lox ir`** runs the lxir toolchain — `check`, `fmt`, `compile`, `test`, `rename`, `lint`, `decompile`, `adopt`, `diff`, `drift`, `observe`, `roundtrip`, with lxir's flags and exit codes (`lox lxir …` works too)
 - `lox config compress FILE.Loxone [--save-as PATH]` — compresses config XML into `sps0.LoxCC`, the format inside a config ZIP, so an upload no longer needs lox-cli. The header carries the payload size, the XML length and the CRC-32 of the XML, as in Loxone-written downloads; `-o json` reports sizes and checksum
   - `--template DOWNLOAD.zip` writes an upload ZIP instead: the download's entries copied raw, only `sps0.LoxCC` replaced, and verified to extract byte-identically to `FILE` before it is written
+- `lox ir repair IN --out OUT` turns numeric character references that Loxone stores as literal text (`&amp;#xA;` and the like) back into the characters they stand for (lxir D44)
 - **`lox config push [PROJECT] [--force]`** deploys an lxir project: downloads the live config, refuses when its logic changed since the project's base, compiles the module against the live download (users and passwords stay as they are), shows the logic changes and stages a byte-exact upload ZIP. With `--force` it uploads it as `sps_new.zip`, reboots, waits, downloads again to verify the Miniserver runs exactly the compiled file, and only then updates the lock, `out` and `base`. `--patched-from`, `--allow-removals`, `--accept-version`, `--backup-dir`; `-o json` reports every artifact
 
 ### Changed
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lox blind --help` lists every action with the command it sends: `up`/`down` are full moves (`FullUp`/`FullDown`, also as `full-up`/`full-down`), not jog steps; `stop` sends `off`, `shade` `AutomaticDown`, `shade N` `manualLamella/N`, `pos N` `manualPosition/N`. The MCP `blind` tool says the same
 - Releases are automatic: every push to main that passes CI becomes a release (version bump from PR labels or the changelog, binaries, Docker image, Homebrew formula), and lxir is published to crates.io whenever its version is new
 - lxir now lives in this repository (`crates/lxir`, imported with its history) and lox builds it from source, so `lox config diff/show/wiring/lint/history`, the Wiring view and MCP `get_wiring` use the current lxir instead of the crates.io 0.1.0 release
+- `crates/lxir` has the lxir changes that landed in the old repository after the import: a title claim also rewrites the refs that copy that title (D43), and blocks are placed in the GUI's own geometry, shared with the GUI (D42, `lox ir compile --relayout <page>`). D42 moves the lockfile to version 4; a version 3 lock is upgraded on the next compile
 - License expression `GPL-3.0-or-later OR LicenseRef-Commercial` (was `AND`): the dual license is a choice between the two, as LICENSE says
 
 ### Fixed

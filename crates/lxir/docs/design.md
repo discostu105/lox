@@ -51,10 +51,13 @@ edit, and records each in the lockfile:
    title, or the room/category binding (`<IoData Pr=/Cr=>`), of an
    *extern* object: devices and their inputs/outputs, which only Loxone
    Config can create. Original, written value and the followers a
-   room/category claim carried along are recorded in `lock.attr_claims`
-   and restored when the claim disappears (D39).
+   claim carried along (a room/category claim's descendants, a title
+   claim's refs, D43) are recorded in `lock.attr_claims` and restored
+   when the claim disappears (D39).
 
-Everything else is somebody else's, and passes through unchanged.
+Everything else is somebody else's, and passes through unchanged. One
+piece of a managed block is shared: its position on the page. The GUI may
+drag it, and compile takes the drag over (D42).
 
 ## The compile strategy: tear down, rebuild
 
@@ -69,7 +72,7 @@ Each compile:
    the state owned by the other two writers.
 4. **Rebuilds** from source: plans port lists, mints missing UUIDs, emits
    managed `<C>` elements, applies wires and sets, records everything in the
-   lock.
+   lock, and places the blocks that have no position yet (D42).
 5. Writes counters (never decreasing) and target metadata.
 
 This makes compilation *convergent*: compiling the compiler's own output
@@ -1084,3 +1087,175 @@ Anything unverified is an error, not a heuristic:
   without a command; no corpus evidence), and checking abbreviations
   beyond `As`/`Lico` (the house also has `TpfController` blocks on
   Flex API connectors, whose commands lxir writes unchecked).
+- **D42 — Placement: the GUI's geometry, shared with the GUI**
+  (2026-10-29). A block without a position went into one column at
+  x 7392, below the lowest managed block of the whole lock, on every
+  page. Compile wrote positions from the lock only, so the next compile
+  reverted a GUI drag. On a kitchen page of the house config the 11
+  minted objects sat in one column at y 18552–29040, below everything
+  else, and 15 of the page's 76 wires ran right to left. On
+  "Automatik-Regeln" the content ends near y 6000 and two managed
+  blocks sat at y 15192. Decision:
+  - **Positions are shared state.** Teardown harvests each managed
+    block's rectangle from the base, like other GUI residue (D19),
+    together with the page it is drawn on. When lock and base disagree,
+    the base wins: a drag in the GUI goes into the lock. Positions stay
+    outside the diff projection and the fingerprint (D21), so a drag is
+    not drift. Two limits:
+    - Only a move of a grid unit (96) or more is a drag. The GUI
+      recomputes `Px2`/`Py2` on every save; a block on the same spot
+      takes the GUI's rectangle, so a save moves nothing.
+    - A rectangle on another page than the module's (a GUI cut and
+      paste) is ignored: the block is rebuilt on its own page, where it
+      was.
+  - **The GUI's geometry** (`src/layout.rs`, from corpus statistics
+    and GUI refs placed next to block ports). Grid 96, port row 192.
+    Small blocks are 1344 wide and 312 + 192·rows tall, with the first
+    port row at 288. Function blocks are 2688 wide and 504 + 192·rows
+    tall, first row at 480. Ref tags are 2112 × 192 and sit 960 off the
+    block edge. Rows are what the GUI shows:
+    - Types that show at least a set number of rows, from the corpus
+      mode: LC2 6; AutoJalousie, CentralShade, CentralLight and Code16
+      4; DayTimer 3; PButtonT and PulseAt 2. Wired connectors beyond
+      those add rows.
+    - Other built-ins show their inputs and outputs, and show params
+      and `Remanence` only when they are wired.
+    - Unknown types show only wired ports. Keys starting with `out` go
+      on the right: the API links of `OutputAPI` are stored on the
+      output, so a wired connector there is not an input.
+
+    `Memory` draws as a 2112 × 192 tag but is a block and sits in its
+    chain. Objects of unknown type keep the size they are drawn with.
+
+    The old formula `504 + 192·(ports−2)` was wrong for function blocks:
+    a minted PushButton came out 1344 × 1848, where the GUI draws
+    2688 × 1272. The GUI snaps `Py` to the grid on save and recomputes
+    `Px2`/`Py2`. Compile writes grid positions with the GUI's
+    footprint, so a save moves nothing.
+  - **Placement runs after wiring**, per page, on the page as it then
+    stands. Free blocks joined by wires form a cluster, laid out as a
+    layered graph:
+    - feedback is broken in source order by a depth-first walk;
+    - columns come from the longest path, and order within a column
+      from barycenter sweeps;
+    - each block sits level with the ports that feed it;
+    - columns are spaced for the labels and tags beside them.
+
+    The cluster goes to the free spot, cleared by a margin, that keeps
+    its wires to fixed objects shortest and running left to right. A
+    cluster without such a wire goes below the page's content. A minted
+    ref tag goes beside the port it serves, 960 off and stacked by row,
+    as the GUI places them. Integer arithmetic and sorted candidates
+    make placement deterministic.
+  - **`--relayout <page>`** places the page's managed blocks afresh, as
+    if new. A block stays where it is if it is wired to a ref tag the
+    compile does not own (a GUI-drawn ref) and drawn beside it, level
+    and at most two gaps off: someone arranged those two together in
+    the GUI. A wire routed through a GUI ref elsewhere on the page
+    (D34) pins nothing. A cluster's old position (that of its first
+    block) is worth one row in the cost, so a spot about as good keeps
+    it. A title that names no page is an error.
+  - **A stale base must not revert a placement.** After a relayout,
+    the lock holds the new position, and the base keeps the old one
+    until it is uploaded and downloaded again. Harvest would read the
+    old position as a GUI drag. So the lock records it as
+    `superseded_layout`:
+    - a base position on the same spot is ignored;
+    - any other base position is taken over (the new one once it
+      arrives, or a drag) and clears the field;
+    - every placement writes it anew: the base position it replaced,
+      or nothing.
+
+    This is the same lifecycle as D31's tombstones. The field is new in
+    lockfile v4, so an older binary refuses the lock instead of dropping
+    it. A block that changes pages is placed afresh; its old page's
+    position is not on the new page, so nothing is superseded.
+  - **`lxir render`** draws one page as SVG: managed objects blue, GUI
+    objects grey, wires orthogonal with backward ones red, labels for
+    other pages purple. It prints the metrics that placement is judged
+    by: overlaps, backward wires (listed), long wires (over 8000), wire
+    crossings and total wire length. This shows a layout without
+    opening Loxone Config.
+  - **Results on the house.** Without `--relayout`, compiling the house
+    gives the same bytes and the same lock as before. With
+    `--relayout`:
+    - The kitchen page: backward wires 15 → 5, long wires 11 → 4,
+      crossings 34 → 18, total wire length 333k → 210k. Four of the
+      remaining backward wires are real feedback, from a scene block
+      back into the two light controllers it follows; the fifth runs
+      between two GUI objects.
+    - "Automatik-Regeln": the page's extent shrinks from y 768–16584 to
+      768–7416.
+
+  Not covered:
+  - Moving objects the compile does not own (GUI refs, extern blocks).
+  - Wire routing: the GUI routes wires itself.
+  - Negative coordinates: never observed, so x and y stay ≥ 0, and a
+    chain that feeds a block at the page's left edge runs backward.
+  - Lifting positions into source: they live in the lock.
+- **D43 — a title claim carries the refs that copy the title**
+  (2026-10-29). Every `InputRef`/`OutputRef` holds its own `Title=`,
+  and Loxone Config re-derives it from the mirrored object on every
+  save (oracle session 11 found this for minted refs; session 12
+  confirms it for the GUI's own, stale ones included). A D39 `.title`
+  claim rewrote the object and left its refs on the old title, so the
+  next GUI save showed up as drift, and the house config carried two
+  stale relay refs from such a claim. Now a title claim has followers
+  like a room/category claim: every ref whose `Ref=` is the claimed
+  object, whatever its current title (the GUI would rewrite a stale one
+  too). **Except collected inputs:** the `InputRef`s an alarm block
+  gathers into its sensor list are written with `WF` bit 0x1000, often
+  under a composite title ("<input> <device>"), and the GUI keeps their
+  titles — composite or plain copy, through a rename of the target or
+  of its device. The bit is GUI-derived (session 12: flipped by hand,
+  the save restores it; a position added or removed changes nothing),
+  so it marks exactly the refs whose title the GUI does not own. The
+  `OutputRef`s such a block uses carry 0x1000 too and *do* follow.
+  Managed refs and refs claimed explicitly are skipped, as for D39
+  followers. Lock, teardown and tombstones are D39's unchanged: each
+  follower is restored to the claim's original while it still shows
+  the written value, which is also what the GUI derives once the
+  object is back. Minted `mirrors:` refs (D33) take the title this
+  compile leaves on their target — the claimed one, or after a
+  withdrawal the restored one — not the base's, which may still show
+  a withdrawn claim. Validated with the oracle on the house config:
+  the existing relay claims now fix their stale refs, and claims on a
+  target with visible, hidden and collected refs, and their
+  withdrawal, both save with an empty semantic diff.
+- **D44 — `lxir repair`: numeric character references back to
+  characters** (2026-10-29). D40 made lxir read `&#xA;` the way Loxone
+  does, as text, and `lxir drift` lists the attributes that hold it,
+  but repairing them stayed manual: the house's two damaged `APC=`
+  payloads were byte-patched, and ten Modbus `NDOC=` texts still show
+  the literal `&#xD;&#xA;`. Decision: a command that writes a repaired
+  copy, `lxir repair <cfg> --out <out>`, over
+  `LoxoneDoc::repair_char_refs`:
+  - **What it writes is what Loxone wrote before the damage.** Each
+    reference becomes the character it names, written the way Loxone
+    writes it (loxone-format, deviation 2): line breaks and every other
+    character raw, `& < > " '` as the five named entities. A foreign
+    writer encodes characters one by one, so decoding them one by one
+    restores the original: a `&#xD;&#xA;` pair becomes CRLF, a lone
+    `&#xA;` a bare LF.
+  - **Both damaged forms.** `&amp;#xA;` (re-escaped by a later GUI save,
+    the house case) and `&#xA;` (straight from the foreign writer, not
+    yet saved by the GUI) both read as the text `&#xA;`, and both are
+    repaired. A reference naming nothing an attribute can hold (`&#0;`,
+    a surrogate) stays text, and the command names what it left.
+  - **Byte-exact elsewhere.** The rewrite works on the raw attribute
+    value and touches only the references; every other byte of the
+    document, the rest of each repaired value included, is copied.
+    Same scope as `char_ref_attrs`: attributes of `<C>` elements.
+  - **A copy, not in place, and no compile step.** The input stays as
+    evidence; each rewritten attribute is listed with its object, UUID
+    and reference count. The repaired file is a base like a download:
+    compile against it, push the output. The repaired attributes are
+    GUI content (`NDOC`, `APC`, an unclaimed `Code`), so they reach the
+    Miniserver through the compiled output, and drift sees the push.
+  Validated with the oracle (session 13): repaired corpus configs equal
+  their undamaged originals byte for byte, and Loxone Config keeps the
+  repaired `APC=` (2 rules, raw CRLF in the JSON) and `Code=` (a
+  program with 436 line breaks) byte-identical on open and save. On the house
+  config the ten `NDOC=` texts, plus a `Code=` damaged on purpose, come
+  back with raw CRLF, and the save keeps them, with no semantic change
+  beyond two known stale ref titles (D43).

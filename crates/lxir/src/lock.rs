@@ -31,11 +31,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
-/// externs (`attr_claims`/`removed_attrs`, D39). Older locks load fine (the
-/// maps default to empty); saving always writes the current version, so an
-/// old binary — whose version check refuses the newer number — can never
-/// silently drop state it does not know about.
-pub const LOCKFILE_VERSION: u32 = 3;
+/// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
+/// (D42). Older locks load fine (the maps default to empty); saving always
+/// writes the current version, so an old binary — whose version check
+/// refuses the newer number — can never silently drop state it does not
+/// know about.
+pub const LOCKFILE_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -150,7 +151,16 @@ pub struct LockedObject {
     pub block_type: String,
     /// Port key → port UUID. Every port gets its own pinned UUID.
     pub ports: BTreeMap<String, String>,
+    /// Drawing rectangle the compiler writes (D42). Placed once, then
+    /// kept — except that a move made in Loxone Config is taken over
+    /// from the base, and a relayout places the block afresh.
     pub layout: Option<Layout>,
+    /// The position a base still showed when the compiler last placed
+    /// the block afresh (relayout, page change). A base that shows it
+    /// predates that placement — it is not a GUI move to take over.
+    /// Cleared once a base shows the current layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_layout: Option<Layout>,
     /// UUID of the `<C Type="Page">` the block lives on. Pinned on first
     /// compile (from the compile options' page) or by adoption (the page
     /// the existing block was drawn on); rebuilds place the block there.
@@ -299,6 +309,7 @@ mod tests {
                     px2: 2304,
                     py2: 1656,
                 }),
+                superseded_layout: None,
                 page_uuid: Some("00000002-0000-0000-ffff504f94112233".into()),
                 expr_owned: false,
             },
@@ -344,6 +355,39 @@ mod tests {
     }
 
     #[test]
+    fn superseded_layout_roundtrips_and_stays_out_when_unset() {
+        let mut lock = Lockfile::new();
+        lock.objects.insert(
+            "a".into(),
+            LockedObject {
+                uuid: "u".into(),
+                block_type: "And".into(),
+                ports: BTreeMap::new(),
+                layout: Some(Layout {
+                    px: 960,
+                    py: 960,
+                    px2: 2304,
+                    py2: 1656,
+                }),
+                superseded_layout: None,
+                page_uuid: None,
+                expr_owned: false,
+            },
+        );
+        assert!(!lock.to_json().contains("superseded_layout"));
+        lock.objects.get_mut("a").unwrap().superseded_layout = Some(Layout {
+            px: 7392,
+            py: 21480,
+            px2: 8736,
+            py2: 22176,
+        });
+        let json = lock.to_json();
+        let back: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, lock);
+        assert_eq!(back.to_json(), json);
+    }
+
+    #[test]
     fn rename_and_remove() {
         let mut lock = Lockfile::new();
         lock.objects.insert(
@@ -353,6 +397,7 @@ mod tests {
                 block_type: "And".into(),
                 ports: BTreeMap::new(),
                 layout: None,
+                superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
             },

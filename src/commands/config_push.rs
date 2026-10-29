@@ -251,7 +251,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         say("Nothing to push: the Miniserver already runs the compiled module.");
         return Ok(report);
     }
-    report.changes = logic::diff_lines(&live_xml, &compiled)?;
+    report.changes = change_lines(&live_xml, &compiled)?;
     if !quiet {
         eprintln!("Changes (live → compiled):");
         for line in &report.changes {
@@ -349,12 +349,32 @@ fn compile_project(
         mint_time_unix: chrono::Utc::now().timestamp(),
         page_title: project.page.clone(),
         allow_removals: opts.allow_removals,
+        // Re-laying out a page is a deliberate `lox ir compile --relayout`;
+        // a push deploys the placement the project already has.
+        relayout: Vec::new(),
     };
     compile(&parse(base)?, &module, lock, &options).context("Compiling the module failed")
 }
 
 fn parse(xml: &[u8]) -> Result<LoxoneDoc> {
     Ok(LoxoneDoc::parse(xml)?)
+}
+
+/// What the push changes, live → compiled. The logic view leaves out refs,
+/// pages and the document; when only those differ (a title claim renaming
+/// the refs that copy a title, say), the semantic diff's totals say so
+/// instead of an empty list.
+fn change_lines(live: &[u8], compiled: &[u8]) -> Result<Vec<String>> {
+    let lines = logic::diff_lines(live, compiled)?;
+    if !lines.is_empty() {
+        return Ok(lines);
+    }
+    let d = lxir::diff::diff(&parse(live)?, &parse(compiled)?);
+    Ok(vec![if d.is_empty() {
+        "no semantic changes: only bytes outside the logic differ".to_string()
+    } else {
+        format!("refs, pages or document only: {}", summary(&d))
+    }])
 }
 
 /// One-line totals of a semantic diff.
@@ -599,6 +619,26 @@ mod tests {
         );
         assert_eq!(fs::read(dir.path().join("pool.lock.json")).unwrap(), lock);
         assert!(!dir.path().join("out.Loxone").exists());
+    }
+
+    #[test]
+    fn changes_name_ref_renames_the_logic_view_leaves_out() {
+        let dir = project();
+        let live = base(dir.path());
+        let renamed = String::from_utf8(live.clone())
+            .unwrap()
+            .replacen(
+                r#"Title="Netzbezug" Nio="4""#,
+                r#"Title="Netzbezug neu" Nio="4""#,
+                1,
+            )
+            .into_bytes();
+        assert_ne!(renamed, live);
+        assert!(logic::diff_lines(&live, &renamed).unwrap().is_empty());
+
+        let lines = change_lines(&live, &renamed).unwrap();
+
+        assert_eq!(lines, ["refs, pages or document only: 1 renamed"]);
     }
 
     #[test]

@@ -329,26 +329,12 @@ impl LoxoneDoc {
     /// means the program has collapsed onto one line
     /// ([loxone-format.md](../docs/loxone-format.md)).
     pub fn char_ref_attrs(&self) -> Vec<(String, String)> {
-        fn has_char_ref(v: &str) -> bool {
-            v.match_indices("&#").any(|(i, _)| {
-                let rest = &v[i + 2..];
-                let (body, radix) = match rest.strip_prefix(['x', 'X']) {
-                    Some(hex) => (hex, 16),
-                    None => (rest, 10),
-                };
-                let digits = body
-                    .find(|c: char| !c.is_digit(radix))
-                    .unwrap_or(body.len());
-                digits > 0 && body[digits..].starts_with(';')
-            })
-        }
         fn walk(el: &Element, out: &mut Vec<(String, String)>) {
             for child in el.child_elements() {
                 if child.name == "C" {
                     for a in &child.attrs {
                         if has_char_ref(&crate::xml::unescape(&a.value)) {
-                            let who = child.attr("Title").or(child.attr("U")).unwrap_or("?");
-                            out.push((crate::xml::unescape(who).into_owned(), a.name.clone()));
+                            out.push((object_label(child), a.name.clone()));
                         }
                     }
                 }
@@ -357,6 +343,43 @@ impl LoxoneDoc {
         }
         let mut out = Vec::new();
         walk(&self.xml.root, &mut out);
+        out
+    }
+
+    /// Replace the numeric-character-reference text that
+    /// [`Self::char_ref_attrs`] finds with the characters it names, written
+    /// the way Loxone writes them: line breaks and every other character
+    /// raw, `& < > " '` as the five named entities (design decision D44).
+    /// Both damaged forms are repaired — `&amp;#xA;` once Loxone Config has
+    /// re-escaped the ampersand, `&#xA;` straight from the foreign writer.
+    /// Every other byte of the document stays as it was. A reference that
+    /// names no character an attribute can hold (`&#0;`) is left alone, so
+    /// `char_ref_attrs` still lists it. Returns one entry per rewritten
+    /// attribute, in document order.
+    pub fn repair_char_refs(&mut self) -> Vec<CharRefRepair> {
+        fn walk(el: &mut Element, out: &mut Vec<CharRefRepair>) {
+            for child in el.child_elements_mut() {
+                if child.name == "C" {
+                    let object = object_label(child);
+                    let uuid = child.attr("U").unwrap_or("?").to_string();
+                    for a in child.attrs.iter_mut() {
+                        let (value, replaced) = repair_raw(&a.value);
+                        if replaced > 0 {
+                            a.value = value;
+                            out.push(CharRefRepair {
+                                object: object.clone(),
+                                uuid: uuid.clone(),
+                                attr: a.name.clone(),
+                                replaced,
+                            });
+                        }
+                    }
+                }
+                walk(child, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&mut self.xml.root, &mut out);
         out
     }
 
@@ -467,6 +490,82 @@ fn remove_object(el: &mut Element, uuid: &str) -> Option<Element> {
         }
     }
     None
+}
+
+/// One attribute rewritten by [`LoxoneDoc::repair_char_refs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharRefRepair {
+    /// The object's title, or its UUID when it has none.
+    pub object: String,
+    pub uuid: String,
+    pub attr: String,
+    /// References replaced by the character they name.
+    pub replaced: usize,
+}
+
+/// How findings name an object: its title, else its UUID.
+fn object_label(el: &Element) -> String {
+    let who = el.attr("Title").or(el.attr("U")).unwrap_or("?");
+    crate::xml::unescape(who).into_owned()
+}
+
+/// The numeric reference body at the start of `s` (`#xA;`, `#13;` — the
+/// `&` already consumed): its length through the `;`, and the character
+/// it names if an attribute can hold that one (XML 1.0 `Char`, without
+/// the controls other than tab, LF and CR).
+fn numeric_ref(s: &str) -> Option<(usize, Option<char>)> {
+    let rest = s.strip_prefix('#')?;
+    let (body, radix) = match rest.strip_prefix(['x', 'X']) {
+        Some(hex) => (hex, 16),
+        None => (rest, 10),
+    };
+    let digits = body
+        .find(|c: char| !c.is_digit(radix))
+        .unwrap_or(body.len());
+    if digits == 0 || !body[digits..].starts_with(';') {
+        return None;
+    }
+    let len = s.len() - body.len() + digits + 1;
+    let c = u32::from_str_radix(&body[..digits], radix)
+        .ok()
+        .and_then(char::from_u32)
+        .filter(|&c| {
+            matches!(c, '\t' | '\n' | '\r') || (c >= ' ' && !matches!(c, '\u{fffe}' | '\u{ffff}'))
+        });
+    Some((len, c))
+}
+
+/// Whether a decoded attribute value holds numeric-reference text.
+fn has_char_ref(v: &str) -> bool {
+    v.match_indices("&#")
+        .any(|(i, _)| numeric_ref(&v[i + 1..]).is_some())
+}
+
+/// A raw attribute value with each numeric reference — `&amp;#xA;` or
+/// `&#xA;` — replaced by the character it names, written as Loxone would;
+/// and how many were replaced. Everything else is copied byte for byte.
+fn repair_raw(raw: &str) -> (String, usize) {
+    let mut out = String::with_capacity(raw.len());
+    let mut replaced = 0;
+    let mut rest = raw;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let body = if rest.starts_with("&amp;#") { 5 } else { 1 };
+        match numeric_ref(&rest[body..]) {
+            Some((len, Some(c))) => {
+                out.push_str(&crate::xml::escape(c.encode_utf8(&mut [0; 4])));
+                replaced += 1;
+                rest = &rest[body + len..];
+            }
+            _ => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    (out, replaced)
 }
 
 #[cfg(test)]

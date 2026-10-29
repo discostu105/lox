@@ -388,6 +388,13 @@ with their own claim for the same attribute (and their subtrees) are
 skipped. A follower changed in Loxone Config after the claim keeps the
 GUI's value and leaves the follower list on the next compile.
 
+A title claim's followers are the object's refs (D43): every
+`InputRef`/`OutputRef` whose `Ref=` is the object takes the new title,
+since Loxone Config derives a ref's title from its target on every save.
+The inputs an alarm block collected into its sensor list (`WF` bit
+0x1000 on an `InputRef`) keep theirs — the GUI owns those titles. A
+minted ref (`mirrors:`) of a claimed extern carries the claimed title.
+
 Rules:
 
 - **Externs only.** A managed block's title is its label

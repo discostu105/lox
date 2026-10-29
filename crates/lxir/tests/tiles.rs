@@ -122,6 +122,7 @@ fn opts() -> CompileOptions {
         page_title: Some("Pool".into()),
         allow_removals: false,
         accept_version: None,
+        relayout: Vec::new(),
     }
 }
 
