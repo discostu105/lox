@@ -219,7 +219,9 @@ fn rewrite(
     templates: &BTreeMap<(String, String), Value>,
 ) -> Result<Value> {
     let mut new = old.clone();
+    // Both flags, as the app's activation writes them.
     new["active"] = Value::Bool(want.active);
+    new["activeIfValid"] = Value::Bool(want.active);
 
     let old_events = old["eventGroups"][0]["events"]
         .as_array()

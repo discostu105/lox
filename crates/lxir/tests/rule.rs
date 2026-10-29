@@ -23,7 +23,7 @@ fn esc(json: &str) -> String {
 
 fn rule_on_apc() -> String {
     esc(&format!(
-        r#"{{"type":1,"id":"{RULE_ON}","active":true,"activeIfValid":false,"name":"Pumpe Ein","description":"","operator":3,"invalid":false,"eventGroups":[{{"operator":1,"events":[{{"type":3,"descID":270001,"id":270,"value":9999999999,"operator":1,"forceEdge":false,"arrValues":[0,1,2,3,4]}},{{"type":5,"descID":272001,"id":272,"value":540,"operator":1,"forceEdge":false}}]}}],"actions":[{{"type":0,"descID":342101,"id":"{PUMP}","command":"on"}}]}}"#
+        r#"{{"type":1,"id":"{RULE_ON}","active":true,"activeIfValid":true,"name":"Pumpe Ein","description":"","operator":3,"invalid":false,"eventGroups":[{{"operator":1,"events":[{{"type":3,"descID":270001,"id":270,"value":9999999999,"operator":1,"forceEdge":false,"arrValues":[0,1,2,3,4]}},{{"type":5,"descID":272001,"id":272,"value":540,"operator":1,"forceEdge":false}}]}}],"actions":[{{"type":0,"descID":342101,"id":"{PUMP}","command":"on"}}]}}"#
     ))
 }
 
@@ -231,6 +231,10 @@ fn a_changed_rule_writes_only_what_the_source_states() {
     let on = tag_of(&out, RULE_ON);
     let want = rule_on_apc()
         .replace("&quot;active&quot;:true", "&quot;active&quot;:false")
+        .replace(
+            "&quot;activeIfValid&quot;:true",
+            "&quot;activeIfValid&quot;:false",
+        )
         .replace("[0,1,2,3,4]", "[5,6]");
     assert!(on.contains(&format!("APC=\"{want}\">")), "{on}");
     assert!(!on.contains("STA="), "{on}");
@@ -239,11 +243,37 @@ fn a_changed_rule_writes_only_what_the_source_states() {
     let off = tag_of(&out, RULE_OFF);
     let want = rule_off_apc()
         .replace("&quot;active&quot;:false", "&quot;active&quot;:true")
+        .replace(
+            "&quot;activeIfValid&quot;:false",
+            "&quot;activeIfValid&quot;:true",
+        )
         .replace("&quot;value&quot;:1020", "&quot;value&quot;:1050");
     assert!(off.contains(&format!("APC=\"{want}\" STA=\"1\">")), "{off}");
 
     // Stating the old rules again restores the original bytes.
     assert_eq!(compile_rules(&out, AS_READ).unwrap(), base);
+}
+
+#[test]
+fn active_alone_is_not_active() {
+    // `active` without `activeIfValid` never ran (live): the rule reads
+    // as inactive, and stating that writes nothing.
+    let half = rule_on_apc().replace(
+        "&quot;activeIfValid&quot;:true",
+        "&quot;activeIfValid&quot;:false",
+    );
+    let base = fixture_with(&half, &rule_off_apc());
+    let (m, _) = decompile(&parse(&base), &DecompileOptions::default()).unwrap();
+    assert!(
+        m.to_text().contains("rule pumpe_ein\n\tinactive\n"),
+        "{}",
+        m.to_text()
+    );
+    let inactive = AS_READ.replacen("\tactive\n", "\tinactive\n", 1);
+    assert_eq!(compile_rules(&base, &inactive).unwrap(), base);
+    // Activating it sets both flags.
+    let out = compile_rules(&base, AS_READ).unwrap();
+    assert!(tag_of(&out, RULE_ON).contains(&rule_on_apc()));
 }
 
 #[test]

@@ -1745,10 +1745,15 @@ Anything unverified is an error, not a heuristic:
     their JSON objects, a changed one keeps every field the source does
     not state (a single-day `value` stays that form, a sentinel stays
     a sentinel), only new ones are built; the text is written compact in
-    the app's key order. `STA="1"` follows `active` — set right after
-    `APC=`, removed when inactive: 10/10 corpus rules, and the house
-    config's own history (deactivating a rule in the app changed
-    exactly `active` and dropped `STA`).
+    the app's key order.
+  - **Active means two flags.** The engine runs a rule only when
+    `active` *and* `activeIfValid` are true: the house's rules sat at
+    `active: true, activeIfValid: false` for three months and never ran,
+    a compile that set `active` alone did not run either, and the app's
+    own activation (saved as a custom change) set both and ran within
+    the minute. `active`/`inactive` therefore writes both, and a rule
+    reads as active only with both. `STA="1"` follows: set right after
+    `APC=`, removed when inactive (10/10 corpus rules, the app's save).
   - **No creation, no deletion.** The rule block, its name, its
     `ref=` and its position stay the app's; a declaration addresses an
     existing rule by extern, and removing it releases the rule
@@ -1760,8 +1765,9 @@ Anything unverified is an error, not a heuristic:
     declaration, pulling the rule and its action targets in as
     externs; adopt + compile is byte-identical (house config: all five
     rules).
-  Validated live (Miniserver firmware 17.2.8.28, house config, 2026-10-29): an
-  inactive rule compiled to `active`, another weekday set and time,
-  pushed, verified by download (byte fixpoint), and executed by the
-  Miniserver at the compiled time; compiling the original declaration
+  Validated live (Miniserver firmware 17.2.8.28, house config,
+  2026-10-29/30): compiles with `active` alone were pushed, verified
+  byte-exact, and never ran; the app's activation of the same rule ran;
+  a compile setting both flags ran at its compiled minute (00:37:00 in
+  the rule log). Compiling the original declaration
   back restored the original bytes. See loxone-format.md.

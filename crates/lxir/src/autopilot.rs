@@ -196,6 +196,7 @@ fn join(path: &str, key: &str) -> String {
 /// spelling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
+    /// `active` and `activeIfValid` both set: the rule runs.
     pub active: bool,
     pub events: Vec<Event>,
     pub actions: Vec<Action>,
@@ -238,10 +239,15 @@ pub fn interpret(rule: &Value) -> Result<Rule, String> {
             show(rule.get("operator"))
         ));
     }
-    let active = rule
-        .get("active")
-        .and_then(Value::as_bool)
-        .ok_or("no boolean `active`")?;
+    // The engine runs a rule only when both flags are set: the app sets
+    // both on activation, and rules with `active` alone never ran (house
+    // config, live, 2026-10-30 — docs/loxone-format.md).
+    let flag = |k: &str| {
+        rule.get(k)
+            .and_then(Value::as_bool)
+            .ok_or(format!("no boolean `{k}`"))
+    };
+    let active = flag("active")? && flag("activeIfValid")?;
     let groups = rule
         .get("eventGroups")
         .and_then(Value::as_array)
@@ -441,7 +447,7 @@ mod tests {
         serde_json::from_str(
             r#"{
               "type": 1, "id": "30000009-0000-0090-ffff504f94112233",
-              "active": true, "activeIfValid": false,
+              "active": true, "activeIfValid": true,
               "name": "Skimmer Ein", "description": "",
               "operator": 3, "invalid": false,
               "eventGroups": [{"operator": 1, "events": [
