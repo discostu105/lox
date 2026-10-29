@@ -14,7 +14,7 @@ heading_anchors: true
 back_to_top: true
 back_to_top_text: "Back to top"
 
-footer_content: "MIT License. <a href=\"https://github.com/discostu105/lox\">View on GitHub</a>."
+footer_content: "GPL-3.0 or commercial license. <a href=\"https://github.com/discostu105/lox\">View on GitHub</a>."
 
 color_scheme: lox
 

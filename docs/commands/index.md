@@ -63,3 +63,23 @@ JSON dry-run output:
   }
 }
 ```
+
+## Scripting
+
+- Exit code `0` on success, non-zero on errors; `lox if` exits `1` when the condition is false.
+- `-o json` on every command; errors become a JSON envelope (`{"ok": false, "error": "control_not_found", …}`).
+- `--no-header` with `-o csv` or tables for clean pipes; `-q` drops progress messages.
+- `lox schema -o json` describes every command and argument.
+
+```bash
+lox ls -t Jalousie -r OG -o json | jq -r '.[].uuid' | while read -r b; do lox blind "$b" up; done
+```
+
+## Pages
+
+| Page | Commands |
+|:-----|:---------|
+| [Controls](controls) | `on`/`off`, lights, blinds, gates, climate, alarm, doors, intercom, charger, inputs, music, `send`, `run` |
+| [Inspection](inspection) | `ls`, `get`, `info`, `watch`, `stream`, `if`, rooms, sensors, energy, weather, history, autopilot |
+| [System](system) | `status`, `log`, `health`, `discover`, firmware, `reboot`, `files`, `tui` |
+| [Configuration](configuration) | `setup`, aliases, cache, token, scenes, `config`, `ir`, contexts, completions, `schema`, `mcp` |

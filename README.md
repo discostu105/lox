@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/discostu105/lox/actions/workflows/ci.yml/badge.svg)](https://github.com/discostu105/lox/actions/workflows/ci.yml)
 [![Release](https://github.com/discostu105/lox/actions/workflows/release.yml/badge.svg)](https://github.com/discostu105/lox/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: GPL-3.0 or commercial](https://img.shields.io/badge/License-GPL--3.0%20%7C%20commercial-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.91%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
@@ -36,7 +36,7 @@ lox get "Temperatur" --room "Schlafzimmer"
 lox get "Temperatur [OG Kinderzimmer Bastian]"
 
 # Quick energy overview
-lox status --energy
+lox energy
 
 # Conditionally close blinds
 lox if "Temperatur Außen" gt 28 && lox blind "Beschattung Süd" pos 70
@@ -65,7 +65,7 @@ This CLI was designed for AI agent integration. Every command:
   "name": "lox",
   "description": "Control Loxone smart home. Use -o json for structured output.",
   "parameters": {
-    "command": { "type": "string", "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'status --energy'" }
+    "command": { "type": "string", "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'energy'" }
   }
 }
 ```
@@ -130,10 +130,13 @@ The binary is at `target/release/lox` (or `lox.exe` on Windows). Copy it somewhe
 
 ```bash
 lox setup set --host https://192.168.1.100 --user USER --pass PASS
-
-# With serial for correct TLS hostname (avoids cert warnings)
-lox setup set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
+lox status                    # check the connection
+lox ls                        # what lox can see
 ```
+
+To keep the password out of your shell history and the process list, read it into `LOX_PASS` instead of passing
+`--pass`: `read -rs LOX_PASS && export LOX_PASS`. `--serial` is optional:
+it names the Miniserver's folder in the [config repo](#config-versioning-gitops) and its OpenTelemetry `device.id`.
 
 Config location:
 - **macOS/Linux:** `~/.lox/config.yaml`
@@ -203,7 +206,8 @@ lox tui --demo                         # …try it without a Miniserver
 lox stream --room "Kitchen" -o json    # Real-time WebSocket state stream
 lox otel serve --endpoint http://..   # Push metrics, logs & traces via OTLP
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
-lox status --energy                    # Energy dashboard
+lox energy                             # Energy meters
+lox sensors --type door-window         # Open windows and doors
 lox config download --extract          # Download & extract Loxone Config
 lox config compress out.Loxone --template dl.zip  # Upload ZIP from a download, only sps0.LoxCC replaced
 lox config push --force                # Deploy an lxir project: compile, upload, reboot, verify
@@ -217,8 +221,9 @@ lox config find bewegung               # Search blocks by name, type, device, ro
 lox config lint                        # Dead blocks, unwired inputs and motors, duplicate names
 lox config history "Licht"             # How one block changed over time
 lox config restore abc123 --force      # Restore config from git history
-lox ir compile                         # Config as code: compile .lxir modules into the config
-lox ir drift current.Loxone            # Has anyone else changed the config since?
+lox ir check                           # Config as code: validate .lxir modules
+lox ir compile                         # … compile them into the config
+lox ir drift live.Loxone               # Has anyone else changed the config since?
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
 lox schema blind                       # Command schema for AI agent discovery
@@ -285,7 +290,7 @@ steps:
 
 ## Performance
 
-Structure cache at `~/.lox/cache/structure.json` (24h TTL):
+The structure (`LoxApp3.json`) is cached per context for 24 h; `lox cache refresh` after you change the config:
 
 | Operation | Cold | Warm |
 |-----------|------|------|
@@ -300,16 +305,18 @@ Structure cache at `~/.lox/cache/structure.json` (24h TTL):
 
 | Type | Commands |
 |------|----------|
-| `LightControllerV2` | `on`, `off`, `mood plus/minus/off/<id>` |
-| `Jalousie` / `CentralJalousie` | `up`, `down`, `stop`, `pos <0-100>`, `shade`, `full-up`, `full-down` |
-| `Switch` | `on`, `off`, `pulse` |
-| `Dimmer` | `dimmer <name> <0-100>` |
+| `LightControllerV2` | `on`, `off`, `light mood <name> plus/minus/off/<id>`, `light moods <name>` |
+| `Jalousie` / `CentralJalousie` | `blind <name> up/down/stop/shade/pos <0-100>` |
+| `Switch` / `Pushbutton` | `on`, `off`, `input pulse` |
+| `Dimmer` | `light dim <name> <0-100>` |
+| `ColorPickerV2` | `light color <name> "#RRGGBB"` / `"hsv(h,s,v)"` / `"temp(brightness,kelvin)"` |
 | `Gate` / `CentralGate` | `gate <name> open/close/stop` |
-| `ColorPickerV2` | `color <name> #RRGGBB` or `color <name> "hsv(h,s,v)"` |
-| `IRoomControllerV2` | `thermostat <name> --temp/--mode/--override` |
-| `Alarm` | `alarm <name> arm/disarm/quit` |
-| `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
-| Any | `send <uuid> <raw-command>`, `lock`, `unlock` |
+| `IRoomControllerV2` | `thermostat <name> temp <°C>` / `mode <auto…>` / `override <°C> [min]` |
+| `Alarm` | `alarm <name> arm/arm-home/disarm/quit` |
+| Door lock, intercom, wallbox | `door … lock/unlock/open`, `intercom … answer/hangup/open`, `charger … start/stop/pause` |
+| Analog / virtual inputs | `input set <name> <value>` |
+| Sensors, meters | `get`, `sensors`, `energy`, `history` (read-only) |
+| Any | `send <name> <raw-command>`, `lock`, `unlock` |
 
 ---
 
@@ -327,8 +334,8 @@ lox config pull
 # View history
 lox config log
 
-# Restore a previous version
-lox config restore abc123 --force
+# Restore a previous version (loaded on the next reboot)
+lox config restore abc123 --force && lox reboot --yes
 ```
 
 Each pull downloads the config via FTP, decompresses the proprietary LoxCC format to XML, diffs the logic
@@ -352,7 +359,8 @@ Every snapshot stays inspectable: `lox config diff` between any two (commit, ver
 
 **Multi-Miniserver:** each Miniserver gets its own subdirectory (by serial number).
 
-**Safe restore:** uploads the original backup ZIP from git history (no risky recompression).
+**Safe restore:** uploads the original backup ZIP from git history as `sps_new.zip` (no recompression), which the
+Miniserver loads on its next start.
 
 ---
 
@@ -370,8 +378,18 @@ lockfile, so the next compile changes only what you changed. Everything you don'
 visualization, other logic — passes through byte for byte. `lox ir diff` proves it, `lox ir drift` tells you
 when the GUI or the app wrote to the config since. `lox config push --force` deploys a project end to end: drift
 check, compile against the live config, byte-exact upload, reboot, and a download that proves the Miniserver runs
-exactly the compiled file. See [COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the
-[lxir docs](crates/lxir/README.md) (language, lockfile, workflow).
+exactly the compiled file.
+
+```bash
+lox config download --extract --save-as base.zip   # the deployed config → base.Loxone
+lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json   # take over existing blocks
+$EDITOR pages/*.lxir                                 # with base, module, lock in lox.toml:
+lox ir compile && lox config diff base.Loxone out.Loxone
+lox config push --force                              # deploy, verified
+```
+
+Walkthrough: the [Config as Code guide](docs/guides/config-as-code.md). Reference:
+[COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the [lxir docs](crates/lxir/README.md) (language, lockfile).
 
 The toolchain is the [`lxir`](crates/lxir) crate in this repository: a network-free library (also on
 [crates.io](https://crates.io/crates/lxir)) that `lox` builds on for `lox ir`, the logic diffs, the Wiring view
@@ -383,11 +401,12 @@ and `lox config show/wiring/find/lint/history`.
 
 ```
 ~/.lox/
-  config.yaml          # Host, credentials, serial, aliases
-  cache/
-    structure.json     # LoxApp3.json (24h TTL, ~150KB)
-  token.json           # Token auth (optional)
-  scenes/*.yaml        # Your scenes
+  config.yaml          # host, credentials, aliases, confirm: list (one Miniserver or named contexts)
+  tui.yaml             # lox tui preferences
+  contexts/<name>/     # per context (a single-Miniserver config keeps these directly in ~/.lox/)
+    cache/structure.json   # LoxApp3.json (24h TTL, ~150KB)
+    token.json         # token auth (optional)
+    scenes/*.yaml      # your scenes
 ```
 
 Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted. Works on Windows, macOS, and Linux.
@@ -405,7 +424,7 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 
 ## Status
 
-This project is a an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If you like the project, please help and contribute.
+This project is an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If you like the project, please help and contribute.
 
 **Use at your own risk.** Commands that modify your Miniserver (e.g., `config upload`, `reboot`, `update`) can affect your live system. Always have a backup.
 
@@ -413,4 +432,4 @@ This project is a an experiment. Expect rough edges. Not every Miniserver config
 
 ## License
 
-[License](https://github.com/discostu105/lox/blob/main/LICENSE)
+Dual-licensed: [GPL-3.0](LICENSE-GPL) or a [commercial license](LICENSE-COMMERCIAL). See [LICENSE](LICENSE).

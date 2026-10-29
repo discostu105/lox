@@ -48,6 +48,16 @@ nav_order: 1
     <div class="feature-desc">JSON output, schema discovery, fuzzy matching, dry-run mode, and structured errors designed for LLM tool use.</div>
   </div>
   <div class="feature-card">
+    <span class="feature-icon">&#128421;</span>
+    <div class="feature-title">Terminal UI</div>
+    <div class="feature-desc"><code>lox tui</code>: rooms, live events, energy flow, system health and the wiring behind every control. Try <code>lox tui --demo</code>.</div>
+  </div>
+  <div class="feature-card">
+    <span class="feature-icon">&#128221;</span>
+    <div class="feature-title">Config as code</div>
+    <div class="feature-desc">Write logic as <code>.lxir</code> text, review it in a pull request, deploy it verified with <code>lox config push</code>.</div>
+  </div>
+  <div class="feature-card">
     <span class="feature-icon">&#128225;</span>
     <div class="feature-title">Real-time streaming</div>
     <div class="feature-desc">WebSocket state streaming with NDJSON output. Filter by room, type, or specific controls.</div>
@@ -102,8 +112,9 @@ nav_order: 1
 <span class="terminal-comment"># Real-time monitoring</span>
 <span class="terminal-prompt">$</span> lox stream --room "Kitchen" -o json
 
-<span class="terminal-comment"># GitOps config backup</span>
-<span class="terminal-prompt">$</span> lox config pull</code></pre>
+<span class="terminal-comment"># GitOps config backup, and why a light is on</span>
+<span class="terminal-prompt">$</span> lox config pull
+<span class="terminal-prompt">$</span> lox config wiring "Licht Wohnzimmer" --trace up</code></pre>
   </div>
 </div>
 
@@ -115,16 +126,18 @@ nav_order: 1
 
 | Type | Commands |
 |:-----|:---------|
-| `LightControllerV2` | `on`, `off`, `mood plus/minus/off/<id>` |
-| `Jalousie` / `CentralJalousie` | `up`, `down`, `stop`, `pos <0-100>`, `shade`, `full-up`, `full-down` |
-| `Switch` | `on`, `off`, `pulse` |
-| `Dimmer` | `dimmer <name> <0-100>` |
+| `LightControllerV2` | `on`, `off`, `light mood <name> plus/minus/off/<id>`, `light moods <name>` |
+| `Jalousie` / `CentralJalousie` | `blind <name> up/down/stop/shade/pos <0-100>` |
+| `Switch` / `Pushbutton` | `on`, `off`, `input pulse` |
+| `Dimmer` | `light dim <name> <0-100>` |
+| `ColorPickerV2` | `light color <name> "#RRGGBB"` / `"hsv(h,s,v)"` / `"temp(brightness,kelvin)"` |
 | `Gate` / `CentralGate` | `gate <name> open/close/stop` |
-| `ColorPickerV2` | `color <name> #RRGGBB` or `hsv(h,s,v)` |
-| `IRoomControllerV2` | `thermostat <name> --temp/--mode/--override` |
-| `Alarm` | `alarm <name> arm/disarm/quit` |
-| `InfoOnlyAnalog` / `Meter` | `get` (read-only) |
-| Any | `send <uuid> <raw-command>`, `lock`, `unlock` |
+| `IRoomControllerV2` | `thermostat <name> temp <°C>` / `mode <auto…>` / `override <°C> [min]` |
+| `Alarm` | `alarm <name> arm/arm-home/disarm/quit` |
+| Door lock, intercom, wallbox | `door … lock/unlock/open`, `intercom … answer/hangup/open`, `charger … start/stop/pause` |
+| Analog / virtual inputs | `input set <name> <value>` |
+| Sensors, meters | `get`, `sensors`, `energy`, `history` (read-only) |
+| Any | `send <name> <raw-command>`, `lock`, `unlock` |
 
 ---
 
@@ -132,7 +145,7 @@ nav_order: 1
 
 ## Benchmarks
 
-Structure cache at `~/.lox/cache/structure.json` (24h TTL):
+The structure (`LoxApp3.json`) is cached per context for 24 h:
 
 | Operation | Cold | Warm |
 |:----------|:-----|:-----|

@@ -22,11 +22,13 @@ nav_order: 2
 lox ls                                 # all controls
 lox ls -t Jalousie                     # filter by type
 lox ls -r "Wohnzimmer"                 # filter by room
-lox ls -c "Beleuchtung"               # filter by category
+lox ls -c "Beleuchtung"                # filter by category
 lox ls -f                              # only favorites
 lox ls --values                        # include live values (slower)
-lox ls -o json                         # JSON output
+lox ls -o json | jq -r '.[].name'      # names, for scripts
 ```
+
+Filters combine and match substrings, case-insensitively: `lox ls -t Jalousie -r OG`.
 
 | Flag | Description |
 |:-----|:------------|
@@ -46,7 +48,8 @@ lox get "Temperatur" --room "Schlafzimmer"
 lox get "Temperatur [OG Kinderzimmer]"
 ```
 
-Returns all state outputs for the control.
+Returns all state outputs for the control. To see *why* it has that value, follow its wiring in the config:
+`lox config wiring "Licht Wohnzimmer" --trace up` (see [Config Versioning](/lox/guides/config-versioning#inspecting-snapshots)).
 
 ---
 
@@ -88,6 +91,7 @@ lox stream --type LightControllerV2    # filter by type
 lox stream --control "Kitchen Light"   # filter by control name
 lox stream --initial                   # include initial state snapshot
 lox stream -o json                     # NDJSON output
+lox stream --reconnect                 # keep going across Miniserver reboots
 ```
 
 | Flag | Description |
@@ -95,7 +99,13 @@ lox stream -o json                     # NDJSON output
 | `-t`, `--type` | Filter by control type |
 | `-r`, `--room` | Filter by room |
 | `-c`, `--control` | Filter by control name |
-| `--initial` | Include initial state snapshot |
+| `--initial` | Include initial state snapshot (with `--reconnect`: again after every reconnect) |
+| `--reconnect` | Wait for the Miniserver after a reboot or dropped connection (backs off 1 s → 30 s, gives up after 30 min), then resume; the gap is reported on stderr and, with `-o json`, as `disconnected`/`reconnected` event lines |
+
+```bash
+# A change log of one room, one JSON object per line
+lox stream -r Küche --reconnect -o json >> kueche.ndjson
+```
 
 ---
 
@@ -110,7 +120,7 @@ lox if "Schalter" eq 1 && lox on "Licht"
 
 Operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
 
-Useful for scripting conditional automation:
+Use `-r <room>` to disambiguate. Useful for scripting conditional automation:
 
 ```bash
 # Close blinds if temperature exceeds 28
@@ -134,7 +144,7 @@ lox modes                             # operating modes
 
 ```bash
 lox sensors                           # all sensor readings
-lox sensors --type temperature        # temperature sensors only (by unit: °)
+lox sensors --type temperature        # temperature sensors only
 lox sensors --type door-window        # door/window sensors
 lox sensors --type motion             # motion sensors
 lox sensors --type smoke              # smoke detectors
@@ -164,7 +174,7 @@ lox weather --forecast                # 7-day forecast
 ## Statistics & History
 
 ```bash
-lox stats                             # controls with statistics (legacy or Statistics V2)
+lox stats                             # controls with statistics enabled (legacy or Statistics V2)
 lox history "Temperatur" --month 2025-01
 lox history "Temperatur" --day 2025-01-15
 lox history "Temperatur" -o csv       # CSV output for spreadsheets

@@ -388,7 +388,7 @@ Control:
   light                        Moods, dimmer, color
   blind, gate                  Blinds, gates
   thermostat, alarm            Climate, security
-  door, intercom, charger     Door locks, intercoms, EV chargers
+  door, intercom, charger      Door locks, intercoms, EV chargers
   music                        Music server zones
   lock, unlock                 Lock/unlock controls (admin)
   run, send                    Run scenes, send raw commands
@@ -571,7 +571,7 @@ pub(crate) enum Cmd {
         #[arg(long, short = 'r')]
         room: Option<String>,
     },
-    /// Control thermostat: temp <°C> | mode <auto|eco|comfort|manual> | override <°C> [minutes]
+    /// Control thermostat: temp <°C> | mode <auto|manual|auto-heat|…> | override <°C> [minutes]
     Thermostat {
         name_or_uuid: String,
         /// Action: temp, mode, override (omit to show current state)
@@ -1266,7 +1266,7 @@ pub(crate) enum CtxCmd {
         /// Password
         #[arg(long)]
         pass: String,
-        /// Miniserver serial number (for DynDNS TLS)
+        /// Miniserver serial number (names its config repo folder, OTel device.id)
         #[arg(long)]
         serial: Option<String>,
     },

@@ -20,13 +20,23 @@ nav_order: 4
 
 ```bash
 lox setup set --host https://192.168.1.100 --user admin --pass secret
-lox setup set --serial YOUR_SERIAL         # enables correct TLS hostname
+lox setup set --serial 504F94112233        # config repo folder, OTel device.id; checked by config push
 lox setup set --verify-ssl                 # enable cert verification
 lox setup set --no-verify-ssl              # disable (default, self-signed)
 lox setup show                             # show config (password redacted)
 ```
 
-All fields support environment variables: `LOX_HOST`, `LOX_USER`, `LOX_PASS`, `LOX_SERIAL`.
+`setup set` changes only the fields you pass. All fields also read environment variables (`LOX_HOST`, `LOX_USER`,
+`LOX_PASS`, `LOX_SERIAL`); `read -rs LOX_PASS && export LOX_PASS` keeps the password out of the process list and
+your shell history.
+
+To have `lox tui` and the MCP server ask before acting on a control, list it under `confirm:` in the config
+(UUID, alias, or name with an optional `[Room]`):
+
+```yaml
+confirm:
+  - Pool Abdeckung [Pool]
+```
 
 ---
 
@@ -38,13 +48,14 @@ lox alias remove wz
 lox alias ls
 ```
 
-Then use directly: `lox on wz`, `lox get wz`
+Then use directly: `lox on wz`, `lox get wz`. Find a UUID with `lox ls -o json` or `lox info <name>`.
 
 ---
 
 ## Cache
 
-The structure cache (`~/.lox/cache/structure.json`) stores the Miniserver's LoxApp3.json with a 24-hour TTL.
+The structure cache stores the Miniserver's `LoxApp3.json` per context with a 24-hour TTL. Run `lox cache refresh`
+after you change the config, so new controls and names show up.
 
 ```bash
 lox cache info               # show cache age and path
@@ -68,7 +79,8 @@ lox token revoke             # revoke token on Miniserver
 lox token clear              # delete local token file
 ```
 
-The token auth flow uses RSA+AES key exchange via WebSocket. Once acquired, the token is automatically used for all HTTP requests.
+The token is acquired with an RSA+AES key exchange over WebSocket and used by WebSocket sessions (`stream`, `tui`,
+`otel`, `light moods`), which request and save one on their own when needed. HTTP commands use Basic Auth.
 
 ---
 
@@ -80,7 +92,7 @@ lox scene show abend         # print YAML definition
 lox scene new abend          # create empty scene file
 ```
 
-Scene files are stored in `~/.lox/scenes/*.yaml`. See the [Scenes guide](/lox/guides/scenes) for details.
+Scene files are stored in `~/.lox/scenes/*.yaml` (with contexts: `~/.lox/contexts/<name>/scenes/`). See the [Scenes guide](/lox/guides/scenes) for details.
 
 ---
 
@@ -95,10 +107,18 @@ lox config download --save-as config.zip  # custom output filename
 lox config ls                             # list available configs
 lox config extract config.zip             # decompress LoxCC to .Loxone XML
 lox config extract config.zip --save-as out.Loxone
-lox config upload config.zip --force      # upload to Miniserver
+lox config compress out.Loxone --template config.zip  # upload ZIP: config.zip with only sps0.LoxCC replaced
+lox config upload config.zip --force      # upload as sps_new.zip, loaded on the next reboot
 lox config users file.Loxone              # list user accounts
 lox config devices file.Loxone            # list hardware devices
 ```
+
+`upload` refuses anything that is not a config ZIP and only stages it: `lox reboot --yes` loads it. To upload,
+reboot and verify in one go, deploy with [`lox config push`](/lox/guides/config-as-code#deploy-with-lox-config-push).
+
+{: .warning }
+An upload replaces the whole program and discards autopilot rules that exist only on the Miniserver (created in the
+app). Check `lox autopilot changed` first.
 
 ### Inspecting the logic
 
@@ -128,11 +148,24 @@ lox config init ~/loxone-config           # initialize git repo
 lox config pull                           # download, diff, and git-commit
 lox config pull --quiet                   # cron-friendly
 lox config log                            # show change history
-lox config log -n 5                       # last 5 entries
+lox config log -c 5                       # last 5 entries
 lox config restore abc123 --force         # restore from git history
 ```
 
 See the [Config Versioning guide](/lox/guides/config-versioning) for the full workflow.
+
+### Config as code
+
+```bash
+lox ir check                              # validate .lxir modules (in a lox.toml project)
+lox ir compile                            # base + module + lock → out.Loxone
+lox config diff base.Loxone out.Loxone    # review the change by name
+lox config push                           # drift check, compile, stage (dry run)
+lox config push --force                   # upload, reboot, verify, move base
+lox ir help                               # every lxir command and flag
+```
+
+See the [Config as Code guide](/lox/guides/config-as-code).
 
 ---
 
@@ -142,7 +175,7 @@ Manage multiple Miniserver connections, similar to `kubectl config use-context`:
 
 ```bash
 lox ctx add home --host https://192.168.1.100 --user admin --pass secret
-lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret --serial 504F94AABBCC
 lox ctx use home                # switch active context
 lox ctx home                    # shortcut for `lox ctx use home`
 lox ctx list                    # list all contexts (* = active)
@@ -229,7 +262,8 @@ Expose `lox` to MCP clients (Claude Desktop, ChatGPT, Cursor, Claude Code, …):
 lox mcp serve                             # stdio server (MCP 2026-07-28 + older), launched by the client
 lox mcp serve --read-only                 # read tools only
 lox mcp serve --allow-risky               # doors, gates, alarm without asking the user
-lox mcp config                            # print client config snippets
+lox mcp serve --allow-raw                 # also expose send_command
+lox mcp config                            # print client config snippets (takes the same policy flags)
 lox mcp tools                             # list exposed tools
 ```
 
