@@ -7,6 +7,7 @@
     { "include": "#template" },
     { "include": "#test" },
     { "include": "#tiles" },
+    { "include": "#access" },
     { "include": "#end" },
     { "include": "#page" },
     { "include": "#extern" },
@@ -163,6 +164,24 @@
           "captures": {
             "1": { "name": "variable.parameter.lxir" },
             "2": { "name": "punctuation.separator.lxir" }
+          }
+        }
+      ]
+    },
+    "access": {
+      "comment": "access <code_touch> … end with user/group \"<title>\": \"<schedule>\" grants (D49)",
+      "patterns": [
+        {
+          "match": "^\\s*(access)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
+          "captures": {
+            "1": { "name": "keyword.control.access.lxir" },
+            "2": { "name": "variable.other.lxir" }
+          }
+        },
+        {
+          "match": "^\\s*(user|group)\\s+(?=\")",
+          "captures": {
+            "1": { "name": "keyword.other.access.lxir" }
           }
         }
       ]

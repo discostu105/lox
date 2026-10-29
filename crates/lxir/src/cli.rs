@@ -7,9 +7,9 @@
 
 use lxir::ir::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, adopt, adopt_one,
-    adopt_pages, apply_rekeys, compile, decompile, decompile_pages, lint_dead_outputs, lint_source,
-    lint_tiles, lock_rekeys, plan_tests, read_results, rename_slug, slugify, valid_slug,
-    validate_ports,
+    adopt_pages, apply_rekeys, compile, decompile, decompile_pages, lint_access, lint_dead_outputs,
+    lint_source, lint_tiles, lock_rekeys, plan_tests, read_results, rename_slug, slugify,
+    valid_slug, validate_ports,
 };
 use lxir::uuid::parse_serial;
 use lxir::{Lockfile, LoxoneDoc, Project};
@@ -93,7 +93,8 @@ USAGE:
         block that reaches only dead ref plumbing is still dead), and
         Touch Pure Flex commands on any device that reach several
         API-linked blocks because they name none (tile-broadcast) or
-        reach none (tile-dead-command). Never
+        reach none (tile-dead-command), and users whose NFC tag or access
+        code opens no NFC Code Touch (no-access-right). Never
         modifies anything; exit 1 when there are findings — they can be
         deliberate (reference externs kept as documentation, app-visible
         state blocks), so lint is not part of the compile path.
@@ -1010,6 +1011,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
                 .map_err(|e| format!("compile for dead-output analysis failed: {e}"))?;
             findings.extend(lint_dead_outputs(&module, &lock, &compiled)?);
             findings.extend(lint_tiles(&module, &compiled));
+            findings.extend(lint_access(&compiled));
         }
         None => eprintln!("note: no lox.toml project — dead-output analysis skipped"),
     }

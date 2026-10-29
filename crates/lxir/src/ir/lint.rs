@@ -29,6 +29,9 @@ pub enum LintKind {
     TileBroadcast,
     /// A Touch Pure Flex command no API-linked block receives (D41).
     TileDeadCommand,
+    /// A user with an NFC tag or access code and no access right on any
+    /// NFC Code Touch (D49).
+    NoAccessRight,
 }
 
 impl LintKind {
@@ -40,6 +43,7 @@ impl LintKind {
             LintKind::DeadOutputs => "dead-outputs",
             LintKind::TileBroadcast => "tile-broadcast",
             LintKind::TileDeadCommand => "tile-dead-command",
+            LintKind::NoAccessRight => "no-access-right",
         }
     }
 }
@@ -134,6 +138,10 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             }
             Item::TilesClaim(c) => {
                 object_refs.insert(&c.slug);
+            }
+            // Access rights use the Code Touch they are on (D49).
+            Item::Access(a) => {
+                object_refs.insert(&a.slug);
             }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {

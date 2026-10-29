@@ -128,6 +128,12 @@ extern sensor = LoxAIRDevice(uuid: "…")  # a device (created in Loxone Config)
 sensor.title = "Raumklima Bad"       # assign title, room, category (D39);
 sensor.room = "Bad"                  # children in the device's room follow
 
+extern tuer = NfcCodeTouch(uuid: "…")
+access tuer                          # who may open it, under which schedule
+	user "alice": "Always"           # (D49): users, groups and schedules
+	group "Residents": "Workdays"    # by title; the rest lose access
+end
+
 removed old_gate                     # confirmed delete of a managed block
 moved beschatten -> schatten_gate    # slug rename, UUIDs survive
 ```
@@ -175,6 +181,9 @@ it only when it matches what you intended.
 | `carries no room binding` / `carries no category binding` | the object has no `<IoData Pr=/Cr=>` to rewrite | assign a room/category once in Loxone Config, then claim it from source |
 | `claim the … of the same object` | two externs resolve to one object and claim the same attribute | keep one assignment |
 | `numeric character references as literal text` (from `drift`) | a foreign XML writer left `&#xA;` text in programs, rules or descriptions; Loxone reads it verbatim | `lxir repair <cfg> --out <fixed>`, then compile against `<fixed>` as the base |
+| `no user titled` / `no group titled` / `no access schedule titled` | an `access` grant names nothing in the base | use the title as Loxone Config or the app shows it; create the user, group or schedule there first |
+| `users are titled` / `groups are titled` / `schedules are titled` | several objects share the title an `access` grant names | give them distinct titles in Loxone Config or the app |
+| `not an NFC Code Touch` | `access` on an extern of another type | declare `access` only on an `NfcCodeTouch` extern |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -188,7 +197,9 @@ only on success) — just fix and re-run.
   re-run freely.
 - The compiler touches only: its managed blocks, wires it drew onto extern
   ports (`<-`), `Def=` values it assigned on extern ports, and the
-  title/room/category it claimed on externs (plus that claim's followers).
-  Everything else in the config is preserved byte-for-byte.
+  title/room/category it claimed on externs (plus that claim's followers),
+  tile programs it declared, and access rights (`TIM=`) on Code Touches
+  with an `access` declaration. Everything else in the config is
+  preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

@@ -17,11 +17,14 @@
 //!    rights, layout, visualization — stays as it is live instead of reverting
 //!    to the base.
 //! 4. Show what the push changes. Nothing to push ends here.
-//! 5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced,
+//! 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced,
 //!    verified to extract to exactly the compiled file. Its app catalogue
 //!    (`LoxAPP3.json`) is Loxone Config's from before: controls of the app the
-//!    push renames, moves or deletes are named. Without `--force` the push
-//!    ends here.
+//!    push renames, moves or deletes are named. `permissions.bin` is
+//!    regenerated for the compiled config when lxir reproduces the live one
+//!    byte for byte; otherwise the live file stays, and the report says when
+//!    it no longer matches the compiled access rights. Without `--force` the
+//!    push ends here.
 //! 6. Upload it as `sps_new.zip`, which the Miniserver loads on start, reboot,
 //!    and wait until it answers again. Loading it drops the Miniserver's
 //!    custom changes, users edited in the app among them: when the live users
@@ -185,6 +188,14 @@ pub(crate) struct PushReport {
     /// (`false`: the uploaded one, so the app still shows the old state)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_catalogue_rebuilt: Option<bool>,
+    /// What the staged ZIP carries as `permissions.bin`: `unchanged`,
+    /// `regenerated` (for the compiled access rights), `kept` (the live file,
+    /// which lxir does not reproduce) or `absent`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<&'static str>,
+    /// The kept `permissions.bin` does not match the compiled access rights:
+    /// users or groups gained or lost a block
+    pub permissions_stale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compiled: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +323,8 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         custom_changes_pending: pending,
         app_catalogue_stale: Vec::new(),
         app_catalogue_rebuilt: None,
+        permissions: None,
+        permissions_stale: false,
         compiled: None,
         staged: None,
         verified: None,
@@ -338,8 +351,9 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
             None
         }
     };
+    let (live_doc, compiled_doc) = (parse(&live_xml)?, parse(&compiled)?);
     if let Some(catalogue) = &catalogue {
-        let d = lxir::diff::diff(&parse(&live_xml)?, &parse(&compiled)?);
+        let d = lxir::diff::diff(&live_doc, &compiled_doc);
         report.app_catalogue_stale = app_catalogue::stale_entries(catalogue, &d);
     }
     if !report.app_catalogue_stale.is_empty() {
@@ -356,8 +370,31 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         ));
     }
 
-    // 5. Stage exactly the compiled bytes.
-    let staged = loxcc::stage_upload_zip(&live_zip, &compiled)?;
+    // 5. Stage exactly the compiled bytes, with the access table to match.
+    let permissions = permissions_for(&live_zip, &live_doc, &compiled_doc)?;
+    report.permissions = Some(permissions.status);
+    report.permissions_stale = permissions.stale;
+    match (&permissions.content, &permissions.kept_because) {
+        (Some(_), _) => say("permissions.bin: regenerated for the compiled access rights."),
+        (None, Some(why)) if permissions.stale => eprintln!(
+            "WARNING: permissions.bin stays as live ({why}), but the compiled config assigns \
+             users and groups differently: the file is stale. Whether the Miniserver rebuilds \
+             it on start is unverified; after the push, check `lox access perms <control>` \
+             and the door itself."
+        ),
+        (None, Some(why)) => say(&format!(
+            "permissions.bin: kept as live ({why}); the compiled config assigns users and \
+             groups as live does."
+        )),
+        (None, None) => {}
+    }
+    let replace: Vec<(&str, &[u8])> = permissions
+        .content
+        .as_deref()
+        .map(|c| (loxcc::PERMISSIONS_ENTRY, c))
+        .into_iter()
+        .collect();
+    let staged = loxcc::stage_upload_zip_replacing(&live_zip, &compiled, &replace)?;
     let staged_path = file("push.zip");
     fs::write(&staged_path, &staged)?;
     report.staged = Some(staged_path.clone());
@@ -553,6 +590,67 @@ fn compile_project(
         relayout: Vec::new(),
     };
     compile(&parse(base)?, &module, lock, &options).context("Compiling the module failed")
+}
+
+/// What the staged ZIP carries as `permissions.bin`.
+struct Permissions {
+    /// `unchanged`, `regenerated`, `kept` or `absent`
+    status: &'static str,
+    /// The regenerated file, when it differs from the live one.
+    content: Option<Vec<u8>>,
+    /// Why the live file stays as it is.
+    kept_because: Option<String>,
+    /// The kept file does not match the compiled assignments.
+    stale: bool,
+}
+
+/// `permissions.bin` for the compiled config. Loxone Config writes it next to
+/// the program, from the program and `LoxAPP3.json` (`lxir::permissions`).
+/// Only when the generator reproduces the live file byte for byte does the
+/// push trust it with the compiled config; otherwise the live file stays,
+/// stale when the compiled config assigns users and groups differently.
+fn permissions_for(live_zip: &[u8], live: &LoxoneDoc, compiled: &LoxoneDoc) -> Result<Permissions> {
+    use lxir::permissions::{assignments, encode, generate};
+    let Some(bin) = loxcc::read_entry(live_zip, loxcc::PERMISSIONS_ENTRY)? else {
+        return Ok(Permissions {
+            status: "absent",
+            content: None,
+            kept_because: None,
+            stale: false,
+        });
+    };
+    let app = loxcc::read_entry(live_zip, app_catalogue::MEMBER)?
+        .map(|a| String::from_utf8(a).map_err(|_| "LoxAPP3.json is not UTF-8".to_string()))
+        .unwrap_or_else(|| Err("the download has no LoxAPP3.json".to_string()));
+    let regenerated = app.and_then(|app| {
+        let live_bin = generate(live, &app).map_err(|e| e.to_string())?;
+        if encode(&live_bin) != bin {
+            return Err("lxir does not reproduce the live file".to_string());
+        }
+        Ok(encode(
+            &generate(compiled, &app).map_err(|e| e.to_string())?,
+        ))
+    });
+    Ok(match regenerated {
+        Ok(new) if new == bin => Permissions {
+            status: "unchanged",
+            content: None,
+            kept_because: None,
+            stale: false,
+        },
+        Ok(new) => Permissions {
+            status: "regenerated",
+            content: Some(new),
+            kept_because: None,
+            stale: false,
+        },
+        Err(why) => Permissions {
+            status: "kept",
+            content: None,
+            stale: assignments(live) != assignments(compiled),
+            kept_because: Some(why),
+        },
+    })
 }
 
 fn parse(xml: &[u8]) -> Result<LoxoneDoc> {
@@ -1228,6 +1326,175 @@ mod tests {
         );
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["kept_as_live"].as_array().unwrap().len(), 2);
+    }
+
+    // ── permissions.bin ─────────────────────────────────────────────────
+
+    const DOOR: &str = "50000009-0000-0090-ffff504f94112233";
+
+    /// The example base with users, an access schedule, a task list and an
+    /// NFC Code Touch that alice may open (all synthetic).
+    fn base_with_users(dir: &Path) -> String {
+        let tree = format!(
+            "\t\t<C Type=\"LoxCaption\" V=\"175\" U=\"50000000-0000-0001-ffff504f94112233\" \
+             Title=\"Users and Permissions\" CaptionType=\"20\" SubType=\"20\">\r\n\
+             \t\t\t<C Type=\"User\" V=\"175\" U=\"50000001-0000-0010-ffff504f94112233\" \
+             Title=\"alice\" UsR=\"-1\" NFCArr=\"0A1B\" NFCNArr=\"Key fob\">\r\n\
+             \t\t\t\t<PH NUM=\"1\">\r\n\
+             \t\t\t\t\t<PRM REF=\"{DOOR}\" TIM=\"50000006-0000-0060-ffff504f94112233\"/>\r\n\
+             \t\t\t\t</PH>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"User\" V=\"175\" U=\"50000002-0000-0020-ffff504f94112233\" \
+             Title=\"bob\" UsR=\"129\"/>\r\n\
+             \t\t\t<C Type=\"SwitchingTimer\" V=\"175\" U=\"50000006-0000-0060-ffff504f94112233\" \
+             Title=\"Always\"/>\r\n\
+             \t\t</C>\r\n\
+             \t\t<C Type=\"TaskCaption\" V=\"175\" U=\"50000011-0000-0110-ffff504f94112233\" \
+             Title=\"Tasks\"/>\r\n\
+             \t\t<C Type=\"Page\" V=\"175\" U=\"50000008-0000-0080-ffff504f94112233\" \
+             Title=\"Eingang\">\r\n\
+             \t\t\t<C Type=\"NfcCodeTouch\" V=\"175\" U=\"{DOOR}\" Title=\"Front door\">\r\n\
+             \t\t\t\t<Co K=\"Q1\" U=\"50000009-0000-0091-00ffaaaaaaaa5009\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n"
+        );
+        let anchor = "\t\t<C Type=\"VirtualInCaption\"";
+        let xml =
+            String::from_utf8(base(dir))
+                .unwrap()
+                .replacen(anchor, &format!("{tree}{anchor}"), 1);
+        fs::write(dir.join("pool.Loxone"), &xml).unwrap();
+        xml
+    }
+
+    /// A LoxAPP3.json listing the Code Touch, BOM in front as Loxone writes it.
+    fn loxapp3() -> String {
+        let keys = [
+            "operatingMode",
+            "sunrise",
+            "sunset",
+            "pastTasks",
+            "plannedTasks",
+            "notifications",
+            "modifications",
+            "favColorSequences",
+            "favColors",
+            "miniserverTime",
+            "liveSearch",
+            "userSettings",
+            "userSettingsTs",
+            "cloudservice",
+            "trustVersion",
+            "propsVersion",
+            "hasInternet",
+        ];
+        let globals: Vec<String> = keys
+            .iter()
+            .zip(1..)
+            .map(|(k, n): (&&str, u32)| {
+                format!(r#""{k}": "60000000-0000-{n:04x}-ffff504f94112233""#)
+            })
+            .collect();
+        format!(
+            "\u{feff}{{\"globalStates\": {{{}}}, \"controls\": {{\"{DOOR}\": {{\"type\": \
+             \"NfcCodeTouch\", \"room\": \"x\", \"states\": {{\"history\": \
+             \"60000000-0000-0101-ffff504f94112233\"}}}}}}}}",
+            globals.join(", ")
+        )
+    }
+
+    /// A download with LoxAPP3.json and the given permissions.bin.
+    fn zip_with_permissions(xml: &[u8], permissions: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("sps0.LoxCC", opts).unwrap();
+        w.write_all(&loxcc::compress_loxcc(xml).unwrap()).unwrap();
+        w.start_file("LoxAPP3.json", opts).unwrap();
+        w.write_all(loxapp3().as_bytes()).unwrap();
+        w.start_file("permissions.bin", opts).unwrap();
+        w.write_all(permissions).unwrap();
+        w.finish().unwrap().into_inner()
+    }
+
+    fn generated(xml: &[u8]) -> Vec<u8> {
+        let doc = LoxoneDoc::parse(xml).unwrap();
+        lxir::permissions::encode(&lxir::permissions::generate(&doc, &loxapp3()).unwrap())
+    }
+
+    /// The project module also gives bob access to the Code Touch.
+    fn grant_bob(dir: &Path) {
+        fs::write(
+            dir.join("pages/zz_access.lxir"),
+            format!(
+                "extern front_door = NfcCodeTouch(uuid: \"{DOOR}\")\n\n\
+                 access front_door\n\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Always\"\nend\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn push_regenerates_permissions_for_the_compiled_access() {
+        let dir = project();
+        let live = base_with_users(dir.path());
+        grant_bob(dir.path());
+        let live_bin = generated(live.as_bytes());
+        let ms = FakeMiniserver::new(zip_with_permissions(live.as_bytes(), &live_bin));
+
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.permissions, Some("regenerated"));
+        assert!(!report.permissions_stale);
+        let compiled = fs::read(report.compiled.as_ref().unwrap()).unwrap();
+        let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
+        let staged_bin = loxcc::read_entry(&staged, loxcc::PERMISSIONS_ENTRY)
+            .unwrap()
+            .unwrap();
+        assert_eq!(staged_bin, generated(&compiled));
+        assert_ne!(staged_bin, live_bin, "bob now opens the door");
+        assert_eq!(
+            loxcc::read_entry(&staged, app_catalogue::MEMBER).unwrap(),
+            Some(loxapp3().into_bytes()),
+            "LoxAPP3.json stays as downloaded"
+        );
+    }
+
+    #[test]
+    fn push_keeps_a_permissions_bin_it_cannot_reproduce_and_says_it_is_stale() {
+        let dir = project();
+        let live = base_with_users(dir.path());
+        let foreign = vec![0x42; 32];
+        let ms = FakeMiniserver::new(zip_with_permissions(live.as_bytes(), &foreign));
+
+        // No access change: the kept file is still right.
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(report.permissions, Some("kept"));
+        assert!(!report.permissions_stale);
+
+        // bob gains access, but the file cannot follow.
+        grant_bob(dir.path());
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(report.permissions, Some("kept"));
+        assert!(report.permissions_stale);
+        let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            loxcc::read_entry(&staged, loxcc::PERMISSIONS_ENTRY).unwrap(),
+            Some(foreign)
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["permissions"], "kept");
+        assert_eq!(json["permissions_stale"], true);
+    }
+
+    #[test]
+    fn push_without_permissions_bin_says_absent() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(report.permissions, Some("absent"));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["permissions_stale"], false);
     }
 
     #[test]
