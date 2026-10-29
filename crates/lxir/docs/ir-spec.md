@@ -373,7 +373,9 @@ wire directly into blocks on any page.
   one past the highest number in use, and kept from then on.
 - `Analog:` (`"true"`/`"false"`, default `"false"`), `MinVal:`,
   `MaxVal:`, `DefVal:` are attribute parameters. Each is a claim: written
-  while bound, the GUI's value otherwise (like `Code:`).
+  while bound, the GUI's value otherwise (like `Code:`). Make the range
+  cover what the input will receive: a value outside it is reported to
+  read 0 ([loxone-format.md](loxone-format.md)).
 - The room/category binding (`<IoData>`) and display settings stay
   with Loxone Config.
 - A base without the folder is a compile error. Existing virtual inputs

@@ -72,6 +72,11 @@ which lxir refuses rather than guessing past:
   `Modes=`. So a correct `schedule` fails scenarios that check the
   timer's off times (`kr09-outdoor-light-schedule`).
 
+- **`AnalogMultiplexer2`.** lox-sim passes `Input1` at `Select=0` and
+  `Input2` at `1`; on a Miniserver `Select` is reported 1-based (`0`
+  gives 0). A solution that drives it from a digital flag can pass the
+  simulator and fail live ([loxone-format.md](../../docs/loxone-format.md)).
+
 ## Results
 
 2026-10-29, 10 sampled feasible cases (`solutions/`): 9 pass. Every

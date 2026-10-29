@@ -96,9 +96,18 @@ types) contradict each other. Results and methodology:
       references (777/778 are the built-in "Viel Licht"/"Aus"), a `CID=`
       of unknown meaning, `ReadOnly`/`Move` flags, and one `Q<n>=` per
       circuit whose encoding follows the circuit type (dimmer 0–100,
-      switch 0/1, packed colour). Needs an oracle-driven design before
+      switch 0/1, packed colour: `0x60000000 + R + 1000·G + 1000000·B`
+      in percent, per lox-cli; see loxone-format.md for how far the
+      corpus bears out its numbering rules). Needs an oracle-driven design before
       it can be claimed; values on *existing* moods by name are the
       likely first step.
+- [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
+      `I1*0.5`, every corpus formula with a fraction writes `0,5`.
+      Verify which the Miniserver reads (oracle: does the GUI rewrite or
+      flag it; live: the value) before an agent relies on fractions;
+      integer constants are unaffected.
+- [ ] Lint: more than eight Program blocks (`Code1`–`Code16`), which
+      lox-cli reports the Miniserver ignores beyond the eighth.
 - [ ] Block `V=` on Config 17.2: the save writes `V="178"`; the
       compiler emits `175` and `adopt` refuses any other value, so
       blocks saved by 17.2 cannot be adopted yet. Needs a per-release
