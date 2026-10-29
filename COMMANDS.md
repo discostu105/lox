@@ -381,6 +381,7 @@ lox ir compile                         # in a lox.toml project: base + module + 
 lox ir compile --base current.Loxone --module pages/ --lock haus.lock.json \
                --out out.Loxone --serial 504F94112233
 lox ir diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
+lox ir diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
 lox ir drift current.Loxone            # did another writer change the config since the last compile?
 lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
 lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
@@ -424,8 +425,10 @@ Each step stops the push when it fails:
 1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`).
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
    since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
-3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, layout and
-   visualization stay as they are live. Live identical to the compiled config: nothing to push.
+   Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
+   (`kept_as_live` in the JSON report) and goes on.
+3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, access
+   rights, layout and visualization stay as they are live. Live identical to the compiled config: nothing to push.
 4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
    replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
    `--dry-run`) the push ends here.

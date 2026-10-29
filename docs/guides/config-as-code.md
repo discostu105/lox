@@ -145,8 +145,9 @@ Each step stops the push when it fails:
 
 1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`).
 2. **Drift check:** the live logic must still be your `base`. If someone saved from Loxone Config or the app since,
-   the push refuses and names the `lox ir diff` to run.
-3. Compile against the live download, so users, passwords and layout stay as they are live.
+   the push refuses and names the `lox ir diff` to run. Changed users, groups, tags, codes or access rights don't
+   stop it: the push lists them as kept as live.
+3. Compile against the live download, so users, passwords, access rights and layout stay as they are live.
 4. Show the changes and stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to
    exactly the compiled file. Without `--force` the push ends here.
 5. Upload as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
