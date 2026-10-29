@@ -87,8 +87,8 @@ lox reboot --yes                          # the Miniserver loads it on start
 This uploads the original backup ZIP from git history. No recompression: it is the exact file that was downloaded.
 
 {: .warning }
-Restoring a config replaces the live program. Autopilot rules created in the app since that backup are lost; check
-`lox autopilot changed`.
+Restoring a config replaces the live program and deletes the Miniserver's custom changes (what the app changed and
+Loxone Config has not saved: light moods, timers, autopilot rules). `restore` lists them first.
 
 ## Automated backups
 

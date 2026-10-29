@@ -336,6 +336,7 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
     eprintln!("Restoring config from: {}", log_line);
 
     if !force {
+        crate::custom_changes::warn_before_upload(cfg, None);
         eprintln!(
             "\nWARNING: This will upload the config to the Miniserver.\n\
              A bad configuration can require physical SD card access to recover.\n\n\
@@ -356,8 +357,9 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
     let zip_data = show_output.stdout;
     // The Miniserver starts from whatever sps_new.zip holds (a Git LFS
     // pointer, say, would be fatal).
-    loxcc::extract_and_decompress(&zip_data)
+    let xml = loxcc::extract_and_decompress(&zip_data)
         .with_context(|| format!("{} at {} is not a config ZIP", zip_rel, commit))?;
+    crate::custom_changes::warn_before_upload(cfg, Some(&xml));
 
     eprintln!(
         "Uploading as /prog/{} ({} KB)...",

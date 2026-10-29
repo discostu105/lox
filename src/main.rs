@@ -12,9 +12,11 @@ macro_rules! println {
 }
 
 mod actions;
+mod app_catalogue;
 mod client;
 mod commands;
 mod config;
+mod custom_changes;
 mod ftp;
 mod gitops;
 mod logic;
@@ -1564,13 +1566,18 @@ pub(crate) enum ConfigCmd {
         /// Where downloads and push artifacts go (default: PROJECT/backups)
         #[arg(long, value_name = "DIR")]
         backup_dir: Option<String>,
+        /// Push even though the Miniserver holds custom changes (made in the
+        /// app, the web UI or through the API, not saved by Loxone Config);
+        /// loading the upload deletes them
+        #[arg(long)]
+        discard_custom_changes: bool,
     },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     ///
     /// The ZIP goes to /prog/sps_new.zip, which the Miniserver loads on its
-    /// next start (`lox reboot`). It then discards its custom changes, such as
-    /// rules edited in the app since the last upload: check `lox autopilot
-    /// changed` first.
+    /// next start (`lox reboot`). It then deletes its custom changes: what the
+    /// app, the web UI or the API changed and Loxone Config has not saved (light
+    /// moods, timers, rules). The upload lists them first.
     Upload {
         /// Path to a config ZIP file
         file: String,

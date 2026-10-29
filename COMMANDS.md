@@ -282,8 +282,9 @@ lox autopilot changed -o json          # {"changed": <unix seconds>, "changed_at
 
 Rules created or edited in the app can live only in the Miniserver's *custom changes*, not in the
 program file: `lox autopilot ls` and a config download don't see them, and uploading a config discards
-them (the Miniserver logs `Remove old custom changes`). Before an upload, check that
-`lox autopilot changed` is older than the download the upload is based on.
+them (the Miniserver logs `Remove old custom changes`). `lox config push --force` refuses while the
+Miniserver holds custom changes, and `lox config upload` / `restore` list them. Before another kind of
+upload, check that `lox autopilot changed` is older than the download the upload is based on.
 
 ---
 
@@ -318,6 +319,7 @@ Multi-Miniserver: each serial gets its own subdirectory in the repo.
 
 `upload` and `restore` write the ZIP to `/prog/sps_new.zip`, the file the Miniserver loads on its next start; `lox reboot` applies it.
 Both refuse a file that is not a config ZIP. A `.Loxone` file becomes one with `lox config compress FILE --template DOWNLOAD.zip`.
+Both list the Miniserver's custom changes first (see `lox config push`): loading the upload deletes them.
 To upload, reboot and verify in one go, deploy with `lox config push` instead.
 
 ### Inspecting the logic (read-only)
@@ -418,11 +420,18 @@ lox config push --patched-from backups/dl.Loxone --force  # base is a byte patch
 lox config push --allow-removals --force   # delete managed blocks gone from the module
 lox config push --accept-version 17010727  # base saved by a new Loxone Config release
 lox config push --backup-dir /tmp/push # downloads and artifacts elsewhere (default: PROJECT/backups)
+lox config push --discard-custom-changes --force  # push although the Miniserver holds custom changes
 ```
 
 Each step stops the push when it fails:
 
-1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`).
+1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`), and look for its
+   *custom changes*: what the app, the web UI or the API changed and Loxone Config has not saved yet (light moods,
+   timer schedules, autopilot rules), one `/sys/custom/<UUID>.LoxCC` per object. The download doesn't contain them
+   and loading the upload deletes them (def.log: `Remove old custom changes`). With any present, `--force` refuses
+   and names them (`custom_changes_pending` in `-o json`). To keep them, load the project from the Miniserver in
+   Loxone Config and save it, then bring the project up to date; `--discard-custom-changes` deletes them on purpose.
+   A staging run only warns. If `/sys/custom` cannot be listed, `--force` refuses too.
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
    since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
    Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
@@ -431,10 +440,14 @@ Each step stops the push when it fails:
    rights, layout and visualization stay as they are live. Live identical to the compiled config: nothing to push.
 4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
    replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
-   `--dry-run`) the push ends here.
+   `--dry-run`) the push ends here. The ZIP's app catalogue (`LoxAPP3.json`, what the app shows) is Loxone Config's
+   from before: controls of the app the push renames, moves to another room or category, or deletes are named
+   (`app_catalogue_stale` in `-o json`). A save from Loxone Config rewrites the catalogue.
 5. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
 6. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
-   fails and the project is left as it was.
+   fails and the project is left as it was. When app controls changed, the push also reads the catalogue the
+   Miniserver serves and says whether it is still the uploaded one (same `lastModified`: the app shows the old
+   names) or rebuilt (`app_catalogue_rebuilt`).
 7. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
 
 A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:

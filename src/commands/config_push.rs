@@ -4,6 +4,10 @@
 //! Each step stops the push when it fails:
 //!
 //! 1. Download the config the Miniserver runs now (kept under `backups/`).
+//!    Its custom changes (what the app, the web UI or the API changed and
+//!    Loxone Config has not saved) are not in that download, and loading an
+//!    upload deletes them: with any present, `--force` refuses unless
+//!    `--discard-custom-changes` says to delete them.
 //! 2. Drift check: the live config must still be the project's base, at least
 //!    semantically (`lox ir diff` would show no logic changes). A change saved
 //!    from Loxone Config or the app since then is never overwritten. Users,
@@ -14,11 +18,15 @@
 //!    to the base.
 //! 4. Show what the push changes. Nothing to push ends here.
 //! 5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced,
-//!    verified to extract to exactly the compiled file. Without `--force` the
-//!    push ends here.
+//!    verified to extract to exactly the compiled file. Its app catalogue
+//!    (`LoxAPP3.json`) is Loxone Config's from before: controls of the app the
+//!    push renames, moves or deletes are named. Without `--force` the push
+//!    ends here.
 //! 6. Upload it as `sps_new.zip`, which the Miniserver loads on start, reboot,
 //!    and wait until it answers again.
 //! 7. Download again: the Miniserver must now run exactly the compiled file.
+//!    With app controls changed, compare the catalogue it serves with the
+//!    uploaded one: unchanged means the app still shows them as before.
 //! 8. Move the project forward: lock, out file and `base` in lox.toml point at
 //!    the verified state.
 //!
@@ -26,8 +34,10 @@
 //! download (GUI-owned edits lxir cannot express): the live config must be
 //! byte-identical to DOWNLOAD, and the compile uses the patched base.
 
+use crate::app_catalogue::{self, StaleEntry};
 use crate::client::LoxClient;
 use crate::config::Config;
+use crate::custom_changes::{self, CustomChange};
 use crate::{ftp, logic, loxcc};
 use anyhow::{Context, Result, anyhow, bail};
 use lxir::ir::{CompileOptions, compile};
@@ -44,11 +54,16 @@ pub(crate) trait Miniserver {
     fn serial(&self) -> Option<String>;
     /// The newest config ZIP on the Miniserver: its file name and bytes.
     fn download_newest(&self) -> Result<(String, Vec<u8>)>;
+    /// The files of `/sys/custom` (name, LoxCC bytes): custom changes an
+    /// upload would delete.
+    fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>>;
     /// Upload a config ZIP as `/prog/sps_new.zip`.
     fn upload(&self, zip: &[u8]) -> Result<()>;
     fn reboot(&self) -> Result<()>;
     /// Return once the Miniserver answers again after a reboot.
     fn wait_until_up(&self) -> Result<()>;
+    /// The app catalogue the Miniserver serves (`/data/LoxApp3.json`).
+    fn app_catalogue(&self) -> Result<Vec<u8>>;
 }
 
 /// The Miniserver of the connection settings: FTP for configs, HTTP for the
@@ -75,6 +90,10 @@ impl Miniserver for LiveMiniserver {
             .context("No configs found on the Miniserver")?;
         let data = ftp::download_backup(&self.cfg, &newest.filename)?;
         Ok((newest.filename, data))
+    }
+
+    fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        ftp::download_custom_changes(&self.cfg)
     }
 
     fn upload(&self, zip: &[u8]) -> Result<()> {
@@ -106,6 +125,10 @@ impl Miniserver for LiveMiniserver {
         std::thread::sleep(Duration::from_secs(10));
         Ok(())
     }
+
+    fn app_catalogue(&self) -> Result<Vec<u8>> {
+        LoxClient::new(self.cfg.clone())?.get_bytes("/data/LoxApp3.json")
+    }
 }
 
 pub(crate) struct PushOptions {
@@ -120,6 +143,8 @@ pub(crate) struct PushOptions {
     /// Where downloads and push artifacts go (default: `backups/` in the
     /// project).
     pub backup_dir: Option<PathBuf>,
+    /// Upload even though the Miniserver holds custom changes, deleting them.
+    pub discard_custom_changes: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,6 +162,15 @@ pub(crate) struct PushReport {
     pub kept_as_live: Vec<String>,
     /// Logic changes from live to the compiled config
     pub changes: Vec<String>,
+    /// Custom changes on the Miniserver that loading the upload deletes
+    pub custom_changes_pending: Vec<CustomChange>,
+    /// Controls of the app the push renames, moves or deletes; the uploaded
+    /// app catalogue still describes them as before
+    pub app_catalogue_stale: Vec<StaleEntry>,
+    /// After the push: whether the Miniserver serves a rebuilt catalogue
+    /// (`false`: the uploaded one, so the app still shows the old state)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_catalogue_rebuilt: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compiled: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,6 +219,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let live_path = file("pre-push.Loxone");
     fs::write(file("pre-push.zip"), &live_zip)?;
     fs::write(&live_path, &live_xml)?;
+    let pending = check_custom_changes(ms, opts, &live_xml, &say)?;
 
     // 2. Drift: nobody else may have changed the logic since the base.
     let mut kept_as_live = Vec::new();
@@ -257,6 +292,9 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         rebased,
         kept_as_live,
         changes: Vec::new(),
+        custom_changes_pending: pending,
+        app_catalogue_stale: Vec::new(),
+        app_catalogue_rebuilt: None,
         compiled: None,
         staged: None,
         verified: None,
@@ -273,6 +311,32 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         }
     }
     report.compiled = Some(compiled_path.clone());
+    let catalogue = match app_catalogue::from_zip(&live_zip) {
+        Ok(catalogue) => catalogue,
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot read the app catalogue of {name}: {e:#}"
+            ));
+            None
+        }
+    };
+    if let Some(catalogue) = &catalogue {
+        let d = lxir::diff::diff(&parse(&live_xml)?, &parse(&compiled)?);
+        report.app_catalogue_stale = app_catalogue::stale_entries(catalogue, &d);
+    }
+    if !report.app_catalogue_stale.is_empty() {
+        let list: String = report
+            .app_catalogue_stale
+            .iter()
+            .map(|e| format!("\n  \"{}\": {}", e.app_name, e.change))
+            .collect();
+        say(&format!(
+            "Note: the push changes controls of the app:{list}\n\
+             The upload carries Loxone Config's app catalogue ({}) from before, which still \
+             shows them as they were. A save from Loxone Config rewrites it.",
+            app_catalogue::MEMBER
+        ));
+    }
 
     // 5. Stage exactly the compiled bytes.
     let staged = loxcc::stage_upload_zip(&live_zip, &compiled)?;
@@ -323,6 +387,10 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         ));
     }
 
+    if let (false, Some(uploaded)) = (report.app_catalogue_stale.is_empty(), &catalogue) {
+        report.app_catalogue_rebuilt = check_served_catalogue(ms, uploaded, &say);
+    }
+
     // 8. The verified state is the project's new base.
     fs::copy(&scratch_lock, &project.lock)
         .with_context(|| format!("Cannot update {}", project.lock.display()))?;
@@ -340,6 +408,104 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     report.outcome = "pushed";
     report.verified = Some(post_path);
     Ok(report)
+}
+
+/// The custom changes an upload would delete. With `--force` any present
+/// stop the push, unless `--discard-custom-changes`; a staging run only warns.
+/// A failed check counts as changes present: it stops `--force` too.
+fn check_custom_changes(
+    ms: &dyn Miniserver,
+    opts: &PushOptions,
+    live_xml: &[u8],
+    say: &dyn Fn(&str),
+) -> Result<Vec<CustomChange>> {
+    let refuse = opts.force && !opts.discard_custom_changes;
+    let files = match ms.custom_changes() {
+        Ok(files) => files,
+        Err(e) if refuse => {
+            return Err(e.context(format!(
+                "Cannot check {} for custom changes, which loading the upload would delete. \
+                 --discard-custom-changes pushes without the check.",
+                ftp::CUSTOM_CHANGES_DIR
+            )));
+        }
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot check {} for custom changes: {e:#}",
+                ftp::CUSTOM_CHANGES_DIR
+            ));
+            return Ok(Vec::new());
+        }
+    };
+    let pending = custom_changes::describe(&files, Some(live_xml));
+    if pending.is_empty() {
+        return Ok(pending);
+    }
+    let list: String = pending
+        .iter()
+        .map(|c| format!("\n  {}", c.label()))
+        .collect();
+    let head = format!(
+        "The Miniserver holds {} custom change(s) that are not in the program file \
+         (made in the app, the web UI or through the API):{list}\n\
+         Loading the upload deletes them.",
+        pending.len()
+    );
+    if refuse {
+        bail!(
+            "{head} To keep them, load the project from the Miniserver in Loxone Config and \
+             save it, then bring the project up to date with that download. To delete them \
+             on purpose, push with --discard-custom-changes."
+        );
+    }
+    if opts.force {
+        say(&format!("{head} Deleting them (--discard-custom-changes)."));
+    } else {
+        say(&format!(
+            "{head} `--force` will refuse while they are there (or delete them with \
+             --discard-custom-changes)."
+        ));
+    }
+    Ok(pending)
+}
+
+/// After a push that changed controls of the app: does the Miniserver serve
+/// the uploaded catalogue (`Some(false)`) or one it rebuilt (`Some(true)`)?
+/// Compares `lastModified`, the time Loxone Config wrote it: the served
+/// catalogue may be filtered for the user, so the rest can differ anyway.
+/// Only says what it finds; `None` when it cannot tell.
+fn check_served_catalogue(
+    ms: &dyn Miniserver,
+    uploaded: &serde_json::Value,
+    say: &dyn Fn(&str),
+) -> Option<bool> {
+    let served = match ms.app_catalogue().and_then(|b| app_catalogue::parse(&b)) {
+        Ok(served) => served,
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot read the app catalogue the Miniserver serves: {e:#}"
+            ));
+            return None;
+        }
+    };
+    let (Some(was), Some(now)) = (
+        app_catalogue::last_modified(uploaded),
+        app_catalogue::last_modified(&served),
+    ) else {
+        say("Warning: an app catalogue without lastModified; cannot tell whether it was rebuilt.");
+        return None;
+    };
+    if was != now {
+        say(&format!(
+            "The Miniserver serves a rebuilt app catalogue (lastModified {now}, uploaded {was})."
+        ));
+        return Some(true);
+    }
+    say(&format!(
+        "The Miniserver serves the uploaded app catalogue (lastModified {was}): the app still \
+         shows the changed controls as they were until Loxone Config saves the project."
+    ));
+    Some(false)
 }
 
 /// `lox ir compile` for the project, against `base` instead of the project's
@@ -472,6 +638,8 @@ mod tests {
         current: RefCell<Vec<u8>>,
         uploaded: RefCell<Option<Vec<u8>>>,
         reboots: RefCell<usize>,
+        /// The files of /sys/custom; `None`: listing it fails
+        custom: Option<Vec<(String, Vec<u8>)>>,
     }
 
     impl FakeMiniserver {
@@ -481,6 +649,7 @@ mod tests {
                 current: RefCell::new(zip),
                 uploaded: RefCell::new(None),
                 reboots: RefCell::new(0),
+                custom: Some(Vec::new()),
             }
         }
     }
@@ -495,6 +664,11 @@ mod tests {
                 self.current.borrow().clone(),
             ))
         }
+        fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
+            self.custom
+                .clone()
+                .ok_or_else(|| anyhow!("550 Permission denied"))
+        }
         fn upload(&self, zip: &[u8]) -> Result<()> {
             *self.uploaded.borrow_mut() = Some(zip.to_vec());
             Ok(())
@@ -508,6 +682,16 @@ mod tests {
         }
         fn wait_until_up(&self) -> Result<()> {
             Ok(())
+        }
+        /// Serves the catalogue of the config it runs, as is.
+        fn app_catalogue(&self) -> Result<Vec<u8>> {
+            use std::io::Read;
+            let zip = self.current.borrow().clone();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip))?;
+            let mut file = archive.by_name(app_catalogue::MEMBER)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
         }
     }
 
@@ -563,6 +747,7 @@ mod tests {
             allow_removals: false,
             accept_version: None,
             backup_dir: None,
+            discard_custom_changes: false,
         }
     }
 
@@ -701,6 +886,123 @@ mod tests {
             live.matches("Visu=\"true\"").count(),
             "the live visualization setting is kept"
         );
+    }
+
+    /// A Miniserver whose app changed the base's first titled block since the
+    /// last save: one /sys/custom file. Returns it and the block's title.
+    fn with_custom_change(dir: &Path) -> (FakeMiniserver, String) {
+        let xml = base(dir);
+        let doc = LoxoneDoc::parse(&xml).unwrap();
+        let obj = doc
+            .objects()
+            .into_iter()
+            .find(|o| o.title.is_some() && o.block_type != "Page")
+            .unwrap();
+        let fragment = format!(r#"<C Type="{}" U="{}"/>"#, obj.block_type, obj.uuid);
+        let mut ms = FakeMiniserver::new(config_zip(&xml));
+        ms.custom = Some(vec![(
+            format!("{}.LoxCC", obj.uuid),
+            loxcc::compress_loxcc(fragment.as_bytes()).unwrap(),
+        )]);
+        (ms, obj.title.unwrap())
+    }
+
+    #[test]
+    fn push_refuses_while_custom_changes_are_pending() {
+        let dir = project();
+        let (ms, title) = with_custom_change(dir.path());
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(msg.contains("1 custom change(s)"), "{msg}");
+        assert!(msg.contains(&format!("\"{title}\"")), "{msg}");
+        assert!(msg.contains("--discard-custom-changes"), "{msg}");
+        assert!(ms.uploaded.borrow().is_none());
+        assert_eq!(*ms.reboots.borrow(), 0);
+    }
+
+    #[test]
+    fn push_discards_custom_changes_on_purpose() {
+        let dir = project();
+        let (ms, title) = with_custom_change(dir.path());
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+
+        let report = push(&ms, &opts, true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert_eq!(report.custom_changes_pending.len(), 1);
+        assert_eq!(
+            report.custom_changes_pending[0].title.as_deref(),
+            Some(title.as_str())
+        );
+        assert!(!report.custom_changes_pending[0].new);
+    }
+
+    #[test]
+    fn staging_reports_custom_changes_without_refusing() {
+        let dir = project();
+        let (ms, _) = with_custom_change(dir.path());
+
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "staged");
+        assert_eq!(report.custom_changes_pending.len(), 1);
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json["custom_changes_pending"][0]["type"].is_string());
+    }
+
+    #[test]
+    fn a_failed_custom_changes_check_stops_force_but_not_staging() {
+        let dir = project();
+        let mut ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        ms.custom = None;
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+        assert!(format!("{err:#}").contains("550"), "{err:#}");
+        assert!(ms.uploaded.borrow().is_none());
+
+        let staged = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(staged.outcome, "staged");
+
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+        assert_eq!(push(&ms, &opts, true).unwrap().outcome, "pushed");
+    }
+
+    #[test]
+    fn the_served_catalogue_tells_whether_the_miniserver_rebuilt_it() {
+        use std::io::Write;
+        let uploaded = r#"{"lastModified":"2026-10-29 17:15:28","controls":{}}"#;
+        let zip_with = |catalogue: &str| {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let opts = zip::write::SimpleFileOptions::default();
+            w.start_file(app_catalogue::MEMBER, opts).unwrap();
+            w.write_all(catalogue.as_bytes()).unwrap();
+            w.finish().unwrap().into_inner()
+        };
+        let uploaded_json = app_catalogue::parse(uploaded.as_bytes()).unwrap();
+        let said = RefCell::new(Vec::<String>::new());
+        let say = |m: &str| said.borrow_mut().push(m.to_string());
+
+        let same = FakeMiniserver::new(zip_with(uploaded));
+        assert_eq!(
+            check_served_catalogue(&same, &uploaded_json, &say),
+            Some(false)
+        );
+        assert!(said.borrow()[0].contains("2026-10-29 17:15:28"));
+
+        let rebuilt = FakeMiniserver::new(zip_with(
+            r#"{"lastModified":"2026-10-29 18:02:11","controls":{}}"#,
+        ));
+        assert_eq!(
+            check_served_catalogue(&rebuilt, &uploaded_json, &say),
+            Some(true)
+        );
+
+        let none = FakeMiniserver::new(config_zip(b"<x/>"));
+        assert_eq!(check_served_catalogue(&none, &uploaded_json, &say), None);
     }
 
     #[test]

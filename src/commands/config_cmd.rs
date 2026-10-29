@@ -11,8 +11,8 @@ use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
 use crate::{
-    AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, detect_shell,
-    ftp, gitops, install_completions, json_val_str, loxcc, loxone_xml,
+    AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, custom_changes,
+    detect_shell, ftp, gitops, install_completions, json_val_str, loxcc, loxone_xml,
 };
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
@@ -529,6 +529,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             allow_removals,
             accept_version,
             backup_dir,
+            discard_custom_changes,
         } => {
             let ms = config_push::LiveMiniserver::new(Config::load()?);
             let opts = config_push::PushOptions {
@@ -538,6 +539,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 allow_removals,
                 accept_version,
                 backup_dir: backup_dir.map(Into::into),
+                discard_custom_changes,
             };
             let report = config_push::push(&ms, &opts, ctx.quiet)?;
             if ctx.json {
@@ -547,13 +549,18 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         ConfigCmd::Upload { file, force } => {
             let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
             // The Miniserver starts from whatever sps_new.zip holds.
-            if let Err(e) = loxcc::extract_and_decompress(&data) {
-                bail!(
+            let xml = match loxcc::extract_and_decompress(&data) {
+                Ok(xml) => xml,
+                Err(e) => bail!(
                     "{} is not a config ZIP ({:#}). A .Loxone file becomes one with \
                      `lox config compress FILE --template DOWNLOAD.zip`.",
                     file,
                     e
-                );
+                ),
+            };
+            let cfg = Config::load();
+            if let Ok(cfg) = &cfg {
+                custom_changes::warn_before_upload(cfg, Some(&xml));
             }
             if !force {
                 eprintln!(
@@ -568,7 +575,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 );
                 std::process::exit(1);
             }
-            let cfg = Config::load()?;
+            let cfg = cfg?;
             eprintln!(
                 "Uploading {} as /prog/{} ({} KB)...",
                 file,
