@@ -6,8 +6,10 @@
 //! into the UI language — 111 renames in one observed save with zero
 //! semantic change. [`Rename::locale_suspect`] flags those.
 
+use crate::access::{AccessChange, AccessModel};
 use crate::connectors::{attr_params, file_params};
 use crate::doc::{LoxoneDoc, ObjectSummary, WireView, ports};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Element attributes the diff projection compares for a block type: the
@@ -40,7 +42,7 @@ fn canonical_attr(name: &str, value: &Option<String>) -> Option<String> {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct DocDiff {
     pub added: Vec<ObjectSummary>,
     pub removed: Vec<ObjectSummary>,
@@ -50,10 +52,21 @@ pub struct DocDiff {
     pub placements: Vec<PlacementChange>,
     pub wires_added: Vec<WireView>,
     pub wires_removed: Vec<WireView>,
+    /// The users/access section ([`crate::access::changes`]): users and
+    /// groups (which the object lists above leave out), membership,
+    /// credentials, rights. Secrets show as fingerprints only.
+    pub access: Vec<AccessChange>,
 }
 
 impl DocDiff {
     pub fn is_empty(&self) -> bool {
+        self.logic_is_empty() && self.access.is_empty()
+    }
+
+    /// Empty apart from the users/access section: what the Miniserver
+    /// runs as logic is the same. `lox config push` keeps users and access
+    /// rights as they are live, so its drift check asks this.
+    pub fn logic_is_empty(&self) -> bool {
         self.added.is_empty()
             && self.removed.is_empty()
             && self.renamed.is_empty()
@@ -64,7 +77,13 @@ impl DocDiff {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Object types the users/access section reports instead of the object
+/// lists.
+fn in_access_section(block_type: &str) -> bool {
+    matches!(block_type, "User" | "UserGroup")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Rename {
     pub uuid: String,
     pub block_type: String,
@@ -76,7 +95,7 @@ pub struct Rename {
 }
 
 /// A `Def=` change on one port of an object present in both documents.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ParamChange {
     pub object_uuid: String,
     pub block_type: String,
@@ -88,7 +107,7 @@ pub struct ParamChange {
 /// A room or category binding change (`<IoData Pr=…>` / `Cr=…`) on an
 /// object present in both documents. The values are `Place`/`Category`
 /// UUIDs; the titles are resolved in each value's own document.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlacementChange {
     pub object_uuid: String,
     pub block_type: String,
@@ -184,6 +203,9 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
     let (names_a, names_b) = (taxonomy_titles(&objs_a), taxonomy_titles(&objs_b));
 
     for (uuid, ob) in &objs_b {
+        if in_access_section(&ob.block_type) {
+            continue;
+        }
         match objs_a.get(uuid) {
             None => out.added.push(ob.clone()),
             Some(oa) => {
@@ -281,10 +303,16 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
         }
     }
     for (uuid, oa) in &objs_a {
-        if !objs_b.contains_key(uuid) {
+        if !objs_b.contains_key(uuid) && !in_access_section(&oa.block_type) {
             out.removed.push(oa.clone());
         }
     }
+    out.access = crate::access::changes(
+        &AccessModel::read(a),
+        &AccessModel::read(b),
+        &objs_a,
+        &objs_b,
+    );
 
     let wires_a: BTreeSet<WireView> = a.wires().into_iter().collect();
     let wires_b: BTreeSet<WireView> = b.wires().into_iter().collect();
@@ -293,14 +321,19 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
     out
 }
 
-/// Stable digest of exactly the projection [`diff`] compares: two
-/// documents fingerprint-equal iff their diff is empty apart from
-/// locale-suspect renames (suspect titles are left out, so re-saving a
-/// config under another UI locale does not read as drift; neither do
-/// position moves or the save fingerprint, which the projection never
-/// sees). Recorded in the lockfile at adopt/compile; `lxir drift`
-/// recomputes it over a fresh download to answer "did another writer
-/// change something?" from one parse, no reference config needed.
+/// Stable digest of the projection [`diff`] compares: two documents
+/// fingerprint-equal iff their diff is empty apart from locale-suspect
+/// renames and the details of users and groups (suspect titles are left
+/// out, so re-saving a config under another UI locale does not read as
+/// drift; neither do position moves or the save fingerprint, which the
+/// projection never sees). Users and groups count as objects here, UUID,
+/// type and title, as they did before the diff moved them into its
+/// users/access section. Their credentials, members, rights and last
+/// edits stay outside: a fingerprint that took them in would read every
+/// lockfile recorded so far as drift. Recorded in the lockfile
+/// at adopt/compile; `lxir drift` recomputes it over a fresh download to
+/// answer "did another writer change something?" from one parse, no
+/// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 4)
 }

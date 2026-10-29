@@ -14,8 +14,10 @@
 //!   layout. The piece that makes `compile` stable across runs.
 //! - [`ir`] — the textual intermediate representation: parse, decompile
 //!   (config → IR view), compile (IR + lockfile → config).
-//! - [`diff`] — semantic diff between two configs (objects, params, wires),
-//!   with locale-rename noise classification.
+//! - [`diff`] — semantic diff between two configs (objects, params, wires,
+//!   users and access), with locale-rename noise classification.
+//! - [`access`] — users, groups, credentials and access rights, read as a
+//!   model; secrets only ever print as fingerprints.
 //! - [`layout`] — page geometry: footprints, port rows, wires, and the
 //!   placement of blocks that have no position yet; [`render`] draws a
 //!   page as SVG with layout metrics.
@@ -31,6 +33,7 @@
 // `lxir::…`, the way a dependent does.
 extern crate self as lxir;
 
+pub mod access;
 pub mod autopilot;
 pub mod cli;
 pub mod connectors;
