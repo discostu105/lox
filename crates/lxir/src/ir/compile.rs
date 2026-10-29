@@ -2020,20 +2020,20 @@ fn create_pages(
                 .iter()
                 .find(|o| o.block_type == "Page" && o.title.as_deref() == Some(want))
         };
-        if let Some(uuid) = old.get(title) {
-            if let Some(o) = objects.iter().find(|o| &o.uuid == uuid) {
-                let now = o.title.as_deref().unwrap_or_default();
-                if now != title {
-                    return Err(Error::Compile(format!(
-                        "page {title:?} was created by the compiler as {uuid}; the base \
-                         titles it {now:?} — renamed in Loxone Config? Write \
-                         `page {now:?}` in the source (the page then belongs to Loxone \
-                         Config), or rename it back"
-                    )));
-                }
-                lock.pages.insert(title.to_string(), uuid.clone());
-                continue;
+        if let Some(uuid) = old.get(title)
+            && let Some(o) = objects.iter().find(|o| &o.uuid == uuid)
+        {
+            let now = o.title.as_deref().unwrap_or_default();
+            if now != title {
+                return Err(Error::Compile(format!(
+                    "page {title:?} was created by the compiler as {uuid}; the base \
+                     titles it {now:?} — renamed in Loxone Config? Write \
+                     `page {now:?}` in the source (the page then belongs to Loxone \
+                     Config), or rename it back"
+                )));
             }
+            lock.pages.insert(title.to_string(), uuid.clone());
+            continue;
         }
         if page_titled(title).is_some() {
             continue; // Loxone Config's page: nothing to create.
@@ -2118,7 +2118,8 @@ fn insert_page(program: &mut Element, el: Element, title: &str) {
     let after = |n: &Node| {
         page(n).is_some_and(|e| {
             e.attr("SpNo").is_some()
-                || e.attr_decoded("Title").is_some_and(|t| t.to_lowercase() <= key)
+                || e.attr_decoded("Title")
+                    .is_some_and(|t| t.to_lowercase() <= key)
         })
     };
     let at = match program.children.iter().rposition(after) {

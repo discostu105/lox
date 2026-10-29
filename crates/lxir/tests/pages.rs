@@ -131,10 +131,19 @@ fn a_created_page_follows_its_predecessor_in_title_order() {
     let unsorted = BASE.replace("Title=\"Zentral\"", "Title=\"Diele\"");
     let unsorted = LoxoneDoc::parse(unsorted.as_bytes()).unwrap();
     for (title, want) in [
-        ("Abstellraum", ["Automatik-Regeln", "Abstellraum", "K\u{fc}che", "Diele"]),
+        (
+            "Abstellraum",
+            ["Automatik-Regeln", "Abstellraum", "K\u{fc}che", "Diele"],
+        ),
         // Diele is out of order; what sorts after it follows it.
-        ("Keller", ["Automatik-Regeln", "K\u{fc}che", "Diele", "Keller"]),
-        ("Zimmer", ["Automatik-Regeln", "K\u{fc}che", "Diele", "Zimmer"]),
+        (
+            "Keller",
+            ["Automatik-Regeln", "K\u{fc}che", "Diele", "Keller"],
+        ),
+        (
+            "Zimmer",
+            ["Automatik-Regeln", "K\u{fc}che", "Diele", "Zimmer"],
+        ),
     ] {
         let src = SRC.replace("K\u{fc}che Logik", title);
         let out = compile(

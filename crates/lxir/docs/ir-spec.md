@@ -61,7 +61,9 @@ factor     = operand | "(" arith ")" ;
 operand    = slug "." port | number [ unit ] | const-ref ;
 removed    = "removed" slug [ comment ] ;
 moved      = "moved" slug "->" slug [ comment ] ;
-page       = "page" string [ comment ] ;           (* placement (D28) *)
+page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
+                                                  (* placement (D28), creation (D56) *)
+page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
 template   = "template" slug "(" [ params ] ")" [ comment ]
              { comment | block-head | arg-line | wire | set }
@@ -524,9 +526,30 @@ pinned to a base page with the declared title. A pin that still matches a
 page so titled is kept — titles need not be unique, and adopted blocks
 never move behind your back — any other pin is re-pinned to the first
 matching page in document order (the block visibly moves in Loxone
-Config), and a title no page carries is a compile error. Creating pages
-stays with Loxone Config; the statement only places blocks on pages that
-exist.
+Config), and a title no page carries is a compile error — unless the
+statement says where to create it.
+
+```text
+page "Küche Logik" (room: "Küche")
+page "Küche Logik" (room: "Küche", category: "Beleuchtung")
+```
+
+With `room:` a missing page is **created** (D56), as Loxone Config's
+"Neue Seite" does: in the program, filed by title, assigned to the room
+(a `Place` by title; Loxone Config does not accept the unassigned one)
+and to `category:` (default: the unassigned category). A page that
+already carries the title is used as is — the arguments only apply to
+creation. Without `room:` a missing title stays an error, so a typo never
+creates a page. Several statements for one page need the arguments only
+once; given twice, they must agree.
+
+The lockfile keeps a created page's UUID (`pages`): recompiles before the
+push re-create the same page, and once the page is on the Miniserver it
+is an ordinary page — rename it, move it, give it a room in Loxone
+Config. Renaming a created page there while the statement still has
+`room:` is an error: write the new title in the source (dropping the
+arguments hands the page to Loxone Config). Removing the statement never
+deletes the page.
 
 `page` is not allowed inside a template body — placement belongs to the
 module. The decompiler emits `page` statements as section headers (the
