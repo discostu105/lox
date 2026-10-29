@@ -1,4 +1,4 @@
-# Lockfile specification (v3)
+# Lockfile specification (v4)
 
 The lockfile is the persistent identity between IR source and compiled
 config — the analogue of `terraform.tfstate` / `package-lock.json`.

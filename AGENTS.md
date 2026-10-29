@@ -170,7 +170,7 @@ UDP :7070                           → Miniserver discovery (broadcast)
 HTTP :7091/zone/{n}/{cmd}           → Music server API (unofficial)
 ```
 
-TLS: certificate verification is off unless `verify_ssl: true` is set (Miniservers use self-signed certs); the WebSocket connector (`src/ws.rs`) always skips verification. `serial` is only used for the OTel `device.id` and the gitops directory name; there is no DynDNS hostname generation.
+TLS: certificate verification is off unless `verify_ssl: true` is set (Miniservers use self-signed certs); the WebSocket connector (`src/ws.rs`) always skips verification. `serial` is only used for the OTel `device.id`, the gitops directory name and the `config push` target check; there is no DynDNS hostname generation.
 
 ## Agent Workflow
 

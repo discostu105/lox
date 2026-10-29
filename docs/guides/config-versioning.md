@@ -2,7 +2,7 @@
 title: Config Versioning
 layout: default
 parent: Guides
-nav_order: 3
+nav_order: 4
 ---
 
 # Config Versioning (GitOps)
@@ -31,7 +31,9 @@ Initialize a git repository for config tracking:
 lox config init ~/loxone-config
 ```
 
-This creates a git repository where configs will be stored. Multi-Miniserver setups use subdirectories by serial number.
+This creates a git repository where configs will be stored, one subdirectory per Miniserver (its `serial`, or the
+host name when no serial is set). `lox config pull` uses the active context; run it once per context
+(`lox --ctx office config pull`) for several Miniservers.
 
 ## Pull workflow
 
@@ -70,19 +72,23 @@ layout say "No logic changes (layout or metadata only)." Long diffs are capped i
 
 ```bash
 lox config log                  # show change history
-lox config log -n 5             # last 5 entries
+lox config log -c 5             # last 5 entries
 ```
 
 ## Restore a previous version
 
 ```bash
-lox config restore abc123 --force
+lox config log                            # find the commit
+lox config diff abc123 HEAD               # what you would undo
+lox config restore abc123 --force         # upload it as sps_new.zip
+lox reboot --yes                          # the Miniserver loads it on start
 ```
 
-This uploads the original backup ZIP from git history to the Miniserver. No risky recompression — uses the exact file that was downloaded.
+This uploads the original backup ZIP from git history. No recompression: it is the exact file that was downloaded.
 
 {: .warning }
-Restoring a config uploads it to your live Miniserver. Always verify the commit before restoring.
+Restoring a config replaces the live program. Autopilot rules created in the app since that backup are lost; check
+`lox autopilot changed`.
 
 ## Automated backups
 
@@ -162,9 +168,23 @@ lox config history "Garage light"         # every snapshot that changed this blo
 lox config lint                           # dead blocks, unwired inputs and motors, duplicate names
 ```
 
+Snapshots are named by commit (`a1b2c3d`, `HEAD~2`, `<hash>^`), Loxone Config version (`v271`) or save date
+(`2026-08-25`). Without `--at`, `show`/`wiring`/`find`/`lint` read the repo's working copy (or `lox tui`'s cached
+download); `--download` fetches the live config first (read-only).
+
+```bash
+# Why is this light on? Everything upstream, with devices and rooms
+lox config wiring "Licht Gang" --trace up --depth 6
+```
+
 In `lox tui`, *System › Config* lists the snapshots with their diffs: `⏎` browses a snapshot (pages,
 blocks, lxir source, `/` search, `⏎` on a block opens its wiring at that snapshot), `m` marks a commit
 to compare any two, and `w` on a diff line opens that block's wiring.
+
+## Changing the config from git
+
+`lox config pull` only records what others changed. To make the change yourself as reviewed text and deploy it
+verified, see [Config as Code](config-as-code).
 
 ## Config inspection
 

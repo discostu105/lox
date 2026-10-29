@@ -18,7 +18,7 @@ nav_order: 1
 
 ## On / Off
 
-Turn controls on or off by name, UUID, or alias.
+Turn controls on or off by name, UUID, or alias. Add `--dry-run` to any control command to see what would be sent.
 
 ```bash
 lox on "Licht Wohnzimmer"
@@ -63,31 +63,37 @@ lox light dim "Stehlampe" 75               # set dimmer 0-100% (Dimmer controls;
 ```bash
 lox light color "LED Strip" "#FF0000"              # hex RGB
 lox light color "LED Strip" "hsv(120,100,100)"     # HSV
+lox light color "LED Strip" "temp(80,2700)"        # white: brightness %, color temperature K
 ```
+
+{: .tip }
+`light dim` is for `Dimmer` controls. A lighting controller (`LightControllerV2`) is driven by moods: list them with
+`lox light moods`, then set one by ID.
 
 ---
 
 ## Blinds
 
 ```bash
-lox blind "Beschattung Sud" up
-lox blind "Beschattung Sud" down
-lox blind "Beschattung Sud" stop
-lox blind "Beschattung Sud" pos 50          # position 0-100%
-lox blind "Beschattung Sud" shade           # automatic shading
-lox blind "Beschattung Sud" full-up
-lox blind "Beschattung Sud" full-down
+lox blind "Beschattung Süd" up
+lox blind "Beschattung Süd" pos 50          # position: 0 = open, 100 = closed
+lox blind "Beschattung Süd" 50              # same
+lox blind "Beschattung Süd" shade           # automatic shading
+lox blind "Beschattung Süd" shade 40        # slat angle
+lox blind "Beschattung Süd" stop
 ```
 
-| Action | Description |
-|:-------|:------------|
-| `up` | Move blind up |
-| `down` | Move blind down |
-| `stop` | Stop movement |
-| `pos <0-100>` | Set exact position (0=open, 100=closed) |
-| `shade` | Automatic shading position |
-| `full-up` | Move fully up |
-| `full-down` | Move fully down |
+| Action | Aliases | Sends |
+|:-------|:--------|:------|
+| `up` | `open`, `full-up` | `FullUp`: all the way up |
+| `down` | `close`, `full-down` | `FullDown`: all the way down |
+| `stop` | | `off` |
+| `pos <0-100>` | `<0-100>` | `manualPosition/<n>` (0 = open, 100 = closed) |
+| `shade` | `auto` | `AutomaticDown`: automatic shading |
+| `shade <0-100>` | | `manualLamella/<n>`: slat angle (0 = horizontal, 100 = vertical) |
+
+`up` and `down` run to the end position. For short jog steps send the raw commands:
+`lox send "Beschattung Süd" up`, then `lox send "Beschattung Süd" UpOff`.
 
 ---
 
@@ -106,7 +112,7 @@ lox gate "Garagentor" stop
 ```bash
 lox thermostat "Heizung" temp 22.5              # set comfort temperature
 lox thermostat "Heizung" mode auto               # auto | manual | auto-heat | auto-cool | manual-heat | manual-cool
-lox thermostat "Heizung" override 24 120         # override 24C for 120 minutes
+lox thermostat "Heizung" override 24 120         # override 24 °C for 120 minutes (default 60)
 lox thermostat "Heizung"                         # show current state
 ```
 
@@ -125,7 +131,7 @@ lox alarm "Alarmanlage" quit               # acknowledge / silence
 | Flag | Description |
 |:-----|:------------|
 | `--no-motion` | Arm without motion detection |
-| `--code` | Provide access code |
+| `--code` | PIN code for arm/disarm |
 | `-r`, `--room` | Disambiguate by room |
 
 ---
@@ -133,19 +139,23 @@ lox alarm "Alarmanlage" quit               # acknowledge / silence
 ## Door locks
 
 ```bash
-lox door "Haustur" lock
-lox door "Haustur" unlock
-lox door "Haustur" open        # open (e.g. electric strike)
+lox door "Haustür" lock
+lox door "Haustür" unlock
+lox door "Haustür" open        # open (e.g. electric strike)
 ```
+
+{: .note }
+Doors, gates and the alarm act immediately on the command line. `lox tui` and the
+[MCP server](/lox/guides/ai-agents#safety) ask for confirmation first.
 
 ---
 
 ## Intercom
 
 ```bash
-lox intercom "Turklingel" answer
-lox intercom "Turklingel" hangup
-lox intercom "Turklingel" open
+lox intercom "Türklingel" answer
+lox intercom "Türklingel" hangup
+lox intercom "Türklingel" open
 ```
 
 ---
@@ -156,7 +166,7 @@ lox intercom "Turklingel" open
 lox charger "Wallbox" start
 lox charger "Wallbox" stop
 lox charger "Wallbox" pause
-lox charger "Wallbox" start --limit 16     # set current limit
+lox charger "Wallbox" start --limit 20     # stop after 20 kWh
 ```
 
 ---
@@ -166,7 +176,7 @@ lox charger "Wallbox" start --limit 16     # set current limit
 ```bash
 lox input set "Sollwert Heizung" 21.5
 lox input set "Sollwert Heizung" 21.5 -r "Wohnzimmer"
-lox input pulse "Taster"
+lox input pulse "Taster"                      # momentary pulse, e.g. a push-button
 ```
 
 ---
@@ -184,13 +194,14 @@ lox music mute
 lox music unmute
 ```
 
-All music commands accept an optional zone number (default: 1).
+All music commands accept an optional zone number (default: 1): `lox music volume 30 2` sets zone 2. They use the
+Music Server's unofficial API on port 7091 of the host.
 
 ---
 
 ## Lock / Unlock controls
 
-Administrative lock to prevent changes:
+Administrative lock to prevent changes (admin user, firmware 11.3.2.11+):
 
 ```bash
 lox lock "Heizung" --reason "Wartung"
@@ -201,11 +212,11 @@ lox unlock "Heizung"
 
 ## Raw commands
 
-Send any command directly to a control by UUID:
+Send any command the Miniserver understands directly to a control (name, alias or UUID):
 
 ```bash
-lox send <uuid> <command>
-lox send <uuid> <command> --secured <hash>
+lox send "Beschattung Süd" UpOff
+lox send <uuid> <command> --secured <hash>   # secured command (visualization password hash)
 ```
 
 ---
