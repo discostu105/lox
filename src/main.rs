@@ -413,6 +413,7 @@ Configuration:
   setup, alias, scene          Connection settings, aliases, scenes
   cache, token                 Cache & auth token management
   config                       Loxone Config files (download/inspect/diff)
+  ir                           Config as code: lxir modules → .Loxone
   ctx                          Manage multiple Miniserver contexts
   completions                  Generate shell completions
   schema                       Command schema for AI agent discovery
@@ -925,6 +926,15 @@ Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui
     Config {
         #[command(subcommand)]
         action: ConfigCmd,
+    },
+    /// Config as code: lxir modules compiled into the .Loxone config (`lox ir help`)
+    #[command(alias = "lxir", disable_help_flag = true)]
+    Ir {
+        /// lxir command and its arguments, passed through as-is: check, fmt,
+        /// compile, test, rename, lint, decompile, adopt, diff, drift,
+        /// observe, roundtrip
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Manage multiple Miniserver contexts
     Ctx {
@@ -1784,6 +1794,18 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Cache { action } => commands::config_cmd::cmd_cache(&ctx, action),
         Cmd::Token { action } => commands::config_cmd::cmd_token(&ctx, action),
         Cmd::Config { action } => commands::config_cmd::cmd_config(&ctx, action),
+        Cmd::Ir { args } => {
+            // lxir exits 1 on findings (check errors, a diff, drift) and 2 on
+            // usage errors; scripts rely on both.
+            use std::process::ExitCode;
+            let code = lxir::cli::main_with("lox ir", &args);
+            if code != ExitCode::SUCCESS {
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                std::process::exit(if code == ExitCode::from(2) { 2 } else { 1 });
+            }
+            Ok(())
+        }
         Cmd::Ctx { action } => commands::ctx::cmd_ctx(&ctx, action),
         Cmd::Completions { shell, install } => {
             commands::config_cmd::cmd_completions(&ctx, shell, install)

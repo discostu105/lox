@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ControlList Version="1" NextObj="200" NextConst="1" NextNote="1" NextMem="1">
+	<C Type="Document" V="17010727" U="20000000-0000-0001-ffff504f94112233" Title="Haus" ConfigVersion="17010727">
+		<C Type="VirtualInCaption" V="175" U="20000000-0000-0002-ffff504f94112233" Title="Virtuelle Eingänge">
+			<C Type="VirtualIn" V="175" U="20000001-0000-0010-ffff504f94112233" Title="Außentemperatur" IName="VI1" Nio="2">
+				<Co K="Q" U="20000001-0000-0011-00ffaaaaaaaa0001"/>
+				<Co K="Qm" U="20000001-0000-0012-01ffaaaaaaaa0001"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="20000002-0000-0020-ffff504f94112233" Title="Windalarm" IName="VI2" Nio="2">
+				<Co K="Q" U="20000002-0000-0021-00ffaaaaaaaa0002"/>
+				<Co K="Qm" U="20000002-0000-0022-01ffaaaaaaaa0002"/>
+			</C>
+			<C Type="VirtualIn" V="175" U="20000003-0000-0030-ffff504f94112233" Title="Sonnenschein" IName="VI3" Nio="2">
+				<Co K="Q" U="20000003-0000-0031-00ffaaaaaaaa0003"/>
+				<Co K="Qm" U="20000003-0000-0032-01ffaaaaaaaa0003"/>
+			</C>
+		</C>
+		<C Type="Page" V="175" U="20000004-0000-0040-ffff504f94112233" Title="Beschattung">
+			<C Type="AutoJalousie" V="175" U="20000005-0000-0050-ffff504f94112233" Title="Beschattung Süd" Px="960" Py="960" Px2="3648" Py2="2232" Cl="115,224,255" Nio="4" WF="16384">
+				<Co K="InputTrigger" U="20000005-0000-0051-00ffaaaaaaaa0005"/>
+				<Co K="AutoShade" U="20000005-0000-0052-06ffaaaaaaaa0005"/>
+				<Co K="Safety" U="20000005-0000-0053-09ffaaaaaaaa0005"/>
+				<Co K="TargetPos" Def="100" U="20000005-0000-0054-2effaaaaaaaa0005"/>
+			</C>
+		</C>
+	</C>
+</ControlList>

@@ -38,6 +38,9 @@ jobs:
       - name: clippy
         run: cargo clippy -- -D warnings
 
+      - name: clippy (lxir, all targets)
+        run: cargo clippy -p lxir --all-targets -- -D warnings
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -65,6 +68,29 @@ jobs:
 
       - name: test
         run: cargo test --release
+
+      # lxir's CI check path (crates/lxir/examples/ci.sh) on the shipped
+      # examples: validate, canonical format, lock currency, determinism,
+      # byte-identical expected output.
+      - name: lxir check path (example module)
+        if: runner.os == 'Linux'
+        env:
+          LXIR: target/release/lxir
+          BASE: crates/lxir/examples/configs/haus.Loxone
+          MODULE: crates/lxir/examples/ir/beschattung.lxir
+          LOCK: crates/lxir/examples/out/beschattung.lock.json
+          EXPECTED: crates/lxir/examples/out/haus-compiled.Loxone
+        run: crates/lxir/examples/ci.sh
+
+      - name: lxir check path (example project)
+        if: runner.os == 'Linux'
+        env:
+          LXIR: target/release/lxir
+          BASE: crates/lxir/examples/configs/pool.Loxone
+          MODULE: crates/lxir/examples/project/pages
+          LOCK: crates/lxir/examples/project/pool.lock.json
+          EXPECTED: crates/lxir/examples/project/out.Loxone
+        run: crates/lxir/examples/ci.sh
 
   coverage:
     name: Coverage

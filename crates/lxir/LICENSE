@@ -1,0 +1,27 @@
+This project is dual-licensed:
+
+1. **GNU General Public License v3.0 (GPL-3.0)** — see [LICENSE-GPL](LICENSE-GPL)
+2. **Commercial License** — see [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL)
+
+## What does this mean?
+
+### Free use (GPL-3.0)
+
+You can freely use, modify, and distribute this software under the terms of the
+GPL-3.0. This includes commercial use — you can use lxir in your business without
+any fees. The GPL-3.0 requires that if you distribute modified versions, you must
+also release your modifications under the GPL-3.0.
+
+### Commercial License
+
+If you want to modify this software and redistribute it under proprietary /
+closed-source terms (i.e., without publishing your changes under GPL-3.0),
+you need a commercial license. Contact the author to negotiate terms.
+
+## Contact
+
+For commercial licensing inquiries, please contact the copyright holder.
+
+---
+
+Copyright (c) 2026 Christoph Neumüller

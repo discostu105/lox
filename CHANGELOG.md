@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lox config lint` warns about drive blocks that move no motor (`unwired-motor`): an `AutoJalousie` or `JalousieUpDown2` with neither `OutputUp` nor `OutputDown` wired, a `Door` with no open/close/trigger output wired. Such a block still runs its position model and the app shows it moving, but nothing switches. The finding names the outputs on the same page that nothing drives, usually the relays meant for the motor. A position output into hardware, or an API link to a device that serves this block alone (a Tree/Air smart motor), counts as driving; a panel API-linked to several blocks does not
 - `lox autopilot changed`: when the Automatic Designer rules were last changed on the Miniserver (the live `changed` state, unix seconds; `-o json` for scripts). Rules edited in the app can live only in the Miniserver's custom changes, which an upload discards: compare this with the time of the download an upload is based on
 - `lox files get PATH --save-as -` writes the file to stdout
+- **Config as code: `lox ir`** runs the lxir toolchain — `check`, `fmt`, `compile`, `test`, `rename`, `lint`, `decompile`, `adopt`, `diff`, `drift`, `observe`, `roundtrip`, with lxir's flags and exit codes (`lox lxir …` works too)
 
 ### Changed
 - `lox autopilot ls` lists the rules themselves, read from the program file (`AutopilotRule` objects) with the `lox config` sources (`--at`, `--file`, `--download`): name, UUID, active, and whether the rule JSON parses. It used to list the structure file's single container entry. `-o json` is now `{"config", "rules": [{name, uuid, active, invalid, apc_valid, apc_error}]}`
 - `lox files get` names the absolute path it saved to (`✓  Downloaded /log/def.log → /home/me/def.log (51234 bytes)`), supports `-o json` and `--quiet`, and when stdout is redirected without `--save-as` says on stderr where the file went (`lox files get X > file` used to capture only the message)
 - `lox blind --help` lists every action with the command it sends: `up`/`down` are full moves (`FullUp`/`FullDown`, also as `full-up`/`full-down`), not jog steps; `stop` sends `off`, `shade` `AutomaticDown`, `shade N` `manualLamella/N`, `pos N` `manualPosition/N`. The MCP `blind` tool says the same
+- lxir now lives in this repository (`crates/lxir`, imported with its history) and lox builds it from source, so `lox config diff/show/wiring/lint/history`, the Wiring view and MCP `get_wiring` use the current lxir instead of the crates.io 0.1.0 release
+- License expression `GPL-3.0-or-later OR LicenseRef-Commercial` (was `AND`): the dual license is a choice between the two, as LICENSE says
 
 ### Fixed
 - `lox stream` without `--initial` no longer prints the initial text-state snapshot as if it were changes (only the value-state snapshot was skipped)

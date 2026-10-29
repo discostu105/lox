@@ -1,0 +1,185 @@
+//! End-to-end tests of `lox.toml` projects through the real binary:
+//! zero-flag compile, recursive fragment discovery, flag override, and
+//! the project defaults of `check`, `fmt`, and `drift`.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+/// Fragments of the shipped example module, split the way a project
+/// splits sources: periphery externs in one file, logic in a nested one.
+const PERIPHERY: &str = "\
+# Externe Objekte gehören Loxone Config.
+
+extern aussentemp = VirtualIn(iname: \"VI1\")
+extern wind_alarm = VirtualIn(iname: \"VI2\")
+extern sonne = VirtualIn(iname: \"VI3\")
+extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")
+";
+
+const SUED: &str = "\
+# Beschattung Süd — referenziert Externs aus _periphery.lxir.
+
+let temp_schwelle = 28
+
+temp_hoch = GreaterEqual(
+\t\"Temp über 28\",
+\tInput1: aussentemp.Q,
+\tInput2: temp_schwelle,
+)
+
+beschatten = And(
+\tI1: temp_hoch.Q,
+\tI2: sonne.Q,
+)
+
+jal_sued.AutoShade <- beschatten.Q
+jal_sued.Safety <- wind_alarm.Q
+
+jal_sued.TargetPos = 70
+";
+
+fn lxir(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_lxir"))
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("run lxir")
+}
+
+fn assert_ok(out: &Output, what: &str) -> String {
+    assert!(
+        out.status.success(),
+        "{what} failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A fresh project directory under the cargo-managed test tmpdir.
+fn make_project(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    std::fs::create_dir_all(dir.join("src/rooms")).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/examples/configs/haus.Loxone"),
+        dir.join("haus.Loxone"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("lox.toml"),
+        "# Beispielprojekt\n\
+         base = \"haus.Loxone\"\n\
+         module = \"src\"\n\
+         lock = \"haus.lock.json\"\n\
+         serial = \"504F94112233\"\n\
+         page = \"Beschattung\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/_periphery.lxir"), PERIPHERY).unwrap();
+    std::fs::write(dir.join("src/rooms/sued.lxir"), SUED).unwrap();
+    dir
+}
+
+#[test]
+fn zero_flag_compile_inside_a_project() {
+    let dir = make_project("zero-flag");
+    // A dot-directory with garbage must be skipped by discovery.
+    std::fs::create_dir_all(dir.join("src/.cache")).unwrap();
+    std::fs::write(dir.join("src/.cache/junk.lxir"), "not lxir at all").unwrap();
+
+    let stdout = assert_ok(&lxir(&dir, &["compile"]), "zero-flag compile");
+    assert!(stdout.contains("-> out.Loxone"), "stdout: {stdout}");
+    assert!(dir.join("out.Loxone").exists());
+    assert!(dir.join("haus.lock.json").exists());
+
+    // Recompile: lock pins every identity, output is byte-stable.
+    let first = std::fs::read(dir.join("out.Loxone")).unwrap();
+    assert_ok(&lxir(&dir, &["compile"]), "recompile");
+    assert_eq!(first, std::fs::read(dir.join("out.Loxone")).unwrap());
+
+    // A flag overrides the project file; the rest still comes from it.
+    assert_ok(&lxir(&dir, &["compile", "--out", "other.Loxone"]), "--out");
+    assert_eq!(first, std::fs::read(dir.join("other.Loxone")).unwrap());
+
+    // The compiled output matches the lock's fingerprint (drift, lock
+    // path from the project); the base no longer does.
+    assert_ok(&lxir(&dir, &["drift", "out.Loxone"]), "drift out");
+    assert!(!lxir(&dir, &["drift", "haus.Loxone"]).status.success());
+}
+
+#[test]
+fn drift_accepts_a_fingerprint_recorded_by_an_older_lxir() {
+    // Locks written before D39 carry the v1 fingerprint, which is blind to
+    // room/category bindings. Upgrading lxir must not turn every project
+    // red: a v1 match is in sync, with a note; the next compile records v2.
+    let dir = make_project("drift-v1");
+    assert_ok(&lxir(&dir, &["compile"]), "compile");
+    let out = lxir::LoxoneDoc::parse(&std::fs::read(dir.join("out.Loxone")).unwrap()).unwrap();
+    let (v1, v2) = (
+        lxir::diff::semantic_fingerprint_v1(&out),
+        lxir::diff::semantic_fingerprint(&out),
+    );
+    let lock_path = dir.join("haus.lock.json");
+    let lock = std::fs::read_to_string(&lock_path).unwrap();
+    assert!(lock.contains(&v2));
+    std::fs::write(&lock_path, lock.replace(&v2, &v1)).unwrap();
+
+    let stdout = assert_ok(&lxir(&dir, &["drift", "out.Loxone"]), "drift v1");
+    assert!(stdout.contains("older lxir"), "stdout: {stdout}");
+    assert!(!lxir(&dir, &["drift", "haus.Loxone"]).status.success());
+
+    assert_ok(&lxir(&dir, &["compile"]), "recompile");
+    assert!(std::fs::read_to_string(&lock_path).unwrap().contains(&v2));
+}
+
+#[test]
+fn explicit_project_dir_and_missing_toml() {
+    let dir = make_project("explicit-dir");
+    let parent = dir.parent().unwrap().to_path_buf();
+    let stdout = assert_ok(
+        &lxir(
+            &parent,
+            &["compile", dir.file_name().unwrap().to_str().unwrap()],
+        ),
+        "compile <project-dir>",
+    );
+    assert!(stdout.contains("objects"), "stdout: {stdout}");
+    assert!(dir.join("out.Loxone").exists());
+
+    // An explicit directory without a lox.toml is a hard error…
+    let bare = parent.join("no-project-here");
+    std::fs::create_dir_all(&bare).unwrap();
+    let out = lxir(&parent, &["compile", "no-project-here"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("no lox.toml"), "stderr: {stderr}");
+
+    // …and so is a flagless compile outside any project.
+    let out = lxir(&bare, &["compile"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("lox.toml"), "stderr: {stderr}");
+}
+
+#[test]
+fn check_and_fmt_default_to_the_project_module() {
+    let dir = make_project("check-fmt");
+    // check with no path sees both fragments — 4 externs from
+    // _periphery.lxir, 2 blocks from the nested rooms/sued.lxir.
+    let stdout = assert_ok(&lxir(&dir, &["check"]), "zero-arg check");
+    assert!(stdout.contains("4 externs, 2 blocks"), "stdout: {stdout}");
+
+    let stdout = assert_ok(&lxir(&dir, &["fmt", "--check"]), "zero-arg fmt");
+    assert!(stdout.contains("sued.lxir: canonical"), "stdout: {stdout}");
+
+    // Outside a project, zero-arg check says what is missing.
+    let bare = dir.parent().unwrap().join("no-project-bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    let out = lxir(&bare, &["check"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("no lox.toml"), "stderr: {stderr}");
+}

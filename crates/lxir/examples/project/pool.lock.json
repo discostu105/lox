@@ -1,0 +1,87 @@
+{
+  "lockfile_version": 3,
+  "target": {
+    "config_version": "17010727",
+    "miniserver_serial": "504F94112233",
+    "source_config_sha256": "b7e958e0124b8e6ac79b1862b35012b786f63c113e5a00be21d1a007aad67a7f",
+    "semantic_fingerprint": "34d9f0129cfdaf3ede4a045f4450ca87b4dbff810a48a7b2a599d46c728bc090"
+  },
+  "counters": {
+    "next_obj": 302,
+    "next_const": 1,
+    "next_note": 1,
+    "next_mem": 1,
+    "next_mint": 8
+  },
+  "objects": {
+    "heizen": {
+      "uuid": "1ff9b180-0000-0003-ffff504f94112233",
+      "type": "Less",
+      "ports": {
+        "Input1": "1ff9b180-0000-0000-00ff81755fe5ba78",
+        "Input2": "1ff9b180-0000-0001-01ff81755fe5ba78",
+        "Q": "1ff9b180-0000-0002-02ff81755fe5ba78"
+      },
+      "layout": {
+        "px": 7392,
+        "py": 192,
+        "px2": 8736,
+        "py2": 888
+      },
+      "page_uuid": "30000004-0000-0040-ffff504f94112233"
+    },
+    "netz_warnung": {
+      "uuid": "1ff9b180-0000-0007-ffff504f94112233",
+      "type": "GreaterEqual",
+      "ports": {
+        "Input1": "1ff9b180-0000-0004-00ff2b7857011936",
+        "Input2": "1ff9b180-0000-0005-01ff2b7857011936",
+        "Q": "1ff9b180-0000-0006-02ff2b7857011936"
+      },
+      "layout": {
+        "px": 7392,
+        "py": 1080,
+        "px2": 8736,
+        "py2": 1776
+      },
+      "page_uuid": "30000008-0000-0080-ffff504f94112233"
+    }
+  },
+  "externals": {
+    "lampe": {
+      "uuid": "30000009-0000-0090-ffff504f94112233",
+      "matched_by": "title",
+      "title_at_match": "Störmeldung",
+      "iname_at_match": null
+    },
+    "netz": {
+      "uuid": "3000000b-0000-00b0-ffff504f94112233",
+      "matched_by": "iname",
+      "title_at_match": "Netzbezug",
+      "iname_at_match": "VI5"
+    },
+    "pumpe": {
+      "uuid": "30000005-0000-0050-ffff504f94112233",
+      "matched_by": "title",
+      "title_at_match": "Freigabe",
+      "iname_at_match": null
+    },
+    "wasser": {
+      "uuid": "30000001-0000-0010-ffff504f94112233",
+      "matched_by": "iname",
+      "title_at_match": "Wassertemperatur",
+      "iname_at_match": "VI1"
+    }
+  },
+  "extern_wires": [
+    {
+      "from": "1ff9b180-0000-0002-02ff81755fe5ba78",
+      "to": "30000005-0000-0051-00ffaaaaaaaa0005"
+    },
+    {
+      "from": "1ff9b180-0000-0006-02ff2b7857011936",
+      "to": "30000009-0000-0091-00ffaaaaaaaa0009"
+    }
+  ],
+  "set_originals": {}
+}

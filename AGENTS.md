@@ -21,7 +21,11 @@ cargo clippy
 # Test
 cargo test
 cargo test <test_name>  # run a single test
+cargo test -p lxir      # only the lxir crate
 ```
+
+The commands above cover the whole workspace (`default-members`): the `lox` package at the root and the
+`lxir` crate in `crates/lxir`. `cargo run` runs `lox` (`default-run`); `cargo run --bin lxir -- help` runs lxir.
 
 ## Pre-push CI Checklist
 
@@ -38,13 +42,28 @@ Do not push until all four pass. Fix issues and re-run before committing.
 
 ## Architecture
 
-Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + WebSocket for the RSA/AES key exchange.
+Cargo workspace: the `lox` binary (root package) and the `lxir` library crate (`crates/lxir`), which `lox` uses
+by path. CLI commands use reqwest blocking; token auth uses tokio + WebSocket for the RSA/AES key exchange.
+
+### The lxir crate (`crates/lxir`)
+
+Loxone config as code: lossless `.Loxone` XML, the UUID/identity model, the `.lxir` language,
+compile/decompile/adopt, the lockfile, semantic diff. It never touches the network — transport, LoxCC and
+credentials stay in `src/`. Its CLI is `crates/lxir/src/cli.rs`, run by the `lxir` binary and by `lox ir`
+(arguments passed through as-is). Before changing it, read `crates/lxir/AGENTS.md` (format facts are
+documented, never guessed; the connector table only takes live-verified entries; never commit real configs).
+lxir is published to crates.io on its own version; `lox` is not published (the crate name is taken).
+
+The standalone repo github.com/discostu105/lxir was imported with `git subtree` (history kept). Until it is
+archived, work merged there comes over with
+`git subtree pull --prefix=crates/lxir https://github.com/discostu105/lxir.git main` (a moved file such as
+`src/bin/lxir.rs` → `src/cli.rs` still merges).
 
 ### Source files
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing) |
+| `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing); `lox ir` hands its arguments to `lxir::cli` |
 | `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes |
 | `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
@@ -58,6 +77,7 @@ Single Rust binary. CLI commands use reqwest blocking; token auth uses tokio + W
 | `src/logic.rs` | Adapter over lxir (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (by hash, `v273`, save date, `<hash>^`), working copy, cache, FTP download, files; block history across commits |
 | `src/commands/config_insight.rs` | Read-only `lox config diff/show/wiring/find/lint/history` |
+| `crates/lxir/` | The lxir crate (see above): `src/xml.rs`, `uuid.rs`, `doc.rs`, `connectors.rs`, `lock.rs`, `diff.rs`, `project.rs`, `ir/` (parser, compile, decompile, adopt, lint, simtest), `cli.rs`; its own `docs/`, `tests/`, `examples/` (`examples/ci.sh` runs in CI) |
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 
 ### Key design points

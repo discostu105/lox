@@ -282,7 +282,7 @@ Multi-Miniserver: each serial gets its own subdirectory in the repo.
 
 ### Inspecting the logic (read-only)
 
-The program inside a config — blocks, parameters and wires — read with [lxir](https://github.com/discostu105/lxir).
+The program inside a config — blocks, parameters and wires — read with [lxir](crates/lxir).
 Hardware references on the pages are folded away: a wire goes from the motion sensor to the light, not to an input ref.
 
 ```bash
@@ -324,6 +324,36 @@ Hallway
 ```
 
 All of them take `-o json`.
+
+---
+
+## Config as Code (lxir)
+
+`lox ir` runs the [lxir](crates/lxir) toolchain: logic written as `.lxir` text, compiled into the `.Loxone`
+config with a lockfile that pins every UUID. The arguments go to lxir as they are (`lox lxir …` works too),
+so lxir's docs apply word for word — `lxir compile` is `lox ir compile`. Nothing here talks to the Miniserver.
+
+```bash
+lox ir help                            # every command and flag
+lox ir check pages/                    # parse + validate a module (line-numbered errors; --json)
+lox ir fmt --write pages/              # canonical formatting (--check for CI)
+lox ir compile                         # in a lox.toml project: base + module + lock → out.Loxone
+lox ir compile --base current.Loxone --module pages/ --lock haus.lock.json \
+               --out out.Loxone --serial 504F94112233
+lox ir diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
+lox ir drift current.Loxone            # did another writer change the config since the last compile?
+lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
+lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
+lox ir decompile current.Loxone        # the IR view of every page (read-only)
+lox ir rename old_name new_name        # rename across sources and lockfile, identities kept
+lox ir lint                            # unused names, blocks whose outputs feed nothing
+lox ir test --lox ~/lox-cli/lox        # `test … end` blocks through lox-cli's simulator (`lox sim`)
+```
+
+Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.
+A directory with a `lox.toml` (`base`, `module`, `lock`, `out`, `serial`, `page`) is a project: inside it
+`compile` needs no flags and `check`/`fmt`/`drift` use its module and lock. The language, the lockfile and the
+workflow are documented in [crates/lxir](crates/lxir/README.md).
 
 ---
 
