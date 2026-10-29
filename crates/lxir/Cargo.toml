@@ -1,0 +1,20 @@
+[package]
+name = "lxir"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Loxone config-as-code: a text language compiled to .Loxone configs — lossless XML core, UUID/identity model, lockfile, compile/decompile/adopt, semantic diff, simulated tests"
+repository = "https://github.com/discostu105/lxir"
+readme = "README.md"
+keywords = ["loxone", "home-automation", "smart-home", "compiler", "config"]
+categories = ["command-line-utilities", "parser-implementations"]
+# Dual-licensed: recipient chooses GPL-3.0 or a commercial license (see LICENSE).
+license = "GPL-3.0-or-later OR LicenseRef-Commercial"
+# Dev-only trees stay out of the package (the corpus is gitignored anyway).
+exclude = ["/corpus", "/docs/data", "/tools", "/scripts", "/.github", "/AGENTS.md"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"

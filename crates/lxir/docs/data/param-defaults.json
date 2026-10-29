@@ -1,0 +1,2426 @@
+{
+ "_meta": {
+  "corpus_files": 111,
+  "share_threshold": 0.9,
+  "min_observations": 10,
+  "tool": "tools/extract-defaults.py"
+ },
+ "2Point": {
+  "Hysteresis": {
+   "value": "0.5",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Target": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AMinmax": {
+  "Max": {
+   "value": "10",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AalSmartAlarm": {
+  "Delay Alarm Level 2": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time Bedroom Alarm": {
+   "value": "6",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time Recreational Room Alarm": {
+   "value": "4",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time Throughfare Alarm": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AcControl": {
+  "inAirDir": {
+   "value": "1",
+   "share": 0.56,
+   "with_def": 25,
+   "top": 14,
+   "absent": 0,
+   "accepted": false
+  },
+  "inFan": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  },
+  "inMode": {
+   "value": "1",
+   "share": 0.56,
+   "with_def": 25,
+   "top": 14,
+   "absent": 0,
+   "accepted": false
+  },
+  "inTempTarget": {
+   "value": "29",
+   "share": 0.9091,
+   "with_def": 11,
+   "top": 10,
+   "absent": 14,
+   "accepted": true
+  },
+  "maxTemp": {
+   "value": "40",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  },
+  "minTemp": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  },
+  "parHyst": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  },
+  "parOff": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  },
+  "parPause": {
+   "value": "7200",
+   "share": 1.0,
+   "with_def": 25,
+   "top": 25,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "Alarm": {
+  "Delay": {
+   "value": "10",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "MaxDurOut": {
+   "value": "900",
+   "share": 0.6667,
+   "with_def": 3,
+   "top": 2,
+   "absent": 6,
+   "accepted": false
+  },
+  "TQ2": {
+   "value": "1",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "TQ3": {
+   "value": "2",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "TQ4": {
+   "value": "3",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "TQ5": {
+   "value": "4",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "TQ6": {
+   "value": "5",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "WI2": {
+   "value": "900",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 7,
+   "accepted": false
+  }
+ },
+ "AlarmChain": {
+  "MaxRuns": {
+   "value": "4",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AnalogComparator": {
+  "Off": {
+   "value": "-1",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "On": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AnalogMultiplexer": {
+  "Select": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 7,
+   "top": 7,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AnalogMultiplexer2": {
+  "Input2": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 61,
+   "accepted": false
+  }
+ },
+ "AnalogScaler": {
+  "Dst1": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 8,
+   "accepted": false
+  },
+  "Dst2": {
+   "value": "100",
+   "share": 0.5,
+   "with_def": 8,
+   "top": 4,
+   "absent": 3,
+   "accepted": false
+  },
+  "Src1": {
+   "value": "100000",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 10,
+   "accepted": false
+  },
+  "Src2": {
+   "value": "10",
+   "share": 0.7,
+   "with_def": 10,
+   "top": 7,
+   "absent": 1,
+   "accepted": false
+  }
+ },
+ "AnalogThresholdTrigger": {
+  "Off": {
+   "value": "30",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "On": {
+   "value": "45",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "PulseTime": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "AutoJalousie": {
+  "AutMode": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 4,
+   "accepted": false
+  },
+  "AutoShadeEnd": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "AutoShadeTime": {
+   "value": "120",
+   "share": 0.4167,
+   "with_def": 12,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "Back": {
+   "value": "0.8",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "DblClk": {
+   "value": "0.3",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "Dir": {
+   "value": "180",
+   "share": 0.9091,
+   "with_def": 11,
+   "top": 10,
+   "absent": 1,
+   "accepted": true
+  },
+  "DirTol": {
+   "value": "85",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "DirTol2": {
+   "value": "85",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "MinMove": {
+   "value": "0.4",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "MinPulse": {
+   "value": "3",
+   "share": 0.9167,
+   "with_def": 12,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "SRoff": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "SSoff": {
+   "value": "-30",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "Space": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeBlock": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeEnd": {
+   "value": "75",
+   "share": 0.5,
+   "with_def": 12,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeEndDown": {
+   "value": "70",
+   "share": 0.5,
+   "with_def": 12,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "TurnOffset": {
+   "value": "0.15",
+   "share": 0.6667,
+   "with_def": 12,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "Width": {
+   "value": "70",
+   "share": 1.0,
+   "with_def": 12,
+   "top": 12,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "Avg": {
+  "Max": {
+   "value": "10",
+   "share": 0.4737,
+   "with_def": 19,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "2",
+   "share": 0.4737,
+   "with_def": 19,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "CentralMusic": {
+  "DblClk": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "ClimateControllerUS": {
+  "FanDelay": {
+   "value": "90",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "HTarget": {
+   "value": "45",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "OnThreshold": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TOm": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TPMax": {
+   "value": "19",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TPMin": {
+   "value": "12",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempDelta": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempLimitC": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempLimitH": {
+   "value": "18",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeAddional": {
+   "value": "300",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeOffPump": {
+   "value": "300",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Counter": {
+  "EndValue": {
+   "value": "100",
+   "share": 0.5,
+   "with_def": 6,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Door": {
+  "PulseClose": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "PulseHigh": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "PulseLow": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "PulseOpen": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeBlock": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeHigh": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeLow": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Doorcontroller": {
+  "Timeout": {
+   "value": "60",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "DoubleClick": {
+  "Max": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "EFM": {
+  "CO2": {
+   "value": "0.42",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Pre": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Pri": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "EIBJalousie": {
+  "Time": {
+   "value": "0.3",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "EdgeDetection": {
+  "PulseTime": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "EibDimmer": {
+  "Repeat": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Step": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Energy": {
+  "Factor": {
+   "value": "800",
+   "share": 0.8,
+   "with_def": 5,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "60",
+   "share": 0.8,
+   "with_def": 5,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Equal": {
+  "Input2": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 53,
+   "accepted": false
+  }
+ },
+ "Formula": {
+  "Input3": {
+   "value": "0.1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 79,
+   "accepted": false
+  }
+ },
+ "Fronius": {
+  "CO2Factor": {
+   "value": "0.209",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "PriceConsume": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "PriceDelivery": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "GreaterEqual": {
+  "Input2": {
+   "value": "0.1",
+   "share": 0.6667,
+   "with_def": 3,
+   "top": 2,
+   "absent": 4,
+   "accepted": false
+  }
+ },
+ "HVACController": {
+  "Average": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "FanDelay": {
+   "value": "120",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Mode": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "OnThreshold": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Temp": {
+   "value": "-1000",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempAdditional": {
+   "value": "-6",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempLimitC": {
+   "value": "18",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempLimitH": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempMin": {
+   "value": "-22",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeAddional": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimePulseOff": {
+   "value": "300",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimePulseOn": {
+   "value": "750",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "HeatIRoomController2": {
+  "AMode": {
+   "value": "1",
+   "share": 0.7143,
+   "with_def": 7,
+   "top": 5,
+   "absent": 1,
+   "accepted": false
+  },
+  "TCCelvin": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 7,
+   "top": 7,
+   "absent": 1,
+   "accepted": false
+  },
+  "TComfort": {
+   "value": "22.5",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TComfortC": {
+   "value": "24.5",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TComfortHC": {
+   "value": "22",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TDeepSleep": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TDiff": {
+   "value": "1.5",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TExcess": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "THCelvin": {
+   "value": "120",
+   "share": 1.0,
+   "with_def": 7,
+   "top": 7,
+   "absent": 1,
+   "accepted": false
+  },
+  "TMax": {
+   "value": "28",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TSave": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TSaveL": {
+   "value": "3",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TSaveU": {
+   "value": "3",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TShadeCool": {
+   "value": "23.5",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TShadeHeat": {
+   "value": "27.5",
+   "share": 0.625,
+   "with_def": 8,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TWin": {
+   "value": "300",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TempO": {
+   "value": "-1000",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 4,
+   "accepted": false
+  },
+  "TimeC": {
+   "value": "3600",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeMove": {
+   "value": "14",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeMv": {
+   "value": "1800",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeS": {
+   "value": "3600",
+   "share": 1.0,
+   "with_def": 8,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Heatmixer": {
+  "Ki": {
+   "value": "0.033",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "Kp": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "Max": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "Sample": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "150",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Heatmixer2": {
+  "BufferInc": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Gain": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Max": {
+   "value": "40",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Min": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "PrevInc": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Transconductance": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Treshold": {
+   "value": "35",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "HourCounter": {
+  "Maintenance": {
+   "value": "2592000",
+   "share": 0.6667,
+   "with_def": 3,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Unit": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 2,
+   "accepted": false
+  }
+ },
+ "IRoomcontrol": {
+  "TComfort": {
+   "value": "21",
+   "share": 0.9091,
+   "with_def": 22,
+   "top": 20,
+   "absent": 0,
+   "accepted": true
+  },
+  "TComfortC": {
+   "value": "20",
+   "share": 0.9091,
+   "with_def": 22,
+   "top": 20,
+   "absent": 0,
+   "accepted": true
+  },
+  "TDeepSleep": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 22,
+   "top": 22,
+   "absent": 0,
+   "accepted": true
+  },
+  "TMax": {
+   "value": "28",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TMore": {
+   "value": "3",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TParty": {
+   "value": "5",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TSave": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 22,
+   "top": 22,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeC": {
+   "value": "3600",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeMove": {
+   "value": "1209600",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeMoveC": {
+   "value": "1209600",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "TimeMv": {
+   "value": "1800",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeS": {
+   "value": "3600",
+   "share": 0.9545,
+   "with_def": 22,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "InputRef": {
+  "AQ": {
+   "value": "1",
+   "share": 0.8,
+   "with_def": 5,
+   "top": 4,
+   "absent": 2356,
+   "accepted": false
+  },
+  "Q": {
+   "value": "5",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 2359,
+   "accepted": false
+  }
+ },
+ "Intercom": {
+  "Lbr": {
+   "value": "20",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Timeout": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Tp": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "LightController": {
+  "AlarmBrightness": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "AlarmPeriod": {
+   "value": "1.5",
+   "share": 0.5714,
+   "with_def": 21,
+   "top": 12,
+   "absent": 0,
+   "accepted": false
+  },
+  "BrightnessLimit": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Learntime": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 21,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "Max": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 21,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "MaxP": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 21,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "Min": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 15,
+   "accepted": false
+  },
+  "MoveIgnore": {
+   "value": "10",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "MoveOn": {
+   "value": "180",
+   "share": 0.8571,
+   "with_def": 21,
+   "top": 18,
+   "absent": 0,
+   "accepted": false
+  },
+  "MoveTimeout": {
+   "value": "3600",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 18,
+   "accepted": false
+  },
+  "Step": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 21,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  },
+  "Steptime": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 21,
+   "top": 21,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "LightController2": {
+  "AlarmBrightness": {
+   "value": "50",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "AlarmClockPeriod": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "AlarmPeriod": {
+   "value": "4",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "BrightnessLimit": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "DayMaxTemp": {
+   "value": "6500",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "DayMinTemp": {
+   "value": "2700",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "FadingTime": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "Max": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "MaxP": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "MoveIgnore": {
+   "value": "300",
+   "share": 0.8182,
+   "with_def": 11,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  },
+  "MoveOn": {
+   "value": "900",
+   "share": 0.8182,
+   "with_def": 11,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  },
+  "MoveTimeout": {
+   "value": "3600",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "SceneMixTime": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "Step": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  },
+  "Steptime": {
+   "value": "0.2",
+   "share": 1.0,
+   "with_def": 11,
+   "top": 11,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "LoadShed": {
+  "Hysteresis": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "maxP": {
+   "value": "20",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "maxTp": {
+   "value": "40",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "LongClick": {
+  "Max": {
+   "value": "0.1",
+   "share": 0.4,
+   "with_def": 5,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "0.1",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 2,
+   "accepted": false
+  },
+  "V1": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "V2": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "V3": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "V4": {
+   "value": "4",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "LoxAIRAactor": {
+  "I": {
+   "value": "300",
+   "share": 0.3333,
+   "with_def": 3,
+   "top": 1,
+   "absent": 22,
+   "accepted": false
+  }
+ },
+ "MPGroup": {
+  "DblClk": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Media": {
+  "DblClk": {
+   "value": "0.5",
+   "share": 0.75,
+   "with_def": 4,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeNum": {
+   "value": "3000",
+   "share": 0.75,
+   "with_def": 4,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "MediaClient": {
+  "DblClk": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 10,
+   "top": 10,
+   "absent": 0,
+   "accepted": true
+  },
+  "MoveTimeout": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 8,
+   "accepted": false
+  },
+  "RepeatFirst": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 9,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  },
+  "RepeatRate": {
+   "value": "0.3",
+   "share": 1.0,
+   "with_def": 9,
+   "top": 9,
+   "absent": 0,
+   "accepted": false
+  },
+  "VolumeStep": {
+   "value": "2",
+   "share": 0.9,
+   "with_def": 10,
+   "top": 9,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "Monoflop": {
+  "Time": {
+   "value": "2",
+   "share": 0.8571,
+   "with_def": 21,
+   "top": 18,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Mult": {
+  "Input2": {
+   "value": "60",
+   "share": 0.8333,
+   "with_def": 12,
+   "top": 10,
+   "absent": 37,
+   "accepted": false
+  }
+ },
+ "MultiClick": {
+  "Max": {
+   "value": "0.35",
+   "share": 0.6667,
+   "with_def": 6,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "0.1",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "V1": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "V2": {
+   "value": "2",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "V3": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "V4": {
+   "value": "4",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "MultiFuncSW": {
+  "TimeHigh": {
+   "value": "3600",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeTrigger": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeWarn": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  },
+  "WarnTime": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "MusicPlayer": {
+  "AlarmVol": {
+   "value": "35",
+   "share": 0.7826,
+   "with_def": 23,
+   "top": 18,
+   "absent": 0,
+   "accepted": false
+  },
+  "BellVol": {
+   "value": "20",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  },
+  "BuzzVol": {
+   "value": "10",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  },
+  "BuzzerFav": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  },
+  "DblClk": {
+   "value": "0.35",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  },
+  "DefVol": {
+   "value": "25",
+   "share": 0.7826,
+   "with_def": 23,
+   "top": 18,
+   "absent": 0,
+   "accepted": false
+  },
+  "MaxVol": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "Step": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  },
+  "TTSVol": {
+   "value": "20",
+   "share": 1.0,
+   "with_def": 23,
+   "top": 23,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "NfcCodeTouch": {
+  "Au": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "Lbr": {
+   "value": "50",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "PulseTime": {
+   "value": "3",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "OffDelay": {
+  "Time": {
+   "value": "600",
+   "share": 0.3636,
+   "with_def": 11,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "OnDelay": {
+  "Time": {
+   "value": "600",
+   "share": 0.4444,
+   "with_def": 9,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "OnOffDelay": {
+  "TimeOff": {
+   "value": "3600",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeOn": {
+   "value": "600",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "OnPulseDelay": {
+  "Delay": {
+   "value": "3",
+   "share": 0.4286,
+   "with_def": 14,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "Time": {
+   "value": "0.5",
+   "share": 0.8571,
+   "with_def": 14,
+   "top": 12,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PButtonT": {
+  "Time": {
+   "value": "0.3",
+   "share": 0.8,
+   "with_def": 10,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Ping": {
+  "PingTime": {
+   "value": "10",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeoutTime": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "Timeouts": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PresenceDetector": {
+  "ParamTOn": {
+   "value": "900",
+   "share": 0.8,
+   "with_def": 5,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "ParamTWarn": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PulseAt": {
+  "Time": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PulseBy": {
+  "Time": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PulseGen": {
+  "TimeHigh": {
+   "value": "0.5",
+   "share": 0.5,
+   "with_def": 16,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeLow": {
+   "value": "0.5",
+   "share": 0.5,
+   "with_def": 16,
+   "top": 8,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "PushDimmer": {
+  "Max": {
+   "value": "4",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Min": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 1,
+   "accepted": false
+  },
+  "Step": {
+   "value": "1",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Steptime": {
+   "value": "1",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "Switchtime": {
+   "value": "0.4",
+   "share": 1.0,
+   "with_def": 2,
+   "top": 2,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Radio": {
+  "Max": {
+   "value": "8",
+   "share": 0.9231,
+   "with_def": 39,
+   "top": 36,
+   "absent": 0,
+   "accepted": true
+  }
+ },
+ "Radio2": {
+  "Max": {
+   "value": "16",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Sequencer": {
+  "Def": {
+   "value": "4",
+   "share": 0.3333,
+   "with_def": 6,
+   "top": 2,
+   "absent": 1,
+   "accepted": false
+  },
+  "Max": {
+   "value": "4",
+   "share": 0.4286,
+   "with_def": 7,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "SmokeAlarm": {
+  "AlarmDelay": {
+   "value": "120",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "MaxDuration": {
+   "value": "300",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "MaxTemp": {
+   "value": "43",
+   "share": 1.0,
+   "with_def": 3,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "SpotOpt": {
+  "Mvh": {
+   "value": "1",
+   "share": 0.8333,
+   "with_def": 6,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "Ta": {
+   "value": "24",
+   "share": 0.5,
+   "with_def": 6,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  },
+  "Tn": {
+   "value": "4",
+   "share": 0.5,
+   "with_def": 6,
+   "top": 3,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "StairwayLS": {
+  "InputDisable": {
+   "value": "5",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 20,
+   "accepted": false
+  },
+  "On": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 20,
+   "accepted": false
+  },
+  "Remanence": {
+   "value": "0.3",
+   "share": 1.0,
+   "with_def": 4,
+   "top": 4,
+   "absent": 20,
+   "accepted": false
+  },
+  "TimeHigh": {
+   "value": "900",
+   "share": 0.5833,
+   "with_def": 24,
+   "top": 14,
+   "absent": 0,
+   "accepted": false
+  },
+  "TimeWarn": {
+   "value": "15",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 23,
+   "accepted": false
+  },
+  "WarnTime": {
+   "value": "0.5",
+   "share": 1.0,
+   "with_def": 1,
+   "top": 1,
+   "absent": 23,
+   "accepted": false
+  }
+ },
+ "StepSel": {
+  "Max": {
+   "value": "5",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Switch2Button": {
+  "Time": {
+   "value": "0.02",
+   "share": 0.4,
+   "with_def": 15,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "ToiletFan": {
+  "AiringDelay": {
+   "value": "300",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  },
+  "MaxAiringDuration": {
+   "value": "600",
+   "share": 0.5,
+   "with_def": 2,
+   "top": 1,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "UpDownCounter": {
+  "OnValue": {
+   "value": "30",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "Remanence": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  },
+  "Reset": {
+   "value": "1",
+   "share": 1.0,
+   "with_def": 6,
+   "top": 6,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "Ventilation": {
+  "IN_A_MAX": {
+   "value": "1000",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_H_MAX": {
+   "value": "60",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_H_MIN": {
+   "value": "40",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_P_H": {
+   "value": "1800",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_S_H": {
+   "value": "5400",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_T_F": {
+   "value": "-15",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_T_T": {
+   "value": "23",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_V_MAX": {
+   "value": "100",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_V_MIN": {
+   "value": "50",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_V_P_MAX": {
+   "value": "80",
+   "share": 0.8,
+   "with_def": 5,
+   "top": 4,
+   "absent": 0,
+   "accepted": false
+  },
+  "IN_V_P_MIN": {
+   "value": "50",
+   "share": 1.0,
+   "with_def": 5,
+   "top": 5,
+   "absent": 0,
+   "accepted": false
+  }
+ },
+ "WipingRelay": {
+  "TimeOn": {
+   "value": "1",
+   "share": 0.8214,
+   "with_def": 56,
+   "top": 46,
+   "absent": 0,
+   "accepted": false
+  }
+ }
+}

@@ -1,0 +1,12 @@
+# Seite "Technik" — das zweite Fragment. Der Draht von `netz.Q` läuft
+# hier automatisch über den Netzbezug-Spiegel der Seite (D34).
+
+page "Technik"
+
+netz_warnung = GreaterEqual(
+	"Netzbezug über 3 kW",
+	Input1: netz.Q,
+	Input2: 3000,
+)
+
+lampe.On <- netz_warnung.Q

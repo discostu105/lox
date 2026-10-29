@@ -1,0 +1,88 @@
+{
+  "lockfile_version": 3,
+  "target": {
+    "config_version": "17010727",
+    "miniserver_serial": "504F94112233",
+    "source_config_sha256": "9f9cb562cebcd5b435b29bdb307fc07b5082adf58c3acb7d039b00a45b708511",
+    "semantic_fingerprint": "6b81ace2eb5c602da2e5926be88fc3a4eb9816e963ff331cff99cf17824e67c9"
+  },
+  "counters": {
+    "next_obj": 202,
+    "next_const": 1,
+    "next_note": 1,
+    "next_mem": 1
+  },
+  "objects": {
+    "beschatten": {
+      "uuid": "1ff9b180-0000-0007-ffff504f94112233",
+      "type": "And",
+      "ports": {
+        "I1": "1ff9b180-0000-0004-00ffba4dbc1f17cd",
+        "I2": "1ff9b180-0000-0005-01ffba4dbc1f17cd",
+        "Q": "1ff9b180-0000-0006-02ffba4dbc1f17cd"
+      },
+      "layout": {
+        "px": 7392,
+        "py": 1080,
+        "px2": 8736,
+        "py2": 1776
+      },
+      "page_uuid": "20000004-0000-0040-ffff504f94112233"
+    },
+    "temp_hoch": {
+      "uuid": "1ff9b180-0000-0003-ffff504f94112233",
+      "type": "GreaterEqual",
+      "ports": {
+        "Input1": "1ff9b180-0000-0000-00ff3770a72821c9",
+        "Input2": "1ff9b180-0000-0001-01ff3770a72821c9",
+        "Q": "1ff9b180-0000-0002-02ff3770a72821c9"
+      },
+      "layout": {
+        "px": 7392,
+        "py": 192,
+        "px2": 8736,
+        "py2": 888
+      },
+      "page_uuid": "20000004-0000-0040-ffff504f94112233"
+    }
+  },
+  "externals": {
+    "aussentemp": {
+      "uuid": "20000001-0000-0010-ffff504f94112233",
+      "matched_by": "iname",
+      "title_at_match": "Außentemperatur",
+      "iname_at_match": "VI1"
+    },
+    "jal_sued": {
+      "uuid": "20000005-0000-0050-ffff504f94112233",
+      "matched_by": "title",
+      "title_at_match": "Beschattung Süd",
+      "iname_at_match": null
+    },
+    "sonne": {
+      "uuid": "20000003-0000-0030-ffff504f94112233",
+      "matched_by": "iname",
+      "title_at_match": "Sonnenschein",
+      "iname_at_match": "VI3"
+    },
+    "wind_alarm": {
+      "uuid": "20000002-0000-0020-ffff504f94112233",
+      "matched_by": "iname",
+      "title_at_match": "Windalarm",
+      "iname_at_match": "VI2"
+    }
+  },
+  "extern_wires": [
+    {
+      "from": "1ff9b180-0000-0006-02ffba4dbc1f17cd",
+      "to": "20000005-0000-0052-06ffaaaaaaaa0005"
+    },
+    {
+      "from": "20000002-0000-0021-00ffaaaaaaaa0002",
+      "to": "20000005-0000-0053-09ffaaaaaaaa0005"
+    }
+  ],
+  "set_originals": {
+    "20000005-0000-0054-2effaaaaaaaa0005": "100"
+  }
+}

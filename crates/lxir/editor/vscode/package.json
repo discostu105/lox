@@ -1,0 +1,42 @@
+{
+  "name": "lxir",
+  "displayName": "lxir",
+  "description": "Syntax highlighting and snippets for lxir modules (.lxir) — Loxone config-as-code",
+  "version": "0.1.0",
+  "publisher": "lxir",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lxir",
+        "aliases": [
+          "lxir"
+        ],
+        "extensions": [
+          ".lxir"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lxir",
+        "scopeName": "source.lxir",
+        "path": "./syntaxes/lxir.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "lxir",
+        "path": "./snippets/lxir.json"
+      }
+    ]
+  }
+}

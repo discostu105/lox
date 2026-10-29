@@ -1,0 +1,10 @@
+# Peripherie des Projekts: Externs und Konstanten, sichtbar für alle
+# Fragmente — ein Modul, ein Namensraum, kein `import` (D25). Der
+# Unterstrich sortiert die Datei nach vorn, mehr bedeutet er nicht.
+
+let solltemp = 27
+
+extern wasser = VirtualIn(iname: "VI1")
+extern netz = VirtualIn(iname: "VI5")
+extern pumpe = Switch(title: "Freigabe", room: "Pool")
+extern lampe = Switch(title: "Störmeldung")
