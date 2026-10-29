@@ -396,9 +396,10 @@ compiler emitting 178:
 
 A save of that rebuild still differs from it in bytes: blocks move
 within their page, `Desc=` moves right after `Type=`, the
-AnalogThresholdTrigger connectors are reordered, and minted ApiActor
-refs gain `Text="true"`, which GUI-created ApiActor refs carry under
-17.1 too and D33 does not emit yet.
+AnalogThresholdTrigger connectors are reordered (the next compile keeps
+all three, D47), and minted ApiActor refs gain `Text="true"`, which
+GUI-created ApiActor refs carry under 17.1 too and D33 does not emit
+yet.
 
 ## The rig, one command
 
