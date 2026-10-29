@@ -36,7 +36,7 @@ jobs:
     outputs:
       tag: ${{ steps.push.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
