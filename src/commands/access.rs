@@ -1,15 +1,19 @@
-//! `lox user ls/show` and `lox access log/check/perms`: the Miniserver's users
-//! and who may open which NFC Code Touch. Read-only; the user lox connects
-//! with needs the right to manage users.
+//! `lox user …` and `lox access …`: the Miniserver's users, who may open
+//! which NFC Code Touch, and the changes — NFC tags (learn, pair, remove) and
+//! access codes. The user lox connects with needs the right to manage users.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use serde::Serialize;
+use std::io::{IsTerminal, Write};
+use std::time::Duration;
 
 use crate::client::LoxClient;
 use crate::commands::RunContext;
 use crate::config::Config;
+use crate::nfc_learn::{self, LearnedTag};
 use crate::snapshot;
-use crate::usermgmt::{self, AccessReport, Verdict};
-use crate::{AccessCmd, AccessConfigSource, UserCmd};
+use crate::usermgmt::{self, AccessReport, UserChange, Verdict};
+use crate::{AccessCmd, AccessConfigSource, UserCmd, UserCodeCmd, UserNfcCmd};
 
 fn print_json(v: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(v)?);
@@ -107,8 +111,272 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
             }
             println!("  {:<13} {}", "Access codes", u.access_codes);
         }
+        UserCmd::Nfc(UserNfcCmd::Add {
+            user,
+            id,
+            name,
+            yes,
+        }) => {
+            let u = usermgmt::resolve_user(&lox, &user)?;
+            let change = usermgmt::plan_add_nfc(&u, &id, &name)?;
+            run_change(ctx, &lox, change, yes, None)?;
+        }
+        UserCmd::Nfc(UserNfcCmd::Rm { user, tag, yes }) => {
+            let u = usermgmt::resolve_user(&lox, &user)?;
+            let change = usermgmt::plan_remove_nfc(&u, &tag)?;
+            run_change(ctx, &lox, change, yes, None)?;
+        }
+        UserCmd::Code(UserCodeCmd::Set { user, yes }) => {
+            let u = usermgmt::resolve_user(&lox, &user)?;
+            let change = usermgmt::plan_set_code(&u);
+            let code = read_code(ctx)?;
+            run_change(ctx, &lox, change, yes, Some(&code))?;
+        }
     }
     Ok(())
+}
+
+/// Whether there is someone to ask: a terminal, and prompts not switched off.
+fn can_ask(ctx: &RunContext) -> bool {
+    !ctx.json
+        && !ctx.non_interactive
+        && std::io::stdin().is_terminal()
+        && std::io::stderr().is_terminal()
+}
+
+/// Ask before a change; `--yes` skips the question.
+fn confirm(ctx: &RunContext, yes: bool, question: &str) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    if !can_ask(ctx) {
+        bail!("this change requires --yes: there is no terminal to confirm it on");
+    }
+    eprint!("{} [y/N] ", question);
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        bail!("Aborted — nothing was changed")
+    }
+}
+
+/// The new access code: a hidden prompt, asked twice, on a terminal; else
+/// the first line of stdin. Never from the command line, never echoed.
+fn read_code(ctx: &RunContext) -> Result<String> {
+    let code = if std::io::stdin().is_terminal() {
+        if ctx.json || ctx.non_interactive {
+            bail!(
+                "no access code on stdin — pipe it in (prompts are off with -o json and \
+                 --non-interactive)"
+            );
+        }
+        let code = rpassword::prompt_password("New access code (2-8 digits): ")?;
+        usermgmt::validate_access_code(code.trim())?;
+        let again = rpassword::prompt_password("Repeat the code: ")?;
+        if code.trim() != again.trim() {
+            bail!("the two codes differ — nothing was changed");
+        }
+        code
+    } else {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        line
+    };
+    let code = code.trim().to_string();
+    usermgmt::validate_access_code(&code)?;
+    Ok(code)
+}
+
+/// Show a planned change (--dry-run), or confirm and carry it out.
+fn run_change(
+    ctx: &RunContext,
+    lox: &LoxClient,
+    mut change: UserChange,
+    yes: bool,
+    code: Option<&str>,
+) -> Result<()> {
+    if ctx.dry_run {
+        change.dry_run = true;
+        if ctx.json {
+            return print_json(&change);
+        }
+        println!("[dry-run] {}", change.question());
+        for r in &change.requests {
+            println!("  would send: {}", r);
+        }
+        for w in &change.warnings {
+            println!("  warning: {}", w);
+        }
+        return Ok(());
+    }
+    if !yes && !ctx.quiet {
+        for w in &change.warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+    confirm(ctx, yes, &change.question())?;
+    usermgmt::apply(lox, &mut change, code)?;
+    print_change(ctx, &change)
+}
+
+fn print_change(ctx: &RunContext, change: &UserChange) -> Result<()> {
+    if ctx.json {
+        return print_json(change);
+    }
+    match (change.action.as_str(), &change.tag) {
+        ("add-nfc-tag", Some(t)) => println!(
+            "Paired the NFC tag {} as '{}' with {}.",
+            t.id, t.name, change.user
+        ),
+        ("remove-nfc-tag", Some(t)) => println!(
+            "Removed the NFC tag '{}' ({}) from {}.",
+            t.name, t.id, change.user
+        ),
+        _ => println!("Set a new access code for {}.", change.user),
+    }
+    for w in &change.warnings {
+        eprintln!("warning: {}", w);
+    }
+    if !ctx.quiet
+        && let Some(note) = &change.note
+    {
+        eprintln!("note: {}", note);
+    }
+    Ok(())
+}
+
+/// `lox access learn -o json`: the tag, and the pairing if --user asked for one.
+#[derive(Serialize)]
+struct LearnOutput {
+    #[serde(flatten)]
+    tag: LearnedTag,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paired: Option<UserChange>,
+}
+
+fn learn_timeout(s: &str) -> Result<Duration> {
+    let t = crate::otel::parse_interval(s)
+        .map_err(|_| anyhow::anyhow!("--timeout '{}': expected e.g. 60s or 2m", s))?;
+    if t.is_zero() || t > nfc_learn::MAX_TIMEOUT {
+        bail!("--timeout must be between 1s and 5m");
+    }
+    Ok(t)
+}
+
+fn cmd_learn(
+    ctx: &RunContext,
+    code_touch: &str,
+    user: Option<&str>,
+    name: Option<&str>,
+    timeout: &str,
+    yes: bool,
+) -> Result<()> {
+    let timeout = learn_timeout(timeout)?;
+    let mut lox = LoxClient::new(Config::load()?)?;
+    let target = nfc_learn::target(&mut lox, code_touch)?;
+    let owner = match user {
+        Some(q) => Some(usermgmt::resolve_user(&lox, q)?),
+        None => None,
+    };
+    let tag_name = name.map(usermgmt::validate_tag_name).transpose()?;
+
+    if ctx.dry_run {
+        let mut tag = LearnedTag::planned(&target, timeout);
+        if let (Some(u), Some(n)) = (&owner, tag_name) {
+            tag.would_send.push(format!(
+                "GET {}",
+                usermgmt::add_nfc_path(&u.uuid, "<learned ID>", n)
+            ));
+        }
+        if ctx.json {
+            return print_json(&tag);
+        }
+        println!("[dry-run] learn an NFC tag at {}", target.name);
+        for c in &tag.would_send {
+            println!("  would send: {}", c);
+        }
+        return Ok(());
+    }
+    // fail before the user holds a tag to the reader for nothing
+    if owner.is_some() && !yes && !can_ask(ctx) {
+        bail!("pairing the tag requires --yes: there is no terminal to confirm it on");
+    }
+
+    if !ctx.quiet {
+        eprintln!(
+            "Hold the NFC tag or the unlocked phone to {} now ({} s; Ctrl-C ends learn mode)…",
+            target.name,
+            timeout.as_secs()
+        );
+    }
+    let rt = tokio::runtime::Runtime::new()?;
+    let learned = rt.block_on(async {
+        let mut session = crate::stream::Session::open(&lox.cfg, Duration::from_secs(20)).await?;
+        let ctrl_c = async {
+            // without a handler, never fire (Ctrl-C then ends the process)
+            if tokio::signal::ctrl_c().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        };
+        nfc_learn::learn(&mut session, &target, timeout, ctrl_c).await
+    })?;
+    // names for the IDs; the tag is read even when the list is not
+    let users = usermgmt::user_list(&lox).unwrap_or_default();
+    let tag = LearnedTag::new(&target, learned, &users);
+    if !ctx.json {
+        println!("{}", tag.describe());
+        for w in &tag.warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+
+    let paired = match (owner, tag_name) {
+        (Some(u), Some(n)) => pair_learned(ctx, &lox, &tag, &u, n, yes)?,
+        _ => None,
+    };
+    if ctx.json {
+        return print_json(&LearnOutput { tag, paired });
+    }
+    if let Some(change) = &paired {
+        print_change(ctx, change)?;
+    }
+    Ok(())
+}
+
+/// Pair a learned tag with `user`, unless it is theirs already; refuse a tag
+/// another user has.
+fn pair_learned(
+    ctx: &RunContext,
+    lox: &LoxClient,
+    tag: &LearnedTag,
+    user: &usermgmt::User,
+    name: &str,
+    yes: bool,
+) -> Result<Option<UserChange>> {
+    match &tag.user_uuid {
+        Some(owner) if owner.eq_ignore_ascii_case(&user.uuid) => {
+            if !ctx.json {
+                println!("{} has this tag already — nothing to pair.", user.name);
+            }
+            return Ok(None);
+        }
+        Some(owner) => bail!(
+            "the tag {} is paired with {} already — remove it there first \
+             (`lox user nfc rm {} \"{}\"`)",
+            tag.id,
+            tag.user.as_deref().unwrap_or(owner),
+            tag.user.as_deref().unwrap_or(owner),
+            tag.id
+        ),
+        None => {}
+    }
+    let mut change = usermgmt::plan_add_nfc(user, &tag.id, name)?;
+    confirm(ctx, yes, &change.question())?;
+    usermgmt::apply(lox, &mut change, None)?;
+    Ok(Some(change))
 }
 
 pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
@@ -180,6 +448,22 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
                     p.count, p.control, p.typ
                 );
             }
+        }
+        AccessCmd::Learn {
+            code_touch,
+            user,
+            name,
+            timeout,
+            yes,
+        } => {
+            cmd_learn(
+                ctx,
+                &code_touch,
+                user.as_deref(),
+                name.as_deref(),
+                &timeout,
+                yes,
+            )?;
         }
         AccessCmd::Check {
             user,

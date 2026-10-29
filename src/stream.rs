@@ -727,6 +727,80 @@ where
     }
 }
 
+/// What a [`Session`] receives.
+#[derive(Debug, Clone)]
+pub enum Incoming {
+    /// State events: the initial dump or a change
+    States(Vec<StateEvent>),
+    /// A command's answer (`{"LL": …}`)
+    Reply(String),
+}
+
+/// A subscribed session that also sends commands and hands back their
+/// answers (`lox access learn`). Keeps the socket alive like [`pump`].
+pub struct Session {
+    ws: WsStream,
+    framer: Framer,
+    keepalive: tokio::time::Interval,
+    last_rx: tokio::time::Instant,
+}
+
+impl Session {
+    /// Connect, authenticate and subscribe within `connect_timeout`.
+    pub async fn open(cfg: &Config, connect_timeout: Duration) -> Result<Self> {
+        let ws = tokio::time::timeout(connect_timeout, open_subscribed(cfg))
+            .await
+            .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+        let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
+        keepalive.tick().await;
+        Ok(Self {
+            ws,
+            framer: Framer::default(),
+            keepalive,
+            last_rx: tokio::time::Instant::now(),
+        })
+    }
+
+    pub async fn send(&mut self, cmd: &str) -> Result<()> {
+        self.ws.send(Message::Text(cmd.to_string())).await?;
+        Ok(())
+    }
+
+    /// The next state events or command answer; `None` when the server
+    /// closed the socket.
+    pub async fn next(&mut self) -> Result<Option<Incoming>> {
+        loop {
+            let msg = tokio::select! {
+                _ = self.keepalive.tick() => {
+                    if self.last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
+                        bail!("connection timed out");
+                    }
+                    self.ws.send(Message::Text("keepalive".to_string())).await?;
+                    continue;
+                }
+                m = self.ws.next() => m,
+            };
+            let Some(msg) = msg else { return Ok(None) };
+            self.last_rx = tokio::time::Instant::now();
+            match msg? {
+                Message::Binary(data) => {
+                    let events = self.framer.binary(&data)?;
+                    if !events.is_empty() {
+                        return Ok(Some(Incoming::States(events)));
+                    }
+                }
+                Message::Text(t) => {
+                    self.framer.text();
+                    return Ok(Some(Incoming::Reply(t.to_string())));
+                }
+                Message::Ping(data) => self.ws.send(Message::Pong(data)).await?,
+                Message::Close(_) => return Ok(None),
+                _ => {}
+            }
+        }
+    }
+}
+
 /// Stream events until the callback returns `Some(T)`, then return that value.
 ///
 /// Like `stream_events` but supports early exit — useful when you only need

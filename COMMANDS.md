@@ -416,7 +416,7 @@ lox log -n 100                         # custom line count
 
 ## Users & Door Access
 
-Reads the Miniserver's user management. The user lox connects with needs the right to manage users
+The Miniserver's user management. The user lox connects with needs the right to manage users
 (an admin); otherwise the commands fail with `forbidden` and say so.
 
 ```bash
@@ -457,6 +457,32 @@ when held to the reader. `-o json` returns the verdict, reason, rights, warnings
 `access perms` lists direct assignments only, UI and access rights alike (the Miniserver does not say which),
 and not the members of the listed groups.
 
+### NFC tags and access codes
+
+```bash
+lox access learn "Code Touch"                              # read a tag's ID: hold the tag or the unlocked phone to the reader
+lox access learn "Code Touch" --user alice --name "alice phone"  # … and pair it with alice
+lox user nfc add alice "04 A1 B2 C3 D4 E5 F6" "alice card" # pair a tag by ID (spaces, case and : or - don't matter)
+lox user nfc rm alice "alice card"                         # remove a tag, by name or ID
+lox user code set alice                                    # new access code: hidden prompt, asked twice
+echo 4711 | lox user code set alice --yes                  # … or the first line of stdin (never an argument)
+lox user nfc add alice 04A1B2C3 "spare" --dry-run          # show the request, send nothing
+```
+
+`access learn` starts the Code Touch's learn mode (it shows a cyan running light), waits for a tag (`--timeout`,
+default 60s, at most 5m), prints its ID and whether a user or Code Touch has it already, and always ends learn mode
+again, on timeout and Ctrl-C too. Read errors (`…E8`), authentication errors (`…EE`, e.g. a locked phone) and a reader
+that does not start (`…EF`) are named; a Code Touch that cannot learn (offline, not set up, an Air model on battery)
+answers `423`. With `--user` and `--name` the tag is then paired after a confirmation; a tag another user has is refused.
+
+Every change asks for confirmation; `--yes` skips the question, and without a terminal (or with `-o json` or
+`--non-interactive`) a change needs `--yes`. `--dry-run` prints the requests instead, with the access code shown as
+`****`. The code is 2 to 8 digits and never appears in output, errors or the `-v`/`-vv` log; a code another user has
+already fails with `code_in_use`. Each change is sent once, without retries.
+
+User-management changes may live only in the Miniserver's custom changes until Loxone Config saves the program;
+uploading an older program (Loxone Config, `lox config push`) can discard them. lox reminds you after each change.
+
 ---
 
 ## Device Health
@@ -489,7 +515,7 @@ Returns command structure, arguments, subcommands, control type hints, and valid
 ```bash
 lox mcp serve                         # Model Context Protocol server on stdio (MCP 2026-07-28 + older)
 lox mcp serve --read-only             # read tools only, no actions
-lox mcp serve --allow-risky           # doors, gates, alarm without asking the user first
+lox mcp serve --allow-risky           # doors, gates, alarm, user changes without asking the user first
 lox mcp serve --allow-raw             # also expose send_command (raw Loxone commands)
 lox mcp config                        # print config for Claude Desktop / Cursor and Claude Code
 lox mcp config -o json                # just the JSON "mcpServers" snippet
@@ -502,9 +528,11 @@ MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp co
 Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
 `system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down),
 `list_users`, `get_user`, `access_log`, `access_check` (see [Users & Door Access](#users--door-access); `access_check`
-downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`
-(and `send_command` with `--allow-raw`). Every tool has input and output schemas; every action tool accepts `dry_run`.
-High-risk actions (the ones `lox tui` asks to confirm, and any action on a door lock, gate or alarm) are confirmed by the user
+downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`,
+`learn_nfc_tag`, `assign_nfc_tag`, `remove_nfc_tag`, `set_access_code` (and `send_command` with `--allow-raw`). Every tool
+has input and output schemas; every action tool accepts `dry_run`.
+High-risk actions (the ones `lox tui` asks to confirm, any action on a door lock, gate or alarm, and every change to users
+and NFC learning) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
 Door openers wired as push-buttons are recognized by their door/gate/lock/key icons. To have any other control confirmed
 (e.g. a pool cover), list it under `confirm:` in the config (UUID, alias, or name with an optional `[Room]`; shown by `lox setup show`).
@@ -532,7 +560,7 @@ When using `-o json`, errors return structured envelopes instead of plain text:
 }
 ```
 
-Error codes: `control_not_found`, `ambiguous_control`, `user_not_found`, `ambiguous_user`, `config_not_found`, `confirmation_required`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
+Error codes: `control_not_found`, `ambiguous_control`, `user_not_found`, `ambiguous_user`, `tag_not_found`, `code_in_use`, `learn_timeout`, `config_not_found`, `confirmation_required`, `declined_by_user`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
 
 ---
 

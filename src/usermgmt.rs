@@ -1,9 +1,9 @@
-//! Miniserver user management, read side: users (`getuserlist2`, `getuser`),
-//! groups (`getgrouplist`), who is assigned to a control
-//! (`getcontrolpermissions`) and the NFC Code Touch access log
-//! (`/log/<uuid>.txt`). Pure parsers with typed results, thin calls on
-//! [`LoxClient`], and the access check that joins live users with the access
-//! rights of the program file.
+//! Miniserver user management: users (`getuserlist2`, `getuser`), groups
+//! (`getgrouplist`), who is assigned to a control (`getcontrolpermissions`)
+//! and the NFC Code Touch access log (`/log/<uuid>.txt`); the changes
+//! `addusernfc`, `removeusernfc` and `updateuseraccesscode`. Pure parsers
+//! with typed results, thin calls on [`LoxClient`], and the access check that
+//! joins live users with the access rights of the program file.
 //!
 //! Every call needs a connection user with the right to manage users.
 
@@ -578,6 +578,383 @@ pub fn resolve_user(lox: &LoxClient, query: &str) -> Result<User> {
     let users = user_list(lox)?;
     let summary = find_user(&users, query)?;
     user(lox, &summary.uuid)
+}
+
+// ── Changes ───────────────────────────────────────────────────────────────────
+
+/// Where a change lives until Loxone Config saves the program again.
+pub const CHANGE_NOTE: &str = "user-management changes may live only in the Miniserver's \
+     custom changes until Loxone Config saves the program; uploading an older program \
+     (Loxone Config, `lox config push`) can discard them";
+
+/// An NFC tag ID in one form: upper-case hex bytes separated by single
+/// spaces, as `getuser` and the learn result show it. Accepts any case, with
+/// or without separators (space, `:`, `-`).
+pub fn normalize_nfc_id(input: &str) -> Result<String> {
+    let hex: String = input
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '\t' | ':' | '-'))
+        .collect();
+    let bytes = hex.len() / 2;
+    if hex.is_empty()
+        || !hex.chars().all(|c| c.is_ascii_hexdigit())
+        || !hex.len().is_multiple_of(2)
+        || !(4..=16).contains(&bytes)
+    {
+        bail!(
+            "'{}' is not an NFC tag ID: expected 4 to 16 hex bytes like '04 A1 B2 C3 D4 E5 F6' \
+             (spaces optional) — `lox access learn` reads one at a Code Touch",
+            input
+        );
+    }
+    let upper = hex.to_ascii_uppercase();
+    Ok(upper
+        .as_bytes()
+        .chunks(2)
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+/// The NFC tag ID as `addusernfc` and `removeusernfc` take it in the path.
+///
+/// UNVERIFIED: the API documentation names the parameter `{nfcTagId}`
+/// without a format. This sends the ID exactly as `getuser` and the learn
+/// result show it — hex bytes separated by spaces, the last byte included —
+/// with the spaces percent-encoded. If the Miniserver wants it without
+/// spaces or without the last byte, this is the one place to change.
+pub fn nfc_id_for_api(id: &str) -> String {
+    uri_component(id)
+}
+
+/// Percent-encode everything but the unreserved characters of RFC 3986, so
+/// a name with `/`, `?` or umlauts stays one path segment.
+pub fn uri_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+/// A name for an NFC tag: not empty, one line, no `/` (the Miniserver splits
+/// its paths on it, encoded or not).
+pub fn validate_tag_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("the NFC tag needs a name, e.g. \"alice phone\"");
+    }
+    if name.contains('/') || name.chars().any(char::is_control) {
+        bail!("an NFC tag name cannot contain '/' or line breaks");
+    }
+    Ok(name)
+}
+
+/// An access code is 2 to 8 digits. The message never repeats the code.
+pub fn validate_access_code(code: &str) -> Result<()> {
+    if !(2..=8).contains(&code.len()) || !code.bytes().all(|b| b.is_ascii_digit()) {
+        bail!("an access code is 2 to 8 digits (0-9)");
+    }
+    Ok(())
+}
+
+pub fn add_nfc_path(user_uuid: &str, id: &str, name: &str) -> String {
+    format!(
+        "/jdev/sps/addusernfc/{}/{}/{}",
+        user_uuid,
+        nfc_id_for_api(id),
+        uri_component(name)
+    )
+}
+
+pub fn remove_nfc_path(user_uuid: &str, id: &str) -> String {
+    format!(
+        "/jdev/sps/removeusernfc/{}/{}",
+        user_uuid,
+        nfc_id_for_api(id)
+    )
+}
+
+/// The path that sets a code; pass `"****"` for the one to show.
+pub fn access_code_path(user_uuid: &str, code: &str) -> String {
+    format!("/jdev/sps/updateuseraccesscode/{}/{}", user_uuid, code)
+}
+
+/// The answer code of a change: the LL envelope's `Code`, else the HTTP
+/// status (some answers have no envelope).
+pub fn answer_code(status: u16, body: &str) -> u16 {
+    if !(200..300).contains(&status) {
+        return status;
+    }
+    serde_json::from_str::<Value>(body.trim())
+        .ok()
+        .and_then(|v| {
+            let ll = v.get("LL")?;
+            crate::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)
+        })
+        .and_then(|c| c.trim().parse().ok())
+        .unwrap_or(status)
+}
+
+/// A refused change as an error: 401/403 with the fix, the rest by code.
+fn change_refused(code: u16, shown: &str) -> anyhow::Error {
+    needs_user_management(
+        LlCodeError {
+            code: code.to_string(),
+            control: shown.trim_start_matches('/').to_string(),
+        }
+        .into(),
+    )
+}
+
+/// Pair an NFC tag with a user.
+pub fn add_user_nfc(lox: &LoxClient, user_uuid: &str, id: &str, name: &str) -> Result<()> {
+    validate_uuid(user_uuid)?;
+    let path = add_nfc_path(user_uuid, id, name);
+    let (status, body) = lox.get_once(&path, None)?;
+    match answer_code(status, &body) {
+        200 | 201 => Ok(()),
+        code => Err(change_refused(code, &path)),
+    }
+}
+
+/// Unpair an NFC tag from a user.
+pub fn remove_user_nfc(lox: &LoxClient, user_uuid: &str, id: &str) -> Result<()> {
+    validate_uuid(user_uuid)?;
+    let path = remove_nfc_path(user_uuid, id);
+    let (status, body) = lox.get_once(&path, None)?;
+    match answer_code(status, &body) {
+        200 | 201 => Ok(()),
+        code => Err(change_refused(code, &path)),
+    }
+}
+
+/// How `updateuseraccesscode` took a new code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeSet {
+    /// 200: no one else has this code
+    Unique,
+    /// 201: set, but another user has the same code
+    NotUnique,
+}
+
+/// Set a user's access code. The code stays out of logs and errors: the
+/// path and the answer (which echoes it) show `****` instead.
+pub fn set_access_code(lox: &LoxClient, user_uuid: &str, code: &str) -> Result<CodeSet> {
+    validate_uuid(user_uuid)?;
+    validate_access_code(code)?;
+    let path = access_code_path(user_uuid, code);
+    let shown = access_code_path(user_uuid, "****");
+    // the answer echoes the path as `dev/sps/…`: mask the part after the prefix
+    let secret = format!("{}/{}", user_uuid, code);
+    let masked = format!("{}/****", user_uuid);
+    let (status, body) = lox.get_once(&path, Some((&secret, &masked)))?;
+    match answer_code(status, &body) {
+        200 => Ok(CodeSet::Unique),
+        201 => Ok(CodeSet::NotUnique),
+        409 => bail!(
+            "the code is already used by another user (or as a code of an NFC Code Touch) — \
+             choose a different one"
+        ),
+        400 => bail!(
+            "the Miniserver does not know the user {} — see `lox user ls`",
+            user_uuid
+        ),
+        429 => bail!(
+            "the Miniserver blocks code changes for 5 minutes after 5 refused attempts — \
+             wait, and make sure the user lox connects with may manage users"
+        ),
+        code => Err(change_refused(code, &shown)),
+    }
+}
+
+/// The tag of `user` that `query` means: its ID (any form), or its name
+/// (any case).
+pub fn find_tag<'a>(user: &'a User, query: &str) -> Result<&'a NfcTag> {
+    if user.nfc_tags.is_empty() {
+        bail!("{} has no NFC tags", user.name);
+    }
+    if let Ok(id) = normalize_nfc_id(query) {
+        let same = |t: &&NfcTag| normalize_nfc_id(&t.id).is_ok_and(|t| t == id);
+        if let Some(t) = user.nfc_tags.iter().find(same) {
+            return Ok(t);
+        }
+    }
+    let q = query.trim().to_lowercase();
+    let named: Vec<&NfcTag> = user
+        .nfc_tags
+        .iter()
+        .filter(|t| t.name.to_lowercase() == q)
+        .collect();
+    match named.as_slice() {
+        [t] => Ok(t),
+        [] => bail!(
+            "{} has no NFC tag matching '{}' — the tags: {}",
+            user.name,
+            query,
+            user.nfc_tags
+                .iter()
+                .map(|t| format!("{} ({})", t.name, t.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        _ => bail!(
+            "{} has several NFC tags named '{}' — use the ID",
+            user.name,
+            query
+        ),
+    }
+}
+
+/// A change to a user, planned or done: what `--dry-run` and the
+/// confirmation show, and what a change reports.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct UserChange {
+    pub ok: bool,
+    /// add-nfc-tag, remove-nfc-tag or set-access-code
+    pub action: String,
+    pub user: String,
+    pub user_uuid: String,
+    /// The NFC tag added or removed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<NfcTag>,
+    /// The requests, secrets masked
+    pub requests: Vec<String>,
+    /// Nothing was sent (dry run)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
+    /// The user confirmed the change (MCP)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirmed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// Where the change lives (set once it is done)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl UserChange {
+    fn new(action: &str, user: &User, tag: Option<NfcTag>, request: String) -> Self {
+        Self {
+            ok: true,
+            action: action.to_string(),
+            user: user.name.clone(),
+            user_uuid: user.uuid.clone(),
+            tag,
+            requests: vec![format!("GET {}", request)],
+            dry_run: false,
+            confirmed: false,
+            warnings: Vec::new(),
+            note: None,
+        }
+    }
+
+    /// The `lox` command that makes the same change.
+    pub fn cli(&self) -> String {
+        let q = |s: &str| {
+            if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || "-_.".contains(c)) {
+                s.to_string()
+            } else {
+                format!("\"{}\"", s.replace('"', "\\\""))
+            }
+        };
+        match (self.action.as_str(), &self.tag) {
+            ("add-nfc-tag", Some(t)) => format!(
+                "lox user nfc add {} {} {}",
+                q(&self.user),
+                q(&t.id),
+                q(&t.name)
+            ),
+            ("remove-nfc-tag", Some(t)) => {
+                format!("lox user nfc rm {} {}", q(&self.user), q(&t.id))
+            }
+            _ => format!("lox user code set {}", q(&self.user)),
+        }
+    }
+
+    /// The question a confirmation asks.
+    pub fn question(&self) -> String {
+        match (self.action.as_str(), &self.tag) {
+            ("add-nfc-tag", Some(t)) => format!(
+                "Pair the NFC tag {} as '{}' with the user {}?",
+                t.id, t.name, self.user
+            ),
+            ("remove-nfc-tag", Some(t)) => format!(
+                "Remove the NFC tag '{}' ({}) from the user {}?",
+                t.name, t.id, self.user
+            ),
+            _ => format!("Set a new access code for the user {}?", self.user),
+        }
+    }
+}
+
+/// Plan pairing a tag with a user; refuses a tag the user has already.
+pub fn plan_add_nfc(user: &User, id: &str, name: &str) -> Result<UserChange> {
+    let id = normalize_nfc_id(id)?;
+    let name = validate_tag_name(name)?;
+    if let Some(t) = user
+        .nfc_tags
+        .iter()
+        .find(|t| normalize_nfc_id(&t.id).is_ok_and(|t| t == id))
+    {
+        bail!(
+            "{} has this NFC tag already (as '{}') — to rename it, remove it and add it again",
+            user.name,
+            t.name
+        );
+    }
+    let tag = NfcTag {
+        name: name.to_string(),
+        id: id.clone(),
+    };
+    let path = add_nfc_path(&user.uuid, &id, name);
+    Ok(UserChange::new("add-nfc-tag", user, Some(tag), path))
+}
+
+/// Plan unpairing one of a user's tags, by ID or name.
+pub fn plan_remove_nfc(user: &User, query: &str) -> Result<UserChange> {
+    let tag = find_tag(user, query)?.clone();
+    let path = remove_nfc_path(&user.uuid, &tag.id);
+    Ok(UserChange::new("remove-nfc-tag", user, Some(tag), path))
+}
+
+/// Plan setting a user's access code (shown as `****`).
+pub fn plan_set_code(user: &User) -> UserChange {
+    let mut change = UserChange::new(
+        "set-access-code",
+        user,
+        None,
+        access_code_path(&user.uuid, "****"),
+    );
+    if user.access_codes > 0 {
+        change
+            .warnings
+            .push(format!("replaces the access code {} has now", user.name));
+    }
+    change
+}
+
+/// Carry out a planned tag change (`code` is for set-access-code).
+pub fn apply(lox: &LoxClient, change: &mut UserChange, code: Option<&str>) -> Result<()> {
+    match (change.action.as_str(), &change.tag) {
+        ("add-nfc-tag", Some(t)) => add_user_nfc(lox, &change.user_uuid, &t.id, &t.name)?,
+        ("remove-nfc-tag", Some(t)) => remove_user_nfc(lox, &change.user_uuid, &t.id)?,
+        ("set-access-code", _) => {
+            let code = code.context("no access code given")?;
+            if set_access_code(lox, &change.user_uuid, code)? == CodeSet::NotUnique {
+                change
+                    .warnings
+                    .push("another user has the same code".to_string());
+            }
+        }
+        _ => bail!("unknown change '{}'", change.action),
+    }
+    change.note = Some(CHANGE_NOTE.to_string());
+    Ok(())
 }
 
 // ── Access check ──────────────────────────────────────────────────────────────
@@ -1324,5 +1701,203 @@ mod tests {
                 .any(|w| w.contains("not in the program file"))
         );
         assert!(c.warnings.iter().any(|w| w.contains("added after")));
+    }
+
+    // ── Changes ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn nfc_ids_are_normalized() {
+        let canon = "01 23 45 67 89 AB CD EF EC";
+        for input in [
+            canon,
+            "0123456789abcdefec",
+            "01:23:45:67:89:ab:cd:ef:ec",
+            " 01-23-45-67-89-AB-CD-EF-EC ",
+        ] {
+            assert_eq!(normalize_nfc_id(input).unwrap(), canon, "{}", input);
+        }
+        for bad in [
+            "",
+            "0123",
+            "0123456",
+            "01 23 45 6",
+            "zz 23 45 67",
+            "alice phone",
+        ] {
+            assert!(normalize_nfc_id(bad).is_err(), "{}", bad);
+        }
+    }
+
+    #[test]
+    fn paths_encode_ids_and_names_as_one_segment() {
+        assert_eq!(uri_component("a b/ä?"), "a%20b%2F%C3%A4%3F");
+        assert_eq!(
+            add_nfc_path(ALICE, "01 23 45 67", "alice phone"),
+            format!(
+                "/jdev/sps/addusernfc/{}/01%2023%2045%2067/alice%20phone",
+                ALICE
+            )
+        );
+        assert_eq!(
+            remove_nfc_path(ALICE, "01 23 45 67"),
+            format!("/jdev/sps/removeusernfc/{}/01%2023%2045%2067", ALICE)
+        );
+    }
+
+    #[test]
+    fn tag_names_and_codes_are_validated() {
+        assert_eq!(validate_tag_name("  alice phone ").unwrap(), "alice phone");
+        assert!(validate_tag_name(" ").is_err());
+        assert!(validate_tag_name("a/b").is_err());
+        assert!(validate_tag_name("a\nb").is_err());
+        for ok in ["12", "12345678", "0000"] {
+            assert!(validate_access_code(ok).is_ok(), "{}", ok);
+        }
+        for bad in ["1", "123456789", "12a4", "", " 1234"] {
+            let e = validate_access_code(bad).unwrap_err().to_string();
+            assert!(bad.is_empty() || !e.contains(bad), "the code leaks: {}", e);
+        }
+    }
+
+    #[test]
+    fn answer_codes_come_from_the_envelope_or_the_status() {
+        let ll = |code: &str| format!(r#"{{"LL":{{"control":"x","value":"","Code":"{}"}}}}"#, code);
+        assert_eq!(answer_code(200, &ll("200")), 200);
+        assert_eq!(answer_code(200, &ll("409")), 409);
+        assert_eq!(answer_code(200, r#"{"LL":{"Code":201}}"#), 201);
+        assert_eq!(answer_code(200, "ok"), 200);
+        assert_eq!(answer_code(403, &ll("200")), 403);
+    }
+
+    #[test]
+    fn plans_check_the_tags_a_user_has() {
+        let alice = parse_user(&alice_json()).unwrap();
+        let add = plan_add_nfc(&alice, "aabbccdd", "spare card").unwrap();
+        assert_eq!(add.tag.as_ref().unwrap().id, "AA BB CC DD");
+        assert_eq!(
+            add.requests,
+            vec![format!(
+                "GET /jdev/sps/addusernfc/{}/AA%20BB%20CC%20DD/spare%20card",
+                ALICE
+            )]
+        );
+        assert!(add.question().contains("spare card"));
+        // the tag she has, in another spelling
+        let e = plan_add_nfc(&alice, "0123456789abcdefec", "again").unwrap_err();
+        assert!(e.to_string().contains("already"), "{}", e);
+
+        for query in ["Alice Phone", "0123456789ABCDEFEC"] {
+            let rm = plan_remove_nfc(&alice, query).unwrap();
+            assert_eq!(rm.tag.as_ref().unwrap().name, "alice phone");
+            assert!(rm.requests[0].contains("removeusernfc"));
+        }
+        let e = plan_remove_nfc(&alice, "bob card").unwrap_err().to_string();
+        assert!(
+            e.contains("has no NFC tag matching") && e.contains("alice phone"),
+            "{}",
+            e
+        );
+
+        let mut bob = parse_user(&alice_json()).unwrap();
+        bob.access_codes = 1;
+        let code = plan_set_code(&bob);
+        assert!(code.requests[0].ends_with("/****"));
+        assert_eq!(code.warnings.len(), 1);
+    }
+
+    fn fake(server: &httpmock::MockServer) -> LoxClient {
+        LoxClient::new(crate::config::Config {
+            host: server.base_url(),
+            user: "test".into(),
+            pass: "test".into(),
+            verify_ssl: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    fn answer(server: &httpmock::MockServer, path: String, control: String, code: &str) {
+        let body = format!(
+            r#"{{"LL":{{"control":"{}","value":"","Code":"{}"}}}}"#,
+            control, code
+        );
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path(path);
+            then.status(200).body(body);
+        });
+    }
+
+    #[test]
+    fn setting_a_code_maps_the_answers_and_never_shows_the_code() {
+        let code = "73519";
+        for (answer_with, expect) in [
+            ("200", Ok(CodeSet::Unique)),
+            ("201", Ok(CodeSet::NotUnique)),
+            ("409", Err("already used by another user")),
+            ("429", Err("5 minutes")),
+            ("403", Err("right to manage users")),
+            ("400", Err("does not know the user")),
+            ("500", Err("code 500")),
+        ] {
+            let server = httpmock::MockServer::start();
+            answer(
+                &server,
+                format!("/jdev/sps/updateuseraccesscode/{}/{}", ALICE, code),
+                format!("dev/sps/updateuseraccesscode/{}/{}", ALICE, code),
+                answer_with,
+            );
+            let got = set_access_code(&fake(&server), ALICE, code);
+            match (got, expect) {
+                (Ok(set), Ok(want)) => assert_eq!(set, want),
+                (Err(e), Err(words)) => {
+                    let msg = format!("{:#}", e);
+                    assert!(msg.contains(words), "{}: {}", answer_with, msg);
+                    assert!(!msg.contains(code), "the code leaks: {}", msg);
+                }
+                (got, want) => panic!("{}: got {:?}, want {:?}", answer_with, got, want),
+            }
+        }
+    }
+
+    #[test]
+    fn nfc_changes_send_one_request_and_explain_refusals() {
+        let server = httpmock::MockServer::start();
+        let add = server.mock(|when, then| {
+            // the wire form: one path segment each, spaces encoded
+            when.method(httpmock::Method::GET).path(format!(
+                "/jdev/sps/addusernfc/{}/AA%20BB%20CC%20DD/spare%20card",
+                ALICE
+            ));
+            then.status(200)
+                .body(r#"{"LL":{"control":"dev/sps/addusernfc","value":"","Code":"200"}}"#);
+        });
+        add_user_nfc(&fake(&server), ALICE, "AA BB CC DD", "spare card").unwrap();
+        add.assert_hits(1);
+
+        // refused: one attempt, no retry, the fix in the message
+        let server = httpmock::MockServer::start();
+        let rm = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path(format!(
+                "/jdev/sps/removeusernfc/{}/AA%20BB%20CC%20DD",
+                ALICE
+            ));
+            then.status(500).body("");
+        });
+        let e = remove_user_nfc(&fake(&server), ALICE, "AA BB CC DD").unwrap_err();
+        assert!(format!("{:#}", e).contains("code 500"), "{:#}", e);
+        rm.assert_hits(1);
+
+        let server = httpmock::MockServer::start();
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains("removeusernfc");
+            then.status(401).body("");
+        });
+        let e = remove_user_nfc(&fake(&server), ALICE, "AA BB CC DD").unwrap_err();
+        assert!(
+            format!("{:#}", e).contains("lox setup set --user"),
+            "{:#}",
+            e
+        );
     }
 }

@@ -21,6 +21,7 @@ mod logic;
 mod loxcc;
 mod loxone_xml;
 mod mcp;
+mod nfc_learn;
 mod otel;
 mod scene;
 mod snapshot;
@@ -983,7 +984,7 @@ pub(crate) struct McpPolicy {
     /// Expose read tools only (no actions)
     #[arg(long, conflicts_with_all = ["allow_risky", "allow_raw"])]
     read_only: bool,
-    /// Run high-risk actions (doors, gates, alarm, the `confirm:` list) without asking the user to confirm
+    /// Run high-risk actions (doors, gates, alarm, user changes, the `confirm:` list) without asking the user to confirm
     #[arg(long)]
     allow_risky: bool,
     /// Expose the send_command tool for raw Loxone commands
@@ -1193,6 +1194,56 @@ pub(crate) enum UserCmd {
     },
     /// List the user groups with their type (normal, full access, …)
     Groups,
+    /// Pair NFC tags with a user or remove them
+    #[command(subcommand)]
+    Nfc(UserNfcCmd),
+    /// Set a user's access code for NFC Code Touch keypads
+    #[command(subcommand)]
+    Code(UserCodeCmd),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum UserNfcCmd {
+    /// Pair an NFC tag with a user (read the ID with `lox access learn`)
+    Add {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// Tag ID: hex bytes, with or without spaces ("04 A1 B2 C3 D4 E5 F6")
+        id: String,
+        /// Name for the tag, e.g. "alice phone"
+        name: String,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// Remove an NFC tag from a user
+    #[command(alias = "remove")]
+    Rm {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// The tag: its ID (any form) or its name
+        tag: String,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum UserCodeCmd {
+    /// Set a user's access code (2-8 digits), replacing the current one
+    ///
+    /// The code is read from a hidden prompt (asked twice), or from the first
+    /// line of stdin when stdin is not a terminal — never from the command
+    /// line, where it would end up in the shell history.
+    #[command(verbatim_doc_comment)]
+    Set {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// Skip the confirmation prompt (required when the code comes from stdin)
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1225,6 +1276,30 @@ pub(crate) enum AccessCmd {
     Perms {
         /// Control name, `Name [room]`, alias or UUID
         control: String,
+    },
+    /// Read an NFC tag's ID at a Code Touch, and optionally pair it with a user
+    ///
+    /// Starts the Code Touch's learn mode (it shows a cyan running light);
+    /// hold the tag, or the unlocked phone, to the reader. Prints the ID and
+    /// whether the tag is known already. Learn mode always ends again, also
+    /// on timeout and Ctrl-C. With --user (and --name) the tag is then paired
+    /// with that user, after a confirmation.
+    #[command(verbatim_doc_comment)]
+    Learn {
+        /// NFC Code Touch: name (or a unique part of it), alias or UUID
+        code_touch: String,
+        /// Pair the tag with this user (name or UUID)
+        #[arg(long, requires = "name")]
+        user: Option<String>,
+        /// Name for the tag when pairing, e.g. "alice phone"
+        #[arg(long, requires = "user")]
+        name: Option<String>,
+        /// How long to wait for a tag (e.g. 60s, 2m; at most 5m)
+        #[arg(long, default_value = "60s")]
+        timeout: String,
+        /// Pair without asking
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 }
 
@@ -1645,6 +1720,14 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
         "control_not_found"
     } else if lower.contains("no user matching") {
         "user_not_found"
+    } else if lower.contains("has no nfc tag") {
+        "tag_not_found"
+    } else if lower.contains("no nfc tag was read") {
+        "learn_timeout"
+    } else if lower.contains("already used by another user") {
+        "code_in_use"
+    } else if lower.starts_with("aborted") {
+        "declined_by_user"
     } else if lower.contains("ambiguous user") {
         "ambiguous_user"
     } else if lower.contains("ambiguous") {
@@ -1717,6 +1800,7 @@ fn run(cli: Cli) -> Result<()> {
         quiet: cli.quiet,
         csv: cli.output == OutputFormat::Csv,
         dry_run: cli.dry_run,
+        non_interactive: cli.non_interactive,
         no_header: cli.no_header,
         trace_id: cli.trace_id.clone(),
     };
