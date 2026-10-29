@@ -1084,54 +1084,12 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&v)?);
                 return Ok(());
             }
-            if rules.is_empty() {
-                println!("No automatic rules in {}.", snap.label);
-                return Ok(());
-            }
-            let name_w = rules
-                .iter()
-                .map(|r| r.name.chars().count())
-                .max()
-                .unwrap_or(4)
-                .max(4);
-            if !ctx.no_header {
-                println!("{:<name_w$}  {:<7}  {:<6}  UUID", "NAME", "ACTIVE", "JSON");
-            }
-            for r in &rules {
-                let active = match (r.invalid, r.active) {
-                    (Some(true), _) => "invalid",
-                    (_, Some(true)) => "yes",
-                    (_, Some(false)) => "no",
-                    _ => "?",
-                };
-                let json = if r.apc_valid { "ok" } else { "broken" };
-                println!(
-                    "{:<name_w$}  {:<7}  {:<6}  {}",
-                    r.name, active, json, r.uuid
-                );
-            }
-            println!("\n{} rules ({})", rules.len(), snap.label);
-            for r in rules.iter().filter(|r| !r.apc_valid) {
-                println!(
-                    "✗  {}: rule JSON does not parse ({})",
-                    r.name,
-                    r.apc_error.as_deref().unwrap_or("")
-                );
-            }
+            print!("{}", rules_table(&rules, &snap.label, !ctx.no_header));
         }
         AutopilotCmd::Changed => {
             let cfg = Config::load()?;
             let ap = LoxClient::new(cfg.clone())?.autopilot()?;
-            let raw = read_state(&cfg, &ap.state_changed)?;
-            let secs = raw
-                .trim()
-                .parse::<f64>()
-                .with_context(|| format!("autopilot `changed` is not a number: {raw:?}"))?
-                as i64;
-            let at = (secs > 0)
-                .then(|| chrono::DateTime::from_timestamp(secs, 0))
-                .flatten()
-                .map(|t| t.with_timezone(&chrono::Local));
+            let (secs, at) = parse_changed(&read_state(&cfg, &ap.state_changed)?)?;
             if ctx.json {
                 let v = serde_json::json!({
                     "changed": secs,
@@ -1154,22 +1112,7 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
             let cfg = Config::load()?;
             let ap = LoxClient::new(cfg.clone())?.autopilot()?;
             let runs = parse_autopilot_history(&read_state(&cfg, &ap.state_history)?);
-            let q = name_or_uuid.to_lowercase();
-            let hits: Vec<&AutopilotRun> = runs
-                .iter()
-                .filter(|r| r.uuid == name_or_uuid || r.name.to_lowercase().contains(&q))
-                .collect();
-            let mut names: Vec<&str> = hits.iter().map(|r| r.name.as_str()).collect();
-            names.sort_unstable();
-            names.dedup();
-            if names.len() > 1 {
-                bail!(
-                    "Ambiguous: '{}' matches {} rules in the history:\n  {}",
-                    name_or_uuid,
-                    names.len(),
-                    names.join("\n  ")
-                );
-            }
+            let hits = runs_of(&runs, &name_or_uuid)?;
             let last = hits.iter().max_by(|a, b| a.time.cmp(&b.time));
             if ctx.json {
                 let v = serde_json::json!({
@@ -1196,6 +1139,89 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The `lox autopilot ls` table, with a count line and the broken rules.
+fn rules_table(rules: &[crate::logic::AutopilotRuleInfo], label: &str, header: bool) -> String {
+    use std::fmt::Write;
+    if rules.is_empty() {
+        return format!("No automatic rules in {label}.\n");
+    }
+    let name_w = rules
+        .iter()
+        .map(|r| r.name.chars().count())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let mut out = String::new();
+    if header {
+        let _ = writeln!(
+            out,
+            "{:<name_w$}  {:<7}  {:<6}  UUID",
+            "NAME", "ACTIVE", "JSON"
+        );
+    }
+    for r in rules {
+        let active = match (r.invalid, r.active) {
+            (Some(true), _) => "invalid",
+            (_, Some(true)) => "yes",
+            (_, Some(false)) => "no",
+            _ => "?",
+        };
+        let json = if r.apc_valid { "ok" } else { "broken" };
+        let _ = writeln!(
+            out,
+            "{:<name_w$}  {:<7}  {:<6}  {}",
+            r.name, active, json, r.uuid
+        );
+    }
+    let _ = writeln!(out, "\n{} rules ({})", rules.len(), label);
+    for r in rules.iter().filter(|r| !r.apc_valid) {
+        let _ = writeln!(
+            out,
+            "✗  {}: rule JSON does not parse ({})",
+            r.name,
+            r.apc_error.as_deref().unwrap_or("")
+        );
+    }
+    out
+}
+
+/// The autopilot `changed` state: unix seconds, and the local time unless 0
+/// (never changed).
+fn parse_changed(raw: &str) -> Result<(i64, Option<chrono::DateTime<chrono::Local>>)> {
+    let secs = raw
+        .trim()
+        .parse::<f64>()
+        .with_context(|| format!("autopilot `changed` is not a number: {raw:?}"))?
+        as i64;
+    let at = (secs > 0)
+        .then(|| chrono::DateTime::from_timestamp(secs, 0))
+        .flatten()
+        .map(|t| t.with_timezone(&chrono::Local));
+    Ok((secs, at))
+}
+
+/// The runs of one rule, by UUID or a part of its name; a name part that
+/// matches several rules is an error.
+fn runs_of<'a>(runs: &'a [AutopilotRun], name_or_uuid: &str) -> Result<Vec<&'a AutopilotRun>> {
+    let q = name_or_uuid.to_lowercase();
+    let hits: Vec<&AutopilotRun> = runs
+        .iter()
+        .filter(|r| r.uuid == name_or_uuid || r.name.to_lowercase().contains(&q))
+        .collect();
+    let mut names: Vec<&str> = hits.iter().map(|r| r.name.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    if names.len() > 1 {
+        bail!(
+            "Ambiguous: '{}' matches {} rules in the history:\n  {}",
+            name_or_uuid,
+            names.len(),
+            names.join("\n  ")
+        );
+    }
+    Ok(hits)
 }
 
 /// One state's current value from the WebSocket state dump (max 10 s): text
@@ -1250,8 +1276,8 @@ fn parse_autopilot_history(text: &str) -> Vec<AutopilotRun> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AutopilotRun, Backoff, SnapshotFilter, fmt_offline, parse_autopilot_history,
-        statistic_output_names,
+        AutopilotRun, Backoff, SnapshotFilter, fmt_offline, parse_autopilot_history, parse_changed,
+        rules_table, runs_of, statistic_output_names,
     };
     use crate::stream::StateEvent;
     use serde_json::json;
@@ -1384,6 +1410,63 @@ mod tests {
             ]
         );
         assert!(parse_autopilot_history("").is_empty());
+    }
+
+    #[test]
+    fn autopilot_runs_of_one_rule() {
+        let runs = parse_autopilot_history(
+            "2026-07-26 17:01:00 0a000000-0000-0001-ffff000000000001 Pump off|\
+             2026-07-27 09:00:00 0a000000-0000-0003-ffff000000000003 Pump on|\
+             2026-07-27 17:01:00 0a000000-0000-0001-ffff000000000001 Pump off",
+        );
+        let off = runs_of(&runs, "pump OFF").unwrap();
+        assert_eq!(off.len(), 2);
+        assert!(off.iter().all(|r| r.name == "Pump off"));
+        let by_uuid = runs_of(&runs, "0a000000-0000-0003-ffff000000000003").unwrap();
+        assert_eq!(by_uuid[0].name, "Pump on");
+        let e = runs_of(&runs, "pump").unwrap_err().to_string();
+        assert!(e.contains("matches 2 rules"), "{}", e);
+        assert!(runs_of(&runs, "heating").unwrap().is_empty());
+    }
+
+    #[test]
+    fn autopilot_changed_seconds() {
+        let (secs, at) = parse_changed("1793275220").unwrap();
+        assert_eq!(secs, 1793275220);
+        assert_eq!(at.unwrap().timestamp(), 1793275220);
+        assert_eq!(parse_changed("0").unwrap(), (0, None));
+        assert!(parse_changed("soon").is_err());
+    }
+
+    #[test]
+    fn autopilot_rules_table_rows() {
+        use crate::logic::AutopilotRuleInfo;
+        let rule = |name: &str, active, invalid, err: Option<&str>| AutopilotRuleInfo {
+            uuid: format!("uuid-{name}"),
+            name: name.into(),
+            active,
+            invalid,
+            apc_valid: err.is_none(),
+            apc_error: err.map(str::to_string),
+        };
+        let rules = [
+            rule("Morning", Some(true), Some(false), None),
+            rule("Stale", Some(true), Some(true), None),
+            rule("Broken", None, None, Some("expected value")),
+        ];
+        let t = rules_table(&rules, "test.Loxone", true);
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines[0], "NAME     ACTIVE   JSON    UUID");
+        assert_eq!(lines[1], "Morning  yes      ok      uuid-Morning");
+        assert_eq!(lines[2], "Stale    invalid  ok      uuid-Stale");
+        assert_eq!(lines[3], "Broken   ?        broken  uuid-Broken");
+        assert_eq!(lines[5], "3 rules (test.Loxone)");
+        assert_eq!(
+            lines[6],
+            "✗  Broken: rule JSON does not parse (expected value)"
+        );
+        assert!(!rules_table(&rules, "x", false).starts_with("NAME"));
+        assert_eq!(rules_table(&[], "x", true), "No automatic rules in x.\n");
     }
 
     #[test]
