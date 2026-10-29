@@ -3309,6 +3309,69 @@ fn canvas_labels_point_at_the_port_key() {
 }
 
 #[test]
+fn schedule_changes_are_semantic() {
+    // lox#162: a schedule-only edit is a diff entry per day group, in the
+    // source's terms, and moves the fingerprint; the v5 form (recorded
+    // before schedules joined the projection) does not see it.
+    let compiled = |schedule: &str| {
+        let src = format!(
+            "page \"Beschattung\"\nschedule abend\n{schedule}end\n\
+             uhr = DayTimer(\"Abendlicht\")\nuhr.schedule = abend\n"
+        );
+        let module = Module::parse(&src).unwrap();
+        compile(&base(), &module, &mut Lockfile::new(), &opts()).unwrap()
+    };
+    let a = compiled("\tdaily 00:00-06:00 activate, 21:00-24:00 activate\n");
+    let b = compiled("\tdaily 00:00-06:00 activate, 22:00-24:00 activate\n");
+    let d = lxir::diff::diff(&a, &b);
+    assert!(d.added.is_empty() && d.removed.is_empty() && d.wires_added.is_empty());
+    assert_eq!(d.param_changes.len(), 1, "{:?}", d.param_changes);
+    let p = &d.param_changes[0];
+    assert_eq!(p.port_key, "schedule daily");
+    assert_eq!(
+        p.from.as_deref(),
+        Some("00:00-06:00 activate, 21:00-24:00 activate")
+    );
+    assert_eq!(
+        p.to.as_deref(),
+        Some("00:00-06:00 activate, 22:00-24:00 activate")
+    );
+    let summary = lxir::diff::summary(&a, &b, &d);
+    assert!(
+        summary.contains(
+            "DayTimer \"Abendlicht\" schedule daily: 00:00-06:00 activate, \
+             21:00-24:00 activate -> 00:00-06:00 activate, 22:00-24:00 activate"
+        ),
+        "{summary}"
+    );
+    use lxir::diff::{semantic_fingerprint, semantic_fingerprint_v5};
+    assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
+    assert_eq!(semantic_fingerprint_v5(&a), semantic_fingerprint_v5(&b));
+    assert!(lxir::diff::diff(&a, &a).is_empty());
+
+    // Columns that change alike group under the schedule's day words; a
+    // mode column one side lacks reads as none.
+    let c = compiled("\tweekdays 00:00-06:00 activate, 21:00-24:00 activate\n\tholiday off\n");
+    let d = lxir::diff::diff(&a, &c);
+    let changes: Vec<(&str, Option<&str>, Option<&str>)> = d
+        .param_changes
+        .iter()
+        .map(|p| (p.port_key.as_str(), p.from.as_deref(), p.to.as_deref()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            ("schedule holiday", None, Some("off")),
+            (
+                "schedule weekend",
+                Some("00:00-06:00 activate, 21:00-24:00 activate"),
+                Some("off")
+            ),
+        ]
+    );
+}
+
+#[test]
 fn schedules_write_modes_and_entries_onto_a_day_timer() {
     // D53: a schedule claim rewrites `Modes=`, `N=` and the `<Entry>`
     // children of the DayTimer — by mode index, then start.

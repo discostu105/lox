@@ -134,8 +134,8 @@ USAGE:
         says exactly which line to add.
 
   lxir diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>
-        Semantic diff: objects, parameters, rooms/categories, wires, and
-        a users/access section (users and groups, membership, NFC tags,
+        Semantic diff: objects, parameters, rooms/categories, DayTimer
+        schedules, wires, and a users/access section (users and groups, membership, NFC tags,
         codes, passwords, last edit, access and UI rights). Credentials
         show as names, counts and short fingerprints, never as the stored
         hash. --exit-code exits 1 when the docs differ, users/access
@@ -1502,9 +1502,15 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             continue;
         }
-        // A tile function (D41) is already a readable `name="value"` list.
-        if p.port_key.starts_with("tile ") {
-            let side = |v: &Option<String>| v.clone().unwrap_or_else(|| "(empty)".into());
+        // A tile function (D41) is already a readable `name="value"` list,
+        // a schedule column (D53) a list of intervals.
+        if p.port_key.starts_with("tile ") || p.port_key.starts_with("schedule ") {
+            let none = if p.port_key.starts_with("tile ") {
+                "(empty)"
+            } else {
+                "(no column)"
+            };
+            let side = |v: &Option<String>| v.clone().unwrap_or_else(|| none.into());
             println!(
                 "* {} {} {}: {} -> {}",
                 p.block_type,
@@ -1632,6 +1638,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = lxir::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v5(&doc) == *recorded {
+        // Recorded before DayTimer schedules joined the projection (D53).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to DayTimer schedules — the next compile \
+             records the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v4(&doc) == *recorded {
         // Recorded before messages joined the projection (D51).

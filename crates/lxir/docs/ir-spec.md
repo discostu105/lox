@@ -917,6 +917,14 @@ schedule in place, editable in the app again. Only one schedule per
 timer; two externs resolving to the same timer are a compile error.
 Top-level only.
 
+`lxir diff` compares the schedule of every DayTimer, claimed or not, per
+mode column and in these terms: the columns that changed alike are
+grouped under the day words (`DayTimer "Schaltuhr" schedule daily:
+00:00-06:00 activate, 21:00-24:00 activate -> 00:00-06:00 activate,
+22:00-24:00 activate`), a user mode by its title, a column one side
+lacks as none. The semantic fingerprint includes the schedule, so
+`lxir drift` reports one changed in Loxone Config or the app.
+
 ### Push notifications: `OutputRefLM` and `recipients` (D51)
 
 ```text

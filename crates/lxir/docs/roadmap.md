@@ -63,9 +63,9 @@ types) contradict each other. Results and methodology:
       sets claimed onto extern or managed DayTimers, the ten built-in
       operating modes, analog values, `activate`; all seven weekday
       columns always written (oracle session 18: a save fills missing
-      ones with "on all day"). Open: user-defined modes (resolve the
-      config's mode objects by title), and `lxir diff` does not show
-      schedule changes yet (GUI-owned content).
+      ones with "on all day"). `lxir diff` and `lxir drift` cover
+      every DayTimer's schedule (lox#162). Open: user-defined modes
+      (resolve the config's mode objects by title).
 - [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
       land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
       input range as claimed attribute parameters, and the defaults a

@@ -202,6 +202,141 @@ fn message_fields(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String
         .unwrap_or_default()
 }
 
+/// The day keywords of the built-in operating modes (D53), by the `N` of
+/// their fixed UUID `00000000-0000-000N-15…` — the schedule's own words.
+const MODE_DAYS: [&str; 10] = [
+    "holiday", "vacation", "dayoff", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+];
+
+/// A DayTimer's switching times (D53), one column per operating mode in
+/// `Modes=`: the column's key orders the built-in modes as a schedule
+/// names them (holiday … sun, then any other mode by title or UUID), the
+/// value is its intervals in source terms — `21:00-24:00 activate`,
+/// `06:00-08:00 = 21.5` (a value shows on an analog timer, or wherever it
+/// is not a digital `1`), `off` for an empty column. `N=` and
+/// `UserModes=` are counts of what the columns hold, so they add nothing
+/// here. Not a DayTimer: empty.
+fn schedule_columns(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<(usize, String), String> {
+    let mut out = BTreeMap::new();
+    if o.block_type != "DayTimer" {
+        return out;
+    }
+    let Some(el) = doc.element_at(&o.path) else {
+        return out;
+    };
+    let analog = el.attr("Analog") == Some("true");
+    let modes: Vec<(usize, String)> = el
+        .attr_decoded("Modes")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|m| !m.is_empty())
+        .map(|m| {
+            let builtin = m
+                .strip_prefix("00000000-0000-")
+                .and_then(|r| r.strip_suffix("-1500000000000000"))
+                .and_then(|n| u16::from_str_radix(n, 16).ok())
+                .and_then(|n| Some((n as usize, *MODE_DAYS.get((n as usize).checked_sub(1)?)?)));
+            match builtin {
+                Some((n, day)) => (n, day.to_string()),
+                None => {
+                    let title = doc
+                        .objects()
+                        .into_iter()
+                        .find(|x| x.uuid == m)
+                        .and_then(|x| x.title);
+                    (
+                        usize::MAX,
+                        title.map_or_else(|| m.to_string(), |t| format!("{t:?}")),
+                    )
+                }
+            }
+        })
+        .collect();
+    let mut columns: BTreeMap<(usize, String), Vec<(u32, String)>> =
+        modes.iter().map(|m| (m.clone(), Vec::new())).collect();
+    let hm = |m: u32| format!("{:02}:{:02}", m / 60, m % 60);
+    for e in el.child_elements().filter(|c| c.name == "Entry") {
+        let num = |name: &str| e.attr_decoded(name).and_then(|v| v.parse::<u32>().ok());
+        let (from, to, ix) = (num("From").unwrap_or(0), num("To").unwrap_or(0), num("Ix"));
+        let mut iv = format!("{}-{}", hm(from), hm(to));
+        let v = e.attr_decoded("V").unwrap_or_default();
+        if analog || v != "1" {
+            iv.push_str(&format!(" = {v}"));
+        }
+        if e.attr("NeedActivate") == Some("true") {
+            iv.push_str(" activate");
+        }
+        let ix = ix.unwrap_or(0) as usize;
+        let key = modes
+            .get(ix)
+            .cloned()
+            .unwrap_or_else(|| (usize::MAX, format!("mode #{ix}")));
+        columns.entry(key).or_default().push((from, iv));
+    }
+    for (key, mut ivs) in columns {
+        ivs.sort();
+        let text = if ivs.is_empty() {
+            "off".to_string()
+        } else {
+            ivs.into_iter()
+                .map(|(_, iv)| iv)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        out.insert(key, text);
+    }
+    out
+}
+
+/// The schedule changes of one DayTimer, keyed `schedule <days>`: the
+/// columns that differ, those with the same before and after grouped
+/// under the schedule's day words (`daily`, `weekdays`, `weekend`, then
+/// single days). A column one side lacks is `None`.
+fn schedule_changes(
+    a: &BTreeMap<(usize, String), String>,
+    b: &BTreeMap<(usize, String), String>,
+) -> Vec<(String, Option<String>, Option<String>)> {
+    // The mode columns of one group, and its before and after.
+    type Group<'a> = (
+        Vec<&'a (usize, String)>,
+        Option<&'a String>,
+        Option<&'a String>,
+    );
+    let mut groups: Vec<Group> = Vec::new();
+    for key in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
+        let (from, to) = (a.get(key), b.get(key));
+        if from == to {
+            continue;
+        }
+        match groups.iter_mut().find(|g| g.1 == from && g.2 == to) {
+            Some(g) => g.0.push(key),
+            None => groups.push((vec![key], from, to)),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(keys, from, to)| {
+            let mut days: Vec<&str> = keys.iter().map(|(_, d)| d.as_str()).collect();
+            for (group, members) in [
+                ("daily", &MODE_DAYS[3..10]),
+                ("weekdays", &MODE_DAYS[3..8]),
+                ("weekend", &MODE_DAYS[8..10]),
+            ] {
+                if members.iter().all(|m| days.contains(m)) {
+                    let at = days.iter().position(|d| d == &members[0]).unwrap_or(0);
+                    days.retain(|d| !members.contains(d));
+                    days.insert(at.min(days.len()), group);
+                }
+            }
+            (
+                format!("schedule {}", days.join(" ")),
+                from.cloned(),
+                to.cloned(),
+            )
+        })
+        .collect()
+}
+
 fn taxonomy_titles(objs: &BTreeMap<String, ObjectSummary>) -> BTreeMap<&str, &str> {
     objs.values()
         .filter(|o| matches!(o.block_type.as_str(), "Place" | "Category"))
@@ -309,6 +444,18 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         });
                     }
                 }
+                // A DayTimer's switching times (D53), by day group.
+                for (key, from, to) in
+                    schedule_changes(&schedule_columns(a, oa), &schedule_columns(b, ob))
+                {
+                    out.param_changes.push(ParamChange {
+                        object_uuid: uuid.clone(),
+                        block_type: ob.block_type.clone(),
+                        port_key: key,
+                        from,
+                        to,
+                    });
+                }
                 for name in diff_attrs(&ob.block_type) {
                     let attr = |doc: &LoxoneDoc, o: &ObjectSummary| {
                         doc.element_at(&o.path)
@@ -361,6 +508,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// answer "did another writer change something?" from one parse, no
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 6)
+}
+
+/// The fingerprint as lxir wrote it before DayTimer schedules (`Modes=`
+/// and the `<Entry>` list) joined the projection (D53, lox#162). `lxir
+/// drift` accepts it so an upgrade alone does not read as drift; the next
+/// compile records the current form.
+pub fn semantic_fingerprint_v5(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 5)
 }
 
@@ -407,7 +562,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         2 => b"lxir-fingerprint-v2".to_vec(),
         3 => b"lxir-fingerprint-v3".to_vec(),
         4 => b"lxir-fingerprint-v4".to_vec(),
-        _ => b"lxir-fingerprint-v5".to_vec(),
+        5 => b"lxir-fingerprint-v5".to_vec(),
+        _ => b"lxir-fingerprint-v6".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -461,6 +617,12 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         if version >= 5 {
             for (key, v) in message_fields(doc, o) {
                 field(&mut buf, b'm', &key);
+                field(&mut buf, b'v', &v);
+            }
+        }
+        if version >= 6 {
+            for ((_, mode), v) in schedule_columns(doc, o) {
+                field(&mut buf, b's', &mode);
                 field(&mut buf, b'v', &v);
             }
         }
@@ -891,6 +1053,109 @@ mod tests {
         assert_ne!(fp, semantic_fingerprint(&doc2("Y", "Cap", "1", true)));
         assert_ne!(fp, semantic_fingerprint(&doc2("X", "Cap", "2", true)));
         assert_ne!(fp, semantic_fingerprint(&doc2("X", "Cap", "1", false)));
+    }
+
+    #[test]
+    fn day_timer_schedules_read_in_source_terms() {
+        // `Modes=` columns by index, `From` absent = 0, a value where the
+        // timer is analog, a user mode by its title (D53, lox#162).
+        let timer = |entries: &str| {
+            let s = format!(
+                "<ControlList Version=\"1\" NextObj=\"5\">\r\n\
+                 \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+                 \t\t<C Type=\"Mode\" U=\"00000005-0000-0000-ffff000000000001\" Title=\"Party\"/>\r\n\
+                 \t\t<C Type=\"Page\" U=\"00000002-0000-0000-ffff000000000001\" Title=\"P\">\r\n\
+                 \t\t\t<C Type=\"DayTimer\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Heizung\" \
+                 Analog=\"true\" N=\"3\" Modes=\"00000000-0000-0004-1500000000000000,\
+                 00000000-0000-0009-1500000000000000,00000000-0000-000a-1500000000000000,\
+                 00000005-0000-0000-ffff000000000001\">\r\n{entries}\
+                 \t\t\t</C>\r\n\
+                 \t\t</C>\r\n\
+                 \t</C>\r\n\
+                 </ControlList>\r\n"
+            );
+            LoxoneDoc::parse(s.as_bytes()).unwrap()
+        };
+        let a = timer(
+            "<Entry To=\"360\" V=\"18\"/><Entry From=\"480\" To=\"1440\" Ix=\"1\" V=\"21\"/>\
+             <Entry From=\"480\" To=\"1440\" Ix=\"2\" V=\"21\"/>",
+        );
+        let b = timer(
+            "<Entry To=\"360\" V=\"18\"/><Entry From=\"540\" To=\"1440\" Ix=\"1\" V=\"21\"/>\
+             <Entry From=\"540\" To=\"1440\" Ix=\"2\" V=\"21\"/>\
+             <Entry From=\"1200\" To=\"1440\" Ix=\"3\" NeedActivate=\"true\" V=\"23\"/>",
+        );
+        let d = diff(&a, &b);
+        let changes: Vec<(&str, Option<&str>, Option<&str>)> = d
+            .param_changes
+            .iter()
+            .map(|p| (p.port_key.as_str(), p.from.as_deref(), p.to.as_deref()))
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                (
+                    "schedule weekend",
+                    Some("08:00-24:00 = 21"),
+                    Some("09:00-24:00 = 21")
+                ),
+                (
+                    "schedule \"Party\"",
+                    Some("off"),
+                    Some("20:00-24:00 = 23 activate")
+                ),
+            ]
+        );
+        assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
+        assert_eq!(semantic_fingerprint_v5(&a), semantic_fingerprint_v5(&b));
+
+        // Reordering `Modes=` with the entries' indexes is the same
+        // schedule.
+        let reordered = |doc: &LoxoneDoc| {
+            let text = String::from_utf8(doc.to_bytes()).unwrap();
+            let text = text
+                .replace(
+                    "00000000-0000-0004-1500000000000000,00000000-0000-0009",
+                    "00000000-0000-0009-1500000000000000,00000000-0000-0004",
+                )
+                .replace(
+                    "<Entry To=\"360\" V=\"18\"/>",
+                    "<Entry To=\"360\" Ix=\"1\" V=\"18\"/>",
+                )
+                .replace("Ix=\"1\" V=\"21\"", "V=\"21\"");
+            LoxoneDoc::parse(text.as_bytes()).unwrap()
+        };
+        assert_ne!(a.to_bytes(), reordered(&a).to_bytes());
+        assert!(diff(&a, &reordered(&a)).is_empty());
+        assert_eq!(
+            semantic_fingerprint(&a),
+            semantic_fingerprint(&reordered(&a))
+        );
+    }
+
+    #[test]
+    fn schedule_day_groups() {
+        let col = |days: &[usize], v: &str| -> BTreeMap<(usize, String), String> {
+            days.iter()
+                .map(|&n| ((n, MODE_DAYS[n - 1].to_string()), v.to_string()))
+                .collect()
+        };
+        let all: Vec<usize> = (1..=10).collect();
+        let keys = |b: BTreeMap<(usize, String), String>| -> Vec<String> {
+            schedule_changes(&col(&all, "off"), &b)
+                .into_iter()
+                .map(|(k, ..)| k)
+                .collect()
+        };
+        let mut b = col(&[1, 4, 5, 6, 7, 8, 9, 10], "x");
+        b.extend(col(&[2, 3], "off"));
+        assert_eq!(keys(b), ["schedule holiday daily"]);
+        let mut b = col(&[4, 5, 6, 7, 8], "x");
+        b.extend(col(&[1, 2, 3, 9, 10], "off"));
+        assert_eq!(keys(b), ["schedule weekdays"]);
+        let mut b = col(&[4, 6, 9, 10], "x");
+        b.extend(col(&[1, 2, 3, 5, 7, 8], "off"));
+        assert_eq!(keys(b), ["schedule mon wed weekend"]);
     }
 
     #[test]
