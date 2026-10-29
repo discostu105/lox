@@ -179,6 +179,8 @@ lxir adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
      --lock modules/haus.lock.json  # adopt one freshly drawn block
 lxir observe current.Loxone          # port-direction evidence (JSON)
 lxir roundtrip current.Loxone        # byte-fidelity self-check
+lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
+                                     # writer back to raw line breaks
 lxir test                            # run the module's `test … end` blocks
                                      # through lox-cli's `lox sim` (--lox/$LOX)
 ```

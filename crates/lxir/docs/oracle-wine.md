@@ -354,6 +354,28 @@ in two of them a hand-edited ref) through one open+save:
   so do title claims on three targets with visible, hidden and
   collected refs, and the compile that withdraws them again.
 
+## Repaired numeric references (session 13, D44) — passed
+
+Ran 2026-10-29. Question: does Loxone Config keep what `lxir repair`
+writes (raw line breaks where a foreign writer had left `&#xA;` text)
+in `APC=`, `NDOC=` and `Code=`? Each probe took a config, encoded the
+line breaks of one attribute kind as `&amp;#xD;&amp;#xA;` (the
+GUI-saved damage), ran `lxir repair`, then one open+save:
+
+- **Corpus, `APC=`** (a public use-case config with two rules whose
+  JSON holds a raw CRLF): the repair reproduced the original file byte
+  for byte; the save kept both payloads byte-identical.
+- **Corpus, `Code=`** (a public Modbus example whose program has 436
+  line breaks): repair equal to the original; the save kept the program
+  byte-identical. The semantic diffs of both corpus files show only
+  the release upgrade of an older config (added system objects,
+  locale renames).
+- **House config, local only:** the ten damaged Modbus `NDOC=` texts
+  as downloaded, plus its compiled program (D40) damaged on purpose. All
+  eleven came back with raw CRLF, everything else unchanged; the save
+  kept every `NDOC=` (18/18) and the program byte-identical, and the
+  semantic diff shows only two ref titles known to be stale (D43).
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

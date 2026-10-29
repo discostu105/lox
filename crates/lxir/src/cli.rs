@@ -139,6 +139,17 @@ USAGE:
         *what* changed, this tells you *whether* cheaply. --lock
         defaults to the lox.toml project's lockfile.
 
+  lxir repair <cfg.Loxone> --out <out.Loxone>
+        Write a copy of the config with numeric character references
+        (`&#xA;`, also as `&amp;#xA;`) replaced by the characters they
+        name, written as Loxone writes them: line breaks raw, `& < > \" '`
+        as named entities. Loxone reads such references as literal text,
+        so they only come from a foreign XML writer and leave programs,
+        rule payloads and descriptions without their line breaks — the
+        attributes `drift` notes. Lists every attribute it rewrote; every
+        other byte is copied unchanged. Recompile against the repaired
+        base before pushing it.
+
   lxir observe <cfg.Loxone>... [--crosscheck <legacy.json>]...
         Port-direction evidence per block type, as JSON. Multiple configs
         merge into one corpus-level view. --crosscheck compares the
@@ -210,6 +221,7 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["adopt", rest @ ..] => cmd_adopt(rest),
         ["diff", rest @ ..] => cmd_diff(rest),
         ["drift", rest @ ..] => cmd_drift(rest),
+        ["repair", rest @ ..] => cmd_repair(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
         [cmd, ..] => {
@@ -1495,7 +1507,8 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         println!(
             "note: {config} has numeric character references as literal text in \
              {} attribute(s) ({}{}) — Loxone reads them verbatim, so the \
-             line breaks there are gone; see docs/loxone-format.md",
+             line breaks there are gone; `lxir repair` writes them back \
+             (docs/loxone-format.md)",
             refs.len(),
             shown.join(", "),
             if more > 0 {
@@ -1629,6 +1642,43 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
             "crosscheck": checks,
         }))?
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_repair(args: &[&str]) -> Result<ExitCode, AnyError> {
+    let (config, out) = match args {
+        [config, "--out", out] | ["--out", out, config] => (*config, *out),
+        _ => return Err("usage: lxir repair <cfg.Loxone> --out <out.Loxone>".into()),
+    };
+    let input = std::fs::read(config).map_err(|e| format!("{config}: {e}"))?;
+    let mut doc = LoxoneDoc::parse(&input).map_err(|e| format!("{config}: {e}"))?;
+    let repairs = doc.repair_char_refs();
+    for r in &repairs {
+        println!(
+            "repaired {:?}.{} ({}): {} reference(s)",
+            r.object, r.attr, r.uuid, r.replaced
+        );
+    }
+    if repairs.is_empty() {
+        std::fs::write(out, &input).map_err(|e| format!("{out}: {e}"))?;
+        println!("nothing to repair: {out} is a copy of {config}");
+    } else {
+        std::fs::write(out, doc.to_bytes()).map_err(|e| format!("{out}: {e}"))?;
+        println!("wrote {out}: {} attribute(s) repaired", repairs.len());
+    }
+    let left = doc.char_ref_attrs();
+    if !left.is_empty() {
+        let shown: Vec<String> = left
+            .iter()
+            .map(|(who, attr)| format!("{who:?}.{attr}"))
+            .collect();
+        println!(
+            "note: left as text in {} attribute(s), naming no character an \
+             attribute can hold: {}",
+            left.len(),
+            shown.join(", ")
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 

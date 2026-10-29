@@ -369,10 +369,14 @@ ones are *assigned*.
       fingerprint (v3). Accepted on the house config: it restored the
       Hue program that an `&#xA;`-encoding push had collapsed to a
       single comment line, byte for byte.
-- [ ] Oracle probe: does a Loxone Config open+save keep a compiled
-      program byte-identical? The compiled text equals what Loxone
-      Config itself wrote before 2026-08-25, so the answer should be
-      yes; `scripts/oracle.sh` would confirm it.
+- [x] Repair 2026-10-29 (D44): `lxir repair <cfg> --out <out>` writes a
+      copy with numeric-reference text (`&amp;#xA;`, `&#xA;`) replaced
+      by the raw characters, byte-exact elsewhere, listing each
+      attribute it rewrote. Covers the damage `Code:` cannot claim:
+      `APC=` rules, `NDOC=` texts, programs left with the GUI.
+- [x] Oracle probe: does a Loxone Config open+save keep a compiled
+      program byte-identical? Yes (session 13, D44): the house's
+      compiled program and a corpus program both came back unchanged.
 - [ ] `Task=` (the program's run schedule) stays GUI-owned until a
       corpus survey shows its format.
 

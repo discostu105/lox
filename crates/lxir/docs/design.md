@@ -1114,3 +1114,40 @@ Anything unverified is an error, not a heuristic:
   the existing relay claims now fix their stale refs, and claims on a
   target with visible, hidden and collected refs, and their
   withdrawal, both save with an empty semantic diff.
+- **D44 — `lxir repair`: numeric character references back to
+  characters** (2026-10-29). D40 made lxir read `&#xA;` the way Loxone
+  does, as text, and `lxir drift` lists the attributes that hold it,
+  but repairing them stayed manual: the house's two damaged `APC=`
+  payloads were byte-patched, and ten Modbus `NDOC=` texts still show
+  the literal `&#xD;&#xA;`. Decision: a command that writes a repaired
+  copy, `lxir repair <cfg> --out <out>`, over
+  `LoxoneDoc::repair_char_refs`:
+  - **What it writes is what Loxone wrote before the damage.** Each
+    reference becomes the character it names, written the way Loxone
+    writes it (loxone-format, deviation 2): line breaks and every other
+    character raw, `& < > " '` as the five named entities. A foreign
+    writer encodes characters one by one, so decoding them one by one
+    restores the original: a `&#xD;&#xA;` pair becomes CRLF, a lone
+    `&#xA;` a bare LF.
+  - **Both damaged forms.** `&amp;#xA;` (re-escaped by a later GUI save,
+    the house case) and `&#xA;` (straight from the foreign writer, not
+    yet saved by the GUI) both read as the text `&#xA;`, and both are
+    repaired. A reference naming nothing an attribute can hold (`&#0;`,
+    a surrogate) stays text, and the command names what it left.
+  - **Byte-exact elsewhere.** The rewrite works on the raw attribute
+    value and touches only the references; every other byte of the
+    document, the rest of each repaired value included, is copied.
+    Same scope as `char_ref_attrs`: attributes of `<C>` elements.
+  - **A copy, not in place, and no compile step.** The input stays as
+    evidence; each rewritten attribute is listed with its object, UUID
+    and reference count. The repaired file is a base like a download:
+    compile against it, push the output. The repaired attributes are
+    GUI content (`NDOC`, `APC`, an unclaimed `Code`), so they reach the
+    Miniserver through the compiled output, and drift sees the push.
+  Validated with the oracle (session 13): repaired corpus configs equal
+  their undamaged originals byte for byte, and Loxone Config keeps the
+  repaired `APC=` (2 rules, raw CRLF in the JSON) and `Code=` (a
+  program with 436 line breaks) byte-identical on open and save. On the house
+  config the ten `NDOC=` texts, plus a `Code=` damaged on purpose, come
+  back with raw CRLF, and the save keeps them, with no semantic change
+  beyond two known stale ref titles (D43).

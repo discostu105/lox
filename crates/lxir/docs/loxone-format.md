@@ -46,7 +46,11 @@ been one comment line since; two `APC=` payloads and ten Modbus `NDOC=` texts
 went the same way. No config in the 133-file corpus contains a numeric
 reference. A writer must therefore emit line breaks raw (deviation 2) and
 escape only the five named entities. lxir reads `&#…;` as literal text, and
-`lxir drift` lists every attribute that holds one (design decision D40). Text
+`lxir drift` lists every attribute that holds one (design decision D40).
+`lxir repair` writes a copy with each reference replaced by the raw
+character it names (D44). Loxone Config keeps such repaired `APC=`,
+`NDOC=` and `Code=` values byte-identical on open+save (oracle session 13).
+Text
 content appears only in `<Key>hex</Key>`-style elements and is rendered
 inline (`<Key>2B35</Key>`).
 

@@ -161,6 +161,7 @@ it only when it matches what you intended.
 | `no room titled` / `no category titled` | `.room`/`.category` names no `Place`/`Category` in the base | use a listed title, or create the room/category in Loxone Config first |
 | `carries no room binding` / `carries no category binding` | the object has no `<IoData Pr=/Cr=>` to rewrite | assign a room/category once in Loxone Config, then claim it from source |
 | `claim the … of the same object` | two externs resolve to one object and claim the same attribute | keep one assignment |
+| `numeric character references as literal text` (from `drift`) | a foreign XML writer left `&#xA;` text in programs, rules or descriptions; Loxone reads it verbatim | `lxir repair <cfg> --out <fixed>`, then compile against `<fixed>` as the base |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
