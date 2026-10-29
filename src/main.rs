@@ -1129,7 +1129,23 @@ pub(crate) enum AutopilotCmd {
     /// Reads the live `changed` state of the structure's autopilot entry (unix
     /// seconds; 0 = never). `-o json` gives `{"changed": <unix>, "changed_at":
     /// <RFC 3339 or null>, "uuid": ...}` for scripts.
-    Changed,
+    ///
+    /// The state also moves when the Miniserver writes its program for other
+    /// reasons (a password changed in the app, say). `--explain` says what
+    /// changed (read-only, FTP): the newest program file in /prog compared with
+    /// the one before it (or with `--since FILE`), sorted into rules, users &
+    /// access and other changes, plus the rules pending in /sys/custom, which
+    /// an upload would delete. JSON adds `program`, `custom_changes` and
+    /// `rules_changed` (true when either holds a rule change).
+    Changed {
+        /// Say what the newest program write and the pending custom changes hold
+        #[arg(long)]
+        explain: bool,
+        /// Compare the newest program file with this config (.Loxone or ZIP,
+        /// e.g. the download after the last push) instead of the one before it
+        #[arg(long, requires = "explain", value_name = "FILE")]
+        since: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

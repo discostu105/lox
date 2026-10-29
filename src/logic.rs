@@ -1772,6 +1772,73 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
     out
 }
 
+/// A rule the diff touches: added, removed or changed (one entry per rule).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RuleChange {
+    pub uuid: String,
+    pub name: String,
+    /// `added`, `removed` or `changed`
+    pub change: &'static str,
+}
+
+/// A semantic diff sorted by what it touches: Automatic Designer rules, users
+/// and access, everything else (`lox autopilot changed --explain`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct ChangeKinds {
+    pub rules: Vec<RuleChange>,
+    pub access: Vec<String>,
+    pub other: Vec<DiffLine>,
+}
+
+impl ChangeKinds {
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty() && self.access.is_empty() && self.other.is_empty()
+    }
+}
+
+pub fn change_kinds(a: &Logic, b: &Logic) -> ChangeKinds {
+    let names: HashMap<String, String> = a
+        .autopilot_rules()
+        .into_iter()
+        .chain(b.autopilot_rules())
+        .map(|r| (r.uuid, r.name))
+        .collect();
+    sort_changes(diff_logic(a, b), &names)
+}
+
+/// Sort diff lines into [`ChangeKinds`]; `rules` maps each rule's UUID (of
+/// either side) to its name. The summary and page header lines are dropped.
+fn sort_changes(lines: Vec<DiffLine>, rules: &HashMap<String, String>) -> ChangeKinds {
+    let mut out = ChangeKinds::default();
+    for l in lines {
+        if l.text.starts_with("= ") || l.text.starts_with("# ") {
+            continue;
+        }
+        if let Some(name) = l.block.as_ref().and_then(|u| rules.get(u)) {
+            let uuid = l.block.clone().unwrap_or_default();
+            let change = match l.text.chars().next() {
+                Some('+') => "added",
+                Some('-') => "removed",
+                _ => "changed",
+            };
+            match out.rules.iter_mut().find(|r| r.uuid == uuid) {
+                Some(r) if change != "changed" => r.change = change,
+                Some(_) => {}
+                None => out.rules.push(RuleChange {
+                    uuid,
+                    name: name.clone(),
+                    change,
+                }),
+            }
+        } else if is_access_line(&l.text) {
+            out.access.push(l.text);
+        } else {
+            out.other.push(l);
+        }
+    }
+    out
+}
+
 // the fixtures are the demo house of the TUI
 #[cfg(all(test, feature = "tui"))]
 mod tests {
@@ -2193,6 +2260,51 @@ mod tests {
         assert_eq!((r[2].active, r[2].apc_valid), (None, false));
         assert!(r[2].apc_error.is_some());
         assert!(r[0].apc_error.is_none());
+    }
+
+    #[test]
+    fn change_kinds_sorts_rules_access_and_the_rest() {
+        let line = |text: &str, block: Option<&str>| DiffLine {
+            text: text.into(),
+            block: block.map(str::to_string),
+        };
+        let rules: HashMap<String, String> = [("r1", "Morning"), ("r2", "Evening")]
+            .into_iter()
+            .map(|(u, n)| (u.to_string(), n.to_string()))
+            .collect();
+        let k = sort_changes(
+            vec![
+                line("= 1 renamed · 2 parameters · 1 user/access change", None),
+                line("# Automatic rules", None),
+                line("~ rename Morning → Early", Some("r1")),
+                line("~ param  Early · APC  {..} → {..}", Some("r1")),
+                line("- block  Evening (AutopilotRule)", Some("r2")),
+                line("# (users & access)", None),
+                line("~ user   loxcli · visualization password set", None),
+                line("# Kitchen", None),
+                line("~ param  Light · Brightness  50 → 60", Some("b1")),
+            ],
+            &rules,
+        );
+        assert_eq!(
+            k.rules,
+            [
+                RuleChange {
+                    uuid: "r1".into(),
+                    name: "Morning".into(),
+                    change: "changed"
+                },
+                RuleChange {
+                    uuid: "r2".into(),
+                    name: "Evening".into(),
+                    change: "removed"
+                },
+            ]
+        );
+        assert_eq!(k.access, ["~ user   loxcli · visualization password set"]);
+        assert_eq!(k.other.len(), 1);
+        assert_eq!(k.other[0].block.as_deref(), Some("b1"));
+        assert!(sort_changes(vec![line("= no changes", None)], &rules).is_empty());
     }
 
     #[test]

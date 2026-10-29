@@ -1086,16 +1086,30 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
             }
             print!("{}", rules_table(&rules, &snap.label, !ctx.no_header));
         }
-        AutopilotCmd::Changed => {
+        AutopilotCmd::Changed { explain, since } => {
             let cfg = Config::load()?;
             let ap = LoxClient::new(cfg.clone())?.autopilot()?;
             let (secs, at) = parse_changed(&read_state(&cfg, &ap.state_changed)?)?;
+            let why = explain
+                .then(|| explain_changes(&cfg, since.as_deref()))
+                .transpose()?;
             if ctx.json {
-                let v = serde_json::json!({
+                let mut v = serde_json::json!({
                     "changed": secs,
                     "changed_at": at.map(|t| t.to_rfc3339()),
                     "uuid": ap.uuid,
                 });
+                if let Some(w) = &why {
+                    v["program"] = serde_json::json!({
+                        "newest": w.newest,
+                        "compared_with": w.compared_with,
+                        "rules": w.kinds.rules,
+                        "access": w.kinds.access,
+                        "other": w.kinds.other,
+                    });
+                    v["custom_changes"] = serde_json::to_value(&w.custom)?;
+                    v["rules_changed"] = w.rules_changed().into();
+                }
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
                 match at {
@@ -1105,6 +1119,9 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
                         secs
                     ),
                     None => println!("Rules last changed: never"),
+                }
+                if let Some(w) = &why {
+                    print!("{}", w.text());
                 }
             }
         }
@@ -1185,6 +1202,102 @@ fn rules_table(rules: &[crate::logic::AutopilotRuleInfo], label: &str, header: b
         );
     }
     out
+}
+
+/// What `lox autopilot changed --explain` found: the newest program file
+/// against a baseline, and the pending custom changes.
+struct ChangeReport {
+    /// The newest program file in /prog
+    newest: String,
+    /// The baseline: the program file before it, or `--since`; none when
+    /// /prog holds a single file
+    compared_with: Option<String>,
+    kinds: crate::logic::ChangeKinds,
+    custom: Vec<crate::custom_changes::CustomChange>,
+}
+
+impl ChangeReport {
+    /// A rule pending in /sys/custom, or one whose type is unknown (the file
+    /// did not read), counts as a rule change.
+    fn rules_changed(&self) -> bool {
+        !self.kinds.rules.is_empty()
+            || self
+                .custom
+                .iter()
+                .any(|c| c.block_type.as_deref().is_none_or(|t| t == "AutopilotRule"))
+    }
+
+    fn text(&self) -> String {
+        let mut s = format!("\nNewest program file: {}\n", self.newest);
+        match &self.compared_with {
+            None => s.push_str("  the only one in /prog: nothing to compare with\n"),
+            Some(base) if self.kinds.is_empty() => {
+                s.push_str(&format!("  no changes against {base}\n"))
+            }
+            Some(base) => {
+                s.push_str(&format!("  against {base}:\n"));
+                for r in &self.kinds.rules {
+                    s.push_str(&format!("    rule {}: {}\n", r.change, r.name));
+                }
+                for a in &self.kinds.access {
+                    s.push_str(&format!("    {a}\n"));
+                }
+                for o in &self.kinds.other {
+                    s.push_str(&format!("    {}\n", o.text));
+                }
+            }
+        }
+        if self.custom.is_empty() {
+            s.push_str("Custom changes (/sys/custom): none\n");
+        } else {
+            s.push_str("Custom changes (/sys/custom), deleted by the next upload:\n");
+            for c in &self.custom {
+                s.push_str(&format!("    {}\n", c.label()));
+            }
+        }
+        s.push_str(if self.rules_changed() {
+            "\nRule changes found.\n"
+        } else {
+            "\nNo rule changes.\n"
+        });
+        s
+    }
+}
+
+/// Read-only: the two newest program files of /prog (or the newest and
+/// `since`) and the files of /sys/custom.
+fn explain_changes(cfg: &Config, since: Option<&str>) -> Result<ChangeReport> {
+    use crate::{ftp, logic::Logic, loxcc, snapshot};
+    let backups = ftp::list_backups(cfg)?;
+    let newest = backups
+        .first()
+        .context("no program files in /prog on the Miniserver")?;
+    let new_xml = loxcc::extract_and_decompress(&ftp::download_backup(cfg, &newest.filename)?)?;
+    let base = match since {
+        Some(f) => Some(snapshot::file(f)?),
+        None => match backups.get(1) {
+            Some(b) => Some(snapshot::Snapshot {
+                bytes: loxcc::extract_and_decompress(&ftp::download_backup(cfg, &b.filename)?)?,
+                label: b.filename.clone(),
+            }),
+            None => None,
+        },
+    };
+    let new = Logic::parse(&new_xml).with_context(|| format!("cannot read {}", newest.filename))?;
+    let kinds = match &base {
+        Some(b) => {
+            let old = Logic::parse(&b.bytes).with_context(|| format!("cannot read {}", b.label))?;
+            crate::logic::change_kinds(&old, &new)
+        }
+        None => Default::default(),
+    };
+    let files = ftp::download_custom_changes(cfg)?;
+    Ok(ChangeReport {
+        newest: newest.filename.clone(),
+        compared_with: base.map(|b| b.label),
+        kinds,
+        custom: crate::custom_changes::describe(&files, Some(&new_xml)),
+    })
 }
 
 /// The autopilot `changed` state: unix seconds, and the local time unless 0
@@ -1276,12 +1389,58 @@ fn parse_autopilot_history(text: &str) -> Vec<AutopilotRun> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AutopilotRun, Backoff, SnapshotFilter, fmt_offline, parse_autopilot_history, parse_changed,
-        rules_table, runs_of, statistic_output_names,
+        AutopilotRun, Backoff, ChangeReport, SnapshotFilter, fmt_offline, parse_autopilot_history,
+        parse_changed, rules_table, runs_of, statistic_output_names,
     };
     use crate::stream::StateEvent;
     use serde_json::json;
     use std::time::Duration;
+
+    fn custom(block_type: Option<&str>) -> crate::custom_changes::CustomChange {
+        crate::custom_changes::CustomChange {
+            uuid: "u1".into(),
+            block_type: block_type.map(str::to_string),
+            title: Some("T".into()),
+            page: None,
+            new: false,
+        }
+    }
+
+    #[test]
+    fn change_report_rules_changed() {
+        let mut r = ChangeReport {
+            newest: "sps_2_20261029195728.zip".into(),
+            compared_with: Some("sps_1_20261029194421.zip".into()),
+            kinds: crate::logic::ChangeKinds {
+                access: vec!["~ user   loxcli · visualization password set".into()],
+                ..Default::default()
+            },
+            custom: vec![custom(Some("DayTimer"))],
+        };
+        // a password change and a timer edited in the app: no rule change
+        assert!(!r.rules_changed());
+        let t = r.text();
+        assert!(t.contains("against sps_1_20261029194421.zip:"), "{t}");
+        assert!(t.contains("~ user   loxcli"), "{t}");
+        assert!(t.contains("\"T\" (DayTimer)"), "{t}");
+        assert!(t.ends_with("No rule changes.\n"), "{t}");
+        // a rule pending in /sys/custom, or a file that did not read
+        r.custom = vec![custom(Some("AutopilotRule"))];
+        assert!(r.rules_changed());
+        r.custom = vec![custom(None)];
+        assert!(r.rules_changed());
+        // a rule changed in the program file
+        r.custom.clear();
+        r.kinds.rules.push(crate::logic::RuleChange {
+            uuid: "r1".into(),
+            name: "Morning".into(),
+            change: "changed",
+        });
+        assert!(r.rules_changed());
+        assert!(r.text().contains("rule changed: Morning"));
+        r.compared_with = None;
+        assert!(r.text().contains("nothing to compare with"));
+    }
 
     fn values(pairs: &[(&str, f64)]) -> Vec<StateEvent> {
         pairs

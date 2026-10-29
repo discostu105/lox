@@ -288,6 +288,8 @@ lox autopilot ls --file backup.Loxone  # same sources as `lox config` (--at, --f
 lox autopilot state "Rule Name"        # when a rule last ran (the Miniserver's rule history)
 lox autopilot changed                  # when the rules were last changed on the Miniserver
 lox autopilot changed -o json          # {"changed": <unix seconds>, "changed_at": …, "uuid": …}
+lox autopilot changed --explain        # …and what changed: newest /prog file vs the one before, /sys/custom
+lox autopilot changed --explain --since F  # …against F, e.g. the download after the last push
 ```
 
 Rules created or edited in the app can live only in the Miniserver's *custom changes*, not in the
@@ -295,6 +297,13 @@ program file: `lox autopilot ls` and a config download don't see them, and uploa
 them (the Miniserver logs `Remove old custom changes`). `lox config push --force` refuses while the
 Miniserver holds custom changes, and `lox config upload` / `restore` list them. Before another kind of
 upload, check that `lox autopilot changed` is older than the download the upload is based on.
+
+The `changed` time also moves when the Miniserver writes its program for another reason, a
+visualization password set in the app for example. `--explain` says what it was (read-only, over
+FTP). It compares the newest program file in `/prog` with the one before it, or with `--since FILE`,
+and sorts the changes into rules, users & access and the rest. It also lists the custom changes in
+`/sys/custom`, where rules edited in the app wait. With `-o json`, `rules_changed` is true when either
+holds a rule change, which suits a guard script before an upload.
 
 ---
 
