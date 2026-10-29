@@ -1222,8 +1222,8 @@ mod tests {
 
     #[test]
     fn test_extract_lox_value_json_numeric_float() {
-        let text = r#"{"LL":{"value":3.14,"Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(3.14));
+        let text = r#"{"LL":{"value":2.75,"Code":"200"}}"#;
+        assert_eq!(extract_lox_value(text), Some(2.75));
     }
 
     #[test]

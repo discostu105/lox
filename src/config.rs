@@ -511,8 +511,10 @@ mod tests {
 
     #[test]
     fn global_config_roundtrip() {
-        let mut global = GlobalConfig::default();
-        global.active_context = Some("home".to_string());
+        let mut global = GlobalConfig {
+            active_context: Some("home".to_string()),
+            ..Default::default()
+        };
         global.contexts.insert(
             "home".to_string(),
             ContextEntry {

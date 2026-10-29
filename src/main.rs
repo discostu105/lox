@@ -2480,7 +2480,7 @@ mod tests {
         // "CO2" → 3 bytes, header_end = 15, entry_size = 16 → aligned = 16
         let name = b"CO2";
         let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 1 * 8; // uuid(4) + ts(4) + 1×f64
+        let entry_size: usize = 4 + 4 + 8; // uuid(4) + ts(4) + 1×f64
         let aligned = header_end.div_ceil(entry_size) * entry_size;
         assert_eq!(aligned, 16);
     }
@@ -2491,7 +2491,7 @@ mod tests {
         let name = "Zähler Licht Vorraum"; // 21 UTF-8 bytes (ä = 2 bytes)
         assert_eq!(name.len(), 21);
         let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 1 * 8;
+        let entry_size: usize = 4 + 4 + 8;
         let aligned = header_end.div_ceil(entry_size) * entry_size;
         assert_eq!(aligned, 48);
     }
@@ -2887,7 +2887,7 @@ mod tests {
         data.write_u32::<LittleEndian>(0).unwrap();
         data.write_u32::<LittleEndian>(3).unwrap(); // name_length=3
         data.extend_from_slice(b"CO2\0"); // pad to 16
-        let entry_size = 4 + 4 + 1 * 8;
+        let entry_size = 4 + 4 + 8;
         assert_eq!(stats_data_offset(&data, entry_size), Some(16));
     }
 

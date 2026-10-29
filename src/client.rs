@@ -1259,7 +1259,7 @@ mod tests {
         let _redirect = server.mock(|when, then| {
             when.method(GET).path("/old-path");
             then.status(302)
-                .header("Location", &format!("{}/new-path", server.base_url()));
+                .header("Location", format!("{}/new-path", server.base_url()));
         });
         let _target = server.mock(|when, then| {
             when.method(GET).path("/new-path");
