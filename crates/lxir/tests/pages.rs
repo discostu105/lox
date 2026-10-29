@@ -123,6 +123,32 @@ fn a_missing_page_with_a_room_is_created_sorted_in() {
     assert_eq!(deployed.pages, lock.pages);
 }
 
+/// The GUI does not re-sort, so a base's page list need not be sorted: a
+/// new page goes behind the last page sorting at or before it, and never
+/// ahead of the special pages.
+#[test]
+fn a_created_page_follows_its_predecessor_in_title_order() {
+    let unsorted = BASE.replace("Title=\"Zentral\"", "Title=\"Diele\"");
+    let unsorted = LoxoneDoc::parse(unsorted.as_bytes()).unwrap();
+    for (title, want) in [
+        ("Abstellraum", ["Automatik-Regeln", "Abstellraum", "K\u{fc}che", "Diele"]),
+        // Diele is out of order; what sorts after it follows it.
+        ("Keller", ["Automatik-Regeln", "K\u{fc}che", "Diele", "Keller"]),
+        ("Zimmer", ["Automatik-Regeln", "K\u{fc}che", "Diele", "Zimmer"]),
+    ] {
+        let src = SRC.replace("K\u{fc}che Logik", title);
+        let out = compile(
+            &unsorted,
+            &Module::parse(&src).unwrap(),
+            &mut Lockfile::new(),
+            &opts(),
+        )
+        .unwrap();
+        let titles: Vec<String> = pages(&out).into_iter().map(|(t, _)| t).collect();
+        assert_eq!(titles, want, "{title}");
+    }
+}
+
 #[test]
 fn a_page_loxone_config_has_is_used_not_created() {
     let module = Module::parse(&SRC.replace("K\u{fc}che Logik", "Zentral")).unwrap();

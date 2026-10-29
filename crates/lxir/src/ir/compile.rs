@@ -2102,28 +2102,35 @@ fn create_pages(
 }
 
 /// Where Loxone Config files a new page: among the program's pages in
-/// case-insensitive title order — before the first that sorts after it,
-/// never ahead of the special pages (`SpNo`) leading the list; behind the
-/// last page otherwise.
+/// case-insensitive title order. The GUI does not re-sort on load, so a
+/// base's list need not be sorted: the page goes behind the last page
+/// whose title sorts at or before its own, else behind the special pages
+/// (`SpNo`) leading the list, else first.
 fn insert_page(program: &mut Element, el: Element, title: &str) {
     use crate::xml::Node;
     let key = title.to_lowercase();
-    let page =
-        |n: &Node| matches!(n, Node::Element(e) if e.name == "C" && e.attr("Type") == Some("Page"));
-    let at = program
-        .children
-        .iter()
-        .position(|n| {
-            matches!(n, Node::Element(e)
-                if page(n)
-                    && e.attr("SpNo").is_none()
-                    && e.attr_decoded("Title").is_some_and(|t| t.to_lowercase() > key))
-        })
-        .or_else(|| program.children.iter().rposition(page).map(|i| i + 1));
-    match at {
-        Some(i) => program.children.insert(i, Node::Element(el)),
-        None => program.push_child(el),
+    fn page(n: &Node) -> Option<&Element> {
+        match n {
+            Node::Element(e) if e.name == "C" && e.attr("Type") == Some("Page") => Some(e),
+            _ => None,
+        }
     }
+    let after = |n: &Node| {
+        page(n).is_some_and(|e| {
+            e.attr("SpNo").is_some()
+                || e.attr_decoded("Title").is_some_and(|t| t.to_lowercase() <= key)
+        })
+    };
+    let at = match program.children.iter().rposition(after) {
+        Some(i) => i + 1,
+        None => program
+            .children
+            .iter()
+            .position(|n| page(n).is_some())
+            .unwrap_or(program.children.len()),
+    };
+    program.children.insert(at, Node::Element(el));
+    program.self_closing = false;
 }
 
 /// Insert a rebuilt block into its page where the base had it (D47):
