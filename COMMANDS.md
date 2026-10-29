@@ -420,9 +420,12 @@ Error codes: `control_not_found`, `ambiguous_control`, `config_not_found`, `conf
 
 ```bash
 lox files ls /                         # browse Miniserver filesystem
-lox files get /log/def.log             # download a file
+lox files get /log/def.log             # download into the current directory (./def.log)
 lox files get /log/def.log --save-as local.log
+lox files get /log/def.log --save-as - | grep -i error   # write the file to stdout
 ```
+
+Without `--save-as` the file is saved under its own name in the current directory (overwriting a file of that name); the confirmation shows the absolute path (`✓  Downloaded /log/def.log → /home/me/def.log (51234 bytes)`, `-o json`: `{"ok": true, "path": …, "saved_as": …, "bytes": …}`). `--save-as -` writes the raw bytes to stdout and prints nothing else there.
 
 ---
 
