@@ -114,6 +114,52 @@ fn placement(doc: &LoxoneDoc, o: &ObjectSummary) -> [(&'static str, Option<Strin
     [("room", get("Pr")), ("category", get("Cr"))]
 }
 
+/// The programmed functions of a Touch Pure Flex's tiles (D41), keyed
+/// `tile <i> click|up|down`: every attribute of the function element
+/// except the fixed `bT=`, decoded, `api`/`cT`/`ctrls` first. A function
+/// without one is left out — like a port without `Def=`, it reads the
+/// same as an absent one. Tile layout (`x`/`y`/`w`/`h`, icons) is not part
+/// of the projection, as block positions are not.
+fn tile_functions(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let Some(btns) = doc
+        .element_at(&o.path)
+        .and_then(|el| el.child_elements().find(|c| c.name == "btns"))
+    else {
+        return out;
+    };
+    const SLOTS: [(&str, &str); 3] = [("f1", "click"), ("f2", "up"), ("f3", "down")];
+    const ORDER: [&str; 3] = ["api", "cT", "ctrls"];
+    for btn in btns.child_elements().filter(|e| e.name == "btn") {
+        let i = btn.attr_decoded("i").unwrap_or_default();
+        for (element, key) in SLOTS {
+            let Some(f) = btn.child_elements().find(|e| e.name == element) else {
+                continue;
+            };
+            let mut attrs: Vec<_> = f.attrs.iter().filter(|a| a.name != "bT").collect();
+            attrs.sort_by_key(|a| {
+                (
+                    ORDER
+                        .iter()
+                        .position(|n| *n == a.name)
+                        .unwrap_or(ORDER.len()),
+                    a.name.clone(),
+                )
+            });
+            if attrs.is_empty() {
+                continue;
+            }
+            let projection = attrs
+                .iter()
+                .map(|a| format!("{}={:?}", a.name, crate::xml::unescape(&a.value)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.insert(format!("tile {i} {key}"), projection);
+        }
+    }
+    out
+}
+
 fn taxonomy_titles(objs: &BTreeMap<String, ObjectSummary>) -> BTreeMap<&str, &str> {
     objs.values()
         .filter(|o| matches!(o.block_type.as_str(), "Place" | "Category"))
@@ -200,6 +246,21 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                 // Block logic stored as an element attribute — attribute
                 // parameters (`Formula=`) and the Automatic Designer rule
                 // payload (`APC=`); see `diff_attrs`.
+                // Touch Pure Flex tile programs (D41), one change per
+                // function.
+                let (ta, tb) = (tile_functions(a, oa), tile_functions(b, ob));
+                for key in ta.keys().chain(tb.keys()).collect::<BTreeSet<_>>() {
+                    let (from, to) = (ta.get(key), tb.get(key));
+                    if from != to {
+                        out.param_changes.push(ParamChange {
+                            object_uuid: uuid.clone(),
+                            block_type: ob.block_type.clone(),
+                            port_key: key.clone(),
+                            from: from.cloned(),
+                            to: to.cloned(),
+                        });
+                    }
+                }
                 for name in diff_attrs(&ob.block_type) {
                     let attr = |doc: &LoxoneDoc, o: &ObjectSummary| {
                         doc.element_at(&o.path)
@@ -241,6 +302,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// recomputes it over a fresh download to answer "did another writer
 /// change something?" from one parse, no reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 4)
+}
+
+/// The fingerprint as lxir wrote it before Touch Pure Flex tile programs
+/// joined the projection (D41). `lxir drift` accepts it so an upgrade
+/// alone does not read as drift; the next compile records the current
+/// form.
+pub fn semantic_fingerprint_v3(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 3)
 }
 
@@ -269,7 +338,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
     let mut buf: Vec<u8> = match version {
         1 => b"lxir-fingerprint-v1".to_vec(),
         2 => b"lxir-fingerprint-v2".to_vec(),
-        _ => b"lxir-fingerprint-v3".to_vec(),
+        3 => b"lxir-fingerprint-v3".to_vec(),
+        _ => b"lxir-fingerprint-v4".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -312,6 +382,12 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
                     field(&mut buf, b'p', attr);
                     field(&mut buf, b'v', &v);
                 }
+            }
+        }
+        if version >= 4 {
+            for (key, v) in tile_functions(doc, o) {
+                field(&mut buf, b'b', &key);
+                field(&mut buf, b'v', &v);
             }
         }
     }

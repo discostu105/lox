@@ -19,7 +19,7 @@ errors.
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line
            | wire | set | attr | removed | moved | template | instance
-           | page | test | blank ;
+           | page | test | tiles | tiles-claim | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number | string ) [ comment ] ;
@@ -81,6 +81,17 @@ expect     = "expect" slug "." port test-cmp ( number [ unit ] | const-ref ) [ c
 clock      = "clock" string [ comment ] ;          (* "HH:MM[:SS]" or
                                                       "YYYY-MM-DD HH:MM[:SS]" *)
 
+tiles      = "tiles" slug [ comment ]              (* Touch Pure Flex (D41) *)
+             { comment | tile-head | arg-line }
+             "end" [ comment ] ;
+tile-head  = "tile" integer "(" [ tile-args ] [ ")" ] [ comment ] ;
+tile-args  = tile-arg { "," tile-arg } [ "," ] ;
+tile-arg   = ( fn | "text" | fn "_text" ) ":" ( string | number )
+           | ( "to" | fn "_to" ) ":" slug ;       (* "to" may repeat *)
+fn         = "click" | "up" | "down" ;
+tiles-claim = slug "." "tiles" "=" slug [ comment ] ;
+                                    (* extern TreeDevice, top-level only *)
+
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
@@ -116,7 +127,7 @@ Notes:
   through `fmt`. An unknown suffix is a parse error. A *quoted* `"40s"`
   stays a string — two spellings, two meanings.
 - The keywords `let`, `extern`, `removed`, `moved`, `template`, `end`,
-  `page`, `test`, `tick`, `expect`, `clock`, and the expression
+  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, and the expression
   operators `and`, `or`, `not` are reserved, as are v0's `block`,
   `wire`, `set`, and `use` (migration errors) — none can be declared as
   a name.
@@ -296,6 +307,21 @@ Rules:
 - Types, port names, and wire directions on managed blocks are validated
   **statically** (`lxir check`, no base config needed); unknown names get
   a "did you mean" suggestion when a close candidate exists.
+- One input port may be a wire source: the `AI` of an `OutputRef`
+  mirroring an `ApiActor`, read by a block's API connector `OutputAPI`
+  (on a type whose `OutputAPI` takes wires). It is the reverse half of
+  an API link drawn through that mirror (D41;
+  [loxone-format.md](loxone-format.md) records the shape):
+
+  ```text
+  flex_api_ost = OutputRef(mirrors: flex_api, AI: ost.OutputAPI)   # forward
+  flex_api.I <- flex_api_ost.AQ                                    # distribution
+  ost = AutoJalousie("Ost", OutputAPI: flex_api_ost.AI)            # reverse
+  ```
+
+  Write it this way where D34 cannot pick one of several mirrors of the
+  actor on the page; with one mirror (or none) `OutputAPI: flex_api.I`
+  is enough. Any other input as a source stays an error.
 
 ### `<-` — wire onto an extern port
 
@@ -632,10 +658,85 @@ are same-signal mirrors or a room qualifier separates them.
 `lxir test --filter <substring>` runs a subset; `--show-spec` prints
 the generated SimSpec JSON instead of running.
 
+### `tiles` — program the tiles of a Touch Pure Flex (D41)
+
+```text
+extern flex_kueche = TreeDevice(uuid: "40000001-0000-0010-ffff504f94112233")
+extern jal_nord = AutoJalousie(uuid: "40000010-0000-0100-ffff504f94112233")
+extern jal_sued = AutoJalousie(uuid: "40000011-0000-0110-ffff504f94112233")
+
+tiles kueche
+	tile 2()                                     # clear: the tile does nothing
+	tile 3(
+		click: "SET(As;Tg;pulse)",
+		up: "SET(As;Co;pulse)",
+		down: "SET(As;Cc;pulse)",
+		text: "=ECHO(As)",
+		to: jal_nord,
+		to: jal_sued,
+		up_to: jal_nord,                         # the up arrow opens Nord only
+	)
+end
+
+flex_kueche.tiles = kueche
+```
+
+A `tiles` set names tile programs; a claim `<device>.tiles = <set>`
+writes them onto one Touch Pure Flex, and one set may be claimed by
+several devices. The device is an extern `TreeDevice` — pin it by
+`uuid:` (titles of tree devices are free text). A tile is addressed by
+its index `i` in the config: lxir rewrites the three functions of tiles
+that exist and carries every unlisted tile unchanged. The layout — which
+tiles exist, their position, size and icon — stays with Loxone Config.
+
+Keys of a `tile`:
+
+- **`click:`, `up:`, `down:`** — the command (`api=`) of the click and of
+  the up/down arrows, a quoted string written as Loxone Config shows it
+  (`SET(As;Co;pulse)`, `SET(Lico;M+;pulse)&WAIT(500)&MENU(Lico;Mood)`).
+  A function without its key has no command; `tile <i>()` clears all
+  three.
+- **`text:`** — the status text (`cT=`, e.g. `"=ECHO(As)"`) of every
+  function that has a command.
+- **`to: <slug>`** — a block the commands address (`ctrls=`); repeat it
+  for several. It applies to every function that has a command. Without
+  `to:` a command reaches every block of its type linked to the device
+  (see *lint* below).
+- **`click_text:`, `up_text:`, `down_text:`, `click_to:`, `up_to:`,
+  `down_to:`** — replace `text:`/`to:` for one function. `up_text: ""`
+  drops the text there.
+
+A `to:` target is an extern or a managed block, by its flattened name
+(`<instance>_<block>` for a template body block). It must be
+**API-linked** to the device: its `OutputAPI` wired to the device's API
+connector (`ApiActor.I`), or to the `AI` of an `OutputRef` mirroring it
+whose `AQ` feeds `ApiActor.I` — in source (`OutputAPI: flex_api.I`, or
+an explicit mirror as under *Block declaration*) or in
+Loxone Config. A command whose abbreviations lxir knows (`As` =
+AutoJalousie, `Lico` = LightController2) refuses a target of another
+type. Other abbreviations are written unchecked.
+
+Rules:
+
+- **Extern `TreeDevice` only**, with a `<btns>` tile layout; a missing
+  tile index is a compile error naming the indices that exist.
+- **One set per device** — a duplicate claim is a validation error; two
+  externs resolving to the same device are a compile error.
+- **Strings, not constants.** Commands and texts are quoted strings.
+- **No restore.** Like `Code:` (D40) a claim keeps no lockfile state:
+  removing it leaves the last written programs in place.
+- **Top-level only** — neither the set nor the claim inside a template.
+- `x.tiles <- …` is a parse error.
+
+`lxir lint` (in a project) checks the tiles of *every* Touch Pure Flex
+in the compiled config, claimed or not: `tile-broadcast` when a command
+without targets reaches two or more linked blocks of its type,
+`tile-dead-command` when no linked block of its type receives it.
+
 ## Name resolution and validation
 
-- Externs, blocks, and `let` constants share one namespace per module;
-  duplicates are an error.
+- Externs, blocks, `let` constants, templates and `tiles` sets share one
+  namespace per module; duplicates are an error.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).
@@ -699,7 +800,10 @@ quoted, constant references bare, port references dotted, unit values
 with their suffix as written. The one value
 canonicalization happens at parse time: a quoted string that reads exactly
 as a number (`"28"`) becomes the bare number, so every value has one
-canonical spelling. `parse(to_text(m)) == m`, and `to_text` is a fixpoint.
+canonical spelling. A `tile` follows the same rule one level deeper:
+`tile 2()` on one line, a tile with keys as a two-tab-indented list
+with the `)` on its own tab-indented line. `parse(to_text(m)) == m`, and
+`to_text` is a fixpoint.
 
 ## Errors
 

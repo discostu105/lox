@@ -6,6 +6,7 @@
     { "include": "#comment" },
     { "include": "#template" },
     { "include": "#test" },
+    { "include": "#tiles" },
     { "include": "#end" },
     { "include": "#page" },
     { "include": "#extern" },
@@ -140,6 +141,32 @@
         }
       ]
     },
+    "tiles": {
+      "comment": "tiles <name> … end with tile <i>(…) entries (D41)",
+      "patterns": [
+        {
+          "match": "^\\s*(tiles)\\s+([a-z][a-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.tiles.lxir" },
+            "2": { "name": "entity.name.function.lxir" }
+          }
+        },
+        {
+          "match": "^\\s*(tile)\\s+([0-9]+)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "keyword.control.tile.lxir" },
+            "2": { "name": "constant.numeric.lxir" }
+          }
+        },
+        {
+          "match": "\\b((?:click|up|down)(?:_(?:text|to))?|text|to)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.parameter.lxir" },
+            "2": { "name": "punctuation.separator.lxir" }
+          }
+        }
+      ]
+    },
     "file": {
       "comment": "file(\"…\") — program text from a file (D40); one match, so its ) never closes the argument list",
       "match": "\\b(file)\\s*(\\()\\s*(\"[^\"]*\")\\s*(\\))",
@@ -227,7 +254,7 @@
       }
     },
     "attr": {
-      "match": "^\\s*([a-z][a-z0-9_]*)(\\.)(title|room|category)\\s*(=)",
+      "match": "^\\s*([a-z][a-z0-9_]*)(\\.)(title|room|category|tiles)\\s*(=)",
       "captures": {
         "1": { "name": "variable.other.lxir" },
         "2": { "name": "punctuation.accessor.lxir" },

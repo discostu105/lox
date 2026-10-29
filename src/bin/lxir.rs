@@ -7,7 +7,8 @@
 use lxir::ir::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, adopt, adopt_one,
     adopt_pages, apply_rekeys, compile, decompile, decompile_pages, lint_dead_outputs, lint_source,
-    lock_rekeys, plan_tests, read_results, rename_slug, slugify, valid_slug, validate_ports,
+    lint_tiles, lock_rekeys, plan_tests, read_results, rename_slug, slugify, valid_slug,
+    validate_ports,
 };
 use lxir::uuid::parse_serial;
 use lxir::{Lockfile, LoxoneDoc, Project};
@@ -83,7 +84,10 @@ USAGE:
         externs and constants, uninstantiated templates — and, inside a
         lox.toml project, managed blocks whose outputs feed nothing in
         the *compiled* config (GUI-drawn wires count as consumers; a
-        block that reaches only dead ref plumbing is still dead). Never
+        block that reaches only dead ref plumbing is still dead), and
+        Touch Pure Flex commands on any device that reach several
+        API-linked blocks because they name none (tile-broadcast) or
+        reach none (tile-dead-command). Never
         modifies anything; exit 1 when there are findings — they can be
         deliberate (reference externs kept as documentation, app-visible
         state blocks), so lint is not part of the compile path.
@@ -932,6 +936,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             let compiled = compile(&base_doc, &module, &mut lock_copy, &opts)
                 .map_err(|e| format!("compile for dead-output analysis failed: {e}"))?;
             findings.extend(lint_dead_outputs(&module, &lock, &compiled)?);
+            findings.extend(lint_tiles(&module, &compiled));
         }
         None => eprintln!("note: no lox.toml project — dead-output analysis skipped"),
     }
@@ -1350,6 +1355,19 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             continue;
         }
+        // A tile function (D41) is already a readable `name="value"` list.
+        if p.port_key.starts_with("tile ") {
+            let side = |v: &Option<String>| v.clone().unwrap_or_else(|| "(empty)".into());
+            println!(
+                "* {} {} {}: {} -> {}",
+                p.block_type,
+                p.object_uuid,
+                p.port_key,
+                side(&p.from),
+                side(&p.to)
+            );
+            continue;
+        }
         println!(
             "* {} {}.{}: {:?} -> {:?}",
             p.block_type, p.object_uuid, p.port_key, p.from, p.to
@@ -1450,6 +1468,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = lxir::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v3(&doc) == *recorded {
+        // Recorded before tile programs joined the projection (D41).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to Touch Pure Flex tile programs — the next \
+             compile records the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v2(&doc) == *recorded {
         // Recorded before program text joined the projection (D40).
