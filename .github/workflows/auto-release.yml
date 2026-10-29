@@ -1,0 +1,90 @@
+name: Auto-release
+
+# Every push to main that passes CI is released: bump the version, move
+# the CHANGELOG's Unreleased section under it, commit "Release vX.Y.Z",
+# tag, then build and publish exactly like a pushed tag (release.yml).
+#
+# How big a bump, and whether to release at all, is decided by
+# .github/scripts/prepare_release.py: PR labels release:major,
+# release:minor, release:patch, no-release (or the same words in brackets
+# in a direct commit's message); without a release:* label, minor when
+# Unreleased has an "### Added" entry, else patch; nothing for
+# docs/CI-only changes.
+#
+# Pushes made with GITHUB_TOKEN (the release commit, the tag, the
+# Homebrew formula update) trigger no workflows, so nothing here loops
+# and release.yml runs once, called below.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Version, changelog, tag
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # Only the newest green commit releases: if main moved on, the CI run
+      # of the newer commit releases this one along with it.
+      - name: Still the head of main?
+        id: head
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main moved on past $SHA; the next CI run releases it"
+          fi
+
+      - name: Decide and prepare
+        id: prepare
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/prepare_release.py
+
+      - name: Commit, tag, push
+        id: push
+        if: steps.prepare.outputs.tag != ''
+        env:
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release $TAG"
+          git tag "$TAG"
+          if git push --atomic origin HEAD:refs/heads/main "refs/tags/$TAG"; then
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main moved on while preparing $TAG; the next CI run releases"
+          fi
+
+  release:
+    name: Release
+    needs: prepare
+    if: needs.prepare.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write

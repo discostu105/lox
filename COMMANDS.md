@@ -264,7 +264,11 @@ lox config download --save-as config.zip  # custom output filename
 lox config ls                          # list all configs on the Miniserver
 lox config extract config.zip          # decompress LoxCC → .Loxone XML
 lox config extract config.zip --save-as out.Loxone
+lox config compress out.Loxone         # compress .Loxone XML → out.LoxCC (sps0.LoxCC format)
+lox config compress out.Loxone --save-as sps0.LoxCC
+lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
+lox config push --force                # deploy an lxir project, verified (see Config as Code)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
 
@@ -354,6 +358,36 @@ Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a 
 A directory with a `lox.toml` (`base`, `module`, `lock`, `out`, `serial`, `page`) is a project: inside it
 `compile` needs no flags and `check`/`fmt`/`drift` use its module and lock. The language, the lockfile and the
 workflow are documented in [crates/lxir](crates/lxir/README.md).
+
+### Deploying a project: `lox config push`
+
+```bash
+lox config push                        # in a lox.toml project: download, drift check, compile, stage
+lox config push --force                # … then upload, reboot, wait, verify and move the base forward
+lox config push ~/r50 --force -o json  # another project dir; JSON report on stdout
+lox config push --patched-from backups/dl.Loxone --force  # base is a byte patch of that download
+lox config push --allow-removals --force   # delete managed blocks gone from the module
+lox config push --accept-version 17010727  # base saved by a new Loxone Config release
+lox config push --backup-dir /tmp/push # downloads and artifacts elsewhere (default: PROJECT/backups)
+```
+
+Each step stops the push when it fails:
+
+1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`).
+2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
+   since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
+3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, layout and
+   visualization stay as they are live. Live identical to the compiled config: nothing to push.
+4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
+   replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
+   `--dry-run`) the push ends here.
+5. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
+6. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
+   fails and the project is left as it was.
+7. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
+
+A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:
+nothing re-serializes the XML on the way.
 
 ---
 

@@ -40,6 +40,25 @@ cargo test                   # all tests
 
 Do not push until all four pass. Fix issues and re-run before committing.
 
+## Releases
+
+Every push to main that passes CI is released automatically (`.github/workflows/auto-release.yml`): the version is
+bumped, the CHANGELOG's `[Unreleased]` section moves under it, `Release vX.Y.Z` is committed and tagged, and
+`release.yml` builds the binaries, the Docker image and the Homebrew formula. So keep `[Unreleased]` current in
+every PR: it becomes the release notes.
+
+- Bump: PR label `release:major`, `release:minor`, `release:patch` or `no-release` (in a direct push: the same
+  words in brackets in the commit message, `[release:minor]`). Without a `release:*` label: minor when
+  `[Unreleased]` has an `### Added` entry, otherwise patch. Changes to docs, CI or the formula alone are not
+  released.
+- Several merges in a row become one release (only the newest green commit of main releases).
+- A Cargo.toml version above the last tag is released as it is. A hand-pushed `vX.Y.Z` tag still releases; a
+  failed release reruns with *Actions › Release › Run workflow* and the tag.
+- lxir keeps its own version in `crates/lxir/Cargo.toml`: bump it (and the `lxir` requirement in the root
+  Cargo.toml when leaving 0.1.x) and the next release publishes it to crates.io — that needs the
+  `CARGO_REGISTRY_TOKEN` repository secret.
+- `python3 .github/scripts/prepare_release.py --dry-run` shows what the next release would be.
+
 ## Architecture
 
 Cargo workspace: the `lox` binary (root package) and the `lxir` library crate (`crates/lxir`), which `lox` uses
@@ -77,6 +96,7 @@ archived, work merged there comes over with
 | `src/logic.rs` | Adapter over lxir (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (by hash, `v273`, save date, `<hash>^`), working copy, cache, FTP download, files; block history across commits |
 | `src/commands/config_insight.rs` | Read-only `lox config diff/show/wiring/find/lint/history` |
+| `src/commands/config_push.rs` | `lox config push`: deploy an lxir project — drift check, compile against the live download (lxir library), byte-exact staging, upload as `sps_new.zip`, reboot, verify, move `base`; `Miniserver` trait with a fake for tests |
 | `crates/lxir/` | The lxir crate (see above): `src/xml.rs`, `uuid.rs`, `doc.rs`, `connectors.rs`, `lock.rs`, `diff.rs`, `project.rs`, `ir/` (parser, compile, decompile, adopt, lint, simtest), `cli.rs`; its own `docs/`, `tests/`, `examples/` (`examples/ci.sh` runs in CI) |
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 

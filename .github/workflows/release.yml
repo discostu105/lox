@@ -1,12 +1,29 @@
 name: Release
 
+# Builds and publishes a tagged version: binaries on the GitHub release,
+# the Docker image, the Homebrew formula, and lxir on crates.io when its
+# version is new. Runs for a pushed vX.Y.Z tag, when auto-release.yml calls
+# it after tagging, or by hand for an existing tag (to retry a failed run).
 on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release (vX.Y.Z), already pushed
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and release, e.g. v0.15.0
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -36,6 +53,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -118,6 +137,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -126,10 +147,23 @@ jobs:
           pattern: lox-*
           merge-multiple: true
 
+      # The CHANGELOG section of this version, above GitHub's list of PRs
+      - name: Release notes
+        run: |
+          python3 - "$TAG" > release-notes.md <<'PYEOF'
+          import re, sys
+          version = re.escape(sys.argv[1].lstrip("v"))
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{version}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]: |\Z)", text, re.M | re.S)
+          print(m.group(1).strip() if m else "")
+          PYEOF
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           files: artifacts/*
+          body_path: release-notes.md
           generate_release_notes: true
 
   docker:
@@ -141,6 +175,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
@@ -172,8 +208,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
             type=raw,value=latest
 
       - name: Build and push
@@ -206,7 +242,7 @@ jobs:
 
       - name: Update formula with checksums
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           export SHA_MACOS_ARM=$(awk '{print $1}' artifacts/lox-macos-aarch64.sha256)
           export SHA_MACOS_X86=$(awk '{print $1}' artifacts/lox-macos-x86_64.sha256)
           export SHA_LINUX_ARM=$(awk '{print $1}' artifacts/lox-linux-aarch64.sha256)
@@ -247,5 +283,39 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/lox.rb
-          git commit -m "brew: update formula to ${GITHUB_REF_NAME}"
+          if git diff --cached --quiet; then
+            echo "Formula already at ${TAG}"
+            exit 0
+          fi
+          git commit -m "brew: update formula to ${TAG}"
+          # A PR merged meanwhile must not fail the release
+          git pull --rebase origin main
           git push origin main
+
+  publish-lxir:
+    name: Publish lxir to crates.io (new versions only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # lxir keeps its own version (crates/lxir/Cargo.toml); bump it there
+      # and the next release publishes it.
+      - name: Publish if crates.io lacks this version
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "lxir") | .version')
+          if curl -fsS -o /dev/null -A "lox release (github.com/${GITHUB_REPOSITORY})" \
+               "https://crates.io/api/v1/crates/lxir/${version}"; then
+            echo "lxir ${version} is on crates.io already"
+          elif [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::warning::lxir ${version} is not on crates.io, and there is no CARGO_REGISTRY_TOKEN secret to publish it"
+          else
+            cargo publish -p lxir --locked
+          fi

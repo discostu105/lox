@@ -314,7 +314,9 @@ fn fragment_dir(file: &Path) -> &Path {
     file.parent().unwrap_or(Path::new("."))
 }
 
-fn read_module(path: &str) -> Result<Module, AnyError> {
+/// Load a module — one `.lxir` file, or a directory of fragments — the way
+/// every command here does (also used by lox's `config push`).
+pub fn read_module(path: &str) -> Result<Module, AnyError> {
     load_module(path).map_err(|(p, e)| format!("{p}: {e}").into())
 }
 
