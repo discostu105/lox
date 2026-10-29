@@ -103,6 +103,46 @@ fn minted_ref_carries_the_mirror_identity() {
 }
 
 #[test]
+fn minted_ref_of_a_text_value_carries_text() {
+    // D48: every corpus ref of a VirtualTextIn or ApiActor carries
+    // `Text="true"`, in the slot `Analog=` takes: between `WF=` and
+    // `LinkRefType=`. A minted one must too, or a GUI save adds it.
+    let dir = make_project(
+        "mirrors-text",
+        "extern status = VirtualTextIn(iname: \"VTI1\")\n\
+         \n\
+         spiegel = InputRef(mirrors: status)\n",
+    );
+    let base = std::fs::read_to_string(dir.join("haus.Loxone")).unwrap();
+    let caption_end = "\t\t</C>\r\n\t\t<C Type=\"Page\"";
+    let text_in = "\t\t\t<C Type=\"VirtualTextIn\" V=\"175\" \
+         U=\"20000006-0000-0060-ffff504f94112233\" Title=\"Status\" IName=\"VTI1\" Nio=\"1\">\r\n\
+         \t\t\t\t<Co K=\"TQ\" U=\"20000006-0000-0061-00ffaaaaaaaa0006\"/>\r\n\
+         \t\t\t</C>\r\n";
+    assert_eq!(base.matches(caption_end).count(), 1);
+    std::fs::write(
+        dir.join("haus.Loxone"),
+        base.replace(caption_end, &format!("{text_in}{caption_end}")),
+    )
+    .unwrap();
+    let out = lxir(&dir, &["compile"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let el = input_ref_element(&dir);
+    assert_eq!(attr(&el, "LinkRefType").as_deref(), Some("83"), "{el}");
+    assert_eq!(attr(&el, "Text").as_deref(), Some("true"), "{el}");
+    assert_eq!(attr(&el, "Analog"), None, "{el}");
+    let at = |name: &str| el.find(&format!(" {name}=\"")).unwrap();
+    assert!(
+        at("WF") < at("Text") && at("Text") < at("LinkRefType"),
+        "{el}"
+    );
+}
+
+#[test]
 fn minted_ref_may_mirror_a_managed_block() {
     // A block minted this very compile is a legal target — the corpus
     // shows Memory mirrors (LinkRefType 320).

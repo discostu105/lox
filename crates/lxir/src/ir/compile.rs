@@ -32,7 +32,9 @@
 //!   Wine oracle showed Loxone Config 17 silently deletes off-descriptor
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
-use crate::connectors::{PortDir, VERIFIED_BLOCK_VERSIONS, attr_params, builtin, ref_link_type};
+use crate::connectors::{
+    PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, attr_params, builtin, ref_link_type,
+};
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
 use crate::ir::ast::{Attr, Item, MatchSpec, Module, Value};
@@ -667,7 +669,7 @@ pub fn compile(
     struct Mirror {
         ref_uuid: String,
         link_type: u32,
-        analog: bool,
+        value: RefValue,
         /// The GUI derives a ref's `Title=` from its target (oracle
         /// session 11: a save rewrites whatever else stands there) — the
         /// compiler emits the derived title so the file converges.
@@ -722,7 +724,7 @@ pub fn compile(
                 block.slug
             )));
         };
-        let (code, analog) = ref_link_type(&target_type).ok_or_else(|| {
+        let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
             Error::Compile(format!(
                 "block `{}` mirrors `{target}` of type `{target_type}`, which has \
                  no verified `LinkRefType=` code yet — extend \
@@ -736,7 +738,7 @@ pub fn compile(
             Mirror {
                 ref_uuid: uuid,
                 link_type: code,
-                analog,
+                value,
                 title: target_title,
                 target_type,
             },
@@ -789,7 +791,8 @@ pub fn compile(
         }
         el.set_attr("Nio", &plan.keys.len().to_string());
         // Minted-ref identity (D33), in the GUI's observed attribute
-        // order: `Ref=` after `Nio=`, `Analog=`/`LinkRefType=` after `WF=`.
+        // order: `Ref=` after `Nio=`; `Analog=` or `Text=` (D48), then
+        // `LinkRefType=`, after `WF=`.
         if let Some(m) = mirror_of.get(&block.slug) {
             el.set_attr("Ref", &m.ref_uuid);
         }
@@ -802,8 +805,10 @@ pub fn compile(
             (None, _) => el.set_attr("WF", "147456"),
         }
         if let Some(m) = mirror_of.get(&block.slug) {
-            if m.analog {
-                el.set_attr("Analog", "true");
+            match m.value {
+                RefValue::Digital => {}
+                RefValue::Analog => el.set_attr("Analog", "true"),
+                RefValue::Text => el.set_attr("Text", "true"),
             }
             el.set_attr("LinkRefType", &m.link_type.to_string());
         }
@@ -828,7 +833,7 @@ pub fn compile(
                 // above; the claim wins over the carried copy.
                 let compiler_owned = matches!(n.as_str(), "Cl" | "LtE" | "WF")
                     || (is_ref_type(&block.block_type)
-                        && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog"))
+                        && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog" | "Text"))
                     || managed_attrs.contains_key(&(block.slug.clone(), n.clone()));
                 if !compiler_owned {
                     el.set_attr_raw(n, v);
