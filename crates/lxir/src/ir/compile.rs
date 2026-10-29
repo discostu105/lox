@@ -956,7 +956,7 @@ pub fn compile(
             order_connectors(&mut el, &r.co_order);
         } else if block.block_type == "VirtualIn" {
             // What a save gives a fresh virtual input (oracle session
-            // 16): shown in the app, one decimal — the GUI's from then on.
+            // 18): shown in the app, one decimal — the GUI's from then on.
             let mut io = Element::new("IoData");
             io.set_attr("Visu", "true");
             io.set_attr("St", "2");

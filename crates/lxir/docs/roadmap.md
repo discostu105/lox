@@ -108,10 +108,6 @@ types) contradict each other. Results and methodology:
       integer constants are unaffected.
 - [ ] Lint: more than eight Program blocks (`Code1`–`Code16`), which
       lox-cli reports the Miniserver ignores beyond the eighth.
-- [ ] Block `V=` on Config 17.2: the save writes `V="178"`; the
-      compiler emits `175` and `adopt` refuses any other value, so
-      blocks saved by 17.2 cannot be adopted yet. Needs a per-release
-      table of descriptor versions (oracle per release), not a bump.
 
 ## Stufe 0 — Hardening the v0 pipeline
 

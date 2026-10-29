@@ -8,7 +8,8 @@ description: Author and change Loxone Miniserver logic as source code with the l
 The `.Loxone` file is a build artifact. You write `.lxir` modules, and
 `lxir compile` turns them into a new config against the current one. The
 lockfile pins every UUID the compiler minted. The full guide is
-`docs/agents.md` in the lxir repository; the language is `docs/ir-spec.md`.
+`crates/lxir/docs/agents.md` in the lox repository; the language is
+`crates/lxir/docs/ir-spec.md`. `lox ir …` and `lxir …` are the same CLI.
 
 ## Never
 
