@@ -427,3 +427,52 @@ fn a_memory_flag_is_placed_in_its_chain() {
     assert_eq!((m.w(), m.h()), (TAG_W, ROW));
     assert!(v.px2 < m.px && m.px2 < h.px, "{v:?} {m:?} {h:?}");
 }
+
+/// `doc` drawn on A3 landscape, as most configs are (D49).
+fn on_a3(doc: &LoxoneDoc) -> LoxoneDoc {
+    let xml = String::from_utf8(doc.to_bytes()).unwrap();
+    let doc_tag = "ConfigVersion=\"17010727\">";
+    assert_eq!(xml.matches(doc_tag).count(), 1);
+    LoxoneDoc::parse(
+        xml.replace(doc_tag, "ConfigVersion=\"17010727\" PaperFormat=\"2\">")
+            .as_bytes(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_sheet_comes_from_the_paper_format() {
+    assert_eq!(lxir::layout::sheet(&base()), None);
+    assert_eq!(
+        lxir::layout::sheet(&on_a3(&base())),
+        Some(Layout::at(0, 0, 23808, 16032))
+    );
+}
+
+#[test]
+fn a_relayout_brings_blocks_back_onto_the_sheet() {
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module(), &mut lock, &opts()).unwrap();
+    let and = uuid(&lock, "beschatten");
+    let managed: std::collections::BTreeSet<&str> =
+        lock.objects.values().map(|o| o.uuid.as_str()).collect();
+    assert!(lxir::layout::off_sheet(&on_a3(&out), &managed).is_empty());
+
+    // Dragged past the sheet's right edge in the GUI.
+    let dragged = on_a3(&gui_move(&out, &and, 28800, 4800));
+    let off = lxir::layout::off_sheet(&dragged, &managed);
+    assert_eq!(off.get("Beschattung"), Some(&vec![and.clone()]));
+    // A plain compile takes the drag over; a relayout brings it back.
+    let kept = compile(&dragged, &module(), &mut lock, &opts()).unwrap();
+    assert_eq!(rect(&kept, &and).px, 28800);
+    let laid = compile(&dragged, &module(), &mut lock, &relayout()).unwrap();
+    let managed: std::collections::BTreeSet<&str> =
+        lock.objects.values().map(|o| o.uuid.as_str()).collect();
+    assert!(
+        lxir::layout::off_sheet(&laid, &managed).is_empty(),
+        "{:?}",
+        lxir::layout::off_sheet(&laid, &managed)
+    );
+    let geo = PageGeometry::of(&laid, BESCHATTUNG).unwrap();
+    assert!(metrics(&geo).overlaps.is_empty());
+}
