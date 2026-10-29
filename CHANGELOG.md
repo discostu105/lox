@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `lox ir compile` puts each wire it rebuilds back where the base had it among the connector's inputs (lxir D45). Loxone Config sorts a connector's inputs when it saves, and the compile used to move its own wires to the end, so after a save in Loxone Config, `lox config push` found bytes to upload where the logic had not changed
+
 ## [0.15.0] — 2026-10-29
 
 ### Added

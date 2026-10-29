@@ -74,6 +74,41 @@ fn recompiling_own_output_converges() {
 }
 
 #[test]
+fn recompiling_a_gui_saved_config_keeps_its_in_order() {
+    // D45: Loxone Config sorts a connector's `<In>` children on save. Here
+    // the GUI saved a wire of its own behind the compiler's wire into the
+    // extern sink; the recompile tears the compiler's wire down and must
+    // put it back in front — not append it — to reproduce the save.
+    let module = module();
+    let mut lock = Lockfile::new();
+    let mut saved = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let path = saved
+        .objects()
+        .iter()
+        .find(|o| o.block_type == "AutoJalousie")
+        .unwrap()
+        .path
+        .clone();
+    let co = saved
+        .element_at_mut(&path)
+        .unwrap()
+        .child_elements_mut()
+        .find(|c| c.name == "Co" && c.attr("K") == Some("AutoShade"))
+        .unwrap();
+    assert_eq!(co.attr("Nc"), Some("1"), "the compiler's wire");
+    let mut gui = Element::new("In");
+    gui.set_attr("Input", "20000003-0000-0032-01ffaaaaaaaa0003"); // Sonnenschein.Qm
+    co.push_child(gui);
+    co.set_attr("Nc", "2");
+
+    let out = compile(&saved, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.to_bytes()),
+        String::from_utf8_lossy(&saved.to_bytes())
+    );
+}
+
+#[test]
 fn counters_advance_once_per_minted_object_and_never_decrease() {
     let base = base();
     assert_eq!(base.counters().next_obj, 200);
