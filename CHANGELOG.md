@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `lox autopilot ls` lists the rules themselves, read from the program file (`AutopilotRule` objects) with the `lox config` sources (`--at`, `--file`, `--download`): name, UUID, active, and whether the rule JSON parses. It used to list the structure file's single container entry. `-o json` is now `{"config", "rules": [{name, uuid, active, invalid, apc_valid, apc_error}]}`
 - `lox files get` names the absolute path it saved to (`✓  Downloaded /log/def.log → /home/me/def.log (51234 bytes)`), supports `-o json` and `--quiet`, and when stdout is redirected without `--save-as` says on stderr where the file went (`lox files get X > file` used to capture only the message)
+- `lox blind --help` lists every action with the command it sends: `up`/`down` are full moves (`FullUp`/`FullDown`, also as `full-up`/`full-down`), not jog steps; `stop` sends `off`, `shade` `AutomaticDown`, `shade N` `manualLamella/N`, `pos N` `manualPosition/N`. The MCP `blind` tool says the same
 
 ### Fixed
 - `lox stream` without `--initial` no longer prints the initial text-state snapshot as if it were changes (only the value-state snapshot was skipped)
 - `lox autopilot state <rule>` shows when the rule last ran, from the Miniserver's rule history; it used to fail with HTTP 404 (states can't be read over `/jdev/sps/io`)
+- `lox blind NAME full-up` / `full-down`, as documented in COMMANDS.md, were rejected as unknown actions
 
 ## [0.14.0] — 2026-10-04
 

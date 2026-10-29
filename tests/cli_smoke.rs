@@ -34,6 +34,18 @@ macro_rules! subcmd_help {
 subcmd_help!(help_on, "on");
 subcmd_help!(help_off, "off");
 subcmd_help!(help_blind, "blind");
+
+#[test]
+fn blind_help_says_what_each_action_sends() {
+    lox()
+        .args(["blind", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("full-up"))
+        .stdout(predicate::str::contains("FullUp"))
+        .stdout(predicate::str::contains("FullDown"))
+        .stdout(predicate::str::contains("manualPosition/<n>"));
+}
 subcmd_help!(help_gate, "gate");
 subcmd_help!(help_thermostat, "thermostat");
 subcmd_help!(help_alarm, "alarm");

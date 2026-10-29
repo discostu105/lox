@@ -506,9 +506,25 @@ pub(crate) enum Cmd {
         room: Option<String>,
     },
     /// Control blind: up | down | stop | shade [<0-100>] | pos <0-100>
+    ///
+    /// Actions, and the command each one sends to the Jalousie:
+    ///   up, open, full-up        all the way up            FullUp
+    ///   down, close, full-down   all the way down          FullDown
+    ///   stop                     stop moving               off
+    ///   shade, auto              automatic shading         AutomaticDown
+    ///   shade <0-100>            slat angle                manualLamella/<n>
+    ///   pos <0-100>, <0-100>     to a position             manualPosition/<n>
+    ///
+    /// up and down are full moves: the blind runs to its end position unless it
+    /// is stopped. They are not jog steps; for those send the raw commands, e.g.
+    /// `lox send <blind> up` and then `lox send <blind> UpOff`.
+    /// Positions: 0 = open, 100 = closed. Slats: 0 = horizontal, 100 = vertical.
+    #[command(verbatim_doc_comment)]
     Blind {
         name_or_uuid: String,
+        /// up | down | stop | shade | pos | <0-100> (--help lists what each one sends)
         action: String,
+        /// Value for `shade` (slat angle) and `pos` (position), 0-100
         #[arg(allow_hyphen_values = true)]
         pos: Option<f64>,
         #[arg(long, short = 'r')]
@@ -1885,7 +1901,16 @@ pub(crate) fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
 
         // Include valid actions
         let actions = match cmd.get_name() {
-            "blind" => Some(vec!["up", "down", "stop", "shade", "pos <0-100>"]),
+            "blind" => Some(vec![
+                "up",
+                "down",
+                "full-up",
+                "full-down",
+                "stop",
+                "shade",
+                "shade <0-100>",
+                "pos <0-100>",
+            ]),
             "gate" => Some(vec!["open", "close", "stop"]),
             "alarm" => Some(vec!["arm", "arm-home", "disarm", "quit"]),
             "door" => Some(vec!["lock", "unlock", "open"]),
