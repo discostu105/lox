@@ -873,13 +873,54 @@ pub fn parse(src: &str) -> Result<Module> {
                 [_, Tok::Str(title)] => {
                     items.push(Item::Page(PageDecl {
                         title: title.clone(),
+                        room: None,
+                        category: None,
+                        comment,
+                    }));
+                }
+                [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
+                    // `page "T" (room: "…"[, category: "…"])` — what a page
+                    // the compiler creates is assigned to (D56).
+                    let (mut room, mut category) = (None, None);
+                    for arg in args.split(|t| matches!(t, Tok::Comma)) {
+                        let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
+                            return Err(err(
+                                "expected `page \"<Title>\" (room: \"…\"[, category: \"…\"])`"
+                                    .into(),
+                            ));
+                        };
+                        let slot = match k.as_str() {
+                            "room" => &mut room,
+                            "category" => &mut category,
+                            other => {
+                                return Err(err(format!(
+                                    "unknown page argument `{other}` (expected room or category)"
+                                )));
+                            }
+                        };
+                        if slot.replace(v.clone()).is_some() {
+                            return Err(err(format!("duplicate `{k}:` page argument")));
+                        }
+                    }
+                    if room.is_none() {
+                        return Err(err(
+                            "a page argument list needs `room:` — the room a created page \
+                             is assigned to (D56)"
+                                .into(),
+                        ));
+                    }
+                    items.push(Item::Page(PageDecl {
+                        title: title.clone(),
+                        room,
+                        category,
                         comment,
                     }));
                 }
                 _ => {
                     return Err(err(
                         "expected `page \"<Title>\"` — the quoted display title of a \
-                         page in the base config (D28)"
+                         page in the base config (D28), optionally `(room: \"…\"[, category: \"…\"])` \
+                         to create it (D56)"
                             .into(),
                     ));
                 }

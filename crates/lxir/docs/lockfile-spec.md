@@ -1,4 +1,4 @@
-# Lockfile specification (v4)
+# Lockfile specification (v5)
 
 The lockfile is the persistent identity between IR source and compiled
 config — the analogue of `terraform.tfstate` / `package-lock.json`.
@@ -13,7 +13,7 @@ otherwise — a wrong port UUID silently breaks wire identity.
 
 ```jsonc
 {
-  "lockfile_version": 4,
+  "lockfile_version": 5,
 
   "target": {                       // informational metadata (nullable)
     "config_version": "17010727",   // ConfigVersion of the last base
@@ -133,8 +133,11 @@ otherwise — a wrong port UUID silently breaks wire identity.
         "written": "Neu"
       }
     }
-  }
-}
+  },
+  "pages": {                       // pages the compiler created (D56):
+    "Küche Logik": "21879f0f-0000-0048-ffff504f94112233"
+  }                                // title → page UUID, while the
+}                                  // `page … (room: …)` statement lives
 ```
 
 Serialization is stable: `serde_json` pretty-printing over `BTreeMap`s,
@@ -169,7 +172,13 @@ byte-for-byte, so lockfile diffs in review always mean something.
    then the entry retires on its own. The compile → push → download
    window is therefore a lock **fixpoint**: the committed state recompiles
    byte-identically before and after the push.
-7. Identity is unique: a base whose `<C>`/`<Co>` UUIDs repeat is refused,
+7. A `pages` entry is the identity of a page the compiler created (D56).
+   A base without that page gets it again under the same UUID; a base
+   whose page so identified carries another title (renamed in Loxone
+   Config) aborts the compile instead of creating a second page. The
+   entry is dropped with its statement (or its `room:`); the page itself
+   is never deleted.
+8. Identity is unique: a base whose `<C>`/`<Co>` UUIDs repeat is refused,
    and an output that would repeat one is never returned (D38).
 
 ## Operations
@@ -197,4 +206,5 @@ a v2 lock instead of silently dropping tombstones it does not understand.
 **v3** (2026-10-18) added attribute claims (`attr_claims`,
 `removed_attrs`, D39); a v1/v2 lock loads with both empty.
 **v4** (2026-10-29) added `superseded_layout` (D42); a v1–v3 lock loads
-without it.
+without it. **v5** (2026-10-29) added `pages` (D56); older locks load
+with it empty.

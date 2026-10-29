@@ -22,6 +22,17 @@ the reason the crate's parser is hand-rolled.
 - Inside: one `<C Type="Document">` (carrying `ConfigVersion=` among many
   attributes), containing caption/folder `<C>` elements, `<C Type="Page">`
   drawing pages, and the object tree.
+- Pages are the direct children of the one `<C Type="Program">` (title:
+  the Miniserver's). A page is `<C Type="Page" V=… U=… Title=… LtE=…
+  WF="16384">` with `<IoData Cr="<Category>" Pr="<Place>"/>` as its first
+  child, then its objects. `LtE=` is the last edit in seconds since
+  2009-01-01 UTC; the special page "Automatik-Regeln" carries `SpNo="1"`,
+  no `LtE=` and the unassigned `Place`. "Neue Seite" (Tools ribbon) asks
+  for a title and a room — Save stays disabled while the room is the
+  unassigned one — and files the page among the others in
+  case-insensitive title order; the GUI never re-sorts existing pages,
+  so real lists are not sorted (oracle 2026-10-29, 17.2). A page without
+  `LtE=` loads and saves unchanged (D56).
 - `PaperFormat=` on the Document is the paper sheet every page is drawn
   on; pages carry no size of their own. `2` is A3 landscape, the format
   of 109 of 112 corpus configs and the largest the GUI offers. The GUI

@@ -576,7 +576,8 @@ Anything unverified is an error, not a heuristic:
   the declared title is kept (titles need not be unique — this is what
   keeps adopted output byte-faithful, verified across the corpus), any
   other pin moves to the first matching page in document order, and a
-  missing title is an error. Creating pages stays with Loxone Config.
+  missing title is an error. Creating pages was left with Loxone Config
+  until D56 (`page "Title" (room: …)`).
   The decompiler now emits real `page` statements as section headers
   (per-page modules and fragments open with theirs; the periphery, not
   being a page, keeps its comment), so decompile/adopt output states
@@ -1671,3 +1672,41 @@ Anything unverified is an error, not a heuristic:
     fallback (27 externs across the corpus's wired views).
   - A serial is personal data (`lxir scan` reports it): modules of a
     real house belong in a private repository anyway.
+- **D56 — creating pages from source** (2026-10-29). D28 made a page
+  title authoritative but left creating the page to Loxone Config, so an
+  agent that needed room for a block chain — a nine-block feedback loop
+  needs 17 088 twips in one row, the full page it belonged on had
+  10 560 free on the A3 sheet (D50) — had to stop and ask a human to click "Neue Seite". Decision:
+  `page "Title" (room: "…"[, category: "…"])` creates the page when no
+  page carries the title.
+  - **Opt-in by `room:`.** Without it a missing title stays the D28
+    error, so a typo never creates a page; the error names the syntax.
+    `room:` is required because the GUI requires it: its dialog keeps
+    Save disabled while the room is "Nicht zugeordnet", and lxir refuses
+    the unassigned `Place` (`First="true"`) likewise. The category
+    defaults to the unassigned one, as the dialog does.
+  - **The element** is what the GUI writes (oracle, Loxone Config
+    17.2): `<C Type="Page" V=… U=… Title=… WF="16384">` with
+    `<IoData Cr="<category>" Pr="<place>"/>`, `V=` the document's block
+    version (D46). The GUI also writes `LtE=` (seconds since 2009-01-01,
+    the last edit); the compiler leaves it out, and a GUI save of a
+    compiled page does not add it.
+  - **Position:** the program's pages in case-insensitive title order,
+    which is where the GUI filed its new page. The GUI does not re-sort
+    on load, and real lists are not sorted (`EG/OG Treppe` before
+    `EG Büro`), so the page goes behind the last page sorting at or
+    before it — next to its namesake — never ahead of the special pages
+    (`SpNo`).
+  - **Identity in the lock** (v5 `pages`, title → UUID), minted like a
+    block (NextObj + 1). It makes the compile → push → download window a
+    fixpoint: a recompile against the old base re-creates the same page,
+    against the downloaded one creates nothing. A base titling the UUID
+    differently means the page was renamed in Loxone Config: an error,
+    not a second page.
+  - **Ownership ends at creation.** Once the base has the page, it is
+    Loxone Config's like any other: room, category, title and position
+    are not enforced (a claim on the page's attributes would be D39's
+    job, and nothing needs it yet), and a vanished statement releases
+    the lock entry without deleting the page — deleting a page deletes
+    whatever else the GUI drew on it.
+  Validated with the oracle (session 19): see oracle-wine.md.

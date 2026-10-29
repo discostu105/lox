@@ -58,6 +58,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - Match externs by `iname:` or `uuid:` where you can. Titles are
   locale-volatile; narrow a repeated title with `room:`, `category:` or
   `device: "<serial>"`.
+- `page "Title"` puts the blocks that follow on that page. When a page
+  is full, `page "Title" (room: "…")` creates a new one (the room is
+  required); without `room:` a missing title is an error.
 - Deleting a block needs `removed <slug>`; renaming a slug needs
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
 - A push notification is created in Loxone Config and named as an

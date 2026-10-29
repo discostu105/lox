@@ -32,11 +32,11 @@ use std::path::Path;
 
 /// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
 /// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
-/// (D42). Older locks load fine (the maps default to empty); saving always
+/// (D42); v5 the pages the compiler created (`pages`, D56). Older locks load fine (the maps default to empty); saving always
 /// writes the current version, so an old binary — whose version check
 /// refuses the newer number — can never silently drop state it does not
 /// know about.
-pub const LOCKFILE_VERSION: u32 = 4;
+pub const LOCKFILE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -91,6 +91,12 @@ pub struct Lockfile {
     /// base shows anything else.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub removed_attrs: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
+    /// Pages the compiler created (D56: `page "T" (room: …)`), title →
+    /// page UUID. A base without the page gets it again under the same
+    /// UUID; one that titles the UUID differently (renamed in Loxone
+    /// Config) is refused. An entry lives as long as its statement.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pages: BTreeMap<String, String>,
 }
 
 /// One attribute claim (D39). Values are decoded: a title as text, a room

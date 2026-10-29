@@ -213,6 +213,9 @@ it only when it matches what you intended.
 | `no user titled` / `no group titled` / `no access schedule titled` | an `access` grant names nothing in the base | use the title as Loxone Config or the app shows it; create the user, group or schedule there first |
 | `users are titled` / `groups are titled` / `schedules are titled` | several objects share the title an `access` grant names | give them distinct titles in Loxone Config or the app |
 | `not an NFC Code Touch` | `access` on an extern of another type | declare `access` only on an `NfcCodeTouch` extern |
+| `but the base config has no <C Type="Page"> titled` | no page carries the title | fix the title, or create the page: `page "…" (room: "…")` (D56) |
+| `a page needs a real room` | `page … (room: "Nicht zugeordnet")` | name the room the page belongs to |
+| `was created by the compiler as … the base titles it` | a page lxir created was renamed in Loxone Config | write the new title in the source (without the arguments the page is Loxone Config's), or rename it back |
 | `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
 | `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |

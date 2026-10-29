@@ -504,6 +504,24 @@ blocks.
   gained the GUI-owned `On`/`Off`/`SpStates`, `IoData` and `Display`,
   as every minted DayTimer does.
 
+## Creating pages (session 19, D56) — passed
+
+Ran 2026-10-29 against a copy of the house config (Loxone Config 17.2).
+First the GUI as reference: "Neue Seite" with a title and a room wrote
+`<C Type="Page" V="178" U=… Title=… LtE=… WF="16384">` with
+`<IoData Cr=… Pr=…/>` — `Cr` the unassigned category, `Pr` the chosen
+room — filed by title between its neighbours; cancelling the dialog
+discards the page, and Save stays disabled until a real room is chosen.
+Then the probe: a compile that moved a nine-block chain onto a page
+created from source (`page "…" (room: "…")`), no `LtE=`.
+
+- **Pass:** the page element came back byte-identical (no `LtE=` added,
+  room and category kept, position kept), the chain with all its wires
+  and cross-page connections stayed on it, and the semantic diff was
+  empty. NextObj rose by the usual two of the save. A recompile against
+  the saved file created nothing and left the lock's `pages` entry as
+  it was.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

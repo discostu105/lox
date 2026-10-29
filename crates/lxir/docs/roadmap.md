@@ -340,6 +340,11 @@ haus/
       matching page, a missing title errors), and emitted by
       decompile/adopt as real section headers in place of the old
       `# page:` comments. Corpus adoption fidelity unchanged.
+- [x] Creating pages from source 2026-10-29 (D56):
+      `page "Title" (room: "…")` creates a page the base lacks, filed by
+      title like the GUI's "Neue Seite"; the lock (v5 `pages`) keeps its
+      UUID until the push, a GUI rename is an error, nothing is ever
+      deleted. Oracle session 19.
 - [x] `adopt` (whole-config form) 2026-08-25 (D18): `lxir adopt <cfg>`
       moves every managed-type block under source control — the
       managed-only module plus a lockfile pinning existing object/port

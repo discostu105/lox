@@ -449,6 +449,27 @@ pub fn compile(
         }
     }
 
+    let mut minter = Minter::new(opts.machine, opts.mint_time_unix);
+    // Never reuse a (time, sequence) pair a previous compile session
+    // handed out: seed past the recorded high-water mark and every locked
+    // UUID (older locks have no mark). With a fixed mint time the bare
+    // per-run counter would mint a later-added block into a collision.
+    minter.seed(lock.counters.next_mint);
+    for u in lock.pages.values() {
+        minter.avoid(u);
+    }
+    for o in lock.objects.values() {
+        minter.avoid(&o.uuid);
+        for p in o.ports.values() {
+            minter.avoid(p);
+        }
+    }
+    let mint_base = minter.counter();
+
+    // --- Pages the source asks for and the base lacks are created (D56),
+    //     before anything is pinned to them.
+    create_pages(&mut doc, module, lock, &mut minter)?;
+
     // --- Plan managed blocks: the builtin port list is the full port list
     //     and pinned identity for every one of them. Each block is pinned
     //     to a page: adopted blocks to the page they were drawn on, new
@@ -498,19 +519,6 @@ pub fn compile(
                 .push(o.uuid);
         }
     }
-    let mut minter = Minter::new(opts.machine, opts.mint_time_unix);
-    // Never reuse a (time, sequence) pair a previous compile session
-    // handed out: seed past the recorded high-water mark and every locked
-    // UUID (older locks have no mark). With a fixed mint time the bare
-    // per-run counter would mint a later-added block into a collision.
-    minter.seed(lock.counters.next_mint);
-    for o in lock.objects.values() {
-        minter.avoid(&o.uuid);
-        for p in o.ports.values() {
-            minter.avoid(p);
-        }
-    }
-    let mint_base = minter.counter();
     let mut managed: BTreeMap<String, PlannedBlock> = BTreeMap::new();
     // Pages to lay out afresh (D42), by UUID.
     let mut relayout_pages: BTreeSet<&str> = BTreeSet::new();
@@ -608,7 +616,9 @@ pub fn compile(
                         let u = candidates.first().cloned().ok_or_else(|| {
                             Error::Compile(format!(
                                 "block `{}` is placed with `page \"{title}\"`, but the \
-                                 base config has no <C Type=\"Page\"> titled `{title}`",
+                                 base config has no <C Type=\"Page\"> titled `{title}` — \
+                                 to create it, name its room: `page \"{title}\" \
+                                 (room: \"…\")` (D56)",
                                 block.slug
                             ))
                         })?;
@@ -2025,6 +2035,167 @@ fn order_connectors(el: &mut Element, base: &[String]) {
     for (i, co) in slots.into_iter().zip(in_base_order(cos, rank)) {
         el.children[i] = co;
     }
+}
+
+/// Create the pages the source names with `room:` that the base has no
+/// page titled for (D56), as Loxone Config's "Neue Seite" does: a
+/// `<C Type="Page">` in the program, sorted in by title, assigned to the
+/// room and category through its `<IoData>`. The lock remembers each
+/// created page's UUID — a recompile against a base from before the
+/// deployment re-creates the same page, and a base where Loxone Config
+/// renamed it is an error instead of a second page. Once the base carries
+/// the page, Loxone Config owns it like any other; a vanished statement
+/// only releases the lock entry, it never deletes a page.
+fn create_pages(
+    doc: &mut LoxoneDoc,
+    module: &Module,
+    lock: &mut Lockfile,
+    minter: &mut Minter,
+) -> Result<()> {
+    // Title → (room, category); the statements for one title must agree.
+    let mut wanted: BTreeMap<&str, (&str, Option<&str>)> = BTreeMap::new();
+    for item in &module.items {
+        let Item::Page(p) = item else { continue };
+        let Some(room) = p.room.as_deref() else {
+            continue;
+        };
+        let spec = (room, p.category.as_deref());
+        if let Some(prev) = wanted.insert(p.title.as_str(), spec)
+            && prev != spec
+        {
+            return Err(Error::Compile(format!(
+                "`page {:?}` is created with two different room/category arguments — \
+                 give them once, or the same everywhere",
+                p.title
+            )));
+        }
+    }
+    let old = std::mem::take(&mut lock.pages);
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let objects = doc.objects();
+    let block_version = doc
+        .block_version()
+        .unwrap_or_else(|| VERIFIED_BLOCK_VERSIONS[VERIFIED_BLOCK_VERSIONS.len() - 1].into());
+    for (title, (room, category)) in wanted {
+        let page_titled = |want: &str| {
+            objects
+                .iter()
+                .find(|o| o.block_type == "Page" && o.title.as_deref() == Some(want))
+        };
+        if let Some(uuid) = old.get(title)
+            && let Some(o) = objects.iter().find(|o| &o.uuid == uuid)
+        {
+            let now = o.title.as_deref().unwrap_or_default();
+            if now != title {
+                return Err(Error::Compile(format!(
+                    "page {title:?} was created by the compiler as {uuid}; the base \
+                     titles it {now:?} — renamed in Loxone Config? Write \
+                     `page {now:?}` in the source (the page then belongs to Loxone \
+                     Config), or rename it back"
+                )));
+            }
+            lock.pages.insert(title.to_string(), uuid.clone());
+            continue;
+        }
+        if page_titled(title).is_some() {
+            continue; // Loxone Config's page: nothing to create.
+        }
+        let place = taxonomy_uuid(doc, "Place", "room", room)?;
+        let first = |uuid: &str| {
+            objects.iter().any(|o| {
+                o.uuid == uuid
+                    && doc
+                        .element_at(&o.path)
+                        .is_some_and(|el| el.attr("First") == Some("true"))
+            })
+        };
+        if first(&place) {
+            return Err(Error::Compile(format!(
+                "`page {title:?} (room: {room:?})`: a page needs a real room — Loxone \
+                 Config does not accept the unassigned one"
+            )));
+        }
+        let cat = match category {
+            Some(c) => taxonomy_uuid(doc, "Category", "category", c)?,
+            None => objects
+                .iter()
+                .find(|o| o.block_type == "Category" && first(&o.uuid))
+                .map(|o| o.uuid.clone())
+                .ok_or_else(|| {
+                    Error::Compile(format!(
+                        "`page {title:?}`: the base has no unassigned category \
+                         (<C Type=\"Category\" First=\"true\">) — name one with `category:`"
+                    ))
+                })?,
+        };
+        let uuid = match old.get(title) {
+            Some(u) => u.clone(),
+            None => {
+                lock.counters.next_obj += 1;
+                minter.mint_object().to_string()
+            }
+        };
+        let program = objects
+            .iter()
+            .find(|o| o.block_type == "Program")
+            .map(|o| o.path.clone())
+            .ok_or_else(|| {
+                Error::Compile(format!(
+                    "`page {title:?}`: the base has no <C Type=\"Program\"> to hold a page"
+                ))
+            })?;
+        let mut el = Element::new("C");
+        el.set_attr("Type", "Page");
+        el.set_attr_raw("V", &block_version);
+        el.set_attr("U", &uuid);
+        el.set_attr("Title", title);
+        el.set_attr("WF", "16384");
+        let mut io = Element::new("IoData");
+        io.set_attr("Cr", &cat);
+        io.set_attr("Pr", &place);
+        el.push_child(io);
+        let program = doc
+            .element_at_mut(&program)
+            .expect("the object's path is in the document");
+        insert_page(program, el, title);
+        lock.pages.insert(title.to_string(), uuid);
+    }
+    Ok(())
+}
+
+/// Where Loxone Config files a new page: among the program's pages in
+/// case-insensitive title order. The GUI does not re-sort on load, so a
+/// base's list need not be sorted: the page goes behind the last page
+/// whose title sorts at or before its own, else behind the special pages
+/// (`SpNo`) leading the list, else first.
+fn insert_page(program: &mut Element, el: Element, title: &str) {
+    use crate::xml::Node;
+    let key = title.to_lowercase();
+    fn page(n: &Node) -> Option<&Element> {
+        match n {
+            Node::Element(e) if e.name == "C" && e.attr("Type") == Some("Page") => Some(e),
+            _ => None,
+        }
+    }
+    let after = |n: &Node| {
+        page(n).is_some_and(|e| {
+            e.attr("SpNo").is_some()
+                || e.attr_decoded("Title")
+                    .is_some_and(|t| t.to_lowercase() <= key)
+        })
+    };
+    let at = match program.children.iter().rposition(after) {
+        Some(i) => i + 1,
+        None => program
+            .children
+            .iter()
+            .position(|n| page(n).is_some())
+            .unwrap_or(program.children.len()),
+    };
+    program.children.insert(at, Node::Element(el));
+    program.self_closing = false;
 }
 
 /// Insert a rebuilt block into its page where the base had it (D47):

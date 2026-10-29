@@ -60,6 +60,8 @@ jal_sued.TargetPos = 70                              # a parameter
   create it. A title that repeats can be narrowed by `room:`, `category:` or `device:` (the hardware serial of the
   Extension or Tree device it hangs off).
 - A plain declaration (`temp_hoch = GreaterEqual(…)`) is a block the compiler owns.
+- `page "Beschattung"` puts the blocks that follow on that page. `page "Küche Logik" (room: "Küche")` creates the
+  page if the config has none of that title, like "Neue Seite" in Loxone Config.
 - `<-` draws a wire, `=` sets a parameter. Expressions (`and`, `>=`, `/ 1000`) compile to real blocks, units read as
   written (`Time: 30min`, `70%`), and `template … end` stamps out repeated rules.
 
