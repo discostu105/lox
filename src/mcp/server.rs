@@ -234,7 +234,7 @@ pub enum BlindAction {
 pub struct BlindParams {
     #[serde(flatten)]
     pub target: Target,
-    /// up, down, stop, shade (automatic shading), position (needs value), slats (needs value)
+    /// up/down (full travel to the end position), stop, shade (automatic shading), position (needs value), slats (needs value)
     pub action: BlindAction,
     /// Required for position and slats (0-100, 100 = closed)
     #[serde(default)]
@@ -880,7 +880,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Move blinds",
-        description = "Move a blind/shade (Jalousie). Position and slats are 0-100 where 100 is fully closed/down. 'shade' starts automatic shading.",
+        description = "Move a blind/shade (Jalousie). 'up'/'down' travel all the way to the end position (FullUp/FullDown), 'stop' stops it. Position and slats are 0-100 where 100 is fully closed/down. 'shade' starts automatic shading.",
         output_schema = schema_for_output::<ActionResult>(),
         annotations(
             read_only_hint = false,

@@ -175,6 +175,14 @@ lox history "Temperatur" -o csv       # CSV output for spreadsheets
 ## Autopilot rules
 
 ```bash
-lox autopilot ls                      # list all automatic rules
-lox autopilot state "Rule Name"       # show when a rule last fired
+lox autopilot ls                      # rules in the program file: active, JSON valid
+lox autopilot ls --file backup.Loxone # same sources as `lox config` (--at, --file, --download)
+lox autopilot state "Rule Name"       # when a rule last ran (the Miniserver's rule history)
+lox autopilot changed                 # when the rules were last changed on the Miniserver
+lox autopilot changed -o json         # {"changed": <unix seconds>, "changed_at": …, "uuid": …}
 ```
+
+Rules created or edited in the app can live only in the Miniserver's *custom changes*, not in the
+program file: `lox autopilot ls` and a config download don't see them, and uploading a config discards
+them (the Miniserver logs `Remove old custom changes`). Before an upload, check that
+`lox autopilot changed` is older than the download the upload is based on.

@@ -24,7 +24,7 @@ fn load_cfg(file: bool) -> Result<Config> {
     }
 }
 
-fn load(src: &ConfigSource) -> Result<(Snapshot, Logic)> {
+pub(crate) fn load(src: &ConfigSource) -> Result<(Snapshot, Logic)> {
     let cfg = load_cfg(src.file.is_some())?;
     let snap = snapshot::load(&cfg, src.at.as_deref(), src.file.as_deref(), src.download)?;
     let l = Logic::parse(&snap.bytes).context("cannot read the config's logic")?;

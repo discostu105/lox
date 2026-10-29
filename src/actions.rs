@@ -11,7 +11,9 @@ pub const MOOD_OFF_ID: u32 = 778;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlindCmd {
+    /// Full travel up (`FullUp`), not a jog step
     Up,
+    /// Full travel down (`FullDown`), not a jog step
     Down,
     Stop,
     /// Automatic shading
@@ -515,8 +517,9 @@ pub fn on_confirm_list(
 /// `lox blind <name> <action> [pos]`
 pub fn parse_blind(action: &str, pos: Option<f64>) -> Result<Action> {
     let cmd = match action.to_lowercase().as_str() {
-        "up" | "open" => BlindCmd::Up,
-        "down" | "close" => BlindCmd::Down,
+        // full travel to the end position, not a jog step
+        "up" | "open" | "full-up" | "fullup" => BlindCmd::Up,
+        "down" | "close" | "full-down" | "fulldown" => BlindCmd::Down,
         "stop" => BlindCmd::Stop,
         "shade" | "auto" => match pos {
             Some(p) => BlindCmd::Lamella(check_pct(p, "Position")?),
@@ -529,7 +532,7 @@ pub fn parse_blind(action: &str, pos: Option<f64>) -> Result<Action> {
         other => match other.parse::<f64>() {
             Ok(p) => BlindCmd::Position(check_pct(p, "Position")?),
             Err(_) => bail!(
-                "Unknown action '{}'. Use: up down stop shade [<0-100>] pos <0-100>",
+                "Unknown action '{}'. Use: up (full-up), down (full-down), stop, shade [<0-100>], pos <0-100>; `lox blind --help` lists what each one sends.",
                 other
             ),
         },
@@ -735,8 +738,17 @@ mod tests {
 
     #[test]
     fn blind_mapping() {
-        assert_eq!(cmds(&parse_blind("up", None).unwrap()), ["FullUp"]);
-        assert_eq!(cmds(&parse_blind("close", None).unwrap()), ["FullDown"]);
+        // up/down are full moves under every name, never the jog commands
+        for up in ["up", "open", "full-up", "fullup", "Full-Up"] {
+            assert_eq!(cmds(&parse_blind(up, None).unwrap()), ["FullUp"], "{up}");
+        }
+        for down in ["down", "close", "full-down", "fulldown"] {
+            assert_eq!(
+                cmds(&parse_blind(down, None).unwrap()),
+                ["FullDown"],
+                "{down}"
+            );
+        }
         assert_eq!(cmds(&parse_blind("stop", None).unwrap()), ["off"]);
         assert_eq!(
             cmds(&parse_blind("shade", None).unwrap()),
