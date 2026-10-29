@@ -41,6 +41,9 @@ jobs:
       - name: clippy (lxir, all targets)
         run: cargo clippy -p lxir --all-targets -- -D warnings
 
+      - name: Changelog fragments
+        run: python3 .github/scripts/prepare_release.py --check
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

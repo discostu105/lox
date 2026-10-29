@@ -43,21 +43,24 @@ Do not push until all four pass. Fix issues and re-run before committing.
 ## Releases
 
 Every push to main that passes CI is released automatically (`.github/workflows/auto-release.yml`): the version is
-bumped, the CHANGELOG's `[Unreleased]` section moves under it, `Release vX.Y.Z` is committed and tagged, and
-`release.yml` builds the binaries, the Docker image and the Homebrew formula. So keep `[Unreleased]` current in
-every PR: it becomes the release notes.
+bumped, the changelog entries are written into CHANGELOG.md under it, `Release vX.Y.Z` is committed and tagged,
+and `release.yml` builds the binaries, the Docker image and the Homebrew formula.
+
+**Changelog: never edit CHANGELOG.md in a PR.** Add the entry as a new file `changelog.d/<branch>.<section>.md`
+(section `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`; content: the bullet as it should read
+in the changelog). New files never conflict; the release merges them into CHANGELOG.md and deletes them. See
+[changelog.d/README.md](changelog.d/README.md).
 
 - Bump: PR label `release:major`, `release:minor`, `release:patch` or `no-release` (in a direct push: the same
   words in brackets in the commit message, `[release:minor]`). Without a `release:*` label: minor when
-  `[Unreleased]` has an `### Added` entry, otherwise patch. Changes to docs, CI or the formula alone are not
-  released.
+  there is an `added` entry, otherwise patch. Changes to docs, CI or the formula alone are not released.
 - Several merges in a row become one release (only the newest green commit of main releases).
 - A Cargo.toml version above the last tag is released as it is. A hand-pushed `vX.Y.Z` tag still releases; a
   failed release reruns with *Actions › Release › Run workflow* and the tag.
 - lxir keeps its own version in `crates/lxir/Cargo.toml`: bump it (and the `lxir` requirement in the root
   Cargo.toml when leaving 0.1.x) and the next release publishes it to crates.io — that needs the
   `CARGO_REGISTRY_TOKEN` repository secret.
-- `python3 .github/scripts/prepare_release.py --dry-run` shows what the next release would be.
+- `python3 .github/scripts/prepare_release.py --dry-run` shows what the next release would be, with its notes.
 
 ## Architecture
 
