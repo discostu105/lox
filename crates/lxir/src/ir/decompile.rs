@@ -34,7 +34,7 @@
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
 
-use crate::connectors::{BUILTIN_TYPES, attr_params};
+use crate::connectors::{BUILTIN_TYPES, attr_params, container_type};
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
@@ -77,7 +77,13 @@ pub struct DecompileOptions {
 impl Default for DecompileOptions {
     fn default() -> Self {
         DecompileOptions {
-            managed_types: BUILTIN_TYPES.iter().map(|t| String::from(*t)).collect(),
+            // Objects of the object tree (a VirtualIn, D54) can be minted
+            // but are not adopted — existing ones stay externs.
+            managed_types: BUILTIN_TYPES
+                .iter()
+                .filter(|t| container_type(t).is_none())
+                .map(|t| String::from(*t))
+                .collect(),
             scope: DecompileScope::Full,
             exclude: BTreeSet::new(),
             all_params: false,
@@ -1038,7 +1044,7 @@ fn is_ident(s: &str) -> bool {
 /// hands them out and the parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile",
+    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule",
 ];
 
 /// Slug generation with umlaut transliteration and `_2`-style

@@ -148,6 +148,9 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             Item::Access(a) => {
                 object_refs.insert(&a.slug);
             }
+            Item::ScheduleClaim(c) => {
+                object_refs.insert(&c.slug);
+            }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {
                 for stmt in &t.body {

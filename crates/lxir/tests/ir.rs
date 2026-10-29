@@ -1033,7 +1033,10 @@ fn incremental_adopt_refuses_claimed_or_unverified_identities() {
         .uuid
         .clone();
     let err = adopt_one(&base, &vi, "x", &module, &mut lock.clone()).unwrap_err();
-    assert!(err.to_string().contains("builtin table"), "{err}");
+    assert!(
+        err.to_string().contains("reference it as an extern"),
+        "{err}"
+    );
 }
 
 const FASSADE_MODULE: &str = "\
@@ -3202,4 +3205,208 @@ fn canvas_labels_point_at_the_port_key() {
         ),
         "{err}"
     );
+}
+
+#[test]
+fn schedules_write_modes_and_entries_onto_a_day_timer() {
+    // D53: a schedule claim rewrites `Modes=`, `N=` and the `<Entry>`
+    // children of the DayTimer — by mode index, then start.
+    let src = "page \"Beschattung\"\n\
+               schedule abend\n\
+               \tweekend 08:00-23:00 activate\n\
+               \tmon 06:00-07:30, 17:00-22:00\n\
+               \tholiday off\n\
+               end\n\
+               uhr = DayTimer(\"Abendlicht\")\n\
+               uhr.schedule = abend\n";
+    let module = Module::parse(src).unwrap();
+    assert_eq!(
+        Module::parse(&module.to_text()).unwrap(),
+        module,
+        "fmt round-trips"
+    );
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let uuid = &lock.objects["uhr"].uuid;
+    let path = out
+        .objects()
+        .iter()
+        .find(|o| &o.uuid == uuid)
+        .unwrap()
+        .path
+        .clone();
+    let el = out.element_at(&path).unwrap();
+    assert_eq!(
+        el.attr("Modes"),
+        Some(
+            "00000000-0000-0001-1500000000000000,00000000-0000-0004-1500000000000000,\
+             00000000-0000-0005-1500000000000000,00000000-0000-0006-1500000000000000,\
+             00000000-0000-0007-1500000000000000,00000000-0000-0008-1500000000000000,\
+             00000000-0000-0009-1500000000000000,00000000-0000-000a-1500000000000000"
+        ),
+        "every weekday has a column — unnamed ones are off"
+    );
+    assert_eq!(el.attr("N"), Some("4"));
+    // `UserModes=` counts the modes beyond the weekdays, right before `N=`.
+    let names: Vec<&str> = el.attrs.iter().map(|a| a.name.as_str()).collect();
+    let n = names.iter().position(|&a| a == "N").unwrap();
+    assert_eq!(names[n - 1], "UserModes");
+    assert_eq!(el.attr("UserModes"), Some("1"));
+    let entries: Vec<String> = el
+        .child_elements()
+        .filter(|e| e.name == "Entry")
+        .map(|e| {
+            e.attrs
+                .iter()
+                .map(|a| format!("{}={}", a.name, a.value))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            "From=360 To=450 Ix=1 V=1",
+            "From=1020 To=1320 Ix=1 V=1",
+            "From=480 To=1380 Ix=6 NeedActivate=true V=1",
+            "From=480 To=1380 Ix=7 NeedActivate=true V=1",
+        ]
+    );
+    // Recompiling the output converges: the claim rewrites in place.
+    let again = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+
+    // A digital timer takes no values; claims are checked by type.
+    for (bad, needle) in [
+        (
+            "uhr.schedule = abend\nschedule abend\n\tmon 06:00-07:00 = 21\nend",
+            "the timer is digital",
+        ),
+        (
+            "p = Monoflop(\"x\")\np.schedule = abend\nschedule abend\n\tmon off\nend",
+            "a schedule belongs to a `DayTimer`",
+        ),
+        (
+            "uhr.schedule = abnd\nschedule abend\n\tmon off\nend",
+            "did you mean `abend`?",
+        ),
+    ] {
+        let src = format!("uhr = DayTimer(\"Abendlicht\")\n{bad}\n");
+        let err = Module::parse(&src)
+            .and_then(|m| compile(&base(), &m, &mut Lockfile::new(), &opts()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn virtual_inputs_are_minted_into_their_folder() {
+    // D54: a VirtualIn is an object of the "Virtuelle Eingänge" folder,
+    // not a page block — appended there with the next free `VI<n>`, no
+    // position, and wired across to the page like any extern source.
+    let src = "page \"Beschattung\"\n\
+               party = VirtualIn(\"Partymodus\")\n\
+               soll = VirtualIn(\"Sollwert\", Analog: \"true\", MinVal: 5, MaxVal: 30, DefVal: 21)\n\
+               licht = And(I1: party.Q)\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let objects = out.objects();
+    let find = |slug: &str| {
+        let uuid = &lock.objects[slug].uuid;
+        objects.iter().find(|o| &o.uuid == uuid).unwrap()
+    };
+    let folder = objects
+        .iter()
+        .find(|o| o.block_type == "VirtualInCaption")
+        .unwrap();
+    for slug in ["party", "soll"] {
+        assert_eq!(
+            find(slug).path[..folder.path.len()],
+            folder.path[..],
+            "{slug}"
+        );
+        assert_eq!(lock.objects[slug].page_uuid, None);
+        assert_eq!(lock.objects[slug].layout, None);
+    }
+    let el = |slug: &str| out.element_at(&find(slug).path).unwrap();
+    let names = |slug: &str| {
+        el(slug)
+            .attrs
+            .iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names("party"),
+        [
+            "Type",
+            "IName",
+            "V",
+            "U",
+            "Title",
+            "Cl",
+            "Nio",
+            "WF",
+            "Analog",
+            "MaxVal",
+            "MinChange",
+            "MinTime"
+        ],
+        "a save fills these in for a digital input"
+    );
+    assert_eq!(
+        names("soll")[8..],
+        ["Analog", "EnVal", "DefVal", "MinVal", "MaxVal"],
+        "the order a save writes"
+    );
+    let kids = |slug: &str| {
+        el(slug)
+            .child_elements()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kids("party"), ["Co", "Co", "IoData", "Display"]);
+    assert_eq!(el("party").attr("IName"), Some("VI4"), "haus has VI1..VI3");
+    assert_eq!(el("party").attr("Analog"), Some("false"));
+    assert_eq!(el("soll").attr("IName"), Some("VI5"));
+    assert_eq!(el("soll").attr("Analog"), Some("true"));
+    assert_eq!(el("soll").attr("MaxVal"), Some("30"));
+    // The page block reads the folder object's output directly (D34).
+    let q = &lock.objects["party"].ports["Q"];
+    let and = el("licht");
+    let i1 = and
+        .child_elements()
+        .find(|c| c.attr("K") == Some("I1"))
+        .unwrap();
+    assert!(i1.child_elements().any(|i| i.attr("Input") == Some(q)));
+
+    // Converges, and the designation is kept once minted — even when an
+    // earlier VirtualIn takes the next number first.
+    let again = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+    let first = Module::parse(&format!("{src}neu = VirtualIn(\"Neu\")\n")).unwrap();
+    let out2 = compile(&out, &first, &mut lock, &opts()).unwrap();
+    let iname = |slug: &str| {
+        let uuid = &lock.objects[slug].uuid;
+        let o = out2
+            .objects()
+            .into_iter()
+            .find(|o| &o.uuid == uuid)
+            .unwrap();
+        out2.element_at(&o.path)
+            .unwrap()
+            .attr("IName")
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        [iname("party"), iname("soll"), iname("neu")],
+        ["VI4", "VI5", "VI6"]
+    );
+
+    let bad = Module::parse("x = VirtualIn(Analog: \"ja\")\n").unwrap();
+    let err = compile(&base(), &bad, &mut Lockfile::new(), &opts()).unwrap_err();
+    assert!(err.to_string().contains("\"true\" or \"false\""), "{err}");
 }

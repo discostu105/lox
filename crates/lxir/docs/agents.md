@@ -112,6 +112,8 @@ See [ir-spec.md](ir-spec.md) for the full spec.
 let schwelle = 28                    # named constant
 
 extern sonne = VirtualIn(iname: "VI3")           # existing object, not yours
+party = VirtualIn("Partymodus")      # a new app switch, minted into the
+                                     # "Virtual Inputs" folder (D54)
 extern jal = AutoJalousie(title: "Beschattung Süd")
 
 temp_hoch = GreaterEqual(            # yours, compiler-owned; the argument
@@ -168,6 +170,12 @@ it only when it matches what you intended.
 | `is the label Loxone Config shows on the canvas` | a canvas label (`Tr`, `D`) used as a port name | use the key the error names (`InputTrigger`, `Time`) |
 | `does not fit — the port is documented in …` | unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`lxir types <Type>`) |
 | `is no exact decimal number of minutes` | time value on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a representable value |
+| `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |
+| `the timer is analog — … needs a value` / `the timer is digital` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
+| `user-defined operating modes are not supported yet` | a quoted mode title in a schedule line | use the built-in days; user modes stay with Loxone Config |
+| `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
+| `` `Analog:` is "true" or "false" `` | a VirtualIn's `Analog:` got another value | write `Analog: "true"` (or drop it: digital) |
+| `cannot adopt VirtualIn …: … minted from source but not adopted` | `adopt` pointed at an existing virtual input | reference it as `extern x = VirtualIn(iname: "VI3")` |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |

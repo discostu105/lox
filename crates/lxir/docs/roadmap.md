@@ -59,6 +59,28 @@ types) contradict each other. Results and methodology:
       the Central* `Out*` ports flipped to Output on surviving wires.
       Documented port facts (TechDoc) joined as the weakest evidence
       tier (D52).
+- [x] DayTimer schedules from source (2026-10-29, D53): `schedule`
+      sets claimed onto extern or managed DayTimers, the ten built-in
+      operating modes, analog values, `activate`; all seven weekday
+      columns always written (oracle session 18: a save fills missing
+      ones with "on all day"). Open: user-defined modes (resolve the
+      config's mode objects by title), and `lxir diff` does not show
+      schedule changes yet (GUI-owned content).
+- [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
+      land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
+      input range as claimed attribute parameters, and the defaults a
+      save writes (oracle session 18). Open: adopting existing ones
+      (they stay externs); a room/category for minted ones (the D39
+      claims work on externs only).
+- [ ] LightController2 moods from source. Surveyed 2026-10-29: a mood
+      is a `<LightsceneC>` in `<LightscenesC Num= Outputs= FC=>` with a
+      minted `UUID=`, a scene id `SID=` that `<LSConfig OpM= ScMv=>`
+      references (777/778 are the built-in "Viel Licht"/"Aus"), a `CID=`
+      of unknown meaning, `ReadOnly`/`Move` flags, and one `Q<n>=` per
+      circuit whose encoding follows the circuit type (dimmer 0–100,
+      switch 0/1, packed colour). Needs an oracle-driven design before
+      it can be claimed; values on *existing* moods by name are the
+      likely first step.
 - [ ] Block `V=` on Config 17.2: the save writes `V="178"`; the
       compiler emits `175` and `adopt` refuses any other value, so
       blocks saved by 17.2 cannot be adopted yet. Needs a per-release

@@ -1538,3 +1538,67 @@ Anything unverified is an error, not a heuristic:
     reads the documented shape, expanding `%d` names against the
     observed keys (corpus-wide: 736 direction agreements, one conflict,
     `Intercom.API`, which is API-like).
+- **D53 — DayTimer schedules from source** (2026-10-29). A DayTimer's
+  switching times were GUI-owned content (D19): the `<Entry>` list, the
+  `Modes=` columns, the `N=` count. Automations an agent writes need
+  them ("lights on at 17:00 on weekdays"), and lox-cli writes
+  schedules too. Decision: a `schedule` set and a
+  `<timer>.schedule = <set>` claim, the D41 tiles shape:
+  - **Format facts first** (corpus, 26 DayTimers in 145 configs, zero
+    counterexamples): `Modes=` lists operating-mode UUIDs; an entry
+    names its mode by index into that list (`Ix=`, absent = 0), spans
+    `From=`…`To=` in minutes of the day (`From` absent = 0, `To=1440`
+    = midnight), carries `V=` and an optional `NeedActivate="true"`;
+    entries are ordered by `Ix`; `N=` equals the entry count. The ten
+    built-in modes have fixed UUIDs `00000000-0000-000N-15…` in every
+    config (holiday 1, vacation 2, day off 3, Monday 4 … Sunday 10).
+  - **Built-in modes only.** User modes are objects of each config,
+    with their own UUIDs; a quoted mode title is refused until
+    resolving them is built. The two seasonal modes (11, 12) never
+    appear in a corpus `Modes=` list and are not offered.
+  - **All seven weekdays, always.** Every corpus `Modes=` list has
+    them, and a save fills a missing weekday column with an all-day
+    "on" entry (oracle session 18) — so a weekday the schedule does not
+    name is written as an empty column (off). `UserModes=` is the
+    count of the remaining modes, absent at zero (corpus-wide; the
+    save computes the same).
+  - **The claim owns the whole schedule** — `Modes=`, `UserModes=`,
+    `N=` and every
+    `<Entry>` — and nothing else: `Analog=`, `DefValue=`, `IoData`
+    stay GUI-owned. Values are checked against the timer: an analog
+    timer needs one per interval, a digital one takes none. Intervals
+    must not overlap per day, the GUI's editor has no representation
+    for that.
+  - **Extern or managed.** Unlike tiles (a device only), a DayTimer is
+    also mintable, so the claim applies to both; it runs as a post-pass
+    over the compiled document by UUID. No lock state, no restore
+    (D40/D41).
+  Validated with the oracle (session 18): see oracle-wine.md.
+- **D54 — minting virtual inputs** (2026-10-29). Agent-written
+  automations often need a switch the user flips in the app ("party
+  mode", a setpoint), and until now the IR could only reference one the
+  GUI had created. A VirtualIn is not a page block: it is an
+  object of the "Virtual Inputs" folder (`<C Type="VirtualInCaption">`)
+  wired across to the pages, which D34 established as legal. Decision:
+  `VirtualIn` is a mintable builtin type whose element lives in that
+  folder:
+  - **Shape** (corpus, 175 instances): connectors `[Q, Qm]`, both
+    sources; attribute order `Type, IName, V, U, Title, Cl, Nio, WF, …`;
+    no `Px=`/`Py=`; fresh defaults `Cl="238,238,238"`, `WF="16400"`,
+    `Analog="false"`.
+  - **Placement.** Appended to the base's first `VirtualInCaption` —
+    never pinned in the lock (`page_uuid`/`layout` stay empty), never
+    laid out, not governed by `page` statements. A base without the
+    folder is refused.
+  - **`IName=`** (`VI<n>`, the designation the GUI shows) is minted once
+    as one past the highest number in the base and in carried residue,
+    then carried verbatim like the other input-dialog attributes
+    (`connectors::carried_attrs`).
+  - **Parameters.** `Analog:` (`"true"`/`"false"`), `MinVal:`,
+    `MaxVal:`, `DefVal:` are attribute parameters with claim semantics
+    (D40): written while bound, the GUI's otherwise. The `<IoData>`
+    room/category binding and `<Display>` stay GUI-owned.
+  - **Not adopted.** Existing VirtualIns stay externs (`iname:`
+    matching); `adopt` refuses them. Adopting would add nothing an
+    extern cannot do.
+  Validated with the oracle (session 18): see oracle-wine.md.

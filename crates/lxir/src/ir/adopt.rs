@@ -25,7 +25,7 @@
 //! [`AdoptReport::refused`] — one bespoke GUI flag never blocks adopting
 //! the rest of the house.
 
-use crate::connectors::{VERIFIED_BLOCK_VERSIONS, attr_params, builtin};
+use crate::connectors::{VERIFIED_BLOCK_VERSIONS, attr_params, builtin, container_type};
 use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, ports};
 use crate::error::{Error, Result};
 use crate::ir::ast::{ArgItem, BindingKind, Item, MatchSpec, Module, PortRef, WireDecl};
@@ -145,6 +145,12 @@ pub fn adopt_one(
             "cannot adopt {ident}: `{}` is not in the verified builtin table — only \
              evidence-verified types can be managed (docs/connector-db.md)",
             o.block_type
+        )));
+    }
+    if let Some(container) = container_type(&o.block_type) {
+        return Err(fail(format!(
+            "cannot adopt {ident}: an object of the `{container}` folder is minted \
+             from source but not adopted (D54) — reference it as an extern"
         )));
     }
     if let Some((s, _)) = lock.objects.iter().find(|(_, lo)| lo.uuid == uuid) {

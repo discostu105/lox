@@ -60,6 +60,7 @@ impl Module {
                 Item::Let(l) => Some(l.name.as_str()),
                 Item::Template(t) => Some(t.name.as_str()),
                 Item::Tiles(t) => Some(t.name.as_str()),
+                Item::Schedule(t) => Some(t.name.as_str()),
                 _ => None,
             })
             .collect();

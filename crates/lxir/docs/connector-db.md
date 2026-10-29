@@ -306,6 +306,18 @@ chain with parameters on every block; details in
 [oracle-wine.md](oracle-wine.md). The corpus counterexample test
 passes over all 144 corpus files.
 
+## VirtualIn, admitted 2026-10-29 (D54)
+
+`Q`, `Qm` — both Output. 175 corpus instances from Config 3.x to 17;
+the 113 that carry connectors all have exactly `[Q, Qm]` in that order,
+and both are wire sources wherever wired. VirtualIn is the first
+admitted type that is not a page block: a minted one goes into the
+`VirtualInCaption` folder (`connectors::container_type`), with its
+input-dialog attributes carried per type (`connectors::carried_attrs`)
+and `Analog`/`MinVal`/`MaxVal`/`DefVal` as attribute parameters.
+Mint-validated in oracle session 18 (digital and analog, wired to page
+blocks): connectors, UUIDs and wires came back identical.
+
 ## Growing the table
 
 Add configs to the corpus (any installation helps — foreign corpora
