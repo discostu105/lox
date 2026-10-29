@@ -192,6 +192,10 @@ Miniserver context.
 | `list_scenes` | read | Your `lox` scenes |
 | `system_status` | read | Firmware, PLC state, memory |
 | `get_wiring` | read | The Loxone Config logic around a control: what drives it, what it drives, parameters; `trace` up to the sensors or down to the actuators |
+| `list_users` | read | Users with state and admin flag (needs a connection user that may manage users) |
+| `get_user` | read | One user: validity, groups, NFC tags, number of access codes |
+| `access_log` | read | Access log of an NFC Code Touch: who opened when, denied attempts |
+| `access_check` | read | Why a user may or may not open an NFC Code Touch: verdict, rights, warnings |
 | `switch` | action | `on`, `off`, `pulse` |
 | `blind` | action | `up`, `down`, `stop`, `shade`, `position`, `slats` |
 | `light` | action | `mood`, `dim`, `color` |

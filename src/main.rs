@@ -29,6 +29,7 @@ mod stream;
 mod token;
 #[cfg(feature = "tui")]
 mod tui;
+mod usermgmt;
 mod ws;
 
 use anyhow::{Context, Result, bail};
@@ -407,6 +408,7 @@ System:
   discover, extensions         Find Miniservers, list extensions
   update, reboot               Firmware updates, reboot
   files                        Browse Miniserver filesystem
+  user, access                 Users and NFC Code Touch access (admin)
   otel                         Export metrics via OpenTelemetry (OTLP)
 
 Configuration:
@@ -889,6 +891,16 @@ Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui
         #[command(subcommand)]
         action: FilesCmd,
     },
+    /// Users of the Miniserver: list, show (needs the right to manage users)
+    User {
+        #[command(subcommand)]
+        action: UserCmd,
+    },
+    /// NFC Code Touch access: who may open what, the access log, permissions
+    Access {
+        #[command(subcommand)]
+        action: AccessCmd,
+    },
 
     /// Export metrics, logs & traces to OpenTelemetry backends
     Otel {
@@ -1170,6 +1182,67 @@ pub(crate) enum MusicCmd {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum UserCmd {
+    /// List the users with state and admin flag
+    #[command(alias = "list")]
+    Ls,
+    /// Show a user: state, validity, groups, NFC tags, number of access codes
+    Show {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+    },
+    /// List the user groups with their type (normal, full access, …)
+    Groups,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AccessCmd {
+    /// Access log of an NFC Code Touch: who opened when, denied attempts
+    Log {
+        /// NFC Code Touch: name (or a unique part of it), alias or UUID
+        code_touch: String,
+        /// Number of entries to show, newest last (0: all)
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
+    /// Why may (or may not) a user open an NFC Code Touch?
+    ///
+    /// Joins the live user (state, groups, NFC tags, access codes) with the
+    /// access rights in the program file, which is downloaded fresh from the
+    /// Miniserver (read-only FTP) unless --file, --at or --cached says
+    /// otherwise. Verdicts: granted, no-access-right, no-credential,
+    /// user-disabled, unknown-full-access.
+    #[command(verbatim_doc_comment)]
+    Check {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// NFC Code Touch (default: every Code Touch in the program file)
+        code_touch: Option<String>,
+        #[command(flatten)]
+        src: AccessConfigSource,
+    },
+    /// Users and groups the Miniserver lists as assigned to a control (live)
+    Perms {
+        /// Control name, `Name [room]`, alias or UUID
+        control: String,
+    },
+}
+
+/// Where `lox access check` reads the access rights from.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub(crate) struct AccessConfigSource {
+    /// A config file (ZIP or .Loxone) instead of a fresh download
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<String>,
+    /// A snapshot of the config repo: commit, version (v273) or date (2026-08-25)
+    #[arg(long, value_name = "SNAPSHOT", conflicts_with = "file")]
+    pub at: Option<String>,
+    /// The config repo's working copy or the cached download (no FTP; may be stale)
+    #[arg(long, conflicts_with_all = ["file", "at"])]
+    pub cached: bool,
+}
+
+#[derive(Subcommand)]
 pub(crate) enum FilesCmd {
     /// List files at a path
     Ls {
@@ -1430,9 +1503,10 @@ pub(crate) enum ConfigCmd {
         #[arg(long)]
         force: bool,
     },
-    /// List user accounts from a .Loxone config file
+    /// List the users of a config file: NFC tags, access codes, groups and
+    /// access rights (live users: `lox user ls`)
     Users {
-        /// Path to a .Loxone XML file (from `lox config extract`)
+        /// Path to a .Loxone XML file (from `lox config extract`) or a backup ZIP
         file: String,
     },
     /// List hardware devices from a .Loxone config file
@@ -1567,8 +1641,12 @@ pub(crate) enum TraceDir {
 pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
     let msg = format!("{:#}", e);
     let lower = msg.to_lowercase();
-    if lower.contains("no control matching") {
+    if lower.contains("no control matching") || lower.contains("no nfc code touch matching") {
         "control_not_found"
+    } else if lower.contains("no user matching") {
+        "user_not_found"
+    } else if lower.contains("ambiguous user") {
+        "ambiguous_user"
     } else if lower.contains("ambiguous") {
         "ambiguous_control"
     } else if lower.contains("config not found") {
@@ -1580,6 +1658,13 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
             401 => "unauthorized",
             403 => "forbidden",
             404 => "not_found",
+            _ => "http_error",
+        }
+    } else if let Some(ll) = e.downcast_ref::<usermgmt::LlCodeError>() {
+        match ll.code.as_str() {
+            "401" => "unauthorized",
+            "403" => "forbidden",
+            "404" => "not_found",
             _ => "http_error",
         }
     } else if lower.contains("connection") || lower.contains("timeout") {
@@ -1825,6 +1910,8 @@ fn run(cli: Cli) -> Result<()> {
             demo,
         }),
         Cmd::Files { action } => commands::system::cmd_files(&ctx, action),
+        Cmd::User { action } => commands::access::cmd_user(&ctx, action),
+        Cmd::Access { action } => commands::access::cmd_access(&ctx, action),
         Cmd::Otel { action } => commands::system::cmd_otel(&ctx, action),
 
         // ── Configuration commands ────────────────────────────────────
@@ -2480,7 +2567,7 @@ mod tests {
         // "CO2" → 3 bytes, header_end = 15, entry_size = 16 → aligned = 16
         let name = b"CO2";
         let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 1 * 8; // uuid(4) + ts(4) + 1×f64
+        let entry_size: usize = 4 + 4 + 8; // uuid(4) + ts(4) + 1×f64
         let aligned = header_end.div_ceil(entry_size) * entry_size;
         assert_eq!(aligned, 16);
     }
@@ -2491,7 +2578,7 @@ mod tests {
         let name = "Zähler Licht Vorraum"; // 21 UTF-8 bytes (ä = 2 bytes)
         assert_eq!(name.len(), 21);
         let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 1 * 8;
+        let entry_size: usize = 4 + 4 + 8;
         let aligned = header_end.div_ceil(entry_size) * entry_size;
         assert_eq!(aligned, 48);
     }
@@ -2887,7 +2974,7 @@ mod tests {
         data.write_u32::<LittleEndian>(0).unwrap();
         data.write_u32::<LittleEndian>(3).unwrap(); // name_length=3
         data.extend_from_slice(b"CO2\0"); // pad to 16
-        let entry_size = 4 + 4 + 1 * 8;
+        let entry_size = 4 + 4 + 8;
         assert_eq!(stats_data_offset(&data, entry_size), Some(16));
     }
 

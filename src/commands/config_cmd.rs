@@ -580,24 +580,32 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             println!("Reboot the Miniserver to load it: lox reboot");
         }
         ConfigCmd::Users { file } => {
-            if file.ends_with(".zip") {
-                bail!(
-                    "Expected a .Loxone XML file. Run `lox config extract {}` first.",
-                    file
-                );
-            }
-            let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+            let xml = crate::load_config_xml(&file)?;
             let users = loxone_xml::parse_users(&xml)?;
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&users)?);
             } else {
                 let nfc_count = users.iter().filter(|u| u.nfc).count();
-                println!("  {:<26} {:<6} Description", "Name", "NFC");
-                for u in &users {
+                if !ctx.no_header {
                     println!(
-                        "  {:<26} {:<6} {}",
+                        "{:<24} {:<4} {:<6} {:<28} {:<28} DESCRIPTION",
+                        "NAME", "NFC", "CODES", "GROUPS", "ACCESS"
+                    );
+                }
+                let count = |n: usize| if n == 0 { "-".into() } else { n.to_string() };
+                for u in &users {
+                    let access: Vec<String> = u
+                        .access
+                        .iter()
+                        .map(|a| format!("{} ({})", a.block, a.schedule))
+                        .collect();
+                    println!(
+                        "{:<24} {:<4} {:<6} {:<28} {:<28} {}",
                         u.name,
-                        if u.nfc { "yes" } else { "-" },
+                        count(u.nfc_tags),
+                        count(u.access_codes),
+                        or_dash(&u.groups.join(", ")),
+                        or_dash(&access.join(", ")),
                         u.description,
                     );
                 }
@@ -750,6 +758,10 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn or_dash(s: &str) -> &str {
+    if s.is_empty() { "-" } else { s }
 }
 
 pub fn cmd_completions(

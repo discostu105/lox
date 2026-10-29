@@ -52,6 +52,8 @@ Address controls by name: a case-insensitive substring match. If a name is ambig
 pass `room` or write it as 'Name [Room]'. UUIDs work too.
 Read live values with get_control or list_sensors. To explain why something happened \
 (what drives a light, which sensors feed a block), use get_wiring. \
+For door access at NFC Code Touches: access_check says why a user may or may not open, \
+access_log shows who opened when. \
 Every action tool accepts dry_run=true to preview the exact commands without sending them.
 Doors, gates, the alarm and controls the user listed for confirmation are high-risk: \
 the user is asked to confirm each one. \
@@ -199,6 +201,33 @@ pub struct WiringQuery {
     /// Download the current config from the Miniserver first (read-only FTP, a few seconds)
     #[serde(default)]
     pub download: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UserQuery {
+    /// User name (exact, or a unique part of it) or UUID
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AccessLogQuery {
+    /// NFC Code Touch: name (or a unique part of it), alias or UUID
+    pub code_touch: String,
+    /// Number of newest entries to return (default 50, 0 = all)
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AccessCheckQuery {
+    /// User name (exact, or a unique part of it) or UUID
+    pub user: String,
+    /// NFC Code Touch: name, alias or UUID. Omit to check every Code Touch.
+    #[serde(default)]
+    pub code_touch: Option<String>,
+    /// Read the access rights from the cached config instead of downloading the newest one from the Miniserver (read-only FTP, a few seconds). Faster, but may miss recent changes.
+    #[serde(default)]
+    pub cached: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -849,6 +878,56 @@ impl LoxMcp {
                     q.all_params,
                     q.download,
                 )
+            })
+            .await,
+        )
+    }
+
+    #[tool(
+        title = "List users",
+        description = "List the Miniserver's users with their state (enabled, disabled, enabled until/from …) and admin flag. Needs a connection user with the right to manage users.",
+        output_schema = schema_for_output::<ops::UserList>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn list_users(&self) -> ToolResponse {
+        respond(self.blocking(ops::list_users).await)
+    }
+
+    #[tool(
+        title = "Get user",
+        description = "One user's details: state and validity, groups, NFC tags (name and ID) and the number of access codes (the codes themselves are stored hashed).",
+        output_schema = schema_for_output::<crate::usermgmt::User>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn get_user(&self, Parameters(q): Parameters<UserQuery>) -> ToolResponse {
+        respond(self.blocking(move |lox| ops::get_user(lox, &q.name)).await)
+    }
+
+    #[tool(
+        title = "Access log",
+        description = "Access log of an NFC Code Touch: who opened when with which NFC tag, code or the app, and denied attempts. Returns the newest entries, oldest first, in local time.",
+        output_schema = schema_for_output::<crate::usermgmt::AccessLog>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn access_log(&self, Parameters(q): Parameters<AccessLogQuery>) -> ToolResponse {
+        respond(
+            self.blocking(move |lox| {
+                crate::usermgmt::read_access_log(lox, &q.code_touch, q.limit.unwrap_or(50))
+            })
+            .await,
+        )
+    }
+
+    #[tool(
+        title = "Check door access",
+        description = "Why may (or may not) a user open an NFC Code Touch? Joins the live user (state, groups, NFC tags, access codes) with the access rights in the Loxone Config program. Verdict per Code Touch: granted (with schedule, direct or via a group), no-access-right, no-credential, user-disabled, or unknown-full-access (only the full-access group, not verified to open doors). Warnings flag where the program file and the live state disagree.",
+        output_schema = schema_for_output::<crate::usermgmt::AccessReport>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn access_check(&self, Parameters(q): Parameters<AccessCheckQuery>) -> ToolResponse {
+        respond(
+            self.blocking(move |lox| {
+                ops::access_check(lox, &q.user, q.code_touch.as_deref(), q.cached)
             })
             .await,
         )

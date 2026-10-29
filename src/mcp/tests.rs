@@ -389,6 +389,15 @@ fn output_schemas_do_not_require_fields_that_may_be_omitted() {
         "tool",
         "code",
         "error",
+        "description",
+        "last_edit",
+        "valid_from",
+        "valid_until",
+        "trust_member",
+        "assigned_live",
+        "skipped",
+        "ext_medium",
+        "ext_authority",
     ];
     fn walk(v: &Value, optional: &[&str], tool: &str) {
         if let Some(req) = v.get("required").and_then(|r| r.as_array()) {
@@ -1356,4 +1365,265 @@ async fn get_wiring_without_a_config_says_how_to_get_one() {
     assert!(err);
     assert_eq!(out["error"], "config_unavailable");
     assert!(out["message"].as_str().unwrap().contains("download=true"));
+}
+
+// ── Users and access ──────────────────────────────────────────────────────────
+
+const ALICE: &str = "1a2b3c4d-0001-0001-ffff000000000001";
+const BOB: &str = "1a2b3c4d-0001-0002-ffff000000000002";
+const FAMILY: &str = "1a2b3c4d-0002-0001-ffff000000000001";
+const FULL_ACCESS: &str = "1a2b3c4d-0002-0002-ffff000000000002";
+const TOUCH: &str = "0f1e2d3c-000d-1111-ffff00000000000d";
+const ALWAYS: &str = "1a2b3c4d-0004-0001-ffff000000000001";
+
+/// A user-management answer: JSON in a string in the LL envelope.
+fn ll(control: &str, value: Value) -> Value {
+    json!({ "LL": { "control": control, "value": value.to_string(), "Code": "200" } })
+}
+
+/// A Miniserver with an NFC Code Touch, alice (NFC tag, direct access right)
+/// and bob (only in the full-access group).
+async fn access_miniserver() -> MockServer {
+    let server = MockServer::start_async().await;
+    let mut s = structure();
+    s["controls"][TOUCH] =
+        json!({ "name": "Code Touch Eingang", "type": "NfcCodeTouch", "room": "r3" });
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(s);
+        })
+        .await;
+    let users = json!([
+        { "name": "alice", "uuid": ALICE, "isAdmin": false, "userState": 0 },
+        { "name": "bob", "uuid": BOB, "isAdmin": true, "userState": 0 },
+    ]);
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/jdev/sps/getuserlist2");
+            then.status(200)
+                .json_body(ll("dev/sps/getuserlist2", users));
+        })
+        .await;
+    let alice = json!({
+        "name": "alice", "uuid": ALICE, "desc": "", "lastEdit": 562000000, "userState": 0,
+        "isAdmin": false, "trustMember": "",
+        "usergroups": [{ "name": "Family", "uuid": FAMILY, "trustMember": "" }],
+        "nfcNumTags": 1, "nfcTags": [{ "name": "alice phone", "id": "01 02 03 04 05 06 07 08 EC" }],
+        "numKeyCodes": 0, "keycodes": []
+    });
+    let bob = json!({
+        "name": "bob", "uuid": BOB, "desc": "", "lastEdit": 562000100, "userState": 0,
+        "isAdmin": true, "trustMember": "",
+        "usergroups": [{ "name": "Full access", "uuid": FULL_ACCESS, "trustMember": "" }],
+        "nfcNumTags": 0, "nfcTags": [], "numKeyCodes": 1, "keycodes": [{}]
+    });
+    for (uuid, user) in [(ALICE, alice), (BOB, bob)] {
+        let path = format!("/jdev/sps/getuser/{}", uuid);
+        let control = format!("dev/sps/getuser/{}", uuid);
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path(path);
+                then.status(200).json_body(ll(&control, user));
+            })
+            .await;
+    }
+    let groups = json!([
+        { "name": "Family", "description": "", "uuid": FAMILY, "type": 0, "userRights": 129 },
+        { "name": "Full access", "description": "", "uuid": FULL_ACCESS, "type": 4, "userRights": -1 },
+    ]);
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/jdev/sps/getgrouplist");
+            then.status(200)
+                .json_body(ll("dev/sps/getgrouplist", groups));
+        })
+        .await;
+    // firmware 16 answers with a list in braces and no envelope
+    let perms = format!(
+        r#"{{[{{"name":"alice","uuid":"{}","type":"User"}}]}}"#,
+        ALICE
+    );
+    server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path(format!("/jdev/sps/getcontrolpermissions/{}", TOUCH));
+            then.status(200).body(perms);
+        })
+        .await;
+    let log = concat!(
+        r#"{"ts":1790000000,"output":-1,"type":8}/"#,
+        r#"{"ts":1790000004,"output":1,"type":3,"user":"alice","description":"alice phone"}/"#,
+        r#"{"ts":1790000060,"output":1,"type":6,"user":"bob"}/"#,
+    );
+    server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path(format!("/dev/fsget/log/{}.txt", TOUCH));
+            then.status(200).body(log);
+        })
+        .await;
+    server
+}
+
+/// The program file: alice's access right on the Code Touch, the groups.
+fn access_config(dir: &std::path::Path) {
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<ControlList Version="1">
+<C Type="Document" V="178" U="2e000000-0000-0000-ffff000000000001" Title="Test">
+<C Type="UserCaption" U="2e000000-0000-0000-ffff000000000002" Title="Users">
+<C Type="User" V="178" U="{ALICE}" Title="alice" NFCArr="{tag}" NFCNArr="alice phone" LastEdit="562000000">
+<PH NUM="1"><PRM REF="{TOUCH}" TIM="{ALWAYS}"/></PH>
+</C>
+<C Type="User" V="178" U="{BOB}" Title="bob" CodeArr="x" LastEdit="562000100"/>
+</C>
+<C Type="UserGroupCaption" U="2e000000-0000-0000-ffff000000000003" Title="Groups">
+<C Type="UserGroup" V="178" U="{FAMILY}" Title="Family" Rights="129" User="{ALICE}" UserGroups=""/>
+<C Type="UserGroup" V="178" U="{FULL_ACCESS}" Title="Full access" Rights="-1" UgType="4" User="{BOB}" UserGroups=""/>
+</C>
+<C Type="SwitchingTimer" V="178" U="{ALWAYS}" Title="Always" FIX="1"/>
+<C Type="NfcCodeTouch" V="178" U="{TOUCH}" Title="Code Touch Eingang"/>
+</C>
+</ControlList>
+"#,
+        tag = "ab".repeat(32)
+    );
+    let cache = dir.join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("config.Loxone"), xml).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_tools_list_and_show_users_even_read_only() {
+    let ms = access_miniserver().await;
+    let opts = ServerOptions {
+        read_only: true,
+        ..Default::default()
+    };
+    let client = session(&ms, opts, Lifecycle::Modern).await;
+    let names = tool_names(&client).await;
+    for t in ["list_users", "get_user", "access_log", "access_check"] {
+        assert!(names.contains(&t.to_string()), "missing {}", t);
+    }
+    let (out, err) = call(&client, "list_users", json!({})).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["count"], 2);
+    assert_eq!(out["users"][1]["name"], "bob");
+    assert_eq!(out["users"][1]["is_admin"], true);
+    let (out, err) = call(&client, "get_user", json!({ "name": "ALI" })).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["uuid"], ALICE);
+    assert_eq!(out["groups"][0]["name"], "Family");
+    assert_eq!(out["nfc_tags"][0]["name"], "alice phone");
+    let (out, err) = call(&client, "get_user", json!({ "name": "carol" })).await;
+    assert!(err);
+    assert_eq!(out["error"], "user_not_found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn access_log_reads_the_code_touch_log() {
+    let ms = access_miniserver().await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Legacy).await;
+    let (out, err) = call(
+        &client,
+        "access_log",
+        json!({ "code_touch": "eingang", "limit": 2 }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["code_touch_uuid"], TOUCH);
+    assert_eq!(
+        (out["count"].as_u64(), out["total"].as_u64()),
+        (Some(2), Some(3))
+    );
+    let e = &out["entries"];
+    assert_eq!(e[0]["result"], "granted");
+    assert_eq!(e[0]["method"], "NFC tag");
+    assert_eq!(e[0]["description"], "alice phone");
+    assert_eq!(e[1]["method"], "app");
+    let (out, err) = call(&client, "access_log", json!({ "code_touch": "Licht" })).await;
+    assert!(err);
+    assert_eq!(out["error"], "control_not_found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn access_check_explains_the_verdict() {
+    let ms = access_miniserver().await;
+    let dir = tempfile::tempdir().unwrap();
+    access_config(dir.path());
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    let (out, err) = call(
+        &client,
+        "access_check",
+        json!({ "user": "alice", "cached": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["config"], "cached");
+    let c = &out["checks"][0];
+    assert_eq!(c["code_touch"], "Code Touch Eingang");
+    assert_eq!(c["verdict"], "granted");
+    assert_eq!(c["rights"][0]["via"], "direct");
+    assert_eq!(c["rights"][0]["schedule"], "Always");
+    assert_eq!(c["assigned_live"], true);
+    assert!(c["hints"][0].as_str().unwrap().contains("unlocked"));
+    // only the full-access group: not verified
+    let (out, err) = call(
+        &client,
+        "access_check",
+        json!({ "user": "bob", "code_touch": TOUCH, "cached": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["checks"][0]["verdict"], "unknown-full-access");
+    assert_eq!(out["checks"][0]["assigned_live"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn access_check_without_a_cached_config_says_how_to_get_one() {
+    let ms = access_miniserver().await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    let (out, err) = call(
+        &client,
+        "access_check",
+        json!({ "user": "alice", "cached": true }),
+    )
+    .await;
+    assert!(err);
+    assert_eq!(out["error"], "config_unavailable");
+    assert!(out["message"].as_str().unwrap().contains("cached=false"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_user_management_says_which_right_is_missing() {
+    let ms = MockServer::start_async().await;
+    ms.mock_async(|when, then| {
+        when.method(GET).path("/jdev/sps/getuserlist2");
+        then.status(200).json_body(json!({
+            "LL": { "control": "dev/sps/getuserlist2", "value": "", "Code": "403" }
+        }));
+    })
+    .await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    let (out, err) = call(&client, "list_users", json!({})).await;
+    assert!(err);
+    assert_eq!(out["error"], "forbidden");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap()
+            .contains("right to manage users"),
+        "{}",
+        out
+    );
 }

@@ -6,11 +6,153 @@ use std::collections::HashMap;
 
 // ── Users ──
 
+/// A user of the program file, as `lox config users` lists it.
 #[derive(Debug, Serialize)]
 pub struct LoxUser {
     pub name: String,
+    pub uuid: String,
     pub nfc: bool,
+    /// Number of NFC tags
+    pub nfc_tags: usize,
+    pub nfc_names: Vec<String>,
+    /// Number of access codes
+    pub access_codes: usize,
+    /// Names of the user's groups
+    pub groups: Vec<String>,
     pub description: String,
+    /// Loxone time (seconds since 2009-01-01) of the last change
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_edit: Option<i64>,
+    /// The user's own access rights (rights through groups not included)
+    pub access: Vec<AccessGrant>,
+}
+
+/// An access right by name: the block (e.g. an NFC Code Touch) and the
+/// schedule that limits it.
+#[derive(Debug, Serialize)]
+pub struct AccessGrant {
+    pub block: String,
+    pub schedule: String,
+}
+
+// ── Access rights ──
+//
+// Users (`<C Type="User">`) and groups (`<C Type="UserGroup">`) carry their
+// rights as `<PH><PRM REF="block" …/></PH>`. A PRM with `ACT` is a right in the
+// user interface (ACT="3": operate); a PRM with `TIM` is an access right, e.g.
+// to open an NFC Code Touch, limited by the schedule TIM points to (a
+// `SwitchingTimer`; the built-in ones have FIX="1" always, FIX="2" never).
+// Group members are listed on the group (`User="uuid,uuid"`), not on the user.
+// The full-access group has UgType="4", the nobody group UgType="3".
+// Seen in configs saved by Loxone Config 16.
+
+/// One `<PRM>` entry of a user or group.
+#[derive(Debug, Clone, Serialize)]
+pub struct Permission {
+    /// The block the right is on
+    pub target: String,
+    /// Access right: the schedule (UUID) that limits it
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+    /// UI right: the `ACT` bits
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigUser {
+    pub uuid: String,
+    pub name: String,
+    pub description: String,
+    /// `LastEdit`, Loxone time; matches `lastEdit` of the live user
+    pub last_edit: Option<i64>,
+    /// Number of NFC tags (`NFCArr` holds one 64-digit hash per tag)
+    pub nfc_tags: usize,
+    /// Tag names from `NFCNArr`
+    pub nfc_names: Vec<String>,
+    /// Number of access codes (`CodeArr`, hashed)
+    pub access_codes: usize,
+    pub permissions: Vec<Permission>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigGroup {
+    pub uuid: String,
+    pub name: String,
+    /// 3 nobody, 4 full access; absent for ordinary groups
+    pub ug_type: Option<i64>,
+    /// Member user UUIDs
+    pub members: Vec<String>,
+    pub permissions: Vec<Permission>,
+}
+
+/// A schedule an access right refers to.
+#[derive(Debug, Clone)]
+pub struct Schedule {
+    pub title: String,
+    /// The built-in "never" schedule (FIX="2")
+    pub never: bool,
+}
+
+/// Users, groups and the access rights between them and the blocks.
+#[derive(Debug, Default)]
+pub struct AccessModel {
+    pub users: Vec<ConfigUser>,
+    pub groups: Vec<ConfigGroup>,
+    /// NFC Code Touch blocks: UUID, title
+    pub code_touches: Vec<(String, String)>,
+    /// Title of every titled object, by UUID
+    titles: HashMap<String, String>,
+    /// `FIX` of the built-in schedules, by UUID
+    fixed: HashMap<String, String>,
+}
+
+impl AccessModel {
+    pub fn user(&self, uuid: &str) -> Option<&ConfigUser> {
+        self.users.iter().find(|u| u.uuid == uuid)
+    }
+
+    /// The groups the program file lists the user in.
+    pub fn groups_of<'a>(&'a self, user: &'a str) -> impl Iterator<Item = &'a ConfigGroup> {
+        self.groups
+            .iter()
+            .filter(move |g| g.members.iter().any(|m| m == user))
+    }
+
+    pub fn title(&self, uuid: &str) -> Option<&str> {
+        self.titles.get(uuid).map(String::as_str)
+    }
+
+    pub fn schedule(&self, uuid: &str) -> Schedule {
+        Schedule {
+            title: self.title(uuid).unwrap_or(uuid).to_string(),
+            never: self.fixed.get(uuid).is_some_and(|f| f == "2"),
+        }
+    }
+}
+
+impl ConfigUser {
+    /// Schedules of the user's access rights on a block.
+    pub fn access_schedules<'a>(&'a self, target: &'a str) -> impl Iterator<Item = &'a str> {
+        access_schedules(&self.permissions, target)
+    }
+}
+
+impl ConfigGroup {
+    /// Schedules of the group's access rights on a block.
+    pub fn access_schedules<'a>(&'a self, target: &'a str) -> impl Iterator<Item = &'a str> {
+        access_schedules(&self.permissions, target)
+    }
+}
+
+fn access_schedules<'a>(
+    permissions: &'a [Permission],
+    target: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    permissions
+        .iter()
+        .filter(move |p| p.target == target)
+        .filter_map(|p| p.schedule.as_deref())
 }
 
 // ── Devices ──
@@ -65,6 +207,58 @@ fn attr_value(e: &BytesStart, name: &[u8]) -> Option<String> {
 
 fn attr_value_or(e: &BytesStart, name: &[u8], default: &str) -> String {
     attr_value(e, name).unwrap_or_else(|| default.to_string())
+}
+
+/// An attribute with XML escapes resolved (`&amp;` → `&`, `&#xA;` → newline).
+fn attr_text(e: &BytesStart, name: &[u8]) -> Option<String> {
+    let attr = e.attributes().flatten().find(|a| a.key.as_ref() == name)?;
+    match attr.unescape_value() {
+        Ok(v) => Some(v.into_owned()),
+        Err(_) => String::from_utf8(attr.value.to_vec()).ok(),
+    }
+}
+
+/// Number of tag hashes in `NFCArr`: 64 hex digits each. How several tags
+/// are separated is not documented and no sample had two, so any non-hex
+/// separator, or none, is accepted.
+fn count_tag_hashes(arr: &str) -> usize {
+    arr.split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| chunk.len().div_ceil(64))
+        .sum()
+}
+
+/// Tag names from `NFCNArr`. With one tag the attribute is its name; for
+/// several the separator is not documented, so the common ones are tried
+/// and the first that yields one name per tag wins.
+fn split_tag_names(names: &str, tags: usize) -> Vec<String> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    if tags > 1 {
+        for sep in ['|', ';', '\n', '\t', ','] {
+            let parts: Vec<&str> = names.split(sep).collect();
+            if parts.len() == tags {
+                return parts.iter().map(|p| p.trim().to_string()).collect();
+            }
+        }
+    }
+    vec![names.to_string()]
+}
+
+/// Number of access codes in `CodeArr` (hashed; separator undocumented).
+fn count_codes(arr: &str) -> usize {
+    arr.split([',', ';', '|', '\n', '\t'])
+        .filter(|chunk| !chunk.trim().is_empty())
+        .count()
+}
+
+fn split_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 pub fn subtype_label(sub_type: u32) -> &'static str {
@@ -140,33 +334,139 @@ fn is_control_type(type_attr: &str) -> bool {
 // ── Parsing ──
 
 pub fn parse_users(xml: &[u8]) -> Result<Vec<LoxUser>> {
+    let model = parse_access_model(xml)?;
+    Ok(model
+        .users
+        .iter()
+        .map(|u| LoxUser {
+            name: u.name.clone(),
+            uuid: u.uuid.clone(),
+            nfc: u.nfc_tags > 0,
+            nfc_tags: u.nfc_tags,
+            nfc_names: u.nfc_names.clone(),
+            access_codes: u.access_codes,
+            groups: model.groups_of(&u.uuid).map(|g| g.name.clone()).collect(),
+            description: u.description.clone(),
+            last_edit: u.last_edit,
+            access: u
+                .permissions
+                .iter()
+                .filter_map(|p| {
+                    let schedule = p.schedule.as_deref()?;
+                    Some(AccessGrant {
+                        block: model.title(&p.target).unwrap_or(&p.target).to_string(),
+                        schedule: model.schedule(schedule).title,
+                    })
+                })
+                .collect(),
+        })
+        .collect())
+}
+
+/// Users, groups, their rights, the schedules and the NFC Code Touches of a
+/// program file.
+pub fn parse_access_model(xml: &[u8]) -> Result<AccessModel> {
+    enum Owner {
+        User(usize),
+        Group(usize),
+        Other,
+    }
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
-    let mut users = Vec::new();
+    let mut model = AccessModel::default();
+    // the open <C> elements; PRMs belong to the innermost one
+    let mut open: Vec<Owner> = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e) | Event::Empty(ref e))
-                if e.name().as_ref() == b"C"
-                    && attr_value(e, b"Type").as_deref() == Some("User") =>
-            {
-                let name = attr_value_or(e, b"Title", "");
-                let nfc_arr = attr_value_or(e, b"NFCArr", "");
-                let desc = attr_value_or(e, b"Desc", "").replace('_', " ");
-                users.push(LoxUser {
-                    name,
-                    nfc: !nfc_arr.is_empty(),
-                    description: desc,
-                });
+        let (e, empty) = match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => (e, false),
+            Ok(Event::Empty(e)) => (e, true),
+            Ok(Event::End(e)) => {
+                if e.name().as_ref() == b"C" {
+                    open.pop();
+                }
+                buf.clear();
+                continue;
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(e).context("Failed to parse XML"),
+            _ => {
+                buf.clear();
+                continue;
+            }
+        };
+        match e.name().as_ref() {
+            b"C" => {
+                let uuid = attr_value_or(&e, b"U", "");
+                let title = attr_text(&e, b"Title");
+                if let Some(t) = &title
+                    && !uuid.is_empty()
+                {
+                    model.titles.insert(uuid.clone(), t.clone());
+                }
+                let owner = match attr_value(&e, b"Type").as_deref() {
+                    Some("User") => {
+                        let nfc_tags = count_tag_hashes(&attr_value_or(&e, b"NFCArr", ""));
+                        model.users.push(ConfigUser {
+                            uuid,
+                            name: title.unwrap_or_default(),
+                            description: attr_text(&e, b"Desc")
+                                .unwrap_or_default()
+                                .replace('_', " "),
+                            last_edit: attr_value(&e, b"LastEdit").and_then(|v| v.parse().ok()),
+                            nfc_tags,
+                            nfc_names: split_tag_names(
+                                &attr_text(&e, b"NFCNArr").unwrap_or_default(),
+                                nfc_tags,
+                            ),
+                            access_codes: count_codes(&attr_value_or(&e, b"CodeArr", "")),
+                            permissions: Vec::new(),
+                        });
+                        Owner::User(model.users.len() - 1)
+                    }
+                    Some("UserGroup") => {
+                        model.groups.push(ConfigGroup {
+                            uuid,
+                            name: title.unwrap_or_default(),
+                            ug_type: attr_value(&e, b"UgType").and_then(|v| v.parse().ok()),
+                            members: split_list(&attr_value_or(&e, b"User", "")),
+                            permissions: Vec::new(),
+                        });
+                        Owner::Group(model.groups.len() - 1)
+                    }
+                    Some("NfcCodeTouch") => {
+                        model.code_touches.push((uuid, title.unwrap_or_default()));
+                        Owner::Other
+                    }
+                    _ => {
+                        if let Some(fix) = attr_value(&e, b"FIX") {
+                            model.fixed.insert(uuid, fix);
+                        }
+                        Owner::Other
+                    }
+                };
+                if !empty {
+                    open.push(owner);
+                }
+            }
+            b"PRM" => {
+                let p = Permission {
+                    target: attr_value_or(&e, b"REF", ""),
+                    schedule: attr_value(&e, b"TIM").filter(|t| !t.is_empty()),
+                    ui: attr_value(&e, b"ACT"),
+                };
+                match open.last() {
+                    Some(Owner::User(i)) => model.users[*i].permissions.push(p),
+                    Some(Owner::Group(i)) => model.groups[*i].permissions.push(p),
+                    _ => {}
+                }
+            }
             _ => {}
         }
         buf.clear();
     }
-    Ok(users)
+    Ok(model)
 }
 
 pub fn parse_devices(xml: &[u8]) -> Result<Vec<LoxDevice>> {
@@ -330,6 +630,99 @@ mod tests {
         assert_eq!(users[1].name, "chris");
         assert!(users[1].nfc);
         assert_eq!(users[1].description, "Main user");
+    }
+
+    const ALICE: &str = "1a2b3c4d-0001-0001-ffff000000000001";
+    const BOB: &str = "1a2b3c4d-0001-0002-ffff000000000002";
+    const KIDS: &str = "1a2b3c4d-0002-0001-ffff000000000001";
+    const TOUCH: &str = "1a2b3c4d-0003-0001-ffff000000000001";
+    const ALWAYS: &str = "1a2b3c4d-0004-0001-ffff000000000001";
+    const NEVER: &str = "1a2b3c4d-0004-0002-ffff000000000002";
+
+    fn access_xml() -> String {
+        let tag = "0123456789abcdef".repeat(4);
+        format!(
+            r#"<?xml version="1.0"?>
+<ControlList Version="1">
+<C Type="Document" Title="Test">
+<C Type="UserCaption" Title="Users">
+<C Type="User" U="{ALICE}" Title="alice &amp; co" NFCArr="{tag}" NFCNArr="alice phone" CodeArr="" LastEdit="562000000">
+<HP H="" Sc="-1" S=""/>
+<PH NUM="2"><PRM REF="{ALWAYS}" ACT="3"/><PRM REF="{TOUCH}" TIM="{ALWAYS}"/></PH>
+</C>
+<C Type="User" U="{BOB}" Title="bob" NFCArr="{tag}{tag}" NFCNArr="bob card|bob watch" CodeArr="{tag}" Desc="the_kid"/>
+</C>
+<C Type="UserGroupCaption" Title="Groups">
+<C Type="UserGroup" U="{KIDS}" Title="Kids" Rights="1281" User="{BOB},{ALICE}" UserGroups="">
+<PH NUM="1"><PRM REF="{TOUCH}" TIM="{NEVER}"/></PH>
+</C>
+<C Type="UserGroup" U="1a2b3c4d-0002-0002-ffff000000000002" Title="Full access" Rights="-1" UgType="4" User=""/>
+</C>
+<C Type="SwitchingTimer" U="{ALWAYS}" Title="Always" FIX="1"><C Type="Inner" U="1a2b3c4d-0005-0001-ffff000000000001" Title="x"/></C>
+<C Type="SwitchingTimer" U="{NEVER}" Title="Never" FIX="2"/>
+<C Type="NfcCodeTouch" U="{TOUCH}" Title="Front door"><PH NUM="1"><PRM REF="{ALICE}" ACT="3"/></PH></C>
+</C>
+</ControlList>"#
+        )
+    }
+
+    #[test]
+    fn parses_users_groups_and_access_rights() {
+        let m = parse_access_model(access_xml().as_bytes()).unwrap();
+        assert_eq!(m.users.len(), 2);
+        let alice = m.user(ALICE).unwrap();
+        assert_eq!(alice.name, "alice & co");
+        assert_eq!(alice.last_edit, Some(562000000));
+        assert_eq!((alice.nfc_tags, alice.access_codes), (1, 0));
+        assert_eq!(alice.nfc_names, ["alice phone"]);
+        assert_eq!(alice.permissions.len(), 2);
+        assert_eq!(alice.access_schedules(TOUCH).collect::<Vec<_>>(), [ALWAYS]);
+        let bob = m.user(BOB).unwrap();
+        assert_eq!((bob.nfc_tags, bob.access_codes), (2, 1));
+        assert_eq!(bob.nfc_names, ["bob card", "bob watch"]);
+        assert_eq!(bob.description, "the kid");
+        assert!(bob.permissions.is_empty());
+        let kids: Vec<_> = m.groups_of(BOB).map(|g| g.name.as_str()).collect();
+        assert_eq!(kids, ["Kids"]);
+        assert_eq!(m.groups[0].access_schedules(TOUCH).count(), 1);
+        assert_eq!(m.groups[1].ug_type, Some(4));
+        assert!(m.groups[1].members.is_empty());
+        assert!(m.schedule(NEVER).never);
+        assert!(!m.schedule(ALWAYS).never);
+        assert_eq!(m.schedule(ALWAYS).title, "Always");
+        assert_eq!(
+            m.code_touches,
+            [(TOUCH.to_string(), "Front door".to_string())]
+        );
+        // a PRM on a block is no user's right
+        assert_eq!(
+            m.users.iter().map(|u| u.permissions.len()).sum::<usize>(),
+            2
+        );
+    }
+
+    #[test]
+    fn config_users_lists_groups_and_named_access_rights() {
+        let users = parse_users(access_xml().as_bytes()).unwrap();
+        assert_eq!(users[0].groups, ["Kids"]);
+        assert_eq!(users[0].access.len(), 1);
+        assert_eq!(users[0].access[0].block, "Front door");
+        assert_eq!(users[0].access[0].schedule, "Always");
+        assert_eq!(users[1].nfc_tags, 2);
+    }
+
+    #[test]
+    fn tag_hashes_and_names_tolerate_unknown_separators() {
+        let tag = "a".repeat(64);
+        assert_eq!(count_tag_hashes(""), 0);
+        assert_eq!(count_tag_hashes(&tag), 1);
+        assert_eq!(count_tag_hashes(&format!("{tag},{tag}")), 2);
+        assert_eq!(count_tag_hashes(&format!("{tag}{tag}{tag}")), 3);
+        assert_eq!(split_tag_names("a;b", 2), ["a", "b"]);
+        assert_eq!(split_tag_names("one name", 2), ["one name"]);
+        assert!(split_tag_names("", 0).is_empty());
+        assert_eq!(count_codes("x|y"), 2);
+        assert_eq!(count_codes(""), 0);
     }
 
     #[test]

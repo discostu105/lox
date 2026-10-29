@@ -1,3 +1,4 @@
+pub mod access;
 pub mod config_cmd;
 pub mod config_insight;
 pub mod config_push;

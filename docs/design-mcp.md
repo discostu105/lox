@@ -85,6 +85,10 @@ a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destr
 | `list_scenes` | — | local `lox` scenes with description and step count |
 | `system_status` | — | firmware, PLC state, heap |
 | `get_wiring` | `name`, `room?`, `trace?` (up, down, both), `depth?`, `all_params?`, `download?` | the config logic around a control or block: inputs, outputs (hardware refs folded to the device and room), non-default parameters, optional traced paths, and the app control it is. Reads the config repo or the cached `.Loxone`; `download` fetches it via FTP (read-only) |
+| `list_users` | — | users with state and admin flag (`getuserlist2`) |
+| `get_user` | `name` | one user (`getuser`): state, validity, groups, NFC tags, number of access codes |
+| `access_log` | `code_touch`, `limit?` | the NFC Code Touch's access log (`/log/<uuid>.txt`), newest entries, decoded |
+| `access_check` | `user`, `code_touch?`, `cached?` | per Code Touch: verdict (granted, no-access-right, no-credential, user-disabled, unknown-full-access), the rights found, warnings where the program file and the live state disagree. Downloads the config via FTP (read-only) unless `cached` |
 
 ### 4.2 Action tools
 
