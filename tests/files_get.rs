@@ -4,6 +4,7 @@
 use assert_cmd::Command;
 use httpmock::prelude::*;
 use serde_json::Value;
+use std::path::Path;
 
 /// Not valid UTF-8 on purpose: stdout must carry the bytes unchanged.
 const BODY: &[u8] = b"line 1\nline 2\n\xff\xfe\x00end";
@@ -21,6 +22,17 @@ fn setup() -> (MockServer, tempfile::TempDir) {
     )
     .unwrap();
     (server, dir)
+}
+
+/// `shown` is absolute and names `dir/name`. Compared canonically: the temp
+/// dir has other spellings (macOS /var → /private/var, Windows 8.3 names).
+fn assert_saved_at(shown: &str, dir: &tempfile::TempDir, name: &str) {
+    let shown = Path::new(shown);
+    assert!(shown.is_absolute(), "{}", shown.display());
+    assert_eq!(
+        shown.canonicalize().unwrap(),
+        dir.path().join(name).canonicalize().unwrap()
+    );
 }
 
 fn lox(dir: &tempfile::TempDir) -> Command {
@@ -56,18 +68,14 @@ fn files_get_default_names_the_absolute_path() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{:?}", out);
-    // canonical: the child sees its cwd that way (macOS: /var → /private/var)
-    let saved = dir.path().canonicalize().unwrap().join("def.log");
-    assert_eq!(std::fs::read(&saved).unwrap(), BODY);
+    assert_eq!(std::fs::read(dir.path().join("def.log")).unwrap(), BODY);
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(
-        stdout.trim_end(),
-        format!(
-            "✓  Downloaded /log/def.log → {} ({} bytes)",
-            saved.display(),
-            BODY.len()
-        )
-    );
+    let saved = stdout
+        .trim_end()
+        .strip_prefix("✓  Downloaded /log/def.log → ")
+        .and_then(|rest| rest.strip_suffix(&format!(" ({} bytes)", BODY.len())))
+        .unwrap_or_else(|| panic!("{}", stdout));
+    assert_saved_at(saved, &dir, "def.log");
     // stdout is captured here, as with `> file`: say where the file went
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("--save-as -"), "{}", stderr);
@@ -90,10 +98,9 @@ fn files_get_json_and_quiet() {
         .unwrap();
     assert!(out.status.success(), "{:?}", out);
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let saved = dir.path().canonicalize().unwrap().join("sub.log");
     assert_eq!(v["ok"], true);
     assert_eq!(v["path"], "/log/def.log");
-    assert_eq!(v["saved_as"], saved.to_str().unwrap());
+    assert_saved_at(v["saved_as"].as_str().unwrap(), &dir, "sub.log");
     assert_eq!(v["bytes"], BODY.len());
 
     let out = lox(&dir)
