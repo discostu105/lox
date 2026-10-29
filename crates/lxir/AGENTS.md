@@ -54,4 +54,5 @@ cargo run --bin lxir -- help     # the CLI (also: lox ir help)
 | [docs/connector-db.md](docs/connector-db.md) | connector database: evidence, admission rules |
 | [docs/oracle-wine.md](docs/oracle-wine.md) | save oracle via Loxone Config under Wine: rig + findings |
 | [docs/agents.md](docs/agents.md) | **how agents use the toolchain** |
+| [skills/lxir/SKILL.md](skills/lxir/SKILL.md) | condensed agents.md as a Claude Code skill; keep in sync |
 | [docs/roadmap.md](docs/roadmap.md) | Stufen, open questions |

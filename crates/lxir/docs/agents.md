@@ -4,6 +4,12 @@ Operational guidance for AI agents (and automation generally) authoring
 Loxone logic through this toolchain. The IR exists so you never have to edit
 `.Loxone` XML — and you must not.
 
+A condensed version ships as a Claude Code skill,
+[skills/lxir/SKILL.md](../skills/lxir/SKILL.md): link the directory into
+`~/.claude/skills/` (or a house repository's `.claude/skills/`) and an
+agent there loads it when the task is Loxone logic. `tests/skill.rs`
+keeps its example module valid.
+
 ## Hard rules
 
 1. **Never edit `.Loxone` files directly.** All config changes go through

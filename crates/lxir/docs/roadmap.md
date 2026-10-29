@@ -80,6 +80,8 @@ types) contradict each other. Results and methodology:
       scenarios so solutions carry their own checks.
 - [x] `lxir scan` (2026-10-29): personal data in a config, located but
       never quoted; CI fails on any finding in a committed `.Loxone`.
+- [x] Agent skill (2026-10-29, `skills/lxir/SKILL.md`): agents.md
+      condensed for Claude Code; its example module is under test.
 - [x] `lxir diff --summary` (2026-10-29): the semantic diff as a commit
       message — subject counting the changes per page, body by title and
       port name.

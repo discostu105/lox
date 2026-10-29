@@ -309,6 +309,7 @@ which are the intended consumers of this crate.
 | [docs/connector-db.md](docs/connector-db.md) | The consolidated connector database: methodology, findings, admission rules |
 | [docs/oracle-wine.md](docs/oracle-wine.md) | The save oracle: driving Loxone Config under Wine, and what a save changes |
 | [docs/agents.md](docs/agents.md) | Operational guide for AI agents using the toolchain |
+| [skills/lxir/SKILL.md](skills/lxir/SKILL.md) | The same, condensed as a Claude Code skill (link into `~/.claude/skills/`) |
 | [docs/roadmap.md](docs/roadmap.md) | Stufen −1…4: hardening, templates, expressions, verification, multi-module |
 
 [`AGENTS.md`](AGENTS.md) at the repo root gives agents the build/test
