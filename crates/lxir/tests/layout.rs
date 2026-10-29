@@ -476,3 +476,64 @@ fn a_relayout_brings_blocks_back_onto_the_sheet() {
     let geo = PageGeometry::of(&laid, BESCHATTUNG).unwrap();
     assert!(metrics(&geo).overlaps.is_empty());
 }
+
+/// The example base with the jalousie block dragged right, past the
+/// sheet's edge: the chain feeding it is pulled after it.
+fn jalousie_past_the_edge() -> LoxoneDoc {
+    let base = base();
+    let geo = PageGeometry::of(&base, BESCHATTUNG).unwrap();
+    let jal = geo
+        .objects
+        .iter()
+        .find(|o| o.title == "Beschattung Süd")
+        .unwrap();
+    gui_move(&base, &jal.uuid, 26880, jal.rect.py)
+}
+
+#[test]
+fn placement_keeps_to_the_sheet_where_the_wires_pull_past_it() {
+    let sheet = Layout::at(0, 0, 23808, 16032);
+    // Unbounded, the chain sits beside the jalousie, past the edge.
+    let mut lock = Lockfile::new();
+    let open = compile(&jalousie_past_the_edge(), &module(), &mut lock, &opts()).unwrap();
+    let and = rect(&open, &uuid(&lock, "beschatten"));
+    assert!(!and.within(&sheet), "{and:?}");
+
+    // On A3 it stays on the sheet, and a relayout changes nothing.
+    let mut lock = Lockfile::new();
+    let base = on_a3(&jalousie_past_the_edge());
+    let out = compile(&base, &module(), &mut lock, &opts()).unwrap();
+    let managed: std::collections::BTreeSet<&str> =
+        lock.objects.values().map(|o| o.uuid.as_str()).collect();
+    assert!(
+        lxir::layout::off_sheet(&out, &managed).is_empty(),
+        "{:?}",
+        lxir::layout::off_sheet(&out, &managed)
+    );
+    let and = rect(&out, &uuid(&lock, "beschatten"));
+    assert!(and.within(&sheet), "{and:?}");
+    let laid = compile(&out, &module(), &mut lock, &relayout()).unwrap();
+    assert_eq!(out.to_bytes(), laid.to_bytes());
+}
+
+#[test]
+fn off_sheet_counts_labels_like_render() {
+    // "Temp über 28" reads a value from off the page: its label sits left
+    // of it, so at x 0 the label hangs past the sheet's edge.
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module(), &mut lock, &opts()).unwrap();
+    let temp = uuid(&lock, "temp_hoch");
+    let moved = on_a3(&gui_move(&out, &temp, 0, rect(&out, &temp).py));
+    let managed: std::collections::BTreeSet<&str> =
+        lock.objects.values().map(|o| o.uuid.as_str()).collect();
+    assert_eq!(
+        lxir::layout::off_sheet(&moved, &managed).get("Beschattung"),
+        Some(&vec![temp.clone()])
+    );
+    let geo = PageGeometry::of(&moved, BESCHATTUNG).unwrap();
+    assert!(
+        metrics(&geo)
+            .off_sheet
+            .contains(&"Temp über 28".to_string())
+    );
+}

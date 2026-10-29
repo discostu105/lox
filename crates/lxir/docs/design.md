@@ -1388,16 +1388,20 @@ Anything unverified is an error, not a heuristic:
     to breathe reads better than a cramped one close by.
   - **Past the edge only when nothing fits.** A cluster that fits
     nowhere on the sheet even at the tightest spacing goes where D42
-    put it, at the GUI's spacing. A ref tag goes beside its port only
-    if it stays on the sheet; otherwise it takes the best clear spot on
-    the sheet like a cluster of one.
+    put it, at the GUI's spacing. A ref tag goes beside its port if it
+    stays on the sheet there; otherwise it takes the best clear spot on
+    the sheet like a cluster of one. A tag whose block is past the edge
+    stays beside the block.
   - **Compile names what is past the edge.** After writing, `compile`
     warns per page about managed objects past the sheet (by slug) and
-    names the `--relayout` that lays the page out afresh. Less than a
-    grid unit over is on the sheet: the GUI draws a block as tall as
-    its rows wherever it was dropped, and a GUI-placed block on the
-    kitchen page ends 24 below the title-block line. `render` reports
-    the sheet and the objects off it, and draws its outline.
+    names the `--relayout` that lays the page out afresh. An object is
+    past the edge if its footprint or one of its off-page labels is:
+    the same test as placement's, and the one `render` reports along
+    with the sheet's outline. Less than a grid unit over is on the
+    sheet: the GUI draws a block as tall as its rows wherever it was
+    dropped, and a GUI-placed block on the kitchen page ends 24 below
+    the title-block line. `lox config push` deploys the placement the
+    lock holds and places nothing, so it does not warn.
 
   The A3 page is the limit: Loxone Config offers no larger format. A page
   that is full stays full. Moving logic to a page of its own is a

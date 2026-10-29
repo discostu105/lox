@@ -139,29 +139,34 @@ fn on_sheet(r: &Layout, sheet: &Layout) -> bool {
 }
 
 /// Of the objects with these UUIDs, those drawn past the edge of the
-/// sheet (D49), by the title of their page. Empty when the sheet is
-/// unknown.
+/// sheet (D49), labels included, by the title of their page — what
+/// [`PageGeometry::off_sheet`] says of each page that holds one. Empty
+/// when the sheet is unknown.
 pub fn off_sheet(doc: &LoxoneDoc, uuids: &BTreeSet<&str>) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let Some(sheet) = sheet(doc) else {
+    if sheet(doc).is_none() {
         return out;
-    };
-    for o in doc.objects() {
-        if !uuids.contains(o.uuid.as_str()) {
-            continue;
-        }
-        let Some(r) = doc.element_at(&o.path).and_then(Layout::of_element) else {
+    }
+    let pages: BTreeSet<String> = doc
+        .objects()
+        .into_iter()
+        .filter(|o| uuids.contains(o.uuid.as_str()))
+        .filter_map(|o| {
+            let page = doc.element_at(&o.path[..o.path.len().checked_sub(1)?])?;
+            (page.name == "C" && page.attr("Type") == Some("Page"))
+                .then(|| page.attr("U").map(str::to_string))?
+        })
+        .collect();
+    for page in &pages {
+        let Some(geo) = PageGeometry::of(doc, page) else {
             continue;
         };
-        let page = (1..o.path.len()).rev().find_map(|n| {
-            let el = doc.element_at(&o.path[..n])?;
-            (el.name == "C" && el.attr("Type") == Some("Page"))
-                .then(|| el.attr_decoded("Title").unwrap_or_default().into_owned())
-        });
-        if let Some(page) = page
-            && !on_sheet(&r, &sheet)
-        {
-            out.entry(page).or_default().push(o.uuid);
+        for i in geo.off_sheet() {
+            if uuids.contains(geo.objects[i].uuid.as_str()) {
+                out.entry(geo.title.clone())
+                    .or_default()
+                    .push(geo.objects[i].uuid.clone());
+            }
         }
     }
     out
@@ -681,6 +686,11 @@ pub fn place(
             (!is_ref(other.0) && at.contains_key(&other.0)).then_some(other)
         });
         let (w, h) = geo.objects[t].size;
+        // A tag keeps to the sheet unless its block is past the edge: then
+        // it stays with the block.
+        let bound = geo
+            .sheet
+            .filter(|s| partner.is_none_or(|(o, _)| on_sheet(&at[&o], s)));
         let spot = partner.and_then(|(o, p)| {
             let (x, y) = geo.objects[o].port_at(p, &at[&o]);
             let x = match geo.objects[o].ports[p].side {
@@ -689,7 +699,7 @@ pub fn place(
             };
             let mut r = Layout::at(snap(x), snap(y - ROW / 2), w, h);
             for _ in 0..256 {
-                let on_page = geo.sheet.map_or(r.px >= 0, |s| r.within(&s));
+                let on_page = bound.map_or(r.px >= 0, |s| r.within(&s));
                 if on_page && !hard.iter().any(|o| o.intersects(&r)) {
                     return Some(r);
                 }
@@ -699,7 +709,7 @@ pub fn place(
         });
         let r = spot.unwrap_or_else(|| {
             let rel = BTreeMap::from([(t, Layout::at(0, 0, w, h))]);
-            geo.sheet
+            bound
                 .and_then(|s| settle(geo, &[t], &rel, &room, &at, &hard, &reserved, prev, Some(s)))
                 .or_else(|| settle(geo, &[t], &rel, &room, &at, &hard, &reserved, prev, None))
                 .expect("an unbounded page has room below its content")[&t]
@@ -1299,6 +1309,33 @@ mod tests {
         let r = place(&geo, &[1], &BTreeMap::new())[&1];
         assert!(r.within(&geo.sheet.unwrap()), "{r:?}");
         assert!(!r.intersects(&geo.objects[0].rect), "{r:?}");
+    }
+
+    #[test]
+    fn a_tag_of_a_block_past_the_edge_stays_with_it() {
+        let wall = object("wall", Shape::Large, Layout::at(0, 0, 9600, 4800), &[]);
+        let tag = GeoObject {
+            block_type: "OutputRef".into(),
+            ..object(
+                "r1",
+                Shape::Tag,
+                Layout::at(0, 0, TAG_W, ROW),
+                &[("AI", Side::Left, 0)],
+            )
+        };
+        let geo = PageGeometry {
+            sheet: Some(Layout::at(0, 0, 9600, 4800)),
+            ..page(vec![wall, small("a"), tag], &[((1, 2), (2, 0))])
+        };
+        let placed = place(&geo, &[1, 2], &BTreeMap::new());
+        let (a, r) = (placed[&1], placed[&2]);
+        assert!(!a.within(&geo.sheet.unwrap()), "{a:?}");
+        let (_, y) = geo.objects[1].port_at(2, &a);
+        assert_eq!(
+            (r.px, r.py),
+            (a.px2 + GAP, snap(y - ROW / 2)),
+            "{a:?} {r:?}"
+        );
     }
 
     #[test]
