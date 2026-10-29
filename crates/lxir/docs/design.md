@@ -55,9 +55,9 @@ edit, and records each in the lockfile:
    claim's refs, D43) are recorded in `lock.attr_claims` and restored
    when the claim disappears (D39).
 
-Two declarations write GUI content without recording it: the tile
-programs of a Touch Pure Flex (D41) and the access rights on an NFC Code
-Touch (D49). They own what they declare while they declare it; removed,
+Three declarations write GUI content without recording it: the tile
+programs of a Touch Pure Flex (D41), the access rights on an NFC Code
+Touch (D49) and the recipients of a push notification (D51). They own what they declare while they declare it; removed,
 they leave the last written state in place.
 
 Everything else is somebody else's, and passes through unchanged. One
@@ -1492,6 +1492,42 @@ Anything unverified is an error, not a heuristic:
   them. Past the edge, right of the controllers, only the four wires
   back into them ran right to left (5 backward wires on the page). Above
   them, the four out of them do too (9).
+- **D51 — push notifications from source** (2026-10-29). A push
+  notification is three pieces in the config (loxone-format, *Push
+  notifications*): the `Notification` object under *Messages*, an
+  `OutputRefLM` on a page whose `<LoggerMailer>` child holds the texts
+  and the minimum time, and the recipients as `ACT=` rights on the
+  notification. Logic that should warn someone needed the GUI for all
+  three. Decision:
+  - **The notification stays periphery.** Like a device, Loxone Config
+    creates it; the module names it as an extern `Notification(…)`.
+    Minting it would put objects into the *Messages* tree, which no
+    compile writes.
+  - **The page object is a minted ref** (D33): `OutputRefLM(mirrors:
+    <notification>, AI: …)`. It gets the shape Config gives a fresh
+    one — `Cl="0,0,0"`, no `WF=`, no `LinkRefType=` — and its
+    `mirrors:` must name a `Notification`. Its message is parameters on
+    the block: `On`, `Off` and `MinimumTime` (a duration, compiled to
+    milliseconds; default the GUI's 5 s). An empty `Off` is not
+    written, as Config does. The parameters are compiler-owned like the
+    rest of the block, so the `<LoggerMailer>` is rebuilt each compile.
+  - **Messages are semantics.** The diff compares the attributes of any
+    `<LoggerMailer>` (`message On`, …), and the fingerprint includes
+    them: v5. `lxir drift` accepts a v4 fingerprint recorded before.
+  - **Recipients are a `recipients <notification>` declaration**, D49's
+    machinery with `ACT=` instead of `TIM=`: it owns every `ACT=` on the
+    notification, grants with `ACT="3"` (Config 17.2), keeps an
+    existing `ACT=` of any value (older configs write `1`), revokes by
+    removing `ACT=`, and keeps no lock state. Users and groups are named
+    by title. The *Full access* group is not listed: Config shows its
+    members as inherited recipients and writes nothing for them.
+  - **Not lifted.** Decompile leaves `OutputRefLM` blocks and
+    recipients with the GUI; a module takes them over by declaring
+    them.
+  Validated: oracle session 15 — a house compile with a notification,
+  a recipient and an `OutputRefLM` open+saves with an empty semantic
+  diff. Not covered: whether the Miniserver delivers to a recipient
+  that the uploaded `permissions.bin` does not list.
 - **D52 — documented port facts: units, labels, ranges** (2026-10-29).
   D27 read every time suffix as seconds, which is wrong on the ports
   Loxone keeps in minutes: `AutoJalousie(AutoShadeTime: 2h)` compiled

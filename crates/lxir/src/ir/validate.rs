@@ -7,14 +7,16 @@
 //! two entry points cannot drift apart.
 
 use super::ast::{Module, Value};
-use crate::connectors::{BUILTIN_TYPES, PortDir, attr_params, builtin, file_params};
+use crate::connectors::{
+    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, builtin, file_params, message_params,
+};
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
 
-/// `InputRef`/`OutputRef` — block types whose managed form mirrors
-/// another object (`mirrors:` binding, design.md D33).
+/// `InputRef`/`OutputRef`/`OutputRefLM` — block types whose managed form
+/// mirrors another object (`mirrors:` binding, design.md D33, D51).
 pub(super) fn is_ref_type(block_type: &str) -> bool {
-    matches!(block_type, "InputRef" | "OutputRef")
+    matches!(block_type, "InputRef" | "OutputRef" | "OutputRefLM")
 }
 
 /// The one input port that may be a wire source: the `AI` of an
@@ -73,6 +75,20 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             if attr_params(&block.block_type).contains(&key) {
                 continue;
             }
+            // Message parameters (D51) live on the `<LoggerMailer>` child:
+            // texts, and a duration for `MinimumTime`.
+            if message_params(&block.block_type).contains(&key) {
+                if key == "MinimumTime"
+                    && !matches!(v, Value::Number(_) | Value::Unit { .. } | Value::Ref(_))
+                {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `MinimumTime: {v}` takes a duration \
+                         (`MinimumTime: 1h`, or seconds as a number)",
+                        block.slug
+                    )));
+                }
+                continue;
+            }
             // `mirrors:` on a minted ref names the mirrored object — an
             // identity binding, not a connector (D33).
             if is_ref_type(&block.block_type) && key == "mirrors" {
@@ -107,6 +123,22 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                      in the base instead, use `extern`)",
                     block.slug, block.block_type
                 )));
+            }
+            // A message ref (D51) shows a notification and nothing else.
+            if block.block_type == "OutputRefLM"
+                && let Some(target) = mirrors
+            {
+                let t = module
+                    .externs()
+                    .find(|e| &e.slug == target)
+                    .map(|e| e.block_type.as_str());
+                if t != Some(MESSAGE_REF_TARGET) {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: an OutputRefLM mirrors a push notification — \
+                         `{target}` must be an extern `{MESSAGE_REF_TARGET}(…)`",
+                        block.slug
+                    )));
+                }
             }
             // Oracle session 11: a save rewrites a ref's Title= to the
             // mirrored object's title — a label of our own would be a lie.

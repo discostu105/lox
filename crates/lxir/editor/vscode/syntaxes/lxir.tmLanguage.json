@@ -169,10 +169,10 @@
       ]
     },
     "access": {
-      "comment": "access <code_touch> … end with user/group \"<title>\": \"<schedule>\" grants (D49)",
+      "comment": "access <code_touch> … end with user/group \"<title>\": \"<schedule>\" grants (D49); recipients <notification> … end with user/group \"<title>\" (D51)",
       "patterns": [
         {
-          "match": "^\\s*(access)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
+          "match": "^\\s*(access|recipients)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
           "captures": {
             "1": { "name": "keyword.control.access.lxir" },
             "2": { "name": "variable.other.lxir" }

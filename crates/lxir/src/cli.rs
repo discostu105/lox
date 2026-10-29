@@ -1631,6 +1631,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
         Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v4(&doc) == *recorded {
+        // Recorded before messages joined the projection (D51).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to notification messages — the next \
+             compile records the current form)"
+        );
+        Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v3(&doc) == *recorded {
         // Recorded before tile programs joined the projection (D41).
         println!(

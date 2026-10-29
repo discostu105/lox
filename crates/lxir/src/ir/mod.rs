@@ -34,6 +34,10 @@
 //!     user "<title>": "<schedule>"              extern NfcCodeTouch — every
 //!     group "<title>": "<schedule>"             right on it; titles name the
 //! end                                           base's users and schedules)
+//! recipients <slug>                            (D51: who gets an extern
+//!     user "<title>"                            Notification — `ACT=` on it;
+//!     group "<title>"                           its messages come from
+//! end                                           `OutputRefLM` blocks)
 //! ```
 //!
 //! In a block's argument list, the value decides the meaning: a literal or
@@ -67,9 +71,9 @@ pub use ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl, Binding,
     BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl, ExternDecl, Interval,
     Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef, RemovedDecl,
-    ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, TemplateDecl, TemplateParam,
-    TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value,
-    WireDecl,
+    RightKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, TemplateDecl,
+    TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl,
+    TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{

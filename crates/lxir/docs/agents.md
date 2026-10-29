@@ -213,6 +213,8 @@ it only when it matches what you intended.
 | `no user titled` / `no group titled` / `no access schedule titled` | an `access` grant names nothing in the base | use the title as Loxone Config or the app shows it; create the user, group or schedule there first |
 | `users are titled` / `groups are titled` / `schedules are titled` | several objects share the title an `access` grant names | give them distinct titles in Loxone Config or the app |
 | `not an NFC Code Touch` | `access` on an extern of another type | declare `access` only on an `NfcCodeTouch` extern |
+| `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
+| `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -227,8 +229,9 @@ only on success) — just fix and re-run.
 - The compiler touches only: its managed blocks, wires it drew onto extern
   ports (`<-`), `Def=` values it assigned on extern ports, and the
   title/room/category it claimed on externs (plus that claim's followers),
-  tile programs it declared, and access rights (`TIM=`) on Code Touches
-  with an `access` declaration. Everything else in the config is
+  tile programs it declared, access rights (`TIM=`) on Code Touches
+  with an `access` declaration, and recipients (`ACT=`) of notifications
+  with a `recipients` declaration. Everything else in the config is
   preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

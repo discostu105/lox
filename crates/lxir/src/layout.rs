@@ -195,7 +195,7 @@ impl Shape {
     /// The shape of a block type; unknown types draw large.
     pub fn of_type(block_type: &str) -> Shape {
         match block_type {
-            "InputRef" | "OutputRef" | "Memory" => Shape::Tag,
+            "InputRef" | "OutputRef" | "OutputRefLM" | "Memory" => Shape::Tag,
             "And"
             | "Or"
             | "Not"
@@ -302,7 +302,10 @@ impl GeoObject {
     /// A ref tag: placed beside the port it serves, not in a cluster.
     /// (`Memory` draws as a tag too, but sits in its chain like a block.)
     pub fn is_ref(&self) -> bool {
-        matches!(self.block_type.as_str(), "InputRef" | "OutputRef")
+        matches!(
+            self.block_type.as_str(),
+            "InputRef" | "OutputRef" | "OutputRefLM"
+        )
     }
 
     /// Port offset from the object's top-left corner.

@@ -735,7 +735,7 @@ fn access_declarations_are_checked() {
     let err = |src: &str| Module::parse(src).unwrap_err().to_string();
     assert!(
         err(&format!("{DOOR}access front_door\n\tuser \"alice\"\nend\n"))
-            .contains("expected `user \"<title>\": \"<schedule>\"`")
+            .contains("name the user and the access schedule by their titles (`user \"<title>\": \"<schedule>\"`)")
     );
     assert!(err(&format!("{DOOR}access front_door\n")).contains("unclosed `access front_door`"));
     assert!(err("access\n").contains("expected `access <slug>`"));

@@ -1,4 +1,5 @@
-//! Access rights on NFC Code Touch blocks (D49).
+//! Access rights on NFC Code Touch blocks (D49) and the recipients of push
+//! notifications (D51).
 //!
 //! A user or group may open a Code Touch when its `<PH>` list has a
 //! `<PRM REF="<block>" TIM="<schedule>"/>`: the right is on the block,
@@ -15,13 +16,19 @@
 //! declaration keeps no lock state: withdrawing it leaves the rights as
 //! they are.
 //!
+//! A `recipients <slug>` declaration does the same for `ACT=` on a push
+//! notification (`Notification`): a user or group with `ACT=` on it gets
+//! the message. A new recipient gets `ACT="3"`, the value Loxone Config 17.2
+//! writes (oracle session 15); an `ACT=` already there counts whatever its
+//! value (older configs have `ACT="1"`) and stays.
+//!
 //! The edit is the one Loxone Config makes (docs/loxone-format.md, *Users,
 //! groups and access rights*): a new right is a `<PRM REF TIM/>` appended
 //! to the list, `NUM=` counts the list, and nothing else of the user or
 //! group changes — not even `LastEdit=`. A declaration that matches the
 //! config writes nothing, so compiling it reproduces the bytes.
 
-use super::ast::{ACCESS_BLOCK_TYPE, AccessDecl, Module, PrincipalKind};
+use super::ast::{ACCESS_BLOCK_TYPE, AccessDecl, Module, PrincipalKind, RightKind};
 use super::lint::{LintFinding, LintKind};
 use crate::access::AccessModel;
 use crate::doc::LoxoneDoc;
@@ -29,12 +36,16 @@ use crate::error::{Error, Result};
 use crate::xml::{Attr, Element, Node};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The access rights one declaration wants on its block: principal UUID →
-/// schedule UUID.
+/// The rights one declaration wants on its block: principal UUID → the
+/// value of `attr` (the schedule UUID for `TIM=`, `3` for `ACT=`).
 struct Plan {
     block: String,
+    attr: &'static str,
     want: BTreeMap<String, String>,
 }
+
+/// The `ACT=` Loxone Config 17.2 writes for a new recipient.
+const RECIPIENT_ACT: &str = "3";
 
 pub(crate) fn apply(
     doc: &mut LoxoneDoc,
@@ -55,19 +66,21 @@ pub(crate) fn apply(
     let mut plans = Vec::new();
     let mut claimed: BTreeMap<&str, &str> = BTreeMap::new();
     for a in module.access_decls() {
+        let kw = a.right.keyword();
         let block = uuid_of[&a.slug].as_str();
         if let Some(other) = claimed.insert(block, &a.slug) {
             return Err(Error::Compile(format!(
-                "`access {}` and `access {other}` are the same block ({block}) — keep one",
+                "`{kw} {}` and `{kw} {other}` are the same block ({block}) — keep one",
                 a.slug
             )));
         }
         let ty = types.get(block).map_or("", String::as_str);
-        if ty != ACCESS_BLOCK_TYPE {
+        if ty != a.right.block_type() {
             return Err(Error::Compile(format!(
-                "`access {}`: the block ({block}) is a `{ty}`, not an NFC Code Touch \
-                 (`{ACCESS_BLOCK_TYPE}`)",
-                a.slug
+                "`{kw} {}`: the block ({block}) is a `{ty}`, not {} (`{}`)",
+                a.slug,
+                a.right.block_noun(),
+                a.right.block_type()
             )));
         }
         plans.push(resolve(a, block, &model)?);
@@ -94,7 +107,7 @@ pub(crate) fn apply(
 }
 
 fn resolve(a: &AccessDecl, block: &str, model: &AccessModel) -> Result<Plan> {
-    let ctx = format!("`access {}`", a.slug);
+    let ctx = format!("`{} {}`", a.right.keyword(), a.slug);
     let mut want = BTreeMap::new();
     for g in a.grants() {
         let (what, candidates): (&str, Vec<(&str, Option<&str>)>) = match g.kind {
@@ -116,16 +129,26 @@ fn resolve(a: &AccessDecl, block: &str, model: &AccessModel) -> Result<Plan> {
             ),
         };
         let principal = by_title(&ctx, what, &g.principal, &candidates)?;
-        let schedules: Vec<(&str, Option<&str>)> = model
-            .schedules
-            .iter()
-            .map(|s| (s.uuid.as_str(), s.title.as_deref()))
-            .collect();
-        let schedule = by_title(&ctx, "access schedule", &g.schedule, &schedules)?;
-        want.insert(principal.to_string(), schedule.to_string());
+        let value = match (&a.right, &g.schedule) {
+            (RightKind::Access, Some(schedule)) => {
+                let schedules: Vec<(&str, Option<&str>)> = model
+                    .schedules
+                    .iter()
+                    .map(|s| (s.uuid.as_str(), s.title.as_deref()))
+                    .collect();
+                by_title(&ctx, "access schedule", schedule, &schedules)?
+            }
+            (RightKind::Recipients, None) => RECIPIENT_ACT,
+            _ => unreachable!("Module::validate checks schedules against the right"),
+        };
+        want.insert(principal.to_string(), value.to_string());
     }
     Ok(Plan {
         block: block.to_string(),
+        attr: match a.right {
+            RightKind::Access => "TIM",
+            RightKind::Recipients => "ACT",
+        },
         want,
     })
 }
@@ -181,8 +204,8 @@ fn rewrite(el: &mut Element, principal: &str, plans: &[Plan]) -> Result<()> {
                     .collect();
                 if hits.len() > 1 {
                     return Err(Error::Compile(format!(
-                        "{} \"{}\" ({principal}) lists {} rights on the Code Touch {} — \
-                         Loxone Config writes one; fix it there before declaring access",
+                        "{} \"{}\" ({principal}) lists {} rights on the block {} — Loxone \
+                         Config writes one; fix it there before declaring its rights",
                         el.attr("Type").unwrap_or("object"),
                         el.attr_decoded("Title").unwrap_or_default(),
                         hits.len(),
@@ -197,11 +220,13 @@ fn rewrite(el: &mut Element, principal: &str, plans: &[Plan]) -> Result<()> {
             (Some(i), want) => {
                 let ph = element(&mut el.children[ph.unwrap()]);
                 let p = element(&mut ph.children[i]);
-                match (p.attr("TIM"), want) {
+                match (p.attr(plan.attr), want) {
                     (Some(have), Some(want)) if have == want => continue,
-                    (_, Some(want)) => set_tim(p, want),
+                    // A recipient is a recipient, whatever its `ACT=` says.
+                    (Some(_), Some(_)) if plan.attr == "ACT" => continue,
+                    (_, Some(want)) => set_right(p, plan.attr, want),
                     (Some(_), None) => {
-                        p.remove_attr("TIM");
+                        p.remove_attr(plan.attr);
                         // Nothing but the reference left: the right is gone.
                         if p.attrs.iter().all(|a| a.name == "REF") {
                             ph.children.remove(i);
@@ -222,7 +247,7 @@ fn rewrite(el: &mut Element, principal: &str, plans: &[Plan]) -> Result<()> {
                 let ph = element(&mut el.children[ph]);
                 let mut p = Element::new("PRM");
                 p.set_attr("REF", &plan.block);
-                p.set_attr("TIM", want);
+                p.set_attr(plan.attr, want);
                 ph.push_child(p);
                 changed = true;
             }
@@ -261,11 +286,11 @@ fn element(n: &mut Node) -> &mut Element {
     }
 }
 
-/// `TIM=` right after `REF=`, the order Loxone Config writes
-/// (`REF TIM ACT`).
-fn set_tim(p: &mut Element, schedule: &str) {
-    if p.attr("TIM").is_some() {
-        p.set_attr("TIM", schedule);
+/// `attr` in the order Loxone Config writes (`REF TIM ACT`): `TIM=`
+/// right after `REF=`, `ACT=` last.
+fn set_right(p: &mut Element, attr: &str, value: &str) {
+    if p.attr(attr).is_some() || attr == "ACT" {
+        p.set_attr(attr, value);
         return;
     }
     let at = p
@@ -276,8 +301,8 @@ fn set_tim(p: &mut Element, schedule: &str) {
     p.attrs.insert(
         at,
         Attr {
-            name: "TIM".into(),
-            value: crate::xml::escape(schedule).into_owned(),
+            name: attr.into(),
+            value: crate::xml::escape(value).into_owned(),
         },
     );
 }

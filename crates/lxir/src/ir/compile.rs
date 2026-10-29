@@ -33,8 +33,8 @@
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
 use crate::connectors::{
-    PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, attr_params, builtin, carried_attrs,
-    container_type, ref_link_type,
+    MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, attr_params, builtin,
+    carried_attrs, container_type, message_params, ref_link_type,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
@@ -682,12 +682,30 @@ pub fn compile(
     let resolve = |v: &Value| -> Result<String> { Ok(module.resolve_value(v)?.to_string()) };
     let mut managed_defs: BTreeMap<(String, String), String> = BTreeMap::new();
     let mut managed_attrs: BTreeMap<(String, String), String> = BTreeMap::new();
+    // Message parameters of an `OutputRefLM` (D51), written onto its
+    // `<LoggerMailer>` child.
+    let mut managed_msgs: BTreeMap<(String, String), String> = BTreeMap::new();
     for block in module.blocks() {
         let attrs = attr_params(&block.block_type);
         for (k, v) in block.params() {
             // `mirrors:` is an identity binding, not a value (D33) —
             // resolved separately below.
             if is_ref_type(&block.block_type) && k == "mirrors" {
+                continue;
+            }
+            if message_params(&block.block_type).contains(&k) {
+                let value = resolve(v)?;
+                let value = if k == "MinimumTime" {
+                    seconds_to_ms(&value).ok_or_else(|| {
+                        Error::Compile(format!(
+                            "block `{}`: `MinimumTime: {v}` is not a duration",
+                            block.slug
+                        ))
+                    })?
+                } else {
+                    value
+                };
+                managed_msgs.insert((block.slug.clone(), k.to_string()), value);
                 continue;
             }
             let target = if attrs.contains(&k) {
@@ -708,7 +726,8 @@ pub fn compile(
     //     picks the GUI's type-registry code.
     struct Mirror {
         ref_uuid: String,
-        link_type: u32,
+        /// `None` on a message ref (D51), which carries no code.
+        link_type: Option<u32>,
         value: RefValue,
         /// The GUI derives a ref's `Title=` from its target (oracle
         /// session 11: a save rewrites whatever else stands there) — the
@@ -764,15 +783,27 @@ pub fn compile(
                 block.slug
             )));
         };
-        let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
-            Error::Compile(format!(
-                "block `{}` mirrors `{target}` of type `{target_type}`, which has \
-                 no verified `LinkRefType=` code yet — extend \
-                 connectors::ref_link_type from corpus evidence before minting \
-                 a ref of it",
-                block.slug
-            ))
-        })?;
+        let (code, value) = if block.block_type == "OutputRefLM" {
+            if target_type != MESSAGE_REF_TARGET {
+                return Err(Error::Compile(format!(
+                    "block `{}` mirrors `{target}` of type `{target_type}` — an \
+                     OutputRefLM mirrors a `{MESSAGE_REF_TARGET}`",
+                    block.slug
+                )));
+            }
+            (None, RefValue::Digital)
+        } else {
+            let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
+                Error::Compile(format!(
+                    "block `{}` mirrors `{target}` of type `{target_type}`, which has \
+                     no verified `LinkRefType=` code yet — extend \
+                     connectors::ref_link_type from corpus evidence before minting \
+                     a ref of it",
+                    block.slug
+                ))
+            })?;
+            (Some(code), value)
+        };
         mirror_of.insert(
             block.slug.clone(),
             Mirror {
@@ -860,9 +891,13 @@ pub fn compile(
         } else {
             "238,238,238"
         };
+        // A fresh message ref (D51) gets what Loxone Config gives one:
+        // black, and no `WF=`.
+        let message_ref = block.block_type == "OutputRefLM";
         match (res, carried("Cl")) {
             (Some(_), Some(v)) => el.set_attr_raw("Cl", v),
             (Some(_), None) => {}
+            (None, _) if message_ref => el.set_attr("Cl", "0,0,0"),
             (None, _) => el.set_attr("Cl", cl),
         }
         el.set_attr("Nio", &plan.keys.len().to_string());
@@ -878,6 +913,7 @@ pub fn compile(
         match (res, carried("WF")) {
             (Some(_), Some(v)) => el.set_attr_raw("WF", v),
             (Some(_), None) => {}
+            (None, _) if message_ref => {}
             (None, _) => el.set_attr("WF", wf),
         }
         if let Some(m) = mirror_of.get(&block.slug) {
@@ -886,7 +922,9 @@ pub fn compile(
                 RefValue::Analog => el.set_attr("Analog", "true"),
                 RefValue::Text => el.set_attr("Text", "true"),
             }
-            el.set_attr("LinkRefType", &m.link_type.to_string());
+            if let Some(code) = m.link_type {
+                el.set_attr("LinkRefType", &code.to_string());
+            }
         }
         if block.block_type == "VirtualIn" {
             virtual_in_attrs(&mut el, &block.slug, &managed_attrs, res)?;
@@ -942,6 +980,26 @@ pub fn compile(
             }
             co.set_attr("U", &plan.ports[key]);
             el.push_child(co);
+        }
+        // The message of a message ref (D51) follows its connectors, as
+        // Loxone Config writes it: the notification, the texts it sends on
+        // and off (an empty one is left out), the least time between two
+        // messages, and `NL="1"`, which every notification carries.
+        if message_ref && let Some(m) = mirror_of.get(&block.slug) {
+            let msg = |k: &str| managed_msgs.get(&(block.slug.clone(), k.to_string()));
+            let mut lm = Element::new("LoggerMailer");
+            lm.set_attr("RefNotification", &m.ref_uuid);
+            for k in ["On", "Off"] {
+                if let Some(text) = msg(k).filter(|t| !t.is_empty()) {
+                    lm.set_attr(k, text);
+                }
+            }
+            lm.set_attr(
+                "MinimumTime",
+                msg("MinimumTime").map_or(DEFAULT_MINIMUM_TIME_MS, String::as_str),
+            );
+            lm.set_attr("NL", "1");
+            el.push_child(lm);
         }
         if let Some(r) = res {
             for c in &r.children {
@@ -1028,7 +1086,10 @@ pub fn compile(
     let mut aq_of_outputref: BTreeMap<String, MirrorRoute> = BTreeMap::new();
     for o in &routed_objects {
         if managed_uuids.contains(o.uuid.as_str())
-            || !matches!(o.block_type.as_str(), "InputRef" | "OutputRef")
+            || !matches!(
+                o.block_type.as_str(),
+                "InputRef" | "OutputRef" | "OutputRefLM"
+            )
         {
             continue;
         }
@@ -1715,9 +1776,12 @@ fn resolve_externs(
     for ext in plain.into_iter().chain(mirrored) {
         let mirror_uuid: Option<String> = match &ext.match_spec {
             MatchSpec::Mirrors(target) => {
-                if !matches!(ext.block_type.as_str(), "InputRef" | "OutputRef") {
+                if !matches!(
+                    ext.block_type.as_str(),
+                    "InputRef" | "OutputRef" | "OutputRefLM"
+                ) {
                     return Err(Error::Compile(format!(
-                        "extern `{}`: `mirrors:` applies to InputRef/OutputRef only, \
+                        "extern `{}`: `mirrors:` applies to InputRef/OutputRef/OutputRefLM only, \
                          not {}",
                         ext.slug, ext.block_type
                     )));
@@ -2306,6 +2370,18 @@ fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<S
                 .join(", ")
         ))),
     }
+}
+
+/// `MinimumTime=` of a message ref without a binding: Loxone Config's
+/// default, 5 s (the GUI writes it for a new block; 53 corpus
+/// `<LoggerMailer>` elements carry it).
+const DEFAULT_MINIMUM_TIME_MS: &str = "5000";
+
+/// A duration in seconds, as the IR resolves it (D27), in the whole
+/// milliseconds `MinimumTime=` stores.
+fn seconds_to_ms(seconds: &str) -> Option<String> {
+    let s: f64 = seconds.parse().ok()?;
+    (s.is_finite() && s >= 0.0).then(|| format!("{}", (s * 1000.0).round() as u64))
 }
 
 #[cfg(test)]
