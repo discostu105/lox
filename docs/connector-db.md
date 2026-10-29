@@ -236,8 +236,10 @@ type — no cross-type collisions):
   blocks, edited in the GUI's central dialog (the `Modes=` class).
 - `Code=`/`Task=` on Code16 — it is the PicoC *program block*; the
   program source is GUI-authored logic like the DayTimer `<Entry>`
-  schedule. Promoting `Code` to an attribute parameter (the `Formula=`
-  precedent) is future work.
+  schedule. Since D40 `Code` is also an attribute parameter (the
+  `Formula=` precedent): `Code: file("prog.c")` claims it from source,
+  and an unclaimed program is still carried verbatim. `Task=` stays
+  GUI-owned.
 
 And one rule extension, **D20** ([design.md](design.md)): an
 `Inv=`-carrying connector is GUI-owned as a whole — its `<Co>` is

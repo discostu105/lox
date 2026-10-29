@@ -472,9 +472,9 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
         let known = KNOWN_ATTRS.contains(&a.name.as_str())
             || GUI_OWNED_ATTRS.contains(&a.name.as_str())
             || attrs.contains(&a.name.as_str())
-            // Validity state travels with attribute parameters (observed:
+            // Validity state travels with the formula (observed:
             // Valid="false" on every Formula=); the rebuild re-emits it.
-            || (a.name == "Valid" && !attrs.is_empty());
+            || (a.name == "Valid" && o.block_type == "Formula");
         if !known {
             return Err(format!(
                 "attribute `{}=\"{}\"` is not understood by the rebuild and would be lost",

@@ -63,6 +63,10 @@ in source: `sensor.title = "Raumklima Bad"`, `sensor.room = "Bad"`,
 room/category binding — and a room change carries along the device's
 inputs and outputs that shared its room (D39).
 
+PicoC programs live in their own files: `hue = Code16("Hue", Code:
+file("hue.c"), AI1: rgb.AQ)` compiles the file into the program block,
+written the way Loxone Config writes it (D40).
+
 ## Why
 
 A Miniserver's entire behavior lives in one opaque `.Loxone` XML file,

@@ -1095,6 +1095,23 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
         [Tok::Ident(name)] if !matches!(name.as_str(), "and" | "or" | "not") => {
             BindingKind::Param(Value::Ref(name.clone()))
         }
+        // `file("hue.c")` — program text from a file (D40); validate
+        // decides which ports may take it.
+        [Tok::Ident(f), Tok::LParen, Tok::Str(path), Tok::RParen] if f == "file" => {
+            if path.is_empty() {
+                return Err(err(format!("`{port}: file(\"\")` names no file")));
+            }
+            BindingKind::Param(Value::File {
+                path: path.clone(),
+                text: None,
+            })
+        }
+        [Tok::Ident(f), Tok::LParen, ..] if f == "file" => {
+            return Err(err(format!(
+                "expected `{port}: file(\"<path>\")` — one quoted path, relative to \
+                 this .lxir file"
+            )));
+        }
         [Tok::Ident(slug), Tok::Dot, Tok::Ident(src_port)] => BindingKind::Wire(PortRef {
             slug: slug.clone(),
             port: src_port.clone(),

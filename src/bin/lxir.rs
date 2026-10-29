@@ -253,11 +253,11 @@ fn load_module(path: &str) -> Result<Module, (String, lxir::Error)> {
             let name = f.display().to_string();
             let src =
                 std::fs::read_to_string(&f).map_err(|e| (name.clone(), lxir::Error::Io(e)))?;
-            items.extend(
-                Module::parse_fragment(&src)
-                    .map_err(|e| (name.clone(), e))?
-                    .items,
-            );
+            let mut fragment = Module::parse_fragment(&src).map_err(|e| (name.clone(), e))?;
+            fragment
+                .load_files(fragment_dir(&f))
+                .map_err(|e| (name.clone(), e))?;
+            items.extend(fragment.items);
         }
         let module = Module { items };
         // Validate the expanded view: module-level statements may reference
@@ -271,8 +271,18 @@ fn load_module(path: &str) -> Result<Module, (String, lxir::Error)> {
     } else {
         let src =
             std::fs::read_to_string(path).map_err(|e| (path.to_string(), lxir::Error::Io(e)))?;
-        Module::parse(&src).map_err(|e| (path.to_string(), e))
+        let mut module = Module::parse(&src).map_err(|e| (path.to_string(), e))?;
+        module
+            .load_files(fragment_dir(p))
+            .map_err(|e| (path.to_string(), e))?;
+        Ok(module)
     }
+}
+
+/// The directory `file("…")` paths in a `.lxir` file resolve against
+/// (D40): the file's own directory.
+fn fragment_dir(file: &Path) -> &Path {
+    file.parent().unwrap_or(Path::new("."))
 }
 
 fn read_module(path: &str) -> Result<Module, AnyError> {
@@ -293,11 +303,12 @@ fn read_module_lenient(path: &str) -> Result<Module, AnyError> {
     };
     for f in files {
         let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
-        items.extend(
-            Module::parse_fragment(&src)
-                .map_err(|e| format!("{}: {e}", f.display()))?
-                .items,
-        );
+        let mut fragment =
+            Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
+        fragment
+            .load_files(fragment_dir(&f))
+            .map_err(|e| format!("{}: {e}", f.display()))?;
+        items.extend(fragment.items);
     }
     Ok(Module { items })
 }
@@ -1327,6 +1338,18 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
                 continue;
             }
         }
+        // Program text (`Code=`, D40) — a line diff, not two blobs.
+        if lxir::connectors::file_params(&p.block_type).contains(&p.port_key.as_str()) {
+            println!(
+                "* {} {}.{} program changed:",
+                p.block_type, p.object_uuid, p.port_key
+            );
+            let (from, to) = (p.from.as_deref(), p.to.as_deref());
+            for line in lxir::diff::text_changes(from.unwrap_or(""), to.unwrap_or("")) {
+                println!("    {line}");
+            }
+            continue;
+        }
         println!(
             "* {} {}.{}: {:?} -> {:?}",
             p.block_type, p.object_uuid, p.port_key, p.from, p.to
@@ -1397,9 +1420,44 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         )
         .into());
     };
+    // Numeric-reference text is a foreign writer's trace (Loxone reads it
+    // literally), in sync or not — a program can sit collapsed in a
+    // config that nobody has touched since (docs/loxone-format.md).
+    let mut refs = doc.char_ref_attrs();
+    // Logic first — a collapsed program or rule payload outranks a
+    // garbled description.
+    refs.sort_by_key(|(_, attr)| !matches!(attr.as_str(), "Code" | "APC"));
+    if !refs.is_empty() {
+        let shown: Vec<String> = refs
+            .iter()
+            .take(5)
+            .map(|(who, attr)| format!("{who:?}.{attr}"))
+            .collect();
+        let more = refs.len().saturating_sub(shown.len());
+        println!(
+            "note: {config} has numeric character references as literal text in \
+             {} attribute(s) ({}{}) — Loxone reads them verbatim, so the \
+             line breaks there are gone; see docs/loxone-format.md",
+            refs.len(),
+            shown.join(", "),
+            if more > 0 {
+                format!(", +{more} more")
+            } else {
+                String::new()
+            }
+        );
+    }
     let current = lxir::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v2(&doc) == *recorded {
+        // Recorded before program text joined the projection (D40).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to program code — the next compile records \
+             the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v1(&doc) == *recorded {
         // Recorded before room/category bindings joined the projection

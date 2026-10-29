@@ -25,6 +25,17 @@
     ],
     "description": "Managed logic block with label, input wire, and parameter"
   },
+  "program": {
+    "prefix": "program",
+    "body": [
+      "${1:slug} = Code16(",
+      "\t\"${2:Label}\",",
+      "\tCode: file(\"${3:program.c}\"),",
+      "\tAI1: ${4:source.AQ},",
+      ")"
+    ],
+    "description": "PicoC program block; the program text comes from a file next to this .lxir file (D40)"
+  },
   "template": {
     "prefix": "template",
     "body": [

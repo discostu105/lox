@@ -945,3 +945,56 @@ Anything unverified is an error, not a heuristic:
   replace, and Loxone Config saves the output without a semantic
   change. Not covered yet: membership lists such as the smoke alarm's
   device list, which live in the alarm block, not in the device.
+- **D40 — program code from source; numeric character references are
+  text** (2026-10-29). The house's Hue program block (Code16 "Philipps
+  Hue Steuerung", PicoC that PUTs light states to the Hue bridge) had
+  done nothing since late August. The first push on 2026-08-25 went
+  through an XML writer that encoded the program's line breaks as
+  `&#xA;`. Loxone Config does not decode numeric character references:
+  its next save (2026-08-28) re-escaped the ampersand, `&amp;#xA;`, and
+  the 503-line program became one line that starts with `//`, a single
+  comment. The same save damaged two `AutopilotRule` `APC=` payloads
+  (now invalid JSON) and ten Modbus `NDOC=` texts. lxir could neither
+  see nor repair it: `Code=` was D19 residue outside the diff, and
+  `xml::unescape` decoded numeric references, so lxir read those
+  attributes differently from Loxone. Decision:
+  - **Numeric character references are text.** `xml::unescape` decodes
+    only the five named entities and keeps `&#…;` verbatim, which is
+    what Loxone reads. No config in the 133-file corpus contains one,
+    so no GUI-written content reads differently. `lxir drift` now
+    starts with a note listing every attribute that holds one
+    (`LoxoneDoc::char_ref_attrs`, program code and `APC=` first).
+  - **`Code: file("prog.c")`** on Code16 is an attribute parameter, the
+    D18 `Formula:` precedent. A PicoC program is hundreds of lines,
+    which the line-oriented IR cannot hold inline, so the value comes
+    from a file. The path is relative to the `.lxir` file that names
+    it and is read when the module loads (`Module::load_files`). CRLF
+    is normalized to LF, and the text is written the way Loxone Config
+    writes it: raw LF line breaks and the five entities. `file(…)`
+    binds only file parameters (`connectors::file_params`, Code16
+    `Code` so far); anywhere else it is an error. `Task=` stays
+    GUI-owned.
+  - **A GUI-owned attribute parameter is a claim.** `Code` stays in
+    D19's carried set: unclaimed, it is carried verbatim from the base,
+    damage included. Claimed, the source text replaces the carried
+    copy. A withdrawn claim hands the program back to the GUI and
+    needs no tombstone, because the base holds the last pushed text.
+    Decompile never lifts `Code`: a decompiled module writes no files,
+    and a program inlined into the view would be unreadable. Adoption
+    therefore leaves the program with the GUI until an author moves it
+    into a file on purpose. Adopt accepts the `Valid=` companion only
+    on `Formula`.
+  - **The diff and fingerprint see program text.** A `Code` change is
+    a param change, printed as a line diff (`diff::text_changes`:
+    common prefix and suffix trimmed, at most eight lines per side).
+    The fingerprint moves to v3 (`lxir-fingerprint-v3`) and includes
+    program text. `lxir drift` still accepts a v2 fingerprint and notes
+    that it is blind to program code; the next compile records v3. The
+    lockfile format is unchanged.
+  Validated on the real config: compiling the house modules with the
+  program in `philipps_hue_steuerung.c` reproduces the Loxone-written
+  `Code=` from before 2026-08-25 byte for byte, every byte outside that
+  attribute equals the base, and the semantic diff shows exactly one
+  change, the program going from 1 line back to 503. The damaged
+  `APC=` and `NDOC=` attributes are still not authorable: they need a
+  Loxone Config fix, and the drift note keeps them visible until then.

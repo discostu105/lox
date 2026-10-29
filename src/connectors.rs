@@ -534,9 +534,25 @@ pub const BUILTIN_TYPES: &[&str] = &[
 /// list). Every observed `Formula=` attribute is accompanied by
 /// `Valid="false"` (the GUI revalidates on load); the compiler emits that
 /// pair together.
+///
+/// An attribute parameter that is also GUI-owned (`Code=` on Code16, see
+/// [`crate::doc::GUI_OWNED_ATTRS`]) is a *claim* (D40): carried verbatim
+/// from the base until the source binds it, written from source while it
+/// does. Decompile never lifts it, so adopting leaves it with the GUI.
 pub fn attr_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "Formula" => &["Formula"],
+        "Code16" => &["Code"],
+        _ => &[],
+    }
+}
+
+/// Attribute parameters holding program text — the only bindings that
+/// take a `file("…")` value (D40): a PicoC program is hundreds of lines,
+/// which the line-oriented IR cannot hold inline.
+pub fn file_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "Code16" => &["Code"],
         _ => &[],
     }
 }

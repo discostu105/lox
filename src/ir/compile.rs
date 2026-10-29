@@ -719,10 +719,13 @@ pub fn compile(
             for (n, v) in &r.attrs {
                 // On a ref block the mirror identity is compiler-owned
                 // (recomputed from `mirrors:` above) — carrying the base's
-                // copy verbatim would clobber a retarget.
+                // copy verbatim would clobber a retarget. A GUI-owned
+                // attribute the source binds (`Code:`, D40) was written
+                // above; the claim wins over the carried copy.
                 let compiler_owned = matches!(n.as_str(), "Cl" | "LtE" | "WF")
                     || (is_ref_type(&block.block_type)
-                        && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog"));
+                        && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog"))
+                    || managed_attrs.contains_key(&(block.slug.clone(), n.clone()));
                 if !compiler_owned {
                     el.set_attr_raw(n, v);
                 }
