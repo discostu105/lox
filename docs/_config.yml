@@ -10,6 +10,7 @@ aux_links:
 nav_enabled: true
 
 heading_anchors: true
+enable_copy_code_button: true
 
 back_to_top: true
 back_to_top_text: "Back to top"

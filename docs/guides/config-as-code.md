@@ -81,7 +81,7 @@ base   = "base.Loxone"       # the deployed config (required)
 module = "pages"             # a .lxir file or a directory of them (required)
 lock   = "lxir.lock.json"    # default: lxir.lock.json
 out    = "out.Loxone"        # default: out.Loxone
-serial = "504F94112233"      # stamped into minted UUIDs; push checks it against the Miniserver
+serial = "504F94112233"      # in minted UUIDs; push checks it
 ```
 
 Then start in one of two ways:
@@ -91,7 +91,8 @@ Then start in one of two ways:
 lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json
 
 # …or adopt one block, e.g. one you just drew in Loxone Config
-lox ir adopt base.Loxone --uuid <uuid> --as stiegenlicht --module pages --lock lxir.lock.json
+lox ir adopt base.Loxone --uuid <uuid> --as stiegenlicht \
+    --module pages --lock lxir.lock.json
 ```
 
 Or write a new page from scratch in `pages/`. Find UUIDs and names with `lox config find` and

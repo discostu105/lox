@@ -1,4 +1,7 @@
-// Custom color scheme for lox docs — modern dark theme with green accents
+// lox docs: just-the-docs' dark scheme (dark syntax highlighting, callouts, search)
+// with a GitHub-dark palette and green accents on top.
+@import "./color_schemes/dark";
+
 $body-background-color: #0d1117;
 $sidebar-color: #0d1117;
 $body-text-color: #c9d1d9;
@@ -6,8 +9,10 @@ $body-heading-color: #e6edf3;
 $nav-child-link-color: #8b949e;
 $link-color: #58a6ff;
 $btn-primary-color: #22c55e;
+$base-button-color: #161b22;
 $code-background-color: #161b22;
 $search-background-color: #161b22;
-$table-background-color: #161b22;
-$feedback-color: darken($link-color, 10%);
+$search-result-preview-color: #8b949e;
+$table-background-color: #0d1117;
+$feedback-color: #161b22;
 $border-color: #21262d;
