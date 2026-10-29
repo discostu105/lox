@@ -26,6 +26,10 @@
 //! or port keys cannot be written as language identifiers stay raw and
 //! their wires are not shown. The report counts what was not lifted.
 //!
+//! Access rights on NFC Code Touch blocks lift into `access` declarations
+//! (D49), in both scopes, with an extern for every Code Touch that has
+//! any: adopting a config takes its access over unchanged.
+//!
 //! Match specs for externs prefer stability over readability:
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
@@ -34,8 +38,8 @@ use crate::connectors::{BUILTIN_TYPES, attr_params};
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
-    ArgItem, Binding, BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl,
-    PortRef, Value, WireDecl,
+    ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
+    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, Value, WireDecl,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -175,6 +179,9 @@ pub(super) struct Lift {
     /// Automatic Designer rule summaries (full view only): extern object
     /// index → `#` comment lines rendered from the rule's `APC=` payload.
     rule_notes: BTreeMap<usize, Vec<String>>,
+    /// The `access` declaration of each NFC Code Touch extern with access
+    /// rights (D49), or why its rights cannot be written as one.
+    access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>>,
 }
 
 /// One page's (or the periphery's) share of the lifted items, as indexes
@@ -423,6 +430,21 @@ impl Lift {
             touched.push((fi, fk, ti, tk));
         }
 
+        // NFC Code Touch blocks with access rights (D49), in both scopes:
+        // the `access` declaration needs the block as an extern.
+        let access = crate::access::AccessModel::read(doc);
+        let rights = access.access_rights();
+        let mut with_rights: Vec<usize> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type == ACCESS_BLOCK_TYPE && rights.iter().any(|r| r.target == o.uuid) {
+                with_rights.push(i);
+                if !lifted[i] {
+                    lifted[i] = true;
+                    externs.push(i);
+                }
+            }
+        }
+
         // Slug assignment: managed first (document order), then externs
         // (seed order, then order of first wire reference), all in one
         // namespace.
@@ -508,6 +530,14 @@ impl Lift {
                         },
                     },
                 )
+            })
+            .collect();
+
+        let access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>> = with_rights
+            .iter()
+            .map(|&i| {
+                let slug = &slug_of[&objects[i].uuid];
+                (i, access_decl(&access, &rights, &objects[i].uuid, slug))
             })
             .collect();
 
@@ -700,6 +730,7 @@ impl Lift {
             ref_wires_folded,
             default_params_elided,
             rule_notes,
+            access_decls,
         }
     }
 
@@ -713,6 +744,21 @@ impl Lift {
     fn push_rule_notes(&self, obj: usize, items: &mut Vec<Item>) {
         if let Some(lines) = self.rule_notes.get(&obj) {
             items.extend(lines.iter().map(|l| Item::Comment(format!(" {l}"))));
+        }
+    }
+
+    /// The `access` declarations of the given externs (D49); a block whose
+    /// rights cannot be written as one gets a comment saying why.
+    fn push_access(&self, externs: &[usize], items: &mut Vec<Item>) {
+        for i in externs {
+            match self.access_decls.get(i) {
+                Some(Ok(decl)) => items.push(Item::Access(decl.clone())),
+                Some(Err(why)) => items.push(Item::Comment(format!(
+                    " access {}: not lifted — {why}",
+                    self.slug_of[&self.objects[*i].uuid]
+                ))),
+                None => {}
+            }
         }
     }
 
@@ -766,6 +812,7 @@ impl Lift {
         for &wi in &b.wires {
             items.push(Item::Wire(self.wires[wi].0.clone()));
         }
+        self.push_access(&b.externs, &mut items);
         items
     }
 
@@ -879,6 +926,7 @@ impl Lift {
             for &wi in &b.wires {
                 items.push(Item::Wire(self.wires[wi].0.clone()));
             }
+            self.push_access(&b.externs, &mut items);
 
             let module = Module { items };
             module.validate()?;
@@ -906,6 +954,71 @@ impl Lift {
             default_params_elided: self.default_params_elided,
         }
     }
+}
+
+/// The access rights on `block` as an `access` declaration (D49): users,
+/// then groups, each in document order. Titles are the references, so a
+/// principal or schedule without a unique title cannot be written down.
+fn access_decl(
+    model: &crate::access::AccessModel,
+    rights: &[crate::access::AccessRight<'_>],
+    block: &str,
+    slug: &str,
+) -> std::result::Result<AccessDecl, String> {
+    use crate::access::PrincipalKind;
+    let unique = |what: &str, uuid: &str, titles: Vec<(&str, Option<&str>)>| {
+        let title = titles
+            .iter()
+            .find(|(u, _)| *u == uuid)
+            .and_then(|(_, t)| *t)
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| format!("{what} {uuid} has no title"))?;
+        let n = titles.iter().filter(|(_, t)| *t == Some(title)).count();
+        if n > 1 {
+            return Err(format!("{n} {what}s are titled \"{title}\""));
+        }
+        Ok(title.to_string())
+    };
+    let users = || {
+        model
+            .users
+            .iter()
+            .map(|u| (u.uuid.as_str(), u.title.as_deref()))
+            .collect()
+    };
+    let groups = || {
+        model
+            .groups
+            .iter()
+            .map(|g| (g.uuid.as_str(), g.title.as_deref()))
+            .collect()
+    };
+    let schedules = || {
+        model
+            .schedules
+            .iter()
+            .map(|s| (s.uuid.as_str(), s.title.as_deref()))
+            .collect()
+    };
+    let mut body = Vec::new();
+    for r in rights.iter().filter(|r| r.target == block) {
+        let principal = match r.kind {
+            PrincipalKind::User => unique("user", r.principal, users())?,
+            PrincipalKind::Group => unique("group", r.principal, groups())?,
+        };
+        body.push(AccessItem::Grant(AccessGrant {
+            kind: r.kind,
+            principal,
+            schedule: unique("access schedule", r.schedule, schedules())?,
+            comment: None,
+        }));
+    }
+    Ok(AccessDecl {
+        slug: slug.to_string(),
+        body,
+        comment: None,
+        end_comment: None,
+    })
 }
 
 /// Whether `s` can be written as a language identifier

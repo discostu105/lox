@@ -1,5 +1,6 @@
 //! IR abstract syntax and canonical text emission.
 
+pub use crate::access::PrincipalKind;
 use crate::error::{Error, Result};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,6 +51,9 @@ pub enum Item {
     /// `<device>.tiles = <name>` — write a tiles set onto an extern Touch
     /// Pure Flex (D41).
     TilesClaim(TilesClaim),
+    /// `access <slug>` … `end` — who may open an extern NFC Code Touch,
+    /// and when (D49).
+    Access(AccessDecl),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -957,6 +961,62 @@ impl fmt::Display for TilesClaim {
     }
 }
 
+/// `access <slug>` … `end` — the access rights (`TIM=`) on an extern NFC
+/// Code Touch (D49): every user and group that may open it, each with the
+/// access schedule that says when. The declaration owns the block's whole
+/// set of access rights; users, groups and schedules stay with Loxone
+/// Config and the app and are named by title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessDecl {
+    pub slug: String,
+    pub body: Vec<AccessItem>,
+    /// Trailing `#` comment on the header line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the `end` line, verbatim.
+    pub end_comment: Option<String>,
+}
+
+impl AccessDecl {
+    pub fn grants(&self) -> impl Iterator<Item = &AccessGrant> {
+        self.body.iter().filter_map(|i| match i {
+            AccessItem::Grant(g) => Some(g),
+            AccessItem::Comment(_) => None,
+        })
+    }
+}
+
+/// One statement of an `access` body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessItem {
+    Grant(AccessGrant),
+    /// Whole-line `#` comment, verbatim.
+    Comment(String),
+}
+
+/// `user "<title>": "<schedule>"` or `group "<title>": "<schedule>"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessGrant {
+    pub kind: PrincipalKind,
+    /// The user's or group's title.
+    pub principal: String,
+    /// The access schedule's title.
+    pub schedule: String,
+    /// Trailing `#` comment, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for AccessGrant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {}: {}",
+            self.kind.as_str(),
+            quote(&self.principal),
+            quote(&self.schedule)
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortRef {
     pub slug: String,
@@ -968,6 +1028,11 @@ impl fmt::Display for PortRef {
         write!(f, "{}.{}", self.slug, self.port)
     }
 }
+
+/// The block type an `access` declaration applies to (D49): the NFC Code
+/// Touch block, the only type with schedule rights (`TIM=`) in the
+/// observed configs.
+pub const ACCESS_BLOCK_TYPE: &str = "NfcCodeTouch";
 
 /// What a declared name refers to, for reference checking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1104,6 +1169,13 @@ impl Module {
     pub fn tiles_claims(&self) -> impl Iterator<Item = &TilesClaim> {
         self.items.iter().filter_map(|i| match i {
             Item::TilesClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    pub fn access_decls(&self) -> impl Iterator<Item = &AccessDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Access(a) => Some(a),
             _ => None,
         })
     }
@@ -1293,6 +1365,7 @@ impl Module {
 
         let mut attrs_seen: BTreeSet<(&str, Attr)> = BTreeSet::new();
         let mut tiles_claimed: BTreeSet<&str> = BTreeSet::new();
+        let mut access_declared: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -1740,6 +1813,70 @@ impl Module {
                         ));
                     }
                 }
+                Item::Access(a) => {
+                    let ctx = format!("`access {}`", a.slug);
+                    match names.get(a.slug.as_str()) {
+                        Some(NameKind::Extern) => {
+                            let ty = self
+                                .externs()
+                                .find(|e| e.slug == a.slug)
+                                .map_or("", |e| e.block_type.as_str());
+                            if ty != ACCESS_BLOCK_TYPE {
+                                return compile_err(format!(
+                                    "{ctx}: access rights with a schedule belong to an NFC \
+                                     Code Touch, a `{ACCESS_BLOCK_TYPE}` — `{}` is declared \
+                                     as `{ty}`",
+                                    a.slug
+                                ));
+                            }
+                        }
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "{ctx}: `{}` is {} — access is declared on an extern NFC \
+                                 Code Touch (`extern {} = {ACCESS_BLOCK_TYPE}(…)`)",
+                                a.slug,
+                                kind.describe(),
+                                a.slug
+                            ));
+                        }
+                        None => {
+                            let hint = super::validate::suggest(
+                                &a.slug,
+                                self.externs().map(|e| e.slug.as_str()),
+                            );
+                            return compile_err(format!(
+                                "{ctx}: undeclared slug `{}`{hint} — declare the block as \
+                                 `extern {} = {ACCESS_BLOCK_TYPE}(…)`",
+                                a.slug, a.slug
+                            ));
+                        }
+                    }
+                    if !access_declared.insert(&a.slug) {
+                        return compile_err(format!(
+                            "{ctx} is declared twice — one declaration holds all access \
+                             rights of the block"
+                        ));
+                    }
+                    let mut principals: BTreeSet<(PrincipalKind, &str)> = BTreeSet::new();
+                    for g in a.grants() {
+                        if g.principal.is_empty() || g.schedule.is_empty() {
+                            return compile_err(format!(
+                                "{ctx}: `{g}` — name the {} and the access schedule by \
+                                 their titles",
+                                g.kind.as_str()
+                            ));
+                        }
+                        if !principals.insert((g.kind, &g.principal)) {
+                            return compile_err(format!(
+                                "{ctx}: {} {} is listed twice — a {} has one access \
+                                 schedule per block",
+                                g.kind.as_str(),
+                                quote(&g.principal),
+                                g.kind.as_str()
+                            ));
+                        }
+                    }
+                }
                 Item::Page(p) if p.title.is_empty() => {
                     return compile_err("`page \"\"`: the page title must not be empty".into());
                 }
@@ -1836,6 +1973,7 @@ impl Module {
                 Item::Page(_) => 10,
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
+                Item::Access(_) => 13,
             }
         }
         let mut out = String::new();
@@ -2004,6 +2142,19 @@ impl Module {
                 }
                 Item::TilesClaim(c) => {
                     out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+                }
+                Item::Access(a) => {
+                    out.push_str(&format!("access {}{}\n", a.slug, tail(&a.comment)));
+                    for stmt in &a.body {
+                        match stmt {
+                            AccessItem::Grant(g) => {
+                                out.push_str(&format!("\t{g}{}\n", tail(&g.comment)));
+                            }
+                            AccessItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                        }
+                    }
+                    out.push_str(&format!("end{}\n", tail(&a.end_comment)));
+                    prev_multiline = true;
                 }
                 Item::Comment(text) => {
                     out.push_str(&format!("#{text}\n"));

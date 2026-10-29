@@ -338,6 +338,8 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut open_tiles: Option<TilesDecl> = None;
     // The index of the `tile` whose argument list `open_call` carries.
     let mut open_tile: Option<u32> = None;
+    // An `access` declaration whose body is still open (until `end`) — D49.
+    let mut open_access: Option<AccessDecl> = None;
 
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
@@ -379,6 +381,10 @@ pub fn parse(src: &str) -> Result<Module> {
             if let Some(text) = comment {
                 if let Some(t) = open_tiles.as_mut() {
                     t.body.push(TilesItem::Comment(text));
+                    continue;
+                }
+                if let Some(a) = open_access.as_mut() {
+                    a.body.push(AccessItem::Comment(text));
                     continue;
                 }
                 match open_test.as_mut() {
@@ -430,6 +436,42 @@ pub fn parse(src: &str) -> Result<Module> {
                         "expected `tile <i>(click: \"…\", up: \"…\", down: \"…\", \
                          text: \"…\", to: <slug>, …)` or `end` in `tiles {}`",
                         t.name
+                    )));
+                }
+            }
+            continue;
+        }
+
+        // Inside an `access` body every line is a grant (or `end`).
+        if let Some(a) = open_access.as_mut() {
+            match toks.as_slice() {
+                [Tok::Ident(kw)] if kw == "end" => {
+                    let mut a = open_access.take().unwrap();
+                    a.end_comment = comment;
+                    items.push(Item::Access(a));
+                }
+                [
+                    Tok::Ident(kw),
+                    Tok::Str(principal),
+                    Tok::Colon,
+                    Tok::Str(schedule),
+                ] if kw == "user" || kw == "group" => {
+                    a.body.push(AccessItem::Grant(AccessGrant {
+                        kind: if kw == "user" {
+                            PrincipalKind::User
+                        } else {
+                            PrincipalKind::Group
+                        },
+                        principal: principal.clone(),
+                        schedule: schedule.clone(),
+                        comment,
+                    }));
+                }
+                _ => {
+                    return Err(err(format!(
+                        "expected `user \"<title>\": \"<schedule>\"`, \
+                         `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
+                        a.slug
                     )));
                 }
             }
@@ -566,6 +608,33 @@ pub fn parse(src: &str) -> Result<Module> {
                 return Err(err(
                     "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
                 ));
+            }
+            // `access` is a keyword only in front of a slug: `access = …` and
+            // `access.Port …` stay statements about an object named `access`.
+            Tok::Ident(kw)
+                if kw == "access"
+                    && !matches!(toks.get(1), Some(Tok::Eq | Tok::Dot | Tok::LArrow)) =>
+            {
+                let [_, Tok::Ident(slug)] = toks.as_slice() else {
+                    return Err(err(
+                        "expected `access <slug>` — the extern NFC Code Touch whose access \
+                         rights the body lists"
+                            .into(),
+                    ));
+                };
+                if open_template.is_some() {
+                    return Err(err(
+                        "`access` is not allowed inside a template body — declare access \
+                         rights at module level (D49)"
+                            .into(),
+                    ));
+                }
+                open_access = Some(AccessDecl {
+                    slug: check_slug(slug, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
             }
             Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
                 return Err(err(format!(
@@ -818,6 +887,12 @@ pub fn parse(src: &str) -> Result<Module> {
         return Err(Error::IrParse {
             line: src.lines().count(),
             msg: format!("unclosed `tiles {}` — missing `end`", t.name),
+        });
+    }
+    if let Some(a) = open_access {
+        return Err(Error::IrParse {
+            line: src.lines().count(),
+            msg: format!("unclosed `access {}` — missing `end`", a.slug),
         });
     }
     if let Some(t) = open_template {

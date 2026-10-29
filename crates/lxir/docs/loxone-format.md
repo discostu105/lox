@@ -406,8 +406,9 @@ the user groups (`UserGroup`, under a `UserGroupCaption`) and, in a
 `LoxCaption CaptionType="11"`, the access schedules: `SwitchingTimer`
 objects (196 in the corpus, among them the built-in *Always* and
 *Never*). Loxone Config, the app and the Miniserver's user management
-API all write this tree; lxir only reads it (`lxir::access`, the
-users/access section of `lxir diff`).
+API all write this tree. lxir reads it (`lxir::access`, the users/access
+section of `lxir diff`) and writes only access rights on NFC Code
+Touches, for an `access` declaration (D49).
 
 Evidence: the 132 public web configs (154 users in 131 configs, 402
 groups) and the house config, Config 12 – 17.
@@ -449,8 +450,9 @@ groups) and the house config, Config 12 – 17.
   Attribute orders: `H Sc S Alg` (218), `H Sc S` (60), `H S Sc` (16),
   `H S` (10). Old configs carry `Pwd=`/`Pwd2=` attributes instead.
 - **Rights are a `<PH NUM=n>` list of `<PRM>`** on users (92 lists) and
-  groups (96), never self-closing. `NUM=` is the number of `PRM`
-  children in all 188 lists, and no list names the same `REF=` twice.
+  groups (96), never self-closing and never empty. `NUM=` is the number
+  of `PRM` children in all 188 lists, and no list names the same `REF=`
+  twice.
   `REF=` is the object the right is on. `ACT=` is a UI right (`3` in
   642 entries, `1` in 5); `TIM=` makes the entry an access right
   (*Zutritt*) under the access schedule it names — always a
@@ -464,6 +466,14 @@ groups) and the house config, Config 12 – 17.
   are bit masks (`-1` = all). `UgType="3"` marks the *Nobody* group
   (131), `UgType="4"` *Full access* (80); `1` and `2` occur 51 times
   each, meaning unverified.
+- **Granting access in Loxone Config** appends `<PRM REF="<Code
+  Touch>" TIM="<schedule>"/>` to the user's list and raises `NUM=`;
+  nothing else in the users tree changes, the user's `LastEdit=`
+  included (Config 17.2, one save on 2026-10-29: the same grant compiled
+  by lxir onto the config from before the save reproduces Config's
+  users, groups and schedules byte for byte). **Unverified:** what a
+  revoke writes. lxir removes `TIM=`, then a `<PRM>` left with only
+  `REF=`, then a list left empty.
 - **Full access is no access right.** A user in the full access group
   without a `TIM=` right on a Code Touch is refused there (live
   Miniserver, FW 17.x).
@@ -475,6 +485,72 @@ groups) and the house config, Config 12 – 17.
 lxir treats every hash and salt as secret: the diff shows a credential
 as a name, a count or an eight-digit fingerprint (a SHA-256 over the
 stored value), never the value itself.
+
+## The access table: `permissions.bin`
+
+Loxone Config writes `permissions.bin` into the program ZIP, next to
+`sps0.LoxCC` and `LoxAPP3.json`: for each object the app shows, the
+users and groups that may see and use it. `lxir::permissions` parses it
+and generates it from the program and the ZIP's `LoxAPP3.json`.
+
+Evidence: 19 program ZIPs of one installation, program versions 243 to
+274 (Aug 2024 – Oct 2026), 2.8 to 37.7 KB of `permissions.bin` each:
+Loxone Config saves, and ZIPs in which an upload replaced `sps0.LoxCC`
+and kept Config's `permissions.bin` and `LoxAPP3.json`. The generator
+reproduces all 19 byte for byte (`LOX_CORPUS=<dir> cargo test
+corpus_permissions`).
+
+- **Records.** No header; a flat list of 16-byte records. A UUID record
+  is the Loxone UUID in binary: the first three fields little-endian
+  (u32, u16, u16), the last eight bytes as written. A marker record is
+  one byte sixteen times: `FE`, `FC`, `FB`, `FD` or `FF`.
+- **Groups.** One per object:
+  `object, FE, state…, FC, principal…, [FB, principal…]…, [FD], FF`.
+  The states are UUIDs the app reads for the object, the principals
+  who may use it.
+- **Principals** of an object, in document order: every `User` and
+  `UserGroup` with a `<PRM REF=…>` on it, whatever the right (`ACT=`,
+  `TIM=` or both), and every `RightGroup` that is the `RGR=` of the
+  object's room or category (`<IoData Pr=/Cr=>`). An `FB` section
+  follows for the object its `Rec=` attribute names, with that object's
+  principals, and so on along the chain. Neither the schedule (`TIM=`
+  value) nor the kind of right is in the file: granting a right to
+  someone who had none on the object changes it, rescheduling does not.
+- **Order and content.** The file follows `LoxAPP3.json`, which the
+  program alone does not determine:
+  1. Six global groups, each with `FD` and no principals:
+     `globalStates.operatingMode`, `sunrise`, `sunset` (no states); the
+     program's `TaskCaption` with `pastTasks` and `plannedTasks`;
+     `modifications` with eleven document states (`notifications`,
+     `modifications`, `favColorSequences`, `favColors`,
+     `miniserverTime`, `liveSearch`, `userSettings`, `userSettingsTs`,
+     `cloudservice`, `trustVersion`, `propsVersion`); `hasInternet`
+     with itself.
+  2. The operating modes, in the key order of `modes`, without states.
+  3. The controls, in the key order of `controls`. States: the
+     control's `states` in key order, arrays flattened; for an
+     `InfoOnlyAnalog`/`InfoOnlyDigital` with `StatsType=`, its first
+     `<Co>`; for `Alarm` and `SmokeAlarm`, a fixed list of connectors
+     (`lxir::permissions`); then per subcontrol its `uuidAction` (when
+     keyed `U:…`) and its states. Repeats are dropped. `FD` when the
+     control has neither `room` nor `cat`.
+  4. The weather server (its first state as the object, `FD`); every
+     `autopilot` rule (`uuidAction` and states), whose principals are
+     the users with `UsR=` bit `0x40`; every `messageCenter` entry
+     (`FD`, nobody).
+- **A grant, regenerated.** For the Config 17.2 save that granted a
+  user access (*Users, groups and access rights* above), the file
+  generated from lxir's compile of that grant and the `LoxAPP3.json`
+  from *before* the save equals the `permissions.bin` Config wrote,
+  byte for byte: the push's situation, which keeps the live
+  `LoxAPP3.json`.
+- **What `FD` means** is unknown; it is written exactly where listed.
+- **The Miniserver stores it as uploaded.** After an upload that
+  replaced only `sps0.LoxCC` (2026-10-29), the next download was the
+  uploaded ZIP byte for byte, `permissions.bin` and `LoxAPP3.json`
+  included. **Unverified:** whether the Miniserver enforces this file
+  or derives the rights from the program, so whether a stale file
+  matters.
 
 ## UUID anatomy
 

@@ -19,7 +19,7 @@ errors.
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line
            | wire | set | attr | removed | moved | template | instance
-           | page | test | tiles | tiles-claim | blank ;
+           | page | test | tiles | tiles-claim | access | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number | string ) [ comment ] ;
@@ -92,6 +92,12 @@ fn         = "click" | "up" | "down" ;
 tiles-claim = slug "." "tiles" "=" slug [ comment ] ;
                                     (* extern TreeDevice, top-level only *)
 
+access     = "access" slug [ comment ]             (* NFC Code Touch (D49) *)
+             { comment | grant }
+             "end" [ comment ] ;
+grant      = ( "user" | "group" ) string ":" string [ comment ] ;
+                                    (* principal title : schedule title *)
+
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
@@ -130,7 +136,8 @@ Notes:
   `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, and the expression
   operators `and`, `or`, `not` are reserved, as are v0's `block`,
   `wire`, `set`, and `use` (migration errors) — none can be declared as
-  a name.
+  a name. `access` is a keyword only where a line starts with `access
+  <slug>`; elsewhere it stays an ordinary slug (`access = Switch()`).
 - An instantiation is distinguished from a block declaration by the case
   of the callee: `sued = fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
@@ -740,10 +747,60 @@ in the compiled config, claimed or not: `tile-broadcast` when a command
 without targets reaches two or more linked blocks of its type,
 `tile-dead-command` when no linked block of its type receives it.
 
+### `access` — who may open an NFC Code Touch (D49)
+
+```text
+extern front_door = NfcCodeTouch(uuid: "50000009-0000-0090-ffff504f94112233")
+
+access front_door
+	user "alice": "Always"
+	user "bob": "Workdays"                       # an access schedule
+	group "Residents": "Always"
+end
+```
+
+An `access` declaration owns the access rights (*Zutritt*) on one NFC
+Code Touch: every user and group it lists may open it under the access
+schedule named after the colon, and nobody else. Compiling it grants
+what it lists, moves a right to another schedule, and revokes the rights
+of users and groups it leaves out; an empty declaration revokes them
+all. Code Touches without a declaration keep their rights as they are.
+
+Users, groups and access schedules (`SwitchingTimer`) stay with Loxone
+Config and the app. The declaration names them by title, exactly as
+written there; a title that names nothing, or more than one object of
+its kind, is a compile error. Their credentials (NFC tags, access codes,
+passwords) and memberships are not part of the language.
+
+Rules:
+
+- **Extern `NfcCodeTouch` only**, one declaration per extern; two
+  externs resolving to the same block are a compile error.
+- **Each principal once** — a user or group listed twice is a
+  validation error.
+- **Access, not operation.** A right's `ACT=` (operating the block in
+  the app) is not an access right; compiling keeps it, and revoking
+  access leaves it.
+- **No restore.** Like `tiles` (D41) a declaration keeps no lockfile
+  state: removing it leaves the last written rights in place.
+- **Top-level only** — not inside a template.
+
+`lxir decompile` and `lxir adopt` lift the access rights of every Code
+Touch that has any into a declaration, with the extern it needs. When a
+right names a user or group without a unique title, the Code Touch gets
+a `# access <slug>: not lifted — …` comment instead: a declaration
+without that right would revoke it.
+
+`lxir lint` (in a project) reports `no-access-right` for a user with an
+NFC tag or access code but no access right on any Code Touch, neither
+directly nor through a group: the tag opens nothing. Membership of the
+*Full access* group does not count, since it grants no access right.
+
 ## Name resolution and validation
 
 - Externs, blocks, `let` constants, templates and `tiles` sets share one
-  namespace per module; duplicates are an error.
+  namespace per module; duplicates are an error. An `access` declaration
+  names an extern and declares nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).
@@ -809,7 +866,8 @@ canonicalization happens at parse time: a quoted string that reads exactly
 as a number (`"28"`) becomes the bare number, so every value has one
 canonical spelling. A `tile` follows the same rule one level deeper:
 `tile 2()` on one line, a tile with keys as a two-tab-indented list
-with the `)` on its own tab-indented line. `parse(to_text(m)) == m`, and
+with the `)` on its own tab-indented line. An `access` declaration puts
+each grant on its own tab-indented line. `parse(to_text(m)) == m`, and
 `to_text` is a fixpoint.
 
 ## Errors

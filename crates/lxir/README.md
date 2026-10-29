@@ -63,6 +63,12 @@ in source: `sensor.title = "Raumklima Bad"`, `sensor.room = "Bad"`,
 room/category binding — and a room change carries along the device's
 inputs and outputs that shared its room (D39).
 
+Who may open a door lives in source too: `access haustuer … end` on an
+NFC Code Touch lists users and groups by title, each with its access
+schedule (`user "alice": "Always"`), and owns that block's access
+rights: whoever it leaves out loses them (D49). Users, their tags and
+codes stay with Loxone Config and the app.
+
 PicoC programs live in their own files: `hue = Code16("Hue", Code:
 file("hue.c"), AI1: rgb.AQ)` compiles the file into the program block,
 written the way Loxone Config writes it (D40).
@@ -169,7 +175,8 @@ lxir compile --base current.Loxone --module modules/beschattung.lxir \
 lxir rename alter_name neuer_name    # refactor: sources + lockfile together,
                                      # identities kept, output verified
 lxir lint                            # advisory: unused names, blocks whose
-                                     # outputs feed nothing (GUI wires count)
+                                     # outputs feed nothing (GUI wires count),
+                                     # NFC tags that open no Code Touch
 lxir diff current.Loxone out.Loxone  # semantic diff, locale noise flagged,
                                      # users/access section; --json
 lxir render out.Loxone --page Beschattung --out page.svg

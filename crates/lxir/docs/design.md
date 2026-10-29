@@ -55,6 +55,11 @@ edit, and records each in the lockfile:
    claim's refs, D43) are recorded in `lock.attr_claims` and restored
    when the claim disappears (D39).
 
+Two declarations write GUI content without recording it: the tile
+programs of a Touch Pure Flex (D41) and the access rights on an NFC Code
+Touch (D49). They own what they declare while they declare it; removed,
+they leave the last written state in place.
+
 Everything else is somebody else's, and passes through unchanged. One
 piece of a managed block is shared: its position on the page. The GUI may
 drag it, and compile takes the drag over (D42).
@@ -1368,3 +1373,77 @@ Anything unverified is an error, not a heuristic:
     `Analog=` on `Memory` does.
   With this and D45 to D47, compiling a config saved by Loxone Config
   17.2 reproduces it byte for byte.
+- **D49 — access rights on NFC Code Touch blocks from source**
+  (2026-10-29). Who may open a door is part of the program: a user or
+  group may open a Code Touch when one of its `<PRM>` rights names the
+  block with a `TIM=` access schedule (loxone-format, *Users, groups and
+  access rights*). lxir could show these rights in the diff, and `lox
+  config push` kept them as they were live, but no source could set
+  them. Decision: an `access <code_touch>` declaration lists the users
+  and groups that may open the block, each with its schedule:
+  - **The declaration owns the block's access, completely.** Every
+    `TIM=` on the block, across all users and groups, is the
+    declaration's: compiling grants what it lists, moves a right to
+    another schedule, and revokes what it leaves out. A grant-only form
+    could never take a right away, and taking rights away is half of
+    the point. Blocks without a declaration are not touched, as with
+    D39's claims.
+  - **Users, groups and schedules stay GUI-owned, referenced by
+    title.** They are created in Loxone Config or the app together with
+    passwords, tags and codes the source must never hold. A title that
+    names nothing, or several objects of its kind, is a compile error
+    that names the candidates: a user renamed in the app stops the
+    compile instead of silently losing access. Schedules are the
+    `SwitchingTimer` objects of the access schedule folder.
+  - **Access only.** A right's `ACT=` (operating the block in the app)
+    stays as it is. A revoke removes `TIM=`; a `<PRM>` left with nothing
+    but `REF=` goes, and a list left empty goes with it, since no
+    config in the corpus carries an empty `<PH>`.
+  - **Config's own edit.** A grant appends `<PRM REF="…" TIM="…"/>`
+    to the user's or group's list (creating the list if there is none),
+    a reschedule rewrites `TIM=` in place, and `NUM=` follows the count.
+    Nothing else changes, not even `LastEdit=`, so a declaration that
+    matches the config writes nothing and compiling reproduces it byte
+    for byte.
+  - **No lock state.** Like tile programs (D41) the rights are the
+    source's while it declares them; removing the declaration leaves
+    the last written rights in place.
+  - **`NfcCodeTouch` only.** Config 16 and 17 put `TIM=` only on those
+    blocks; Config 12 rights on modes, actors and right groups are out
+    of scope, and the compile refuses an `access` on any other type.
+  - **A contextual keyword.** `access` starts a declaration only in
+    front of a slug at the start of a line; reserving the word would
+    turn every existing `access` slug into an error.
+  - **Decompile and adopt lift the rights** of every Code Touch that
+    has any, so adopting a config puts its access under source control
+    unchanged. A right whose user or group has no unique title cannot
+    be referenced; the block gets a comment instead of a declaration
+    that would revoke it.
+  - **Lint `no-access-right`**: a user with an NFC tag or access code
+    but no access right on any Code Touch, directly or through a group.
+    The tag opens nothing; *Full access* does not help (live-verified).
+  - **`permissions.bin` follows when it can be trusted.** Loxone Config
+    writes it into the program ZIP: per object, the users and groups
+    with any right on it (loxone-format, *permissions.bin*). A grant to
+    someone who had no right on the block changes it, a reschedule or
+    a revoke that keeps `ACT=` does not. `lxir::permissions` generates
+    it from the program and the ZIP's `LoxAPP3.json`, byte for byte on
+    every ZIP we have. `lox config push` uses it only where it is
+    proven: when the generator reproduces the live file exactly, the
+    staged ZIP carries the file generated for the compiled config;
+    otherwise the live file stays, and the report flags it as stale
+    (`permissions_stale`) if the compiled config assigns users and
+    groups differently.
+
+  Validated: compiling the declaration lifted from a Loxone Config 17.2
+  save that granted a user access, onto the config from before that
+  save, reproduces Config's users, groups and schedules byte for byte,
+  and the `permissions.bin` generated for it with the `LoxAPP3.json`
+  from before the save is the one Config wrote.
+  Every declaration lifted from the corpus (3 in the public configs, 16
+  in the house's history) compiles to the same bytes; revoking one
+  changes only access rights, and granting it again reverts that
+  exactly. Not covered: the revoke edit is inferred, not observed in a
+  Config save; the Miniserver stores an uploaded `permissions.bin`
+  unchanged, but whether it enforces that file or derives the rights
+  from the program is a live test.
