@@ -507,9 +507,25 @@ pub(crate) enum Cmd {
         room: Option<String>,
     },
     /// Control blind: up | down | stop | shade [<0-100>] | pos <0-100>
+    ///
+    /// Actions, and the command each one sends to the Jalousie:
+    ///   up, open, full-up        all the way up            FullUp
+    ///   down, close, full-down   all the way down          FullDown
+    ///   stop                     stop moving               off
+    ///   shade, auto              automatic shading         AutomaticDown
+    ///   shade <0-100>            slat angle                manualLamella/<n>
+    ///   pos <0-100>, <0-100>     to a position             manualPosition/<n>
+    ///
+    /// up and down are full moves: the blind runs to its end position unless it
+    /// is stopped. They are not jog steps; for those send the raw commands, e.g.
+    /// `lox send <blind> up` and then `lox send <blind> UpOff`.
+    /// Positions: 0 = open, 100 = closed. Slats: 0 = horizontal, 100 = vertical.
+    #[command(verbatim_doc_comment)]
     Blind {
         name_or_uuid: String,
+        /// up | down | stop | shade | pos | <0-100> (--help lists what each one sends)
         action: String,
+        /// Value for `shade` (slat angle) and `pos` (position), 0-100
         #[arg(allow_hyphen_values = true)]
         pos: Option<f64>,
         #[arg(long, short = 'r')]
@@ -762,6 +778,12 @@ pub(crate) enum Cmd {
         room: Option<String>,
     },
     /// List and inspect automatic rules (Automatik-Regel / Autopilot)
+    ///
+    /// A rule created or edited in the app can live only in the Miniserver's
+    /// custom changes, not in the program file: `lox autopilot ls` and a config
+    /// download don't see it, and uploading a config discards it (the Miniserver
+    /// logs "Remove old custom changes"). Before an upload, check that
+    /// `lox autopilot changed` is older than the download the upload is based on.
     Autopilot {
         #[command(subcommand)]
         action: AutopilotCmd,
@@ -1061,11 +1083,24 @@ pub(crate) enum InputCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum AutopilotCmd {
-    /// List all automatic rules
+    /// List the rules in the program file: active, and whether their JSON is valid
+    ///
+    /// Reads the config like `lox config` does (config repo or cached download;
+    /// `--at`, `--file`, `--download`). Rules edited in the app since the last
+    /// upload may differ: see `lox autopilot changed`.
     #[command(alias = "list")]
-    Ls,
-    /// Show when a rule last fired
+    Ls {
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Show when a rule last ran (the Miniserver's rule history)
     State { name_or_uuid: String },
+    /// When the rules were last changed on the Miniserver (e.g. edited in the app)
+    ///
+    /// Reads the live `changed` state of the structure's autopilot entry (unix
+    /// seconds; 0 = never). `-o json` gives `{"changed": <unix>, "changed_at":
+    /// <RFC 3339 or null>, "uuid": ...}` for scripts.
+    Changed,
 }
 
 #[derive(Subcommand)]
@@ -1142,11 +1177,11 @@ pub(crate) enum FilesCmd {
         #[arg(default_value = "/")]
         path: String,
     },
-    /// Download a file
+    /// Download a file (into the current directory unless --save-as is given)
     Get {
         /// Path on the Miniserver filesystem
         path: String,
-        /// Local output path (defaults to filename)
+        /// Local output path, `-` for stdout [default: the file's name, in the current directory]
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
@@ -1348,6 +1383,9 @@ pub(crate) enum ConfigCmd {
         save_as: Option<String>,
     },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
+    ///
+    /// The Miniserver then discards its custom changes, such as rules edited in
+    /// the app since the last upload: check `lox autopilot changed` first.
     Upload {
         /// Path to a config ZIP file
         file: String,
@@ -1885,7 +1923,16 @@ pub(crate) fn describe_command(cmd: &clap::Command, detailed: bool) -> Value {
 
         // Include valid actions
         let actions = match cmd.get_name() {
-            "blind" => Some(vec!["up", "down", "stop", "shade", "pos <0-100>"]),
+            "blind" => Some(vec![
+                "up",
+                "down",
+                "full-up",
+                "full-down",
+                "stop",
+                "shade",
+                "shade <0-100>",
+                "pos <0-100>",
+            ]),
             "gate" => Some(vec!["open", "close", "stop"]),
             "alarm" => Some(vec!["arm", "arm-home", "disarm", "quit"]),
             "door" => Some(vec!["lock", "unlock", "open"]),

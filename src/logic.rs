@@ -126,6 +126,22 @@ pub struct PageInfo {
     pub wires: usize,
 }
 
+/// An Automatic Designer rule (`AutopilotRule`). The app writes each rule as
+/// JSON into `APC=`; the structure file only knows the one container.
+#[derive(Debug, Clone, Serialize)]
+pub struct AutopilotRuleInfo {
+    pub uuid: String,
+    pub name: String,
+    /// `active` in the rule JSON; unknown when the JSON is broken
+    pub active: Option<bool>,
+    /// `invalid` in the rule JSON: the Miniserver found it unrunnable
+    pub invalid: Option<bool>,
+    /// The rule JSON parses (the app shows a broken rule as an error)
+    pub apc_valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apc_error: Option<String>,
+}
+
 /// A finding of [`Logic::lint`].
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {
@@ -1251,6 +1267,44 @@ impl Logic {
         out
     }
 
+    // ── Automatic Designer ──────────────────────────────────────────────────
+
+    /// The Automatic Designer rules of the program, in document order.
+    pub fn autopilot_rules(&self) -> Vec<AutopilotRuleInfo> {
+        let mut out = Vec::new();
+        for obj in self.doc.objects() {
+            if obj.block_type != "AutopilotRule" {
+                continue;
+            }
+            let apc = self
+                .doc
+                .element_at(&obj.path)
+                .and_then(|el| el.attr_decoded("APC").map(|a| a.into_owned()))
+                .unwrap_or_default();
+            let (json, apc_error) = match serde_json::from_str::<serde_json::Value>(&apc) {
+                Ok(v) if v.is_object() => (Some(v), None),
+                Ok(_) => (None, Some("not a JSON object".to_string())),
+                Err(e) => (None, Some(e.to_string())),
+            };
+            let field = |k: &str| json.as_ref().and_then(|v| v.get(k));
+            let name = obj
+                .title
+                .clone()
+                .filter(|t| !t.is_empty())
+                .or_else(|| field("name").and_then(|n| n.as_str()).map(str::to_string))
+                .unwrap_or_else(|| obj.uuid.clone());
+            out.push(AutopilotRuleInfo {
+                uuid: obj.uuid.clone(),
+                name,
+                active: field("active").and_then(|a| a.as_bool()),
+                invalid: field("invalid").and_then(|a| a.as_bool()),
+                apc_valid: apc_error.is_none(),
+                apc_error,
+            });
+        }
+        out
+    }
+
     // ── History ─────────────────────────────────────────────────────────────
 
     fn wire_set(&self, uuid: &str) -> Vec<(bool, String, String, String)> {
@@ -2048,6 +2102,57 @@ mod tests {
             "{}",
             garage
         );
+    }
+
+    #[test]
+    fn autopilot_rules_from_apc() {
+        // the app's JSON, entity-escaped; the broken one carries a line break
+        // an XML writer stored as a numeric reference and escaped again
+        let rule = |u: &str, title: &str, apc: &str| {
+            format!(
+                "<C Type=\"AutopilotRule\" V=\"175\" U=\"{u}\" Title=\"{title}\" APC=\"{apc}\"/>\r\n"
+            )
+        };
+        let q = |json: &str| json.replace('"', "&quot;");
+        let rules = [
+            rule(
+                "2e000000-0000-0003-ffff000000000001",
+                "Morning",
+                &q(r#"{"type":"rule","name":"Morning","active":true,"invalid":false,"eventGroups":[{"events":[{"a":1},{"b":2}]}]}"#),
+            ),
+            rule(
+                "2e000000-0000-0003-ffff000000000002",
+                "Stale",
+                &q(r#"{"name":"Stale","active":false,"invalid":true}"#),
+            ),
+            rule(
+                "2e000000-0000-0003-ffff000000000003",
+                "Broken",
+                &q(r#"{"name":"Broken","active":true,"eventGroups":[{"events":[{"a":1}&amp;#xD;&amp;#xA;{"b":2}]}]}"#),
+            ),
+        ]
+        .concat();
+        let xml = format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\">\r\n\
+             <C Type=\"Document\" V=\"175\" U=\"2e000000-0000-0003-ffff000000000000\" Title=\"Test\">\r\n\
+             <C Type=\"AutoPilot\" V=\"175\" U=\"2e000000-0000-0003-ffff000000000010\" Title=\"Automatic rules\">\r\n\
+             {rules}</C>\r\n</C>\r\n</ControlList>\r\n"
+        );
+        let l = Logic::parse(xml.as_bytes()).unwrap();
+        let r = l.autopilot_rules();
+        let names: Vec<&str> = r.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["Morning", "Stale", "Broken"]);
+        assert_eq!(
+            (r[0].active, r[0].invalid, r[0].apc_valid),
+            (Some(true), Some(false), true)
+        );
+        assert_eq!(
+            (r[1].active, r[1].invalid, r[1].apc_valid),
+            (Some(false), Some(true), true)
+        );
+        assert_eq!((r[2].active, r[2].apc_valid), (None, false));
+        assert!(r[2].apc_error.is_some());
+        assert!(r[0].apc_error.is_none());
     }
 
     #[test]

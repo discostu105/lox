@@ -99,11 +99,14 @@ use crate::config::Config;
 
 pub const USER_AGENT: &str = concat!("lox-cli/", env!("CARGO_PKG_VERSION"));
 
-// ── AutopilotRule ─────────────────────────────────────────────────────────────
+// ── Autopilot ───────────────────────────────────────────────────────────────
 
+/// The structure file's `autopilot` entry: one container for all Automatic
+/// Designer rules, with the states `changed` (unix seconds of the last rule
+/// edit) and `history` (recent runs). The rules themselves are only in the
+/// program file (`AutopilotRule` objects).
 #[derive(Debug, Clone)]
-pub struct AutopilotRule {
-    pub name: String,
+pub struct Autopilot {
     pub uuid: String,
     pub state_changed: String,
     pub state_history: String,
@@ -651,60 +654,29 @@ impl LoxClient {
         Ok(result)
     }
 
-    pub fn list_autopilot_rules(&mut self) -> Result<Vec<AutopilotRule>> {
+    /// The `autopilot` entry of the structure file.
+    pub fn autopilot(&mut self) -> Result<Autopilot> {
         let structure = self.get_structure()?;
-        let mut rules = Vec::new();
-        if let Some(map) = structure.get("autopilot").and_then(|a| a.as_object()) {
-            for (uuid, entry) in map {
-                let name = entry
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("?")
-                    .to_string();
-                let state_changed = entry
-                    .get("states")
-                    .and_then(|s| s.get("changed"))
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let state_history = entry
-                    .get("states")
-                    .and_then(|s| s.get("history"))
-                    .and_then(|h| h.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                rules.push(AutopilotRule {
-                    name,
-                    uuid: uuid.clone(),
-                    state_changed,
-                    state_history,
-                });
-            }
-        }
-        rules.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(rules)
-    }
-
-    pub fn find_autopilot_rule(&mut self, name_or_uuid: &str) -> Result<AutopilotRule> {
-        let rules = self.list_autopilot_rules()?;
-        if is_uuid(name_or_uuid) {
-            return rules
-                .into_iter()
-                .find(|r| r.uuid == name_or_uuid)
-                .context("Autopilot rule UUID not found");
-        }
-        let matches: Vec<AutopilotRule> = rules
-            .into_iter()
-            .filter(|r| r.name.to_lowercase().contains(&name_or_uuid.to_lowercase()))
-            .collect();
-        match matches.len() {
-            0 => bail!("No autopilot rule matching '{}'", name_or_uuid),
-            1 => Ok(matches.into_iter().next().unwrap()),
-            _ => {
-                let list: Vec<String> = matches.iter().map(|r| format!("  {}", r.name)).collect();
-                bail!("Ambiguous: '{}'\n{}", name_or_uuid, list.join("\n"))
-            }
-        }
+        let (uuid, entry) = structure
+            .get("autopilot")
+            .and_then(|a| a.as_object())
+            .and_then(|m| m.iter().next())
+            .context(
+                "The structure file has no autopilot entry: this Miniserver has no Automatic Designer",
+            )?;
+        let state = |k: &str| {
+            entry
+                .get("states")
+                .and_then(|s| s.get(k))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        Ok(Autopilot {
+            uuid: uuid.clone(),
+            state_changed: state("changed"),
+            state_history: state("history"),
+        })
     }
 
     /// Resolve all controls in a room, optionally filtered by type.
@@ -1051,6 +1023,45 @@ mod tests {
         assert_eq!(globals.len(), 2);
         assert!(globals.iter().any(|(n, _)| n == "operatingMode"));
         assert!(globals.iter().any(|(n, _)| n == "sunrise"));
+    }
+
+    #[test]
+    fn autopilot_entry_from_structure() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(serde_json::json!({
+                "rooms": {}, "controls": {},
+                "autopilot": {
+                    "0a000000-0000-0000-ffff000000000010": {
+                        "name": "Automatic rules",
+                        "uuidAction": "0a000000-0000-0000-ffff000000000010",
+                        "states": {
+                            "changed": "0a000000-0000-0000-ffff000000000011",
+                            "history": "0a000000-0000-0000-ffff000000000012"
+                        }
+                    }
+                }
+            }));
+        });
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
+        let ap = client.autopilot().unwrap();
+        assert_eq!(ap.uuid, "0a000000-0000-0000-ffff000000000010");
+        assert_eq!(ap.state_changed, "0a000000-0000-0000-ffff000000000011");
+        assert_eq!(ap.state_history, "0a000000-0000-0000-ffff000000000012");
+    }
+
+    #[test]
+    fn autopilot_entry_missing() {
+        let server = MockServer::start();
+        let _m = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200)
+                .json_body(serde_json::json!({"rooms": {}, "controls": {}}));
+        });
+        let mut client = LoxClient::new(mock_config(&server)).unwrap();
+        let e = client.autopilot().unwrap_err().to_string();
+        assert!(e.contains("no autopilot entry"), "{}", e);
     }
 
     #[test]
