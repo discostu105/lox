@@ -1584,8 +1584,10 @@ Anything unverified is an error, not a heuristic:
   folder:
   - **Shape** (corpus, 175 instances): connectors `[Q, Qm]`, both
     sources; attribute order `Type, IName, V, U, Title, Cl, Nio, WF, …`;
-    no `Px=`/`Py=`; fresh defaults `Cl="238,238,238"`, `WF="16400"`,
-    `Analog="false"`.
+    no `Px=`/`Py=`; fresh defaults as an oracle save writes them
+    (session 18): `Cl="238,238,238"`, `WF="147456"`, `Analog="false"`
+    with `MaxVal="1" MinChange="0.5" MinTime="10"` (an analog one gets
+    `EnVal="true"` instead), and `<IoData>`/`<Display>` children.
   - **Placement.** Appended to the base's first `VirtualInCaption` —
     never pinned in the lock (`page_uuid`/`layout` stay empty), never
     laid out, not governed by `page` statements. A base without the
@@ -1602,3 +1604,34 @@ Anything unverified is an error, not a heuristic:
     matching); `adopt` refuses them. Adopting would add nothing an
     extern cannot do.
   Validated with the oracle (session 18): see oracle-wine.md.
+- **D55 — device-narrowed extern matching** (2026-10-29). Identical
+  hardware repeats its I/O titles: every Tree push-button interface has
+  a "Taster 1", every Extension the same input names. `title:` is then
+  ambiguous and decompile falls back to `uuid:`, which tells a reader
+  nothing. Where a room tells the objects apart, `room:` already
+  narrows; where it does not — the I/Os of an Extension in the
+  distribution board share its room or have none — the device's
+  **serial number** does: printed on the hardware, scanned at
+  installation, never changed by the GUI. Decision: a
+  `device: "<serial>"` constraint, like `room:`/`category:`, narrowing an
+  `iname`/`title` match to objects whose nearest enclosing element with
+  a `Serial=` attribute carries that serial (compared
+  case-insensitively). Nearest, because devices nest — a Tree device
+  sits in a Tree Extension inside a Miniserver, each with its own serial
+  — and the I/O belongs to the innermost; the Miniserver's own I/Os and
+  virtual folders narrow by the Miniserver's serial, which tells the
+  Miniservers of a client/gateway project apart. Not with `uuid:` (pins
+  already) or `mirrors:` (page-narrowed).
+  - **Evidence** (web corpus, titled I/Os below a device whose
+    type+title repeats in their config): Extensions 34, all told apart
+    by device and none by room; Tree devices 204, 45 by device, 151 by
+    room; below the Miniserver itself 4017, mostly repeats within one
+    Miniserver (call and virtual commands), which neither resolves.
+    Air devices carry no `Serial=` (their `IP=` holds a 32-digit hex id
+    not verified to be the printed serial), so their I/Os narrow only
+    to the Air base Extension; they are out for now.
+  - **Decompile** emits `title:` plus `device:` where the title is
+    unique within its device but not overall, ahead of the `uuid:`
+    fallback (27 externs across the corpus's wired views).
+  - A serial is personal data (`lxir scan` reports it): modules of a
+    real house belong in a private repository anyway.

@@ -338,6 +338,12 @@ pub struct ExternDecl {
     /// Category constraint (`category: "Beleuchtung"`): the object's
     /// `<IoData Cr=…>` must point at a `Category` with this title.
     pub category: Option<String>,
+    /// Device constraint (`device: "B0123456"`, D55): the serial number of
+    /// the hardware the object belongs to — the `Serial=` of its nearest
+    /// enclosing Tree device, extension or Miniserver. Narrows
+    /// `iname`/`title` matching where identical devices repeat their I/O
+    /// titles; unlike a room or a title, it does not change in the GUI.
+    pub device: Option<String>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
 }
@@ -351,6 +357,9 @@ impl ExternDecl {
         }
         if let Some(c) = &self.category {
             s.push_str(&format!(", category: {}", quote(c)));
+        }
+        if let Some(d) = &self.device {
+            s.push_str(&format!(", device: {}", quote(d)));
         }
         s
     }

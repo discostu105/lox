@@ -182,6 +182,7 @@ extern sonne = VirtualIn(iname: "VI3")
 extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 extern boiler = Switch(uuid: "1d844a67-0333-5301-ffffed57184a04d2")
 extern licht_buero = LightController2(title: "Deckenlicht", room: "Büro")
+extern taster_flur = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
 extern status_alarm_ref = InputRef(mirrors: status_alarm)
 ```
 
@@ -195,7 +196,13 @@ an `AmbiguousMatch` error listing candidates. Where titles repeat per
 room (every floor has a "Deckenlicht"), `room:` and/or `category:`
 narrow an `iname`/`title` match: the object's `<IoData Pr=…>`/`Cr=…`
 must point at a `Place`/`Category` with that title
-([loxone-format.md](loxone-format.md)). They never combine with
+([loxone-format.md](loxone-format.md)). Where identical hardware
+repeats its I/O titles (every Tree push-button interface has a
+"Taster 1"), `device: "<serial>"` narrows the match to the objects of
+that device: the `Serial=` of the object's nearest enclosing element
+that carries one — a Tree device, an extension, or for the
+Miniserver's own I/Os and virtual folders the Miniserver (D55). Serials
+compare case-insensitively. These constraints never combine with
 `uuid:`, which pins exactly on its own. Once resolved, the UUID is
 pinned in the lockfile; subsequent compiles use the pin (even if the title
 has changed since) as long as an object with that UUID and type still
@@ -220,7 +227,7 @@ keep `uuid:` for, say, two refs of one flag on the same page. Unlike the
 other matchers, a pinned `mirrors:` re-confirms on every compile: the
 claim "this ref mirrors X" must stay true, so a ref the GUI re-pointed
 elsewhere stops the compile instead of being quietly tolerated.
-`room:`/`category:` never combine with it. `decompile`/`adopt` emit
+`room:`/`category:`/`device:` never combine with it. `decompile`/`adopt` emit
 `mirrors:` on their own where the target has a slug in the module and
 the match is unique.
 

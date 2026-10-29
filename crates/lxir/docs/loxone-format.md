@@ -389,6 +389,23 @@ carry their device's room; the rest were moved individually. Loxone
 Config does not cascade a device's room change to its children (its UI
 strings have no such prompt) — the follower rule of D39 is lxir's own.
 
+## Hardware identity: `Serial=`
+
+Hardware elements carry their serial number in `Serial=`, written as
+hex digits in upper case (web corpus, 2026-10-29; four Miniservers end
+in a placeholder `X` instead): 12 digits on the Miniserver (`LoxLIVE`; the same serial forms the tail
+of the UUIDs it mints, see below), 8 on everything else — Tree
+Extensions (`LoxTree`) and Tree devices (`TreeDevice`), the Air base
+(`LoxAIR`), Extensions (`LoxMORE`, `LoxDIMM`, `LoxAout`, `LoxOCEAN`),
+and the bus interfaces (`Comm485`, `Comm1wire`, `CommDMX`, `CommIR`,
+`EIBline`). They nest the way the hardware is cabled: a Tree device
+inside its Tree Extension inside the Miniserver, each with its own
+serial, the I/O objects as children of the innermost. An empty
+`Serial=` occurs (`LoxDMXdevice`) and means none. Air devices
+(`LoxAIRDevice`) have no `Serial=`; a 32-digit hex `IP=` identifies
+them. lxir reads `Serial=` for `device:` extern matching (D55) and
+`lxir scan` reports it as personal data.
+
 ## Time functions: per-project singletons
 
 The GUI's *Zeitfunktionen* periphery folder is a `TimeCaption` element

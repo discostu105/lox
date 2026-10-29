@@ -711,6 +711,107 @@ fn composite_extern_matching_narrows_by_room_and_category() {
 }
 
 #[test]
+fn extern_matching_narrows_by_device_serial() {
+    // Two identical Tree devices, each with a "Taster 1" (D55): the
+    // device's serial tells them apart; the title alone cannot.
+    let sensor = |dev: u32, n: u32| {
+        format!(
+            "\t\t\t\t\t<C Type=\"TreeSensor\" U=\"0000001{dev}-0000-000{n}-ffff000000000001\" \
+             Title=\"Taster {n}\">\r\n\
+             \t\t\t\t\t\t<Co K=\"Q\" U=\"0000001{dev}-0000-000{n}-01ff000000000001\"/>\r\n\
+             \t\t\t\t\t</C>\r\n"
+        )
+    };
+    let device = |dev: u32, serial: &str| {
+        format!(
+            "\t\t\t\t<C Type=\"TreeDevice\" U=\"0000000{dev}-0000-0000-ffff000000000001\" \
+             Title=\"Tasterschnittstelle\" Serial=\"{serial}\">\r\n{}{}\t\t\t\t</C>\r\n",
+            sensor(dev, 1),
+            sensor(dev, 2)
+        )
+    };
+    let base = LoxoneDoc::parse(
+        format!(
+            "<ControlList Version=\"1\" NextObj=\"20\">\r\n\
+             \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+             \t\t<C Type=\"LoxLIVE\" U=\"00000002-0000-0000-ffff000000000001\" Serial=\"504F94000001\">\r\n\
+             \t\t\t<C Type=\"LoxTree\" U=\"00000003-0000-0000-ffff000000000001\" Serial=\"B0000000\">\r\n\
+             {}{}\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n\
+             \t\t<C Type=\"Page\" U=\"00000006-0000-0000-ffff000000000001\" Title=\"P\">\r\n\
+             \t\t\t<C Type=\"And\" U=\"00000007-0000-0000-ffff000000000001\" Title=\"Beide\">\r\n\
+             \t\t\t\t<Co K=\"I1\" U=\"00000007-0000-0001-01ff000000000001\">\r\n\
+             \t\t\t\t\t<In Input=\"00000014-0000-0001-01ff000000000001\"/>\r\n\
+             \t\t\t\t</Co>\r\n\
+             \t\t\t\t<Co K=\"I2\" U=\"00000007-0000-0002-01ff000000000001\">\r\n\
+             \t\t\t\t\t<In Input=\"00000015-0000-0001-01ff000000000001\"/>\r\n\
+             \t\t\t\t</Co>\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"00000007-0000-0003-01ff000000000001\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n\
+             \t</C>\r\n\
+             </ControlList>\r\n",
+            device(4, "B0A1B2C3"),
+            device(5, "B0D4E5F6")
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        base.device_serial(&base.objects()[4].path),
+        Some("B0A1B2C3"),
+        "nearest enclosing Serial=, not the Tree branch or the Miniserver"
+    );
+
+    let resolve = |src: &str| {
+        let m = Module::parse(src)?;
+        let mut lock = Lockfile::new();
+        compile(&base, &m, &mut lock, &opts())?;
+        Ok::<_, Box<dyn std::error::Error>>(lock.externals["t"].uuid.clone())
+    };
+    let err = resolve("extern t = TreeSensor(title: \"Taster 1\")\n").unwrap_err();
+    assert!(err.to_string().contains("2"), "{err}");
+    assert_eq!(
+        resolve("extern t = TreeSensor(title: \"Taster 1\", device: \"b0d4e5f6\")\n").unwrap(),
+        "00000015-0000-0001-ffff000000000001",
+        "serials compare case-insensitively"
+    );
+    let err =
+        resolve("extern t = TreeSensor(title: \"Taster 1\", device: \"B0FFFFFF\")\n").unwrap_err();
+    assert!(err.to_string().contains("device: \"B0FFFFFF\""), "{err}");
+    assert!(
+        Module::parse(
+            "extern t = TreeSensor(uuid: \"00000014-0000-0001-ffff000000000001\", device: \"B0A1B2C3\")\n"
+        )
+        .is_err()
+    );
+    let src = "extern t = TreeSensor(title: \"Taster 1\", room: \"Flur\", device: \"B0A1B2C3\")\n";
+    assert_eq!(Module::parse(src).unwrap().to_text(), src);
+
+    // Decompile says the same: a repeated title gets its device, and the
+    // lifted externs resolve to the objects they were lifted from.
+    let (m, _) = decompile(&base, &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    let externs: Vec<&str> = text.lines().filter(|l| l.starts_with("extern ")).collect();
+    assert_eq!(
+        externs,
+        [
+            "extern taster_1 = TreeSensor(title: \"Taster 1\", device: \"B0A1B2C3\")",
+            "extern taster_1_2 = TreeSensor(title: \"Taster 1\", device: \"B0D4E5F6\")",
+        ],
+        "{text}"
+    );
+    let m = Module::parse(&(externs.join("\n") + "\n")).unwrap();
+    let mut lock = Lockfile::new();
+    compile(&base, &m, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        lock.externals["taster_1_2"].uuid,
+        "00000015-0000-0001-ffff000000000001"
+    );
+}
+
+#[test]
 fn config_version_pin_refuses_an_unqualified_release() {
     let base = base(); // ConfigVersion="17010727"
     let module = module();

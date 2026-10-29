@@ -78,6 +78,13 @@ types) contradict each other. Results and methodology:
       (it ignores `From=`/`Modes=`, so it is worth reporting upstream).
       Open: a larger sample; `test` blocks generated from a case's
       scenarios so solutions carry their own checks.
+- [x] `lxir scan` (2026-10-29): personal data in a config, located but
+      never quoted; CI fails on any finding in a committed `.Loxone`.
+- [x] Device-narrowed extern matching (2026-10-29, D55):
+      `device: "<serial>"` beside `room:`/`category:`; decompile uses it
+      before falling back to `uuid:`. Open: Air devices (their id is in
+      `IP=`, not `Serial=`); decompile narrowing by room, which would
+      resolve more repeated Tree titles than the serial does.
 - [ ] LightController2 moods from source. Surveyed 2026-10-29: a mood
       is a `<LightsceneC>` in `<LightscenesC Num= Outputs= FC=>` with a
       minted `UUID=`, a scene id `SID=` that `<LSConfig OpM= ScMv=>`

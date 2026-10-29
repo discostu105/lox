@@ -81,6 +81,8 @@ fn walk(el: &Element, out: &mut Vec<Finding>, users: &mut usize) {
                 (_, "ExtAddr") => Some("remote-access"),
                 (_, "MAC") => Some("network"),
                 (_, "Serial") => Some("hardware-serial"),
+                // An Air device's id: its `IP=` is not an IP address.
+                ("LoxAIRDevice", "IP") => Some("hardware-serial"),
                 (_, n) if is_credential(n) => Some("credential"),
                 _ if is_mail(v) => Some("mail"),
                 _ if is_public_ipv4(v) => Some("network"),
@@ -152,6 +154,7 @@ mod tests {
             r#"<C Type="Mailer" Title="Mail" SmtpReceiver="a@example.org" Cloud="true"/>"#,
             r#"<C Type="NetworkDevice" Title="TV" IP="192.168.1.20" Addr="8.8.4.4"/>"#,
             r#"<C Type="Page" Title="a@b"><IoData VisuPwd="geheim"/></C>"#,
+            r#"<C Type="LoxAIRDevice" Title="Rauchmelder" IP="0123456789ABCDEF0123456789ABCDEF"/>"#,
         ));
         let got: Vec<(&str, String, String)> = scan(&d)
             .into_iter()
@@ -167,6 +170,7 @@ mod tests {
             ("mail", "Mailer \"Mail\"", "SmtpReceiver"),
             ("network", "NetworkDevice \"TV\"", "Addr"),
             ("credential", "IoData", "VisuPwd"),
+            ("hardware-serial", "LoxAIRDevice \"Rauchmelder\"", "IP"),
         ];
         let want: Vec<(&str, String, String)> = want
             .iter()

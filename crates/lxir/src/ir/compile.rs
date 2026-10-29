@@ -1678,6 +1678,10 @@ fn resolve_externs(
                             .and_then(|u| cat_titles.get(&u))
                             .is_some_and(|t| t == want)
                     })
+                    && ext.device.as_ref().is_none_or(|want| {
+                        doc.device_serial(&o.path)
+                            .is_some_and(|s| s.eq_ignore_ascii_case(want))
+                    })
             })
             .collect();
         // Page narrowing, `mirrors:` only (D32): several refs of the same

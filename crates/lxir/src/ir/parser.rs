@@ -739,7 +739,8 @@ pub fn parse(src: &str) -> Result<Module> {
                             _ => {
                                 return Err(err(
                                     "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
-                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"])`"
+                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
+                                     [, device: \"…\"])`"
                                         .into(),
                                 ));
                             }
@@ -769,12 +770,12 @@ pub fn parse(src: &str) -> Result<Module> {
                         Some((other, _, _)) => {
                             return Err(err(format!(
                                 "unknown matcher `{other}` (expected uuid, iname, title, or \
-                                 mirrors first; room/category only narrow it)"
+                                 mirrors first; room/category/device only narrow it)"
                             )));
                         }
                         None => return Err(err("empty matcher list".into())),
                     };
-                    let (mut room, mut category) = (None, None);
+                    let (mut room, mut category, mut device) = (None, None, None);
                     for (k, v, is_ident) in pairs {
                         if is_ident {
                             return Err(err(format!("`{k}:` takes a quoted string")));
@@ -782,9 +783,11 @@ pub fn parse(src: &str) -> Result<Module> {
                         let slot = match k {
                             "room" => &mut room,
                             "category" => &mut category,
+                            "device" => &mut device,
                             other => {
                                 return Err(err(format!(
-                                    "unknown constraint `{other}` (expected room or category)"
+                                    "unknown constraint `{other}` (expected room, category \
+                                     or device)"
                                 )));
                             }
                         };
@@ -792,19 +795,16 @@ pub fn parse(src: &str) -> Result<Module> {
                             return Err(err(format!("duplicate `{k}:` constraint")));
                         }
                     }
-                    if matches!(match_spec, MatchSpec::Uuid(_))
-                        && (room.is_some() || category.is_some())
-                    {
-                        return Err(err("`uuid:` pins exactly — room/category constraints are \
-                             redundant and not allowed with it"
+                    let constrained = room.is_some() || category.is_some() || device.is_some();
+                    if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
+                        return Err(err("`uuid:` pins exactly — room/category/device \
+                             constraints are redundant and not allowed with it"
                             .into()));
                     }
-                    if matches!(match_spec, MatchSpec::Mirrors(_))
-                        && (room.is_some() || category.is_some())
-                    {
+                    if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
                         return Err(err(
                             "`mirrors:` is narrowed by the file's `page` statement — \
-                             room/category constraints are not allowed with it"
+                             room/category/device constraints are not allowed with it"
                                 .into(),
                         ));
                     }
@@ -814,6 +814,7 @@ pub fn parse(src: &str) -> Result<Module> {
                         match_spec,
                         room,
                         category,
+                        device,
                         comment,
                     }));
                 }

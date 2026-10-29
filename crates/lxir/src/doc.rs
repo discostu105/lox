@@ -281,6 +281,16 @@ impl LoxoneDoc {
         Some(cur)
     }
 
+    /// Serial number of the hardware the object at `path` belongs to: the
+    /// `Serial=` of its nearest enclosing element that carries one (a
+    /// Tree device, an extension, a Miniserver).
+    pub fn device_serial(&self, path: &[usize]) -> Option<&str> {
+        (0..path.len())
+            .rev()
+            .filter_map(|k| self.element_at(&path[..k])?.attr("Serial"))
+            .find(|s| !s.is_empty())
+    }
+
     pub fn element_at_mut(&mut self, path: &[usize]) -> Option<&mut Element> {
         let mut cur = &mut self.xml.root;
         for &i in path {
