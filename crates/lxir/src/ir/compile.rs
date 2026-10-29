@@ -294,11 +294,21 @@ pub fn compile(
     // It remembers which mirror a consumer wire went through — the lock's
     // extern_wires can't, since wires into managed sinks vanish with their
     // block and are never recorded there.
-    let base_wires: BTreeSet<(String, String)> = doc
-        .wires()
+    let all_base_wires = doc.wires();
+    let base_wires: BTreeSet<(String, String)> = all_base_wires
         .iter()
         .map(|w| (w.from_port.clone(), w.to_port.clone()))
         .collect();
+    // Each sink's `<In>` sources in base order (D45): a wire the rebuild
+    // adds back returns to its place among them, so whichever writer last
+    // ordered a connector — Loxone Config sorts on save — keeps its order.
+    let mut base_in_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for w in all_base_wires {
+        base_in_order
+            .entry(w.to_port)
+            .or_default()
+            .push(w.from_port);
+    }
 
     // --- Tear down our previous output: managed objects, extern wires,
     //     extern sets. What remains is exactly the Loxone-Config-owned state.
@@ -1084,6 +1094,7 @@ pub fn compile(
             &to.port_uuid,
             &from.port_uuid,
             flg.map(String::as_str),
+            base_in_order.get(&to.port_uuid).map_or(&[], Vec::as_slice),
         )?;
         if to.is_extern {
             lock.extern_wires.push(LockedWire {
@@ -1690,14 +1701,16 @@ fn find_co_mut<'a>(el: &'a mut Element, port_uuid: &str) -> Option<&'a mut Eleme
         .find_map(|c| find_co_mut(c, port_uuid))
 }
 
-/// Append `<In Input=from/>` under the sink `<Co>` and maintain `Nc`.
-/// `flg` re-emits a harvested `FLG=` wire flag verbatim (D19 residue).
+/// Put `<In Input=from/>` under the sink `<Co>` and maintain `Nc`.
+/// `flg` re-emits a harvested `FLG=` wire flag verbatim (D19 residue);
+/// `base_order` is the sink's `<In>` sources as the base listed them.
 fn add_wire(
     doc: &mut LoxoneDoc,
     owner_uuid: &str,
     to_port: &str,
     from_port: &str,
     flg: Option<&str>,
+    base_order: &[String],
 ) -> Result<()> {
     let owner = find_c_mut(&mut doc.xml.root, owner_uuid)
         .ok_or_else(|| Error::Compile(format!("wire sink object `{owner_uuid}` not found")))?;
@@ -1713,26 +1726,36 @@ fn add_wire(
             co.attr_decoded("K").unwrap_or_default()
         )));
     }
-    // A declared wire always ends up as the LAST <In> of its sink: an
-    // already-present duplicate (first compile after adopt — the wire
-    // exists in the base) is moved there instead of re-created, keeping
-    // its attributes and making the first compile byte-identical to every
-    // later one (which tears the wire down and re-appends it). `<In>`
-    // order is semantically unordered — the GUI rewrites it on save.
-    let existing = co.children.iter().position(|n| {
+    // A declared wire keeps the place the base gave it (D45). `<In>` order
+    // is semantically unordered, but Loxone Config sorts it on save; a
+    // wire the teardown removed goes back before the first `<In>` the base
+    // listed after it, so compiling a GUI-saved base reproduces it byte
+    // for byte. An already-present duplicate (first compile after adopt —
+    // the wire exists in the base) stays where it is, keeping its
+    // attributes, which is where every later compile puts it back. Only a
+    // wire the base did not carry is appended.
+    let exists = co.children.iter().any(|n| {
         matches!(n, crate::xml::Node::Element(e)
             if e.name == "In" && e.attr("Input") == Some(from_port))
     });
-    if let Some(pos) = existing {
-        let node = co.children.remove(pos);
-        co.children.push(node);
-    } else {
+    if !exists {
         let mut input = Element::new("In");
         input.set_attr("Input", from_port);
         if let Some(v) = flg {
             input.set_attr_raw("FLG", v);
         }
-        co.push_child(input);
+        let rank = |src: &str| base_order.iter().position(|s| s == src);
+        let before = rank(from_port).and_then(|mine| {
+            co.children.iter().position(|n| {
+                matches!(n, crate::xml::Node::Element(e)
+                    if e.name == "In"
+                        && e.attr("Input").and_then(rank).is_none_or(|r| r > mine))
+            })
+        });
+        match before {
+            Some(i) => co.children.insert(i, crate::xml::Node::Element(input)),
+            None => co.push_child(input),
+        }
     }
     sync_nc(co);
     Ok(())

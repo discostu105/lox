@@ -78,7 +78,8 @@ Each compile:
 This makes compilation *convergent*: compiling the compiler's own output
 again is a byte-level fixpoint (tested in `tests/ir.rs`), which is what makes
 the real workflow — compile → upload → Config saves → download → compile —
-safe.
+safe. Where a save reorders a connector's `<In>`, the rebuild follows the
+saved order (D45).
 
 ## Identity and determinism
 
@@ -1259,3 +1260,32 @@ Anything unverified is an error, not a heuristic:
   config the ten `NDOC=` texts, plus a `Code=` damaged on purpose, come
   back with raw CRLF, and the save keeps them, with no semantic change
   beyond two known stale ref titles (D43).
+- **D45 — a rebuilt wire keeps its place among the sink's `<In>`**
+  (2026-10-29). Loxone Config writes a connector's `<In>` children in
+  an order of its own when it saves. The order means nothing, but the
+  teardown removes the compiler's wires and the rebuild appended them,
+  so recompiling a GUI-saved config moved every compiler wire that the
+  save had sorted in front of another `<In>` to the end of its
+  connector. The bytes changed with the logic unchanged, and `lox
+  config push` offered an upload, with its reboot, for nothing.
+  Decision: before the teardown, the compile records each sink's
+  `<In>` sources in base order. A wire added back goes in before the
+  first `<In>` that the base listed after it, or that the base did not
+  have, and so lands where the base had it:
+  - **Managed and extern sinks alike.** A managed block is rebuilt
+    empty and gets its wires back in base order; on an extern sink the
+    GUI's wires stay put and the compiler's wires return between them.
+  - **New wires still append.** A wire the base did not carry has no
+    place to keep and goes last, as before.
+  - **An `<In>` already present stays.** The first compile after adopt
+    finds the declared wire in the base; it used to move it to the end
+    so that the next compile, which appended, matched. It now stays
+    where it is, which is where every later compile puts it back.
+  Compiling the compiler's own output is still a fixpoint, since that
+  output is a base like any other. Not covered: a save also rewrites
+  what the rebuild emits for a managed block. Loxone Config 17.2
+  stamps every block `V="178"` where the rebuild writes the verified
+  `V="175"`, writes `Desc=` right after `Type=`, moves blocks within a
+  page, and adds `Text="true"` to some minted refs. A recompile of a
+  config saved with 17.2 still differs in those bytes, though not in
+  logic.
