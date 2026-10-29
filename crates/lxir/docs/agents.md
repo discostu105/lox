@@ -216,6 +216,8 @@ it only when it matches what you intended.
 | `but the base config has no <C Type="Page"> titled` | no page carries the title | fix the title, or create the page: `page "…" (room: "…")` (D56) |
 | `a page needs a real room` | `page … (room: "Nicht zugeordnet")` | name the room the page belongs to |
 | `was created by the compiler as … the base titles it` | a page lxir created was renamed in Loxone Config | write the new title in the source (without the arguments the page is Loxone Config's), or rename it back |
+| `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
+| `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -230,8 +232,9 @@ only on success) — just fix and re-run.
 - The compiler touches only: its managed blocks, wires it drew onto extern
   ports (`<-`), `Def=` values it assigned on extern ports, and the
   title/room/category it claimed on externs (plus that claim's followers),
-  tile programs it declared, and access rights (`TIM=`) on Code Touches
-  with an `access` declaration. Everything else in the config is
+  tile programs it declared, access rights (`TIM=`) on Code Touches
+  with an `access` declaration, and recipients (`ACT=`) of notifications
+  with a `recipients` declaration. Everything else in the config is
   preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

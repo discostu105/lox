@@ -63,6 +63,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   required); without `room:` a missing title is an error.
 - Deleting a block needs `removed <slug>`; renaming a slug needs
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
+- A push notification is created in Loxone Config and named as an
+  extern `Notification(…)`; `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")`
+  sends it, and `recipients <it> … end` (`user "<title>"`) says who gets it.
 - To take over logic someone drew in the GUI, use `lxir adopt`, then
   confirm with `lxir diff --exit-code` that the takeover changed nothing.
   The decompile view is for reading and does not compile.

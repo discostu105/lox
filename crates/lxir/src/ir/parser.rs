@@ -472,12 +472,10 @@ pub fn parse(src: &str) -> Result<Module> {
                     a.end_comment = comment;
                     items.push(Item::Access(a));
                 }
-                [
-                    Tok::Ident(kw),
-                    Tok::Str(principal),
-                    Tok::Colon,
-                    Tok::Str(schedule),
-                ] if kw == "user" || kw == "group" => {
+                [Tok::Ident(kw), Tok::Str(principal), rest @ ..]
+                    if (kw == "user" || kw == "group")
+                        && matches!(rest, [] | [Tok::Colon, Tok::Str(_)]) =>
+                {
                     a.body.push(AccessItem::Grant(AccessGrant {
                         kind: if kw == "user" {
                             PrincipalKind::User
@@ -485,16 +483,26 @@ pub fn parse(src: &str) -> Result<Module> {
                             PrincipalKind::Group
                         },
                         principal: principal.clone(),
-                        schedule: schedule.clone(),
+                        schedule: match rest {
+                            [_, Tok::Str(schedule)] => Some(schedule.clone()),
+                            _ => None,
+                        },
                         comment,
                     }));
                 }
                 _ => {
-                    return Err(err(format!(
-                        "expected `user \"<title>\": \"<schedule>\"`, \
-                         `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
-                        a.slug
-                    )));
+                    return Err(err(match a.right {
+                        RightKind::Access => format!(
+                            "expected `user \"<title>\": \"<schedule>\"`, \
+                             `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
+                            a.slug
+                        ),
+                        RightKind::Recipients => format!(
+                            "expected `user \"<title>\"`, `group \"<title>\"` or `end` in \
+                             `recipients {}`",
+                            a.slug
+                        ),
+                    }));
                 }
             }
             continue;
@@ -643,27 +651,45 @@ pub fn parse(src: &str) -> Result<Module> {
                     "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
                 ));
             }
-            // `access` is a keyword only in front of a slug: `access = …` and
-            // `access.Port …` stay statements about an object named `access`.
+            // `access` and `recipients` are keywords only in front of a slug:
+            // `access = …` and `access.Port …` stay statements about an
+            // object named `access`.
             Tok::Ident(kw)
-                if kw == "access"
+                if (kw == "access" || kw == "recipients")
                     && !matches!(toks.get(1), Some(Tok::Eq | Tok::Dot | Tok::LArrow)) =>
             {
+                let right = if kw == "access" {
+                    RightKind::Access
+                } else {
+                    RightKind::Recipients
+                };
                 let [_, Tok::Ident(slug)] = toks.as_slice() else {
-                    return Err(err(
-                        "expected `access <slug>` — the extern NFC Code Touch whose access \
-                         rights the body lists"
+                    return Err(err(match right {
+                        RightKind::Access => "expected `access <slug>` — the extern NFC Code \
+                                              Touch whose access rights the body lists"
                             .into(),
-                    ));
+                        RightKind::Recipients => "expected `recipients <slug>` — the extern \
+                                                  push notification whose recipients the body \
+                                                  lists"
+                            .into(),
+                    }));
                 };
                 if open_template.is_some() {
-                    return Err(err(
-                        "`access` is not allowed inside a template body — declare access \
-                         rights at module level (D49)"
-                            .into(),
-                    ));
+                    return Err(err(format!(
+                        "`{kw}` is not allowed inside a template body — declare {} at module \
+                         level ({})",
+                        match right {
+                            RightKind::Access => "access rights",
+                            RightKind::Recipients => "recipients",
+                        },
+                        match right {
+                            RightKind::Access => "D49",
+                            RightKind::Recipients => "D51",
+                        }
+                    )));
                 }
                 open_access = Some(AccessDecl {
+                    right,
                     slug: check_slug(slug, lineno)?,
                     body: Vec::new(),
                     comment,
@@ -968,7 +994,11 @@ pub fn parse(src: &str) -> Result<Module> {
     if let Some(a) = open_access {
         return Err(Error::IrParse {
             line: src.lines().count(),
-            msg: format!("unclosed `access {}` — missing `end`", a.slug),
+            msg: format!(
+                "unclosed `{} {}` — missing `end`",
+                a.right.keyword(),
+                a.slug
+            ),
         });
     }
     if let Some(t) = open_schedule {

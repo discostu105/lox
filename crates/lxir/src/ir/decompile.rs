@@ -39,7 +39,7 @@ use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
-    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, Value, WireDecl,
+    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, RightKind, Value, WireDecl,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1057,11 +1057,12 @@ fn access_decl(
         body.push(AccessItem::Grant(AccessGrant {
             kind: r.kind,
             principal,
-            schedule: unique("access schedule", r.schedule, schedules())?,
+            schedule: Some(unique("access schedule", r.schedule, schedules())?),
             comment: None,
         }));
     }
     Ok(AccessDecl {
+        right: RightKind::Access,
         slug: slug.to_string(),
         body,
         comment: None,

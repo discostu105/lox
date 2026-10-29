@@ -401,6 +401,43 @@ all three, D47), and minted ApiActor refs gain `Text="true"`, which
 GUI-created ApiActor refs carry under 17.1 too and D33 did not emit
 (D48 does).
 
+## Push notifications (session 15, D51) — passed
+
+Ran 2026-10-29 with Loxone Config 17.2.8. Two parts:
+
+- **Probe.** On a copy of the house config: *Messages › Notification*
+  created and renamed, dragged onto a page, a user ticked as recipient
+  in its permissions dialog, saved. The save is the format reference in
+  loxone-format.md (*Push notifications*): the `Notification` element,
+  the `OutputRefLM` with its `<LoggerMailer>`, the recipient's
+  `<PRM ACT="3"/>`.
+- **Compile.** The notification spliced into the base (a byte patch,
+  since it is periphery), then the house module plus an `InputRef` of a
+  temperature sensor, a `LessEqual`, an `OutputRefLM` with `On:` and
+  `MinimumTime: 12h`, and `recipients` for one user, compiled, opened
+  and saved. The first run diffed in two places, both source errors:
+  the comparator's `Input2: 0` came back without `Def=` (Config writes
+  no zero there; leave the input open), and the sensor ref gained the
+  wire `I ← sensor.Q` (loxone-format, *Refs*). With both fixed the
+  semantic diff is empty — message texts, `MinimumTime=` and the
+  recipient included. The save added the known `WF` fingerprint
+  (`147456` on the `OutputRefLM`, `16384` on the comparator, `16400` on
+  the notification and the mirrored sensor).
+
+Driving the GUI, learned on the way:
+
+- A modal popup (the permissions dialog) must be closed with Alt+F4.
+  Unmapping it with xdotool leaves the GUI modal: Ctrl+S then does
+  nothing.
+- Dragging a tree item onto a page needs a slow drag: mouse down, a
+  small move, a pause of about 0.8 s, moves in steps of 0.15 s, a
+  pause, mouse up. A fast drag drops nothing.
+- `xdotool type` mangles non-ASCII (`ä` arrives as `°`); send keysyms
+  (`xdotool key adiaeresis`).
+- Use a private `ORACLE_DIR` and `ORACLE_DISPLAY` when another session
+  may run the rig: a second `oracle.sh` on the same display tears down
+  the first one's Xvfb.
+
 ## The timer/edge/state batch (sessions 16–17) — passed
 
 Ran 2026-10-29 against a copy of the house config (Loxone Config

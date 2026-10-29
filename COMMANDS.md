@@ -409,6 +409,18 @@ access haustuer
 end
 ```
 
+Push notifications too (decision D51): the notification is created in Loxone Config and named as an extern; an
+`OutputRefLM` block sends its message when its input turns on, and a `recipients` declaration lists who gets it.
+
+```text
+extern frost = Notification(title: "Frostwarnung Garten")
+warn = OutputRefLM(mirrors: frost, AI: zu_kalt.Q, On: "Frost im Garten", MinimumTime: 12h)
+
+recipients frost
+	user "alice"
+end
+```
+
 A directory with a `lox.toml` is a project: inside it `compile` needs no flags and `check`/`fmt`/`drift`/`lint`
 use its module and lock. Paths are relative to the file:
 

@@ -1781,7 +1781,7 @@ fn mirrors_matcher_resolves_refs_by_their_target() {
     )
     .unwrap_err()
     .to_string();
-    assert!(err.contains("InputRef/OutputRef only"), "{err}");
+    assert!(err.contains("InputRef/OutputRef/OutputRefLM only"), "{err}");
 }
 
 /// D30: the full view elides a parameter whose value equals the

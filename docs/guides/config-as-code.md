@@ -103,6 +103,25 @@ party = VirtualIn("Partymodus")          # a new switch in the app, in the Virtu
 The claim replaces the timer's switching times and nothing else; edits made in the app are overwritten on the next
 push, and removing the claim hands the times back to the app. A new `VirtualIn` gets the next free `VI<n>`.
 
+### Push notifications
+
+A push notification is created in Loxone Config (*Messages*); the module names it and says when it fires, what it
+says and who gets it:
+
+```text
+extern frost = Notification(title: "Frostwarnung Garten")
+
+warn = OutputRefLM(mirrors: frost, AI: zu_kalt.Q, On: "Frost im Garten", MinimumTime: 12h)
+
+recipients frost
+	user "alice"
+end
+```
+
+`On:` is sent when `AI` turns on, `Off:` (optional) when it turns off, and `MinimumTime:` keeps the messages apart.
+`recipients` works like `access`: whoever it leaves out stops getting the notification. Members of *Full access*
+always get it.
+
 The full language: [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md).
 Worked examples: [crates/lxir/examples](https://github.com/discostu105/lox/tree/main/crates/lxir/examples).
 
