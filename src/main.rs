@@ -697,9 +697,18 @@ pub(crate) enum Cmd {
         /// Filter by control name (fuzzy match)
         #[arg(long, short = 'c')]
         control: Option<String>,
-        /// Include initial state snapshot
+        /// Include initial state snapshot (with --reconnect: again after every reconnect)
         #[arg(long)]
         initial: bool,
+        /// Keep streaming across Miniserver reboots and dropped connections
+        ///
+        /// Waits until the Miniserver answers again (retries back off from 1 s to
+        /// 30 s; gives up after 30 min), re-reads the structure and resumes the
+        /// same output. The gap is reported on stderr and, with -o json, as
+        /// {"event":"disconnected"} / {"event":"reconnected"} lines. States that
+        /// changed while offline are printed after the reconnect.
+        #[arg(long)]
+        reconnect: bool,
     },
     /// Check state (exit 0=match, 1=no match)
     If {
@@ -1677,7 +1686,8 @@ fn run(cli: Cli) -> Result<()> {
             room,
             control,
             initial,
-        } => commands::inspect::cmd_stream(&ctx, r#type, room, control, initial),
+            reconnect,
+        } => commands::inspect::cmd_stream(&ctx, r#type, room, control, initial, reconnect),
         Cmd::If {
             name_or_uuid,
             op,

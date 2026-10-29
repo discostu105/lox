@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `lox stream --reconnect` keeps streaming across Miniserver reboots and dropped connections: it waits until the Miniserver answers again (backoff 1–30 s, gives up after 30 min), re-reads the structure, logs in again and resumes the same output. The gap is reported on stderr and, with `-o json`, as `{"event":"disconnected"}` / `{"event":"reconnected"}` lines; states that changed while offline are printed after the reconnect, and `--initial` prints the full snapshot again
+
+### Fixed
+- `lox stream` without `--initial` no longer prints the initial text-state snapshot as if it were changes (only the value-state snapshot was skipped)
+
 ## [0.14.0] — 2026-10-04
 
 ### Added

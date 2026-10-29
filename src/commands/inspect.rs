@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::client::{Control, LoxClient};
 use crate::commands::RunContext;
@@ -232,17 +232,28 @@ pub fn cmd_watch(_ctx: &RunContext, name_or_uuid: String, interval: u64) -> Resu
     }
 }
 
+/// `lox stream --reconnect`: wait between attempts, doubling up to the max.
+const RECONNECT_MIN_SECS: u64 = 1;
+const RECONNECT_MAX_SECS: u64 = 30;
+/// First wait after the Miniserver announced it is going offline: it may
+/// still answer for a moment before it actually shuts down.
+const RECONNECT_AFTER_OUT_OF_SERVICE_SECS: u64 = 5;
+/// Give up when the Miniserver stays unreachable this long.
+const RECONNECT_GIVE_UP_SECS: u64 = 30 * 60;
+/// Connecting and authenticating one stream session.
+const STREAM_CONNECT_TIMEOUT_SECS: u64 = 20;
+
 pub fn cmd_stream(
     ctx: &RunContext,
     r#type: Option<String>,
     room: Option<String>,
     control: Option<String>,
     initial: bool,
+    reconnect: bool,
 ) -> Result<()> {
     let cfg = Config::load()?;
     let mut lox = LoxClient::new(cfg.clone())?;
-    let structure = lox.get_structure()?.clone();
-    let state_map = stream::build_state_uuid_map(&structure);
+    let mut state_map = stream::build_state_uuid_map(lox.get_structure()?);
     if !ctx.quiet {
         eprintln!("Streaming state changes (Ctrl+C to stop)...");
     }
@@ -253,80 +264,262 @@ pub fn cmd_stream(
     let type_filter = r#type;
     let room_filter = room;
     let control_filter = control;
-    let mut initial_done = false;
     let json = ctx.json;
     let csv = ctx.csv;
-    let quiet = ctx.quiet;
+    let mut snapshot = SnapshotFilter::new(initial);
+    let mut ever_live = false;
+    // While the stream is down: since when, and the wait before the next attempt
+    let mut offline_since: Option<Instant> = None;
+    let mut backoff = Backoff::new(RECONNECT_MIN_SECS);
 
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(stream::stream_events(&cfg, |events| {
-        for event in &events {
-            match event {
-                stream::StateEvent::ValueState { uuid, value } => {
-                    if !initial && !initial_done {
+    loop {
+        let mut out_of_service = false;
+        let result = rt.block_on(stream::stream_events_while(
+            &cfg,
+            Duration::from_secs(STREAM_CONNECT_TIMEOUT_SECS),
+            |events| {
+                ever_live = true;
+                if let Some(since) = offline_since.take() {
+                    print_reconnected(ctx, since.elapsed());
+                }
+                let dump = snapshot.is_dump(&events);
+                for event in &events {
+                    let (uuid, value) = match event {
+                        stream::StateEvent::ValueState { uuid, value } => (uuid, value.to_string()),
+                        stream::StateEvent::TextState { uuid, text, .. } => (uuid, text.clone()),
+                        stream::StateEvent::OutOfService => {
+                            out_of_service = true;
+                            return Ok(false);
+                        }
+                        _ => continue,
+                    };
+                    let Some(info) = state_map.get(uuid) else {
+                        continue;
+                    };
+                    if !matches_filters(
+                        info,
+                        type_filter.as_deref(),
+                        room_filter.as_deref(),
+                        control_filter.as_deref(),
+                    ) || !snapshot.keep(uuid, &value, dump)
+                    {
                         continue;
                     }
-                    if let Some(info) = state_map.get(uuid) {
-                        if !matches_filters(
-                            info,
-                            type_filter.as_deref(),
-                            room_filter.as_deref(),
-                            control_filter.as_deref(),
-                        ) {
-                            continue;
-                        }
-                        print_stream_event(
-                            json,
-                            csv,
-                            &info.control_name,
-                            &info.state_name,
-                            &format!("{}", value),
-                            info.room.as_deref(),
-                            &info.control_type,
-                            uuid,
-                        );
+                    print_stream_event(
+                        json,
+                        csv,
+                        &info.control_name,
+                        &info.state_name,
+                        &value,
+                        info.room.as_deref(),
+                        &info.control_type,
+                        uuid,
+                    );
+                }
+                Ok(true)
+            },
+        ));
+
+        // Without --reconnect, and when the very first connection fails
+        // (wrong host or credentials), end as before.
+        if !reconnect || (!ever_live && result.is_err()) {
+            if out_of_service {
+                if !ctx.quiet {
+                    eprintln!(
+                        "Miniserver going offline (firmware update?). Exiting (--reconnect keeps streaming)."
+                    );
+                }
+                return Ok(());
+            }
+            return result;
+        }
+
+        let (reason, mut message) = match &result {
+            _ if out_of_service => (
+                "out_of_service",
+                "Miniserver going offline (reboot or firmware update)".to_string(),
+            ),
+            Ok(()) => ("closed", "connection closed by the Miniserver".to_string()),
+            Err(e) => ("error", format!("{:#}", e)),
+        };
+        let since = match offline_since {
+            Some(since) => {
+                if crate::client::verbose() >= 1 {
+                    eprintln!("  still offline: {}", message);
+                }
+                since
+            }
+            None => {
+                print_disconnected(ctx, reason, &message);
+                backoff = Backoff::new(if out_of_service {
+                    RECONNECT_AFTER_OUT_OF_SERVICE_SECS
+                } else {
+                    RECONNECT_MIN_SECS
+                });
+                *offline_since.insert(Instant::now())
+            }
+        };
+
+        // Wait until the Miniserver answers again. The structure is re-read on
+        // every attempt: after a reboot it may run a new program (controls
+        // added, renamed or removed), and the download doubles as the probe.
+        loop {
+            if since.elapsed() >= Duration::from_secs(RECONNECT_GIVE_UP_SECS) {
+                bail!(
+                    "Miniserver unreachable for {} min, giving up (last error: {})",
+                    RECONNECT_GIVE_UP_SECS / 60,
+                    message
+                );
+            }
+            thread::sleep(backoff.next_delay());
+            match fetch_fresh_structure(&cfg) {
+                Ok(structure) => {
+                    state_map = stream::build_state_uuid_map(&structure);
+                    break;
+                }
+                Err(e) => {
+                    message = format!("{:#}", e);
+                    if crate::client::verbose() >= 1 {
+                        eprintln!("  still offline: {}", message);
                     }
                 }
-                stream::StateEvent::TextState { uuid, text, .. } => {
-                    if !initial && !initial_done {
-                        continue;
-                    }
-                    if let Some(info) = state_map.get(uuid) {
-                        if !matches_filters(
-                            info,
-                            type_filter.as_deref(),
-                            room_filter.as_deref(),
-                            control_filter.as_deref(),
-                        ) {
-                            continue;
-                        }
-                        print_stream_event(
-                            json,
-                            csv,
-                            &info.control_name,
-                            &info.state_name,
-                            text,
-                            info.room.as_deref(),
-                            &info.control_type,
-                            uuid,
-                        );
-                    }
-                }
-                stream::StateEvent::OutOfService => {
-                    if !quiet {
-                        eprintln!("Miniserver going offline (firmware update?). Exiting.");
-                    }
-                    std::process::exit(0);
-                }
-                _ => {}
             }
         }
-        if !initial_done {
-            initial_done = true;
+        snapshot.new_session();
+    }
+}
+
+/// Re-read the structure from the Miniserver, bypassing the cache.
+fn fetch_fresh_structure(cfg: &Config) -> Result<Value> {
+    let _ = std::fs::remove_file(LoxClient::cache_path(cfg));
+    Ok(LoxClient::new(cfg.clone())?.get_structure()?.clone())
+}
+
+/// Gap marker: a status line on stderr and, with `-o json`, an event line on
+/// stdout between the state lines (CSV has no room for it).
+fn print_disconnected(ctx: &RunContext, reason: &str, message: &str) {
+    if !ctx.quiet {
+        eprintln!(
+            "[{}]  ✗ disconnected: {} — reconnecting (Ctrl+C to stop)...",
+            now_hms(),
+            message
+        );
+    }
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "event": "disconnected",
+                "reason": reason,
+                "message": message,
+            })
+        );
+    }
+}
+
+fn print_reconnected(ctx: &RunContext, offline: Duration) {
+    if !ctx.quiet {
+        eprintln!(
+            "[{}]  ✓ reconnected after {} offline",
+            now_hms(),
+            fmt_offline(offline)
+        );
+    }
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "event": "reconnected",
+                "offline_secs": offline.as_secs(),
+            })
+        );
+    }
+}
+
+fn fmt_offline(d: Duration) -> String {
+    let s = d.as_secs();
+    match s {
+        0..60 => format!("{}s", s),
+        60..3600 => format!("{}m {}s", s / 60, s % 60),
+        _ => format!("{}h {}m", s / 3600, (s % 3600) / 60),
+    }
+}
+
+/// Wait schedule between reconnect attempts: doubling, capped.
+struct Backoff {
+    next_secs: u64,
+}
+
+impl Backoff {
+    fn new(first_secs: u64) -> Self {
+        Self {
+            next_secs: first_secs,
         }
-        Ok(())
-    }))?;
-    Ok(())
+    }
+
+    fn next_delay(&mut self) -> Duration {
+        let secs = self.next_secs;
+        self.next_secs = (secs * 2).min(RECONNECT_MAX_SECS);
+        Duration::from_secs(secs)
+    }
+}
+
+/// Splits a stream session's initial state dump from live changes.
+///
+/// After subscribing, the Miniserver sends every state once (a value-state
+/// table, then a text-state table, each as one batch) and only changes after
+/// that. With `--initial` every dump is printed, also after a reconnect: a
+/// fresh snapshot of the rebooted Miniserver. Without it the first dump is the
+/// silent baseline, and a later one prints only the states that changed (or
+/// appeared) while the stream was down.
+struct SnapshotFilter {
+    initial: bool,
+    reconnected: bool,
+    value_dump_seen: bool,
+    text_dump_seen: bool,
+    /// Last value seen per state UUID, across sessions
+    last: HashMap<String, String>,
+}
+
+impl SnapshotFilter {
+    fn new(initial: bool) -> Self {
+        Self {
+            initial,
+            reconnected: false,
+            value_dump_seen: false,
+            text_dump_seen: false,
+            last: HashMap::new(),
+        }
+    }
+
+    /// A new session after a reconnect starts with a new dump.
+    fn new_session(&mut self) {
+        self.reconnected = true;
+        self.value_dump_seen = false;
+        self.text_dump_seen = false;
+    }
+
+    /// Whether this batch is the session's dump of its table type.
+    fn is_dump(&mut self, batch: &[stream::StateEvent]) -> bool {
+        let seen = match batch.first() {
+            Some(stream::StateEvent::ValueState { .. }) => &mut self.value_dump_seen,
+            Some(stream::StateEvent::TextState { .. }) => &mut self.text_dump_seen,
+            _ => return false,
+        };
+        !std::mem::replace(seen, true)
+    }
+
+    /// Whether to print this state value; `dump` as from [`Self::is_dump`].
+    fn keep(&mut self, uuid: &str, value: &str, dump: bool) -> bool {
+        let previous = self.last.insert(uuid.to_string(), value.to_string());
+        if !dump || self.initial {
+            return true;
+        }
+        self.reconnected && previous.as_deref() != Some(value)
+    }
 }
 
 pub fn cmd_if(
@@ -945,8 +1138,117 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::statistic_output_names;
+    use super::{Backoff, SnapshotFilter, fmt_offline, statistic_output_names};
+    use crate::stream::StateEvent;
     use serde_json::json;
+    use std::time::Duration;
+
+    fn values(pairs: &[(&str, f64)]) -> Vec<StateEvent> {
+        pairs
+            .iter()
+            .map(|(uuid, value)| StateEvent::ValueState {
+                uuid: uuid.to_string(),
+                value: *value,
+            })
+            .collect()
+    }
+
+    fn texts(pairs: &[(&str, &str)]) -> Vec<StateEvent> {
+        pairs
+            .iter()
+            .map(|(uuid, text)| StateEvent::TextState {
+                uuid: uuid.to_string(),
+                icon_uuid: String::new(),
+                text: text.to_string(),
+            })
+            .collect()
+    }
+
+    /// The states of `batch` the filter lets through.
+    fn printed(f: &mut SnapshotFilter, batch: &[StateEvent]) -> Vec<String> {
+        let dump = f.is_dump(batch);
+        batch
+            .iter()
+            .filter_map(|e| match e {
+                StateEvent::ValueState { uuid, value } => Some((uuid, value.to_string())),
+                StateEvent::TextState { uuid, text, .. } => Some((uuid, text.clone())),
+                _ => None,
+            })
+            .filter(|(uuid, value)| f.keep(uuid, value, dump))
+            .map(|(uuid, value)| format!("{}={}", uuid, value))
+            .collect()
+    }
+
+    #[test]
+    fn snapshot_without_initial_hides_both_dumps() {
+        let mut f = SnapshotFilter::new(false);
+        assert!(printed(&mut f, &values(&[("a", 1.0), ("b", 0.0)])).is_empty());
+        // the text-state dump is a second batch, still part of the snapshot
+        assert!(printed(&mut f, &texts(&[("t", "idle")])).is_empty());
+        assert_eq!(printed(&mut f, &values(&[("a", 2.0)])), ["a=2"]);
+        assert_eq!(printed(&mut f, &texts(&[("t", "busy")])), ["t=busy"]);
+    }
+
+    #[test]
+    fn snapshot_with_initial_prints_dumps() {
+        let mut f = SnapshotFilter::new(true);
+        assert_eq!(printed(&mut f, &values(&[("a", 1.0)])), ["a=1"]);
+        assert_eq!(printed(&mut f, &texts(&[("t", "idle")])), ["t=idle"]);
+        assert_eq!(printed(&mut f, &values(&[("a", 2.0)])), ["a=2"]);
+        // after a reconnect: a full fresh snapshot
+        f.new_session();
+        assert_eq!(
+            printed(&mut f, &values(&[("a", 2.0), ("b", 0.0)])),
+            ["a=2", "b=0"]
+        );
+        assert_eq!(printed(&mut f, &texts(&[("t", "idle")])), ["t=idle"]);
+    }
+
+    #[test]
+    fn snapshot_after_reconnect_prints_what_changed_offline() {
+        let mut f = SnapshotFilter::new(false);
+        printed(&mut f, &values(&[("a", 1.0), ("b", 0.0)]));
+        printed(&mut f, &texts(&[("t", "idle")]));
+        assert_eq!(printed(&mut f, &values(&[("b", 1.0)])), ["b=1"]);
+        f.new_session();
+        // a changed while offline, b did not, c is new (a new program)
+        assert_eq!(
+            printed(&mut f, &values(&[("a", 5.0), ("b", 1.0), ("c", 0.0)])),
+            ["a=5", "c=0"]
+        );
+        assert_eq!(
+            printed(&mut f, &texts(&[("t", "idle")])),
+            Vec::<String>::new()
+        );
+        assert_eq!(printed(&mut f, &values(&[("a", 6.0)])), ["a=6"]);
+    }
+
+    #[test]
+    fn snapshot_ignores_other_batches() {
+        let mut f = SnapshotFilter::new(false);
+        assert!(!f.is_dump(&[StateEvent::Keepalive]));
+        assert!(f.is_dump(&values(&[("a", 1.0)])));
+        assert!(!f.is_dump(&values(&[("a", 2.0)])));
+        assert!(f.is_dump(&texts(&[("t", "x")])));
+        assert!(!f.is_dump(&texts(&[("t", "y")])));
+    }
+
+    #[test]
+    fn reconnect_backoff_doubles_up_to_cap() {
+        let mut b = Backoff::new(1);
+        let secs: Vec<u64> = (0..7).map(|_| b.next_delay().as_secs()).collect();
+        assert_eq!(secs, [1, 2, 4, 8, 16, 30, 30]);
+        let mut b = Backoff::new(5);
+        let secs: Vec<u64> = (0..4).map(|_| b.next_delay().as_secs()).collect();
+        assert_eq!(secs, [5, 10, 20, 30]);
+    }
+
+    #[test]
+    fn offline_duration_format() {
+        assert_eq!(fmt_offline(Duration::from_secs(42)), "42s");
+        assert_eq!(fmt_offline(Duration::from_secs(134)), "2m 14s");
+        assert_eq!(fmt_offline(Duration::from_secs(3720)), "1h 2m");
+    }
 
     #[test]
     fn statistic_outputs_array_and_object() {

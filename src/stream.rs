@@ -649,6 +649,25 @@ where
     pump(&mut ws, |events| handler(events).map(|()| true)).await
 }
 
+/// One stream session that the caller can end: like [`stream_events`], but
+/// `handler` returns `Ok(false)` to stop, and connecting plus authenticating
+/// must finish within `connect_timeout`, so an attempt against a Miniserver
+/// that is still starting up cannot hang. Returns `Ok(())` when stopped or
+/// when the server closed the socket; the caller decides whether to reconnect.
+pub async fn stream_events_while<F>(
+    cfg: &Config,
+    connect_timeout: Duration,
+    handler: F,
+) -> Result<()>
+where
+    F: FnMut(Vec<StateEvent>) -> Result<bool>,
+{
+    let mut ws = tokio::time::timeout(connect_timeout, open_subscribed(cfg))
+        .await
+        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+    pump(&mut ws, handler).await
+}
+
 /// A long-lived stream session for interactive use (`lox tui`): like
 /// [`stream_events`] but with a WS keepalive every 30 s (the Miniserver drops
 /// idle sockets after ~5 min), a connect/auth timeout, and a stop signal.
