@@ -1,6 +1,8 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::net::UdpSocket;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::client::LoxClient;
@@ -840,7 +842,7 @@ pub fn cmd_reboot(_ctx: &RunContext, yes: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn cmd_files(_ctx: &RunContext, action: FilesCmd) -> Result<()> {
+pub fn cmd_files(ctx: &RunContext, action: FilesCmd) -> Result<()> {
     let lox = LoxClient::new(Config::load()?)?;
     match action {
         FilesCmd::Ls { path } => {
@@ -848,14 +850,57 @@ pub fn cmd_files(_ctx: &RunContext, action: FilesCmd) -> Result<()> {
             println!("{}", listing);
         }
         FilesCmd::Get { path, save_as } => {
-            let data = lox.get_bytes(&format!("/dev/fsget/{}", abs_path(&path)))?;
-            let out_path = save_as
-                .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("download").to_string());
-            fs::write(&out_path, &data)?;
-            println!("✓ Downloaded {} bytes → {}", data.len(), out_path);
+            let remote = abs_path(&path);
+            let data = lox.get_bytes(&format!("/dev/fsget/{}", remote))?;
+            if save_as.as_deref() == Some("-") {
+                return write_stdout(&data);
+            }
+            let default_location = save_as.is_none();
+            let out_path = PathBuf::from(save_as.unwrap_or_else(|| {
+                let name = remote.rsplit('/').next().unwrap_or_default();
+                if name.is_empty() { "download" } else { name }.to_string()
+            }));
+            fs::write(&out_path, &data)
+                .with_context(|| format!("Cannot write {}", out_path.display()))?;
+            let saved = std::path::absolute(&out_path).unwrap_or(out_path);
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "path": remote,
+                        "saved_as": saved,
+                        "bytes": data.len(),
+                    }))?
+                );
+            } else if !ctx.quiet {
+                println!(
+                    "✓  Downloaded {} → {} ({} bytes)",
+                    remote,
+                    saved.display(),
+                    data.len()
+                );
+                // `lox files get X > file` would otherwise only capture this line
+                if default_location && !std::io::stdout().is_terminal() {
+                    eprintln!(
+                        "Saved to {} (use --save-as - to write the file to stdout)",
+                        saved.display()
+                    );
+                }
+            }
         }
     }
     Ok(())
+}
+
+/// Raw bytes to stdout; a reader that went away early is a normal end, as
+/// for the crate's `println!`.
+fn write_stdout(data: &[u8]) -> Result<()> {
+    let mut out = std::io::stdout().lock();
+    match out.write_all(data).and_then(|()| out.flush()) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        r => r.context("Cannot write to stdout"),
+    }
 }
 
 pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {

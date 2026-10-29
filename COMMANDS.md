@@ -120,14 +120,16 @@ lox light color "LED Strip" "hsv(120,100,100)"  # HSV
 ## Blinds
 
 ```bash
-lox blind "Beschattung Süd" up
-lox blind "Beschattung Süd" down
-lox blind "Beschattung Süd" stop
-lox blind "Beschattung Süd" pos 50    # position 0-100%
-lox blind "Beschattung Süd" full-up
-lox blind "Beschattung Süd" full-down
-lox blind "Beschattung Süd" shade     # automatic shading
+lox blind "Beschattung Süd" up          # all the way up (FullUp); also: open, full-up
+lox blind "Beschattung Süd" down        # all the way down (FullDown); also: close, full-down
+lox blind "Beschattung Süd" stop        # stop moving (off)
+lox blind "Beschattung Süd" pos 50      # to a position, 0 = open, 100 = closed (manualPosition/50)
+lox blind "Beschattung Süd" 50          # same as pos 50
+lox blind "Beschattung Süd" shade       # automatic shading (AutomaticDown); also: auto
+lox blind "Beschattung Süd" shade 40    # slat angle, 0 = horizontal, 100 = vertical (manualLamella/40)
 ```
+
+`up` and `down` are full moves: the blind runs to its end position unless it is stopped. They are not jog steps; for those send the raw commands (`lox send "Beschattung Süd" up`, then `lox send "Beschattung Süd" UpOff`).
 
 ---
 
@@ -239,9 +241,17 @@ steps:
 ## Autopilot (Automatic Rules)
 
 ```bash
-lox autopilot ls                       # list all automatic rules
-lox autopilot state "Rule Name"        # show when a rule last fired
+lox autopilot ls                       # rules in the program file: active, JSON valid
+lox autopilot ls --file backup.Loxone  # same sources as `lox config` (--at, --file, --download)
+lox autopilot state "Rule Name"        # when a rule last ran (the Miniserver's rule history)
+lox autopilot changed                  # when the rules were last changed on the Miniserver
+lox autopilot changed -o json          # {"changed": <unix seconds>, "changed_at": …, "uuid": …}
 ```
+
+Rules created or edited in the app can live only in the Miniserver's *custom changes*, not in the
+program file: `lox autopilot ls` and a config download don't see them, and uploading a config discards
+them (the Miniserver logs `Remove old custom changes`). Before an upload, check that
+`lox autopilot changed` is older than the download the upload is based on.
 
 ---
 
@@ -476,9 +486,12 @@ Error codes: `control_not_found`, `ambiguous_control`, `config_not_found`, `conf
 
 ```bash
 lox files ls /                         # browse Miniserver filesystem
-lox files get /log/def.log             # download a file
+lox files get /log/def.log             # download into the current directory (./def.log)
 lox files get /log/def.log --save-as local.log
+lox files get /log/def.log --save-as - | grep -i error   # write the file to stdout
 ```
+
+Without `--save-as` the file is saved under its own name in the current directory (overwriting a file of that name); the confirmation shows the absolute path (`✓  Downloaded /log/def.log → /home/me/def.log (51234 bytes)`, `-o json`: `{"ok": true, "path": …, "saved_as": …, "bytes": …}`). `--save-as -` writes the raw bytes to stdout and prints nothing else there.
 
 ---
 
