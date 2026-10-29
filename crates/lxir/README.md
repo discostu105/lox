@@ -140,14 +140,18 @@ lxir compile --base current.Loxone --module modules/ \
 # 5. Trust nothing — read the diff. It must show exactly your change:
 lxir diff current.Loxone out.Loxone
 
-# 6. Deploy: open out.Loxone in Loxone Config and upload from there.
+# 6. Deploy. In a lox.toml project (base, module, lock, serial):
+lox config push            # drift check, compile, show the changes, stage
+lox config push --force    # upload byte-exact, reboot, verify, move base
+#    Or open out.Loxone in Loxone Config and upload from there.
 #    Upload exactly the file you diffed — a tool that re-serializes
 #    or re-wires on the way (lox-cli's `config push`) can change it.
 ```
 
-After a push, download again and keep that file as the new base —
-`lxir drift` tells you when someone else (GUI, app, Miniserver) has
-written to the config since, *before* you compile over their change.
+After a push, download again and keep that file as the new base
+(`lox config push` does both) — `lxir drift` tells you when someone else
+(GUI, app, Miniserver) has written to the config since, *before* you
+compile over their change.
 Everything you did not adopt passes through byte-for-byte; the diff in
 step 5 is the proof, every time.
 

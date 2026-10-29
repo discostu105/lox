@@ -6,7 +6,7 @@ use std::fs;
 use std::time::Duration;
 
 use crate::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
-use crate::commands::{RunContext, config_insight};
+use crate::commands::{RunContext, config_insight, config_push};
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
@@ -465,6 +465,84 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 xml.len() / 1024,
                 xml_path
             );
+        }
+        ConfigCmd::Compress {
+            file,
+            template,
+            save_as,
+        } => {
+            let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
+            if xml.starts_with(b"PK\x03\x04") || xml.starts_with(&loxcc::LOXCC_MAGIC.to_le_bytes())
+            {
+                bail!(
+                    "{} is already compressed. Expected a .Loxone XML file (`lox config extract` makes one).",
+                    file
+                );
+            }
+            let stem = file.strip_suffix(".Loxone").unwrap_or(&file);
+            let (out, out_path) = match &template {
+                // An upload ZIP: the template with only sps0.LoxCC replaced,
+                // verified to extract to exactly `xml`
+                Some(template) => {
+                    let shell =
+                        fs::read(template).with_context(|| format!("Cannot read {}", template))?;
+                    let staged = loxcc::stage_upload_zip(&shell, &xml)
+                        .with_context(|| format!("Cannot stage {} into {}", file, template))?;
+                    (staged, save_as.unwrap_or_else(|| format!("{stem}.zip")))
+                }
+                None => (
+                    loxcc::compress_loxcc(&xml)?,
+                    save_as.unwrap_or_else(|| format!("{stem}.LoxCC")),
+                ),
+            };
+            fs::write(&out_path, &out).with_context(|| format!("Cannot write {}", out_path))?;
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "input": file,
+                        "template": template,
+                        "output": out_path,
+                        "xml_bytes": xml.len(),
+                        "output_bytes": out.len(),
+                        "crc32": format!("{:08x}", crc32fast::hash(&xml)),
+                    }))?
+                );
+            } else if !ctx.quiet {
+                println!(
+                    "Compressed {} KB → {} KB → {}{}",
+                    xml.len() / 1024,
+                    out.len() / 1024,
+                    out_path,
+                    if template.is_some() {
+                        " (extracts byte-identically)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+        }
+        ConfigCmd::Push {
+            project,
+            force,
+            patched_from,
+            allow_removals,
+            accept_version,
+            backup_dir,
+        } => {
+            let ms = config_push::LiveMiniserver::new(Config::load()?);
+            let opts = config_push::PushOptions {
+                project: project.into(),
+                force: force && !ctx.dry_run,
+                patched_from: patched_from.map(Into::into),
+                allow_removals,
+                accept_version,
+                backup_dir: backup_dir.map(Into::into),
+            };
+            let report = config_push::push(&ms, &opts, ctx.quiet)?;
+            if ctx.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
         }
         ConfigCmd::Upload { file, force } => {
             let cfg = Config::load()?;
