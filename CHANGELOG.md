@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config as code: `lox ir`** runs the lxir toolchain — `check`, `fmt`, `compile`, `test`, `rename`, `lint`, `decompile`, `adopt`, `diff`, `drift`, `observe`, `roundtrip`, with lxir's flags and exit codes (`lox lxir …` works too)
 
 ### Changed
+- Releases are automatic: every push to main that passes CI becomes a release (version bump from PR labels or the changelog, binaries, Docker image, Homebrew formula), and lxir is published to crates.io whenever its version is new
 - lxir now lives in this repository (`crates/lxir`, imported with its history) and lox builds it from source, so `lox config diff/show/wiring/lint/history`, the Wiring view and MCP `get_wiring` use the current lxir instead of the crates.io 0.1.0 release
 - License expression `GPL-3.0-or-later OR LicenseRef-Commercial` (was `AND`): the dual license is a choice between the two, as LICENSE says
 
