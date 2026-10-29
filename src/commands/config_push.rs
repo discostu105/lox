@@ -349,6 +349,9 @@ fn compile_project(
         mint_time_unix: chrono::Utc::now().timestamp(),
         page_title: project.page.clone(),
         allow_removals: opts.allow_removals,
+        // Re-laying out a page is a deliberate `lox ir compile --relayout`;
+        // a push deploys the placement the project already has.
+        relayout: Vec::new(),
     };
     compile(&parse(base)?, &module, lock, &options).context("Compiling the module failed")
 }
