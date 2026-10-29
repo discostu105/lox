@@ -459,43 +459,62 @@ const INPUT_REF: &[PortSpec] = &[
 ];
 const OUTPUT_REF: &[PortSpec] = &[p("AI", Input), p("AQ", Output)];
 
-/// `LinkRefType=` code and `Analog=` flag a ref carries for a mirrored
+/// What a ref says about its mirrored object's value: nothing for a
+/// digital one, `Analog="true"` or `Text="true"` (D33, D48).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefValue {
+    Digital,
+    Analog,
+    Text,
+}
+use RefValue::{Analog, Digital, Text};
+
+/// `LinkRefType=` code and value flag a ref carries for a mirrored
 /// object of the given XML type — Loxone Config's internal type-registry
 /// number, learned from the house corpus (every code below observed on
 /// real refs, deterministic per target type). A type not in this table
 /// cannot be mirrored by a minted ref yet: extend the table from
 /// corpus evidence rather than guessing the code.
 ///
+/// `Text=` follows the target type as deterministically (D48): every
+/// ref of an `ApiActor` (36) and of a `VirtualTextIn` (12) across the
+/// corpus carries it, from Loxone Config 12.0 to 17.2.
+///
 /// `Memory` is the one target the corpus shows with *both* flags
 /// (8× digital, 1× analog); minted mirrors of blocks default to digital
 /// until evidence for a rule emerges.
-pub fn ref_link_type(target_type: &str) -> Option<(u32, bool)> {
-    Some(match target_type {
-        "Online" => (2, false),
-        "DigitalIn" => (55, false),
-        "Actor" => (63, false),
-        "VirtualIn" => (71, false),
-        "VirtualUdpInCmd" => (79, false),
-        "VirtualTextIn" => (83, false),
-        "VirtualHttpInCmd" => (87, true),
-        "Lox1wireAsensor" => (103, true),
-        "OvertempShutdown" => (109, false),
-        "ApiActor" => (136, false),
-        "ModbusASensor" => (153, true),
-        "ModbusAActor" => (156, true),
-        "LoxAIRsensor" => (172, false),
-        "LoxAIRAsensor" => (173, true),
-        "LoxAIRactor" => (174, false),
-        "LoxAIRAactor" => (175, true),
-        "TreeSensor" => (182, false),
-        "TreeAsensor" => (183, true),
-        "TreeActor" => (184, false),
-        "TreeAactor" => (185, true),
-        "Daylight" => (281, false),
-        "Memory" => (320, false),
-        _ => return None,
-    })
+pub fn ref_link_type(target_type: &str) -> Option<(u32, RefValue)> {
+    REF_LINK_TYPES
+        .iter()
+        .find(|&&(t, ..)| t == target_type)
+        .map(|&(_, code, value)| (code, value))
 }
+
+/// The table behind `ref_link_type`: target type, code, value flag.
+const REF_LINK_TYPES: &[(&str, u32, RefValue)] = &[
+    ("Online", 2, Digital),
+    ("DigitalIn", 55, Digital),
+    ("Actor", 63, Digital),
+    ("VirtualIn", 71, Digital),
+    ("VirtualUdpInCmd", 79, Digital),
+    ("VirtualTextIn", 83, Text),
+    ("VirtualHttpInCmd", 87, Analog),
+    ("Lox1wireAsensor", 103, Analog),
+    ("OvertempShutdown", 109, Digital),
+    ("ApiActor", 136, Text),
+    ("ModbusASensor", 153, Analog),
+    ("ModbusAActor", 156, Analog),
+    ("LoxAIRsensor", 172, Digital),
+    ("LoxAIRAsensor", 173, Analog),
+    ("LoxAIRactor", 174, Digital),
+    ("LoxAIRAactor", 175, Analog),
+    ("TreeSensor", 182, Digital),
+    ("TreeAsensor", 183, Analog),
+    ("TreeActor", 184, Digital),
+    ("TreeAactor", 185, Analog),
+    ("Daylight", 281, Digital),
+    ("Memory", 320, Digital),
+];
 
 /// Every *logic* block type `builtin` knows. This is the default managed
 /// set for decompile/adopt; `InputRef`/`OutputRef` are mintable too (see
@@ -806,6 +825,19 @@ pub fn crosscheck(obs: &Observations, legacy: &LegacyDb) -> BTreeMap<String, Typ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ref_link_types_name_one_type_per_code() {
+        let mut types = std::collections::BTreeSet::new();
+        let mut codes = std::collections::BTreeSet::new();
+        for &(t, code, _) in REF_LINK_TYPES {
+            assert!(types.insert(t), "{t} listed twice");
+            assert!(codes.insert(code), "LinkRefType {code} listed twice");
+        }
+        assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
+        assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
+        assert_eq!(ref_link_type("And"), None);
+    }
 
     #[test]
     fn builtin_shapes() {

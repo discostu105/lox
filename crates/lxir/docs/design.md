@@ -1347,4 +1347,24 @@ Anything unverified is an error, not a heuristic:
   Compiling the compiler's own output is still a fixpoint. With D45
   and D46, compiling a config that Loxone Config 17.2 saved reproduces
   it byte for byte, apart from `Text="true"` on minted ApiActor refs,
-  which D33 does not emit.
+  which D33 does not emit (settled by D48).
+- **D48 — a minted ref of a text value carries `Text="true"`**
+  (2026-10-29). D33 emits a ref's mirror identity: `Ref=`,
+  `LinkRefType=`, and `Analog=` where the target is analog. Refs of
+  text-valued objects carry a third flag in `Analog=`'s slot,
+  `Text="true"`. Every ref of an `ApiActor` (36) and of a
+  `VirtualTextIn` (12) in the corpus has it, from Loxone Config 12.0
+  to 17.2, and no ref has both flags. A minted ref without it gained
+  it on the next GUI save, so no recompile of a saved config could
+  reproduce it. Decision:
+  - `connectors::ref_link_type` returns the value kind with the code
+    (`RefValue`: digital, analog or text) instead of an analog flag.
+    `ApiActor` and `VirtualTextIn` are text.
+  - `Text=` is compiler-owned on refs like the other identity
+    attributes: a ref retargeted to a non-text object loses it.
+  - `Memory` and `VirtualOutCmd` refs carry `Text=` on a few instances
+    only (4 of 806, 3 of 30). There the flag depends on the target's
+    configuration, not its type, so it stays out of the table, as
+    `Analog=` on `Memory` does.
+  With this and D45 to D47, compiling a config saved by Loxone Config
+  17.2 reproduces it byte for byte.
