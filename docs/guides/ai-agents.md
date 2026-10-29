@@ -211,7 +211,7 @@ Miniserver context.
 | `alarm` | risky | `arm`, `arm-home`, `disarm` (confirmed), `quit` |
 | `door` | risky | `lock`, `unlock`, `open` (all confirmed) |
 | `send_command` | risky | Raw Loxone command, only with `--allow-raw` |
-| `learn_nfc_tag` | risky | Read an NFC tag's ID at a Code Touch (confirmed; tell the user to have the tag or unlocked phone ready) |
+| `learn_nfc_tag` | risky | Read an NFC tag's ID at a Code Touch (confirmed; tell the user to have the tag or unlocked phone ready). A secured Code Touch needs `LOX_VISU_PASSWORD` or `visu_password_file` in the config of the `lox mcp` process |
 | `assign_nfc_tag` | risky | Pair an NFC tag with a user (confirmed) |
 | `remove_nfc_tag` | risky | Remove a user's NFC tag (confirmed) |
 | `set_access_code` | risky | Set a user's access code; the code is never echoed (confirmed) |

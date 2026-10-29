@@ -97,6 +97,7 @@ Config fields support env vars with `LOX_` prefix:
 | `LOX_USER` | `user` |
 | `LOX_PASS` | `pass` |
 | `LOX_SERIAL` | `serial` |
+| `LOX_VISU_PASSWORD` | visualization password for secured commands (config: `visu_password_file`) |
 | `NO_COLOR` | Disable colored output |
 
 ## Error Messages

@@ -23,12 +23,18 @@ lox setup set --host https://192.168.1.100 --user admin --pass secret
 lox setup set --serial 504F94112233        # config repo folder, OTel device.id; checked by config push
 lox setup set --verify-ssl                 # enable cert verification
 lox setup set --no-verify-ssl              # disable (default, self-signed)
+lox setup set --visu-password-file ~/.lox/visu-password  # visualization password for secured controls
 lox setup show                             # show config (password redacted)
 ```
 
 `setup set` changes only the fields you pass. All fields also read environment variables (`LOX_HOST`, `LOX_USER`,
 `LOX_PASS`, `LOX_SERIAL`); `read -rs LOX_PASS && export LOX_PASS` keeps the password out of the process list and
 your shell history.
+
+Secured controls (an NFC Code Touch's learn mode, for one) need the **visualization password** of the user lox
+connects with. lox reads it from `LOX_VISU_PASSWORD` or from the first line of the file `visu_password_file:`
+names (`~/` expands; set it with `--visu-password-file`), never from an argument, and never prints it. Keep the
+file private (`chmod 600`).
 
 To have `lox tui` and the MCP server ask before acting on a control, list it under `confirm:` in the config
 (UUID, alias, or name with an optional `[Room]`):

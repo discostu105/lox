@@ -46,6 +46,7 @@ lox setup set --host https://192.168.1.100 --user admin --pass secret
 lox setup set --serial 504F94112233   # names the config repo folder, OTel device.id; checked by config push
 lox setup set --verify-ssl             # enable cert verification
 lox setup set --no-verify-ssl          # disable (default, self-signed)
+lox setup set --visu-password-file ~/.lox/visu-password  # visualization password for secured controls
 lox setup show                         # show config (password redacted)
 ```
 
@@ -55,6 +56,15 @@ history:
 ```bash
 LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 ```
+
+Secured controls (`isSecured`, e.g. an NFC Code Touch) take some commands only signed with the **visualization
+password** of the user lox connects with. lox reads it from `LOX_VISU_PASSWORD` or from a file, never from an
+argument: put the password on the first line of a file only you can read and point the config at it:
+```bash
+(umask 077; read -rs pw && printf '%s\n' "$pw" > ~/.lox/visu-password)
+lox setup set --visu-password-file ~/.lox/visu-password   # stores the path: visu_password_file: in config.yaml
+```
+The file is read only when a secured command needs it, and the password is never printed or logged.
 
 ### Aliases
 
@@ -519,7 +529,7 @@ The Miniserver's user management. The user lox connects with needs the right to 
 
 ```bash
 lox user ls                            # users: state (enabled, disabled, enabled until …), admin, UUID
-lox user show alice                    # one user: validity, groups, NFC tags (name + ID), number of access codes
+lox user show alice                    # one user: validity, last edit (local time), groups, NFC tags (name + ID), number of access codes
 lox user groups                        # user groups and their type (normal, full access, …)
 lox access log "Code Touch"            # NFC Code Touch access log: who opened when, denied attempts (last 50)
 lox access log "Code Touch" -n 0       # the whole log
@@ -572,6 +582,14 @@ default 60s, at most 5m), prints its ID and whether a user or Code Touch has it 
 again, on timeout and Ctrl-C too. Read errors (`…E8`), authentication errors (`…EE`, e.g. a locked phone) and a reader
 that does not start (`…EF`) are named; a Code Touch that cannot learn (offline, not set up, an Air model on battery)
 answers `423`. With `--user` and `--name` the tag is then paired after a confirmation; a tag another user has is refused.
+
+A Code Touch marked `isSecured` takes learn mode only as a secured command (`jdev/sps/ios/<hash>/<uuid>/nfc/startlearn`,
+the same for `stoplearn`), each signed with a fresh key from `getvisusalt` and the visualization password of the user
+lox connects with. The password comes from `--visu-password-file <path>`, `LOX_VISU_PASSWORD`, `visu_password_file:`
+in the config (see [Setup](#setup)), or, in a terminal, a hidden prompt. A refusal with code 500 then means a wrong
+visualization password, or a user without one. A tag a user has already opens the door in learn mode instead of
+being learned; the Miniserver then reports a result without an ID, and `access learn` says so instead of waiting
+for the timeout.
 
 Every change asks for confirmation; `--yes` skips the question, and without a terminal (or with `-o json` or
 `--non-interactive`) a change needs `--yes`. `--dry-run` prints the requests instead, with the access code shown as

@@ -33,6 +33,7 @@ mod token;
 #[cfg(feature = "tui")]
 mod tui;
 mod usermgmt;
+mod visu;
 mod ws;
 
 use anyhow::{Context, Result, bail};
@@ -204,6 +205,19 @@ pub(crate) fn lox_epoch() -> chrono::DateTime<chrono::Local> {
 pub(crate) fn lox_timestamp_to_string(ts: i64) -> String {
     let dt = lox_epoch() + chrono::Duration::seconds(ts);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Convert a Loxone timestamp counted from 2009-01-01 **UTC** (a user's
+/// `lastEdit`) to local time.
+pub(crate) fn lox_utc_timestamp_to_string(ts: i64) -> String {
+    let unix = client::LOXONE_EPOCH_SECS as i64 + ts;
+    match chrono::DateTime::from_timestamp(unix, 0) {
+        Some(dt) => dt
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        None => ts.to_string(),
+    }
 }
 
 /// A single parsed statistics entry.
@@ -1286,6 +1300,11 @@ pub(crate) enum AccessCmd {
     /// whether the tag is known already. Learn mode always ends again, also
     /// on timeout and Ctrl-C. With --user (and --name) the tag is then paired
     /// with that user, after a confirmation.
+    ///
+    /// A secured Code Touch takes learn mode only as a secured command, signed
+    /// with the visualization password of the user lox connects with: from
+    /// --visu-password-file, LOX_VISU_PASSWORD, `visu_password_file:` in the
+    /// config, or a hidden prompt.
     #[command(verbatim_doc_comment)]
     Learn {
         /// NFC Code Touch: name (or a unique part of it), alias or UUID
@@ -1302,6 +1321,9 @@ pub(crate) enum AccessCmd {
         /// Pair without asking
         #[arg(long, short = 'y')]
         yes: bool,
+        /// File holding the visualization password (first line), for a secured Code Touch
+        #[arg(long, value_name = "PATH")]
+        visu_password_file: Option<std::path::PathBuf>,
     },
 }
 
@@ -1483,6 +1505,10 @@ pub(crate) enum SetupCmd {
         /// Disable SSL certificate verification (default, for self-signed Miniserver certs)
         #[arg(long, conflicts_with = "verify_ssl")]
         no_verify_ssl: bool,
+        /// File holding the visualization password for secured controls
+        /// (e.g. ~/.lox/visu-password; stores the path, not the password; "" removes it)
+        #[arg(long, value_name = "PATH")]
+        visu_password_file: Option<String>,
     },
     /// Show current config (password redacted)
     Show,
@@ -3018,6 +3044,18 @@ mod tests {
         // 0 seconds = epoch itself
         let s = lox_timestamp_to_string(0);
         assert!(s.starts_with("2009-01-01"));
+    }
+
+    #[test]
+    fn test_lox_utc_timestamp_is_shown_in_local_time() {
+        use chrono::TimeZone;
+        // 2026-10-29 16:22:00 UTC, as a user's lastEdit
+        let ts = 1_793_290_920 - client::LOXONE_EPOCH_SECS as i64;
+        let local = chrono::Local.timestamp_opt(1_793_290_920, 0).unwrap();
+        assert_eq!(
+            lox_utc_timestamp_to_string(ts),
+            local.format("%Y-%m-%d %H:%M:%S").to_string()
+        );
     }
 
     // ── stats helpers ─────────────────────────────────────────────────────────

@@ -62,6 +62,11 @@ pub struct Config {
     /// (case-insensitive substring, optionally `"Name [Room]"`), e.g. a pool cover.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirm: Vec<String>,
+    /// File holding the connecting user's visualization password (first
+    /// line; `~/` expands), for secured controls such as an NFC Code Touch's
+    /// learn mode. The password itself never goes into this file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visu_password_file: Option<String>,
 
     // ── Runtime-only fields (not serialized) ─────────────────────────────
     /// Resolved base directory for this config's data (cache, token, scenes).
@@ -106,6 +111,8 @@ pub struct ContextEntry {
     pub config_repo: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirm: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visu_password_file: Option<String>,
 }
 
 impl From<&Config> for ContextEntry {
@@ -119,6 +126,7 @@ impl From<&Config> for ContextEntry {
             verify_ssl: cfg.verify_ssl,
             config_repo: cfg.config_repo.clone(),
             confirm: cfg.confirm.clone(),
+            visu_password_file: cfg.visu_password_file.clone(),
         }
     }
 }
@@ -134,6 +142,7 @@ impl ContextEntry {
             verify_ssl: self.verify_ssl,
             config_repo: self.config_repo,
             confirm: self.confirm,
+            visu_password_file: self.visu_password_file,
             data_dir,
             context_name: Some(name.to_string()),
             is_local: false,
@@ -690,6 +699,7 @@ contexts:
             verify_ssl: Some(true),
             config_repo: None,
             confirm: vec!["Pool Abdeckung".to_string()],
+            visu_password_file: Some("~/.lox/visu-password".to_string()),
         };
         let cfg = entry.into_config("test", PathBuf::from("/tmp/test"));
         // Round-trip through ContextEntry
@@ -699,6 +709,10 @@ contexts:
         assert_eq!(entry2.aliases.get("l"), Some(&"uuid-1".to_string()));
         assert_eq!(entry2.verify_ssl, Some(true));
         assert_eq!(entry2.confirm, ["Pool Abdeckung"]);
+        assert_eq!(
+            entry2.visu_password_file.as_deref(),
+            Some("~/.lox/visu-password")
+        );
     }
 
     #[test]

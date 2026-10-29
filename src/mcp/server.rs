@@ -1394,7 +1394,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Learn NFC tag",
-        description = "Read an NFC tag's ID at an NFC Code Touch (its learn mode). Tell the user BEFORE calling: have the NFC tag or the unlocked phone ready and hold it to the reader right after confirming — learn mode waits timeout_secs (default 60). Returns the ID and, for a known tag, its name and user. Learn mode always ends again. Pair the tag with assign_nfc_tag. High-risk: the user is asked to confirm.",
+        description = "Read an NFC tag's ID at an NFC Code Touch (its learn mode). Tell the user BEFORE calling: have the NFC tag or the unlocked phone ready and hold it to the reader right after confirming — learn mode waits timeout_secs (default 60). Returns the ID and, for a known tag, its name and user; a tag that is already paired opens the door instead of being learned. Learn mode always ends again. Pair the tag with assign_nfc_tag. A secured Code Touch needs the visualization password in LOX_VISU_PASSWORD or the config's visu_password_file (never ask the user for it). High-risk: the user is asked to confirm.",
         output_schema = schema_for_output::<LearnedTag>(),
         annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
     )]
@@ -1411,7 +1411,7 @@ impl LoxMcp {
         }
         let timeout = Duration::from_secs(secs);
         let query = p.code_touch.clone();
-        let (target, cfg) = match self
+        let (mut target, cfg) = match self
             .blocking(move |lox| Ok((nfc_learn::target(lox, &query)?, lox.cfg.clone())))
             .await
         {
@@ -1420,6 +1420,17 @@ impl LoxMcp {
         };
         if p.dry_run || self.opts.dry_run {
             return respond(Ok(LearnedTag::planned(&target, timeout)));
+        }
+        // a secured Code Touch: the visualization password from the
+        // environment or the config's file only, never from the client
+        if target.secured {
+            match crate::visu::from_settings(None, &cfg) {
+                Ok(pw) => target.visu_password = pw,
+                Err(e) => return fail(e),
+            }
+            if let Some(e) = target.needs_password() {
+                return fail(e);
+            }
         }
         let question = format!(
             "Learn an NFC tag at {}? After confirming, hold the NFC tag or the unlocked \
