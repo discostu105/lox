@@ -1471,6 +1471,7 @@ pub fn compile(
     // --- Access rights on NFC Code Touch blocks (D49): users, groups and
     //     schedules are the base's; no lock state, like tiles.
     super::access::apply(&mut doc, module, &uuid_of)?;
+    super::rule::apply(&mut doc, module, &uuid_of)?;
 
     // --- Placement (D42), once every wire is drawn: blocks without a
     //     position, and those on pages laid out afresh, go where their

@@ -60,6 +60,9 @@ pub enum Item {
     /// `<timer>.schedule = <name>` — write a schedule onto a DayTimer,
     /// extern or managed (D53).
     ScheduleClaim(ScheduleClaim),
+    /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
+    /// active or not, its conditions and its actions (D57).
+    Rule(RuleDecl),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -1273,6 +1276,77 @@ impl fmt::Display for ScheduleClaim {
     }
 }
 
+/// `rule <slug>` … `end` — an extern Automatic Designer rule
+/// (`AutopilotRule`) as source (D57): whether it is active, the
+/// conditions that must all hold, and the commands it then sends. The
+/// declaration owns exactly that part of the rule's `APC=` payload; its
+/// name, description and every field lxir does not know stay as they
+/// are. Like `access` it keeps no lock state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleDecl {
+    pub slug: String,
+    pub body: Vec<RuleItem>,
+    /// Trailing `#` comment on the header line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the `end` line, verbatim.
+    pub end_comment: Option<String>,
+}
+
+impl RuleDecl {
+    pub fn stmts(&self) -> impl Iterator<Item = &RuleStmt> {
+        self.body.iter().filter_map(|i| match i {
+            RuleItem::Stmt(s) => Some(s),
+            RuleItem::Comment(_) => None,
+        })
+    }
+}
+
+/// One line of a `rule` body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleItem {
+    Stmt(RuleStmt),
+    /// Whole-line `#` comment, verbatim.
+    Comment(String),
+}
+
+/// A statement of a `rule` body, with its trailing comment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleStmt {
+    pub kind: RuleStmtKind,
+    /// Trailing `#` comment, verbatim.
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleStmtKind {
+    /// `active` / `inactive`.
+    Active(bool),
+    /// `when time HH:MM` — minutes since midnight.
+    Time(u16),
+    /// `when weekday mon tue …` — day keywords as written (`weekdays`,
+    /// `weekend`, `daily` stay as written).
+    Weekday(Vec<String>),
+    /// `then <slug> "<command>"` — the app command sent to a block.
+    Then { target: String, command: String },
+}
+
+impl fmt::Display for RuleStmtKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RuleStmtKind::Active(true) => f.write_str("active"),
+            RuleStmtKind::Active(false) => f.write_str("inactive"),
+            RuleStmtKind::Time(m) => write!(f, "when time {:02}:{:02}", m / 60, m % 60),
+            RuleStmtKind::Weekday(days) => write!(f, "when weekday {}", days.join(" ")),
+            RuleStmtKind::Then { target, command } => {
+                write!(f, "then {target} {}", quote(command))
+            }
+        }
+    }
+}
+
+/// The block type a `rule` declaration applies to (D57).
+pub const RULE_BLOCK_TYPE: &str = "AutopilotRule";
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortRef {
     pub slug: String,
@@ -1441,6 +1515,13 @@ impl Module {
     pub fn tiles_claims(&self) -> impl Iterator<Item = &TilesClaim> {
         self.items.iter().filter_map(|i| match i {
             Item::TilesClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    pub fn rule_decls(&self) -> impl Iterator<Item = &RuleDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Rule(r) => Some(r),
             _ => None,
         })
     }
@@ -1672,6 +1753,7 @@ impl Module {
         let mut tiles_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut access_declared: BTreeSet<&str> = BTreeSet::new();
         let mut schedules_claimed: BTreeSet<&str> = BTreeSet::new();
+        let mut rules_declared: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -2290,6 +2372,114 @@ impl Module {
                         ));
                     }
                 }
+                Item::Rule(r) => {
+                    let ctx = format!("`rule {}`", r.slug);
+                    match names.get(r.slug.as_str()) {
+                        Some(NameKind::Extern) => {
+                            let ty = self
+                                .externs()
+                                .find(|e| e.slug == r.slug)
+                                .map_or("", |e| e.block_type.as_str());
+                            if ty != RULE_BLOCK_TYPE {
+                                return compile_err(format!(
+                                    "{ctx}: a rule belongs to an Automatic Designer rule, a \
+                                     `{RULE_BLOCK_TYPE}` — `{}` is declared as `{ty}`",
+                                    r.slug
+                                ));
+                            }
+                        }
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "{ctx}: `{}` is {} — a rule is declared on an extern \
+                                 (`extern {} = {RULE_BLOCK_TYPE}(…)`)",
+                                r.slug,
+                                kind.describe(),
+                                r.slug
+                            ));
+                        }
+                        None => {
+                            let hint = super::validate::suggest(
+                                &r.slug,
+                                self.externs().map(|e| e.slug.as_str()),
+                            );
+                            return compile_err(format!(
+                                "{ctx}: undeclared slug `{}`{hint} — declare the rule as \
+                                 `extern {} = {RULE_BLOCK_TYPE}(title: \"…\")`",
+                                r.slug, r.slug
+                            ));
+                        }
+                    }
+                    if !rules_declared.insert(&r.slug) {
+                        return compile_err(format!(
+                            "{ctx} is declared twice — one declaration holds the whole rule"
+                        ));
+                    }
+                    let (mut active, mut when, mut then) = (0, 0, 0);
+                    for st in r.stmts() {
+                        match &st.kind {
+                            RuleStmtKind::Active(_) => active += 1,
+                            RuleStmtKind::Time(_) => when += 1,
+                            RuleStmtKind::Weekday(days) => {
+                                when += 1;
+                                let mut seen = BTreeSet::new();
+                                for d in days {
+                                    let Some(ix) = super::rule::weekdays(d) else {
+                                        return compile_err(format!(
+                                            "{ctx}: unknown weekday `{d}` — days are mon, tue, \
+                                             wed, thu, fri, sat, sun, weekdays, weekend, daily"
+                                        ));
+                                    };
+                                    if ix.iter().any(|i| !seen.insert(*i)) {
+                                        return compile_err(format!(
+                                            "{ctx}: `{}` names a day twice",
+                                            st.kind
+                                        ));
+                                    }
+                                }
+                            }
+                            RuleStmtKind::Then { target, command } => {
+                                then += 1;
+                                if command.is_empty() {
+                                    return compile_err(format!(
+                                        "{ctx}: `{}` — the command is the app's command text \
+                                         (`on`, `off`, `pulse`, …)",
+                                        st.kind
+                                    ));
+                                }
+                                match names.get(target.as_str()) {
+                                    Some(NameKind::Extern | NameKind::Block) => {}
+                                    None if !flattened => {}
+                                    Some(kind) => {
+                                        return compile_err(format!(
+                                            "{ctx}: `{}` — `{target}` is {}; a rule sends its \
+                                             command to a block (an extern or a managed one)",
+                                            st.kind,
+                                            kind.describe()
+                                        ));
+                                    }
+                                    None => {
+                                        return compile_err(format!(
+                                            "{ctx}: `{}` — undeclared slug `{target}`",
+                                            st.kind
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if active != 1 {
+                        return compile_err(format!(
+                            "{ctx}: say once whether the rule is `active` or `inactive` \
+                             ({active} lines do)"
+                        ));
+                    }
+                    if when == 0 || then == 0 {
+                        return compile_err(format!(
+                            "{ctx}: a rule needs at least one `when` condition and one \
+                             `then` action"
+                        ));
+                    }
+                }
                 Item::Page(p) if p.title.is_empty() => {
                     return compile_err("`page \"\"`: the page title must not be empty".into());
                 }
@@ -2388,6 +2578,7 @@ impl Module {
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
                 Item::Schedule(_) => 14,
+                Item::Rule(_) => 15,
             }
         }
         let mut out = String::new();
@@ -2604,6 +2795,19 @@ impl Module {
                 }
                 Item::ScheduleClaim(c) => {
                     out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+                }
+                Item::Rule(r) => {
+                    out.push_str(&format!("rule {}{}\n", r.slug, tail(&r.comment)));
+                    for stmt in &r.body {
+                        match stmt {
+                            RuleItem::Stmt(st) => {
+                                out.push_str(&format!("\t{}{}\n", st.kind, tail(&st.comment)));
+                            }
+                            RuleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                        }
+                    }
+                    out.push_str(&format!("end{}\n", tail(&r.end_comment)));
+                    prev_multiline = true;
                 }
                 Item::Comment(text) => {
                     out.push_str(&format!("#{text}\n"));

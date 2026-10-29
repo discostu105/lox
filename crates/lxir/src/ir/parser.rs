@@ -342,6 +342,8 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut open_access: Option<AccessDecl> = None;
     // A `schedule` whose body is still open (until `end`) — D53.
     let mut open_schedule: Option<ScheduleDecl> = None;
+    // A `rule` whose body is still open (until `end`) — D57.
+    let mut open_rule: Option<RuleDecl> = None;
 
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
@@ -393,6 +395,10 @@ pub fn parse(src: &str) -> Result<Module> {
                     t.body.push(ScheduleItem::Comment(text));
                     continue;
                 }
+                if let Some(r) = open_rule.as_mut() {
+                    r.body.push(RuleItem::Comment(text));
+                    continue;
+                }
                 match open_test.as_mut() {
                     Some(t) => t.body.push(TestItem::Comment(text)),
                     None => sink(&mut open_template, &mut items).push(Item::Comment(text)),
@@ -413,6 +419,21 @@ pub fn parse(src: &str) -> Result<Module> {
                 t.body.push(ScheduleItem::Line(parse_schedule_line(
                     &toks, comment, lineno,
                 )?));
+            }
+            continue;
+        }
+
+        // Inside a `rule` body every line is a rule statement (or `end`).
+        if let Some(r) = open_rule.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut r = open_rule.take().unwrap();
+                r.end_comment = comment;
+                items.push(Item::Rule(r));
+            } else {
+                r.body
+                    .push(RuleItem::Stmt(parse_rule_stmt(&toks, comment, lineno)?));
             }
             continue;
         }
@@ -524,7 +545,7 @@ pub fn parse(src: &str) -> Result<Module> {
 
         if open_template.is_some()
             && let Tok::Ident(kw) = &toks[0]
-            && matches!(
+            && (matches!(
                 kw.as_str(),
                 "let"
                     | "extern"
@@ -538,7 +559,7 @@ pub fn parse(src: &str) -> Result<Module> {
                     | "tiles"
                     | "tile"
                     | "schedule"
-            )
+            ) || (kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_)))))
         {
             return Err(err(format!(
                 "`{kw}` is not allowed inside a template body — only block \
@@ -641,6 +662,18 @@ pub fn parse(src: &str) -> Result<Module> {
                 };
                 open_schedule = Some(ScheduleDecl {
                     name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            // `rule` is a keyword only in front of a slug, like `access`.
+            Tok::Ident(kw) if kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
+                let [_, Tok::Ident(slug)] = toks.as_slice() else {
+                    return Err(err("expected `rule <slug>` — the rule's extern".into()));
+                };
+                open_rule = Some(RuleDecl {
+                    slug: check_slug(slug, lineno)?,
                     body: Vec::new(),
                     comment,
                     end_comment: None,
@@ -1007,6 +1040,12 @@ pub fn parse(src: &str) -> Result<Module> {
             msg: format!("unclosed `schedule {}` — missing `end`", t.name),
         });
     }
+    if let Some(r) = open_rule {
+        return Err(Error::IrParse {
+            line: src.lines().count(),
+            msg: format!("unclosed `rule {}` — missing `end`", r.slug),
+        });
+    }
     if let Some(t) = open_template {
         return Err(Error::IrParse {
             line: src.lines().count(),
@@ -1020,6 +1059,68 @@ pub fn parse(src: &str) -> Result<Module> {
         });
     }
     Ok(Module { items })
+}
+
+/// One statement of a `rule` body (D57): `active`/`inactive`,
+/// `when time HH:MM`, `when weekday <days>`, or `then <slug> "<command>"`.
+fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
+    let err = |msg: String| Error::IrParse { line: lineno, msg };
+    let usage = "a rule line is `active`, `inactive`, `when time HH:MM`, \
+                 `when weekday <days>`, `then <slug> \"<command>\"` or `end`";
+    let kind = match toks {
+        [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
+        [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Num(h),
+            Tok::Colon,
+            Tok::Num(m),
+        ] if w == "when" && k == "time" => {
+            let bad = || err(format!("`{h}:{m}` is not a time of day (00:00 … 23:59)"));
+            if m.len() != 2 || h.is_empty() || h.len() > 2 {
+                return Err(bad());
+            }
+            let (h, m): (u16, u16) = (h.parse().map_err(|_| bad())?, m.parse().map_err(|_| bad())?);
+            if h > 23 || m > 59 {
+                return Err(bad());
+            }
+            RuleStmtKind::Time(h * 60 + m)
+        }
+        [Tok::Ident(w), Tok::Ident(k), days @ ..] if w == "when" && k == "weekday" => {
+            let mut words = Vec::new();
+            for d in days {
+                match d {
+                    Tok::Ident(d) => words.push(d.clone()),
+                    Tok::Comma => {}
+                    _ => {
+                        return Err(err(format!(
+                            "expected day keywords after `when weekday`; {usage}"
+                        )));
+                    }
+                }
+            }
+            if words.is_empty() {
+                return Err(err(format!(
+                    "`when weekday` needs at least one day; {usage}"
+                )));
+            }
+            RuleStmtKind::Weekday(words)
+        }
+        [Tok::Ident(w), ..] if w == "when" => {
+            return Err(err(format!(
+                "lxir knows the conditions `when time` and `when weekday`; {usage}"
+            )));
+        }
+        [Tok::Ident(w), Tok::Ident(target), Tok::Str(command)] if w == "then" => {
+            RuleStmtKind::Then {
+                target: check_slug(target, lineno)?,
+                command: command.clone(),
+            }
+        }
+        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+    };
+    Ok(RuleStmt { kind, comment })
 }
 
 /// One statement of a `test` body (D36): a port injection, `tick`,

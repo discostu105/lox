@@ -878,6 +878,7 @@ Anything unverified is an error, not a heuristic:
     Miniserver answer on whether it *executes* them — silent
     non-execution being the D8-class failure to rule out. Until all
     three exist, refuse-never-guess keeps the write side closed.
+    (Opened by D57 for the documented shapes, 2026-10-29.)
 - **D38 — UUIDs are unique; a `uuid:` edit re-points** (2026-10-18).
   The r50 drift forensics of 2026-10-18 traced 38 duplicate UUIDs in
   the live config to the first push on 2026-08-25: the upload tool
@@ -1718,3 +1719,49 @@ Anything unverified is an error, not a heuristic:
     the lock entry without deleting the page — deleting a page deletes
     whatever else the GUI drew on it.
   Validated with the oracle (session 19): see oracle-wine.md.
+- **D57 — Automatic Designer rules from source** (2026-10-29). D37
+  kept the write side closed behind three pieces of evidence. For the
+  rules the house actually has — a time of day, optionally weekdays,
+  and `on`/`off`/`pulse` to a button — they now exist, so a `rule`
+  declaration owns what such a rule does:
+  `rule <slug>` (an `AutopilotRule` extern) with exactly one
+  `active`/`inactive`, `when time HH:MM`, `when weekday <days>` and
+  `then <slug> "<command>"` lines.
+  - **Evidence, not tables.** The `descID` of an action is a code per
+    target type and command that ships only in the app. The compile
+    copies it from an action in the same document with the same target
+    type and command, else from the corpus-observed triples (PushButton
+    `on` 342101 / `off` 342102, PButtonT `pulse` 493103), and refuses
+    anything else with a message that says how to give it evidence
+    (create one such action in the app). Event shapes are the two
+    corpus-documented ones: time (5/272001/272, minutes) and weekday
+    (3/270001/270, either a single `value` 0–6 with Monday = 0, or the
+    `9999999999` sentinel with `arrValues`).
+  - **Read as payload, write as edit.** The compile interprets the
+    rule *as read* and writes nothing when the declaration says the
+    same — the raw payload is not writer-stable (two house rules carry
+    a CRLF inside the JSON), so a lifted declaration must not touch it.
+    A changed rule is the app's edit: unchanged events and actions keep
+    their JSON objects, a changed one keeps every field the source does
+    not state (a single-day `value` stays that form, a sentinel stays
+    a sentinel), only new ones are built; the text is written compact in
+    the app's key order. `STA="1"` follows `active` — set right after
+    `APC=`, removed when inactive: 10/10 corpus rules, and the house
+    config's own history (deactivating a rule in the app changed
+    exactly `active` and dropped `STA`).
+  - **No creation, no deletion.** The rule block, its name, its
+    `ref=` and its position stay the app's; a declaration addresses an
+    existing rule by extern, and removing it releases the rule
+    unchanged (no lock state, like D41/D53 claims). Rules whose payload
+    has any other shape (control-state conditions, operating modes, OR
+    groups, several event groups) are neither lifted nor writable — the
+    decompile leaves them as D37 comments.
+  - **Lift.** Decompile and adopt lift every interpretable rule into a
+    declaration, pulling the rule and its action targets in as
+    externs; adopt + compile is byte-identical (house config: all five
+    rules).
+  Validated live (Miniserver firmware 17.2.8.28, house config, 2026-10-29): an
+  inactive rule compiled to `active`, another weekday set and time,
+  pushed, verified by download (byte fixpoint), and executed by the
+  Miniserver at the compiled time; compiling the original declaration
+  back restored the original bytes. See loxone-format.md.
