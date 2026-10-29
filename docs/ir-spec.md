@@ -252,9 +252,32 @@ parameters but can never take a wire:
 summe = Formula("Summe", Formula: "I1+I2", Input1: a.Q, Input2: b.Q)
 ```
 
-`Formula:` on `Formula` blocks is the only one so far (declared per type
-in `connectors::attr_params`); it compiles to `Formula="I1+I2"` on the
-`<C>` element, together with the observed `Valid="false"` companion.
+They are declared per type in `connectors::attr_params`. `Formula:` on
+`Formula` blocks compiles to `Formula="I1+I2"` on the `<C>` element,
+together with the observed `Valid="false"` companion.
+
+`Code:` on `Code16` holds the PicoC program (D40). A program is hundreds
+of lines, so its value is a **file**:
+
+```text
+hue = Code16("Philipps Hue Steuerung", Code: file("hue.c"), AI1: rgb.AQ)
+```
+
+- The path is relative to the `.lxir` file that names it. The file is
+  read when the module loads; a missing file is an error that names the
+  full path.
+- CRLF line endings are normalized to LF, and the text is written the way
+  Loxone Config writes it: raw line breaks and the five named entities,
+  never `&#xA;` (see [loxone-format.md](loxone-format.md)).
+- `file(…)` binds only program text (`connectors::file_params`); on any
+  other parameter it is an error.
+- The program is a **claim**. Without a `Code:` binding the block's
+  program stays with Loxone Config and is carried verbatim from the base;
+  with one, the file replaces it. Removing the binding hands the program
+  back to the GUI. Decompile never writes `Code:`, so an adopted program
+  block keeps its GUI-authored program until an author moves it into a
+  file.
+- `lxir diff` prints a program change as a line diff.
 
 Rules:
 

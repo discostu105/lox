@@ -30,13 +30,25 @@ Two deviations break conforming parsers:
 1. **Attribute names may start with digits**: `12hTF="true"`.
 2. **Attribute values may contain raw, unescaped newlines** — the `Code=`
    attribute of a `Program` block holds multi-line PicoC source, and two
-   of the house config's `AutopilotRule` `APC=` payloads carry a raw CRLF
-   inside the JSON. A standard parser normalizes these to spaces on
-   re-serialization, corrupting the program.
+   of the house config's `AutopilotRule` `APC=` payloads carried a raw
+   CRLF inside the JSON (until the damage described below). A standard
+   parser normalizes these to spaces on re-serialization, corrupting the
+   program, and a standard writer's `&#xA;` is no way out either (see
+   below).
 
-Entities used: `&amp; &lt; &gt; &quot; &apos;` plus numeric character
-references. Text content appears only in `<Key>hex</Key>`-style elements and
-is rendered inline (`<Key>2B35</Key>`).
+Entities used: `&amp; &lt; &gt; &quot; &apos;`, and nothing else. Loxone
+does **not** decode numeric character references: `&#xA;` in an attribute is
+the five characters `&#xA;`, and Loxone Config re-escapes the ampersand on
+its next save (`&amp;#xA;`). Evidence: a foreign XML writer pushed the house
+config on 2026-08-25 with the PicoC program's line breaks encoded as `&#xA;`.
+The GUI save on 2026-08-28 turned them into `&amp;#xA;`, and the program has
+been one comment line since; two `APC=` payloads and ten Modbus `NDOC=` texts
+went the same way. No config in the 133-file corpus contains a numeric
+reference. A writer must therefore emit line breaks raw (deviation 2) and
+escape only the five named entities. lxir reads `&#…;` as literal text, and
+`lxir drift` lists every attribute that holds one (design decision D40). Text
+content appears only in `<Key>hex</Key>`-style elements and is rendered
+inline (`<Key>2B35</Key>`).
 
 ## Objects: `<C>`
 

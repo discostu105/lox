@@ -412,7 +412,13 @@ impl<'a> Parser<'a> {
 // Entities
 // ---------------------------------------------------------------------------
 
-/// Decode the five XML entities plus numeric character references.
+/// Decode the five XML entities. Numeric character references (`&#xA;`,
+/// `&#228;`) stay verbatim, because that is how Loxone reads them: it
+/// never writes one (zero in the whole corpus) and treats one it finds as
+/// plain text — a program whose newlines a foreign XML writer had turned
+/// into `&#xA;` came back from a Loxone Config save as `&amp;#xA;`, i.e.
+/// one long line (docs/loxone-format.md). Decoding them would make the
+/// semantic diff call that corruption a no-op.
 pub fn unescape(raw: &str) -> Cow<'_, str> {
     if !raw.contains('&') {
         return Cow::Borrowed(raw);
@@ -426,28 +432,14 @@ pub fn unescape(raw: &str) -> Cow<'_, str> {
             Some(e) => e,
             None => break, // stray `&` — keep verbatim
         };
-        let entity = &rest[1..end];
-        match entity {
+        match &rest[1..end] {
             "amp" => out.push('&'),
             "lt" => out.push('<'),
             "gt" => out.push('>'),
             "quot" => out.push('"'),
             "apos" => out.push('\''),
-            _ => {
-                let parsed = entity
-                    .strip_prefix("#x")
-                    .or_else(|| entity.strip_prefix("#X"))
-                    .and_then(|h| u32::from_str_radix(h, 16).ok())
-                    .or_else(|| entity.strip_prefix('#').and_then(|d| d.parse().ok()))
-                    .and_then(char::from_u32);
-                match parsed {
-                    Some(c) => out.push(c),
-                    None => {
-                        // Unknown entity — keep verbatim.
-                        out.push_str(&rest[..end + 1]);
-                    }
-                }
-            }
+            // Numeric references and unknown entities — keep verbatim.
+            _ => out.push_str(&rest[..end + 1]),
         }
         rest = &rest[end + 1..];
     }
@@ -514,7 +506,9 @@ mod tests {
     #[test]
     fn entities() {
         assert_eq!(unescape("a &lt;= b &amp; c"), "a <= b & c");
-        assert_eq!(unescape("&#228;&#xE4;"), "ää");
+        // Loxone reads numeric references as text, and so does lxir.
+        assert_eq!(unescape("&#228;&#xE4;"), "&#228;&#xE4;");
+        assert_eq!(unescape("a&amp;#xA;b"), "a&#xA;b");
         assert_eq!(escape("a<b & 'c'"), "a&lt;b &amp; &apos;c&apos;");
         assert_eq!(unescape(&escape("x < & > \" ' y")), "x < & > \" ' y");
     }

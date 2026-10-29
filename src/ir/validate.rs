@@ -7,7 +7,7 @@
 //! two entry points cannot drift apart.
 
 use super::ast::{Module, Value};
-use crate::connectors::{BUILTIN_TYPES, PortDir, attr_params, builtin};
+use crate::connectors::{BUILTIN_TYPES, PortDir, attr_params, builtin, file_params};
 use crate::error::{Error, Result};
 
 /// `InputRef`/`OutputRef` — block types whose managed form mirrors
@@ -32,6 +32,16 @@ pub fn validate_ports(module: &Module) -> Result<()> {
         }
         let mut mirrors = None;
         for (key, v) in block.params() {
+            // A file holds program text (D40) — nothing else takes one.
+            if let Value::File { .. } = v
+                && !file_params(&block.block_type).contains(&key)
+            {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `{key}: {v}` — a file binds only program text \
+                     (`Code:` on a Code16 program block); write other values inline",
+                    block.slug
+                )));
+            }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.
             if attr_params(&block.block_type).contains(&key) {

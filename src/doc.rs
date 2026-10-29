@@ -128,9 +128,9 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
     "rec",
     // Code16 (the PicoC program block): `Code=` is the program source,
     // `Task=` its scheduling mode. GUI-authored logic exactly like the
-    // DayTimer `<Entry>` schedule — carried verbatim, never authored.
-    // Promoting `Code` to an attribute parameter (the `Formula=`
-    // precedent) is future work.
+    // DayTimer `<Entry>` schedule — carried verbatim. `Code` is also an
+    // attribute parameter (D40): a source binding (`Code: file("…")`)
+    // claims it, and only then does the compiler write it.
     "Code",
     "Task",
 ];
@@ -319,6 +319,45 @@ impl LoxoneDoc {
             .filter(|&(_, n)| n > 1)
             .map(|(u, _)| u.to_string())
             .collect()
+    }
+
+    /// `(object title or UUID, attribute)` for every `<C>` attribute whose
+    /// decoded value holds numeric-character-reference text (`&#xA;`,
+    /// `&#13;`), in document order. Loxone never writes such a reference
+    /// and reads one as literal text, so the text only appears after a
+    /// foreign XML writer escaped control characters — in a `Code=` it
+    /// means the program has collapsed onto one line
+    /// ([loxone-format.md](../docs/loxone-format.md)).
+    pub fn char_ref_attrs(&self) -> Vec<(String, String)> {
+        fn has_char_ref(v: &str) -> bool {
+            v.match_indices("&#").any(|(i, _)| {
+                let rest = &v[i + 2..];
+                let (body, radix) = match rest.strip_prefix(['x', 'X']) {
+                    Some(hex) => (hex, 16),
+                    None => (rest, 10),
+                };
+                let digits = body
+                    .find(|c: char| !c.is_digit(radix))
+                    .unwrap_or(body.len());
+                digits > 0 && body[digits..].starts_with(';')
+            })
+        }
+        fn walk(el: &Element, out: &mut Vec<(String, String)>) {
+            for child in el.child_elements() {
+                if child.name == "C" {
+                    for a in &child.attrs {
+                        if has_char_ref(&crate::xml::unescape(&a.value)) {
+                            let who = child.attr("Title").or(child.attr("U")).unwrap_or("?");
+                            out.push((crate::xml::unescape(who).into_owned(), a.name.clone()));
+                        }
+                    }
+                }
+                walk(child, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.xml.root, &mut out);
+        out
     }
 
     /// Refuse a document with duplicate UUIDs ([`Self::duplicate_uuids`]):

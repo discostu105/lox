@@ -69,6 +69,12 @@ pub enum Value {
     /// written; the compiler resolves it to the port's base unit
     /// (`1.5h` → `5400`) when emitting `Def=`.
     Unit { number: String, unit: Unit },
+    /// `file("hue.c")` — text read from a file next to the declaring
+    /// `.lxir` file (D40); binds only program text (`Code:` on Code16).
+    /// `path` is kept as written; `text` is filled by
+    /// [`Module::load_files`] (CRLF normalized to LF) and stays `None`
+    /// for a module parsed from a string alone.
+    File { path: String, text: Option<String> },
 }
 
 /// A value's unit suffix (D27). Time units scale to Loxone's base unit,
@@ -173,13 +179,15 @@ impl Value {
     }
 
     /// The literal content this value resolves to: `Number`/`Str` verbatim,
-    /// `Unit` scaled into its base unit; `None` for a `Ref` (resolve it
-    /// through [`Module::resolve_value`]).
+    /// `Unit` scaled into its base unit, `File` its loaded text; `None` for
+    /// a `Ref` (resolve it through [`Module::resolve_value`]) and for a
+    /// `File` that was never loaded.
     pub fn literal(&self) -> Option<Cow<'_, str>> {
         match self {
             Value::Number(s) | Value::Str(s) => Some(Cow::Borrowed(s)),
             Value::Ref(_) => None,
             Value::Unit { number, unit } => scale_by_unit(number, *unit).map(Cow::Owned),
+            Value::File { text, .. } => text.as_deref().map(Cow::Borrowed),
         }
     }
 }
@@ -191,6 +199,7 @@ impl fmt::Display for Value {
             Value::Str(s) => f.write_str(&quote(s)),
             Value::Ref(r) => f.write_str(r),
             Value::Unit { number, unit } => write!(f, "{number}{unit}"),
+            Value::File { path, .. } => write!(f, "file({})", quote(path)),
         }
     }
 }
@@ -920,6 +929,45 @@ impl Module {
         super::parser::parse(src)
     }
 
+    /// Read every `file("…")` value (D40) relative to `dir` — the directory
+    /// of the `.lxir` file these items were parsed from — so each fragment
+    /// resolves its own paths before the merge. CRLF becomes LF: Loxone's
+    /// own program text carries bare LF (the house program: 502 LF, no CR),
+    /// so an editor's line endings never reach the config.
+    pub fn load_files(&mut self, dir: &std::path::Path) -> Result<()> {
+        fn load(items: &mut [Item], dir: &std::path::Path) -> Result<()> {
+            for item in items {
+                let args = match item {
+                    Item::Block(b) | Item::Instance(b) => &mut b.args,
+                    Item::Template(t) => {
+                        load(&mut t.body, dir)?;
+                        continue;
+                    }
+                    _ => continue,
+                };
+                for arg in args {
+                    if let ArgItem::Binding(Binding {
+                        kind: BindingKind::Param(Value::File { path, text }),
+                        ..
+                    }) = arg
+                    {
+                        let full = dir.join(&*path);
+                        let raw = std::fs::read_to_string(&full).map_err(|e| {
+                            Error::Compile(format!(
+                                "`file({})`: {}: {e}",
+                                quote(path),
+                                full.display()
+                            ))
+                        })?;
+                        *text = Some(raw.replace("\r\n", "\n"));
+                    }
+                }
+            }
+            Ok(())
+        }
+        load(&mut self.items, dir)
+    }
+
     pub fn externs(&self) -> impl Iterator<Item = &ExternDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Extern(e) => Some(e),
@@ -1024,6 +1072,11 @@ impl Module {
                 .find(|l| l.name == *name)
                 .and_then(|l| l.value.literal())
                 .ok_or_else(|| Error::Compile(format!("undeclared constant `{name}`"))),
+            Value::File { path, text: None } => Err(Error::Compile(format!(
+                "`file({})` was not loaded — parse the module from its files \
+                 (`Module::load_files`), which reads it relative to the `.lxir` file",
+                quote(path)
+            ))),
             other => other
                 .literal()
                 .ok_or_else(|| Error::Compile(format!("value `{other}` overflows its unit"))),

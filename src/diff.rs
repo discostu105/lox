@@ -6,12 +6,13 @@
 //! into the UI language — 111 renames in one observed save with zero
 //! semantic change. [`Rename::locale_suspect`] flags those.
 
-use crate::connectors::attr_params;
+use crate::connectors::{attr_params, file_params};
 use crate::doc::{LoxoneDoc, ObjectSummary, WireView, ports};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Element attributes the diff projection compares for a block type: the
-/// language-surface attribute parameters (`Formula=`), plus `APC=` on
+/// language-surface attribute parameters (`Formula=`, Code16's program
+/// text `Code=` — D40), plus `APC=` on
 /// `AutopilotRule` — the app-owned Automatic Designer rule payload.
 /// `APC` is *not* an `attr_params` entry because it is not language
 /// surface (the app and the Miniserver own those blocks; lxir never
@@ -240,28 +241,35 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// recomputes it over a fresh download to answer "did another writer
 /// change something?" from one parse, no reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
-    fingerprint(doc, true)
+    fingerprint(doc, 3)
+}
+
+/// The fingerprint as lxir wrote it before program text (`Code=` on
+/// Code16) joined the projection (D40). `lxir drift` accepts it so an
+/// upgrade alone does not read as drift; the next compile records the
+/// current form.
+pub fn semantic_fingerprint_v2(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 2)
 }
 
 /// The fingerprint as lxir wrote it before room/category bindings joined
 /// the projection (D39) — recorded in every lock compiled until then.
-/// `lxir drift` accepts it so an upgrade alone does not read as drift; the
-/// next compile records the current form.
+/// Accepted by `lxir drift` like [`semantic_fingerprint_v2`].
 pub fn semantic_fingerprint_v1(doc: &LoxoneDoc) -> String {
-    fingerprint(doc, false)
+    fingerprint(doc, 1)
 }
 
-fn fingerprint(doc: &LoxoneDoc, with_placement: bool) -> String {
+fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
     // Length-prefixed fields make the byte stream unambiguous.
     fn field(buf: &mut Vec<u8>, tag: u8, s: &str) {
         buf.push(tag);
         buf.extend_from_slice(&(s.len() as u64).to_le_bytes());
         buf.extend_from_slice(s.as_bytes());
     }
-    let mut buf: Vec<u8> = if with_placement {
-        b"lxir-fingerprint-v2".to_vec()
-    } else {
-        b"lxir-fingerprint-v1".to_vec()
+    let mut buf: Vec<u8> = match version {
+        1 => b"lxir-fingerprint-v1".to_vec(),
+        2 => b"lxir-fingerprint-v2".to_vec(),
+        _ => b"lxir-fingerprint-v3".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -287,6 +295,9 @@ fn fingerprint(doc: &LoxoneDoc, with_placement: bool) -> String {
         // moves the fingerprint of documents that carry the new
         // attribute — rule-free configs hash as before.
         for name in diff_attrs(&o.block_type) {
+            if version < 3 && file_params(&o.block_type).contains(&name) {
+                continue;
+            }
             let value = doc
                 .element_at(&o.path)
                 .and_then(|el| el.attr_decoded(name).map(|v| v.into_owned()));
@@ -295,7 +306,7 @@ fn fingerprint(doc: &LoxoneDoc, with_placement: bool) -> String {
                 field(&mut buf, b'v', &v);
             }
         }
-        if with_placement {
+        if version >= 2 {
             for (attr, v) in placement(doc, o) {
                 if let Some(v) = v {
                     field(&mut buf, b'p', attr);
@@ -310,6 +321,49 @@ fn fingerprint(doc: &LoxoneDoc, with_placement: bool) -> String {
         field(&mut buf, b'>', &w.to_port);
     }
     crate::lock::sha256_hex(&buf)
+}
+
+/// A program-text change (`Code=`, D40) as a compact line diff instead of
+/// two blobs: common leading and trailing lines are cut, the differing
+/// middle shows as `-`/`+` lines, at most [`SHOWN`] per side, each cut at
+/// [`WIDTH`] characters. One contiguous hunk — enough to see what moved
+/// without pulling in a diff algorithm.
+pub fn text_changes(from: &str, to: &str) -> Vec<String> {
+    const SHOWN: usize = 8;
+    const WIDTH: usize = 100;
+    let a: Vec<&str> = from.split('\n').collect();
+    let b: Vec<&str> = to.split('\n').collect();
+    let head = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let tail = a[head..]
+        .iter()
+        .rev()
+        .zip(b[head..].iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
+    let (gone, new) = (&a[head..a.len() - tail], &b[head..b.len() - tail]);
+    let mut out = vec![format!(
+        "{} -> {} lines; line {} on: {} removed, {} added",
+        a.len(),
+        b.len(),
+        head + 1,
+        gone.len(),
+        new.len()
+    )];
+    for (sign, lines) in [('-', gone), ('+', new)] {
+        for line in lines.iter().take(SHOWN) {
+            let cut: String = line.chars().take(WIDTH).collect();
+            let more = line.chars().count() - cut.chars().count();
+            if more > 0 {
+                out.push(format!("{sign} {cut}… (+{more} chars)"));
+            } else {
+                out.push(format!("{sign} {cut}"));
+            }
+        }
+        if lines.len() > SHOWN {
+            out.push(format!("{sign} … ({} more lines)", lines.len() - SHOWN));
+        }
+    }
+    out
 }
 
 fn doc_ports(doc: &LoxoneDoc, obj: &ObjectSummary) -> BTreeMap<String, Option<String>> {
@@ -427,9 +481,14 @@ mod tests {
         // The raw payload text is not writer-stable (raw newlines inside
         // the JSON exist in the wild) — reformatting and key order are
         // not drift, only the parsed value is compared.
-        let reflowed = doc_with("{ &quot;active&quot; :&#10;true }");
+        let reflowed = doc_with("{ &quot;active&quot; :\r\ntrue }");
         assert!(diff(&a, &reflowed).is_empty());
         assert_eq!(semantic_fingerprint(&a), semantic_fingerprint(&reflowed));
+
+        // A numeric reference is not a line break to Loxone but literal
+        // text, which breaks the JSON — a real change (D40).
+        let escaped = doc_with("{ &quot;active&quot; :&#xD;&#xA;true }");
+        assert_eq!(diff(&a, &escaped).param_changes.len(), 1);
     }
 
     #[test]

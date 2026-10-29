@@ -321,6 +321,11 @@ impl Desugar<'_> {
                  compute on plain numbers",
                 self.sink,
             ))),
+            Value::File { .. } => Err(Error::Compile(format!(
+                "`{v}` in the arithmetic on `{}` is a file — formulas compute \
+                 on plain numbers",
+                self.sink,
+            ))),
         }
     }
 

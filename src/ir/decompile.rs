@@ -31,7 +31,7 @@
 //! else `title` when unique, else the exact `uuid`.
 
 use crate::connectors::{BUILTIN_TYPES, attr_params};
-use crate::doc::{LoxoneDoc, ObjectSummary, ports};
+use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
     ArgItem, Binding, BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl,
@@ -520,8 +520,13 @@ impl Lift {
             let el = doc.element_at(&o.path).expect("path from objects()");
             let mut args = Vec::new();
             // Attribute parameters (block logic stored as an element
-            // attribute, e.g. `Formula=`) lead the argument list.
+            // attribute, e.g. `Formula=`) lead the argument list. A
+            // GUI-owned one (`Code=`, D40) stays unclaimed: the compile
+            // carries it, and claiming it is a source decision.
             for name in attr_params(&o.block_type) {
+                if GUI_OWNED_ATTRS.contains(name) {
+                    continue;
+                }
                 if let Some(v) = el.attr_decoded(name) {
                     args.push(ArgItem::Binding(Binding {
                         port: (*name).to_string(),

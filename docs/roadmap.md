@@ -354,6 +354,23 @@ ones are *assigned*.
       formats and an oracle proof before a `members:`-style claim is
       admitted.
 
+## Program blocks: PicoC from source
+
+- [x] Program code from source 2026-10-29 (D40): `Code: file("prog.c")`
+      on Code16 claims the program text; an unclaimed program is carried
+      verbatim. Numeric character references are read as text, as Loxone
+      reads them, and `lxir drift` lists every attribute that holds one.
+      Program text joins the semantic diff (as a line diff) and the
+      fingerprint (v3). Accepted on the house config: it restored the
+      Hue program that an `&#xA;`-encoding push had collapsed to a
+      single comment line, byte for byte.
+- [ ] Oracle probe: does a Loxone Config open+save keep a compiled
+      program byte-identical? The compiled text equals what Loxone
+      Config itself wrote before 2026-08-25, so the answer should be
+      yes; `scripts/oracle.sh` would confirm it.
+- [ ] `Task=` (the program's run schedule) stays GUI-owned until a
+      corpus survey shows its format.
+
 ## Automatic Designer (Automatik Designer)
 
 The app's rule engine; each rule is an `AutopilotRule` block whose whole
