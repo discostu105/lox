@@ -7,7 +7,7 @@ use lxir::ir::{
     PortRef, Value, adopt, adopt_one, adopt_pages, compile, decompile, decompile_pages,
 };
 use lxir::uuid::parse_serial;
-use lxir::xml::{Attr, Element};
+use lxir::xml::{Attr, Element, Node};
 use lxir::{Lockfile, LoxoneDoc};
 
 const MINT_TIME: i64 = 1_767_225_600; // 2026-01-01T00:00:00Z
@@ -100,6 +100,53 @@ fn recompiling_a_gui_saved_config_keeps_its_in_order() {
     gui.set_attr("Input", "20000003-0000-0032-01ffaaaaaaaa0003"); // Sonnenschein.Qm
     co.push_child(gui);
     co.set_attr("Nc", "2");
+
+    let out = compile(&saved, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.to_bytes()),
+        String::from_utf8_lossy(&saved.to_bytes())
+    );
+}
+
+#[test]
+fn recompiling_a_gui_saved_config_keeps_its_block_order() {
+    // D47: Loxone Config writes objects, attributes and connectors in an
+    // order of its own on save. Here the save drew the managed GreaterEqual
+    // in front of the extern AutoJalousie, moved its `Cl=` behind `Type=`
+    // and its `Input2` connector in front of `Input1`; the recompile tears
+    // the block down and must rebuild it exactly as saved.
+    let module = module();
+    let mut lock = Lockfile::new();
+    let mut saved = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let path = saved
+        .objects()
+        .iter()
+        .find(|o| o.block_type == "GreaterEqual")
+        .unwrap()
+        .path
+        .clone();
+    let (at, page_path) = path.split_last().unwrap();
+    let page = saved.element_at_mut(page_path).unwrap();
+    let mut block = match page.children.remove(*at) {
+        Node::Element(e) => e,
+        Node::Text(_) => unreachable!(),
+    };
+    let cl = block.attrs.iter().position(|a| a.name == "Cl").unwrap();
+    let cl = block.attrs.remove(cl);
+    block.attrs.insert(1, cl);
+    let input2 = block
+        .children
+        .iter()
+        .position(|n| matches!(n, Node::Element(e) if e.attr("K") == Some("Input2")))
+        .unwrap();
+    let input2 = block.children.remove(input2);
+    block.children.insert(0, input2);
+    let first = page
+        .children
+        .iter()
+        .position(|n| matches!(n, Node::Element(e) if e.name == "C"))
+        .unwrap();
+    page.children.insert(first, Node::Element(block));
 
     let out = compile(&saved, &module, &mut lock, &opts()).unwrap();
     assert_eq!(

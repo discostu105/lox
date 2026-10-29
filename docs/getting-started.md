@@ -18,7 +18,7 @@ nav_order: 2
 ## Requirements
 
 - Loxone Miniserver Gen 1 or Gen 2, firmware 12.0+
-- Local network access (or DynDNS with serial configured)
+- Network access to the Miniserver (local, VPN, or a DynDNS/port-forward)
 - For `lox log`: Admin user required
 - **Platforms:** Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
 
@@ -63,11 +63,13 @@ Configure your Miniserver connection:
 lox setup set --host https://192.168.1.100 --user USER --pass PASS
 ```
 
-With serial number for correct TLS hostname (avoids cert warnings):
+{: .tip }
+Use a dedicated Miniserver user for `lox` rather than your admin account; give it admin rights only if you need
+`lox log`, config download/push or firmware updates.
 
-```bash
-lox setup set --host https://192.168.1.100 --user USER --pass PASS --serial YOUR_SERIAL
-```
+`--serial` (optional) names this Miniserver's folder in a [config repo](/lox/guides/config-versioning), becomes its
+OpenTelemetry `device.id`, and lets `lox config push` refuse the wrong Miniserver. Certificate checks are off by
+default (Miniservers use self-signed certs); `--verify-ssl` turns them on.
 
 Verify the connection:
 
@@ -93,6 +95,24 @@ LOX_HOST=https://192.168.1.100 LOX_USER=admin LOX_PASS=secret lox status
 | `LOX_USER` | `user` |
 | `LOX_PASS` | `pass` |
 | `LOX_SERIAL` | `serial` |
+
+---
+
+## First commands
+
+```bash
+lox rooms                              # what's there
+lox ls -r Wohnzimmer                   # controls in a room (-t type, -c category)
+lox get "Licht Wohnzimmer"             # live state of one control
+lox on "Licht Wohnzimmer"              # act on it
+lox --dry-run blind "Süd" pos 50       # see what would be sent, without sending
+lox tui                                # or browse everything live
+```
+
+Names are case-insensitive substrings: `lox on wohnz` works if only one control matches. When several do,
+`lox` lists them; pick one with `-r <room>`, `"Name [Room]"` or the UUID.
+
+Every command takes `-o json` for scripts (`lox ls -o json | jq '.[].name'`) and exits non-zero on errors.
 
 ---
 
@@ -186,7 +206,8 @@ lox completions powershell | Out-String | Invoke-Expression
 
 ## Token authentication
 
-For better security than Basic Auth, use token authentication (valid ~20 days):
+Live connections (`lox stream`, `lox tui`, `lox otel`, `lox light moods`) log in over WebSocket with a token,
+which `lox` requests on first use, saves, and reuses while it is valid (~20 days). To manage it yourself:
 
 ```bash
 lox token fetch    # acquire and save token
@@ -194,7 +215,8 @@ lox token info     # check token status
 lox token refresh  # extend validity
 ```
 
-Once fetched, the token is used automatically for all requests. See the [Token Auth](/lox/commands/configuration#token-auth) section for all token commands.
+Plain HTTP commands keep using Basic Auth. See [Token auth](/lox/commands/configuration#token-auth) for all token
+commands.
 
 ---
 
@@ -212,7 +234,9 @@ lox discover --timeout 5
 ## Next steps
 
 - Browse the [Command Reference](/lox/commands/) for all available commands
+- Explore your house in the [Terminal UI](/lox/guides/tui)
 - Learn about [Scenes](/lox/guides/scenes) for multi-step automation
 - Set up [Config Versioning](/lox/guides/config-versioning) for GitOps backups
+- Manage logic as text with [Config as Code](/lox/guides/config-as-code)
 - Integrate with [AI Agents](/lox/guides/ai-agents)
 - Export data with [OpenTelemetry](/lox/guides/opentelemetry)

@@ -41,7 +41,10 @@ jobs:
       - name: clippy (lxir, all targets)
         run: cargo clippy -p lxir --all-targets -- -D warnings
 
+      # On PRs only: an entry under [Unreleased] goes wrong when the PR is
+      # merged; on main the release still picks it up.
       - name: Changelog fragments
+        if: github.event_name == 'pull_request'
         run: python3 .github/scripts/prepare_release.py --check
 
   test:

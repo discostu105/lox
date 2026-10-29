@@ -1,0 +1,208 @@
+---
+title: Config as Code
+layout: default
+parent: Guides
+nav_order: 5
+---
+
+# Config as Code (lxir)
+{: .no_toc }
+
+Write Miniserver logic as text, review it in a pull request, deploy it verified.
+{: .fs-5 .fw-300 }
+
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
+
+## How it works
+
+A Miniserver's logic lives in one `.Loxone` XML file that only Loxone Config can edit. `lox ir` runs the
+[lxir](https://github.com/discostu105/lox/tree/main/crates/lxir) toolchain, which treats it like Terraform treats
+infrastructure:
+
+| | |
+|:--|:--|
+| **Module** (`*.lxir`) | Your source: the blocks, wires and parameters you manage |
+| **Base** (`.Loxone`) | The config the Miniserver runs now (a download) |
+| **Lockfile** (`*.lock.json`) | Pins every UUID the compiler minted, so the next compile changes only what you changed |
+| **Out** (`.Loxone`) | Base + module, written exactly as Loxone Config would have drawn it |
+
+You manage only the logic you choose. Hardware, rooms, visualization, users and everyone else's logic pass through
+byte for byte. Nothing in `lox ir` talks to the Miniserver; `lox config push` does the transport.
+
+{: .note }
+`lox ir …` and the standalone `lxir …` binary are the same CLI, so lxir's docs apply word for word.
+`lox ir help` lists every command and flag.
+
+## The language in one example
+
+```text
+page "Beschattung"
+
+let temp_schwelle = 28
+
+extern aussentemp = VirtualIn(iname: "VI1")          # owned by Loxone Config
+extern sonne      = VirtualIn(iname: "VI3")
+extern jal_sued   = AutoJalousie(title: "Beschattung Süd")
+
+temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: temp_schwelle)
+
+jal_sued.AutoShade <- temp_hoch.Q and sonne.Q        # a wire; the `and` becomes an And block
+jal_sued.TargetPos = 70                              # a parameter
+```
+
+- `extern` names an object Loxone Config owns (matched by `uuid`, `iname` or `title`); you can wire to it, not
+  create it.
+- A plain declaration (`temp_hoch = GreaterEqual(…)`) is a block the compiler owns.
+- `<-` draws a wire, `=` sets a parameter. Expressions (`and`, `>=`, `/ 1000`) compile to real blocks, units read as
+  written (`Time: 30min`, `70%`), and `template … end` stamps out repeated rules.
+
+The full language: [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md).
+Worked examples: [crates/lxir/examples](https://github.com/discostu105/lox/tree/main/crates/lxir/examples).
+
+## Set up a project
+
+A directory with a `lox.toml` is a project: one Miniserver, one deployment target. Keep it in git.
+
+```bash
+mkdir haus && cd haus && git init
+lox config download --extract --save-as base.zip     # → base.zip + base.Loxone
+lox ir decompile base.Loxone | less                  # read-only view of every page
+```
+
+```toml
+# lox.toml — paths are relative to this file
+base   = "base.Loxone"       # the deployed config (required)
+module = "pages"             # a .lxir file or a directory of them (required)
+lock   = "lxir.lock.json"    # default: lxir.lock.json
+out    = "out.Loxone"        # default: out.Loxone
+serial = "504F94112233"      # stamped into minted UUIDs; push checks it against the Miniserver
+```
+
+Then start in one of two ways:
+
+```bash
+# Take over the existing blocks lxir can manage (one file per page)
+lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json
+
+# …or adopt one block, e.g. one you just drew in Loxone Config
+lox ir adopt base.Loxone --uuid <uuid> --as stiegenlicht --module pages --lock lxir.lock.json
+```
+
+Or write a new page from scratch in `pages/`. Find UUIDs and names with `lox config find` and
+`lox config wiring`.
+
+{: .tip }
+Only block types whose ports are verified can be managed. Anything else stays unmanaged (adopt says so with a
+warning) and keeps working, untouched, as part of the base.
+
+## The edit loop
+
+```bash
+lox ir check                          # parse + validate, errors with line numbers
+lox ir fmt --write                    # canonical formatting
+lox ir compile                        # base + module + lock → out.Loxone, lock updated
+lox config diff base.Loxone out.Loxone   # what changes, by name, page by page
+lox ir lint                           # unused names, blocks whose outputs feed nothing
+```
+
+`lox config diff` is the readable review: names, pages and values. `lox ir diff --exit-code` is the same
+comparison by UUID, with exit code 1 when anything differs (for scripts and CI).
+
+```
+base.Loxone → out.Loxone
+
+= 2 added · 1 parameter · wires +4 −0
+
+Beschattung
+  + block  Temp über 28 (GreaterEqual)
+  + block  temp_hoch.Q and sonne.Q (And)
+  ~ param  Beschattung Süd · TargetPos  100 → 70
+  + wire   Außentemperatur.Q → Temp über 28.Input1
+  + wire   Sonnenschein.Q → temp_hoch.Q and sonne.Q.I2
+  + wire   Temp über 28.Q → temp_hoch.Q and sonne.Q.I1
+  + wire   temp_hoch.Q and sonne.Q.Q → Beschattung Süd.AutoShade
+```
+
+That is the example above compiled: the expression became an `And` block, labeled with the expression so it stays
+readable in Loxone Config.
+
+## Deploy with `lox config push`
+
+```bash
+lox config push              # dry run: download live, drift check, compile, show the changes, stage
+lox config push --force      # … then upload, reboot, wait, verify, move base forward
+git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
+```
+
+Each step stops the push when it fails:
+
+1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`).
+2. **Drift check:** the live logic must still be your `base`. If someone saved from Loxone Config or the app since,
+   the push refuses and names the `lox ir diff` to run.
+3. Compile against the live download, so users, passwords and layout stay as they are live.
+4. Show the changes and stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to
+   exactly the compiled file. Without `--force` the push ends here.
+5. Upload as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
+6. Download again: the Miniserver must run exactly the compiled file, or the push fails and the project stays as it
+   was.
+7. Update the lock, `out`, and `base` in `lox.toml`. Commit them.
+
+| Flag | When |
+|:-----|:-----|
+| `--allow-removals` | You deleted managed blocks from the module and want them gone from the config |
+| `--accept-version <v>` | The base was saved by a newer Loxone Config release |
+| `--patched-from <dl.Loxone>` | Your base is a byte patch of that download |
+| `--backup-dir <dir>` | Downloads and artifacts elsewhere (default `backups/`, git-ignored: configs hold personal data) |
+| `-o json` | A machine-readable report on stdout |
+
+{: .warning }
+App-created autopilot rules can live only in the Miniserver's *custom changes*; any upload discards them. Check
+`lox autopilot changed` before you push.
+
+**Roll back** by uploading the download from before the push:
+
+```bash
+lox config upload backups/<stamp>-pre-push.zip --force && lox reboot --yes
+```
+
+## When someone else changed the config
+
+Loxone Config, the app and the Miniserver itself also write the config. Check before you edit:
+
+```bash
+lox config download --extract --save-as live.zip
+lox ir drift live.Loxone              # exit 0: in sync with the last compile; 1: someone wrote since
+lox config diff base.Loxone live.Loxone   # what they changed
+```
+
+If they changed something you don't manage, point `base` in `lox.toml` at `live.Loxone` and compile again. If they
+touched a managed block, bring the module up to date first (or `lox ir adopt --uuid` a block they added).
+
+## Tests, CI and editors
+
+- **Tests:** `test "…" … end` blocks in a module set inputs, advance time and `expect` outputs. `lox ir test` runs
+  them against the compiled config through [lox-cli](https://github.com/eisber/lox-cli)'s simulator (`--lox <path>`
+  or `$LOX`).
+- **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/lxir/examples/ci.sh) checks
+  parsing, formatting, lock currency and byte-determinism; `--sync` also requires the sources to match the deployed
+  config.
+- **Rename safely:** `lox ir rename old_slug new_slug` renames across all files and the lock, identities kept.
+- **VS Code:** syntax highlighting and snippets in
+  [editor/vscode](https://github.com/discostu105/lox/tree/main/crates/lxir/editor/vscode).
+- **AI agents:** `lox ir check --json` gives machine-readable errors; the
+  [agent guide](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/agents.md) has the rules.
+
+## Reference
+
+| Doc | Contents |
+|:----|:---------|
+| [lxir README](https://github.com/discostu105/lox/blob/main/crates/lxir/README.md) | Overview, every CLI command, library use |
+| [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md) | The `.lxir` language |
+| [lockfile-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/lockfile-spec.md) | The lockfile format |
+| [vision.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/vision.md) | Why, and the "three writers, one file" model |

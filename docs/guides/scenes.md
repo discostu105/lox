@@ -2,7 +2,7 @@
 title: Scenes
 layout: default
 parent: Guides
-nav_order: 1
+nav_order: 2
 ---
 
 # Scenes
@@ -21,7 +21,9 @@ Multi-step automation sequences defined as YAML files.
 
 ## Overview
 
-Scenes let you define a sequence of commands that run in order. They are stored as YAML files in `~/.lox/scenes/`.
+Scenes let you define a sequence of commands that run in order. They are YAML files in `~/.lox/scenes/`, or
+`~/.lox/contexts/<name>/scenes/` when you use [contexts](/lox/commands/configuration#context-management), so each
+Miniserver has its own.
 
 ## Creating a scene
 
@@ -39,9 +41,9 @@ name: Abend
 steps:
   - control: "Lichtsteuerung Wohnzimmer"
     cmd: "on"
-  - control: "Beschattung Sudseite"
+  - control: "Beschattung Südseite"
     cmd: "pos 70"
-  - control: "LED Kuche"
+  - control: "LED Küche"
     cmd: "off"
     delay_ms: 500
 ```
@@ -53,7 +55,7 @@ steps:
 | `name` | Yes | Display name for the scene |
 | `steps` | Yes | List of command steps |
 | `steps[].control` | Yes | Control name (fuzzy matched) |
-| `steps[].cmd` | Yes | Command to send |
+| `steps[].cmd` | Yes | Command to send: `on`, `off`, `pos 70`, `plus`, or any raw Loxone command (as with `lox send`) |
 | `steps[].delay_ms` | No | Delay in milliseconds before this step |
 
 ## Running scenes
@@ -75,6 +77,8 @@ lox scene show abend             # print YAML definition
 ## Tips
 
 - Controls are resolved using the same fuzzy matching as regular commands
-- Use `--room` bracket syntax in control names if needed: `"Temperatur [Schlafzimmer]"`
+- Disambiguate with the bracket syntax: `control: "Licht [Schlafzimmer]"`
+- Quote `on`/`off` in YAML (`cmd: "on"`): unquoted, YAML may read them as booleans
+- `lox tui` lists your scenes in the palette (`:`), and AI agents can run them through the [MCP server](ai-agents#mcp-server)
 - Add `delay_ms` between steps when the Miniserver needs time to process
 - Scene files can be version-controlled alongside your other dotfiles

@@ -107,6 +107,10 @@ struct Residue {
     layout: Option<Layout>,
     /// The page the base draws the block on.
     page: Option<String>,
+    /// Every attribute name and every `<Co>` key in base element order:
+    /// the rebuild writes its own in the same order (D47).
+    attr_order: Vec<String>,
+    co_order: Vec<String>,
 }
 
 impl Residue {
@@ -133,6 +137,12 @@ fn harvest_residue(el: &Element) -> Residue {
     Residue {
         layout: Layout::of_element(el),
         page: None,
+        attr_order: el.attrs.iter().map(|a| a.name.clone()).collect(),
+        co_order: el
+            .child_elements()
+            .filter(|c| c.name == "Co")
+            .filter_map(|co| Some(co.attr_decoded("K")?.into_owned()))
+            .collect(),
         attrs: el
             .attrs
             .iter()
@@ -315,6 +325,22 @@ pub fn compile(
     //     Each removed element hands back its GUI-owned residue (D19) so
     //     the rebuild carries it forward verbatim.
     let mut residue: BTreeMap<String, Residue> = BTreeMap::new();
+    // Each page's objects in base order (D47): a rebuilt block goes back
+    // to its place among them.
+    let base_page_order: BTreeMap<String, Vec<String>> = doc
+        .objects()
+        .iter()
+        .filter(|o| o.block_type == "Page")
+        .filter_map(|o| {
+            let page = doc.element_at(&o.path)?;
+            let objects = page
+                .child_elements()
+                .filter(|c| c.name == "C")
+                .filter_map(|c| c.attr("U").map(str::to_string))
+                .collect();
+            Some((o.uuid.clone(), objects))
+        })
+        .collect();
     let base_page: BTreeMap<String, String> = {
         let idx = doc.index();
         lock.objects
@@ -717,9 +743,9 @@ pub fn compile(
         );
     }
 
-    // --- Build the managed <C> elements and append each to its pinned
-    //     page. The index is taken once after teardown; appending children
-    //     never shifts the recorded page paths.
+    // --- Build the managed <C> elements and insert each into its pinned
+    //     page, where the base had it (D47). The index is taken once after
+    //     teardown; inserting into a page never shifts the page paths.
     let page_index = doc.index();
     // D46: managed blocks carry the document's block version, so a GUI
     // save has none to restamp — when the builtin table is verified for
@@ -837,6 +863,13 @@ pub fn compile(
             for c in &r.children {
                 el.push_child(c.clone());
             }
+            // D47: attributes and connectors in the order the base wrote
+            // them; Loxone Config's order differs from ours (it writes
+            // `Desc=` right after `Type=`, 17.2 moves a connector).
+            el.attrs = in_base_order(std::mem::take(&mut el.attrs), |a| {
+                r.attr_order.iter().position(|n| *n == a.name)
+            });
+            order_connectors(&mut el, &r.co_order);
         }
         let page_path = page_index.by_uuid.get(&plan.page_uuid).ok_or_else(|| {
             Error::Compile(format!(
@@ -855,7 +888,8 @@ pub fn compile(
                 page.attr("Type").unwrap_or("?")
             )));
         }
-        page.push_child(el);
+        let order = base_page_order.get(&plan.page_uuid);
+        insert_in_page(page, el, order.map_or(&[], Vec::as_slice));
     }
 
     // --- Mirror routing (D34): a wire may name the mirrored object
@@ -1709,6 +1743,77 @@ fn find_co_mut<'a>(el: &'a mut Element, port_uuid: &str) -> Option<&'a mut Eleme
         .find_map(|c| find_co_mut(c, port_uuid))
 }
 
+/// `items` with the ones `rank` places in rank order, the base's (D47).
+/// An item the base did not have stays right behind the item it follows
+/// in `items`, so a value new to the block keeps its emitted neighbour.
+fn in_base_order<T>(items: Vec<T>, rank: impl Fn(&T) -> Option<usize>) -> Vec<T> {
+    let mut prev = None;
+    let mut keyed: Vec<_> = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let key = match rank(&item) {
+                Some(r) => {
+                    prev = Some(r);
+                    (Some(r), false, i)
+                }
+                None => (prev, true, i),
+            };
+            (key, item)
+        })
+        .collect();
+    keyed.sort_by_key(|(key, _)| *key);
+    keyed.into_iter().map(|(_, item)| item).collect()
+}
+
+/// Reorder the block's `<Co>` children into `base` key order, leaving
+/// every other child where it is.
+fn order_connectors(el: &mut Element, base: &[String]) {
+    use crate::xml::Node;
+    let slots: Vec<usize> = (0..el.children.len())
+        .filter(|&i| matches!(&el.children[i], Node::Element(e) if e.name == "Co"))
+        .collect();
+    let cos: Vec<Node> = slots
+        .iter()
+        .map(|&i| std::mem::replace(&mut el.children[i], Node::Text(String::new())))
+        .collect();
+    let rank = |n: &Node| match n {
+        Node::Element(e) => e
+            .attr_decoded("K")
+            .and_then(|k| base.iter().position(|b| *b == k)),
+        Node::Text(_) => None,
+    };
+    for (i, co) in slots.into_iter().zip(in_base_order(cos, rank)) {
+        el.children[i] = co;
+    }
+}
+
+/// Insert a rebuilt block into its page where the base had it (D47):
+/// before the first object the base listed after it, or that the base did
+/// not have; else behind the page's last object. A block new to the page
+/// is appended, as before.
+fn insert_in_page(page: &mut Element, el: Element, base: &[String]) {
+    use crate::xml::Node;
+    let rank = |u: Option<&str>| u.and_then(|u| base.iter().position(|b| b == u));
+    let Some(mine) = rank(el.attr("U")) else {
+        page.push_child(el);
+        return;
+    };
+    let object = |n: &Node| matches!(n, Node::Element(e) if e.name == "C");
+    let at = page
+        .children
+        .iter()
+        .position(|n| {
+            matches!(n, Node::Element(e)
+                if e.name == "C" && rank(e.attr("U")).is_none_or(|r| r > mine))
+        })
+        .or_else(|| page.children.iter().rposition(object).map(|i| i + 1));
+    match at {
+        Some(i) => page.children.insert(i, Node::Element(el)),
+        None => page.push_child(el),
+    }
+}
+
 /// Put `<In Input=from/>` under the sink `<Co>` and maintain `Nc`.
 /// `flg` re-emits a harvested `FLG=` wire flag verbatim (D19 residue);
 /// `base_order` is the sink's `<In>` sources as the base listed them.
@@ -2025,5 +2130,22 @@ fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<S
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_base_order;
+
+    #[test]
+    fn base_order_wins_and_new_items_keep_their_neighbour() {
+        let base = ["Type", "Desc", "V", "U", "Title"];
+        let rank = |a: &&str| base.iter().position(|b| b == a);
+        // Emitted: `Desc=` late, `Nio=` new to the block, `New=` first.
+        let emitted = vec!["New", "Type", "V", "U", "Title", "Nio", "Desc"];
+        assert_eq!(
+            in_base_order(emitted, rank),
+            ["New", "Type", "Desc", "V", "U", "Title", "Nio"]
+        );
     }
 }

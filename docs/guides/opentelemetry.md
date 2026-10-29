@@ -2,7 +2,7 @@
 title: OpenTelemetry
 layout: default
 parent: Guides
-nav_order: 4
+nav_order: 6
 ---
 
 # OpenTelemetry Export
@@ -98,12 +98,12 @@ lox otel serve --endpoint ... --no-traces
 
 | Flag | Description |
 |:-----|:------------|
-| `--endpoint` | OTLP endpoint URL |
-| `-i`, `--interval` | Push interval (e.g., `30s`, `1m`, `5m`) |
+| `--endpoint` | OTLP HTTP endpoint URL (default `http://localhost:4318`) |
+| `-i`, `--interval` | Push interval (e.g., `30s`, `1m`, `5m`; default `30s`) |
 | `-t`, `--type` | Filter by control type |
 | `-r`, `--room` | Filter by room |
 | `--header` | HTTP header for auth (`Key=Value`) |
-| `--delta` | Use delta temporality for counters |
+| `--delta` | Use delta temporality for counters (required by Dynatrace and some other backends) |
 | `--no-logs` | Disable log export |
 | `--no-traces` | Disable trace export |
 
@@ -118,6 +118,16 @@ lox otel push --endpoint http://localhost:4318
 # Metrics only
 lox otel push --endpoint http://localhost:4318 --no-logs
 ```
+
+Resource attributes: `service.name=loxone-miniserver`, `service.version` and `host.name` (the configured host); with
+`serial` set in the config (`lox setup set --serial …`), also `device.id`.
+
+## Kubernetes
+
+[`k8s/deployment.yaml`](https://github.com/discostu105/lox/blob/main/k8s/deployment.yaml) runs `lox otel serve` as a
+Deployment, with the connection settings from a secret
+([`k8s/secret.yaml`](https://github.com/discostu105/lox/blob/main/k8s/secret.yaml)). The
+`ghcr.io/discostu105/lox` image contains only the binary.
 
 ## Cron example
 
