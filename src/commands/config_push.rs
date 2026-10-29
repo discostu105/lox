@@ -23,7 +23,10 @@
 //!    push renames, moves or deletes are named. Without `--force` the push
 //!    ends here.
 //! 6. Upload it as `sps_new.zip`, which the Miniserver loads on start, reboot,
-//!    and wait until it answers again.
+//!    and wait until it answers again. Loading it drops the Miniserver's
+//!    custom changes, users edited in the app among them: when the live users
+//!    differ from the program file's, staging reports it and `--force`
+//!    refuses unless `--discard-custom-changes` (see `push_users`).
 //! 7. Download again: the Miniserver must now run exactly the compiled file.
 //!    With app controls changed, compare the catalogue it serves with the
 //!    uploaded one: unchanged means the app still shows them as before.
@@ -52,6 +55,8 @@ use std::time::{Duration, Instant};
 pub(crate) trait Miniserver {
     /// The serial from the connection settings, if known.
     fn serial(&self) -> Option<String>;
+    /// Every user of the user management, with details.
+    fn live_users(&self) -> Result<Vec<crate::usermgmt::User>>;
     /// The newest config ZIP on the Miniserver: its file name and bytes.
     fn download_newest(&self) -> Result<(String, Vec<u8>)>;
     /// The files of `/sys/custom` (name, LoxCC bytes): custom changes an
@@ -81,6 +86,15 @@ impl LiveMiniserver {
 impl Miniserver for LiveMiniserver {
     fn serial(&self) -> Option<String> {
         Some(self.cfg.serial.clone()).filter(|s| !s.is_empty())
+    }
+
+    fn live_users(&self) -> Result<Vec<crate::usermgmt::User>> {
+        use crate::usermgmt::{user, user_list};
+        let lox = LoxClient::new(self.cfg.clone())?;
+        user_list(&lox)?
+            .iter()
+            .map(|u| user(&lox, &u.uuid))
+            .collect()
     }
 
     fn download_newest(&self) -> Result<(String, Vec<u8>)> {
@@ -178,6 +192,9 @@ pub(crate) struct PushReport {
     /// The config downloaded after the push — the project's new base
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified: Option<PathBuf>,
+    /// Users changed live that the program file does not hold: loading the
+    /// upload deletes these changes
+    pub user_changes_pending: Vec<crate::commands::push_users::PendingUserChange>,
 }
 
 pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Result<PushReport> {
@@ -298,6 +315,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         compiled: None,
         staged: None,
         verified: None,
+        user_changes_pending: Vec::new(),
     };
     if compiled == live_xml {
         say("Nothing to push: the Miniserver already runs the compiled module.");
@@ -343,6 +361,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let staged_path = file("push.zip");
     fs::write(&staged_path, &staged)?;
     report.staged = Some(staged_path.clone());
+    report.user_changes_pending = user_changes(ms, &live_xml, opts, &say)?;
     if !opts.force {
         report.outcome = "staged";
         say(&format!(
@@ -540,6 +559,46 @@ fn parse(xml: &[u8]) -> Result<LoxoneDoc> {
     Ok(LoxoneDoc::parse(xml)?)
 }
 
+/// The user changes loading an upload of a program file based on `live_xml`
+/// would delete. With `--force` they stop the push unless
+/// `--discard-custom-changes`; a staging run only reports them. Users that
+/// cannot be read stop `--force` too.
+fn user_changes(
+    ms: &dyn Miniserver,
+    live_xml: &[u8],
+    opts: &PushOptions,
+    say: &dyn Fn(&str),
+) -> Result<Vec<crate::commands::push_users::PendingUserChange>> {
+    use crate::commands::push_users::{UNREADABLE, UserChangesPending, pending_in};
+    let refuse = opts.force && !opts.discard_custom_changes;
+    let pending = match ms.live_users() {
+        Ok(users) => pending_in(live_xml, &users)?,
+        Err(e) if refuse => return Err(e.context(UNREADABLE)),
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot read the users to check for user changes: {e:#}"
+            ));
+            return Ok(Vec::new());
+        }
+    };
+    if pending.is_empty() {
+        return Ok(pending);
+    }
+    if refuse {
+        return Err(UserChangesPending(pending).into());
+    }
+    say(if opts.force {
+        "Deleting these user changes (--discard-custom-changes):"
+    } else {
+        "Users changed on the Miniserver since its program file was saved; loading the upload \
+         would delete that (--force refuses unless --discard-custom-changes):"
+    });
+    for p in &pending {
+        say(&format!("  {}: {}", p.user, p.changes.join("; ")));
+    }
+    Ok(pending)
+}
+
 /// What the push changes, live → compiled. The logic view leaves out refs,
 /// pages and the document; when only those differ (a title claim renaming
 /// the refs that copy a title, say), the semantic diff's totals say so
@@ -629,6 +688,7 @@ fn set_base(src: &str, base: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::push_users::{self, UserChangesPending};
     use std::cell::RefCell;
 
     /// A Miniserver in memory: serves its current config ZIP; an upload
@@ -636,6 +696,8 @@ mod tests {
     struct FakeMiniserver {
         serial: Option<String>,
         current: RefCell<Vec<u8>>,
+        /// The user management; `None` refuses to show it.
+        users: Option<Vec<crate::usermgmt::User>>,
         uploaded: RefCell<Option<Vec<u8>>>,
         reboots: RefCell<usize>,
         /// The files of /sys/custom; `None`: listing it fails
@@ -647,6 +709,7 @@ mod tests {
             FakeMiniserver {
                 serial: Some("504F94112233".into()),
                 current: RefCell::new(zip),
+                users: Some(Vec::new()),
                 uploaded: RefCell::new(None),
                 reboots: RefCell::new(0),
                 custom: Some(Vec::new()),
@@ -657,6 +720,15 @@ mod tests {
     impl Miniserver for FakeMiniserver {
         fn serial(&self) -> Option<String> {
             self.serial.clone()
+        }
+        fn live_users(&self) -> Result<Vec<crate::usermgmt::User>> {
+            self.users.clone().ok_or_else(|| {
+                anyhow!(
+                    "the Miniserver refused to show its user management — the user lox \
+                     connects with needs the right to manage users (an admin); change it \
+                     with `lox setup set --user <admin>`"
+                )
+            })
         }
         fn download_newest(&self) -> Result<(String, Vec<u8>)> {
             Ok((
@@ -819,6 +891,117 @@ mod tests {
         );
         assert_eq!(fs::read(dir.path().join("pool.lock.json")).unwrap(), lock);
         assert!(!dir.path().join("out.Loxone").exists());
+    }
+
+    /// The project with users in its base, and a Miniserver that runs the
+    /// base and whose user management matches it.
+    fn project_with_users() -> (tempfile::TempDir, FakeMiniserver) {
+        let dir = project();
+        let xml = String::from_utf8(base(dir.path())).unwrap().replacen(
+            "<C Type=\"PlaceCaption\"",
+            &format!(
+                "{}\n<C Type=\"PlaceCaption\"",
+                push_users::tests::users_xml()
+            ),
+            1,
+        );
+        fs::write(dir.path().join("pool.Loxone"), &xml).unwrap();
+        let mut ms = FakeMiniserver::new(config_zip(xml.as_bytes()));
+        ms.users = Some(push_users::tests::live_users());
+        (dir, ms)
+    }
+
+    /// alice learned a second tag in the app since the program was saved.
+    fn learn_a_tag_live(ms: &mut FakeMiniserver) {
+        let alice = &mut ms.users.as_mut().unwrap()[0];
+        alice.last_edit = Some(562000500);
+        alice.nfc_tags.push(crate::usermgmt::NfcTag {
+            name: "alice card".into(),
+            id: "04 D4 E5 F6".into(),
+        });
+    }
+
+    #[test]
+    fn push_goes_ahead_when_the_users_match_the_program_file() {
+        let (dir, ms) = project_with_users();
+
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert!(report.user_changes_pending.is_empty());
+    }
+
+    #[test]
+    fn push_refuses_to_discard_user_changes() {
+        let (dir, mut ms) = project_with_users();
+        learn_a_tag_live(&mut ms);
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+
+        let pending = err.downcast_ref::<UserChangesPending>().expect("typed");
+        assert_eq!(pending.0.len(), 1);
+        assert_eq!(crate::categorize_error(&err), "user_changes_pending");
+        let msg = err.to_string();
+        assert!(msg.contains("alice (last edit: "), "{msg}");
+        assert!(
+            msg.contains("NFC tags: 2 (alice phone, alice card) live"),
+            "{msg}"
+        );
+        assert!(ms.uploaded.borrow().is_none());
+        assert_eq!(*ms.reboots.borrow(), 0);
+    }
+
+    #[test]
+    fn staging_reports_the_user_changes_an_upload_would_discard() {
+        let (dir, mut ms) = project_with_users();
+        learn_a_tag_live(&mut ms);
+
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "staged");
+        let pending = &report.user_changes_pending;
+        assert_eq!(pending[0].user, "alice");
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["user_changes_pending"][0]["user"], "alice");
+        assert_eq!(
+            json["user_changes_pending"][0]["changes"][1],
+            pending[0].changes[1]
+        );
+    }
+
+    #[test]
+    fn discard_custom_changes_deletes_user_changes_too() {
+        let (dir, mut ms) = project_with_users();
+        learn_a_tag_live(&mut ms);
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+
+        let report = push(&ms, &opts, true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert_eq!(report.user_changes_pending[0].user, "alice");
+    }
+
+    #[test]
+    fn users_that_cannot_be_read_stop_force_only() {
+        let (dir, mut ms) = project_with_users();
+        ms.users = None;
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Cannot read the Miniserver's users"), "{msg}");
+        assert!(msg.contains("lox setup set --user"), "{msg}");
+        assert!(msg.contains("--discard-custom-changes"), "{msg}");
+        assert!(ms.uploaded.borrow().is_none());
+
+        let staged = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(staged.outcome, "staged");
+        assert!(staged.user_changes_pending.is_empty());
+
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+        let report = push(&ms, &opts, true).unwrap();
+        assert_eq!(report.outcome, "pushed");
     }
 
     #[test]

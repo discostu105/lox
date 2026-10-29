@@ -438,17 +438,26 @@ Each step stops the push when it fails:
    (`kept_as_live` in the JSON report) and goes on.
 3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, access
    rights, layout and visualization stay as they are live. Live identical to the compiled config: nothing to push.
-4. Print the logic changes (live → compiled) and stage the upload: the downloaded ZIP with only `sps0.LoxCC`
-   replaced, verified to extract to exactly the compiled file (`<stamp>-push.zip`). Without `--force` (or with
-   `--dry-run`) the push ends here. The ZIP's app catalogue (`LoxAPP3.json`, what the app shows) is Loxone Config's
-   from before: controls of the app the push renames, moves to another room or category, or deletes are named
-   (`app_catalogue_stale` in `-o json`). A save from Loxone Config rewrites the catalogue.
-5. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes).
-6. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
+4. Print the logic changes (live → compiled) and check the users: the Miniserver keeps users, groups, NFC tags and
+   access codes changed in the app or with `lox user` apart from its program file until the program is saved
+   again, and loading the upload deletes them. The push compares every live user with the program file (exists,
+   name, last edit, groups, NFC tag names and count, number of access codes) and lists the differences
+   (`user_changes_pending` in `-o json`). It needs an admin connection (`lox setup set --user <admin>`); users it
+   cannot read stop `--force` (a staging run only warns).
+5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to exactly the
+   compiled file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app
+   catalogue (`LoxAPP3.json`, what the app shows) is Loxone Config's from before: controls of the app the push
+   renames, moves to another room or category, or deletes are named (`app_catalogue_stale` in `-o json`). A save
+   from Loxone Config rewrites the catalogue.
+6. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes). Users changed
+   live stop `--force` before the upload (error `user_changes_pending`): load the program from the Miniserver in
+   Loxone Config and save it back, so the program file holds the changes and the push keeps them, or pass
+   `--discard-custom-changes` to delete them.
+7. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
    fails and the project is left as it was. When app controls changed, the push also reads the catalogue the
    Miniserver serves and says whether it is still the uploaded one (same `lastModified`: the app shows the old
    names) or rebuilt (`app_catalogue_rebuilt`).
-7. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
+8. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
 
 A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:
 nothing re-serializes the XML on the way.
@@ -620,7 +629,7 @@ When using `-o json`, errors return structured envelopes instead of plain text:
 }
 ```
 
-Error codes: `control_not_found`, `ambiguous_control`, `user_not_found`, `ambiguous_user`, `tag_not_found`, `code_in_use`, `learn_timeout`, `config_not_found`, `confirmation_required`, `declined_by_user`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
+Error codes: `control_not_found`, `ambiguous_control`, `user_not_found`, `ambiguous_user`, `tag_not_found`, `code_in_use`, `learn_timeout`, `config_not_found`, `user_changes_pending`, `confirmation_required`, `declined_by_user`, `unauthorized`, `forbidden`, `not_found`, `http_error`, `connection_error`, `error`.
 
 ---
 

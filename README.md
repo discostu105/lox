@@ -382,8 +382,8 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 lockfile, so the next compile changes only what you changed. Everything you don't manage — hardware, rooms,
 visualization, other logic — passes through byte for byte. `lox ir diff` proves it, `lox ir drift` tells you
 when the GUI or the app wrote to the config since. `lox config push --force` deploys a project end to end: drift
-check, compile against the live config, byte-exact upload, reboot, and a download that proves the Miniserver runs
-exactly the compiled file.
+check, compile against the live config, a check for user changes the upload would discard, byte-exact upload,
+reboot, and a download that proves the Miniserver runs exactly the compiled file.
 
 ```bash
 lox config download --extract --save-as base.zip   # the deployed config → base.Loxone
