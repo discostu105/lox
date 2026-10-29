@@ -10,6 +10,25 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-29
+
+### Added
+- **Access rights from source** (#140): an `access <code_touch> … end` declaration in a `.lxir` module lists the
+  users and groups that may open an NFC Code Touch, by title, each with its access schedule
+  (`user "alice": "Always"`). It owns that block's access: compiling grants, reschedules and revokes, writing the
+  same `<PRM>` edit Loxone Config makes; Code Touches without a declaration are not touched. Users, groups,
+  schedules, tags and codes stay with Loxone Config and the app, and a title that is missing or not unique is an
+  error. `lox ir decompile` and `lox ir adopt` lift existing rights into declarations; `lox ir lint` reports
+  `no-access-right` for a user whose NFC tag or access code opens no Code Touch.
+- lxir reads and generates `permissions.bin`, the program ZIP's table of who may use which object
+  (`lxir::permissions`), byte for byte against the files Loxone Config writes.
+
+### Changed
+- `lox config push` stages a `permissions.bin` generated for the compiled config when lxir reproduces the live
+  one byte for byte, so access granted or revoked in the module reaches it. Otherwise the live file stays, and
+  the push warns when the compiled access rights no longer match it. The JSON report has `permissions`
+  (`unchanged`, `regenerated`, `kept`, `absent`) and `permissions_stale`.
+
 ## [0.18.0] — 2026-10-29
 
 ### Added
