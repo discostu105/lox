@@ -38,7 +38,7 @@ USAGE:
               [--base <cfg.Loxone>] [--module <m.lxir | module-dir>]
               [--lock <lock.json>] [--out <out.Loxone>]
               [--serial <12-hex>] [--time <unix-seconds>] [--page <title>]
-              [--allow-removals] [--accept-version <v>]
+              [--allow-removals] [--accept-version <v>] [--relayout <page>]...
         Compile IR against a base config, updating the lockfile. Inside
         a lox.toml project (see below) every path flag is optional and
         flags override the file; otherwise --base, --module, --lock,
@@ -57,6 +57,11 @@ USAGE:
         A base written by a different Loxone release than the lock's
         ConfigVersion pin is refused; after qualifying the release
         (one oracle open+save run), --accept-version <v> re-pins it.
+        Placement (D42): a new block goes where its wires want it on its
+        page; a placed block keeps its position, and a move made in
+        Loxone Config is taken over into the lockfile. --relayout <page>
+        (repeatable) places that page's managed blocks afresh — except
+        those wired to refs another writer owns, which stay with them.
 
   lxir test [<project-dir>] [--filter <substr>] [--lox <path>] [--show-spec]
             [--base <cfg.Loxone>] [--module <m.lxir | module-dir>]
@@ -159,6 +164,11 @@ USAGE:
 
   lxir roundtrip <cfg.Loxone>
         Verify the file re-serializes byte-identically (exit 1 if not).
+  lxir render <cfg.Loxone> --page <title> [--lock <lock.json>] [--out <page.svg>]
+        Layout metrics of one page — overlaps, backward and long wires,
+        crossings, wire length — and, with --out, the page drawn as SVG
+        (wires orthogonal, off-page connections as labels; with --lock,
+        the lockfile's managed blocks in the compiler's color). Read-only.
 
 PROJECT FILE (lox.toml):
         A directory with a lox.toml is a project — one deployment
@@ -224,6 +234,7 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["repair", rest @ ..] => cmd_repair(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
+        ["render", rest @ ..] => cmd_render(rest),
         [cmd, ..] => {
             eprintln!(
                 "unknown or malformed command `{cmd}` — run `{} help`",
@@ -518,6 +529,7 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
     let mut page = None;
     let mut allow_removals = false;
     let mut accept_version = None;
+    let mut relayout = Vec::new();
 
     let mut it = args.iter();
     while let Some(&flag) = it.next() {
@@ -536,6 +548,7 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
             "--page" => page = Some(value()?.to_string()),
             "--allow-removals" => allow_removals = true,
             "--accept-version" => accept_version = Some(value()?.to_string()),
+            "--relayout" => relayout.push(value()?.to_string()),
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
@@ -601,6 +614,7 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         }),
         page_title: page,
         allow_removals,
+        relayout,
     };
     let compiled = compile(&base_doc, &m, &mut lock, &opts)?;
     std::fs::write(&out, compiled.to_bytes())?;
@@ -690,6 +704,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
     let opts = CompileOptions {
         machine: parse_serial(&serial)?,
         accept_version: None,
+        relayout: Vec::new(),
         mint_time_unix: 0,
         page_title: page.or_else(|| project.as_ref().and_then(|p| p.page.clone())),
         allow_removals: false,
@@ -860,6 +875,7 @@ fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {
     let opts = CompileOptions {
         machine: parse_serial(&serial)?,
         accept_version: None,
+        relayout: Vec::new(),
         // Nothing may mint during a rename (the currency check below
         // guarantees it), so a fixed time keeps the comparison exact.
         mint_time_unix: 0,
@@ -979,6 +995,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             let opts = CompileOptions {
                 machine: parse_serial(&serial)?,
                 accept_version: None,
+                relayout: Vec::new(),
                 mint_time_unix: 0,
                 page_title: prj.page.clone(),
                 allow_removals: false,
@@ -1268,6 +1285,7 @@ fn cmd_adopt_one(
         page_title: None,
         allow_removals: false,
         accept_version: None,
+        relayout: Vec::new(),
     };
     let out = compile(&doc, &merged, &mut lock.clone(), &vopts)?;
     let d = lxir::diff::diff(&doc, &out);
@@ -1678,6 +1696,51 @@ fn cmd_repair(args: &[&str]) -> Result<ExitCode, AnyError> {
             left.len(),
             shown.join(", ")
         );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_render(args: &[&str]) -> Result<ExitCode, AnyError> {
+    let mut config = None;
+    let mut page = None;
+    let mut lock_path = None;
+    let mut out = None;
+    let mut it = args.iter();
+    while let Some(&flag) = it.next() {
+        let mut value = || -> Result<&str, AnyError> {
+            it.next()
+                .copied()
+                .ok_or_else(|| format!("{flag} needs a value").into())
+        };
+        match flag {
+            "--page" => page = Some(value()?.to_string()),
+            "--lock" => lock_path = Some(value()?.to_string()),
+            "--out" => out = Some(value()?.to_string()),
+            path if !path.starts_with('-') && config.is_none() => config = Some(path.to_string()),
+            other => return Err(format!("unknown flag `{other}` — run `lxir help`").into()),
+        }
+    }
+    let (Some(config), Some(page)) = (config, page) else {
+        return Err("render requires <cfg.Loxone> and --page <title>".into());
+    };
+    let doc = read_doc(&config)?;
+    let uuids = lxir::layout::PageGeometry::pages_titled(&doc, &page);
+    let [uuid] = uuids.as_slice() else {
+        return Err(format!("{} pages titled {page:?} in {config}", uuids.len()).into());
+    };
+    let geo = lxir::layout::PageGeometry::of(&doc, uuid).expect("page found by title");
+    let managed: std::collections::BTreeSet<String> = match &lock_path {
+        Some(p) => Lockfile::load(Path::new(p))?
+            .objects
+            .values()
+            .map(|o| o.uuid.clone())
+            .collect(),
+        None => Default::default(),
+    };
+    print!("{}", lxir::render::metrics(&geo));
+    if let Some(out) = out {
+        std::fs::write(&out, lxir::render::svg(&geo, &managed))?;
+        println!("wrote {out}");
     }
     Ok(ExitCode::SUCCESS)
 }

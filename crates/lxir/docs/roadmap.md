@@ -433,6 +433,20 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
         compile path (reference externs kept as documentation are a
         legitimate pattern). First run on the house config surfaced one
         real dead block and three suspicious app-visible tasters.
+- **Layout**
+  - [x] Placement in the GUI's geometry, 2026-10-29 (D42). New blocks
+        go beside what they wire to, per page, as left-to-right layered
+        clusters, and minted ref tags go beside their port. A drag in
+        Loxone Config is taken over into the lock. `--relayout <page>`
+        places a page afresh, except blocks wired to refs drawn in the
+        GUI. `lxir render` draws a page as SVG with layout metrics. On
+        a kitchen page of the house, backward wires went from 15 to 5.
+  - [ ] Oracle check: a relayouted page survives a Loxone Config save
+        unchanged (footprints are from corpus statistics; the snap on
+        save is observed, but no relayouted page has been through the
+        oracle yet).
+  - [ ] Geometry claims: let the source move ref tags and extern blocks
+        that the GUI owns. Today a relayout moves only managed blocks.
 - **Editor**
   - [x] VS Code: syntax highlighting + snippets (`editor/vscode/`).
   - [ ] LSP server (`lxir lsp`): diagnostics from `Module::parse`/`validate`

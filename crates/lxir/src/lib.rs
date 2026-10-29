@@ -16,6 +16,9 @@
 //!   (config → IR view), compile (IR + lockfile → config).
 //! - [`diff`] — semantic diff between two configs (objects, params, wires),
 //!   with locale-rename noise classification.
+//! - [`layout`] — page geometry: footprints, port rows, wires, and the
+//!   placement of blocks that have no position yet; [`render`] draws a
+//!   page as SVG with layout metrics.
 //! - [`project`] — `lox.toml` project files: one directory, one deployment
 //!   target, zero flags.
 //!
@@ -35,9 +38,11 @@ pub mod diff;
 pub mod doc;
 pub mod error;
 pub mod ir;
+pub mod layout;
 pub mod lock;
 pub mod observed_defaults;
 pub mod project;
+pub mod render;
 pub mod uuid;
 pub mod xml;
 

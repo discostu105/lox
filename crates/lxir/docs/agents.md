@@ -63,7 +63,17 @@ lxir diff current.Loxone out.Loxone
 
 # 5. Sanity: the output must round-trip.
 lxir roundtrip out.Loxone
+
+# 6. Look at a page you changed: metrics, plus an SVG with the managed
+#    blocks in blue and backward wires in red.
+lxir render out.Loxone --page "Beschattung" \
+            --lock modules/beschattung.lock.json --out page.svg
 ```
+
+Compile places new blocks beside what they wire to, and keeps a block
+where Loxone Config last dragged it. `--relayout "<page>"` places a
+page's managed blocks afresh. Blocks wired to a ref tag drawn in the GUI
+stay where they are (D42).
 
 Present step 4's output when proposing a change: it shows added blocks,
 wires, and parameter changes in reviewable form, and flags locale-rename

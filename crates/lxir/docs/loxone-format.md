@@ -70,9 +70,18 @@ inline (`<Key>2B35</Key>`).
   objects (Modes, weather fields, caption folders) in one observed save.
   Never use titles as identity.
 - `IName` — internal name for I/O objects (`VI1`, `AI3`); locale-stable.
-- `Px/Py/Px2/Py2` — drawing rectangle. Grid unit 96; logic blocks are 1344
-  wide and `504 + 192·(ports−2)` tall (Or with 3 ports: 696; Not with 2:
-  504).
+- `Px/Py/Px2/Py2` — drawing rectangle. Grid unit 96, port rows 192
+  apart. Small logic blocks (gates, Monoflop, …) are 1344 wide
+  and `312 + 192·rows` tall: Not 504, And/Or with two inputs 696. Their
+  first port row is 288 below the top. Function blocks (PushButton,
+  LightController2, AutoJalousie, …) are 2688 wide and `504 + 192·rows`
+  tall, with the first row at 480: PushButton 1272 (4 rows), LC2 1656
+  (6). `rows` counts the rows the GUI shows, the larger of the two
+  sides. Some types show at least a set number of rows; on others a
+  param appears only once it is wired (D42 has the rules). Ref tags
+  (`InputRef`/`OutputRef`) are 2112 × 192 and sit 960 off the block
+  edge, level with the port. `Memory` draws as the same 2112 × 192 tag. The GUI snaps `Py` to the grid on save and
+  recomputes `Px2`/`Py2` from the type.
 - `Cl` — RGB display color (logic green: `141,255,112`).
 - `Nio` — connector count. Matches the number of `<Co>` children: Loxone
   emits **all** connectors, including unwired outputs and inputs without

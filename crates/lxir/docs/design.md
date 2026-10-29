@@ -55,7 +55,9 @@ edit, and records each in the lockfile:
    claim's refs, D43) are recorded in `lock.attr_claims` and restored
    when the claim disappears (D39).
 
-Everything else is somebody else's, and passes through unchanged.
+Everything else is somebody else's, and passes through unchanged. One
+piece of a managed block is shared: its position on the page. The GUI may
+drag it, and compile takes the drag over (D42).
 
 ## The compile strategy: tear down, rebuild
 
@@ -70,7 +72,7 @@ Each compile:
    the state owned by the other two writers.
 4. **Rebuilds** from source: plans port lists, mints missing UUIDs, emits
    managed `<C>` elements, applies wires and sets, records everything in the
-   lock.
+   lock, and places the blocks that have no position yet (D42).
 5. Writes counters (never decreasing) and target metadata.
 
 This makes compilation *convergent*: compiling the compiler's own output
@@ -1085,6 +1087,112 @@ Anything unverified is an error, not a heuristic:
   without a command; no corpus evidence), and checking abbreviations
   beyond `As`/`Lico` (the house also has `TpfController` blocks on
   Flex API connectors, whose commands lxir writes unchecked).
+- **D42 — Placement: the GUI's geometry, shared with the GUI**
+  (2026-10-29). A block without a position went into one column at
+  x 7392, below the lowest managed block of the whole lock, on every
+  page. Compile wrote positions from the lock only, so the next compile
+  reverted a GUI drag. On a kitchen page of the house config the 11
+  minted objects sat in one column at y 18552–29040, below everything
+  else, and 15 of the page's 76 wires ran right to left. On
+  "Automatik-Regeln" the content ends near y 6000 and two managed
+  blocks sat at y 15192. Decision:
+  - **Positions are shared state.** Teardown harvests each managed
+    block's rectangle from the base, like other GUI residue (D19),
+    together with the page it is drawn on. When lock and base disagree,
+    the base wins: a drag in the GUI goes into the lock. Positions stay
+    outside the diff projection and the fingerprint (D21), so a drag is
+    not drift. Two limits:
+    - Only a move of a grid unit (96) or more is a drag. The GUI
+      recomputes `Px2`/`Py2` on every save; a block on the same spot
+      takes the GUI's rectangle, so a save moves nothing.
+    - A rectangle on another page than the module's (a GUI cut and
+      paste) is ignored: the block is rebuilt on its own page, where it
+      was.
+  - **The GUI's geometry** (`src/layout.rs`, from corpus statistics
+    and GUI refs placed next to block ports). Grid 96, port row 192.
+    Small blocks are 1344 wide and 312 + 192·rows tall, with the first
+    port row at 288. Function blocks are 2688 wide and 504 + 192·rows
+    tall, first row at 480. Ref tags are 2112 × 192 and sit 960 off the
+    block edge. Rows are what the GUI shows:
+    - Types that show at least a set number of rows, from the corpus
+      mode: LC2 6; AutoJalousie, CentralShade, CentralLight and Code16
+      4; DayTimer 3; PButtonT and PulseAt 2. Wired connectors beyond
+      those add rows.
+    - Other built-ins show their inputs and outputs, and show params
+      and `Remanence` only when they are wired.
+    - Unknown types show only wired ports. Keys starting with `out` go
+      on the right: the API links of `OutputAPI` are stored on the
+      output, so a wired connector there is not an input.
+
+    `Memory` draws as a 2112 × 192 tag but is a block and sits in its
+    chain. Objects of unknown type keep the size they are drawn with.
+
+    The old formula `504 + 192·(ports−2)` was wrong for function blocks:
+    a minted PushButton came out 1344 × 1848, where the GUI draws
+    2688 × 1272. The GUI snaps `Py` to the grid on save and recomputes
+    `Px2`/`Py2`. Compile writes grid positions with the GUI's
+    footprint, so a save moves nothing.
+  - **Placement runs after wiring**, per page, on the page as it then
+    stands. Free blocks joined by wires form a cluster, laid out as a
+    layered graph:
+    - feedback is broken in source order by a depth-first walk;
+    - columns come from the longest path, and order within a column
+      from barycenter sweeps;
+    - each block sits level with the ports that feed it;
+    - columns are spaced for the labels and tags beside them.
+
+    The cluster goes to the free spot, cleared by a margin, that keeps
+    its wires to fixed objects shortest and running left to right. A
+    cluster without such a wire goes below the page's content. A minted
+    ref tag goes beside the port it serves, 960 off and stacked by row,
+    as the GUI places them. Integer arithmetic and sorted candidates
+    make placement deterministic.
+  - **`--relayout <page>`** places the page's managed blocks afresh, as
+    if new. A block stays where it is if it is wired to a ref tag the
+    compile does not own (a GUI-drawn ref) and drawn beside it, level
+    and at most two gaps off: someone arranged those two together in
+    the GUI. A wire routed through a GUI ref elsewhere on the page
+    (D34) pins nothing. A cluster's old position (that of its first
+    block) is worth one row in the cost, so a spot about as good keeps
+    it. A title that names no page is an error.
+  - **A stale base must not revert a placement.** After a relayout,
+    the lock holds the new position, and the base keeps the old one
+    until it is uploaded and downloaded again. Harvest would read the
+    old position as a GUI drag. So the lock records it as
+    `superseded_layout`:
+    - a base position on the same spot is ignored;
+    - any other base position is taken over (the new one once it
+      arrives, or a drag) and clears the field;
+    - every placement writes it anew: the base position it replaced,
+      or nothing.
+
+    This is the same lifecycle as D31's tombstones. The field is new in
+    lockfile v4, so an older binary refuses the lock instead of dropping
+    it. A block that changes pages is placed afresh; its old page's
+    position is not on the new page, so nothing is superseded.
+  - **`lxir render`** draws one page as SVG: managed objects blue, GUI
+    objects grey, wires orthogonal with backward ones red, labels for
+    other pages purple. It prints the metrics that placement is judged
+    by: overlaps, backward wires (listed), long wires (over 8000), wire
+    crossings and total wire length. This shows a layout without
+    opening Loxone Config.
+  - **Results on the house.** Without `--relayout`, compiling the house
+    gives the same bytes and the same lock as before. With
+    `--relayout`:
+    - The kitchen page: backward wires 15 → 5, long wires 11 → 4,
+      crossings 34 → 18, total wire length 333k → 210k. Four of the
+      remaining backward wires are real feedback, from a scene block
+      back into the two light controllers it follows; the fifth runs
+      between two GUI objects.
+    - "Automatik-Regeln": the page's extent shrinks from y 768–16584 to
+      768–7416.
+
+  Not covered:
+  - Moving objects the compile does not own (GUI refs, extern blocks).
+  - Wire routing: the GUI routes wires itself.
+  - Negative coordinates: never observed, so x and y stay ≥ 0, and a
+    chain that feeds a block at the page's left edge runs backward.
+  - Lifting positions into source: they live in the lock.
 - **D43 — a title claim carries the refs that copy the title**
   (2026-10-29). Every `InputRef`/`OutputRef` holds its own `Title=`,
   and Loxone Config re-derives it from the mirrored object on every

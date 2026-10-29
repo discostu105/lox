@@ -39,6 +39,7 @@ fn opts() -> CompileOptions {
         page_title: None,
         allow_removals: false,
         accept_version: None,
+        relayout: Vec::new(),
     }
 }
 

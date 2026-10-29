@@ -552,6 +552,7 @@ mod tests {
                     block_type: "And".into(),
                     ports: BTreeMap::new(),
                     layout: None,
+                    superseded_layout: None,
                     page_uuid: None,
                     expr_owned: false,
                 },

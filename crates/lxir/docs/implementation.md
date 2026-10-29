@@ -22,6 +22,8 @@ observe output), `sha2` (slug entities, config hashes), `thiserror`.
 | `src/ir/decompile.rs` | config → IR view (`decompile` with `page` statement sections (D28), `decompile_pages` per page), `slugify`, `DecompileReport`; the shared `Lift` | full view by default (D17); `ManagedOnly` lifts only managed-touching wires (D7) |
 | `src/ir/adopt.rs` | `adopt`: managed-only module + lockfile pinning existing identity (D18); per-block rebuild verification (`AdoptReport::refused`) | adopt → compile is a semantic no-op; skipped blocks stay untouched |
 | `src/diff.rs` | UUID-keyed semantic diff, `locale_suspect` heuristic; compares attribute parameters (`Formula=`) and canonicalized `APC=` rule payloads (D37) | `diff(a, a).is_empty()` |
+| `src/layout.rs` | page geometry as the GUI draws it (`PageGeometry`: footprints, visible port rows, wires, off-page labels) and `place` (D42: clusters as layered graphs, ref tags beside their port) | deterministic; moves only the objects it is handed |
+| `src/render.rs` | `lxir render`: one page as SVG, `PageMetrics` (overlaps, backward and long wires, crossings, wire length) | read-only |
 | `src/autopilot.rs` | Automatic Designer `APC=` payload: parse/canonicalize, view summary, field-path change list (D37) | read-only; untyped JSON so unknown fields still diff |
 | `src/project.rs` | `Project`: `lox.toml` load/parse (strict flat TOML subset), path resolution against the file's directory | refuses everything outside the subset with pointed errors (D25) |
 | `src/bin/lxir.rs` | CLI; thin wrappers over the public API only | no semantics of its own |

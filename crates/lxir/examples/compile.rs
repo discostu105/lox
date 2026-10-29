@@ -49,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         page_title: Some("Beschattung".into()),
         allow_removals: false,
         accept_version: None,
+        relayout: Vec::new(),
     };
     let out = compile(&base, &module, &mut lock, &opts)?;
 

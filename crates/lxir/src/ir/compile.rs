@@ -37,6 +37,7 @@ use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports
 use crate::error::{Error, Result};
 use crate::ir::ast::{Attr, Item, MatchSpec, Module, Value};
 use crate::ir::validate::{api_mirror_entry, is_ref_type, suggest, validate_ports};
+use crate::layout::{PageGeometry, beside};
 use crate::lock::{
     AttrClaim, Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex,
 };
@@ -71,6 +72,11 @@ pub struct CompileOptions {
     /// Qualify the release first — one oracle open+save run
     /// (docs/oracle-wine.md) — then accept.
     pub accept_version: Option<String>,
+    /// Page titles whose managed blocks are placed afresh (D42) — the one
+    /// way the compiler moves a block it has placed before. A block wired
+    /// to a ref another writer owns stays where it is: the ref was drawn
+    /// for that spot, and moving the block alone would tear them apart.
+    pub relayout: Vec<String>,
 }
 
 /// GUI-owned residue of an existing managed block (D19), harvested at
@@ -96,10 +102,37 @@ struct Residue {
     /// like the element residue. A wire whose source changed no longer
     /// matches its key and is emitted plain, which the GUI accepts.
     wire_flags: BTreeMap<(String, String), String>,
+    /// Where the block is drawn in the base (D42): a position Loxone Config
+    /// moved it to is taken over instead of reverted.
+    layout: Option<Layout>,
+    /// The page the base draws the block on.
+    page: Option<String>,
+}
+
+impl Residue {
+    /// The base's position of the block, if the base draws it on `page`:
+    /// a position on another page says nothing about this one.
+    fn layout_on(&self, page: &str) -> Option<Layout> {
+        self.layout.filter(|_| self.page.as_deref() == Some(page))
+    }
+}
+
+/// The `<C Type="Page">` the object at `path` sits under.
+fn page_of(doc: &LoxoneDoc, path: &[usize]) -> Option<String> {
+    (1..path.len()).rev().find_map(|n| {
+        let el = doc.element_at(&path[..n])?;
+        if el.name == "C" && el.attr("Type") == Some("Page") {
+            el.attr("U").map(str::to_string)
+        } else {
+            None
+        }
+    })
 }
 
 fn harvest_residue(el: &Element) -> Residue {
     Residue {
+        layout: Layout::of_element(el),
+        page: None,
         attrs: el
             .attrs
             .iter()
@@ -136,18 +169,6 @@ fn harvest_residue(el: &Element) -> Residue {
             .collect(),
     }
 }
-
-/// Managed-block geometry, matching what Loxone Config draws:
-/// blocks are 1344 wide, 504 tall plus 192 per port beyond two,
-/// stacked with a 192 gap on a fixed column.
-const BLOCK_X: i64 = 7392;
-const BLOCK_W: i64 = 1344;
-const BLOCK_H_BASE: i64 = 504;
-const PORT_H: i64 = 192;
-const GAP: i64 = 192;
-/// `InputRef`/`OutputRef` tag width — the GUI redraws refs 2112 wide and
-/// one port-row tall (oracle session 11).
-const REF_W: i64 = 2112;
 
 pub fn compile(
     base: &LoxoneDoc,
@@ -284,9 +305,18 @@ pub fn compile(
     //     Each removed element hands back its GUI-owned residue (D19) so
     //     the rebuild carries it forward verbatim.
     let mut residue: BTreeMap<String, Residue> = BTreeMap::new();
+    let base_page: BTreeMap<String, String> = {
+        let idx = doc.index();
+        lock.objects
+            .values()
+            .filter_map(|o| Some((o.uuid.clone(), page_of(&doc, idx.by_uuid.get(&o.uuid)?)?)))
+            .collect()
+    };
     for obj in lock.objects.values() {
         if let Some(el) = doc.remove_by_uuid(&obj.uuid) {
-            residue.insert(obj.uuid.clone(), harvest_residue(&el));
+            let mut r = harvest_residue(&el);
+            r.page = base_page.get(&obj.uuid).cloned();
+            residue.insert(obj.uuid.clone(), r);
         }
     }
     // Tombstone sweep (D31): a pending removal whose object still exists
@@ -435,7 +465,16 @@ pub fn compile(
     }
     let mint_base = minter.counter();
     let mut managed: BTreeMap<String, PlannedBlock> = BTreeMap::new();
-    let mut py_cursor = next_free_py(lock);
+    // Pages to lay out afresh (D42), by UUID.
+    let mut relayout_pages: BTreeSet<&str> = BTreeSet::new();
+    for title in &opts.relayout {
+        let uuids = pages_by_title.get(title.as_str()).ok_or_else(|| {
+            Error::Compile(format!(
+                "relayout: the base config has no <C Type=\"Page\"> titled `{title}`"
+            ))
+        })?;
+        relayout_pages.extend(uuids.iter().map(String::as_str));
+    }
     for block in module.blocks() {
         // Type, port names, and directions were checked by validate_ports.
         let specs = builtin(&block.block_type).expect("validate_ports admitted the type");
@@ -453,6 +492,7 @@ pub fn compile(
                 block_type: block.block_type.clone(),
                 ports: BTreeMap::new(),
                 layout: None,
+                superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
             });
@@ -479,6 +519,7 @@ pub fn compile(
             entry.uuid = minter.mint_object().to_string();
             lock.counters.next_obj += 1;
         }
+        let pinned_before = entry.page_uuid.clone();
         let page_uuid = match declared_page.get(block.slug.as_str()) {
             // Governed by a `page` statement (D28): keep a pin that still
             // matches a page with the declared title, otherwise (re)pin to
@@ -517,26 +558,26 @@ pub fn compile(
                 }
             },
         };
-        // Refs draw as a flat tag, not a block — the GUI's own footprint
-        // (oracle session 11: a save corrects anything else to this).
-        let (width, height) = if is_ref_type(&block.block_type) {
-            (REF_W, PORT_H)
-        } else {
-            (
-                BLOCK_W,
-                BLOCK_H_BASE + PORT_H * (keys.len() as i64 - 2).max(0),
-            )
-        };
-        let layout = *entry.layout.get_or_insert_with(|| {
-            let l = Layout {
-                px: BLOCK_X,
-                py: py_cursor,
-                px2: BLOCK_X + width,
-                py2: py_cursor + height,
-            };
-            py_cursor = l.py2 + GAP;
-            l
-        });
+        // D42: the position is shared with Loxone Config. A block that
+        // changed pages is placed afresh. Where the base draws the block on
+        // its page is the GUI's: its extents and grid snap always, its
+        // position after a drag — unless the base still shows the position
+        // a placement replaced (the base predates that placement). New
+        // blocks are placed after wiring.
+        if pinned_before.is_some_and(|p| p != page_uuid) {
+            entry.layout = None;
+        }
+        let base_layout = residue
+            .get(&entry.uuid)
+            .and_then(|r| r.layout_on(&page_uuid));
+        if let (Some(l), Some(b)) = (entry.layout, base_layout) {
+            let stale =
+                !l.same_spot(&b) && entry.superseded_layout.is_some_and(|s| s.same_spot(&b));
+            if !stale {
+                entry.layout = Some(b);
+                entry.superseded_layout = None;
+            }
+        }
         managed.insert(
             block.slug.clone(),
             PlannedBlock {
@@ -544,7 +585,8 @@ pub fn compile(
                 block_type: block.block_type.clone(),
                 keys,
                 ports: entry.ports.clone(),
-                layout,
+                layout: entry.layout,
+                relayout: relayout_pages.contains(page_uuid.as_str()),
                 page_uuid,
             },
         );
@@ -682,10 +724,12 @@ pub fn compile(
             Some(m) => el.set_attr("Title", &m.title),
             None => el.set_attr("Title", block.title.as_deref().unwrap_or(&block.slug)),
         }
-        el.set_attr("Px", &plan.layout.px.to_string());
-        el.set_attr("Py", &plan.layout.py.to_string());
-        el.set_attr("Px2", &plan.layout.px2.to_string());
-        el.set_attr("Py2", &plan.layout.py2.to_string());
+        // Blocks without a position get theirs once the wires are drawn.
+        let at = plan.layout.unwrap_or(Layout::at(0, 0, 0, 0));
+        el.set_attr("Px", &at.px.to_string());
+        el.set_attr("Py", &at.py.to_string());
+        el.set_attr("Px2", &at.px2.to_string());
+        el.set_attr("Py2", &at.py2.to_string());
         // D19: a block that existed in the base re-emits its GUI-owned
         // display state verbatim — including *absence* (some types lose
         // `WF` on a GUI save). Only a fresh mint writes the defaults.
@@ -1194,6 +1238,77 @@ pub fn compile(
         .collect();
     super::tiles::apply(&mut doc, module, &uuid_of)?;
 
+    // --- Placement (D42), once every wire is drawn: blocks without a
+    //     position, and those on pages laid out afresh, go where their
+    //     wires want them on the page as it now stands.
+    let mut to_place: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for block in module.blocks() {
+        let plan = &managed[&block.slug];
+        if plan.layout.is_none() || plan.relayout {
+            to_place
+                .entry(plan.page_uuid.as_str())
+                .or_default()
+                .push(block.slug.as_str());
+        }
+    }
+    for (page_uuid, slugs) in &to_place {
+        let geo = PageGeometry::of(&doc, page_uuid).expect("blocks were appended to this page");
+        let foreign_ref = |j: usize| {
+            is_ref_type(&geo.objects[j].block_type)
+                && !managed_uuids.contains(geo.objects[j].uuid.as_str())
+        };
+        let mut free = Vec::new();
+        let mut prev = BTreeMap::new();
+        let mut slug_of = BTreeMap::new();
+        for slug in slugs {
+            let plan = &managed[*slug];
+            let i = geo
+                .index_of(&plan.uuid)
+                .expect("the block was appended to its page");
+            if let Some(l) = plan.layout {
+                // Wired to a ref the compile does not own and drawn beside
+                // it: arranged with that ref in the GUI, so it stays. A
+                // wire routed through a ref elsewhere (D34) pins nothing.
+                let pinned = geo.wires.iter().any(|w| {
+                    let other = match (w.from.0 == i, w.to.0 == i) {
+                        (true, _) => w.to.0,
+                        (_, true) => w.from.0,
+                        _ => return false,
+                    };
+                    foreign_ref(other) && beside(&geo.objects[i].rect, &geo.objects[other].rect)
+                });
+                if pinned {
+                    continue;
+                }
+                prev.insert(i, l);
+            }
+            free.push(i);
+            slug_of.insert(i, *slug);
+        }
+        let placed = crate::layout::place(&geo, &free, &prev);
+        let index = doc.index();
+        for (i, at) in placed {
+            let slug = slug_of[&i];
+            let uuid = &managed[slug].uuid;
+            // Placed where the base already draws it: the GUI's rectangle.
+            let base = residue.get(uuid).and_then(|r| r.layout_on(page_uuid));
+            let at = match base {
+                Some(b) if b.same_spot(&at) => b,
+                _ => at,
+            };
+            let el = doc
+                .element_at_mut(&index.by_uuid[uuid])
+                .expect("indexed path");
+            el.set_attr("Px", &at.px.to_string());
+            el.set_attr("Py", &at.py.to_string());
+            el.set_attr("Px2", &at.px2.to_string());
+            el.set_attr("Py2", &at.py2.to_string());
+            let entry = lock.objects.get_mut(slug).expect("planned from the lock");
+            entry.layout = Some(at);
+            entry.superseded_layout = base.filter(|b| !b.same_spot(&at));
+        }
+    }
+
     // --- Counters and target metadata.
     doc.set_counters(Counters {
         next_obj: lock.counters.next_obj,
@@ -1234,7 +1349,10 @@ struct PlannedBlock {
     /// All port keys in connector-index order.
     keys: Vec<String>,
     ports: BTreeMap<String, String>,
-    layout: Layout,
+    /// `None` until placement (D42) gives the block a position.
+    layout: Option<Layout>,
+    /// The block's page is laid out afresh this compile.
+    relayout: bool,
     /// UUID of the page the block is (re)built on.
     page_uuid: String,
 }
@@ -1877,14 +1995,4 @@ fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<S
                 .join(", ")
         ))),
     }
-}
-
-/// First stacking position below every layout already in the lock, so new
-/// blocks never land on top of existing ones.
-fn next_free_py(lock: &Lockfile) -> i64 {
-    lock.objects
-        .values()
-        .filter_map(|o| o.layout.map(|l| l.py2 + GAP))
-        .max()
-        .unwrap_or(GAP)
 }
