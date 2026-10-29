@@ -11,7 +11,7 @@
 //! Placement is deterministic (integer arithmetic, ordered collections,
 //! ties broken by source order) and incremental: it moves only the
 //! objects it is handed, everything else on the page is an obstacle.
-//! It keeps to the paper sheet the GUI draws the page on (D49).
+//! It keeps to the paper sheet the GUI draws the page on (D50).
 
 use crate::connectors::{PortDir, builtin};
 use crate::doc::{LoxoneDoc, ports};
@@ -37,7 +37,7 @@ const STACK_GAP: i64 = 2 * ROW;
 /// Placement cost of one wire running right to left — it loops around.
 const BACKWARD_COST: i64 = 4 * GAP;
 /// A cluster's (column gap, stacking gap), tried in order until it fits
-/// on the sheet: the GUI's own spacing first, then tighter (D49).
+/// on the sheet: the GUI's own spacing first, then tighter (D50).
 const SPACINGS: [(i64, i64); 3] = [(GAP, STACK_GAP), (6 * GRID, STACK_GAP), (4 * GRID, ROW)];
 /// The drawable part of an A3 landscape sheet (420 × 297 mm in twips,
 /// on the grid), above the title block the GUI prints along its bottom.
@@ -139,7 +139,7 @@ fn on_sheet(r: &Layout, sheet: &Layout) -> bool {
 }
 
 /// Of the objects with these UUIDs, those drawn past the edge of the
-/// sheet (D49), labels included, by the title of their page — what
+/// sheet (D50), labels included, by the title of their page — what
 /// [`PageGeometry::off_sheet`] says of each page that holds one. Empty
 /// when the sheet is unknown.
 pub fn off_sheet(doc: &LoxoneDoc, uuids: &BTreeSet<&str>) -> BTreeMap<String, Vec<String>> {
@@ -572,7 +572,7 @@ impl PageGeometry {
 /// and running left to right. Free ref tags go beside the port they
 /// serve, stacked like the GUI stacks them.
 ///
-/// Everything stays on the page's sheet (D49): a cluster with no room
+/// Everything stays on the page's sheet (D50): a cluster with no room
 /// there at the GUI's spacing is packed tighter, and only one that fits
 /// nowhere even then goes past the edge, at the GUI's spacing.
 pub fn place(

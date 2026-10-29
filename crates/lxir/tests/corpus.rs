@@ -13,9 +13,12 @@
 //! LXIR_CORPUS=corpus/web cargo test --release --test corpus
 //! ```
 
+use lxir::Lockfile;
 use lxir::LoxoneDoc;
 use lxir::connectors::{BUILTIN_TYPES, PortDir, builtin, merge, observe};
-use lxir::ir::{CompileOptions, adopt, compile};
+use lxir::ir::{
+    AccessDecl, CompileOptions, DecompileOptions, Item, Module, adopt, compile, decompile,
+};
 use lxir::uuid::parse_serial;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -105,6 +108,70 @@ fn corpus_adoptions_rebuild_as_semantic_noops() {
     for (n, cause) in causes {
         eprintln!("  {n:4} × {cause}");
     }
+}
+
+/// Access declarations (D49) are byte fixpoints: what decompile lifts from
+/// a config compiles back to exactly its bytes. Revoking every declared
+/// right and granting them again restores the same rights.
+#[test]
+fn corpus_access_declarations_are_byte_fixpoints() {
+    let Some(files) = corpus() else {
+        eprintln!("LXIR_CORPUS not set — skipping corpus access fixpoints");
+        return;
+    };
+    let (mut configs, mut decls) = (0usize, 0usize);
+    for path in &files {
+        let name = path.display();
+        let bytes = std::fs::read(path).unwrap();
+        let base = LoxoneDoc::parse(&bytes).unwrap();
+        // Some views do not validate (unrelated to access); those configs
+        // cannot show a declaration.
+        let Ok((view, _)) = decompile(&base, &DecompileOptions::default()) else {
+            continue;
+        };
+        let access: Vec<&AccessDecl> = view.access_decls().collect();
+        if access.is_empty() {
+            continue;
+        }
+        let externs: Vec<Item> = view
+            .externs()
+            .filter(|e| access.iter().any(|a| a.slug == e.slug))
+            .map(|e| Item::Extern(e.clone()))
+            .collect();
+        let module = |body: bool| Module {
+            items: externs
+                .iter()
+                .cloned()
+                .chain(access.iter().map(|a| {
+                    let mut a = (*a).clone();
+                    if !body {
+                        a.body.clear();
+                    }
+                    Item::Access(a)
+                }))
+                .collect(),
+        };
+        let compiled = |doc: &LoxoneDoc, body: bool| {
+            compile(doc, &module(body), &mut Lockfile::new(), &opts())
+                .unwrap_or_else(|e| panic!("{name}: compile failed: {e}"))
+        };
+        let out = compiled(&base, true);
+        assert!(
+            out.to_bytes() == bytes,
+            "{name}: the lifted access declarations do not reproduce the bytes"
+        );
+        let revoked = compiled(&base, false);
+        let d = lxir::diff::diff(&base, &revoked);
+        assert!(d.logic_is_empty() && !d.access.is_empty(), "{name}");
+        let granted = compiled(&revoked, true);
+        assert!(
+            lxir::diff::diff(&base, &granted).is_empty(),
+            "{name}: revoke and grant again is not a no-op"
+        );
+        configs += 1;
+        decls += access.len();
+    }
+    eprintln!("corpus: {decls} access declarations in {configs} configs are byte fixpoints");
 }
 
 #[test]

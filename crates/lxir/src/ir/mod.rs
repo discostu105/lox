@@ -30,6 +30,10 @@
 //! end
 //! <slug>.tiles = <name>                        (write the set onto an extern
 //!                                               TreeDevice)
+//! access  <slug>                               (D49: the access rights on an
+//!     user "<title>": "<schedule>"              extern NfcCodeTouch — every
+//!     group "<title>": "<schedule>"             right on it; titles name the
+//! end                                           base's users and schedules)
 //! ```
 //!
 //! In a block's argument list, the value decides the meaning: a literal or
@@ -41,6 +45,7 @@
 //! because display titles are locale-volatile (a config save can rename
 //! all built-ins to the writing system's language); `uuid:` pins exactly.
 
+mod access;
 mod adopt;
 mod ast;
 mod compile;
@@ -54,12 +59,15 @@ mod template;
 mod tiles;
 mod validate;
 
+pub use crate::access::PrincipalKind;
+pub use access::lint_access;
 pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adopt_pages};
 pub use ast::{
-    ArgItem, Attr, AttrDecl, Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr,
-    ExprWireDecl, ExternDecl, Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl,
-    PortRef, RemovedDecl, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem,
-    TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
+    ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl, Binding,
+    BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl, ExternDecl, Item,
+    LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef, RemovedDecl, SetDecl,
+    TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim,
+    TilesDecl, TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{

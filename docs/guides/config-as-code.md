@@ -62,6 +62,25 @@ jal_sued.TargetPos = 70                              # a parameter
 - `<-` draws a wire, `=` sets a parameter. Expressions (`and`, `>=`, `/ 1000`) compile to real blocks, units read as
   written (`Time: 30min`, `70%`), and `template … end` stamps out repeated rules.
 
+### Who may open a door
+
+Access rights on an NFC Code Touch can live in source too. An `access` declaration lists who may open it, each user
+or group by its title with an access schedule:
+
+```text
+extern haustuer = NfcCodeTouch(uuid: "…")
+
+access haustuer
+	user "alice": "Always"
+	group "Residents": "Workdays"
+end
+```
+
+The declaration owns that Code Touch's access: whoever it leaves out loses the right on the next push. Users, groups,
+schedules, NFC tags and codes are still created in Loxone Config or the app; a title the config doesn't have stops
+the compile. `lox ir adopt` and `lox ir decompile` write the declarations for the rights the config has, and
+`lox ir lint` names users whose tag or code opens no Code Touch.
+
 The full language: [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md).
 Worked examples: [crates/lxir/examples](https://github.com/discostu105/lox/tree/main/crates/lxir/examples).
 
@@ -154,10 +173,12 @@ Each step stops the push when it fails:
 4. Show the changes and check the users: users, groups, NFC tags and codes changed in the app after the program file
    was saved exist only on the Miniserver, and loading the upload would delete them. The push compares the live
    users with the program file and lists what differs (needs an admin connection).
-5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to exactly the compiled
+5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
    file. The app's catalogue in it stays as Loxone Config wrote it, so the push names the app controls it renames,
-   moves or deletes: the app may keep showing them as before until Loxone Config saves. Without `--force` the push
-   ends here.
+   moves or deletes: the app may keep showing them as before until Loxone Config saves. If your module grants or
+   revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided lxir
+   reproduces the live one exactly; otherwise the push warns that it stays stale. Without `--force` the push ends
+   here.
 6. Upload as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes). Users changed live
    stop the upload: load and save the program in Loxone Config first, or pass `--discard-custom-changes`.
 7. Download again: the Miniserver must run exactly the compiled file, or the push fails and the project stays as it

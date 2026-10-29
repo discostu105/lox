@@ -1,5 +1,6 @@
-//! Users, groups and access rights: the model (`lxir::access`) and the
-//! users/access section of the semantic diff.
+//! Users, groups and access rights: the model (`lxir::access`), the
+//! users/access section of the semantic diff, `permissions.bin`
+//! (`lxir::permissions`), and the IR's `access` declaration (D49).
 //!
 //! The fixture adds a synthetic *Users and Permissions* tree to
 //! examples/configs/pool.Loxone in memory, shaped like Loxone Config writes
@@ -473,4 +474,494 @@ fn fingerprints_ignore_credentials_membership_and_rights() {
     ] {
         assert_eq!(fingerprint(&da), fingerprint(&db));
     }
+}
+
+// ── permissions.bin ─────────────────────────────────────────────────────────
+
+const RIGHT_GROUP: &str = "50000010-0000-0100-ffff504f94112233";
+const TASKS: &str = "50000011-0000-0110-ffff504f94112233";
+
+/// The fixture with what `permissions.bin` needs besides users: a task
+/// list and a right group for the room "Garten".
+fn fixture_with_right_group() -> String {
+    let xml = edit(
+        &fixture(),
+        r#"Title="Garten"/>"#,
+        &format!(r#"Title="Garten" RGR="{RIGHT_GROUP}"/>"#),
+    );
+    let xml = edit(
+        &xml,
+        "\t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004",
+        &format!(
+            "\t\t\t\t<C Type=\"RightGroup\" V=\"175\" U=\"{RIGHT_GROUP}\" Title=\"Garten\" GT=\"1\" MG=\"\"/>\r\n\
+             \t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004"
+        ),
+    );
+    edit(
+        &xml,
+        "\t\t<C Type=\"Page\" V=\"175\" U=\"50000008",
+        &format!(
+            "\t\t<C Type=\"TaskCaption\" V=\"175\" U=\"{TASKS}\" Title=\"Tasks\"/>\r\n\
+             \t\t<C Type=\"Page\" V=\"175\" U=\"50000008"
+        ),
+    )
+}
+
+/// Global state `n` of the synthetic LoxAPP3.json.
+fn global(n: u32) -> String {
+    format!("60000000-0000-{n:04x}-ffff504f94112233")
+}
+
+/// A LoxAPP3.json for the fixture: the Code Touch in "Garten", the switch
+/// without room or category, one automatic rule. With a BOM, as Loxone
+/// writes it.
+fn loxapp3() -> String {
+    let keys = [
+        "operatingMode",
+        "sunrise",
+        "sunset",
+        "pastTasks",
+        "plannedTasks",
+        "notifications",
+        "modifications",
+        "favColorSequences",
+        "favColors",
+        "miniserverTime",
+        "liveSearch",
+        "userSettings",
+        "userSettingsTs",
+        "cloudservice",
+        "trustVersion",
+        "propsVersion",
+        "hasInternet",
+    ];
+    let globals: Vec<String> = keys
+        .iter()
+        .zip(1..)
+        .map(|(k, n)| format!(r#""{k}": "{}""#, global(n)))
+        .collect();
+    let (s1, s2, s3) = (global(0x101), global(0x102), global(0x103));
+    let (ap, ap2) = (global(0x201), global(0x202));
+    let controls = format!(
+        r#""{SWITCH}": {{"type": "Switch", "states": {{"active": "{s1}"}}}},
+           "U:{FRONT_DOOR}": {{"type": "NfcCodeTouch", "room": "x",
+               "states": {{"history": "{s2}", "codeDate": ["{s3}", "{s2}"]}}}}"#
+    );
+    let autopilot =
+        format!(r#""rule": {{"uuidAction": "{ap}", "states": {{"changed": "{ap2}"}}}}"#);
+    format!(
+        "\u{feff}{{\"lastModified\": \"2026-10-29 16:22:00\", \"globalStates\": {{{}}}, \
+         \"modes\": {{}}, \"controls\": {{{controls}}}, \"autopilot\": {{{autopilot}}}}}",
+        globals.join(", ")
+    )
+}
+
+#[test]
+fn permissions_bin_generated_from_program_and_loxapp3() {
+    use lxir::LoxUuid;
+    use lxir::permissions::{Group, encode, generate, parse as parse_bin};
+    let u = |s: &str| LoxUuid::parse(s).unwrap();
+    let g = |n: u32| u(&global(n));
+    let doc = parse(&fixture_with_right_group());
+
+    let groups = generate(&doc, &loxapp3()).unwrap();
+
+    let nobody = || vec![vec![]];
+    let group = |object, states, principals, fd| Group {
+        object,
+        states,
+        principals,
+        fd,
+    };
+    let expected = vec![
+        group(g(1), vec![], nobody(), true),
+        group(g(2), vec![], nobody(), true),
+        group(g(3), vec![], nobody(), true),
+        group(u(TASKS), vec![g(4), g(5)], nobody(), true),
+        group(g(7), (6..=16).map(g).collect(), nobody(), true),
+        group(g(17), vec![g(17)], nobody(), true),
+        // Users and groups with a right on the switch; no room, no category.
+        group(
+            u(SWITCH),
+            vec![g(0x101)],
+            vec![vec![u(ALICE), u(RESIDENTS)]],
+            true,
+        ),
+        // alice by her right, the room's right group; states deduplicated.
+        group(
+            u(FRONT_DOOR),
+            vec![g(0x102), g(0x103)],
+            vec![vec![u(ALICE), u(RIGHT_GROUP)]],
+            false,
+        ),
+        // Automatic rules: users with UsR bit 0x40 (alice: -1; bob: 129).
+        group(
+            g(0x201),
+            vec![g(0x201), g(0x202)],
+            vec![vec![u(ALICE)]],
+            false,
+        ),
+    ];
+    assert_eq!(groups, expected);
+    let bytes = encode(&groups);
+    assert_eq!(parse_bin(&bytes).unwrap(), expected);
+}
+
+#[test]
+fn permissions_assignments_follow_the_rights() {
+    use lxir::permissions::assignments;
+    let a = fixture_with_right_group();
+    // bob gets access to the Code Touch.
+    let b = edit(
+        &a,
+        "\t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\t\t\t\t</C>",
+        &format!(
+            "\t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\
+             \t\t\t\t\t<PH NUM=\"1\">\r\n\
+             \t\t\t\t\t\t<PRM REF=\"{FRONT_DOOR}\" TIM=\"{ALWAYS}\"/>\r\n\
+             \t\t\t\t\t</PH>\r\n\t\t\t\t</C>"
+        ),
+    );
+    let (before, after) = (assignments(&parse(&a)), assignments(&parse(&b)));
+    assert_eq!(
+        before[FRONT_DOOR],
+        [vec![ALICE.to_string(), RIGHT_GROUP.to_string()]]
+    );
+    assert_eq!(
+        after[FRONT_DOOR],
+        [vec![
+            ALICE.to_string(),
+            BOB.to_string(),
+            RIGHT_GROUP.to_string()
+        ]]
+    );
+    // A new schedule is no new assignment.
+    let c = edit(
+        &a,
+        &format!(r#"TIM="{ALWAYS}" ACT="3""#),
+        &format!(r#"TIM="{WORKDAYS}" ACT="3""#),
+    );
+    assert_eq!(assignments(&parse(&c)), before);
+}
+
+// ── access declarations (D49) ───────────────────────────────────────────────
+
+use lxir::Lockfile;
+use lxir::ir::{CompileOptions, LintKind, Module, compile, lint_access};
+use lxir::uuid::parse_serial;
+
+const DOOR: &str =
+    "extern front_door = NfcCodeTouch(uuid: \"50000009-0000-0090-ffff504f94112233\")\n";
+
+fn opts() -> CompileOptions {
+    CompileOptions {
+        machine: parse_serial("504F94112233").unwrap(),
+        mint_time_unix: 1_767_225_600,
+        page_title: Some("Pool".into()),
+        allow_removals: false,
+        accept_version: None,
+        relayout: Vec::new(),
+    }
+}
+
+/// `body` as the access declaration of the front door, compiled against
+/// `base`.
+fn compile_access(base: &str, body: &str) -> lxir::Result<String> {
+    let m = Module::parse(&format!("{DOOR}\naccess front_door\n{body}end\n"))?;
+    let out = compile(&parse(base), &m, &mut Lockfile::new(), &opts())?;
+    Ok(String::from_utf8(out.to_bytes()).unwrap())
+}
+
+/// The serialized `<C>` element with `uuid`, up to its closing tag (or the
+/// self-closing tag itself).
+fn element_of(xml: &str, uuid: &str) -> String {
+    let at = xml.find(&format!("U=\"{uuid}\"")).unwrap();
+    let open = xml[..at].rfind("<C ").unwrap();
+    let tag_end = at + xml[at..].find('>').unwrap();
+    if xml[..tag_end].ends_with('/') {
+        return xml[open..=tag_end].to_string();
+    }
+    // Nested `<C>` would need counting; users and groups hold none.
+    let close = tag_end + xml[tag_end..].find("</C>").unwrap();
+    xml[open..close + 4].to_string()
+}
+
+#[test]
+fn access_declarations_are_canonical() {
+    let src = format!(
+        "{DOOR}extern back_door = NfcCodeTouch(title: \"Back door\")\n\
+         \n\
+         access front_door # main entrance\n\
+         \t# residents first\n\
+         \tuser \"alice\": \"Always\"\n\
+         \tgroup \"Residents\": \"Workdays\" # weekdays only\n\
+         end # door\n\
+         \n\
+         access back_door\n\
+         end\n"
+    );
+    let m = Module::parse(&src).unwrap();
+    assert_eq!(m.to_text(), src);
+    let a = m.access_decls().next().unwrap();
+    let grants: Vec<String> = a.grants().map(|g| g.to_string()).collect();
+    assert_eq!(
+        grants,
+        [
+            r#"user "alice": "Always""#,
+            r#"group "Residents": "Workdays""#
+        ]
+    );
+    // `access` names a declaration only in front of a slug.
+    let m = Module::parse(
+        "extern access = Switch(title: \"Freigabe\")\nlatch = Switch(On: access.Q)\naccess.On = 1\n",
+    )
+    .unwrap();
+    assert_eq!(m.externs().next().unwrap().slug, "access");
+}
+
+#[test]
+fn access_declarations_are_checked() {
+    let err = |src: &str| Module::parse(src).unwrap_err().to_string();
+    assert!(
+        err(&format!("{DOOR}access front_door\n\tuser \"alice\"\nend\n"))
+            .contains("expected `user \"<title>\": \"<schedule>\"`")
+    );
+    assert!(err(&format!("{DOOR}access front_door\n")).contains("unclosed `access front_door`"));
+    assert!(err("access\n").contains("expected `access <slug>`"));
+    assert!(
+        err("template t(x: Switch)\naccess front_door\nend\nend\n")
+            .contains("not allowed inside a template body")
+    );
+    assert!(err("access front_door\nend\n").contains("undeclared slug `front_door`"));
+    assert!(
+        err("extern front_door = Switch(title: \"Freigabe\")\naccess front_door\nend\n")
+            .contains("declared as `Switch`")
+    );
+    assert!(
+        err(&format!(
+            "{DOOR}access front_door\nend\naccess front_door\nend\n"
+        ))
+        .contains("declared twice")
+    );
+    assert!(
+        err(&format!(
+            "{DOOR}access front_door\n\tuser \"alice\": \"Always\"\n\tuser \"alice\": \"Workdays\"\nend\n"
+        ))
+        .contains("user \"alice\" is listed twice")
+    );
+}
+
+/// A declaration that states what the config holds writes nothing.
+#[test]
+fn access_matching_the_base_reproduces_its_bytes() {
+    let base = fixture();
+    let out = compile_access(&base, "\tuser \"alice\": \"Always\"\n").unwrap();
+    assert!(out == base, "compiled bytes differ from the base");
+}
+
+#[test]
+fn access_grants_append_a_right_and_count_it() {
+    let base = fixture();
+    let out = compile_access(
+        &base,
+        "\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Workdays\"\n\tgroup \"Residents\": \"Always\"\n",
+    )
+    .unwrap();
+    // bob had no list: it follows his passwords.
+    assert_eq!(
+        element_of(&out, BOB),
+        format!(
+            "<C Type=\"User\" V=\"175\" U=\"{BOB}\" Title=\"bob\" UsR=\"129\" LastEdit=\"562400000\" \
+             NFCArr=\"\" NFCNArr=\"\" CodeArr=\"\" iBtnArr=\"\" EAIdArr=\"\">\r\n\
+             \t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\
+             \t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\
+             \t\t\t\t\t<PH NUM=\"1\">\r\n\
+             \t\t\t\t\t\t<PRM REF=\"{FRONT_DOOR}\" TIM=\"{WORKDAYS}\"/>\r\n\
+             \t\t\t\t\t</PH>\r\n\
+             \t\t\t\t</C>"
+        )
+    );
+    // Residents: appended behind the right it had, NUM counts both.
+    let residents = element_of(&out, RESIDENTS);
+    assert!(
+        residents.contains(&format!(
+            "<PH NUM=\"2\">\r\n\t\t\t\t\t\t<PRM REF=\"{SWITCH}\" ACT=\"3\"/>\r\n\
+             \t\t\t\t\t\t<PRM REF=\"{FRONT_DOOR}\" TIM=\"{ALWAYS}\"/>\r\n"
+        )),
+        "{residents}"
+    );
+    // Nothing else changed: not alice, not bob's LastEdit, not the diff's
+    // logic view.
+    assert_eq!(element_of(&out, ALICE), element_of(&base, ALICE));
+    let d = diff(&parse(&base), &parse(&out));
+    assert!(d.logic_is_empty());
+    let lines: Vec<String> = d.access.iter().map(|c| c.to_string()).collect();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+}
+
+#[test]
+fn access_reschedules_in_place_and_keeps_the_app_right() {
+    let base = fixture();
+    let out = compile_access(&base, "\tuser \"alice\": \"Workdays\"\n").unwrap();
+    assert_eq!(
+        out,
+        edit(
+            &base,
+            &format!(r#"TIM="{ALWAYS}" ACT="3""#),
+            &format!(r#"TIM="{WORKDAYS}" ACT="3""#)
+        )
+    );
+    // A right to operate the block in the app (ACT only) gains TIM between
+    // REF and ACT, the order Loxone Config writes.
+    let base = edit(
+        &base,
+        &format!(
+            "<PRM REF=\"{SWITCH}\" ACT=\"3\"/>\r\n\t\t\t\t\t</PH>\r\n\t\t\t\t</C>\r\n\t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004"
+        ),
+        &format!(
+            "<PRM REF=\"{FRONT_DOOR}\" ACT=\"3\"/>\r\n\t\t\t\t\t</PH>\r\n\t\t\t\t</C>\r\n\t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004"
+        ),
+    );
+    let out = compile_access(
+        &base,
+        "\tuser \"alice\": \"Always\"\n\tgroup \"Residents\": \"Workdays\"\n",
+    )
+    .unwrap();
+    assert_eq!(
+        out,
+        edit(
+            &base,
+            &format!(r#"<PRM REF="{FRONT_DOOR}" ACT="3"/>"#),
+            &format!(r#"<PRM REF="{FRONT_DOOR}" TIM="{WORKDAYS}" ACT="3"/>"#)
+        )
+    );
+}
+
+#[test]
+fn access_revokes_what_the_declaration_leaves_out() {
+    let base = fixture();
+    // alice keeps the right to operate the block in the app.
+    let out = compile_access(&base, "").unwrap();
+    assert_eq!(
+        out,
+        edit(
+            &base,
+            &format!(r#"<PRM REF="{FRONT_DOOR}" TIM="{ALWAYS}" ACT="3"/>"#),
+            &format!(r#"<PRM REF="{FRONT_DOOR}" ACT="3"/>"#)
+        )
+    );
+    // A right that was only access goes, NUM follows; an emptied list goes
+    // too, and a user left without children closes itself.
+    let granted = compile_access(
+        &base,
+        "\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Workdays\"\n\tgroup \"Residents\": \"Always\"\n",
+    )
+    .unwrap();
+    let revoked = compile_access(&granted, "\tuser \"alice\": \"Always\"\n").unwrap();
+    assert_eq!(revoked, base);
+    let no_passwords = edit(
+        &granted,
+        "\t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\t\t\t\t\t<HP H=\"\" Sc=\"-2\" S=\"\" Alg=\"1\"/>\r\n\t\t\t\t\t<PH NUM=\"1\">",
+        "\t\t\t\t\t<PH NUM=\"1\">",
+    );
+    let out = compile_access(&no_passwords, "\tuser \"alice\": \"Always\"\n").unwrap();
+    assert!(
+        element_of(&out, BOB).ends_with(r#"EAIdArr=""/>"#),
+        "{}",
+        element_of(&out, BOB)
+    );
+}
+
+#[test]
+fn access_titles_must_name_exactly_one_object() {
+    let base = fixture();
+    let err = |base: &str, body: &str| compile_access(base, body).unwrap_err().to_string();
+    let e = err(&base, "\tuser \"alise\": \"Always\"\n");
+    assert!(e.contains("no user titled \"alise\""), "{e}");
+    assert!(e.contains("alice"), "suggests the near miss: {e}");
+    let e = err(&base, "\tgroup \"alice\": \"Always\"\n");
+    assert!(e.contains("no group titled \"alice\""), "{e}");
+    let e = err(&base, "\tuser \"alice\": \"Weekends\"\n");
+    assert!(e.contains("no access schedule titled \"Weekends\""), "{e}");
+    let twice = edit(&base, r#"Title="bob""#, r#"Title="alice""#);
+    let e = err(&twice, "\tuser \"alice\": \"Always\"\n");
+    assert!(e.contains("2 users are titled \"alice\""), "{e}");
+    assert!(e.contains(ALICE) && e.contains(BOB), "{e}");
+    // Nothing is written when a title fails.
+    let m = Module::parse(&format!(
+        "{DOOR}\naccess front_door\n\tuser \"bob\": \"Always\"\n\tuser \"carol\": \"Always\"\nend\n"
+    ))
+    .unwrap();
+    assert!(compile(&parse(&base), &m, &mut Lockfile::new(), &opts()).is_err());
+}
+
+#[test]
+fn lint_finds_tags_that_open_nothing() {
+    let base = fixture();
+    // alice has access; bob gets a code but no right.
+    let with_code = edit(
+        &base,
+        r#"Title="bob" UsR="129" LastEdit="562400000" NFCArr="" NFCNArr="" CodeArr="""#,
+        &format!(
+            r#"Title="bob" UsR="129" LastEdit="562400000" NFCArr="" NFCNArr="" CodeArr="{CODE_2}""#
+        ),
+    );
+    let findings = lint_access(&parse(&with_code));
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, LintKind::NoAccessRight);
+    assert_eq!(findings[0].slug, "bob");
+    assert!(findings[0].detail.contains("an access code"));
+    // Access through a group counts.
+    let via_group = compile_access(
+        &with_code,
+        "\tuser \"alice\": \"Always\"\n\tgroup \"Residents\": \"Always\"\n",
+    )
+    .unwrap();
+    assert!(lint_access(&parse(&via_group)).is_empty());
+    // Full access does not: it never includes access.
+    let revoked = compile_access(&with_code, "").unwrap();
+    let names: Vec<String> = lint_access(&parse(&revoked))
+        .into_iter()
+        .map(|f| f.slug)
+        .collect();
+    assert_eq!(names, ["alice", "bob"]);
+}
+
+#[test]
+fn decompile_lifts_access_rights() {
+    use lxir::ir::{DecompileOptions, decompile};
+    let base = edit(
+        &fixture(),
+        &format!(
+            "<PRM REF=\"{SWITCH}\" ACT=\"3\"/>\r\n\t\t\t\t\t</PH>\r\n\t\t\t\t</C>\r\n\t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004"
+        ),
+        &format!(
+            "<PRM REF=\"{SWITCH}\" ACT=\"3\"/>\r\n\t\t\t\t\t\t<PRM REF=\"{FRONT_DOOR}\" TIM=\"{WORKDAYS}\"/>\r\n\t\t\t\t\t</PH>\r\n\t\t\t\t</C>\r\n\t\t\t\t<C Type=\"UserGroup\" V=\"175\" U=\"50000004"
+        ),
+    );
+    let base = edit(&base, "<PH NUM=\"1\">", "<PH NUM=\"2\">");
+    let (m, _) = decompile(&parse(&base), &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    assert!(
+        text.contains(
+            "access front_door\n\tuser \"alice\": \"Always\"\n\tgroup \"Residents\": \"Workdays\"\nend\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("extern front_door = NfcCodeTouch(title: \"Front door\")"));
+
+    // Adopted, the declaration compiles back to the same rights.
+    let (m, mut lock, _) = lxir::ir::adopt(&parse(&base)).unwrap();
+    assert_eq!(m.access_decls().count(), 1);
+    let out = compile(&parse(&base), &m, &mut lock, &opts()).unwrap();
+    assert!(diff(&parse(&base), &out).access.is_empty());
+
+    // A title that names two users cannot be a reference.
+    let twice = edit(&base, r#"Title="bob""#, r#"Title="alice""#);
+    let (m, _) = decompile(&parse(&twice), &DecompileOptions::default()).unwrap();
+    assert!(m.access_decls().next().is_none());
+    assert!(
+        m.to_text()
+            .contains("# access front_door: not lifted — 2 users are titled \"alice\"\n")
+    );
 }

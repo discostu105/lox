@@ -389,11 +389,25 @@ lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take o
 lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
 lox ir decompile current.Loxone        # the IR view of every page (read-only)
 lox ir rename old_name new_name        # rename across sources and lockfile, identities kept
-lox ir lint                            # unused names, blocks whose outputs feed nothing
+lox ir lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
 lox ir test --lox ~/lox-cli/lox        # `test … end` blocks through lox-cli's simulator (`lox sim`)
 ```
 
 Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.
+
+Access rights on an NFC Code Touch can live in the module too: an `access` declaration lists the users and groups
+that may open it, by title, each with its access schedule, and takes the right away from everyone else. Users,
+groups, schedules, tags and codes stay with Loxone Config and the app. `decompile` and `adopt` lift the rights the
+config has. Spec: [lxir ir-spec](crates/lxir/docs/ir-spec.md), decision D49.
+
+```text
+extern haustuer = NfcCodeTouch(uuid: "…")
+
+access haustuer
+	user "alice": "Always"
+	group "Residents": "Workdays"
+end
+```
 
 A directory with a `lox.toml` is a project: inside it `compile` needs no flags and `check`/`fmt`/`drift`/`lint`
 use its module and lock. Paths are relative to the file:
@@ -444,11 +458,14 @@ Each step stops the push when it fails:
    name, last edit, groups, NFC tag names and count, number of access codes) and lists the differences
    (`user_changes_pending` in `-o json`). It needs an admin connection (`lox setup set --user <admin>`); users it
    cannot read stop `--force` (a staging run only warns).
-5. Stage the upload: the downloaded ZIP with only `sps0.LoxCC` replaced, verified to extract to exactly the
-   compiled file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app
-   catalogue (`LoxAPP3.json`, what the app shows) is Loxone Config's from before: controls of the app the push
-   renames, moves to another room or category, or deletes are named (`app_catalogue_stale` in `-o json`). A save
-   from Loxone Config rewrites the catalogue.
+5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
+   file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app catalogue
+   (`LoxAPP3.json`, what the app shows) is Loxone Config's from before: controls of the app the push renames, moves
+   to another room or category, or deletes are named (`app_catalogue_stale` in `-o json`). A save from Loxone
+   Config rewrites the catalogue. `permissions.bin`, which lists who may use each object, is regenerated for the
+   compiled config when lxir reproduces the live file byte for byte (`permissions` in the JSON report:
+   `unchanged`, `regenerated`). Otherwise the live file stays (`kept`), and when the compiled config assigns users
+   and groups differently the push warns that it is stale (`permissions_stale: true`).
 6. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes). Users changed
    live stop `--force` before the upload (error `user_changes_pending`): load the program from the Miniserver in
    Loxone Config and save it back, so the program file holds the changes and the push keeps them, or pass

@@ -16,8 +16,8 @@
 //! positionally — the structure is identical, only names differ.
 
 use super::ast::{
-    ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, Module, Operand, TemplateDecl,
-    TestItem, TilesItem, Value,
+    AccessItem, ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, Module, Operand,
+    TemplateDecl, TestItem, TilesItem, Value,
 };
 use crate::error::{Error, Result};
 use crate::lock::Lockfile;
@@ -191,6 +191,18 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub(&mut c.slug);
             sub(&mut c.tiles);
             sub_comment(&mut c.comment);
+        }
+        // Principals and schedules are titles, never slugs.
+        Item::Access(a) => {
+            sub(&mut a.slug);
+            for stmt in &mut a.body {
+                match stmt {
+                    AccessItem::Grant(g) => sub_comment(&mut g.comment),
+                    AccessItem::Comment(text) => sub_text(text, old, new),
+                }
+            }
+            sub_comment(&mut a.comment);
+            sub_comment(&mut a.end_comment);
         }
         Item::Comment(text) => sub_text(text, old, new),
     }

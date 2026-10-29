@@ -428,7 +428,7 @@ fn a_memory_flag_is_placed_in_its_chain() {
     assert!(v.px2 < m.px && m.px2 < h.px, "{v:?} {m:?} {h:?}");
 }
 
-/// `doc` drawn on A3 landscape, as most configs are (D49).
+/// `doc` drawn on A3 landscape, as most configs are (D50).
 fn on_a3(doc: &LoxoneDoc) -> LoxoneDoc {
     let xml = String::from_utf8(doc.to_bytes()).unwrap();
     let doc_tag = "ConfigVersion=\"17010727\">";
