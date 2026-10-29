@@ -35,14 +35,18 @@ code {
   font-size: 0.85em;
 }
 
-pre.highlight {
-  border: 1px solid #21262d;
+div.highlighter-rouge,
+figure.highlight {
+  border: 1px solid #1c2129;
   border-radius: 8px;
-  padding: 1rem 1.25rem;
+}
+
+pre.highlight {
+  padding: 0.9rem 1.15rem;
 
   code {
     font-size: 0.82em;
-    line-height: 1.7;
+    line-height: 1.6;
   }
 }
 
@@ -115,10 +119,13 @@ code.language-plaintext {
   border-bottom: none !important;
   padding-bottom: 0 !important;
   margin-top: 0 !important;
-  background: linear-gradient(135deg, #e6edf3 0%, #8b949e 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: 'JetBrains Mono', monospace;
+  color: #e6edf3;
+}
+
+.hero-prompt {
+  color: #22c55e;
+  margin-right: 0.3em;
 }
 
 .hero-tagline {
@@ -148,10 +155,14 @@ code.language-plaintext {
   background: #161b22;
   border: 1px solid #21262d;
   color: #8b949e;
-}
 
-.hero-badge-icon {
-  font-size: 0.9rem;
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
 }
 
 .hero-buttons {
@@ -205,7 +216,7 @@ code.language-plaintext {
 
 .features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
   margin: 2rem 0;
 }
@@ -214,7 +225,7 @@ code.language-plaintext {
   background: #161b22;
   border: 1px solid #21262d;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1.15rem 1.25rem;
   transition: all 0.2s ease;
 
   &:hover {
@@ -225,9 +236,25 @@ code.language-plaintext {
 }
 
 .feature-icon {
-  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
   margin-bottom: 0.75rem;
-  display: block;
+
+  svg {
+    width: 1.2rem;
+    height: 1.2rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
 }
 
 .feature-title {
@@ -238,7 +265,7 @@ code.language-plaintext {
 }
 
 .feature-desc {
-  font-size: 0.875rem;
+  font-size: 0.84rem;
   color: #8b949e;
   line-height: 1.5;
 }
@@ -288,6 +315,7 @@ code.language-plaintext {
     background: transparent;
     border: none;
     padding: 0;
+    overflow-x: auto;
 
     code {
       font-size: 0.82em;
@@ -313,42 +341,80 @@ code.language-plaintext {
   background: #161b22;
   border: 1px solid #21262d;
   border-radius: 12px;
-  padding: 1.25rem 1.5rem;
-  margin: 1.5rem auto;
-  max-width: 600px;
+  padding: 0.5rem 1.25rem;
+  margin: 1.75rem auto 0;
+  max-width: 720px;
   text-align: left;
-
-  code {
-    font-size: 0.9rem;
-    color: #22c55e;
-    background: none;
-    border: none;
-    padding: 0;
-  }
 }
 
 .install-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.4rem 0;
+  padding: 0.75rem 0;
 
-  &:first-child {
-    border-bottom: 1px solid #21262d;
-    padding-bottom: 0.65rem;
-    margin-bottom: 0.25rem;
+  & + & {
+    border-top: 1px solid #21262d;
   }
 }
 
 .install-label {
-  font-size: 0.75rem;
+  display: block;
+  font-size: 0.7rem;
   font-weight: 600;
   color: #8b949e;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  white-space: nowrap;
-  min-width: 7rem;
-  text-align: right;
+  margin-bottom: 0.35rem;
+}
+
+.install-cmd {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    color: #22c55e;
+    background: none;
+    border: none;
+    padding: 0.15rem 0;
+  }
+}
+
+.install-copy {
+  flex-shrink: 0;
+  font: 500 0.75rem 'Inter', sans-serif;
+  color: #8b949e;
+  background: transparent;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+
+  &:hover {
+    color: #e6edf3;
+    border-color: #8b949e;
+  }
+}
+
+// ── TUI screenshot ────────────────────────────────────────────
+
+.hero-shot {
+  margin: 2.5rem auto 0;
+  max-width: 960px;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0d1117;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(34, 197, 94, 0.05);
+
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
 }
 
 // ── Section headers ───────────────────────────────────────────
