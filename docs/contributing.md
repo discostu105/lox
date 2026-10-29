@@ -60,7 +60,7 @@ To test against a real Miniserver:
 - One feature or fix per PR
 - Tests expected for new logic
 - Run `cargo fmt` and `cargo clippy` before submitting
-- Update `CHANGELOG.md` under `[Unreleased]`
+- Add a changelog entry as a new file in `changelog.d/` (see `changelog.d/README.md`); don't edit `CHANGELOG.md`
 
 ## Project status
 

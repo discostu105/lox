@@ -1,15 +1,15 @@
 name: Auto-release
 
-# Every push to main that passes CI is released: bump the version, move
-# the CHANGELOG's Unreleased section under it, commit "Release vX.Y.Z",
-# tag, then build and publish exactly like a pushed tag (release.yml).
+# Every push to main that passes CI is released: bump the version, write
+# the changelog fragments (changelog.d/) into CHANGELOG.md under it, commit
+# "Release vX.Y.Z", tag, then build and publish exactly like a pushed tag
+# (release.yml).
 #
 # How big a bump, and whether to release at all, is decided by
 # .github/scripts/prepare_release.py: PR labels release:major,
 # release:minor, release:patch, no-release (or the same words in brackets
 # in a direct commit's message); without a release:* label, minor when
-# Unreleased has an "### Added" entry, else patch; nothing for
-# docs/CI-only changes.
+# there is an "added" entry, else patch; nothing for docs/CI-only changes.
 #
 # Pushes made with GITHUB_TOKEN (the release commit, the tag, the
 # Homebrew formula update) trigger no workflows, so nothing here loops

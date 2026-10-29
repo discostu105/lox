@@ -46,11 +46,10 @@ lox token fetch          # acquire auth token
 - One feature or fix per PR
 - Tests expected for new logic (pure functions are easy to unit-test)
 - Run `cargo fmt` and `cargo clippy` before submitting
-- Update `CHANGELOG.md` under `[Unreleased]` — merged PRs are released automatically, and that section
-  becomes the release notes
+- Add a changelog entry as a new file in [`changelog.d/`](changelog.d/README.md) (don't edit `CHANGELOG.md`) —
+  merged PRs are released automatically, and the entries become the release notes
 - Label the PR `release:major`, `release:minor`, `release:patch` or `no-release` to steer the version bump
-  (default: minor when `[Unreleased]` has an `### Added` entry, patch otherwise; see
-  [CLAUDE.md](CLAUDE.md#releases))
+  (default: minor when there is an `added` entry, patch otherwise; see [CLAUDE.md](CLAUDE.md#releases))
 
 ## Architecture
 
