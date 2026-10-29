@@ -10,8 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-10-29
+
 ### Fixed
 - `lox ir compile` puts each wire it rebuilds back where the base had it among the connector's inputs (lxir D45). Loxone Config sorts a connector's inputs when it saves, and the compile used to move its own wires to the end, so after a save in Loxone Config, `lox config push` found bytes to upload where the logic had not changed
+- `lox config upload` and `lox config restore` upload as `/prog/sps_new.zip`, the file the Miniserver loads on its next start, as Loxone Config and `lox config push` do. They used the local file's name (`upload`) or the backup's original name (`restore`), which the Miniserver very likely never loaded: the upload reported success and nothing changed. Both also refuse a file that is not a config ZIP (a `.Loxone` file, a Git LFS pointer) before connecting
 
 ## [0.15.0] — 2026-10-29
 
