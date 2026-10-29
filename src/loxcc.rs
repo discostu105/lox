@@ -1,23 +1,30 @@
-//! LoxCC decompression — extract Loxone config XML from backup archives
+//! LoxCC — the compressed config XML inside Loxone backup archives
 //!
 //! Backup ZIPs contain `sps0.LoxCC`, a custom LZ-compressed binary.
-//! This module decompresses it to the original XML.
+//! This module decompresses it to the original XML, compresses XML back
+//! into it, and stages an upload ZIP around a compressed config.
 //!
 //! Reference: <https://gist.github.com/sarnau/e14ff9fe081611782a3f3cb2e2c2bacd>
 
 use anyhow::{Context, Result, bail};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
-const LOXCC_MAGIC: u32 = 0xaabbccee;
+pub const LOXCC_MAGIC: u32 = 0xaabbccee;
+const LOXCC_HEADER_LEN: usize = 16;
+/// The entry name of the config inside a backup ZIP.
+const SPS0_ENTRY: &str = "sps0.loxcc";
 
 /// Decompress a `sps0.LoxCC` binary blob into XML bytes.
 ///
 /// Format:
 ///   [0..4]  u32_le magic (0xaabbccee)
-///   [4..8]  u32_le compressed payload size
-///   [8..12] u32_le uncompressed size hint (for pre-allocation)
-///   [12..16] u32_le reserved/checksum
-///   [16..]  compressed data (LZ4-style)
+///   [4..8]  u32_le compressed payload size (the bytes after the header)
+///   [8..12] u32_le uncompressed size (the XML length)
+///   [12..16] u32_le CRC-32 (IEEE) of the uncompressed XML
+///   [16..]  compressed data (an LZ4 block)
+///
+/// The size and checksum fields were checked against Loxone-written
+/// downloads; this reader does not verify them.
 pub fn decompress_loxcc(data: &[u8]) -> Result<Vec<u8>> {
     if data.len() < 16 {
         bail!("LoxCC data too short ({} bytes)", data.len());
@@ -136,6 +143,94 @@ pub fn extract_and_decompress(zip_data: &[u8]) -> Result<Vec<u8>> {
 
     let data = loxcc_data.context("Backup ZIP does not contain sps0.LoxCC")?;
     decompress_loxcc(&data)
+}
+
+/// Compress config XML into a `sps0.LoxCC` blob — the inverse of
+/// [`decompress_loxcc`].
+///
+/// The payload is a standard LZ4 block (the encoder lox-cli uploads with,
+/// which the Miniserver accepts); the header carries the payload size, the
+/// XML length and the CRC-32 of the XML, as in Loxone-written files. The
+/// bytes differ from Loxone's own encoder (which compresses tighter), the
+/// decompressed XML does not.
+pub fn compress_loxcc(xml: &[u8]) -> Result<Vec<u8>> {
+    let payload = lz4_flex::block::compress(xml);
+    let Ok(xml_len) = u32::try_from(xml.len()) else {
+        bail!("Config too large for LoxCC ({} bytes)", xml.len());
+    };
+    let payload_len = u32::try_from(payload.len()).context("LoxCC payload too large")?;
+
+    let mut blob = Vec::with_capacity(LOXCC_HEADER_LEN + payload.len());
+    blob.extend_from_slice(&LOXCC_MAGIC.to_le_bytes());
+    blob.extend_from_slice(&payload_len.to_le_bytes());
+    blob.extend_from_slice(&xml_len.to_le_bytes());
+    blob.extend_from_slice(&crc32fast::hash(xml).to_le_bytes());
+    blob.extend_from_slice(&payload);
+    Ok(blob)
+}
+
+/// Build an upload ZIP that carries `xml` as its config.
+///
+/// `template_zip` is a Loxone-written download: every entry except
+/// `sps0.LoxCC` is copied raw (name, order, compressed bytes, timestamp),
+/// so the side files stay exactly what the Miniserver wrote. `sps0.LoxCC`
+/// is replaced by [`compress_loxcc`]`(xml)`, keeping the template entry's
+/// name and compression method; its timestamp becomes the current local
+/// time (ZIP times are local), because the content is new. Before
+/// returning, the result is extracted again and must yield exactly `xml`.
+pub fn stage_upload_zip(template_zip: &[u8], xml: &[u8]) -> Result<Vec<u8>> {
+    let mut template =
+        zip::ZipArchive::new(Cursor::new(template_zip)).context("Invalid template ZIP archive")?;
+    let hits = template
+        .file_names()
+        .filter(|n| n.eq_ignore_ascii_case(SPS0_ENTRY))
+        .count();
+    if hits != 1 {
+        bail!("Template ZIP must contain exactly one sps0.LoxCC, found {hits}");
+    }
+
+    let loxcc = compress_loxcc(xml)?;
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for i in 0..template.len() {
+        let entry = template.by_index_raw(i)?;
+        if entry.name().eq_ignore_ascii_case(SPS0_ENTRY) {
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(entry.compression())
+                .last_modified_time(zip_now()?);
+            let name = entry.name().to_string();
+            drop(entry);
+            writer.start_file(name, options)?;
+            writer.write_all(&loxcc)?;
+        } else {
+            writer.raw_copy_file(entry)?;
+        }
+    }
+    let staged = writer.finish()?.into_inner();
+
+    let roundtrip = extract_and_decompress(&staged).context("Staged ZIP does not extract")?;
+    if roundtrip != xml {
+        bail!(
+            "Staged ZIP does not extract byte-identically ({} bytes in, {} bytes out)",
+            xml.len(),
+            roundtrip.len()
+        );
+    }
+    Ok(staged)
+}
+
+/// The current local time as a ZIP timestamp.
+fn zip_now() -> Result<zip::DateTime> {
+    use chrono::{Datelike, Timelike};
+    let now = chrono::Local::now().naive_local();
+    zip::DateTime::from_date_and_time(
+        u16::try_from(now.year()).context("year out of range for a ZIP timestamp")?,
+        now.month() as u8,
+        now.day() as u8,
+        now.hour() as u8,
+        now.minute() as u8,
+        now.second() as u8,
+    )
+    .map_err(|e| anyhow::anyhow!("current time is not a valid ZIP timestamp: {e}"))
 }
 
 #[cfg(test)]
@@ -267,5 +362,224 @@ mod tests {
 
         let result = extract_and_decompress(&zip_data).unwrap();
         assert_eq!(result, xml);
+    }
+
+    /// Deterministic pseudo-random bytes (incompressible beyond the 64 KiB window).
+    fn noise(len: usize) -> Vec<u8> {
+        let mut state = 0x2545_f491_u32;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 24) as u8
+            })
+            .collect()
+    }
+
+    fn header(blob: &[u8]) -> [u32; 4] {
+        let field = |i: usize| u32::from_le_bytes(blob[i * 4..i * 4 + 4].try_into().unwrap());
+        [field(0), field(1), field(2), field(3)]
+    }
+
+    fn sample_xmls() -> Vec<Vec<u8>> {
+        let repetitive = "<C Type=\"Memory\" V=\"175\"/>\n".repeat(40_000);
+        let mut large = br#"<?xml version="1.0" encoding="utf-8"?><C>"#.to_vec();
+        large.extend(noise(200_000));
+        large.extend(repetitive.as_bytes()[..100_000].iter());
+        vec![
+            Vec::new(),
+            b"<a/>".to_vec(),
+            repetitive.into_bytes(),
+            large,
+            "<C Title=\"Küche ° Licht €\" Desc=\"日本語\"/>"
+                .as_bytes()
+                .to_vec(),
+        ]
+    }
+
+    #[test]
+    fn test_compress_roundtrip() {
+        for xml in sample_xmls() {
+            let blob = compress_loxcc(&xml).unwrap();
+            assert_eq!(decompress_loxcc(&blob).unwrap(), xml, "len {}", xml.len());
+        }
+    }
+
+    #[test]
+    fn test_compress_header_fields() {
+        for xml in sample_xmls() {
+            let blob = compress_loxcc(&xml).unwrap();
+            let [magic, payload_len, xml_len, crc] = header(&blob);
+            assert_eq!(magic, LOXCC_MAGIC);
+            assert_eq!(payload_len as usize, blob.len() - LOXCC_HEADER_LEN);
+            assert_eq!(xml_len as usize, xml.len());
+            assert_eq!(crc, crc32fast::hash(&xml));
+        }
+    }
+
+    #[test]
+    fn test_compress_payload_is_standard_lz4() {
+        for xml in sample_xmls() {
+            let blob = compress_loxcc(&xml).unwrap();
+            let plain = lz4_flex::block::decompress(&blob[LOXCC_HEADER_LEN..], xml.len()).unwrap();
+            assert_eq!(plain, xml);
+        }
+    }
+
+    #[test]
+    fn test_compress_shrinks_repetitive_xml() {
+        let xml = "<C Type=\"And\"/>".repeat(10_000);
+        let blob = compress_loxcc(xml.as_bytes()).unwrap();
+        assert!(blob.len() < xml.len() / 10, "{} bytes", blob.len());
+    }
+
+    fn zip_with(entries: &[(&str, &[u8], zip::CompressionMethod)]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let modified = zip::DateTime::from_date_and_time(2026, 10, 18, 20, 30, 56).unwrap();
+        for (name, data, method) in entries {
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(*method)
+                .last_modified_time(modified);
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    /// Name, compression method, timestamp and raw (still compressed) bytes per entry.
+    type RawEntry = (
+        String,
+        zip::CompressionMethod,
+        Option<zip::DateTime>,
+        Vec<u8>,
+    );
+
+    fn raw_entries(zip_data: &[u8]) -> Vec<RawEntry> {
+        let mut archive = zip::ZipArchive::new(Cursor::new(zip_data)).unwrap();
+        (0..archive.len())
+            .map(|i| {
+                let mut entry = archive.by_index_raw(i).unwrap();
+                let mut raw = Vec::new();
+                entry.read_to_end(&mut raw).unwrap();
+                let name = entry.name().to_string();
+                (name, entry.compression(), entry.last_modified(), raw)
+            })
+            .collect()
+    }
+
+    fn template_zip() -> Vec<u8> {
+        let old = compress_loxcc(b"<old config/>").unwrap();
+        let deflated = zip::CompressionMethod::Deflated;
+        zip_with(&[
+            ("sps0.LoxCC", &old, deflated),
+            ("LoxAPP3.json", br#"{"msInfo":{}}"#, deflated),
+            (
+                "permissions.bin",
+                &noise(3000),
+                zip::CompressionMethod::Stored,
+            ),
+            ("Emergency.LoxCC", &old, deflated),
+            ("Music.json", b"{}", deflated),
+        ])
+    }
+
+    #[test]
+    fn test_stage_upload_zip_replaces_only_sps0() {
+        let template = template_zip();
+        let xml = "<C Title=\"Küche\"/>".repeat(5000);
+        let staged = stage_upload_zip(&template, xml.as_bytes()).unwrap();
+
+        assert_eq!(extract_and_decompress(&staged).unwrap(), xml.as_bytes());
+        let before = raw_entries(&template);
+        let after = raw_entries(&staged);
+        assert_eq!(
+            before.iter().map(|e| &e.0).collect::<Vec<_>>(),
+            after.iter().map(|e| &e.0).collect::<Vec<_>>()
+        );
+        // sps0.LoxCC: new content and timestamp, same method
+        assert_eq!(before[0].1, after[0].1);
+        assert_ne!(before[0].2, after[0].2);
+        assert_ne!(before[0].3, after[0].3);
+        // every other entry is copied raw, byte for byte
+        assert_eq!(before[1..], after[1..]);
+    }
+
+    #[test]
+    fn test_stage_upload_zip_matches_name_case_insensitively() {
+        let old = compress_loxcc(b"<old/>").unwrap();
+        let template = zip_with(&[("SPS0.LOXCC", &old, zip::CompressionMethod::Stored)]);
+        let staged = stage_upload_zip(&template, b"<new/>").unwrap();
+        assert_eq!(raw_entries(&staged)[0].0, "SPS0.LOXCC");
+        assert_eq!(extract_and_decompress(&staged).unwrap(), b"<new/>");
+    }
+
+    #[test]
+    fn test_stage_upload_zip_needs_exactly_one_sps0() {
+        let old = compress_loxcc(b"<old/>").unwrap();
+        let stored = zip::CompressionMethod::Stored;
+
+        let none = zip_with(&[("Music.json", b"{}", stored)]);
+        let err = stage_upload_zip(&none, b"<new/>").unwrap_err();
+        assert!(err.to_string().contains("found 0"), "{err}");
+
+        let two = zip_with(&[("sps0.LoxCC", &old, stored), ("SPS0.loxcc", &old, stored)]);
+        let err = stage_upload_zip(&two, b"<new/>").unwrap_err();
+        assert!(err.to_string().contains("found 2"), "{err}");
+
+        let err = stage_upload_zip(b"not a zip", b"<new/>").unwrap_err();
+        assert!(err.to_string().contains("Invalid template ZIP"), "{err}");
+    }
+
+    /// Real downloads: `LOX_CORPUS=<dir> cargo test corpus -- --nocapture`.
+    /// Every ZIP in the directory (by content, whatever its name) must carry
+    /// the header semantics documented on [`decompress_loxcc`], and its XML
+    /// must survive compress → decompress and stage → extract unchanged.
+    #[test]
+    fn test_corpus_roundtrip() {
+        let Some(dir) = std::env::var_os("LOX_CORPUS") else {
+            return;
+        };
+        let mut seen = 0;
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        paths.sort();
+        for path in paths {
+            let data = std::fs::read(&path).unwrap();
+            if !data.starts_with(b"PK\x03\x04") {
+                continue;
+            }
+            let name = path.display();
+            let mut archive = zip::ZipArchive::new(Cursor::new(&data[..])).unwrap();
+            let mut original = Vec::new();
+            archive
+                .by_name("sps0.LoxCC")
+                .unwrap()
+                .read_to_end(&mut original)
+                .unwrap();
+            let xml = decompress_loxcc(&original).unwrap();
+            let [_, payload_len, xml_len, crc] = header(&original);
+            assert_eq!(
+                payload_len as usize,
+                original.len() - LOXCC_HEADER_LEN,
+                "{name}"
+            );
+            assert_eq!(xml_len as usize, xml.len(), "{name}");
+            assert_eq!(crc, crc32fast::hash(&xml), "{name}");
+
+            let ours = compress_loxcc(&xml).unwrap();
+            assert_eq!(decompress_loxcc(&ours).unwrap(), xml, "{name}");
+            let staged = stage_upload_zip(&data, &xml).unwrap();
+            assert_eq!(extract_and_decompress(&staged).unwrap(), xml, "{name}");
+            println!(
+                "{name}: xml {} B, sps0.LoxCC {} B as downloaded, {} B ours{}",
+                xml.len(),
+                original.len(),
+                ours.len(),
+                if ours == original { " (identical)" } else { "" }
+            );
+            seen += 1;
+        }
+        assert!(seen > 0, "no ZIPs in LOX_CORPUS");
     }
 }

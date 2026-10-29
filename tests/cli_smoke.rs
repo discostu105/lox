@@ -129,6 +129,7 @@ subcmd_help!(help_config, "config");
 subcmd_help!(help_config_download, "config", "download");
 subcmd_help!(help_config_ls, "config", "ls");
 subcmd_help!(help_config_extract, "config", "extract");
+subcmd_help!(help_config_compress, "config", "compress");
 subcmd_help!(help_config_upload, "config", "upload");
 subcmd_help!(help_config_users, "config", "users");
 subcmd_help!(help_config_devices, "config", "devices");
@@ -339,4 +340,104 @@ fn closed_stdout_exits_quietly() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{:?}: {stderr}", out.status);
     assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+// ── config compress ────────────────────────────────────────────────────────
+
+/// `lox config compress` works offline: writes a LoxCC next to the input
+/// (magic, payload size, XML length, CRC-32) and reports it in JSON.
+#[test]
+fn config_compress_writes_loxcc() {
+    let dir = tempfile::tempdir().unwrap();
+    let xml = "<C Type=\"Memory\" Title=\"Küche\"/>\n".repeat(2000);
+    let input = dir.path().join("house.Loxone");
+    std::fs::write(&input, &xml).unwrap();
+
+    let out = lox()
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .args(["-o", "json", "config", "compress"])
+        .arg(&input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let output = dir.path().join("house.LoxCC");
+    assert_eq!(report["output"], output.display().to_string());
+    assert_eq!(report["xml_bytes"], xml.len());
+
+    let blob = std::fs::read(&output).unwrap();
+    let field = |i: usize| u32::from_le_bytes(blob[i * 4..i * 4 + 4].try_into().unwrap());
+    assert_eq!(field(0), 0xaabbccee);
+    assert_eq!(field(1) as usize, blob.len() - 16);
+    assert_eq!(field(2) as usize, xml.len());
+    assert_eq!(report["output_bytes"], blob.len());
+}
+
+/// `--template`: the upload ZIP keeps the download's other entries and
+/// extracts (`lox config extract`) to exactly the compressed XML.
+#[test]
+fn config_compress_template_stages_upload_zip() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let path = |name: &str| dir.path().join(name);
+    std::fs::write(path("old.Loxone"), "<C Title=\"old\"/>").unwrap();
+    lox()
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .args(["-q", "config", "compress"])
+        .arg(path("old.Loxone"))
+        .assert()
+        .success();
+
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(path("download.zip")).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    zip.start_file("sps0.LoxCC", options).unwrap();
+    zip.write_all(&std::fs::read(path("old.LoxCC")).unwrap())
+        .unwrap();
+    zip.start_file("Music.json", options).unwrap();
+    zip.write_all(b"{}").unwrap();
+    zip.finish().unwrap();
+
+    let xml = "<C Type=\"Memory\" Title=\"Küche\"/>\n".repeat(2000);
+    std::fs::write(path("new.Loxone"), &xml).unwrap();
+    lox()
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .args(["config", "compress"])
+        .arg(path("new.Loxone"))
+        .arg("--template")
+        .arg(path("download.zip"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("extracts byte-identically"));
+
+    lox()
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .args(["config", "extract"])
+        .arg(path("new.zip"))
+        .arg("--save-as")
+        .arg(path("roundtrip.Loxone"))
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read(path("roundtrip.Loxone")).unwrap(),
+        xml.as_bytes()
+    );
+    let mut staged = zip::ZipArchive::new(std::fs::File::open(path("new.zip")).unwrap()).unwrap();
+    assert_eq!(staged.len(), 2);
+    assert!(staged.by_name("Music.json").is_ok(), "Music.json kept");
+}
+
+#[test]
+fn config_compress_refuses_a_zip() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("backup.zip");
+    std::fs::write(&input, b"PK\x03\x04rest of a zip").unwrap();
+    lox()
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .args(["config", "compress"])
+        .arg(&input)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already compressed"));
 }

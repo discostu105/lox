@@ -205,6 +205,7 @@ lox otel serve --endpoint http://..   # Push metrics, logs & traces via OTLP
 lox if "Temperatur" gt 25 && echo hot  # Conditional logic
 lox status --energy                    # Energy dashboard
 lox config download --extract          # Download & extract Loxone Config
+lox config compress out.Loxone --template dl.zip  # Upload ZIP from a download, only sps0.LoxCC replaced
 lox config init ~/loxone-config        # Init git repo for config versioning
 lox config pull                        # Download, diff & git-commit config
 lox config log                         # Show config change history

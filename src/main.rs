@@ -1347,6 +1347,18 @@ pub(crate) enum ConfigCmd {
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
+    /// Compress a .Loxone XML file to sps0.LoxCC (the config inside a config ZIP)
+    Compress {
+        /// Path to a .Loxone XML file
+        file: String,
+        /// Write an upload ZIP instead: this downloaded config ZIP with only
+        /// sps0.LoxCC replaced, verified to extract byte-identically to FILE
+        #[arg(long, value_name = "ZIP")]
+        template: Option<String>,
+        /// Custom output filename (default: FILE with .LoxCC, or .zip with --template)
+        #[arg(long, value_name = "PATH")]
+        save_as: Option<String>,
+    },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     Upload {
         /// Path to a config ZIP file

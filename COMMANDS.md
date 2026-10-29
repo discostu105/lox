@@ -254,6 +254,9 @@ lox config download --save-as config.zip  # custom output filename
 lox config ls                          # list all configs on the Miniserver
 lox config extract config.zip          # decompress LoxCC → .Loxone XML
 lox config extract config.zip --save-as out.Loxone
+lox config compress out.Loxone         # compress .Loxone XML → out.LoxCC (sps0.LoxCC format)
+lox config compress out.Loxone --save-as sps0.LoxCC
+lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
 lox config upload config.zip --force   # upload to Miniserver (dangerous)
 lox config users file.Loxone           # list user accounts from config XML
 lox config devices file.Loxone         # list hardware devices (Tree/Air/Network)
