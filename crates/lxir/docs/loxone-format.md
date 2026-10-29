@@ -63,7 +63,9 @@ inline (`<Key>2B35</Key>`).
 ```
 
 - `Type` — block type (`Or`, `AutoJalousie`, `VirtualIn`, …).
-- `V` — format/version field, `"175"` on current blocks.
+- `V` — block-format version, one per document: Loxone Config writes
+  every object at its release's version on save (`"175"` for 17.0/17.1,
+  `"178"` for 17.2; see design decision D46).
 - `U` — the object UUID (see below).
 - `Title` — display name. **Locale-volatile** for built-ins: saving the
   config in a differently-localized Loxone Config renamed 111 built-in

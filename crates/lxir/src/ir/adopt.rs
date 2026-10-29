@@ -25,7 +25,7 @@
 //! [`AdoptReport::refused`] — one bespoke GUI flag never blocks adopting
 //! the rest of the house.
 
-use crate::connectors::{attr_params, builtin};
+use crate::connectors::{VERIFIED_BLOCK_VERSIONS, attr_params, builtin};
 use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, ports};
 use crate::error::{Error, Result};
 use crate::ir::ast::{ArgItem, BindingKind, Item, MatchSpec, Module, PortRef, WireDecl};
@@ -484,13 +484,14 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             ));
         }
     }
-    if el.attr("V") != Some("175") {
+    if !VERIFIED_BLOCK_VERSIONS.contains(&el.attr("V").unwrap_or("")) {
         return Err(format!(
-            "block version V=\"{}\" differs from the verified \"175\" — connector \
-             indexes are verified per version, so this needs a save-oracle run \
-             for your Loxone Config version first (docs/connector-db.md, \
-             \"Admit a type yourself\")",
-            el.attr("V").unwrap_or("")
+            "block version V=\"{}\" is not one the connector table is verified \
+             for ({}) — connector indexes are verified per version, so this \
+             needs a save-oracle run for your Loxone Config version first \
+             (docs/connector-db.md, \"Admit a type yourself\")",
+            el.attr("V").unwrap_or(""),
+            VERIFIED_BLOCK_VERSIONS.join(", ")
         ));
     }
     if Layout::of_element(el).is_none() {

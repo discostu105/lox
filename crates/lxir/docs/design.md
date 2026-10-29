@@ -1285,7 +1285,38 @@ Anything unverified is an error, not a heuristic:
   output is a base like any other. Not covered: a save also rewrites
   what the rebuild emits for a managed block. Loxone Config 17.2
   stamps every block `V="178"` where the rebuild writes the verified
-  `V="175"`, writes `Desc=` right after `Type=`, moves blocks within a
+  `V="175"` (settled by D46), writes `Desc=` right after `Type=`, moves blocks within a
   page, and adds `Text="true"` to some minted refs. A recompile of a
   config saved with 17.2 still differs in those bytes, though not in
   logic.
+- **D46 — managed blocks carry the document's block version**
+  (2026-10-29). Every `<C>` carries `V=`, a block-format version, and
+  across the corpus each file has exactly one: Loxone Config writes
+  every object at its release's version on save (16.1 writes 174, 17.0
+  and 17.1 write 175, 17.2 writes 178). The rebuild wrote a fixed
+  `V="175"`, the version the builtin table was verified for. In a house
+  on 17.2 every push set the compiler's blocks back to 175 and every
+  save stamped them 178 again. That is harmless, since Loxone Config
+  migrates an older block on load, but no recompile of a saved config
+  could reproduce it, and adopt refused every block of a 17.2 file.
+  Decision:
+  - **The document's version, when verified.** Compile emits the block
+    version the base's objects carry after the teardown
+    (`LoxoneDoc::block_version`: the most common, a tie the higher)
+    when `connectors::VERIFIED_BLOCK_VERSIONS` lists it. Adopt accepts
+    a block of any listed version.
+  - **Otherwise the first verified version.** In a document of a
+    release nobody has verified, managed blocks stay at 175 and Loxone
+    Config migrates them on load. A block stamped with a version whose
+    layout nobody checked could be read as something it is not.
+  - **178 is verified** (oracle session 14). Under 17.2 all 24 builtin
+    types, minted at `V="178"`, survive open+save at 178 with their
+    exact connector keys and indexes, and the house rebuild at 178
+    saves with an empty semantic diff. One layout fact changed: 17.2
+    writes AnalogThresholdTrigger's `Remanence` connector after `Off`
+    instead of second, at the same index. A save reorders a rebuilt
+    one; the logic is the same.
+  - **The next release** is admitted the same way: both oracle runs
+    under it, then its version joins the list.
+  The release pin (D22) is unchanged: `--accept-version` still accepts
+  a release, and D46 only decides which `V` the managed blocks get.
