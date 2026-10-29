@@ -14,8 +14,9 @@
 //!    statement disappears.
 //! 4. **Attribute claims** — `target.title|room|category = value` on an
 //!    extern rewrites its `Title=` or its `<IoData Pr=/Cr=>` binding (D39),
-//!    carrying along the descendants that shared the old room/category; the
-//!    originals are remembered and restored the same way.
+//!    carrying along the descendants that shared the old room/category and
+//!    the refs that copy the title (D43); the originals are remembered and
+//!    restored the same way.
 //!
 //! Everything is deterministic: same base + module + lock + options → the
 //! same output bytes. New UUIDs come from [`crate::uuid::Minter`] (no clock,
@@ -623,7 +624,19 @@ pub fn compile(
                     block.slug
                 ))
             })?;
-            (u.clone(), t, title.unwrap_or_else(|| target.to_string()))
+            // The title the target ends up with: its own title claim, else
+            // the torn-down one — the base may still show a withdrawn claim
+            // (D43).
+            let title = match module
+                .attrs()
+                .find(|a| a.slug == target && a.attr == Attr::Title)
+            {
+                Some(a) => resolve(&a.value)?,
+                None => read_claimed(&doc, u, Attr::Title)
+                    .or(title)
+                    .unwrap_or_else(|| target.to_string()),
+            };
+            (u.clone(), t, title)
         } else {
             return Err(Error::Compile(format!(
                 "block `{}` mirrors `{target}`, but `{target}` is neither a \
@@ -1121,14 +1134,11 @@ pub fn compile(
                 claim_slot(a.attr)
             ))
         })?;
+        let stop =
+            |u: &str| managed_uuids.contains(u) || claimed.contains_key(&(u.to_string(), a.attr));
         let followers = match a.attr {
-            Attr::Title => Vec::new(),
-            Attr::Room | Attr::Category => {
-                let stop = |u: &str| {
-                    managed_uuids.contains(u) || claimed.contains_key(&(u.to_string(), a.attr))
-                };
-                followers_of(&doc, &uuid, a.attr, &original, &stop)
-            }
+            Attr::Title => ref_followers(&doc, &uuid, &stop),
+            Attr::Room | Attr::Category => followers_of(&doc, &uuid, a.attr, &original, &stop),
         };
         planned_claims.push((
             uuid,
@@ -1808,6 +1818,29 @@ fn followers_of(
         walk(root, attr, original, stop, &mut out);
     }
     out
+}
+
+/// The refs that copy `uuid`'s title — those follow a title claim on it
+/// (D43): every `InputRef`/`OutputRef` with `Ref=` the object, since a
+/// save re-derives their `Title=` from the target whatever stood there.
+/// Not the inputs an alarm block collected itself (`WF` bit 0x1000 on an
+/// `InputRef`): the GUI keeps their titles. `stop` excludes managed refs
+/// (emitted with the derived title already) and explicitly claimed ones.
+fn ref_followers(doc: &LoxoneDoc, uuid: &str, stop: &dyn Fn(&str) -> bool) -> Vec<String> {
+    const COLLECTED: u32 = 0x1000;
+    doc.objects()
+        .into_iter()
+        .filter(|o| is_ref_type(&o.block_type) && o.title.is_some() && !stop(&o.uuid))
+        .filter(|o| {
+            let el = doc.element_at(&o.path).expect("path from objects()");
+            let wf = el
+                .attr("WF")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0);
+            el.attr("Ref") == Some(uuid) && !(o.block_type == "InputRef" && wf & COLLECTED != 0)
+        })
+        .map(|o| o.uuid)
+        .collect()
 }
 
 /// The UUID of the one `Place`/`Category` titled `title` — zero or several

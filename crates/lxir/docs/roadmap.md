@@ -348,6 +348,11 @@ ones are *assigned*.
       fingerprint (v2), lockfile v3. Accepted against a real device
       repurposing on the house config: the compiled claims equal the
       hand patch they replace.
+- [x] Ref titles follow title claims 2026-10-29 (D43): a `.title` claim
+      rewrites the refs whose title the GUI derives from the object (all
+      but an alarm block's collected inputs), and minted mirrors take
+      the claimed title — the next GUI save no longer shows the old
+      title on refs as drift.
 - [ ] Membership lists: blocks that list devices they act on (the smoke
       alarm's detector list and similar) keep that list inside the
       block, not on the device. Needs a corpus survey of the list

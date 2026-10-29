@@ -51,8 +51,9 @@ edit, and records each in the lockfile:
    title, or the room/category binding (`<IoData Pr=/Cr=>`), of an
    *extern* object: devices and their inputs/outputs, which only Loxone
    Config can create. Original, written value and the followers a
-   room/category claim carried along are recorded in `lock.attr_claims`
-   and restored when the claim disappears (D39).
+   claim carried along (a room/category claim's descendants, a title
+   claim's refs, D43) are recorded in `lock.attr_claims` and restored
+   when the claim disappears (D39).
 
 Everything else is somebody else's, and passes through unchanged.
 
@@ -1084,3 +1085,32 @@ Anything unverified is an error, not a heuristic:
   without a command; no corpus evidence), and checking abbreviations
   beyond `As`/`Lico` (the house also has `TpfController` blocks on
   Flex API connectors, whose commands lxir writes unchecked).
+- **D43 — a title claim carries the refs that copy the title**
+  (2026-10-29). Every `InputRef`/`OutputRef` holds its own `Title=`,
+  and Loxone Config re-derives it from the mirrored object on every
+  save (oracle session 11 found this for minted refs; session 12
+  confirms it for the GUI's own, stale ones included). A D39 `.title`
+  claim rewrote the object and left its refs on the old title, so the
+  next GUI save showed up as drift, and the house config carried two
+  stale relay refs from such a claim. Now a title claim has followers
+  like a room/category claim: every ref whose `Ref=` is the claimed
+  object, whatever its current title (the GUI would rewrite a stale one
+  too). **Except collected inputs:** the `InputRef`s an alarm block
+  gathers into its sensor list are written with `WF` bit 0x1000, often
+  under a composite title ("<input> <device>"), and the GUI keeps their
+  titles — composite or plain copy, through a rename of the target or
+  of its device. The bit is GUI-derived (session 12: flipped by hand,
+  the save restores it; a position added or removed changes nothing),
+  so it marks exactly the refs whose title the GUI does not own. The
+  `OutputRef`s such a block uses carry 0x1000 too and *do* follow.
+  Managed refs and refs claimed explicitly are skipped, as for D39
+  followers. Lock, teardown and tombstones are D39's unchanged: each
+  follower is restored to the claim's original while it still shows
+  the written value, which is also what the GUI derives once the
+  object is back. Minted `mirrors:` refs (D33) take the title this
+  compile leaves on their target — the claimed one, or after a
+  withdrawal the restored one — not the base's, which may still show
+  a withdrawn claim. Validated with the oracle on the house config:
+  the existing relay claims now fix their stale refs, and claims on a
+  target with visible, hidden and collected refs, and their
+  withdrawal, both save with an empty semantic diff.

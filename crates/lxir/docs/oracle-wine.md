@@ -329,6 +329,31 @@ type-registry code of the mirrored object's XML type (VirtualIn 71,
 Actor 63, Memory 320, …) with `Analog=` following the target type —
 learned into `connectors::ref_link_type`, unknown types refuse the mint.
 
+## Ref titles under a title change (session 12, D43) — passed
+
+Ran 2026-10-29 on copies of the freshest house download (local only).
+Question: what does Loxone Config write into a ref's `Title=` when its
+target's title changed — and does the composite form "<input> <device>"
+some refs carry survive? Five probes, each a hand-renamed target (and
+in two of them a hand-edited ref) through one open+save:
+
+- **Every ref follows its target** — visible `InputRef`s and
+  `OutputRef`s, position-less `OutputRef`s (`WF` bit 0x1000), and two
+  refs that were already stale before the probe (left so by a D39 title
+  claim; they were rewritten without any rename).
+- **Except an alarm block's collected inputs** (`InputRef`, `WF` bits
+  0x1000|0x0800, wired into the alarm's sensor inputs): neither
+  composite nor plain-copy titles change — not on a target rename, not
+  on a rename of the target's device.
+- `WF` is derived: hand-moving 0x0800 between a following and a
+  keeping ref is undone by the save and changes nothing. Removing a
+  following ref's `Px`/`Py`, or giving a collected one a position,
+  changes neither its bit nor its behaviour.
+- Confirmation: the house project compiled with D43 (the existing relay
+  claims now carry their refs) saves with an **empty semantic diff**;
+  so do title claims on three targets with visible, hidden and
+  collected refs, and the compile that withdraws them again.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

@@ -88,9 +88,10 @@ otherwise — a wrong port UUID silently breaks wire identity.
         "original": "<place-uuid>", // value before the claim (restored)
         "written": "<place-uuid>",  // value the claim wrote (a title, or
                                     // the Place/Category UUID)
-        "followers": [              // descendants that carried `original`
-          "<object-uuid>"           // and were rewritten with it; omitted
-        ]                           // when empty
+        "followers": [              // room/category: descendants that
+          "<object-uuid>"           // carried `original`; title: the refs
+        ]                           // of the object (D43). Rewritten with
+                                    // it; omitted when empty
       }
     }
   },

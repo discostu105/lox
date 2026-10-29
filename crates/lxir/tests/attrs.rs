@@ -266,3 +266,104 @@ fn follower_moved_in_the_gui_stays_put() {
     assert_eq!(io(&back, TEMP, "Pr").as_deref(), Some(TECHNIKRAUM));
     assert_eq!(io(&back, ONLINE, "Pr").as_deref(), Some(POOL));
 }
+
+const NETZ: &str = "3000000b-0000-00b0-ffff504f94112233";
+const NETZ_REF: &str = "3000000a-0000-00a0-ffff504f94112233";
+const STALE_REF: &str = "30000012-0000-0120-ffff504f94112233";
+const COLLECTED_REF: &str = "30000013-0000-0130-ffff504f94112233";
+
+/// pool.Loxone plus two more refs of the `Netzbezug` input: one whose
+/// title went stale, and one an alarm block collected itself (`WF` bit
+/// 0x1000) under a title of its own.
+fn base_with_refs() -> LoxoneDoc {
+    let xml = String::from_utf8(std::fs::read("examples/configs/pool.Loxone").unwrap()).unwrap();
+    let anchor = "\t\t\t<C Type=\"InputRef\" V=\"175\" U=\"3000000a";
+    assert_eq!(xml.matches(anchor).count(), 1);
+    let more = format!(
+        "\t\t\t<C Type=\"InputRef\" V=\"175\" U=\"{STALE_REF}\" Title=\"Netz alt\" Nio=\"4\" \
+         Ref=\"{NETZ}\" WF=\"18432\" LinkRefType=\"71\"/>\n\
+         \t\t\t<C Type=\"InputRef\" V=\"175\" U=\"{COLLECTED_REF}\" Title=\"Netzbezug Zähler\" \
+         Nio=\"4\" Ref=\"{NETZ}\" WF=\"22528\" LinkRefType=\"71\"/>\n"
+    );
+    let xml = xml.replacen(anchor, &format!("{more}{anchor}"), 1);
+    LoxoneDoc::parse(xml.as_bytes()).unwrap()
+}
+
+#[test]
+fn title_claim_carries_the_refs_that_copy_the_title() {
+    let base = base_with_refs();
+    let claims = Module::parse(
+        "extern netz = VirtualIn(iname: \"VI5\")\n\
+         netz.title = \"Netzbezug Haus\"\n",
+    )
+    .unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &claims, &mut lock, &opts()).unwrap();
+
+    // Every ref the GUI re-derives takes the new title — a stale one too,
+    // since a save would rewrite it as well; the collected ref keeps its own.
+    for u in [NETZ, NETZ_REF, STALE_REF] {
+        assert_eq!(title(&out, u).as_deref(), Some("Netzbezug Haus"), "{u}");
+    }
+    assert_eq!(
+        title(&out, COLLECTED_REF).as_deref(),
+        Some("Netzbezug Zähler")
+    );
+    let c = &lock.attr_claims[NETZ][&Attr::Title];
+    assert_eq!(c.followers, [STALE_REF, NETZ_REF]);
+
+    // Fixpoint against its own output.
+    let again = compile(&out, &claims, &mut lock, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), again.to_bytes());
+
+    // Withdrawn: the refs show the restored title, as a save would derive.
+    let back = compile(&out, &module(""), &mut lock, &opts()).unwrap();
+    for u in [NETZ, NETZ_REF, STALE_REF] {
+        assert_eq!(title(&back, u).as_deref(), Some("Netzbezug"), "{u}");
+    }
+    assert_eq!(
+        title(&back, COLLECTED_REF).as_deref(),
+        Some("Netzbezug Zähler")
+    );
+    assert_eq!(
+        lock.removed_attrs[NETZ][&Attr::Title].followers,
+        [STALE_REF, NETZ_REF]
+    );
+}
+
+#[test]
+fn minted_ref_takes_the_claimed_title() {
+    let src = |claim: &str| {
+        Module::parse(&format!(
+            "extern netz = VirtualIn(iname: \"VI5\")\n\
+             {claim}\n\
+             spiegel = InputRef(\n\
+             \tmirrors: netz,\n\
+             \tAI: netz.Q,\n\
+             )\n"
+        ))
+        .unwrap()
+    };
+    let minted = |doc: &LoxoneDoc| {
+        doc.objects()
+            .into_iter()
+            .find(|o| o.block_type == "InputRef" && o.uuid != NETZ_REF)
+            .and_then(|o| o.title)
+    };
+    let mut lock = Lockfile::new();
+    let out = compile(
+        &base(),
+        &src("netz.title = \"Netzbezug Haus\""),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(minted(&out).as_deref(), Some("Netzbezug Haus"));
+    assert_eq!(title(&out, NETZ_REF).as_deref(), Some("Netzbezug Haus"));
+
+    // Withdrawn against the deployed claim: the minted ref follows the
+    // restored title, not the one the base still shows.
+    let back = compile(&out, &src(""), &mut lock, &opts()).unwrap();
+    assert_eq!(minted(&back).as_deref(), Some("Netzbezug"));
+    assert_eq!(title(&back, NETZ).as_deref(), Some("Netzbezug"));
+}

@@ -165,6 +165,20 @@ resolved):
   output-port uuids, 19/19" — read off r50 snapshots of 2026-08-25
   that the first push had already damaged (see *UUIDs are unique*
   below).
+- **A ref's `Title=` is derived from its target.** Loxone Config
+  rewrites it to the mirrored object's title on every save, whatever it
+  held — minted refs (oracle session 11) and the GUI's own alike,
+  visible or not, stale ones included (session 12, 2026-10-29). The one
+  exception are the inputs an alarm block (`SmokeAlarm`, `Alarm`)
+  collected into its sensor list: `InputRef`s with `WF` bit 0x1000
+  (house config: 46 of 189 InputRefs, all wired into such a block, 33
+  of them titled "<input> <device>", the rest a plain copy). The GUI
+  keeps their titles through a rename of the target or of its device.
+  `WF` is the GUI's own bookkeeping: a hand-flipped 0x1000/0x0800 is
+  restored on save, adding or removing `Px`/`Py` changes neither bit
+  nor title. The `OutputRef`s those blocks use also carry 0x1000
+  (54 in the house) and follow their target like any other ref. lxir
+  keeps refs in step with title claims (D43).
 - **API distribution wires are recorded in reverse**: for
   `AutoJalousie.OutputAPI → ApiActor`-style links the `<In>` entry sits
   on the *block's output* connector and names the `OutputRef.AI` (or
