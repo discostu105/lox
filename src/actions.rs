@@ -101,8 +101,10 @@ pub enum Action {
     Intercom(IntercomCmd),
     Charger(ChargerCmd),
     LockControl(String),
+    #[cfg_attr(not(feature = "tui"), allow(dead_code))]
     UnlockControl,
     /// Set an analog/virtual input value (already a plain value string)
+    #[cfg_attr(not(feature = "tui"), allow(dead_code))]
     Value(String),
     /// Raw command string, sent as-is
     Raw(String),
