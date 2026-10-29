@@ -100,6 +100,7 @@ Error codes:
 | `control_not_found` | No control matches the name |
 | `ambiguous_control` | Multiple controls match — use `--room` to disambiguate |
 | `config_not_found` | Missing config file |
+| `user_changes_pending` | `lox config push --force` refused: users changed live, loading the upload would delete that |
 | `confirmation_required` | Command needs `--yes` (reboot, firmware update; user and access changes without a terminal) |
 | `declined_by_user` | The confirmation was answered with no |
 | `user_not_found` | No user matches the name |

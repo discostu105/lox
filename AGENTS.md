@@ -100,6 +100,7 @@ archived, work merged there comes over with
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (by hash, `v273`, save date, `<hash>^`), working copy, cache, FTP download, files; block history across commits |
 | `src/commands/config_insight.rs` | Read-only `lox config diff/show/wiring/find/lint/history` |
 | `src/commands/config_push.rs` | `lox config push`: deploy an lxir project — drift check, compile against the live download (lxir library), byte-exact staging, upload as `sps_new.zip`, reboot, verify, move `base`; `Miniserver` trait with a fake for tests |
+| `src/commands/push_users.rs` | The push's user guard: live users (user management API) against the users of the program file — the changes an upload would discard |
 | `crates/lxir/` | The lxir crate (see above): `src/xml.rs`, `uuid.rs`, `doc.rs`, `connectors.rs`, `lock.rs`, `diff.rs`, `project.rs`, `ir/` (parser, compile, decompile, adopt, lint, simtest), `cli.rs`; its own `docs/`, `tests/`, `examples/` (`examples/ci.sh` runs in CI) |
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 

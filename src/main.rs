@@ -1741,6 +1741,11 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
         "ambiguous_control"
     } else if lower.contains("config not found") {
         "config_not_found"
+    } else if e
+        .downcast_ref::<commands::push_users::UserChangesPending>()
+        .is_some()
+    {
+        "user_changes_pending"
     } else if lower.contains("requires --yes") {
         "confirmation_required"
     } else if let Some(http_err) = e.downcast_ref::<client::HttpStatusError>() {
