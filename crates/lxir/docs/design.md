@@ -1610,6 +1610,14 @@ Anything unverified is an error, not a heuristic:
     also mintable, so the claim applies to both; it runs as a post-pass
     over the compiled document by UUID. No lock state, no restore
     (D40/D41).
+  - **Schedules are semantics** (lox#162). The diff compares every
+    DayTimer's schedule per mode column, in the source's terms
+    (intervals, `activate`, `= value` on an analog timer), and groups
+    the columns that changed alike under the day words; `N=` and
+    `UserModes=` are counts of the columns and add nothing. A column
+    keys on its mode, not on its index, so a reordered `Modes=` list is
+    the same schedule. The fingerprint includes the columns: v6.
+    `lxir drift` accepts a v5 fingerprint recorded before.
   Validated with the oracle (session 18): see oracle-wine.md.
 - **D54 — minting virtual inputs** (2026-10-29). Agent-written
   automations often need a switch the user flips in the app ("party
