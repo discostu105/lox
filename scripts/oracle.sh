@@ -59,6 +59,31 @@ check_isolation() {
     done
 }
 
+# --- ProgramData -----------------------------------------------------------
+# Loxone Config reads its icon library, block images and templates from
+# ProgramData/Loxone/Loxone Config <version>. The packaged launcher
+# (/usr/bin/loxone-config of loxone-config-bin) copies them into its
+# prefix whenever the package version changes; the oracle runs the exe
+# directly, so it does the same for its own prefix, with the same stamp.
+# Without them Loxone Config loads for minutes at full CPU and then says
+# "Die Icon Library konnte nicht geladen werden".
+seed_programdata() {
+    local dir full dest stamp
+    dir=$(dirname "$exe")
+    if [ ! -d "$dir/programdata" ] || [ ! -f "$dir/VERSION" ]; then
+        note "no programdata/ + VERSION next to $exe — ProgramData not seeded"
+        return 0
+    fi
+    full=$(cat "$dir/VERSION")
+    dest="$prefix/drive_c/ProgramData/Loxone/Loxone Config ${full%-*}"
+    stamp="$prefix/.loxone-config-bin-version"
+    [ "$(cat "$stamp" 2>/dev/null)" = "$full" ] && return 0
+    mkdir -p "$dest"
+    cp -r "$dir/programdata/." "$dest/"
+    printf '%s' "$full" >"$stamp"
+    note "seeded ProgramData for Loxone Config $full"
+}
+
 # --- Xvfb ----------------------------------------------------------------
 xvfb_pid() { [ -f "$work/xvfb.pid" ] && cat "$work/xvfb.pid" || true; }
 
@@ -82,11 +107,31 @@ up() {
         note "Xvfb up on $display (pid $(xvfb_pid))"
     fi
     check_isolation
+    seed_programdata
 }
 
 # --- GUI helpers ---------------------------------------------------------
 # Window ids churn right after launch — always re-search, never cache.
-main_window() { xd search --onlyvisible --name 'Loxone Config' 2>/dev/null | head -1 || true; }
+# Loxone Config's message boxes share the main window's caption; at
+# least 400 px high is the main window, anything lower a message box.
+main_window() {
+    local id h
+    for id in $(xd search --onlyvisible --name 'Loxone Config' 2>/dev/null || true); do
+        h=$(xd getwindowgeometry --shell "$id" 2>/dev/null | sed -n 's/^HEIGHT=//p')
+        [ "${h:-0}" -ge 400 ] && { echo "$id"; return 0; }
+    done
+    return 0 # none yet; `id=$(main_window)` must not trip set -e
+}
+
+# Message boxes are the low ones; the id of the first, if any is up.
+message_box() {
+    local id h
+    for id in $(xd search --onlyvisible --name 'Loxone Config' 2>/dev/null || true); do
+        h=$(xd getwindowgeometry --shell "$id" 2>/dev/null | sed -n 's/^HEIGHT=//p')
+        [ "${h:-400}" -lt 400 ] && { echo "$id"; return 0; }
+    done
+    return 0
+}
 
 # The auto-backup recovery dialog's caption is "LoxoneConfig" (no
 # space). Answer No — the file must open exactly as compiled. Alt+N is
@@ -134,9 +179,12 @@ open_file() {
     printf '%s\n' "$copy" >"$work/open.path"
     winpath="Z:$(realpath "$copy" | tr / '\\')"
     note "opening copy $copy"
+    # The launcher must not inherit our stdout: it lives as long as the
+    # GUI, so `oracle.sh run … | tail` would wait for Loxone Config to
+    # exit and hold back every message, the failure included.
     (cd "$(dirname "$exe")" &&
         DISPLAY=$display WINEPREFIX=$prefix LIBGL_ALWAYS_SOFTWARE=1 \
-        nohup wine "$exe" "$winpath" >/dev/null 2>&1 &)
+        nohup wine "$exe" "$winpath" &) </dev/null >/dev/null 2>&1
     # Poll for the main window; answer the recovery dialog whenever it
     # shows (it can precede or follow the main window).
     local i=0
@@ -164,7 +212,12 @@ save_file() {
     xd key ctrl+s
     i=0
     while [ "$(md5sum "$copy" | cut -d' ' -f1)" = "$sum" ]; do
-        i=$((i + 1)); [ "$i" -gt 30 ] && die "file unchanged 60s after Ctrl+S — check 'oracle.sh shot'"
+        i=$((i + 1))
+        if [ "$i" -gt 30 ]; then
+            [ -n "$(message_box)" ] &&
+                die "file unchanged 60s after Ctrl+S — a Loxone Config message box is up; check 'oracle.sh shot'"
+            die "file unchanged 60s after Ctrl+S — check 'oracle.sh shot'"
+        fi
         sleep 2
     done
     sleep 2 # let the write finish
