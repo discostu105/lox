@@ -528,6 +528,13 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "Code16",
 ];
 
+/// Block versions (`V=` on `<C>`) the builtin table is verified for,
+/// oldest first. Loxone Config writes every object of a document at its
+/// release's block version on save (17.0 and 17.1 write 175, 17.2 writes
+/// 178), and every builtin type keeps its connector keys and indexes across
+/// these (D46). Compile emits the document's version when it is listed here.
+pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
+
 /// Element-attribute parameters per block type: logic Loxone stores as an
 /// attribute on the `<C>` element rather than as `Def=` on a connector. In
 /// the IR they bind like any parameter (`Formula: "I1+I2"` in the argument

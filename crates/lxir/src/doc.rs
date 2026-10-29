@@ -235,6 +235,29 @@ impl LoxoneDoc {
             .map(|v| v.into_owned())
     }
 
+    /// The block version (`V=`) of the document's objects, e.g. `"178"`.
+    /// Loxone Config writes every object at its release's version on save,
+    /// so a GUI-saved file carries one; where objects disagree (blocks
+    /// another writer emitted), the most common wins, a tie the higher.
+    pub fn block_version(&self) -> Option<String> {
+        fn count<'a>(el: &'a Element, seen: &mut BTreeMap<&'a str, usize>) {
+            for child in el.child_elements() {
+                if child.name == "C"
+                    && child.attr("Type") != Some("Document")
+                    && let Some(v) = child.attr("V")
+                {
+                    *seen.entry(v).or_default() += 1;
+                }
+                count(child, seen);
+            }
+        }
+        let mut seen = BTreeMap::new();
+        count(&self.xml.root, &mut seen);
+        seen.into_iter()
+            .max_by_key(|&(v, n)| (n, v.len(), v))
+            .map(|(v, _)| v.to_string())
+    }
+
     /// All `<C>` objects in document order (recursive).
     pub fn objects(&self) -> Vec<ObjectSummary> {
         let mut out = Vec::new();
@@ -585,6 +608,17 @@ mod tests {
         \t\t</C>\r\n\
         \t</C>\r\n\
         </ControlList>\r\n";
+
+    #[test]
+    fn block_version_is_the_objects_majority() {
+        // The Document's own V (its ConfigVersion) does not count.
+        let doc = LoxoneDoc::parse(FIXTURE.as_bytes()).unwrap();
+        assert_eq!(doc.block_version().as_deref(), Some("175"));
+        // One page at 178, one block at 175: the tie goes to the higher.
+        let mixed = FIXTURE.replacen("V=\"175\"", "V=\"178\"", 1);
+        let doc = LoxoneDoc::parse(mixed.as_bytes()).unwrap();
+        assert_eq!(doc.block_version().as_deref(), Some("178"));
+    }
 
     #[test]
     fn objects_ports_wires() {

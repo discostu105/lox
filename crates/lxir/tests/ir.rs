@@ -109,6 +109,55 @@ fn recompiling_a_gui_saved_config_keeps_its_in_order() {
 }
 
 #[test]
+fn managed_blocks_carry_the_documents_block_version() {
+    // D46: Loxone Config writes every object at its release's block
+    // version on save (17.2: V="178"). Compile emits that version when the
+    // builtin table is verified for it, so a save has nothing to restamp,
+    // and keeps the first verified one (175) for any other.
+    let saved_at = |v: &str| {
+        let text = std::fs::read_to_string("examples/configs/haus.Loxone").unwrap();
+        let text = text.replace("V=\"175\"", &format!("V=\"{v}\""));
+        LoxoneDoc::parse(text.as_bytes()).unwrap()
+    };
+    let versions = |doc: &LoxoneDoc, types: &[&str]| -> Vec<String> {
+        doc.objects()
+            .iter()
+            .filter(|o| types.contains(&o.block_type.as_str()))
+            .map(|o| {
+                doc.element_at(&o.path)
+                    .unwrap()
+                    .attr("V")
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
+    };
+    let managed = ["GreaterEqual", "And"];
+
+    let mut lock = Lockfile::new();
+    let out = compile(&saved_at("178"), &module(), &mut lock, &opts()).unwrap();
+    assert_eq!(versions(&out, &managed), ["178", "178"]);
+    let again = compile(&out, &module(), &mut lock, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), again.to_bytes());
+
+    // Adopt accepts 178 blocks and rebuilds them as they are.
+    let (adopted, adopted_lock, report) = adopt(&out).unwrap();
+    assert!(
+        report.refused.iter().all(|r| !r.contains("block version")),
+        "{:?}",
+        report.refused
+    );
+    let rebuilt = compile(&out, &adopted, &mut adopted_lock.clone(), &opts()).unwrap();
+    assert_eq!(versions(&rebuilt, &managed), ["178", "178"]);
+
+    // An unverified version: managed blocks stay at 175 for Loxone
+    // Config to migrate on load.
+    let out = compile(&saved_at("180"), &module(), &mut Lockfile::new(), &opts()).unwrap();
+    assert_eq!(versions(&out, &managed), ["175", "175"]);
+    assert_eq!(versions(&out, &["AutoJalousie"]), ["180"]);
+}
+
+#[test]
 fn counters_advance_once_per_minted_object_and_never_decrease() {
     let base = base();
     assert_eq!(base.counters().next_obj, 200);

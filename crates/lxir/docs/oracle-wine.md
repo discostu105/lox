@@ -376,6 +376,30 @@ GUI-saved damage), ran `lxir repair`, then one open+save:
   kept every `NDOC=` (18/18) and the program byte-identical, and the
   semantic diff shows only two ref titles known to be stale (D43).
 
+## Block version 178 (session 14, D46) — passed
+
+Ran 2026-10-29 with Loxone Config 17.2.8.28 (`ConfigVersion 17020828`),
+whose saves write every object at `V="178"`. Two runs, both with the
+compiler emitting 178:
+
+- **Mint oracle.** One bare instance of each of the 24 builtin types,
+  on page Testing of the house config as last saved by 17.2, opened
+  and saved once. All 24 come back at `V="178"` with their exact
+  connector keys and UUIDs. The semantic diff holds two backfills on
+  the bare probes: `Formula=""` on the Formula, `Code=""` on the Code16
+  (under 17.1 the Code16 got none). One layout change:
+  AnalogThresholdTrigger's connectors are written `Input, On, Off,
+  Remanence, …`, where 17.1 wrote `Input, Remanence, On, Off, …`, with
+  unchanged indexes. The house's own 17.2 save shows the same order.
+- **House rebuild.** The whole house config (1909 objects) compiled at
+  178 open+saves with an empty semantic diff, every object still at 178.
+
+A save of that rebuild still differs from it in bytes: blocks move
+within their page, `Desc=` moves right after `Type=`, the
+AnalogThresholdTrigger connectors are reordered, and minted ApiActor
+refs gain `Text="true"`, which GUI-created ApiActor refs carry under
+17.1 too and D33 does not emit yet.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

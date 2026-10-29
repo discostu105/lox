@@ -77,6 +77,17 @@ Tree/Air/Modbus devices) are **never admitted** regardless of evidence —
 they carry device bindings; lxir references hardware, it does not own it
 (see [vision.md](vision.md)).
 
+## Block versions
+
+Every `<C>` carries a block version, `V=`, one per document: Loxone
+Config writes all objects at its release's version on save. The table
+is verified for the versions in `connectors::VERIFIED_BLOCK_VERSIONS`:
+175 (17.0, 17.1) and 178 (17.2, oracle session 14). A new release's
+version joins the list after the mint oracle has open+saved every
+builtin type at that version, and a real rebuild, under that release
+(design decision D46). Until then compile writes its blocks at 175 and
+adopt refuses blocks of that version.
+
 ## Admitted in the first batch
 
 | Type | Ports (index order) | Basis |

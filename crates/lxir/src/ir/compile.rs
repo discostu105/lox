@@ -32,7 +32,7 @@
 //!   Wine oracle showed Loxone Config 17 silently deletes off-descriptor
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
-use crate::connectors::{PortDir, attr_params, builtin, ref_link_type};
+use crate::connectors::{PortDir, VERIFIED_BLOCK_VERSIONS, attr_params, builtin, ref_link_type};
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
 use crate::ir::ast::{Attr, Item, MatchSpec, Module, Value};
@@ -721,11 +721,19 @@ pub fn compile(
     //     page. The index is taken once after teardown; appending children
     //     never shifts the recorded page paths.
     let page_index = doc.index();
+    // D46: managed blocks carry the document's block version, so a GUI
+    // save has none to restamp — when the builtin table is verified for
+    // it. Otherwise they keep the version the table was first verified
+    // for, and Loxone Config migrates them on load.
+    let block_version = doc
+        .block_version()
+        .filter(|v| VERIFIED_BLOCK_VERSIONS.contains(&v.as_str()))
+        .unwrap_or_else(|| VERIFIED_BLOCK_VERSIONS[0].to_string());
     for block in module.blocks() {
         let plan = &managed[&block.slug];
         let mut el = Element::new("C");
         el.set_attr("Type", &block.block_type);
-        el.set_attr("V", "175");
+        el.set_attr("V", &block_version);
         el.set_attr("U", &plan.uuid);
         // A ref block's title is GUI-derived from its mirror target
         // (oracle session 11) — emit the derived value so a save is a
