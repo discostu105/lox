@@ -120,14 +120,16 @@ lox light color "LED Strip" "hsv(120,100,100)"  # HSV
 ## Blinds
 
 ```bash
-lox blind "Beschattung Süd" up
-lox blind "Beschattung Süd" down
-lox blind "Beschattung Süd" stop
-lox blind "Beschattung Süd" pos 50    # position 0-100%
-lox blind "Beschattung Süd" full-up
-lox blind "Beschattung Süd" full-down
-lox blind "Beschattung Süd" shade     # automatic shading
+lox blind "Beschattung Süd" up          # all the way up (FullUp); also: open, full-up
+lox blind "Beschattung Süd" down        # all the way down (FullDown); also: close, full-down
+lox blind "Beschattung Süd" stop        # stop moving (off)
+lox blind "Beschattung Süd" pos 50      # to a position, 0 = open, 100 = closed (manualPosition/50)
+lox blind "Beschattung Süd" 50          # same as pos 50
+lox blind "Beschattung Süd" shade       # automatic shading (AutomaticDown); also: auto
+lox blind "Beschattung Süd" shade 40    # slat angle, 0 = horizontal, 100 = vertical (manualLamella/40)
 ```
+
+`up` and `down` are full moves: the blind runs to its end position unless it is stopped. They are not jog steps; for those send the raw commands (`lox send "Beschattung Süd" up`, then `lox send "Beschattung Süd" UpOff`).
 
 ---
 
