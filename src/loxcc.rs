@@ -12,7 +12,9 @@ use std::io::{Cursor, Read, Write};
 pub const LOXCC_MAGIC: u32 = 0xaabbccee;
 const LOXCC_HEADER_LEN: usize = 16;
 /// The entry name of the config inside a backup ZIP.
-const SPS0_ENTRY: &str = "sps0.loxcc";
+const SPS0_ENTRY: &str = "sps0.LoxCC";
+/// The access table next to the config (see `lxir::permissions`).
+pub const PERMISSIONS_ENTRY: &str = "permissions.bin";
 
 /// Decompress a `sps0.LoxCC` binary blob into XML bytes.
 ///
@@ -179,28 +181,48 @@ pub fn compress_loxcc(xml: &[u8]) -> Result<Vec<u8>> {
 /// time (ZIP times are local), because the content is new. Before
 /// returning, the result is extracted again and must yield exactly `xml`.
 pub fn stage_upload_zip(template_zip: &[u8], xml: &[u8]) -> Result<Vec<u8>> {
+    stage_upload_zip_replacing(template_zip, xml, &[])
+}
+
+/// [`stage_upload_zip`], with more entries replaced the way `sps0.LoxCC`
+/// is: each `(name, content)` names an entry the template has exactly once
+/// (in any case), which keeps its name, position and compression method and
+/// gets `content` and the current time. The staged ZIP must extract to
+/// exactly these contents.
+pub fn stage_upload_zip_replacing(
+    template_zip: &[u8],
+    xml: &[u8],
+    replace: &[(&str, &[u8])],
+) -> Result<Vec<u8>> {
     let mut template =
         zip::ZipArchive::new(Cursor::new(template_zip)).context("Invalid template ZIP archive")?;
-    let hits = template
-        .file_names()
-        .filter(|n| n.eq_ignore_ascii_case(SPS0_ENTRY))
-        .count();
-    if hits != 1 {
-        bail!("Template ZIP must contain exactly one sps0.LoxCC, found {hits}");
+    let loxcc = compress_loxcc(xml)?;
+    let mut entries: Vec<(&str, &[u8])> = vec![(SPS0_ENTRY, &loxcc)];
+    entries.extend_from_slice(replace);
+    for (name, _) in &entries {
+        let hits = template
+            .file_names()
+            .filter(|n| n.eq_ignore_ascii_case(name))
+            .count();
+        if hits != 1 {
+            bail!("Template ZIP must contain exactly one {name}, found {hits}");
+        }
     }
 
-    let loxcc = compress_loxcc(xml)?;
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for i in 0..template.len() {
         let entry = template.by_index_raw(i)?;
-        if entry.name().eq_ignore_ascii_case(SPS0_ENTRY) {
+        let new = entries
+            .iter()
+            .find(|(name, _)| entry.name().eq_ignore_ascii_case(name));
+        if let Some((_, content)) = new {
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(entry.compression())
                 .last_modified_time(zip_now()?);
             let name = entry.name().to_string();
             drop(entry);
             writer.start_file(name, options)?;
-            writer.write_all(&loxcc)?;
+            writer.write_all(content)?;
         } else {
             writer.raw_copy_file(entry)?;
         }
@@ -215,7 +237,27 @@ pub fn stage_upload_zip(template_zip: &[u8], xml: &[u8]) -> Result<Vec<u8>> {
             roundtrip.len()
         );
     }
+    for (name, content) in replace {
+        if read_entry(&staged, name)?.as_deref() != Some(*content) {
+            bail!("Staged ZIP does not extract {name} byte-identically");
+        }
+    }
     Ok(staged)
+}
+
+/// The content of the entry `name` (in any case) of a ZIP; `None` when the
+/// ZIP has no such entry.
+pub fn read_entry(zip_data: &[u8], name: &str) -> Result<Option<Vec<u8>>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(zip_data)).context("Invalid ZIP archive")?;
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.name().eq_ignore_ascii_case(name) {
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)?;
+            return Ok(Some(buf));
+        }
+    }
+    Ok(None)
 }
 
 /// The current local time as a ZIP timestamp.
@@ -504,6 +546,41 @@ mod tests {
     }
 
     #[test]
+    fn test_stage_upload_zip_replaces_permissions_too() {
+        let template = template_zip();
+        let permissions = noise(48);
+        let staged =
+            stage_upload_zip_replacing(&template, b"<new/>", &[(PERMISSIONS_ENTRY, &permissions)])
+                .unwrap();
+        assert_eq!(
+            read_entry(&staged, PERMISSIONS_ENTRY).unwrap().unwrap(),
+            permissions
+        );
+        let before = raw_entries(&template);
+        let after = raw_entries(&staged);
+        // permissions.bin: same name, place and method, new content and time
+        assert_eq!((&before[2].0, before[2].1), (&after[2].0, after[2].1));
+        assert_ne!(before[2].2, after[2].2);
+        // the rest is still copied raw
+        assert_eq!(before[1], after[1]);
+        assert_eq!(before[3..], after[3..]);
+
+        let none = zip_with(&[(
+            "sps0.LoxCC",
+            &compress_loxcc(b"<old/>").unwrap(),
+            zip::CompressionMethod::Stored,
+        )]);
+        let err =
+            stage_upload_zip_replacing(&none, b"<new/>", &[(PERMISSIONS_ENTRY, &permissions)])
+                .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("exactly one permissions.bin, found 0"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn test_stage_upload_zip_matches_name_case_insensitively() {
         let old = compress_loxcc(b"<old/>").unwrap();
         let template = zip_with(&[("SPS0.LOXCC", &old, zip::CompressionMethod::Stored)]);
@@ -581,5 +658,54 @@ mod tests {
             seen += 1;
         }
         assert!(seen > 0, "no ZIPs in LOX_CORPUS");
+    }
+
+    /// Real downloads: `LOX_CORPUS=<dir> cargo test corpus -- --nocapture`.
+    /// Every ZIP with a `permissions.bin` must get exactly that file back
+    /// from `lxir::permissions::generate` over its own program and
+    /// `LoxAPP3.json`.
+    #[test]
+    fn test_corpus_permissions() {
+        let Some(dir) = std::env::var_os("LOX_CORPUS") else {
+            return;
+        };
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        paths.sort();
+        let (mut matched, mut failed) = (0, Vec::new());
+        for path in paths {
+            let data = std::fs::read(&path).unwrap();
+            if !data.starts_with(b"PK\x03\x04") {
+                continue;
+            }
+            let name = path.display().to_string();
+            let (Some(bin), Some(app)) = (
+                read_entry(&data, PERMISSIONS_ENTRY).unwrap(),
+                read_entry(&data, crate::app_catalogue::MEMBER).unwrap(),
+            ) else {
+                println!("{name}: no permissions.bin or LoxAPP3.json, skipped");
+                continue;
+            };
+            let xml = extract_and_decompress(&data).unwrap();
+            let doc = lxir::LoxoneDoc::parse(&xml).unwrap();
+            let app = String::from_utf8(app).unwrap();
+            let ours = lxir::permissions::encode(&lxir::permissions::generate(&doc, &app).unwrap());
+            if ours == bin {
+                println!("{name}: permissions.bin identical ({} B)", bin.len());
+                matched += 1;
+            } else {
+                let at = ours.iter().zip(&bin).position(|(a, b)| a != b);
+                println!(
+                    "{name}: permissions.bin differs ({} B ours, {} B written, first at {at:?})",
+                    ours.len(),
+                    bin.len()
+                );
+                failed.push(name);
+            }
+        }
+        assert!(failed.is_empty(), "permissions.bin differs for {failed:?}");
+        assert!(matched > 0, "no ZIP with permissions.bin in LOX_CORPUS");
     }
 }
