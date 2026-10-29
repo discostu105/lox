@@ -117,8 +117,8 @@ lox config devices file.Loxone            # list hardware devices
 reboot and verify in one go, deploy with [`lox config push`](/lox/guides/config-as-code#deploy-with-lox-config-push).
 
 {: .warning }
-An upload replaces the whole program and discards autopilot rules that exist only on the Miniserver (created in the
-app). Check `lox autopilot changed` first.
+An upload replaces the whole program and deletes the Miniserver's custom changes: what the app, the web UI or the
+API changed and Loxone Config has not saved (light moods, timers, autopilot rules). `upload` lists them first.
 
 ### Inspecting the logic
 

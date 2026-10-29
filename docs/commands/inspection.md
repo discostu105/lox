@@ -194,5 +194,6 @@ lox autopilot changed -o json         # {"changed": <unix seconds>, "changed_at"
 
 Rules created or edited in the app can live only in the Miniserver's *custom changes*, not in the
 program file: `lox autopilot ls` and a config download don't see them, and uploading a config discards
-them (the Miniserver logs `Remove old custom changes`). Before an upload, check that
-`lox autopilot changed` is older than the download the upload is based on.
+them (the Miniserver logs `Remove old custom changes`). `lox config push --force` refuses while the
+Miniserver holds custom changes, and `lox config upload` / `restore` list them. Before another kind of
+upload, check that `lox autopilot changed` is older than the download the upload is based on.

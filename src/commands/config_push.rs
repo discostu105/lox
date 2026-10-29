@@ -4,6 +4,10 @@
 //! Each step stops the push when it fails:
 //!
 //! 1. Download the config the Miniserver runs now (kept under `backups/`).
+//!    Its custom changes (what the app, the web UI or the API changed and
+//!    Loxone Config has not saved) are not in that download, and loading an
+//!    upload deletes them: with any present, `--force` refuses unless
+//!    `--discard-custom-changes` says to delete them.
 //! 2. Drift check: the live config must still be the project's base, at least
 //!    semantically (`lox ir diff` would be empty). A change saved from Loxone
 //!    Config or the app since then is never overwritten.
@@ -26,6 +30,7 @@
 
 use crate::client::LoxClient;
 use crate::config::Config;
+use crate::custom_changes::{self, CustomChange};
 use crate::{ftp, logic, loxcc};
 use anyhow::{Context, Result, anyhow, bail};
 use lxir::ir::{CompileOptions, compile};
@@ -42,6 +47,9 @@ pub(crate) trait Miniserver {
     fn serial(&self) -> Option<String>;
     /// The newest config ZIP on the Miniserver: its file name and bytes.
     fn download_newest(&self) -> Result<(String, Vec<u8>)>;
+    /// The files of `/sys/custom` (name, LoxCC bytes): custom changes an
+    /// upload would delete.
+    fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>>;
     /// Upload a config ZIP as `/prog/sps_new.zip`.
     fn upload(&self, zip: &[u8]) -> Result<()>;
     fn reboot(&self) -> Result<()>;
@@ -73,6 +81,10 @@ impl Miniserver for LiveMiniserver {
             .context("No configs found on the Miniserver")?;
         let data = ftp::download_backup(&self.cfg, &newest.filename)?;
         Ok((newest.filename, data))
+    }
+
+    fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        ftp::download_custom_changes(&self.cfg)
     }
 
     fn upload(&self, zip: &[u8]) -> Result<()> {
@@ -118,6 +130,8 @@ pub(crate) struct PushOptions {
     /// Where downloads and push artifacts go (default: `backups/` in the
     /// project).
     pub backup_dir: Option<PathBuf>,
+    /// Upload even though the Miniserver holds custom changes, deleting them.
+    pub discard_custom_changes: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,6 +145,8 @@ pub(crate) struct PushReport {
     pub rebased: bool,
     /// Logic changes from live to the compiled config
     pub changes: Vec<String>,
+    /// Custom changes on the Miniserver that loading the upload deletes
+    pub custom_changes_pending: Vec<CustomChange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compiled: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,6 +195,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let live_path = file("pre-push.Loxone");
     fs::write(file("pre-push.zip"), &live_zip)?;
     fs::write(&live_path, &live_xml)?;
+    let pending = check_custom_changes(ms, opts, &live_xml, &say)?;
 
     // 2. Drift: nobody else may have changed the logic since the base.
     let (compile_base, rebased) = match &opts.patched_from {
@@ -240,6 +257,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         live: live_path,
         rebased,
         changes: Vec::new(),
+        custom_changes_pending: pending,
         compiled: None,
         staged: None,
         verified: None,
@@ -323,6 +341,65 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     report.outcome = "pushed";
     report.verified = Some(post_path);
     Ok(report)
+}
+
+/// The custom changes an upload would delete. With `--force` any present
+/// stop the push, unless `--discard-custom-changes`; a staging run only warns.
+/// A failed check counts as changes present: it stops `--force` too.
+fn check_custom_changes(
+    ms: &dyn Miniserver,
+    opts: &PushOptions,
+    live_xml: &[u8],
+    say: &dyn Fn(&str),
+) -> Result<Vec<CustomChange>> {
+    let refuse = opts.force && !opts.discard_custom_changes;
+    let files = match ms.custom_changes() {
+        Ok(files) => files,
+        Err(e) if refuse => {
+            return Err(e.context(format!(
+                "Cannot check {} for custom changes, which loading the upload would delete. \
+                 --discard-custom-changes pushes without the check.",
+                ftp::CUSTOM_CHANGES_DIR
+            )));
+        }
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot check {} for custom changes: {e:#}",
+                ftp::CUSTOM_CHANGES_DIR
+            ));
+            return Ok(Vec::new());
+        }
+    };
+    let pending = custom_changes::describe(&files, Some(live_xml));
+    if pending.is_empty() {
+        return Ok(pending);
+    }
+    let list: String = pending
+        .iter()
+        .map(|c| format!("\n  {}", c.label()))
+        .collect();
+    let head = format!(
+        "The Miniserver holds {} custom change(s) that are not in the program file \
+         (made in the app, the web UI or through the API):{list}\n\
+         Loading the upload deletes them.",
+        pending.len()
+    );
+    if refuse {
+        bail!(
+            "{head} To keep them, load the project from the Miniserver in Loxone Config and \
+             save it, then bring the project up to date with that download. To delete them \
+             on purpose, push with --discard-custom-changes."
+        );
+    }
+    if opts.force {
+        say(&format!("{head} Deleting them (--discard-custom-changes)."));
+    } else {
+        say(&format!(
+            "{head} `--force` will refuse while they are there (or delete them with \
+             --discard-custom-changes)."
+        ));
+    }
+    Ok(pending)
 }
 
 /// `lox ir compile` for the project, against `base` instead of the project's
@@ -454,6 +531,8 @@ mod tests {
         current: RefCell<Vec<u8>>,
         uploaded: RefCell<Option<Vec<u8>>>,
         reboots: RefCell<usize>,
+        /// The files of /sys/custom; `None`: listing it fails
+        custom: Option<Vec<(String, Vec<u8>)>>,
     }
 
     impl FakeMiniserver {
@@ -463,6 +542,7 @@ mod tests {
                 current: RefCell::new(zip),
                 uploaded: RefCell::new(None),
                 reboots: RefCell::new(0),
+                custom: Some(Vec::new()),
             }
         }
     }
@@ -476,6 +556,11 @@ mod tests {
                 "sps_100_20261029120000.zip".into(),
                 self.current.borrow().clone(),
             ))
+        }
+        fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
+            self.custom
+                .clone()
+                .ok_or_else(|| anyhow!("550 Permission denied"))
         }
         fn upload(&self, zip: &[u8]) -> Result<()> {
             *self.uploaded.borrow_mut() = Some(zip.to_vec());
@@ -545,6 +630,7 @@ mod tests {
             allow_removals: false,
             accept_version: None,
             backup_dir: None,
+            discard_custom_changes: false,
         }
     }
 
@@ -683,6 +769,89 @@ mod tests {
             live.matches("Visu=\"true\"").count(),
             "the live visualization setting is kept"
         );
+    }
+
+    /// A Miniserver whose app changed the base's first titled block since the
+    /// last save: one /sys/custom file. Returns it and the block's title.
+    fn with_custom_change(dir: &Path) -> (FakeMiniserver, String) {
+        let xml = base(dir);
+        let doc = LoxoneDoc::parse(&xml).unwrap();
+        let obj = doc
+            .objects()
+            .into_iter()
+            .find(|o| o.title.is_some() && o.block_type != "Page")
+            .unwrap();
+        let fragment = format!(r#"<C Type="{}" U="{}"/>"#, obj.block_type, obj.uuid);
+        let mut ms = FakeMiniserver::new(config_zip(&xml));
+        ms.custom = Some(vec![(
+            format!("{}.LoxCC", obj.uuid),
+            loxcc::compress_loxcc(fragment.as_bytes()).unwrap(),
+        )]);
+        (ms, obj.title.unwrap())
+    }
+
+    #[test]
+    fn push_refuses_while_custom_changes_are_pending() {
+        let dir = project();
+        let (ms, title) = with_custom_change(dir.path());
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(msg.contains("1 custom change(s)"), "{msg}");
+        assert!(msg.contains(&format!("\"{title}\"")), "{msg}");
+        assert!(msg.contains("--discard-custom-changes"), "{msg}");
+        assert!(ms.uploaded.borrow().is_none());
+        assert_eq!(*ms.reboots.borrow(), 0);
+    }
+
+    #[test]
+    fn push_discards_custom_changes_on_purpose() {
+        let dir = project();
+        let (ms, title) = with_custom_change(dir.path());
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+
+        let report = push(&ms, &opts, true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert_eq!(report.custom_changes_pending.len(), 1);
+        assert_eq!(
+            report.custom_changes_pending[0].title.as_deref(),
+            Some(title.as_str())
+        );
+        assert!(!report.custom_changes_pending[0].new);
+    }
+
+    #[test]
+    fn staging_reports_custom_changes_without_refusing() {
+        let dir = project();
+        let (ms, _) = with_custom_change(dir.path());
+
+        let report = push(&ms, &options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "staged");
+        assert_eq!(report.custom_changes_pending.len(), 1);
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json["custom_changes_pending"][0]["type"].is_string());
+    }
+
+    #[test]
+    fn a_failed_custom_changes_check_stops_force_but_not_staging() {
+        let dir = project();
+        let mut ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        ms.custom = None;
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+        assert!(format!("{err:#}").contains("550"), "{err:#}");
+        assert!(ms.uploaded.borrow().is_none());
+
+        let staged = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(staged.outcome, "staged");
+
+        let mut opts = options(dir.path(), true);
+        opts.discard_custom_changes = true;
+        assert_eq!(push(&ms, &opts, true).unwrap().outcome, "pushed");
     }
 
     #[test]

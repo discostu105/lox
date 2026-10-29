@@ -154,6 +154,50 @@ pub fn upload_config(cfg: &Config, data: &[u8]) -> Result<()> {
     })
 }
 
+/// Where the Miniserver keeps its custom changes, one `<UUID>.LoxCC` per
+/// object (see `custom_changes`).
+pub const CUSTOM_CHANGES_DIR: &str = "/sys/custom";
+
+/// Download every `*.LoxCC` in /sys/custom: file name and bytes. A directory
+/// that does not exist (FTP 550) holds none.
+pub fn download_custom_changes(cfg: &Config) -> Result<Vec<(String, Vec<u8>)>> {
+    use suppaftp::FtpError;
+    use suppaftp::Status;
+    let host = ftp_host(cfg);
+    ftp_with_retry(|| {
+        let mut ftp = FtpStream::connect(format!("{}:21", host))
+            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        ftp.login(&cfg.user, &cfg.pass)
+            .context("FTP login failed — check your admin credentials")?;
+        let names = match ftp.nlst(Some(CUSTOM_CHANGES_DIR)) {
+            Ok(names) => names,
+            Err(FtpError::UnexpectedResponse(r)) if r.status == Status::FileUnavailable => {
+                Vec::new()
+            }
+            Err(e) => {
+                return Err(e).with_context(|| format!("Failed to list {}", CUSTOM_CHANGES_DIR));
+            }
+        };
+        ftp.transfer_type(suppaftp::types::FileType::Binary)
+            .context("Failed to set binary transfer mode")?;
+        let mut files = Vec::new();
+        for name in names {
+            let name = name.rsplit('/').next().unwrap_or(&name).to_string();
+            if !name.to_ascii_lowercase().ends_with(".loxcc") {
+                continue;
+            }
+            let path = format!("{}/{}", CUSTOM_CHANGES_DIR, name);
+            let data = ftp
+                .retr_as_buffer(&path)
+                .with_context(|| format!("Failed to download {}", path))?
+                .into_inner();
+            files.push((name, data));
+        }
+        ftp.quit().ok();
+        Ok(files)
+    })
+}
+
 /// Extract the FTP hostname from config (strip scheme, port, trailing slash).
 fn ftp_host(cfg: &Config) -> String {
     cfg.host

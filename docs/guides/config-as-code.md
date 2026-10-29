@@ -142,7 +142,10 @@ git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 
 Each step stops the push when it fails:
 
-1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`).
+1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`). **Custom changes:** if the app, the web
+   UI or the API changed something Loxone Config hasn't saved yet (light moods, timers, autopilot rules), the
+   Miniserver holds it in `/sys/custom/`. The download doesn't contain it and the upload would delete it, so
+   `--force` refuses and names what is there.
 2. **Drift check:** the live logic must still be your `base`. If someone saved from Loxone Config or the app since,
    the push refuses and names the `lox ir diff` to run.
 3. Compile against the live download, so users, passwords and layout stay as they are live.
@@ -159,11 +162,12 @@ Each step stops the push when it fails:
 | `--accept-version <v>` | The base was saved by a newer Loxone Config release |
 | `--patched-from <dl.Loxone>` | Your base is a byte patch of that download |
 | `--backup-dir <dir>` | Downloads and artifacts elsewhere (default `backups/`, git-ignored: configs hold personal data) |
+| `--discard-custom-changes` | Push although the Miniserver holds custom changes, deleting them |
 | `-o json` | A machine-readable report on stdout |
 
-{: .warning }
-App-created autopilot rules can live only in the Miniserver's *custom changes*; any upload discards them. Check
-`lox autopilot changed` before you push.
+{: .note }
+To keep custom changes, load the project from the Miniserver in Loxone Config and save it. The live config then
+differs from your `base`: bring the project up to date as below, then push.
 
 **Roll back** by uploading the download from before the push:
 
