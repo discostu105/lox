@@ -1,1 +1,0 @@
-- `lox ir compile` writes its blocks at the block version of the config it compiles against (`V="178"` under Loxone Config 17.2), so a save in Loxone Config no longer restamps them. It used to write a fixed `V="175"`. `lox ir adopt` accepts 17.2 configs, which it refused block by block. The connector table is verified for 17.2 with the save oracle (lxir D46)
