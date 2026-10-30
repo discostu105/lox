@@ -11,7 +11,8 @@ unit-suffixed values (`30min`, `2700K`) and the expression operators
 It also starts the language server (`lxir lsp`) for `.lxir` files:
 diagnostics as you type and on save, go to definition, hover with the base
 object an extern resolves to, port and type completion, formatting
-(*Format Document*), and the outline.
+(*Format Document*), the outline, *Find All References*, *Rename Symbol*
+(fragments and lockfile together) and quick fixes for "did you mean".
 
 Install by linking the folder into your extensions directory, and install
 the language client once (without it the extension still highlights, and

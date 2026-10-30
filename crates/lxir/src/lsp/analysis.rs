@@ -67,6 +67,31 @@ pub struct Unit {
     pub project: Option<Project>,
 }
 
+/// A file a rename rewrites: its text now and after.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEdit {
+    pub file: PathBuf,
+    pub old: String,
+    pub new: String,
+}
+
+/// The `X` of a diagnostic's "did you mean `X`?", when it is a name.
+pub fn suggestion(message: &str) -> Option<&str> {
+    let rest = &message[message.find("did you mean `")? + "did you mean `".len()..];
+    let fix = &rest[..rest.find('`')?];
+    is_name(fix).then_some(fix)
+}
+
+/// `s` is one identifier.
+pub fn is_name(s: &str) -> bool {
+    let mut c = s.chars();
+    c.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && c.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// The declaration kinds rename and references take.
+const RENAMEABLE: &[&str] = &["extern", "block", "instance", "let", "template"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completion {
     pub label: String,
@@ -385,6 +410,135 @@ impl Workspace {
                     .map(|(s, e)| span(f, n, s, e))
             })
         })
+    }
+
+    /// The module-level name at (`line`, `byte`) in `path` that rename
+    /// and references take, with its range: a constant, extern, block,
+    /// template or instance declared outside a template body.
+    pub fn name_at(&self, path: &Path, line: usize, byte: usize) -> Option<(String, Span)> {
+        let text = self.text(path)?;
+        let l = super::text::line(&text, line);
+        let Word::Name { name, start, end } = word_at(l, byte)? else {
+            return None;
+        };
+        if l[end..].trim_start().starts_with(':') && !l[end..].trim_start().starts_with("::") {
+            return None; // an argument key
+        }
+        if local_in(&text, line, name) {
+            return None;
+        }
+        let unit = self.unit(path);
+        let decls = self.decls(&unit);
+        decls.iter().find(|d| {
+            d.slug == name && RENAMEABLE.contains(&d.kind) && {
+                let t = self.text(&d.span.file).unwrap_or_default();
+                !in_template_body(&t, d.span.line)
+            }
+        })?;
+        Some((name.to_string(), span(path, line, start, end)))
+    }
+
+    /// Every use of the module-level name at (`line`, `byte`) across the
+    /// module, its declaration included: the name outside strings and
+    /// comments, not as a port (`x.name`) or an argument key (`name:`),
+    /// and not inside a template body that declares a name of its own
+    /// (a parameter or a block) by it.
+    pub fn references(&self, path: &Path, line: usize, byte: usize) -> Vec<Span> {
+        let Some((name, _)) = self.name_at(path, line, byte) else {
+            return Vec::new();
+        };
+        let unit = self.unit(path);
+        let mut out = Vec::new();
+        for f in &unit.files {
+            let text = self.text(f).unwrap_or_default();
+            let bodies = template_bodies(&text);
+            for (n, l) in text.split('\n').enumerate() {
+                if bodies
+                    .iter()
+                    .any(|(lines, locals)| lines.contains(&n) && locals.contains(&name))
+                {
+                    continue;
+                }
+                let c = code(l);
+                for (s, e) in words(c) {
+                    let after = c[e..].trim_start();
+                    if c[s..e] == name
+                        && !c[..s].ends_with('.')
+                        && !(after.starts_with(':') && !after.starts_with("::"))
+                    {
+                        out.push(span(f, n, s, e));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The files a rename of the name at (`line`, `byte`) to `new`
+    /// changes, with their current and new text. In a project, `lxir
+    /// rename`'s verified plan: the fragments and the lockfile (the
+    /// compiled output is left to the next compile). A file on its own:
+    /// the file.
+    pub fn rename(
+        &self,
+        path: &Path,
+        line: usize,
+        byte: usize,
+        new: &str,
+    ) -> Result<Vec<FileEdit>, String> {
+        let (old, _) = self
+            .name_at(path, line, byte)
+            .ok_or("not a name rename takes (a constant, extern, block, template or instance)")?;
+        let unit = self.unit(path);
+        let sources: Vec<(PathBuf, String)> = unit
+            .files
+            .iter()
+            .map(|f| (f.clone(), self.text(f).unwrap_or_default()))
+            .collect();
+        let current = |f: &Path| {
+            sources
+                .iter()
+                .find(|(p, _)| p == f)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_default()
+        };
+        if let Some(project) = &unit.project {
+            let r =
+                crate::cli::plan_rename(project, &sources, &old, new).map_err(|e| e.to_string())?;
+            let mut out: Vec<FileEdit> = r
+                .files
+                .into_iter()
+                .map(|(file, text)| FileEdit {
+                    old: current(&file),
+                    file,
+                    new: text,
+                })
+                .collect();
+            let lock = r.lock.to_json();
+            let disk = std::fs::read_to_string(&project.lock).unwrap_or_default();
+            if lock != disk {
+                out.push(FileEdit {
+                    file: project.lock.clone(),
+                    old: self.text(&project.lock).unwrap_or(disk),
+                    new: lock,
+                });
+            }
+            return Ok(out);
+        }
+        crate::ir::valid_slug(new).map_err(|e| message_of(&e))?;
+        let text = current(path);
+        let mut m = Module::parse_fragment(&text).map_err(|e| e.to_string())?;
+        if scan(&text, path).iter().any(|d| d.slug == new) {
+            return Err(format!("`{new}` is already declared — pick a fresh name"));
+        }
+        crate::ir::rename_slug(&mut m, &old, new);
+        m.validate()
+            .map_err(|e| format!("after rename: {}", message_of(&e)))?;
+        Ok(vec![FileEdit {
+            file: path.to_path_buf(),
+            old: text,
+            new: m.to_text(),
+        }])
     }
 
     /// The declaration of the name at (`line`, `byte`) in `path`.
@@ -821,6 +975,55 @@ fn word_at(line: &str, byte: usize) -> Option<Word<'_>> {
     })
 }
 
+/// The template bodies of `text`: the lines from `template` to its `end`,
+/// and the names the template declares (its parameters and blocks).
+fn template_bodies(text: &str) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out = Vec::new();
+    let mut n = 0;
+    while n < lines.len() {
+        let c = code(lines[n]);
+        let Some(rest) = c.trim_start().strip_prefix("template ") else {
+            n += 1;
+            continue;
+        };
+        let start = n;
+        let mut locals: Vec<String> = Vec::new();
+        // `template name(p: Type, q = 3)`: the word before a `:` or `=`.
+        if let Some((_, params)) = rest.split_once('(') {
+            let params = params.split(')').next().unwrap_or("");
+            for p in params.split(',') {
+                if let Some((name, _)) = p.split_once([':', '=']) {
+                    locals.push(name.trim().to_string());
+                }
+            }
+        }
+        n += 1;
+        while n < lines.len() && code(lines[n]).trim() != "end" {
+            n += 1;
+        }
+        let body = lines[start + 1..n.min(lines.len())].join("\n");
+        locals.extend(scan(&body, Path::new("")).into_iter().map(|d| d.slug));
+        out.push((start..n + 1, locals));
+        n += 1;
+    }
+    out
+}
+
+fn in_template_body(text: &str, line: usize) -> bool {
+    template_bodies(text)
+        .iter()
+        .any(|(lines, _)| lines.start < line && lines.contains(&line))
+}
+
+/// `name` at `line` is a template's own (a parameter or a block of the
+/// body it is in).
+fn local_in(text: &str, line: usize, name: &str) -> bool {
+    template_bodies(text)
+        .iter()
+        .any(|(lines, locals)| lines.contains(&line) && locals.iter().any(|l| l == name))
+}
+
 /// `before` ends where a block type or template name goes: `name = `.
 fn is_type_position(before: &str) -> bool {
     let t = before.trim_start();
@@ -909,6 +1112,36 @@ end
 a = licht(t: pumpe)
 x = heizen.Q == 1
 "#;
+
+    #[test]
+    fn references_skip_ports_keys_and_template_locals() {
+        let src = "let t = 3\nextern pumpe = Switch(title: \"P\")\n\
+                   template licht(t: Switch, n = 2)\n\tg = Or(I1: t.Q)\nend\n\
+                   a = licht(t: pumpe)\nb = Less(Input1: pumpe.t, Input2: t)\n";
+        let path = Path::new("/nowhere/a.lxir");
+        let mut ws = Workspace::default();
+        ws.open(path.to_path_buf(), src.to_string());
+        let lines = |line, byte| -> Vec<(usize, usize)> {
+            ws.references(path, line, byte)
+                .iter()
+                .map(|s| (s.line, s.start))
+                .collect()
+        };
+        // `t` the constant: not the template's parameter, not the
+        // instance's argument key `t:`, not the port `pumpe.t`.
+        assert_eq!(lines(0, 4), [(0, 4), (6, 34)]);
+        // The parameter is the template's own: no rename.
+        assert!(ws.name_at(path, 3, 12).is_none());
+        assert!(ws.name_at(path, 3, 1).is_none());
+        assert_eq!(lines(1, 8), [(1, 7), (5, 13), (6, 17)]);
+        let edits = ws.rename(path, 0, 4, "schwelle").unwrap();
+        assert!(
+            edits[0].new.contains("Input2: schwelle"),
+            "{}",
+            edits[0].new
+        );
+        assert!(edits[0].new.contains("t.Q"), "{}", edits[0].new);
+    }
 
     #[test]
     fn declarations_are_found_lexically() {

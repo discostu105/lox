@@ -536,8 +536,9 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
         extern identity and port facts, completion of ports from the
         builtin table and the base, of block types, and of names,
         formatting, outline. The VS Code extension starts it.
-  - [ ] LSP: rename (`rename_slug` exists), find references, quick fixes
-        for "did you mean".
+  - [x] LSP: find references, rename (in a project: `lxir rename`'s
+        verified plan, fragments and lockfile in one workspace edit),
+        quick fixes for "did you mean", 2026-10-30 (D59, #176).
   - [ ] tree-sitter grammar (enables highlighting beyond VS Code and
         structural editing for agents).
 - **Distribution**

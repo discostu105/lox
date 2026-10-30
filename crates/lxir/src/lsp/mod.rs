@@ -10,6 +10,10 @@
 //!   range.
 //! - Completion of ports after `name.`, of block types after `name =`.
 //! - Formatting (`lxir fmt`) and the outline of declarations.
+//! - References and rename of module-level names (constants, externs,
+//!   blocks, templates, instances) across the module's files; in a
+//!   project, rename is `lxir rename`'s verified plan and also rewrites
+//!   the lockfile. Quick fixes for "did you mean `X`?" diagnostics.
 //!
 //! Synchronous and single-threaded: requests are answered in order.
 
@@ -150,6 +154,40 @@ impl<W: Write> Server<'_, W> {
                         .collect();
                 Value::Array(items)
             })),
+            "textDocument/references" => Some(self.at(&params, |s, p, l, b| {
+                let all = s.ws.references(p, l, b);
+                let skip_decl = params["context"]["includeDeclaration"] == false;
+                let decl = skip_decl.then(|| s.ws.definition(p, l, b)).flatten();
+                Value::Array(
+                    all.iter()
+                        .filter(|r| Some(*r) != decl.as_ref())
+                        .map(|r| s.location(r))
+                        .collect(),
+                )
+            })),
+            "textDocument/prepareRename" => Some(self.at(&params, |s, p, l, b| {
+                s.ws.name_at(p, l, b).map_or(
+                    Value::Null,
+                    |(name, span)| json!({ "range": s.range(&span), "placeholder": name }),
+                )
+            })),
+            "textDocument/rename" => {
+                let new = params["newName"].as_str().unwrap_or("").to_string();
+                let edits = self.at(&params, |s, p, l, b| match s.ws.rename(p, l, b, &new) {
+                    Ok(files) => s.workspace_edit(&files),
+                    Err(e) => json!({ "error": e }),
+                });
+                if let (Some(id), Some(e)) = (&id, edits.get("error")) {
+                    return write_message(
+                        self.out,
+                        &json!({ "jsonrpc": "2.0", "id": id, "error": {
+                            "code": -32803, "message": e,
+                        }}),
+                    );
+                }
+                Some(edits)
+            }
+            "textDocument/codeAction" => Some(self.code_actions(&params)),
             "textDocument/formatting" => Some(self.formatting(&params)),
             "textDocument/documentSymbol" => Some(self.symbols(&params)),
             _ => {
@@ -192,6 +230,9 @@ impl<W: Write> Server<'_, W> {
                 "completionProvider": { "triggerCharacters": ["."] },
                 "documentFormattingProvider": true,
                 "documentSymbolProvider": true,
+                "referencesProvider": true,
+                "renameProvider": { "prepareProvider": true },
+                "codeActionProvider": { "codeActionKinds": ["quickfix"] },
             },
             "serverInfo": { "name": "lxir", "version": env!("CARGO_PKG_VERSION") },
         })
@@ -251,6 +292,90 @@ impl<W: Write> Server<'_, W> {
 
     fn location(&self, span: &analysis::Span) -> Value {
         json!({ "uri": path_to_uri(&span.file), "range": self.range(span) })
+    }
+
+    /// A `WorkspaceEdit` for the files a rename rewrites: the lines that
+    /// change, or the whole file when its line count changes.
+    fn workspace_edit(&self, files: &[analysis::FileEdit]) -> Value {
+        let mut changes = serde_json::Map::new();
+        for f in files {
+            changes.insert(
+                path_to_uri(&f.file),
+                Value::Array(self.line_edits(&f.old, &f.new)),
+            );
+        }
+        json!({ "changes": changes })
+    }
+
+    fn line_edits(&self, old: &str, new: &str) -> Vec<Value> {
+        let (a, b): (Vec<&str>, Vec<&str>) = (old.split('\n').collect(), new.split('\n').collect());
+        if a.len() != b.len() {
+            return vec![json!({
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": a.len(), "character": 0 },
+                },
+                "newText": new,
+            })];
+        }
+        a.iter()
+            .zip(&b)
+            .enumerate()
+            .filter(|(_, (x, y))| x != y)
+            .map(|(n, (x, y))| {
+                json!({
+                    "range": {
+                        "start": { "line": n, "character": 0 },
+                        "end": { "line": n, "character": self.enc.column(x, x.len()) },
+                    },
+                    "newText": y,
+                })
+            })
+            .collect()
+    }
+
+    /// Quick fixes: a diagnostic's "did you mean `X`?" on a misspelled
+    /// name replaces the name with `X`.
+    fn code_actions(&self, params: &Value) -> Value {
+        let Some(path) = path_of(&params["textDocument"]) else {
+            return Value::Null;
+        };
+        let text = self.ws.text(&path).unwrap_or_default();
+        let uri = path_to_uri(&path);
+        let mut out = Vec::new();
+        for d in params["context"]["diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let msg = d["message"].as_str().unwrap_or("");
+            let Some(fix) = analysis::suggestion(msg) else {
+                continue;
+            };
+            let (start, end) = (&d["range"]["start"], &d["range"]["end"]);
+            let line = start["line"].as_u64().unwrap_or(0) as usize;
+            if end["line"].as_u64() != Some(line as u64) {
+                continue;
+            }
+            let l = text::line(&text, line);
+            let s = self
+                .enc
+                .byte(l, start["character"].as_u64().unwrap_or(0) as u32);
+            let e = self
+                .enc
+                .byte(l, end["character"].as_u64().unwrap_or(0) as u32);
+            if !analysis::is_name(&l[s..e]) {
+                continue;
+            }
+            out.push(json!({
+                "title": format!("Change to `{fix}`"),
+                "kind": "quickfix",
+                "diagnostics": [d],
+                "isPreferred": true,
+                "edit": { "changes": { uri.clone(): [{ "range": d["range"], "newText": fix }] } },
+            }));
+        }
+        Value::Array(out)
     }
 
     fn formatting(&self, params: &Value) -> Value {

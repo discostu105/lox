@@ -868,19 +868,72 @@ fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {
         format!("no lox.toml in `{dir}` — rename needs a project (module, lock, base)")
     })?;
     let project = Project::load(&project_file)?;
-    valid_slug(new)?;
-
     // Fragments load individually so each file can be rewritten in place.
     let files = if project.module.is_dir() {
         module_dir_files(&project.module).map_err(|(p, e)| format!("{p}: {e}"))?
     } else {
         vec![project.module.clone()]
     };
+    let mut sources = Vec::new();
+    for f in files {
+        let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+        sources.push((f, src));
+    }
+    let r = plan_rename(&project, &sources, old, new)?;
+    for (path, text) in &r.files {
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    r.lock.save(&project.lock)?;
+    std::fs::write(&project.out, &r.out)?;
+    println!(
+        "renamed `{old}` -> `{new}`: {} file(s) rewritten, \
+         {} lock entr{} rekeyed, output {}",
+        r.files.len(),
+        r.moved,
+        if r.moved == 1 { "y" } else { "ies" },
+        if r.title_changes == 0 {
+            "byte-identical".to_string()
+        } else {
+            format!(
+                "changed in {} Title label(s) the slug feeds",
+                r.title_changes
+            )
+        }
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A rename `lxir rename` verified, not yet written.
+pub struct Renamed {
+    /// The fragments whose text changes, with their new text
+    pub files: Vec<(PathBuf, String)>,
+    /// The lockfile with the moved keys
+    pub lock: Lockfile,
+    /// The compiled output
+    pub out: Vec<u8>,
+    /// Lock entries rekeyed
+    pub moved: usize,
+    /// `Title=` labels the slug feeds
+    pub title_changes: usize,
+}
+
+/// Rename the module-level name `old` to `new` in the module of `project`,
+/// given as its fragment files and their text (`sources`, in module
+/// order), with the lockfile entries to match. Verified before anything is
+/// returned: the lock must be current, and the renamed module must compile
+/// to the same output but for the `Title=` labels the slug feeds. Used by
+/// `lxir rename` and the language server.
+pub fn plan_rename(
+    project: &Project,
+    sources: &[(PathBuf, String)],
+    old: &str,
+    new: &str,
+) -> Result<Renamed, AnyError> {
+    valid_slug(new)?;
     let mut fragments: Vec<(PathBuf, String, Module)> = Vec::new();
-    for f in &files {
-        let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
-        let m = Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
-        fragments.push((f.clone(), src, m));
+    for (f, src) in sources {
+        let m = Module::parse_fragment(src).map_err(|e| format!("{}: {e}", f.display()))?;
+        fragments.push((f.clone(), src.clone(), m));
     }
     let merge = |frags: &[(PathBuf, String, Module)]| Module {
         items: frags.iter().flat_map(|(_, _, m)| m.items.clone()).collect(),
@@ -961,27 +1014,20 @@ fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {
     let title_changes = title_only_diff(&out_old.to_bytes(), &out_new.to_bytes())
         .map_err(|e| format!("rename is not cosmetic — nothing written: {e}"))?;
 
-    let mut files_changed = 0;
-    for (path, src, m) in &fragments {
-        let text = m.to_text();
-        if *src != text {
-            std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-            files_changed += 1;
-        }
-    }
-    lock_new.save(&project.lock)?;
-    std::fs::write(&project.out, out_new.to_bytes())?;
-    println!(
-        "renamed `{old}` -> `{new}`: {files_changed} file(s) rewritten, \
-         {moved} lock entr{} rekeyed, output {}",
-        if moved == 1 { "y" } else { "ies" },
-        if title_changes == 0 {
-            "byte-identical".to_string()
-        } else {
-            format!("changed in {title_changes} Title label(s) the slug feeds")
-        }
-    );
-    Ok(ExitCode::SUCCESS)
+    let files = fragments
+        .iter()
+        .filter_map(|(path, src, m)| {
+            let text = m.to_text();
+            (*src != text).then(|| (path.clone(), text))
+        })
+        .collect();
+    Ok(Renamed {
+        files,
+        lock: lock_new,
+        out: out_new.to_bytes(),
+        moved,
+        title_changes,
+    })
 }
 
 /// Count the lines two outputs differ in, requiring every difference to

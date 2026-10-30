@@ -259,3 +259,114 @@ fn formatting_and_outline() {
     let unknown = out.iter().find(|m| m["id"] == 3).unwrap();
     assert_eq!(unknown["error"]["code"], -32601);
 }
+
+fn with(mut msg: Value, key: &str, value: Value) -> Value {
+    msg["params"][key] = value;
+    msg
+}
+
+#[test]
+fn references_find_a_name_across_fragments_but_not_ports_or_keys() {
+    let pool = project().join("pages/pool.lxir");
+    let periphery = project().join("pages/_periphery.lxir");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let (l, c) = pos(&src, "solltemp");
+    let (kl, kc) = pos(&src, "Input1");
+    let out = session(&[
+        open(&pool, &src),
+        at(1, "textDocument/references", &pool, l, c + 1),
+        with(
+            at(2, "textDocument/references", &pool, l, c + 1),
+            "context",
+            json!({"includeDeclaration": false}),
+        ),
+        at(3, "textDocument/prepareRename", &pool, l, c + 1),
+        at(4, "textDocument/prepareRename", &pool, kl, kc + 1),
+    ]);
+
+    let refs = response(&out, 1).as_array().unwrap();
+    let files: Vec<&str> = refs.iter().map(|r| r["uri"].as_str().unwrap()).collect();
+    assert_eq!(files, [uri(&periphery), uri(&pool)], "{refs:?}");
+    assert_eq!(
+        refs[1]["range"]["start"],
+        json!({"line": l, "character": c})
+    );
+    assert_eq!(response(&out, 2).as_array().unwrap().len(), 1);
+    assert_eq!(response(&out, 3)["placeholder"], "solltemp");
+    // An argument key is not a name rename takes.
+    assert_eq!(response(&out, 4), &Value::Null);
+}
+
+#[test]
+fn rename_in_a_project_rewrites_the_fragments_and_the_lockfile() {
+    let pool = project().join("pages/pool.lxir");
+    let lock = project().join("pool.lock.json");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let (l, c) = pos(&src, "heizen =");
+    let out = session(&[
+        open(&pool, &src),
+        with(
+            at(1, "textDocument/rename", &pool, l, c + 1),
+            "newName",
+            json!("heizung"),
+        ),
+        with(
+            at(2, "textDocument/rename", &pool, l, c + 1),
+            "newName",
+            json!("solltemp"),
+        ),
+    ]);
+
+    let changes = response(&out, 1)["changes"].as_object().unwrap();
+    let mut files: Vec<&String> = changes.keys().collect();
+    files.sort();
+    assert_eq!(files, [&uri(&pool), &uri(&lock)]);
+    let edited: Vec<&str> = changes[&uri(&pool)]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["newText"].as_str().unwrap())
+        .collect();
+    assert_eq!(edited, ["heizung = Less(", "pumpe.On <- heizung.Q"]);
+    let lock_text = changes[&uri(&lock)].as_array().unwrap()[0]["newText"]
+        .as_str()
+        .unwrap();
+    assert!(lock_text.contains("\"heizung\"") && !lock_text.contains("\"heizen\""));
+    // The files on disk are untouched: the client applies the edit.
+    assert_eq!(std::fs::read_to_string(&pool).unwrap(), src);
+
+    // A name already taken is refused with a JSON-RPC error.
+    let err = &out.iter().find(|m| m["id"] == 2).unwrap()["error"];
+    assert!(
+        err["message"].as_str().unwrap().contains("solltemp"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_did_you_mean_diagnostic_offers_a_quick_fix() {
+    let pool = project().join("pages/pool.lxir");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let typo = src.replace("wasser.Q,", "wasser.Qx,");
+    let (l, c) = pos(&typo, "Qx");
+    let out = session(&[open(&pool, &src), change(&pool, &typo), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("did you mean `Q`"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+    assert_eq!(d["range"]["start"], json!({"line": l, "character": c}));
+
+    let out = session(&[
+        open(&pool, &typo),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `Q`");
+    assert_eq!(actions[0]["edit"]["changes"][uri(&pool)][0]["newText"], "Q");
+}

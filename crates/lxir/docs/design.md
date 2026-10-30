@@ -1823,7 +1823,7 @@ Anything unverified is an error, not a heuristic:
   Miniserver.
 - **D59 — the language server is a lexical layer over the pipeline**
   (2026-10-30). `lxir lsp` (`src/lsp/`) speaks JSON-RPC over stdio by
-  hand, with no LSP crate: the protocol surface is eight methods, and
+  hand, with no LSP crate: the protocol surface is fifteen methods, and
   the crate keeps its four dependencies.
   - **Positions.** The AST carries no spans, and giving it spans would
     touch every node and the `parse(to_text(m)) == m` fixpoint. The
@@ -1842,7 +1842,21 @@ Anything unverified is an error, not a heuristic:
   - **Identity on hover.** `resolve_extern_uuids` resolves the externs
     the way compile pins them. The last result that resolved is kept,
     so hover still shows the base object while the text does not parse.
-  Validated: protocol tests (`tests/lsp.rs`), Neovim 0.12 and VS Code
+  - **References and rename** are lexical too: the name outside
+    strings and comments, not after a `.` (a port) and not before a `:`
+    (an argument key), and not inside a template body that declares the
+    name itself (a parameter or a block). Only module-level names are
+    renamed. In a project the rename is `lxir rename` (`cli::plan_rename`,
+    on the editor's buffers): the lock must be current, the output may
+    change only in titles, and the lockfile is re-keyed. The server
+    returns one workspace edit for the fragments and the lockfile and
+    writes nothing; the next compile writes the output. A name the
+    editor's buffers already hold, or a plan that fails, is a JSON-RPC
+    error, so nothing is half applied.
+  - **Quick fixes** come from the diagnostics: a "did you mean `X`?" on
+    a single name replaces that name with `X`.
+  Validated: protocol tests (`tests/lsp.rs`); diagnostics, definition,
+  hover, completion, formatting and rename also in Neovim 0.12; the first four in VS Code
   (headless, through the bundled client).
 - **D60 — Creating Automatic Designer rules** (2026-10-30). D57 left
   creation to the app; the oracle now answers the question it waited on
