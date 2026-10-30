@@ -46,6 +46,7 @@ pub mod error;
 pub mod ir;
 pub mod layout;
 pub mod lock;
+pub mod lsp;
 pub mod moods;
 pub mod observed_defaults;
 pub mod permissions;

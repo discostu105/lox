@@ -225,6 +225,7 @@ lox config restore abc123 --force      # Restore config from git history
 lox ir check                           # Config as code: validate .lxir modules
 lox ir compile                         # … compile them into the config
 lox ir drift live.Loxone               # Has anyone else changed the config since?
+lox ir lsp                             # … and a language server for your editor
 lox run abend                          # Run a scene
 lox health --problems                  # Device health (battery, signal, offline)
 lox access check alice                 # Why alice may (not) open the NFC Code Touch
