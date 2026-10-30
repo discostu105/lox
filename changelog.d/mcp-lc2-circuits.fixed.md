@@ -1,0 +1,1 @@
+- **MCP `get_control`** on a lighting controller (LightControllerV2) reports each circuit's real value and the active moods (`activeMoods`). The circuit values come from the Miniserver's live states over the WebSocket, because the HTTP read gave 383 for every circuit, whatever the mood.

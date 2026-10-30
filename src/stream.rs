@@ -819,6 +819,50 @@ where
     found.ok_or_else(|| anyhow::anyhow!("WebSocket closed before matching event was found"))
 }
 
+/// The current values of `uuids` from the initial state dump: numbers for
+/// value states, strings for text states. Returns once every one has
+/// arrived, or after `wait` with those that did (a UUID the Miniserver does
+/// not send never arrives).
+pub async fn initial_states(
+    cfg: &Config,
+    uuids: &[String],
+    wait: Duration,
+) -> Result<HashMap<String, serde_json::Value>> {
+    let mut found = HashMap::new();
+    if uuids.is_empty() {
+        return Ok(found);
+    }
+    let mut ws = tokio::time::timeout(wait, open_subscribed(cfg))
+        .await
+        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+    let collect = pump(&mut ws, |events| {
+        for e in events {
+            let (uuid, value) = match e {
+                StateEvent::ValueState { uuid, value } => (uuid, number(value)),
+                StateEvent::TextState { uuid, text, .. } => (uuid, serde_json::Value::from(text)),
+                _ => continue,
+            };
+            if uuids.contains(&uuid) {
+                found.insert(uuid, value);
+            }
+        }
+        Ok(found.len() < uuids.len())
+    });
+    if let Ok(r) = tokio::time::timeout(wait, collect).await {
+        r?;
+    }
+    Ok(found)
+}
+
+/// A state value as JSON: whole numbers as integers (`1`, not `1.0`).
+fn number(v: f64) -> serde_json::Value {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        serde_json::Value::from(v as i64)
+    } else {
+        serde_json::Value::from(v)
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
