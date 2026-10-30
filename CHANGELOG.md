@@ -10,6 +10,29 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-10-30 — the whole house in source
+
+The alarm, smoke alarm, irrigation, room controllers, energy flow monitor and meters join the blocks lxir manages,
+an extern can be promoted to a managed block in place, and `lox ir coverage` shows what is left.
+
+### Added
+- **`lox ir`: the house control blocks are managed** — alarm, smoke alarm, irrigation, the intelligent room
+  controller, the energy flow monitor and the four meter types can be declared, adopted and rebuilt from source;
+  Code Touch, Intercom and Touch Pure Flex adopt (Loxone Config creates them when it pairs the device)
+  - Their internals (zones, timers, statistic groups) pass through unchanged, and a minted block passes a save in
+    Loxone Config with an empty diff
+- **`lox ir adopt --uuid <x> --as <extern>`** promotes an extern to a managed block: its wires and port values move
+  into the declaration, and the other modules keep their references
+- **`lox ir coverage`** lists the config's blocks by type (managed, extern, rule, untouched) and the blocks left to
+  adopt (`--json`)
+- **Managed blocks take `.room` and `.category`**, so a block made in source shows up in its room in the app
+
+### Fixed
+- **`lox ir compile`** keeps the flag Loxone Config set on a wire into an extern, so a compile of an unchanged
+  source is byte-identical
+- **`lox ir adopt --uuid`** works in modules that use templates or Automatic Designer rules (it pinned a rule as
+  a new extern and rejected template slugs)
+
 ## [0.34.0] — 2026-10-30
 
 ### Changed
