@@ -1672,6 +1672,17 @@ struct ResolvedPort {
     is_extern: bool,
 }
 
+/// The object each extern of `module` resolves to in `base` (slug →
+/// UUID), the way [`compile`] pins it; `lock` stays as it is. The
+/// language server shows this identity on hover.
+pub fn resolve_extern_uuids(
+    base: &LoxoneDoc,
+    module: &Module,
+    lock: &Lockfile,
+) -> Result<BTreeMap<String, String>> {
+    resolve_externs(base, &module.expand()?, &mut lock.clone())
+}
+
 fn resolve_externs(
     doc: &LoxoneDoc,
     module: &Module,

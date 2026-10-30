@@ -1,8 +1,8 @@
 {
   "name": "lxir",
   "displayName": "lxir",
-  "description": "Syntax highlighting and snippets for lxir modules (.lxir) — Loxone config-as-code",
-  "version": "0.1.0",
+  "description": "Syntax highlighting, snippets and the lxir language server for lxir modules (.lxir) — Loxone config-as-code",
+  "version": "0.2.0",
   "publisher": "lxir",
   "license": "SEE LICENSE IN ../../LICENSE",
   "engines": {
@@ -37,6 +37,38 @@
         "language": "lxir",
         "path": "./snippets/lxir.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "lxir",
+      "properties": {
+        "lxir.server.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the lxir language server for .lxir files."
+        },
+        "lxir.server.path": {
+          "type": "string",
+          "default": "lxir",
+          "description": "The program that runs the language server: `lxir`, or `lox` (with the arguments `ir lsp`)."
+        },
+        "lxir.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "Its arguments: `[\"lsp\"]` for lxir, `[\"ir\", \"lsp\"]` for lox."
+        }
+      }
+    }
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:lxir"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }

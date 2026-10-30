@@ -515,11 +515,14 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
         that the GUI owns. Today a relayout moves only managed blocks.
 - **Editor**
   - [x] VS Code: syntax highlighting + snippets (`editor/vscode/`).
-  - [ ] LSP server (`lxir lsp`): diagnostics from `Module::parse`/`validate`
-        (already line-precise), completion for port names sourced from the
-        base config + builtin table, go-to-definition for slugs, hover with
-        resolved extern identity. The library API was shaped so this is a
-        thin layer.
+  - [x] LSP server (`lxir lsp`), 2026-10-30 (D59): diagnostics (check
+        and lints as you type; on save in a project, also the compile
+        against the base), go to definition, hover with the resolved
+        extern identity and port facts, completion of ports from the
+        builtin table and the base, of block types, and of names,
+        formatting, outline. The VS Code extension starts it.
+  - [ ] LSP: rename (`rename_slug` exists), find references, quick fixes
+        for "did you mean".
   - [ ] tree-sitter grammar (enables highlighting beyond VS Code and
         structural editing for agents).
 - **Distribution**

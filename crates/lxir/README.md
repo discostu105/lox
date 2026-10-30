@@ -327,12 +327,29 @@ commands and repo rules at a glance.
 
 ## Editor support
 
-`editor/vscode/` contains a declarative VS Code extension for `.lxir`
-files: syntax highlighting, comment/bracket support, and snippets for all
-statement forms. Install by symlinking it into `~/.vscode/extensions/`
-(see [editor/vscode/README.md](editor/vscode/README.md)). A language server
-is scoped on the roadmap; until then `lxir check` / `lxir fmt --check`
-cover the validation loop.
+`lxir lsp` is a language server on stdin/stdout:
+- diagnostics as you type: what `lxir check` and the lints report, and,
+  on save in a `lox.toml` project, the compile against the base config
+  (nothing is written);
+- go to definition across the fragments of a module;
+- hover: the base object an extern resolves to (type, title, room, page,
+  UUID), and the ports and port facts of a type;
+- completion of ports after `name.` and of block types after `name =`;
+- formatting (`lxir fmt`) and the outline.
+
+`editor/vscode/` contains the VS Code extension for `.lxir` files: syntax
+highlighting, comment/bracket support, snippets for all statement forms,
+and the client that starts the server (see
+[editor/vscode/README.md](editor/vscode/README.md)). Other editors start
+`lxir lsp` (or `lox ir lsp`) for the file type `lxir`. Neovim:
+
+```lua
+vim.filetype.add({ extension = { lxir = "lxir" } })
+vim.api.nvim_create_autocmd("FileType", { pattern = "lxir", callback = function(ev)
+  vim.lsp.start({ name = "lxir", cmd = { "lxir", "lsp" },
+    root_dir = vim.fs.root(ev.buf, "lox.toml") })
+end })
+```
 
 ## Validation
 

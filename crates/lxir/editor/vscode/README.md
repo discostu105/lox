@@ -1,6 +1,6 @@
 # lxir for VS Code
 
-Declarative VS Code extension for `.lxir` modules: syntax highlighting
+VS Code extension for `.lxir` modules: syntax highlighting
 (TextMate grammar), comment/bracket configuration, and snippets for every
 statement form — `page`, `let`, `extern`, blocks, `template`/`end` and
 instances, wires (plain and expression), `set`, attribute assignments
@@ -8,23 +8,31 @@ instances, wires (plain and expression), `set`, attribute assignments
 unit-suffixed values (`30min`, `2700K`) and the expression operators
 (`and`/`or`/`not`, comparisons, arithmetic).
 
-No build step and no extension host code — install by copying or linking the
-folder into your extensions directory:
+It also starts the language server (`lxir lsp`) for `.lxir` files:
+diagnostics as you type and on save, go to definition, hover with the base
+object an extern resolves to, port and type completion, formatting
+(*Format Document*), and the outline.
+
+Install by linking the folder into your extensions directory, and install
+the language client once (without it the extension still highlights, and
+says how to enable the server):
 
 ```sh
-ln -s "$(pwd)/editor/vscode" ~/.vscode/extensions/lxir.lxir-0.1.0
+ln -s "$(pwd)/editor/vscode" ~/.vscode/extensions/lxir.lxir-0.2.0
+cd editor/vscode && npm install --omit=dev
 ```
 
 (then reload VS Code), or package it properly with
 [`vsce`](https://github.com/microsoft/vscode-vsce):
 
 ```sh
-cd editor/vscode && npx @vscode/vsce package && code --install-extension lxir-0.1.0.vsix
+cd editor/vscode && npm install && npx @vscode/vsce package && code --install-extension lxir-0.2.0.vsix
 ```
 
-Real autocompletion (port names from the base config, slug references,
-diagnostics-as-you-type) needs a language server; that is scoped in
-[docs/roadmap.md](../../docs/roadmap.md) — the library's line-precise parse
-errors and `observe` API were shaped so an `lxir lsp` subcommand can be a
-thin layer. Until then, `lxir check` and `lxir fmt` in a save hook cover the
-validation loop.
+Settings:
+
+| Setting | Default | |
+|---|---|---|
+| `lxir.server.enable` | `true` | start the language server |
+| `lxir.server.path` | `lxir` | the program: `lxir`, or `lox` |
+| `lxir.server.args` | `["lsp"]` | `["ir", "lsp"]` for `lox` |

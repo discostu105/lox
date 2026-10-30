@@ -34,6 +34,13 @@ USAGE:
         path: the module of the lox.toml project in the current
         directory.
 
+  lxir lsp [--stdio]
+        Language server for .lxir files on stdin/stdout, for editors:
+        diagnostics (check + lints; in a lox.toml project, opening or
+        saving also compiles against the base in memory), go to
+        definition, hover with the object an extern resolves to, port
+        and type completion, formatting, outline.
+
   lxir compile [<project-dir>]
               [--base <cfg.Loxone>] [--module <m.lxir | module-dir>]
               [--lock <lock.json>] [--out <out.Loxone>]
@@ -266,6 +273,10 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["types", rest @ ..] => cmd_types(rest),
         ["roundtrip", path] => cmd_roundtrip(path),
         ["render", rest @ ..] => cmd_render(rest),
+        ["lsp"] | ["lsp", "--stdio"] => {
+            lxir::lsp::run_stdio()?;
+            Ok(ExitCode::SUCCESS)
+        }
         [cmd, ..] => {
             eprintln!(
                 "unknown or malformed command `{cmd}` — run `{} help`",
@@ -280,7 +291,9 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
 /// split its sources into subdirectories (`rooms/`, `systems/`) — sorted
 /// by path (the merge order — semantics don't depend on it, but
 /// determinism does). Dot-entries (`.git`, editor droppings) are skipped.
-fn module_dir_files(dir: &std::path::Path) -> Result<Vec<PathBuf>, (String, lxir::Error)> {
+pub(crate) fn module_dir_files(
+    dir: &std::path::Path,
+) -> Result<Vec<PathBuf>, (String, lxir::Error)> {
     fn collect(dir: &std::path::Path, depth: usize, out: &mut Vec<PathBuf>) -> lxir::Result<()> {
         if depth > 16 {
             return Err(lxir::Error::Compile(format!(

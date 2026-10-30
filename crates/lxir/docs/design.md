@@ -1821,3 +1821,26 @@ Anything unverified is an error, not a heuristic:
   Validated: oracle sessions 21–22 (Loxone Config 17.2.8.28
   keeps minted and seeded moods byte-identical) and live on the house
   Miniserver.
+- **D59 — the language server is a lexical layer over the pipeline**
+  (2026-10-30). `lxir lsp` (`src/lsp/`) speaks JSON-RPC over stdio by
+  hand, with no LSP crate: the protocol surface is eight methods, and
+  the crate keeps its four dependencies.
+  - **Positions.** The AST carries no spans, and giving it spans would
+    touch every node and the `parse(to_text(m)) == m` fixpoint. The
+    language is line-oriented, and a declaration always opens its line,
+    so declarations are found lexically (`analysis::scan`). A parse error
+    has its line; a semantic error names what it is about in backticks.
+    The diagnostic goes to a `slug.port` use of two named names, else to
+    a named key inside a named declaration, else to the declaration,
+    else to the first use.
+  - **What runs when.** On each change: what `lxir check` runs, plus the
+    source lints (10 ms on the house module). On open and save, in a
+    `lox.toml` project: also the compile against the base in memory, on
+    a copy of the lock, plus the lints that need it, exactly what
+    `lxir lint` reports (0.8 s for the house: 21 files, the same 20
+    findings). Nothing is written.
+  - **Identity on hover.** `resolve_extern_uuids` resolves the externs
+    the way compile pins them. The last result that resolved is kept,
+    so hover still shows the base object while the text does not parse.
+  Validated: protocol tests (`tests/lsp.rs`), Neovim 0.12 and VS Code
+  (headless, through the bundled client).
