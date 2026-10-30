@@ -1,0 +1,1 @@
+- **`lox config push`** also warns when the push adds an object the app shows (`Visu`), or shows or hides an existing one: the uploaded `LoxAPP3.json` stays as Loxone Config last saved it (its date is in the note) until the next save from Loxone Config (#155)

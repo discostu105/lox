@@ -2,24 +2,28 @@
 //! writes next to `sps0.LoxCC` and the Miniserver serves as
 //! `/data/LoxApp3.json` (the structure the app and `lox` read). `lox config
 //! push` only replaces `sps0.LoxCC`, so the catalogue it uploads still
-//! describes the program before the push. Whether the Miniserver rebuilds it
-//! on start is not known yet; the push compares what it serves afterwards.
+//! describes the program before the push. The Miniserver does not rebuild it
+//! on start (2026-10-29: a push that added objects left the served catalogue
+//! at the `lastModified` of the last save, #155); the push compares what it
+//! serves afterwards.
 
 use anyhow::{Context, Result};
+use lxir::LoxoneDoc;
 use lxir::diff::DocDiff;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 pub(crate) const MEMBER: &str = "LoxAPP3.json";
 
 /// A control in the app whose title, room or category the push changes, or
-/// that the push deletes.
+/// that the push deletes, shows or hides in the app.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct StaleEntry {
     pub uuid: String,
-    /// The control's name in the app
+    /// The control's name in the app (for an object the app does not list
+    /// yet: its title, or its block type)
     pub app_name: String,
     /// What the push changes, e.g. `renamed "A" → "B"`
     pub change: String,
@@ -49,11 +53,9 @@ pub(crate) fn last_modified(catalogue: &Value) -> Option<&str> {
     catalogue.get("lastModified").and_then(Value::as_str)
 }
 
-/// The controls of `diff` (live → compiled) that the app lists, with what
-/// the push changes about them. Objects the push adds are not in the app:
-/// lxir never makes a block visible (visualization stays with Loxone Config).
-pub(crate) fn stale_entries(catalogue: &Value, diff: &DocDiff) -> Vec<StaleEntry> {
-    let names: BTreeMap<String, String> = catalogue
+/// The controls the catalogue lists: lowercase `uuidAction` → name.
+fn control_names(catalogue: &Value) -> BTreeMap<String, String> {
+    catalogue
         .get("controls")
         .and_then(Value::as_object)
         .into_iter()
@@ -63,7 +65,21 @@ pub(crate) fn stale_entries(catalogue: &Value, diff: &DocDiff) -> Vec<StaleEntry
             let name = c.get("name").and_then(Value::as_str).unwrap_or("");
             Some((uuid, name.to_string()))
         })
-        .collect();
+        .collect()
+}
+
+/// The controls of `diff` (live → compiled) that the app lists, with what
+/// the push changes about them, and the objects whose visibility in the app
+/// (`<IoData Visu="true">`) the push changes: a new visible object (lxir
+/// mints a `VirtualIn` visible, as a save does) is missing from the
+/// catalogue, a hidden one stays in it.
+pub(crate) fn stale_entries(
+    catalogue: &Value,
+    diff: &DocDiff,
+    live: &LoxoneDoc,
+    compiled: &LoxoneDoc,
+) -> Vec<StaleEntry> {
+    let names = control_names(catalogue);
     let mut out = Vec::new();
     let mut push = |uuid: &str, change: String| {
         if let Some(name) = names.get(&uuid.to_ascii_lowercase()) {
@@ -95,7 +111,62 @@ pub(crate) fn stale_entries(catalogue: &Value, diff: &DocDiff) -> Vec<StaleEntry
     for o in &diff.removed {
         push(&o.uuid, "deleted".to_string());
     }
+    let (was, now) = (visible(live), visible(compiled));
+    let existing: BTreeSet<String> = live
+        .objects()
+        .into_iter()
+        .map(|o| o.uuid.to_ascii_lowercase())
+        .collect();
+    for (uuid, label) in &now {
+        if !was.contains_key(uuid) && !names.contains_key(uuid) {
+            let change = if existing.contains(uuid) {
+                "shown in the app, which does not list it yet"
+            } else {
+                "new and shown in the app, which does not list it yet"
+            };
+            out.push(StaleEntry {
+                uuid: uuid.clone(),
+                app_name: label.clone(),
+                change: change.to_string(),
+            });
+        }
+    }
+    let compiled_uuids: BTreeSet<String> = compiled
+        .objects()
+        .into_iter()
+        .map(|o| o.uuid.to_ascii_lowercase())
+        .collect();
+    for uuid in was.keys() {
+        if !now.contains_key(uuid)
+            && compiled_uuids.contains(uuid)
+            && let Some(name) = names.get(uuid)
+        {
+            out.push(StaleEntry {
+                uuid: uuid.clone(),
+                app_name: name.clone(),
+                change: "hidden from the app, which still lists it".to_string(),
+            });
+        }
+    }
     out
+}
+
+/// The objects a document shows in the app (`<IoData Visu="true">`):
+/// lowercase UUID → title, or the block type when it has none.
+fn visible(doc: &LoxoneDoc) -> BTreeMap<String, String> {
+    doc.objects()
+        .into_iter()
+        .filter(|o| {
+            doc.element_at(&o.path).is_some_and(|el| {
+                el.child_elements()
+                    .any(|c| c.name == "IoData" && c.attr("Visu") == Some("true"))
+            })
+        })
+        .map(|o| {
+            let label = o.title.clone().filter(|t| !t.is_empty());
+            (o.uuid.to_ascii_lowercase(), label.unwrap_or(o.block_type))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -145,7 +216,7 @@ mod tests {
         let compiled = doc("Deckenlicht", BAD);
         let d = lxir::diff::diff(&live, &compiled);
 
-        let stale = stale_entries(&catalogue(), &d);
+        let stale = stale_entries(&catalogue(), &d, &live, &compiled);
 
         let changes: Vec<&str> = stale.iter().map(|s| s.change.as_str()).collect();
         assert_eq!(
@@ -167,7 +238,71 @@ mod tests {
         let d = lxir::diff::diff(&live, &compiled);
         assert_eq!(d.removed.len(), 1);
 
-        assert!(stale_entries(&catalogue(), &d).is_empty());
+        assert!(stale_entries(&catalogue(), &d, &live, &compiled).is_empty());
+    }
+
+    /// `doc` with the Switch shown in the app or not, plus an extra object.
+    fn doc_with(switch_visu: bool, extra: &str) -> LoxoneDoc {
+        let xml = String::from_utf8(doc("Licht", KUECHE).to_bytes()).unwrap();
+        let io = if switch_visu {
+            format!(r#"<IoData Visu="true" Pr="{KUECHE}"/>"#)
+        } else {
+            format!(r#"<IoData Pr="{KUECHE}"/>"#)
+        };
+        let xml = xml
+            .replace(&format!(r#"<IoData Pr="{KUECHE}"/>"#), &io)
+            .replace(
+                r#"<C Type="And" U="0f000000-0000-0003-ffff000000000000" Title="Logik"/>"#,
+                &format!(
+                    r#"<C Type="And" U="0f000000-0000-0003-ffff000000000000" Title="Logik"/>{extra}"#
+                ),
+            );
+        LoxoneDoc::parse(xml.as_bytes()).unwrap()
+    }
+
+    const NEW_INPUT: &str = r#"<C Type="VirtualIn" U="0f000000-0000-0004-ffff000000000000" Title="Taster"><IoData Visu="true" St="2"/></C>"#;
+    const OLD_VISIBLE: &str = r#"<C Type="Memory" U="0f000000-0000-0005-ffff000000000000" Title="Merker"><IoData Visu="true"/></C>"#;
+
+    #[test]
+    fn a_new_object_shown_in_the_app_is_missing_from_the_catalogue() {
+        let live = doc_with(true, OLD_VISIBLE);
+        let compiled = doc_with(true, &format!("{OLD_VISIBLE}{NEW_INPUT}"));
+        let d = lxir::diff::diff(&live, &compiled);
+
+        let stale = stale_entries(&catalogue(), &d, &live, &compiled);
+
+        // The Memory was visible and unlisted before the push: not the
+        // push's doing, so it is not reported.
+        assert_eq!(
+            stale,
+            [StaleEntry {
+                uuid: "0f000000-0000-0004-ffff000000000000".into(),
+                app_name: "Taster".into(),
+                change: "new and shown in the app, which does not list it yet".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn showing_and_hiding_existing_objects_is_stale_in_the_catalogue() {
+        let hidden = r#"<C Type="Memory" U="0f000000-0000-0005-ffff000000000000" Title="Merker"><IoData/></C>"#;
+        let live = doc_with(true, hidden);
+        let compiled = doc_with(false, OLD_VISIBLE);
+        let d = lxir::diff::diff(&live, &compiled);
+
+        let stale = stale_entries(&catalogue(), &d, &live, &compiled);
+
+        let changes: Vec<(&str, &str)> = stale
+            .iter()
+            .map(|s| (s.app_name.as_str(), s.change.as_str()))
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                ("Merker", "shown in the app, which does not list it yet"),
+                ("Licht Küche", "hidden from the app, which still lists it"),
+            ]
+        );
     }
 
     #[test]

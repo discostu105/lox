@@ -763,8 +763,12 @@ its own evidence; these are leads, marked by how far they hold.
   with `;`. **Decimal separator:** six corpus formulas use a decimal
   comma (`0,5`), none a decimal point, and lox-cli reports the comma in
   Loxone's own examples. D35's expression folding writes constants
-  with a point (`I1*0.5`); whether the Miniserver reads that is
-  **unverified** (roadmap). Integer constants are unaffected.
+  with a point (`I1*0.5`). **Live-verified 2026-10-30** (firmware
+  17.2.8.28, four pushed Formula blocks, `R` read via
+  `/dev/sps/io/<uuid>/all`): `0.5*4` and `0,5*4` both give 2, `2.5`
+  and `2,5` both 2.5 — the Miniserver reads either separator. Whether
+  the Loxone Config GUI rewrites or flags a point is not checked
+  (oracle). Integer constants are unaffected.
 - **`AnalogMultiplexer2` selects 1-based.** Live: `Select=0` drove the
   output to 0, `1` passed `Input1`, `2` `Input2` — like the four-way
   `AnalogMultiplexer`, and unlike lox-sim's model (`0`→`Input1`,
