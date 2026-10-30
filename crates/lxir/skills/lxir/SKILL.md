@@ -78,6 +78,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   sets (`<slug>_moods`), so start from those rather than retyping them.
 - To take over logic someone drew in the GUI, use `lxir adopt`, then
   confirm with `lxir diff --exit-code` that the takeover changed nothing.
+  `lxir coverage` lists what is not managed yet; adopting an extern
+  `--as` its own slug promotes it (its wires move into the declaration).
+  A managed block takes `.room`/`.category`, never `.title` (its label).
   The decompile view is for reading and does not compile.
 
 ## When the compiler refuses

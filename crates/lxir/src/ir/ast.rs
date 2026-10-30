@@ -1997,23 +1997,17 @@ impl Module {
                     let target = format!("{}.{}", a.slug, a.attr);
                     match names.get(a.slug.as_str()) {
                         Some(NameKind::Extern) => {}
+                        // A managed block's room and category are the
+                        // source's when it states them (D63); its title
+                        // is its label.
+                        Some(NameKind::Block) if a.attr != Attr::Title => {}
                         Some(NameKind::Block) => {
-                            let instead = match a.attr {
-                                Attr::Title => format!(
-                                    "give it a label instead (`{} = {}(\"…\", …)`)",
-                                    a.slug,
-                                    block_type(&a.slug)
-                                ),
-                                Attr::Room | Attr::Category => format!(
-                                    "a managed block's {} stays with Loxone Config \
-                                     (carried forward from the base, D19)",
-                                    a.attr
-                                ),
-                            };
                             return compile_err(format!(
-                                "`{target} = …` targets managed block `{}` — {instead}; \
-                                 attribute assignment is for externs only",
-                                a.slug
+                                "`{target} = …` targets managed block `{}` — give it a \
+                                 label instead (`{} = {}(\"…\", …)`)",
+                                a.slug,
+                                a.slug,
+                                block_type(&a.slug)
                             ));
                         }
                         _ => object_ref(&PortRef {

@@ -196,7 +196,11 @@ impl Coverage {
         };
         table(&mut s, "logic on pages", &self.pages);
         s.push('\n');
-        table(&mut s, "periphery (devices, virtual I/O, system)", &self.periphery);
+        table(
+            &mut s,
+            "periphery (devices, virtual I/O, system)",
+            &self.periphery,
+        );
 
         let sum = |f: fn(&TypeCoverage) -> usize| self.pages.iter().map(f).sum::<usize>();
         let total = sum(|r| r.total);

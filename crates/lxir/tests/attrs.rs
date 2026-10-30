@@ -83,6 +83,42 @@ fn attribute_assignments_are_canonical_and_never_wired() {
 }
 
 #[test]
+fn managed_block_takes_room_and_category_from_source() {
+    let m = Module::parse(
+        "page \"Pool\"\nb = Not(\"Nicht\")\nb.room = \"Pool\"\nb.category = \"Heizung\"\n",
+    )
+    .unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &m, &mut lock, &opts()).unwrap();
+    let text = String::from_utf8(out.to_bytes()).unwrap();
+    // A minted block gets the IoData Loxone Config gives a new one: shown
+    // in the user interface, bound as stated, after its connectors.
+    let i = text.find("Title=\"Nicht\"").unwrap();
+    let block = &text[i..i + text[i..].find("</C>").unwrap()];
+    assert!(
+        block.contains(
+            "<Co K=\"Q\" U=\"1ff9b180-0000-0001-01ff3e23e8160039\"/>\r\n\t\t\t\t<IoData Visu=\"true\" \
+             Cr=\"30000000-0000-0007-ffff504f94112233\" Pr=\"30000000-0000-0003-ffff504f94112233\"/>"
+        ),
+        "{block}"
+    );
+    // The recompile keeps it, and a later room change rewrites it in place.
+    let again = compile(&out, &m, &mut lock, &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+    let moved = Module::parse(
+        "page \"Pool\"\nb = Not(\"Nicht\")\nb.room = \"Garten\"\nb.category = \"Heizung\"\n",
+    )
+    .unwrap();
+    let text = String::from_utf8(
+        compile(&out, &moved, &mut lock, &opts())
+            .unwrap()
+            .to_bytes(),
+    )
+    .unwrap();
+    assert_eq!(text.matches("<IoData Visu=\"true\" Cr=\"30000000-0000-0007-ffff504f94112233\" Pr=\"30000000-0000-0009-ffff504f94112233\"/>").count(), 1, "{text}");
+}
+
+#[test]
 fn attribute_misuse_is_refused() {
     let fails = |src: &str, needle: &str| {
         let err = match Module::parse(src) {
@@ -94,9 +130,9 @@ fn attribute_misuse_is_refused() {
         assert!(err.contains(needle), "`{needle}` not in: {err}");
     };
 
-    // Managed blocks: the label is the title; room/category stay GUI-owned.
+    // Managed blocks: the label is the title.
     fails("b = Not(\"Nicht\")\nb.title = \"x\"\n", "give it a label");
-    fails("b = Not(\"Nicht\")\nb.room = \"Pool\"\n", "D19");
+    fails("b = Not(\"Nicht\")\nb.room = \"Keller\"\n", "Keller");
     fails("klima.room = \"Pool\"\n", "klima");
     // Rewriting what the extern is matched by would break the match.
     fails(

@@ -33,8 +33,8 @@
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
 use crate::connectors::{
-    MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, attr_params, builtin,
-    adopt_only, carried_attrs, carried_children, container_type, message_params, ref_link_type,
+    MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_params,
+    builtin, carried_attrs, carried_children, container_type, message_params, ref_link_type,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
@@ -1395,7 +1395,26 @@ pub fn compile(
     //     follower.
     let managed_uuids: BTreeSet<&str> = managed.values().map(|b| b.uuid.as_str()).collect();
     let mut claimed: BTreeMap<(String, Attr), &str> = BTreeMap::new();
-    for a in module.attrs() {
+    // A managed block's room and category (D63): written onto the rebuilt
+    // block on every compile, no lock state — the block is the source's.
+    let mut managed_claims: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
+    for a in module.attrs().filter(|a| managed.contains_key(&a.slug)) {
+        let value = resolve(&a.value)?;
+        let entry = managed_claims
+            .entry(managed[&a.slug].uuid.clone())
+            .or_default();
+        match a.attr {
+            Attr::Room => entry.0 = Some(taxonomy_uuid(&doc, "Place", "room", &value)?),
+            Attr::Category => {
+                entry.1 = Some(taxonomy_uuid(&doc, "Category", "category", &value)?);
+            }
+            Attr::Title => unreachable!("validate refuses a managed block's `.title`"),
+        }
+    }
+    for (uuid, (room, category)) in &managed_claims {
+        write_binding(&mut doc, uuid, room.as_deref(), category.as_deref());
+    }
+    for a in module.attrs().filter(|a| !managed.contains_key(&a.slug)) {
         let uuid = extern_uuid
             .get(&a.slug)
             .expect("validate admitted only extern targets");
@@ -1409,7 +1428,7 @@ pub fn compile(
         }
     }
     let mut planned_claims: Vec<(String, Attr, AttrClaim)> = Vec::new();
-    for a in module.attrs() {
+    for a in module.attrs().filter(|a| !managed.contains_key(&a.slug)) {
         let uuid = extern_uuid[&a.slug].clone();
         let value = resolve(&a.value)?;
         let written = match a.attr {
@@ -2332,10 +2351,6 @@ fn add_wire(
     Ok(())
 }
 
-/// Remove `<In Input=from/>` from the sink `<Co>` (used to tear down wires
-/// the previous compile owned).
-/// Returns whether a wire was actually present (and thus removed) — the
-/// tombstone lifecycle (D31) keys on this.
 /// The raw `FLG=` of the `<In>` wiring `from_port` into `to_port`.
 fn wire_flag(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> Option<String> {
     find_co_mut(&mut doc.xml.root, to_port)?
@@ -2345,6 +2360,10 @@ fn wire_flag(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> Option<Stri
         .map(str::to_string)
 }
 
+/// Remove `<In Input=from/>` from the sink `<Co>` (used to tear down wires
+/// the previous compile owned).
+/// Returns whether a wire was actually present (and thus removed) — the
+/// tombstone lifecycle (D31) keys on this.
 fn remove_wire(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> bool {
     if let Some(co) = find_co_mut(&mut doc.xml.root, to_port) {
         let before = co.children.len();
@@ -2491,6 +2510,39 @@ fn write_claimed(doc: &mut LoxoneDoc, uuid: &str, attr: Attr, value: &str) {
         && el.attr(name).is_some()
     {
         el.set_attr(name, value);
+    }
+}
+
+/// Bind a managed block to a room and/or category: `Pr=`/`Cr=` on its
+/// `<IoData>`. A block without one — minted, never saved by Loxone
+/// Config — gets the element Loxone Config gives a new block: after its
+/// connectors, shown in the user interface (`Visu="true"`), so the
+/// assignment puts it in the app.
+fn write_binding(doc: &mut LoxoneDoc, uuid: &str, room: Option<&str>, category: Option<&str>) {
+    let Some(c) = find_c_mut(&mut doc.xml.root, uuid) else {
+        return;
+    };
+    if !c.child_elements().any(|e| e.name == "IoData") {
+        let mut io = Element::new("IoData");
+        io.set_attr("Visu", "true");
+        let at = c
+            .children
+            .iter()
+            .rposition(|n| matches!(n, crate::xml::Node::Element(e) if e.name == "Co"))
+            .map_or(c.children.len(), |i| i + 1);
+        c.self_closing = false;
+        c.children.insert(at, crate::xml::Node::Element(io));
+    }
+    let io = c
+        .child_elements_mut()
+        .find(|e| e.name == "IoData")
+        .expect("inserted above");
+    // Loxone Config's attribute order: `Cr` before `Pr`.
+    if let Some(v) = category {
+        io.set_attr("Cr", v);
+    }
+    if let Some(v) = room {
+        io.set_attr("Pr", v);
     }
 }
 

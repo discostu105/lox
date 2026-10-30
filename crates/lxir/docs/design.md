@@ -1917,3 +1917,48 @@ Anything unverified is an error, not a heuristic:
   Validated: three Config saves (every entry of the known types back
   byte for byte, 62 per save); a push to the house and back (the served catalogue
   and `LoxAPPversion3` followed).
+- **D62 — House control types, adopt-only devices, promoting an
+  extern** (2026-10-30). The page blocks of a house (alarm, smoke alarm,
+  irrigation, the room controller, the energy flow monitor, the meters,
+  Code Touch, Intercom, Touch Pure Flex) were references only; a source
+  that wanted to own them had to give up the extern and its wires.
+  - **Connector tables from the corpus**, by the rules of
+    connector-db.md: a direction proven by a wire in the corpus wins;
+    otherwise the legacy map with no corpus contradiction; an input that
+    is never wired and never carries a `Def` stays Input. A save from
+    Loxone Config does not prove a direction: 17.2.8 keeps a
+    wrong-direction wire (oracle session 25).
+  - **Carried internals.** What the GUI writes inside these blocks —
+    zones, timers, statistic groups, `IoData`, `SpStates`, attributes
+    like `PwrN` or `StatsType` — is carried per type
+    (`connectors::carried_attrs`, `carried_children`), not modelled: a
+    rebuild keeps it, a mint starts without it and a save fills it in,
+    after which a recompile is byte-identical.
+  - **Adopt-only.** Code Touch, Intercom and Touch Pure Flex are created
+    by Loxone Config when it pairs the device; lxir adopts them and
+    rebuilds them, but refuses to mint one (`connectors::adopt_only`).
+  - **Promotion.** `lxir adopt --uuid <x>` of an object the source
+    already names as extern `x` keeps the slug: the extern and the
+    statements about it (wires into it, port values) become the block's
+    own declaration, other files' wires to it are kept, the lock drops
+    the extern's entries. Refused, naming the reason, when a template
+    writes onto the extern, when it carries room/category/tile/schedule
+    claims, or when a removal is pending.
+  - **Coverage.** `lxir coverage` counts every object by type against
+    the lock — managed, extern, rule, untouched — and lists what is left
+    to adopt.
+  Validated: oracle session 25 (all nine minted types: empty semantic
+  diff; a save then a recompile byte-identical); live on the house
+  (2026-10-30): nine minted probe blocks pushed, running (`all` answered
+  for each), moved to a room, removed. The house adopted all 42 blocks of
+  these types with a byte-identical compile.
+- **D63 — A managed block's room and category** (2026-10-30). D19 left
+  them to Loxone Config, so a block made in source showed up roomless in
+  the app until someone opened the GUI. `b.room = "…"` and
+  `b.category = "…"` on a managed block now write `IoData Cr=`/`Pr=` on
+  every rebuild (an `IoData` with `Visu="true"` is added when the block
+  has none). No lock state: the source is the owner, as for the label.
+  The extern claims (D47) stay as they were. `.title` on a managed block
+  is still an error — its label is its title. Validated: oracle session
+  25 (room claims on nine minted blocks: empty diff); live, the probe
+  blocks in room "Zentral".

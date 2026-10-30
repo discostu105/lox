@@ -372,7 +372,14 @@ haus/
       the error names the exact argument-list line to add, and the
       module loads leniently so that line may reference the new slug
       before it is declared. Promoting an existing extern to a managed
-      block stays unsupported for now.
+      block: 2026-10-30 (D62) — `--as` the extern's slug; its wires and
+      port values move into the declaration.
+- [x] House control types 2026-10-30 (D62): Alarm, SmokeAlarm,
+      Irrigation, HeatIRoomController2, EFM, the four meters; Code
+      Touch, Intercom and Touch Pure Flex adopt-only. Managed `.room`/
+      `.category` (D63). `lxir coverage` reports what the source owns.
+      The house: 154 of 159 page blocks managed (the rest: five
+      app-made Automatic Designer rules).
 - [x] Drift fingerprint 2026-08-25 (D21): `semantic_fingerprint` hashes
       exactly the projection the semantic diff compares (locale-suspect
       titles excluded), recorded in the lock at adopt/compile; `lxir

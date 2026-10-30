@@ -1715,7 +1715,8 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
 }
 
 fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str = "usage: lxir coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]";
+    const USAGE: &str =
+        "usage: lxir coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]";
     let json = args.contains(&"--json");
     let rest: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
     let (config, lock_path) = match rest.as_slice() {

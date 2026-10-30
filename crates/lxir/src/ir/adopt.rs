@@ -508,7 +508,10 @@ fn check_promotable(
     // Statements a template or an expression writes onto the extern live
     // in the expanded module only — the declaration cannot take them over.
     let count = |m: &Module| {
-        m.items.iter().filter(|i| matches!(i, Item::Wire(w) if w.to.slug == x)).count()
+        m.items
+            .iter()
+            .filter(|i| matches!(i, Item::Wire(w) if w.to.slug == x))
+            .count()
             + m.expr_wires().filter(|w| w.to.slug == x).count()
             + m.sets().filter(|s| s.target.slug == x).count()
     };
