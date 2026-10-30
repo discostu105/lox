@@ -17,12 +17,18 @@
 //! this document, else in the corpus table [`OBSERVED_ACTIONS`] — and
 //! refused when there is none. Rules with shapes outside the documented
 //! ones are not written at all.
+//!
+//! A named rule (`rule <slug> "Name"`, D60) is the source's own: [`create`]
+//! finds it in the base (by its lock UUID, else by name) or builds it next
+//! to the rules the document already has, and from there it is edited
+//! like any other.
 
 use super::ast::{Module, RULE_BLOCK_TYPE, RuleDecl, RuleItem, RuleStmt, RuleStmtKind};
 use crate::autopilot::{self, Action, Event, Rule};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
-use crate::xml::Attr;
+use crate::uuid::{LoxUuid, Minter};
+use crate::xml::{Attr, Element, Node};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -64,6 +70,246 @@ fn day_words(days: &[u8]) -> Vec<String> {
     days.iter()
         .map(|&d| DAYS[d as usize].0.to_string())
         .collect()
+}
+
+/// The connectors of an `AutopilotRule`, in index order (10/10 corpus
+/// rules).
+const RULE_PORTS: [&str; 7] = ["InputTrigger", "Reset", "On", "run", "Q", "A", "OutputAPI"];
+
+/// The vertical gap between two rules stacked on their page (house
+/// config: four of five gaps).
+const RULE_GAP: i64 = 168;
+
+/// The rule UUIDs of the named rules (D60), slug → UUID, creating the ones
+/// the base lacks. `pinned` is the lock's map (slug → UUID); the result is
+/// its new content. A pinned UUID the base carries is the rule — the
+/// source owns its name, so a differing `Title=` is rewritten. Otherwise
+/// the base's one rule of that name is adopted, and with none the rule is
+/// created: under the pinned UUID when there is one (a base from before
+/// the deployment), else a minted one.
+pub(crate) fn create(
+    doc: &mut LoxoneDoc,
+    module: &Module,
+    uuid_of: &BTreeMap<String, String>,
+    pinned: &BTreeMap<String, String>,
+    minter: &mut Minter,
+) -> Result<BTreeMap<String, String>> {
+    // The extern rules: a named rule must not be one of them.
+    let mut out: BTreeMap<String, String> = module
+        .rule_decls()
+        .filter(|d| d.title.is_none())
+        .filter_map(|d| Some((d.slug.clone(), uuid_of.get(&d.slug)?.clone())))
+        .collect();
+    let externs: Vec<String> = out.keys().cloned().collect();
+    for decl in module.rule_decls() {
+        let Some(title) = &decl.title else { continue };
+        let ctx = format!("`rule {} {title:?}`", decl.slug);
+        let objects = doc.objects();
+        let rules: Vec<_> = objects
+            .iter()
+            .filter(|o| o.block_type == RULE_BLOCK_TYPE)
+            .collect();
+        let pin = pinned.get(&decl.slug);
+        if let Some(o) = pin.and_then(|u| objects.iter().find(|o| &o.uuid == u))
+            && o.block_type != RULE_BLOCK_TYPE
+        {
+            return Err(Error::Compile(format!(
+                "{ctx}: the lock pins the rule to {}, which this config has as a `{}` — drop \
+                 the lock entry `rules.{}` to create the rule afresh",
+                o.uuid, o.block_type, decl.slug
+            )));
+        }
+        let uuid = if let Some(o) = pin.and_then(|u| rules.iter().find(|o| &o.uuid == u)) {
+            let el = doc.element_at_mut(&o.path).expect("path from objects()");
+            if el.attr_decoded("Title").as_deref() != Some(title.as_str()) {
+                rename(&ctx, el, title)?;
+            }
+            o.uuid.clone()
+        } else {
+            let named: Vec<_> = rules
+                .iter()
+                .filter(|o| o.title.as_deref() == Some(title.as_str()))
+                .collect();
+            match named.as_slice() {
+                [o] => o.uuid.clone(),
+                [] => build(&ctx, doc, title, pin, minter)?,
+                _ => {
+                    return Err(Error::Compile(format!(
+                        "{ctx}: the config has {} rules of this name — rename all but one \
+                         in the app, or address one by its extern",
+                        named.len()
+                    )));
+                }
+            }
+        };
+        if let Some((other, _)) = out.iter().find(|(_, u)| **u == uuid) {
+            return Err(Error::Compile(format!(
+                "{ctx}: `rule {other}` already declares this rule"
+            )));
+        }
+        out.insert(decl.slug.clone(), uuid);
+    }
+    for slug in externs {
+        out.remove(&slug);
+    }
+    Ok(out)
+}
+
+/// Write `title` as the rule's name: `Title=` and the payload's `name`.
+fn rename(ctx: &str, el: &mut Element, title: &str) -> Result<()> {
+    let raw = el.attr_decoded("APC").unwrap_or_default().into_owned();
+    let mut payload = autopilot::parse(&raw).ok_or_else(|| {
+        Error::Compile(format!(
+            "{ctx}: the rule has no readable payload (`APC=`) to rename"
+        ))
+    })?;
+    payload["name"] = Value::String(title.to_string());
+    el.set_attr("Title", title);
+    el.set_attr("APC", &autopilot::to_text(&payload));
+    Ok(())
+}
+
+/// A new, inactive rule without conditions or actions (the edit that
+/// follows writes them), on the page of the document's rules, below the
+/// last one. Everything not stated comes from that rule: the block
+/// version, size, colour and flags, the `ref=` to the `AutoPilot`
+/// container. A document without a rule is refused — where its rules live
+/// is the app's choice (a special page in the house config, logic pages in
+/// the use-case configs).
+fn build(
+    ctx: &str,
+    doc: &mut LoxoneDoc,
+    title: &str,
+    pin: Option<&String>,
+    minter: &mut Minter,
+) -> Result<String> {
+    let objects = doc.objects();
+    let Some(last) = objects
+        .iter()
+        .filter(|o| o.block_type == RULE_BLOCK_TYPE)
+        .max_by_key(|o| o.path.clone())
+    else {
+        return Err(Error::Compile(format!(
+            "{ctx}: the config has no Automatic Designer rule yet — create one in the app \
+             once, then the compile adds new ones next to it"
+        )));
+    };
+    let template = doc
+        .element_at(&last.path)
+        .expect("path from objects()")
+        .clone();
+    let page_path = &last.path[..last.path.len() - 1];
+    // The lowest free spot in the column of the page's rules.
+    let page = doc.element_at(page_path).expect("parent of an object");
+    let int = |e: &Element, k: &str| e.attr(k).and_then(|v| v.parse::<i64>().ok());
+    let column: Vec<&Element> = page
+        .children
+        .iter()
+        .filter_map(|n| match n {
+            Node::Element(e) if e.attr("Type") == Some(RULE_BLOCK_TYPE) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let (Some(px), Some(py), Some(px2), Some(py2)) = (
+        int(&template, "Px"),
+        int(&template, "Py"),
+        int(&template, "Px2"),
+        int(&template, "Py2"),
+    ) else {
+        return Err(Error::Compile(format!(
+            "{ctx}: the config's rule {} has no position (`Px`/`Py`/`Px2`/`Py2`) to place \
+             a new one by",
+            last.uuid
+        )));
+    };
+    let top = column
+        .iter()
+        .filter_map(|e| int(e, "Py2"))
+        .max()
+        .unwrap_or(py2)
+        + RULE_GAP;
+    let (Some(container), Some(version)) = (template.attr("ref"), template.attr("V")) else {
+        return Err(Error::Compile(format!(
+            "{ctx}: the config's rule {} has no `ref=`/`V=` to copy",
+            last.uuid
+        )));
+    };
+
+    let uuid = match pin {
+        Some(u) => u.clone(),
+        None => {
+            // The ports first, the rule last, as Loxone mints them.
+            minter.seed(minter.counter() + RULE_PORTS.len() as u32);
+            minter.mint_object().to_string()
+        }
+    };
+    let ports = rule_ports(&uuid).ok_or_else(|| {
+        Error::Compile(format!(
+            "{ctx}: the lock pins the rule to a bad UUID {uuid}"
+        ))
+    })?;
+
+    let payload = serde_json::json!({
+        "type": 1, "id": uuid, "active": false, "activeIfValid": false,
+        "name": title, "description": "", "operator": 3, "invalid": false,
+        "eventGroups": [{"operator": 1, "events": []}], "actions": [],
+    });
+    let mut el = Element::new("C");
+    el.set_attr("Type", RULE_BLOCK_TYPE);
+    el.set_attr_raw("V", version);
+    el.set_attr("U", &uuid);
+    el.set_attr("Title", title);
+    el.set_attr("Px", &px.to_string());
+    el.set_attr("Py", &top.to_string());
+    el.set_attr("Px2", &px2.to_string());
+    el.set_attr("Py2", &(top + py2 - py).to_string());
+    for k in ["Cl", "Nio", "WF"] {
+        if let Some(v) = template.attr(k) {
+            el.set_attr_raw(k, v);
+        }
+    }
+    el.set_attr("APC", &autopilot::to_text(&payload));
+    el.set_attr_raw("ref", container);
+    for (k, u) in RULE_PORTS.iter().zip(&ports) {
+        let mut co = Element::new("Co");
+        co.set_attr("K", k);
+        co.set_attr("U", u);
+        el.push_child(co);
+    }
+    let mut io = Element::new("IoData");
+    io.self_closing = false;
+    el.push_child(io);
+
+    let at = *last.path.last().expect("an object has a parent") + 1;
+    let page = doc.element_at_mut(page_path).expect("parent of an object");
+    page.children.insert(at, Node::Element(el));
+    Ok(uuid)
+}
+
+/// A rule's connector UUIDs, derived from its own: Loxone mints the seven
+/// ports right before the rule (house config, 5/5), each with its index
+/// and the rule's machine tail.
+fn rule_ports(rule: &str) -> Option<Vec<String>> {
+    let u = LoxUuid::parse(rule).ok()?;
+    let counter = ((u.mid as u32) << 16 | u.seq as u32).checked_sub(RULE_PORTS.len() as u32)?;
+    Some(
+        (0..RULE_PORTS.len() as u32)
+            .map(|i| {
+                let c = counter + i;
+                let mut tail = [0u8; 8];
+                tail[0] = i as u8;
+                tail[1] = 0xff;
+                tail[2..].copy_from_slice(&u.tail[2..]);
+                LoxUuid {
+                    time: u.time,
+                    mid: (c >> 16) as u16,
+                    seq: c as u16,
+                    tail,
+                }
+                .to_string()
+            })
+            .collect(),
+    )
 }
 
 pub(crate) fn apply(
@@ -332,6 +578,7 @@ pub(crate) fn lift(
     }
     Ok(RuleDecl {
         slug: rule_slug.to_string(),
+        title: None,
         body,
         comment: None,
         end_comment: None,

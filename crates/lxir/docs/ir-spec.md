@@ -970,6 +970,29 @@ a rule with other conditions (a control's state, an operating mode, OR
 groups) stays a comment and must not be declared. Removing a
 declaration leaves the rule as last written. Top-level only.
 
+**Named rules (D60).** `rule <slug> "Name"` declares a rule by its name
+instead of an extern — the slug is the declaration's own:
+
+```text
+rule pumpe_mittag "Pumpe Mittag"     # created if the config lacks it
+	active
+	when time 12:30
+	then pumpe "on"
+end
+```
+
+The compile takes the config's rule of that name (a name two rules
+share is refused), or creates it when there is none: inactive and empty
+until the body is written, placed below the config's last rule on its
+page and filed like it. A config without any rule is refused (create
+one in the app once — where rules live is the app's choice). The lock
+pins the rule's UUID (`rules`), so a compile against a base from before
+the deployment creates it again under the same UUID, the source owns
+the name (changing it renames the rule), and `lxir rename` carries the
+pin. Removing the declaration leaves the rule as last written; lxir
+never deletes one. A slug declared otherwise (an extern, a block) is
+refused, as is a named rule that is also some `rule <extern>`'s.
+
 ### `moods` — the moods of a lighting controller (D58)
 
 ```text

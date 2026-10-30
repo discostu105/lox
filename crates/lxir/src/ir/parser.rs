@@ -702,11 +702,19 @@ pub fn parse(src: &str) -> Result<Module> {
             }
             // `rule` is a keyword only in front of a slug, like `access`.
             Tok::Ident(kw) if kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
-                let [_, Tok::Ident(slug)] = toks.as_slice() else {
-                    return Err(err("expected `rule <slug>` — the rule's extern".into()));
+                let (slug, title) = match toks.as_slice() {
+                    [_, Tok::Ident(slug)] => (slug, None),
+                    [_, Tok::Ident(slug), Tok::Str(title)] => (slug, Some(title.clone())),
+                    _ => {
+                        return Err(err(
+                            "expected `rule <slug>` (the rule's extern) or `rule <slug> \"Name\"`"
+                                .into(),
+                        ));
+                    }
                 };
                 open_rule = Some(RuleDecl {
                     slug: check_slug(slug, lineno)?,
+                    title,
                     body: Vec::new(),
                     comment,
                     end_comment: None,

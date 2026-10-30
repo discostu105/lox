@@ -339,3 +339,169 @@ fn unknown_actions_and_shapes_are_refused() {
     let e = compile_rules(&base, AS_READ).unwrap_err().to_string();
     assert!(e.contains("`rule pumpe_aus`"), "{e}");
 }
+
+// --- Named rules (D60): `rule <slug> "Name"` finds or creates the rule.
+
+/// The fixture with `Pumpe Aus` placed and filed like the house's rules:
+/// a position, colour, flags and the `ref=` to the `AutoPilot` container.
+fn placed_fixture() -> String {
+    fixture().replace(
+        &format!("U=\"{RULE_OFF}\" Title=\"Pumpe Aus\" Nio=\"1\""),
+        &format!(
+            "U=\"{RULE_OFF}\" Title=\"Pumpe Aus\" Px=\"5952\" Py=\"768\" Px2=\"8640\" \
+             Py2=\"1656\" Cl=\"141,255,112\" Nio=\"7\" WF=\"16384\" \
+             ref=\"40000000-0000-0003-ffff504f94112233\""
+        ),
+    )
+}
+
+const NEW_RULE: &str = "rule mittag \"Pumpe Mittag\"\n\
+                        \tactive\n\
+                        \twhen time 12:30\n\
+                        \tthen pumpe \"on\"\n\
+                        end\n";
+
+fn compile_with(base: &str, src: &str, lock: &mut Lockfile) -> lxir::Result<String> {
+    let m = Module::parse(&format!("{EXTERNS}\n{src}"))?;
+    let out = compile(&parse(base), &m, lock, &opts())?;
+    Ok(String::from_utf8(out.to_bytes()).unwrap())
+}
+
+#[test]
+fn a_named_rule_is_created_next_to_the_others() {
+    let base = placed_fixture();
+    let mut lock = Lockfile::new();
+    let out = compile_with(&base, NEW_RULE, &mut lock).unwrap();
+    let uuid = lock.rules["mittag"].clone();
+    assert!(uuid.ends_with("-ffff504f94112233"), "{uuid}");
+
+    // Below the last rule, sized, coloured and filed like it; the payload
+    // names the rule and holds what the source states.
+    let tag = tag_of(&out, &uuid);
+    for want in [
+        "Type=\"AutopilotRule\" V=\"175\"",
+        "Title=\"Pumpe Mittag\" Px=\"5952\" Py=\"1824\" Px2=\"8640\" Py2=\"2712\"",
+        "Cl=\"141,255,112\" Nio=\"7\" WF=\"16384\"",
+        "STA=\"1\" ref=\"40000000-0000-0003-ffff504f94112233\">",
+    ] {
+        assert!(tag.contains(want), "{want}: {tag}");
+    }
+    let apc = esc(&format!(
+        r#"{{"type":1,"id":"{uuid}","active":true,"activeIfValid":true,"name":"Pumpe Mittag","description":"","operator":3,"invalid":false,"eventGroups":[{{"operator":1,"events":[{{"type":5,"descID":272001,"id":272,"value":750,"operator":1,"forceEdge":false}}]}}],"actions":[{{"type":0,"descID":342101,"id":"{PUMP}","command":"on"}}]}}"#
+    ));
+    assert!(tag.contains(&apc), "{tag}");
+
+    // Seven connectors minted right before the rule, then `<IoData>`.
+    let at = out.find(&tag).unwrap() + tag.len();
+    let body = &out[at..at + out[at..].find("</C>").unwrap()];
+    let seq = u32::from_str_radix(&uuid[14..18], 16).unwrap();
+    for (i, k) in ["InputTrigger", "Reset", "On", "run", "Q", "A", "OutputAPI"]
+        .iter()
+        .enumerate()
+    {
+        let port = format!(
+            "{}{:04x}-{:02x}ff504f94112233",
+            &uuid[..14],
+            seq - 7 + i as u32,
+            i
+        );
+        assert!(
+            body.contains(&format!("<Co K=\"{k}\" U=\"{port}\"/>")),
+            "{k}: {body}"
+        );
+    }
+    assert!(body.contains("<IoData></IoData>"), "{body}");
+
+    // A fixpoint: the same base and lock give the same bytes, and the
+    // compiled file as base creates nothing more.
+    let again = compile_with(&base, NEW_RULE, &mut lock).unwrap();
+    assert_eq!(again, out);
+    assert_eq!(compile_with(&out, NEW_RULE, &mut lock).unwrap(), out);
+    assert_eq!(lock.rules["mittag"], uuid);
+
+    // The created rule reads back as an extern rule.
+    let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
+    assert!(
+        m.to_text()
+            .contains("\tactive\n\twhen time 12:30\n\tthen pumpe \"on\"\nend\n"),
+        "{}",
+        m.to_text()
+    );
+}
+
+#[test]
+fn a_named_rule_finds_the_base_rule_and_owns_its_name() {
+    let base = placed_fixture();
+    let mut lock = Lockfile::new();
+    let as_read = "rule abend \"Pumpe Aus\"\n\tinactive\n\twhen time 17:00\n\
+                   \tthen pumpe \"off\"\nend\n";
+    // Found by name: nothing written, the UUID pinned.
+    assert_eq!(compile_with(&base, as_read, &mut lock).unwrap(), base);
+    assert_eq!(lock.rules["abend"], RULE_OFF);
+
+    // Renamed in source: the pinned rule takes the new name.
+    let renamed = as_read.replace("Pumpe Aus", "Pumpe Abend");
+    let out = compile_with(&base, &renamed, &mut lock).unwrap();
+    let tag = tag_of(&out, RULE_OFF);
+    assert!(tag.contains("Title=\"Pumpe Abend\""), "{tag}");
+    assert!(
+        tag.contains("&quot;name&quot;:&quot;Pumpe Abend&quot;"),
+        "{tag}"
+    );
+    assert_eq!(out.matches("Type=\"AutopilotRule\"").count(), 2);
+
+    // `lxir rename` carries the pin to the new slug.
+    let old = Module::parse(&format!("{EXTERNS}\n{renamed}")).unwrap();
+    let mut new = old.clone();
+    lxir::ir::rename_slug(&mut new, "abend", "spaet");
+    let rekeys = lxir::ir::lock_rekeys(&old, &new).unwrap();
+    assert_eq!(lxir::ir::apply_rekeys(&mut lock, &rekeys).unwrap(), 1);
+    assert_eq!(lock.rules["spaet"], RULE_OFF);
+}
+
+#[test]
+fn named_rules_are_checked() {
+    let err = |src: &str| {
+        let mut lock = Lockfile::new();
+        compile_with(&placed_fixture(), src, &mut lock)
+            .unwrap_err()
+            .to_string()
+    };
+    let has = |src: &str, want: &str| {
+        let e = err(src);
+        assert!(e.contains(want), "{src:?}: {e}");
+    };
+    // The slug of an extern is not a new rule's.
+    has(
+        &NEW_RULE.replace("rule mittag", "rule pumpe_ein"),
+        "without the name",
+    );
+    // A name is one rule.
+    has(
+        &format!("{NEW_RULE}\n{}", NEW_RULE.replace("mittag", "noch_einer")),
+        "another rule is named",
+    );
+    // An extern and a name for the same rule.
+    has(
+        &format!(
+            "{}\nrule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+            NEW_RULE.replace("Pumpe Mittag", "Pumpe Aus")
+        ),
+        "already declares this rule",
+    );
+    // Where rules live is the app's choice: with none, nothing is created.
+    let no_rules = {
+        let base = placed_fixture();
+        let start = base.find("\t\t\t<C Type=\"AutopilotRule\"").unwrap();
+        let end = base.rfind("\t\t</C>").unwrap();
+        format!("{}{}", &base[..start], &base[end..])
+    };
+    let m = Module::parse(&format!(
+        "extern pumpe = PushButton(title: \"Pumpe\")\n\n{NEW_RULE}"
+    ))
+    .unwrap();
+    let e = compile(&parse(&no_rules), &m, &mut Lockfile::new(), &opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("create one in the app"), "{e}");
+}

@@ -1377,10 +1377,16 @@ impl fmt::Display for MoodsClaim {
 /// conditions that must all hold, and the commands it then sends. The
 /// declaration owns exactly that part of the rule's `APC=` payload; its
 /// name, description and every field lxir does not know stay as they
-/// are. Like `access` it keeps no lock state.
+/// are. Like `access` it keeps no lock state (a named rule does, D60).
+///
+/// `rule <slug> "Title"` declares a rule by its name instead (D60): the
+/// base's rule of that title, or a new one the compile creates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleDecl {
     pub slug: String,
+    /// The rule's name (`Title=`, the payload's `name`) when the
+    /// declaration owns the rule itself; `None` for an extern rule.
+    pub title: Option<String>,
     pub body: Vec<RuleItem>,
     /// Trailing `#` comment on the header line, verbatim.
     pub comment: Option<String>,
@@ -1868,6 +1874,7 @@ impl Module {
         let mut schedules_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut moods_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut rules_declared: BTreeSet<&str> = BTreeSet::new();
+        let mut rule_titles: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
                 Item::Block(b) => {
@@ -2577,8 +2584,35 @@ impl Module {
                 }
                 Item::Rule(r) => {
                     let ctx = format!("`rule {}`", r.slug);
-                    match names.get(r.slug.as_str()) {
-                        Some(NameKind::Extern) => {
+                    match (&r.title, names.get(r.slug.as_str())) {
+                        // A titled rule names itself (D60): its slug is
+                        // its own, like a managed block's.
+                        (Some(title), None) => {
+                            if title.trim().is_empty() {
+                                return compile_err(format!(
+                                    "{ctx}: the rule's name is empty — the app lists rules \
+                                     by name"
+                                ));
+                            }
+                            if !rule_titles.insert(title.as_str()) {
+                                return compile_err(format!(
+                                    "{ctx}: another rule is named {title:?} — the name is the \
+                                     rule's identity"
+                                ));
+                            }
+                        }
+                        (Some(_), Some(kind)) => {
+                            return compile_err(format!(
+                                "{ctx}: `{}` is already {} — a named rule (`rule {} \"…\"`) \
+                                 declares its own slug; for an existing rule's extern write \
+                                 `rule {}` without the name",
+                                r.slug,
+                                kind.describe(),
+                                r.slug,
+                                r.slug
+                            ));
+                        }
+                        (None, Some(NameKind::Extern)) => {
                             let ty = self
                                 .externs()
                                 .find(|e| e.slug == r.slug)
@@ -2591,7 +2625,7 @@ impl Module {
                                 ));
                             }
                         }
-                        Some(kind) => {
+                        (None, Some(kind)) => {
                             return compile_err(format!(
                                 "{ctx}: `{}` is {} — a rule is declared on an extern \
                                  (`extern {} = {RULE_BLOCK_TYPE}(…)`)",
@@ -2600,15 +2634,16 @@ impl Module {
                                 r.slug
                             ));
                         }
-                        None => {
+                        (None, None) => {
                             let hint = super::validate::suggest(
                                 &r.slug,
                                 self.externs().map(|e| e.slug.as_str()),
                             );
                             return compile_err(format!(
                                 "{ctx}: undeclared slug `{}`{hint} — declare the rule as \
-                                 `extern {} = {RULE_BLOCK_TYPE}(title: \"…\")`",
-                                r.slug, r.slug
+                                 `extern {} = {RULE_BLOCK_TYPE}(title: \"…\")`, or name a \
+                                 new one: `rule {} \"Name\"`",
+                                r.slug, r.slug, r.slug
                             ));
                         }
                     }
@@ -3019,7 +3054,13 @@ impl Module {
                     out.push_str(&format!("{c}{}\n", tail(&c.comment)));
                 }
                 Item::Rule(r) => {
-                    out.push_str(&format!("rule {}{}\n", r.slug, tail(&r.comment)));
+                    let title = r.title.as_deref().map(|t| format!(" {}", quote(t)));
+                    out.push_str(&format!(
+                        "rule {}{}{}\n",
+                        r.slug,
+                        title.unwrap_or_default(),
+                        tail(&r.comment)
+                    ));
                     for stmt in &r.body {
                         match stmt {
                             RuleItem::Stmt(st) => {

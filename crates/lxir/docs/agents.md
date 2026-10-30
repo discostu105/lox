@@ -161,6 +161,12 @@ rule regel                           # an app rule (D57): active, all
 	then pumpe "on"
 end
 
+rule mittag "Pumpe Mittag"           # a named rule (D60): the config's
+	inactive                         # rule of that name, else created
+	when time 12:30
+	then pumpe "on"
+end
+
 moods wohnen                         # light moods (D58), by name; the off
 	"Viel Licht": all on             # mood ("Aus") is implicit
 	"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)

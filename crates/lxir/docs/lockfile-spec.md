@@ -1,4 +1,4 @@
-# Lockfile specification (v6)
+# Lockfile specification (v7)
 
 The lockfile is the persistent identity between IR source and compiled
 config — the analogue of `terraform.tfstate` / `package-lock.json`.
@@ -13,7 +13,7 @@ otherwise — a wrong port UUID silently breaks wire identity.
 
 ```jsonc
 {
-  "lockfile_version": 6,
+  "lockfile_version": 7,
 
   "target": {                       // informational metadata (nullable)
     "config_version": "17010727",   // ConfigVersion of the last base
@@ -142,8 +142,11 @@ otherwise — a wrong port UUID silently breaks wire identity.
     "<controller-uuid>": {         // (D58): name → mood UUID, until a
       "Lesen": "21883d91-0000-009d-ffff504f94112233"
     }                              // base carries the mood
-  }
-}
+  },
+  "rules": {                       // named Automatic Designer rules
+    "regel_mittag": "2188e51a-0000-0074-ffff504f94112233"
+  }                                // (D60): slug → rule UUID, while the
+}                                  // `rule <slug> "Name"` declaration lives
 ```
 
 Serialization is stable: `serde_json` pretty-printing over `BTreeMap`s,
@@ -188,7 +191,13 @@ byte-for-byte, so lockfile diffs in review always mean something.
    (D58): a recompile against a base without it mints it under the same
    UUID. The entry retires once a base carries the mood (its `UUID=` is
    then the controller's own) or the claim no longer adds it.
-9. Identity is unique: a base whose `<C>`/`<Co>` UUIDs repeat is refused,
+9. A `rules` entry is the identity of a named rule (D60), found by
+   name in the base or created by the compiler: a base without that UUID
+   gets the rule again under it, one that carries it has its `Title=` and
+   payload `name` set to the source's name. The entry is dropped with its
+   declaration (the rule itself is never deleted) and follows the slug
+   through `lxir rename`.
+10. Identity is unique: a base whose `<C>`/`<Co>` UUIDs repeat is refused,
    and an output that would repeat one is never returned (D38).
 
 ## Operations
@@ -218,4 +227,5 @@ a v2 lock instead of silently dropping tombstones it does not understand.
 **v4** (2026-10-29) added `superseded_layout` (D42); a v1–v3 lock loads
 without it. **v5** (2026-10-29) added `pages` (D56); older locks load
 with it empty. **v6** (2026-10-30) added `moods` (D58); older locks
-load with it empty.
+load with it empty. **v7** (2026-10-30) added `rules` (D60); older
+locks load with it empty.

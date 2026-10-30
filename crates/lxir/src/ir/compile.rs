@@ -1462,7 +1462,7 @@ pub fn compile(
     //     must be API-linked to the device, and that link may be a wire
     //     this compile just drew. Like `Code:` (D40) the claim keeps no
     //     lock state — a withdrawn claim leaves the pushed programs.
-    let uuid_of: BTreeMap<String, String> = extern_uuid
+    let mut uuid_of: BTreeMap<String, String> = extern_uuid
         .iter()
         .map(|(s, u)| (s.clone(), u.clone()))
         .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
@@ -1475,11 +1475,16 @@ pub fn compile(
     // --- Access rights on NFC Code Touch blocks (D49): users, groups and
     //     schedules are the base's; no lock state, like tiles.
     super::access::apply(&mut doc, module, &uuid_of)?;
+    // Automatic Designer rules (D57); a named one (D60) is found or
+    //     created first, its UUID pinned in the lock while it is declared.
+    //     A rule or mood minted here moves the mint mark.
+    let mint_mark = minter.counter();
+    lock.rules = super::rule::create(&mut doc, module, &uuid_of, &lock.rules, &mut minter)?;
+    uuid_of.extend(lock.rules.iter().map(|(s, u)| (s.clone(), u.clone())));
     super::rule::apply(&mut doc, module, &uuid_of)?;
     // LightController2 moods (D58): the claimed `<LightscenesC>` list; a
     //     new mood mints its UUID (pinned in the lock until the base has
-    //     it), so the mint mark moves with it.
-    let mint_mark = minter.counter();
+    //     it).
     let minted_moods = std::mem::take(&mut lock.moods);
     lock.moods = super::moods::apply(&mut doc, module, &uuid_of, &minted_moods, &mut minter)?;
     if minter.counter() != mint_mark {

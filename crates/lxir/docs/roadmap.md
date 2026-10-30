@@ -450,10 +450,10 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       moves the fingerprint, and trips `lxir drift`; the decompile full
       view renders each rule as `# when … / # then …` comment lines with
       control UUIDs resolved to titles.
-- [ ] Oracle probe: does a Loxone Config open+save round-trip `APC=`
-      byte-identically (key order/whitespace), and does it preserve a
-      foreign-minted rule at all? Cheap to answer with
-      `scripts/oracle.sh`; prerequisite for any write-side work.
+- [x] Oracle probe 2026-10-30 (session 24): a Loxone Config open+save
+      round-trips all five house rules' `APC=` byte-identically and keeps
+      a compiler-created rule (payload, position, connectors, `ref=`);
+      only `WF=` goes, from every rule alike.
 - [x] Editing rules from source 2026-10-29 (D57): `rule <slug>` with
       `active`/`inactive`, `when time`, `when weekday`, `then <slug>
       "<cmd>"`; lifted by decompile/adopt, written only on change, as the
@@ -463,8 +463,15 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
 - [ ] More rule shapes: control-state conditions (`type` 0 with
       `controlUUID`), operating modes, OR groups — each needs its corpus
       evidence first.
-- [ ] Creating rules from source (minting an `AutopilotRule`): needs
-      the oracle answer above.
+- [x] Creating rules from source 2026-10-30 (D60): `rule <slug>
+      "Name"` takes the config's rule of that name or creates one below
+      the last rule, filed like it; the lock pins its UUID (v7 `rules`).
+      Oracle-validated (session 24).
+- [ ] Live check of a created rule (#181): push one, see it in the app and run
+      at its time (the Miniserver loads program rules, D57; a created one
+      has not been pushed yet).
+- [ ] Deleting rules from source (`removed`-style tombstone) — only with
+      a use for it.
 
 ## Tooling & ecosystem
 
