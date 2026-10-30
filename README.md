@@ -427,6 +427,27 @@ Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs a
 
 ---
 
+## Related projects
+
+- **[lxir](crates/lxir)**: the config-as-code toolchain behind `lox ir`, the logic diffs and `lox config push`.
+  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir). It was
+  merged into this repository with its history and is developed here now, as `crates/lxir`. Its crates.io
+  package is [`lxir`](https://crates.io/crates/lxir). The standalone repository receives no further changes.
+- **[eisber/lox-cli](https://github.com/eisber/lox-cli)**: a separate project by Markus Cozowicz, based on an
+  earlier version of lox. Its own code is AGPL-3.0 or commercial. It takes another approach to editing a
+  config:
+  - An AI agent builds the logic with one command per step (`lox config add`, `set-param`, `wire-connector`),
+    and lox-cli writes each step straight into the `.Loxone` XML.
+  - It tests the result in an offline simulator, `lox sim`.
+  - lox, by contrast, keeps the logic as `.lxir` source and compiles it with pinned UUIDs. Everything the
+    source doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
+
+  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios
+  through lox-cli's `lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects install a binary
+  named `lox`, so give one of them another name if you install both.
+
+---
+
 ## Status
 
 This project is an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If you like the project, please help and contribute.

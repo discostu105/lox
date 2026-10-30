@@ -293,8 +293,9 @@ sets the simulated time for `DayTimer`-style logic.
 | `diff` | Semantic diff between two configs, with locale-rename noise flagged. |
 
 **Out of scope** — deliberately: transport (FTP/HTTP to the Miniserver),
-LoxCC compression, credentials. Those live in the `lox` / `lox-cli` CLIs,
-which are the intended consumers of this crate.
+LoxCC compression, credentials. Those live in
+[`lox`](https://github.com/discostu105/lox), the CLI that builds on this
+crate.
 
 ## Documentation
 
@@ -351,13 +352,28 @@ cover the validation loop.
 ## Relationship to `lox` / `lox-cli`
 
 lxir lives in the [`lox`](https://github.com/discostu105/lox) repository
-as `crates/lxir`. lox (server API, transport, LoxCC) depends on it for
-everything config-model-related — `lox config diff/show/wiring/lint`, and
-the whole toolchain as `lox ir`. The crate stays a separate, network-free
-library, published on crates.io for anyone else to build on.
-[`lox-cli`](https://github.com/eisber/lox-cli) (Markus Cozowicz's fork of
-lox: config manipulation CLI, DOM-level writer, `lox sim` simulator) is
-where `lxir test` gets its simulator.
+as `crates/lxir`. It started as the standalone repository
+[discostu105/lxir](https://github.com/discostu105/lxir), was merged here
+with its history, and is developed only here now: the standalone repository
+receives no further changes. lox (server API, transport, LoxCC) depends on
+it for everything config-model-related: `lox config diff/show/wiring/lint`,
+`lox config push`, and the whole toolchain as `lox ir`. The crate stays a
+separate, network-free library, published on crates.io for anyone else to
+build on.
+
+[`lox-cli`](https://github.com/eisber/lox-cli) is a separate project by
+Markus Cozowicz, based on an earlier version of lox. Its own code is AGPL-3.0
+or commercial. It takes another approach:
+- An AI agent edits the `.Loxone` XML directly, one command per step
+  (`lox config add`, `set-param`, `wire-connector`).
+- It tests the result in its offline simulator, `lox sim`.
+
+lxir keeps the logic as source and compiles it with pinned identities, and
+it passes everything the source doesn't own through unchanged. lox-cli does
+not use lxir, and neither project contains the other's code. The one
+connection is `lxir test`: it runs its scenarios through lox-cli's
+`lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects
+install a binary named `lox`.
 
 ## License
 
