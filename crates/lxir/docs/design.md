@@ -1988,4 +1988,10 @@ Anything unverified is an error, not a heuristic:
   is drawn the same way again (D34). Validated: oracle session 26 (one
   of each type minted: empty diff, recompile of the save byte-identical);
   the house's 17 devices with their 195 I/O adopted and rebuilt
-  byte-identically; live on the Miniserver (below).
+  byte-identically; live 2026-10-31 on the house Miniserver (17.2.8):
+  a new HTTP input with a command, a command in an adopted device, a
+  text input and a Modbus register read in an adopted device, pushed
+  (the commands and the register delivered values) and removed again,
+  both with a byte fixpoint. A device's teardown carries the I/O the
+  GUI added below it, never a withdrawn one (its tombstone holds, also
+  inside the captions a device groups its I/O in).

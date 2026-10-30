@@ -1462,6 +1462,10 @@ fn cmd_adopt_one(
         }
         .to_text(),
     );
+    // In the form `lxir fmt` writes, so the file stays canonical.
+    *text = Module::parse_fragment(text)
+        .map_err(|e| format!("{}: {e}", target.display()))?
+        .to_text();
 
     let mut merged = Module { items: Vec::new() };
     for (f, _, text) in &files {

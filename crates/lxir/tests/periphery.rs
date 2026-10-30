@@ -254,3 +254,38 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
     let err = compile(&base1, &again, &mut lock2.clone(), &opts()).unwrap_err();
     assert!(err.to_string().contains("manages as `vorlauf`"), "{err}");
 }
+
+#[test]
+fn removing_a_device_and_an_io_converges_against_the_old_base() {
+    // Mint everything, then withdraw the HTTP device (with its command)
+    // and the Modbus actuator from a device that stays.
+    let mut lock = Lockfile::default();
+    let deployed = compile(&base(), &devices(), &mut lock, &opts()).unwrap();
+    let gone: Vec<String> = ["http", "http_power", "mb_set"]
+        .iter()
+        .map(|s| lock.objects[*s].uuid.clone())
+        .collect();
+    let src = DEVICES
+        .lines()
+        .filter(|l| !l.starts_with("http") && !l.starts_with("mb_set"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("Input1: http_power.AQ, ", "")
+        + "\nremoved http\nremoved http_power\nremoved mb_set\n";
+    let module = Module::parse(&src).unwrap();
+    let out = compile(&deployed, &module, &mut lock, &opts()).unwrap();
+    let has = |d: &LoxoneDoc, u: &str| d.objects().iter().any(|o| o.uuid == u);
+    assert!(gone.iter().all(|u| !has(&out, u)));
+    assert_eq!(lock.removed.len(), 3);
+
+    // Until the removal is deployed, every compile against the old base
+    // removes them again — none comes back with the device that held it.
+    let mut again = lock.clone();
+    let out2 = compile(&deployed, &module, &mut again, &opts()).unwrap();
+    assert_eq!(out2.to_bytes(), out.to_bytes());
+    assert_eq!(again.removed, lock.removed);
+    // Against the deployed result, the tombstones are done.
+    let out3 = compile(&out, &module, &mut again, &opts()).unwrap();
+    assert_eq!(out3.to_bytes(), out.to_bytes());
+    assert!(again.removed.is_empty());
+}

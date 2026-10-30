@@ -414,9 +414,48 @@ pub fn compile(
         let depth = |o: &LockedObject| idx.by_uuid.get(&o.uuid).map_or(0, Vec::len);
         teardown.sort_by_key(|o| std::cmp::Reverse(depth(o)));
     }
+    // Tombstoned objects that went with a torn-down device: still in
+    // this base, so their tombstones stay.
+    let mut in_torn_down: BTreeSet<String> = BTreeSet::new();
     for obj in teardown {
         if let Some(el) = doc.remove_by_uuid(&obj.uuid) {
             let mut r = harvest_residue(&el);
+            // A device carries the I/O the GUI added to it, never one
+            // the source withdrew (its tombstone, D31) — also inside the
+            // captions a device groups its I/O in.
+            fn withdrawn(
+                c: &Element,
+                removed: &BTreeMap<String, crate::lock::Tombstone>,
+                found: &mut BTreeSet<String>,
+            ) -> bool {
+                let u = c
+                    .attr("U")
+                    .filter(|u| c.name == "C" && removed.contains_key(*u));
+                if let Some(u) = u {
+                    found.insert(u.to_string());
+                }
+                u.is_some()
+            }
+            fn drop_withdrawn(
+                el: &mut Element,
+                removed: &BTreeMap<String, crate::lock::Tombstone>,
+                found: &mut BTreeSet<String>,
+            ) {
+                el.children.retain(|n| match n {
+                    crate::xml::Node::Element(c) => !withdrawn(c, removed, found),
+                    _ => true,
+                });
+                for n in el.children.iter_mut() {
+                    if let crate::xml::Node::Element(c) = n {
+                        drop_withdrawn(c, removed, found);
+                    }
+                }
+            }
+            r.children
+                .retain(|c| !withdrawn(c, &lock.removed, &mut in_torn_down));
+            for c in r.children.iter_mut() {
+                drop_withdrawn(c, &lock.removed, &mut in_torn_down);
+            }
             r.page = base_page.get(&obj.uuid).cloned();
             residue.insert(obj.uuid.clone(), r);
         }
@@ -425,8 +464,22 @@ pub fn compile(
     // in this base is deleted again (the base predates the deployment of
     // the removal); one the base no longer contains has reached the
     // Miniserver — its tombstone is done.
-    lock.removed
-        .retain(|uuid, _| doc.remove_by_uuid(uuid).is_some());
+    // A withdrawn device takes its withdrawn I/O along (D64).
+    let pending: Vec<String> = lock.removed.keys().cloned().collect();
+    let mut present: BTreeSet<String> = in_torn_down;
+    for uuid in &pending {
+        if let Some(el) = doc.remove_by_uuid(uuid) {
+            present.insert(uuid.clone());
+            let mut stack: Vec<&Element> = el.child_elements().collect();
+            while let Some(c) = stack.pop() {
+                if let Some(u) = c.attr("U").filter(|_| c.name == "C") {
+                    present.insert(u.to_string());
+                }
+                stack.extend(c.child_elements());
+            }
+        }
+    }
+    lock.removed.retain(|uuid, _| present.contains(uuid));
     // Vanished slugs (authorized via `removed`, allow_removals, or
     // expression ownership) are deleted from this output and leave a
     // tombstone so every later compile against an older base deletes them
