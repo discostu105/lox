@@ -317,7 +317,7 @@ fn ambiguity_and_no_match_are_reported() {
 
 #[test]
 fn unverified_block_type_is_refused() {
-    let m = Module::parse("t = Irrigation()\n").unwrap();
+    let m = Module::parse("t = Sauna()\n").unwrap();
     let err = compile(&base(), &m, &mut Lockfile::new(), &opts()).unwrap_err();
     assert!(err.to_string().contains("builtin table"), "{err}");
 }

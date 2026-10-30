@@ -25,10 +25,12 @@
 //! [`AdoptReport::refused`] — one bespoke GUI flag never blocks adopting
 //! the rest of the house.
 
-use crate::connectors::{VERIFIED_BLOCK_VERSIONS, attr_params, builtin, container_type};
+use crate::connectors::{
+    VERIFIED_BLOCK_VERSIONS, attr_params, builtin, carried_attrs, carried_children, container_type,
+};
 use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, ports};
 use crate::error::{Error, Result};
-use crate::ir::ast::{ArgItem, BindingKind, Item, MatchSpec, Module, PortRef, WireDecl};
+use crate::ir::ast::{ArgItem, Binding, BindingKind, Item, MatchSpec, Module, PortRef, WireDecl};
 use crate::ir::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED};
 use crate::ir::validate::validate_ports;
 use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
@@ -98,6 +100,11 @@ pub struct AdoptedBlock {
     pub page_title: String,
     /// Slugs of the externs newly pinned in the lock.
     pub new_externs: Vec<String>,
+    /// The block was an extern of the module and is managed now: every
+    /// statement on it (its `extern` line, `<-` wires, port assignments,
+    /// `.title` claim) moved into the declaration — strip them from the
+    /// source with [`Module::strip_extern`].
+    pub promoted: bool,
 }
 
 /// Adopt the single existing object `uuid` as managed block `slug` into an
@@ -158,12 +165,23 @@ pub fn adopt_one(
             "{ident} is already managed as `{s}` — nothing to adopt"
         )));
     }
-    if let Some((s, _)) = lock.externals.iter().find(|(_, le)| le.uuid == uuid) {
-        return Err(fail(format!(
-            "{ident} is already referenced as extern `{s}` — promoting an extern to a \
-             managed block is not supported yet; keep it unmanaged or re-adopt the \
-             whole config"
-        )));
+    // Promotion: the object is an extern of the module. It keeps its
+    // slug — every reference stays valid — and the module's statements on
+    // it become the declaration's arguments.
+    let promoted = lock
+        .externals
+        .iter()
+        .find(|(_, le)| le.uuid == uuid)
+        .map(|(s, _)| s.clone());
+    if let Some(x) = &promoted {
+        if x != slug {
+            return Err(fail(format!(
+                "{ident} is extern `{x}` of this module — promoting it keeps the slug \
+                 every statement already uses: adopt it `--as {x}` (rename it \
+                 afterwards with `lxir rename`)"
+            )));
+        }
+        check_promotable(doc, x, uuid, raw, module, lock).map_err(fail)?;
     }
     if let Some(pin) = &lock.target.config_version
         && doc.config_version().as_deref() != Some(pin)
@@ -202,7 +220,7 @@ pub fn adopt_one(
         .chain(lock.objects.keys().cloned())
         .chain(lock.externals.keys().cloned())
         .collect();
-    if taken.contains(slug) {
+    if promoted.is_none() && taken.contains(slug) {
         return Err(fail(format!(
             "slug `{slug}` is already taken in this module/lock — pick another"
         )));
@@ -349,16 +367,99 @@ pub fn adopt_one(
     let mut block = lift.block_decls[&ti].clone();
     block.slug = slug.to_string();
     block.title = o.title.clone().filter(|t| t != slug);
+    if promoted.is_some() {
+        // What the config holds on the block is the GUI's part plus the
+        // compiler's extern writes. The compiler's part is dropped from the
+        // lift and re-stated from the source statements that wrote it —
+        // expressions stay expressions, constants stay constants.
+        let el_ports = ports(el);
+        let key_of = |port_uuid: &str| {
+            el_ports
+                .iter()
+                .find(|p| p.uuid == port_uuid)
+                .map(|p| p.key.clone())
+        };
+        let port_owner: BTreeMap<String, (String, String)> = objects
+            .iter()
+            .flat_map(|ob| {
+                let el = doc.element_at(&ob.path).expect("path from objects()");
+                ports(el)
+                    .into_iter()
+                    .map(move |p| (p.uuid, (ob.uuid.clone(), p.key)))
+            })
+            .collect();
+        let mut owned_wires: BTreeSet<(String, String, String)> = BTreeSet::new();
+        for w in &lock.extern_wires {
+            if let (Some(to_key), Some((from_obj, from_key))) =
+                (key_of(&w.to), port_owner.get(&w.from))
+            {
+                owned_wires.insert((to_key, from_obj.clone(), from_key.clone()));
+            }
+        }
+        let owned_sets: BTreeSet<String> = lock
+            .set_originals
+            .keys()
+            .filter_map(|u| key_of(u))
+            .collect();
+        let uuid_of_lift: BTreeMap<&str, &str> = lift
+            .slug_of
+            .iter()
+            .map(|(u, s)| (s.as_str(), u.as_str()))
+            .collect();
+        block.args.retain(|a| match a {
+            ArgItem::Binding(b) => match &b.kind {
+                BindingKind::Wire(r) => {
+                    let from = uuid_of_lift.get(r.slug.as_str()).copied().unwrap_or("");
+                    !owned_wires.contains(&(b.port.clone(), from.to_string(), r.port.clone()))
+                }
+                BindingKind::Param(_) => !owned_sets.contains(&b.port),
+                BindingKind::Expr(_) => true,
+            },
+            _ => true,
+        });
+        for item in &raw.items {
+            let binding = match item {
+                Item::Wire(w) if w.to.slug == slug => Binding {
+                    port: w.to.port.clone(),
+                    kind: BindingKind::Wire(w.from.clone()),
+                    comment: w.comment.clone(),
+                },
+                Item::ExprWire(w) if w.to.slug == slug => Binding {
+                    port: w.to.port.clone(),
+                    kind: BindingKind::Expr(w.expr.clone()),
+                    comment: w.comment.clone(),
+                },
+                Item::Set(st) if st.target.slug == slug => Binding {
+                    port: st.target.port.clone(),
+                    kind: BindingKind::Param(st.value.clone()),
+                    comment: st.comment.clone(),
+                },
+                _ => continue,
+            };
+            block.args.push(ArgItem::Binding(binding));
+        }
+    }
     for arg in &mut block.args {
         if let ArgItem::Binding(x) = arg
             && let BindingKind::Wire(r) = &mut x.kind
+            && let Some(fin) = rename.get(&r.slug)
         {
-            r.slug = rename[&r.slug].clone();
+            r.slug = fin.clone();
         }
     }
     items.push(Item::Block(block));
     items.extend(wire_items);
 
+    if promoted.is_some() {
+        // The extern's records end here: its wires and parameters are the
+        // managed block's arguments now, rebuilt from source on every
+        // compile, and its title is the block's label.
+        let own: BTreeSet<String> = ports(el).into_iter().map(|p| p.uuid).collect();
+        lock.externals.remove(slug);
+        lock.extern_wires.retain(|w| !own.contains(&w.to));
+        lock.set_originals.retain(|u, _| !own.contains(u));
+        lock.attr_claims.remove(uuid);
+    }
     lock.objects.insert(
         slug.to_string(),
         LockedObject {
@@ -381,7 +482,70 @@ pub fn adopt_one(
         items,
         page_title: lift.page_title(page).to_string(),
         new_externs: new_slugs,
+        promoted: promoted.is_some(),
     })
+}
+
+/// Why extern `x` (object `uuid`) cannot be promoted to a managed block,
+/// if it cannot: a statement the declaration could not hold, or a
+/// withdrawal still on its way to the Miniserver.
+fn check_promotable(
+    doc: &LoxoneDoc,
+    x: &str,
+    uuid: &str,
+    raw: &Module,
+    expanded: &Module,
+    lock: &Lockfile,
+) -> std::result::Result<(), String> {
+    // Statements a template or an expression writes onto the extern live
+    // in the expanded module only — the declaration cannot take them over.
+    let count = |m: &Module| {
+        m.items.iter().filter(|i| matches!(i, Item::Wire(w) if w.to.slug == x)).count()
+            + m.expr_wires().filter(|w| w.to.slug == x).count()
+            + m.sets().filter(|s| s.target.slug == x).count()
+    };
+    // An expression desugars into one wire onto the sink, so the counts
+    // agree unless a template instance adds statements.
+    if count(expanded) != count(raw) {
+        return Err(format!(
+            "a template instance writes onto `{x}` — move those statements out of the \
+             template first, then promote it"
+        ));
+    }
+    for a in raw.attrs().filter(|a| a.slug == x) {
+        if a.attr != crate::ir::ast::Attr::Title {
+            return Err(format!(
+                "`{x}.{} = …` claims a binding a managed block does not take — remove \
+                 the claim (or set it in Loxone Config) first",
+                a.attr
+            ));
+        }
+    }
+    if raw.items.iter().any(|i| {
+        matches!(i, Item::TilesClaim(c) if c.slug == x)
+            || matches!(i, Item::ScheduleClaim(c) if c.slug == x)
+    }) {
+        return Err(format!(
+            "`{x}` carries a tiles or schedule claim, which stays on externs"
+        ));
+    }
+    let el = doc
+        .objects()
+        .into_iter()
+        .find(|o| o.uuid == uuid)
+        .and_then(|o| doc.element_at(&o.path).cloned())
+        .ok_or_else(|| format!("no object with uuid `{uuid}`"))?;
+    let own: BTreeSet<String> = ports(&el).into_iter().map(|p| p.uuid).collect();
+    if lock.removed_wires.iter().any(|w| own.contains(&w.to))
+        || lock.removed_sets.keys().any(|u| own.contains(u))
+        || lock.removed_attrs.contains_key(uuid)
+    {
+        return Err(format!(
+            "a withdrawn statement on `{x}` has not reached the Miniserver yet — push \
+             first, then promote it from the fresh download"
+        ));
+    }
+    Ok(())
 }
 
 fn adopt_lift(doc: &LoxoneDoc) -> (Lift, Vec<String>) {
@@ -491,6 +655,7 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
         let known = KNOWN_ATTRS.contains(&a.name.as_str())
             || GUI_OWNED_ATTRS.contains(&a.name.as_str())
             || attrs.contains(&a.name.as_str())
+            || carried_attrs(&o.block_type).contains(&a.name.as_str())
             // Validity state travels with the formula (observed:
             // Valid="false" on every Formula=); the rebuild re-emits it.
             || (a.name == "Valid" && o.block_type == "Formula");
@@ -520,7 +685,12 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             Node::Element(c) if c.name == "Co" => c,
             // GUI-owned subtrees are carried forward wholesale (D19) —
             // their content needs no inspection.
-            Node::Element(c) if GUI_OWNED_CHILDREN.contains(&c.name.as_str()) => continue,
+            Node::Element(c)
+                if GUI_OWNED_CHILDREN.contains(&c.name.as_str())
+                    || carried_children(&o.block_type).contains(&c.name.as_str()) =>
+            {
+                continue;
+            }
             Node::Element(c) => {
                 return Err(format!(
                     "child element <{}> is not understood by the rebuild",

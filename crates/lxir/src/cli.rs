@@ -1383,6 +1383,25 @@ fn cmd_adopt_one(
     let adopted = adopt_one(&doc, uuid, slug, &module, &mut lock)?;
 
     let mut merged = module;
+    // A promoted extern's statements are the block's arguments now: they
+    // leave every fragment that holds them.
+    let mut stripped: Vec<(PathBuf, String)> = Vec::new();
+    if adopted.promoted {
+        merged.strip_extern(slug);
+        let files = if Path::new(module_path).is_dir() {
+            module_dir_files(Path::new(module_path)).map_err(|(p, e)| format!("{p}: {e}"))?
+        } else {
+            vec![PathBuf::from(module_path)]
+        };
+        for f in files {
+            let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+            let mut m =
+                Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
+            if m.strip_extern(slug) {
+                stripped.push((f, m.to_text()));
+            }
+        }
+    }
     merged.items.extend(adopted.items.iter().cloned());
     merged.validate()?;
     validate_ports(&merged)?;
@@ -1411,6 +1430,9 @@ fn cmd_adopt_one(
     } else {
         PathBuf::from(module_path)
     };
+    for (f, text) in &stripped {
+        std::fs::write(f, text).map_err(|e| format!("{}: {e}", f.display()))?;
+    }
     let mut text = std::fs::read_to_string(&target).unwrap_or_default();
     if text.is_empty() {
         // A fresh page file opens with its `page` statement (D28), so the
@@ -1438,6 +1460,16 @@ fn cmd_adopt_one(
     std::fs::write(&target, text)?;
     lock.save(Path::new(lock_path))?;
 
+    if adopted.promoted {
+        println!(
+            "promoted extern `{slug}` to a managed block: its statements moved out of {}",
+            stripped
+                .iter()
+                .map(|(f, _)| f.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     println!(
         "adopted uuid {uuid} as `{slug}` on page \"{}\"{}",
         adopted.page_title,

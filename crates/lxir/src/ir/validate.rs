@@ -359,7 +359,7 @@ mod tests {
             "; did you mean `GreaterEqual`?"
         );
         // Nothing close: no hint.
-        assert_eq!(suggest("Irrigation", BUILTIN_TYPES.iter().copied()), "");
+        assert_eq!(suggest("Sauna", BUILTIN_TYPES.iter().copied()), "");
         // Short names use the tight cutoff.
         assert_eq!(suggest("Q1", ["Q", "I1", "I2"]), "; did you mean `Q`?");
         assert_eq!(suggest("xyz", ["Q", "I1", "I2"]), "");

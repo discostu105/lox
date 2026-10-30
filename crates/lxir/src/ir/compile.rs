@@ -34,7 +34,7 @@
 
 use crate::connectors::{
     MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, attr_params, builtin,
-    carried_attrs, container_type, message_params, ref_link_type,
+    adopt_only, carried_attrs, carried_children, container_type, message_params, ref_link_type,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
@@ -158,7 +158,10 @@ fn harvest_residue(el: &Element) -> Residue {
             .collect(),
         children: el
             .child_elements()
-            .filter(|c| GUI_OWNED_CHILDREN.contains(&c.name.as_str()))
+            .filter(|c| {
+                GUI_OWNED_CHILDREN.contains(&c.name.as_str())
+                    || carried_children(el.attr("Type").unwrap_or("")).contains(&c.name.as_str())
+            })
             .cloned()
             .collect(),
         wire_flags: el
@@ -573,6 +576,14 @@ pub fn compile(
                 .ports
                 .entry(key.clone())
                 .or_insert_with(|| minter.mint_port(index as u8, entity).to_string());
+        }
+        if entry.uuid.is_empty() && adopt_only(&block.block_type) {
+            return Err(Error::Compile(format!(
+                "block `{}`: a {} is created by Loxone Config when it pairs the \
+                 device — adopt the existing one (`lxir adopt <cfg> --uuid …`) \
+                 instead of declaring a new one",
+                block.slug, block.block_type
+            )));
         }
         if entry.uuid.is_empty() {
             entry.uuid = minter.mint_object().to_string();
