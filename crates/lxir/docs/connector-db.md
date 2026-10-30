@@ -318,6 +318,20 @@ and `Analog`/`MinVal`/`MaxVal`/`DefVal` as attribute parameters.
 Mint-validated in oracle session 18 (digital and analog, wired to page
 blocks): connectors, UUIDs and wires came back identical.
 
+## The house control types, admitted 2026-10-30 (D62)
+
+Alarm, SmokeAlarm, Irrigation, HeatIRoomController2, EFM, MeterDig,
+MeterAbsUni, MeterAbsBi, MeterAbsSt, NfcCodeTouch, Intercom,
+TpfController. Each connector's direction comes from the corpus where a
+wire proves it; otherwise from the legacy map, provided no corpus wire
+contradicts it; an input never wired and never given a `Def` stays
+Input. A save in Loxone Config does not count as evidence, since 17.2.8
+keeps a wire drawn the wrong way (oracle session 25). The internals the
+GUI writes (zones, timers, `statGrp`, meter attributes such as `PwrN`,
+`StatsType`) are carried per type, not modelled. NfcCodeTouch, Intercom
+and TpfController are adopt-only: Loxone Config creates them when it
+pairs the device.
+
 ## Growing the table
 
 Add configs to the corpus (any installation helps — foreign corpora
