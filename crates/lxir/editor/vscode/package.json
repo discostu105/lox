@@ -49,7 +49,8 @@
         "lxir.server.path": {
           "type": "string",
           "default": "lxir",
-          "description": "The program that runs the language server: `lxir`, or `lox` (with the arguments `ir lsp`)."
+          "description": "The program that runs the language server: `lxir`, or `lox` (with the arguments `ir lsp`).",
+          "scope": "machine"
         },
         "lxir.server.args": {
           "type": "array",
@@ -59,7 +60,8 @@
           "default": [
             "lsp"
           ],
-          "description": "Its arguments: `[\"lsp\"]` for lxir, `[\"ir\", \"lsp\"]` for lox."
+          "description": "Its arguments: `[\"lsp\"]` for lxir, `[\"ir\", \"lsp\"]` for lox.",
+          "scope": "machine"
         }
       }
     }
@@ -70,5 +72,15 @@
   ],
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The language server program comes from user settings only.",
+      "restrictedConfigurations": [
+        "lxir.server.path",
+        "lxir.server.args"
+      ]
+    }
   }
 }

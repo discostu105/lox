@@ -31,6 +31,8 @@ cd editor/vscode && npm install && npx @vscode/vsce package && code --install-ex
 
 Settings:
 
+Settings `lxir.server.path` and `lxir.server.args` are read from the user settings only: a workspace cannot choose the program.
+
 | Setting | Default | |
 |---|---|---|
 | `lxir.server.enable` | `true` | start the language server |

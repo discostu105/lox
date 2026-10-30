@@ -19,7 +19,13 @@ function activate(context) {
     );
     return;
   }
-  const server = { command: cfg.get('server.path', 'lxir'), args: cfg.get('server.args', ['lsp']) };
+  // The program to run comes from user settings only: a workspace's
+  // .vscode/settings.json must not choose an executable.
+  const user = (key, fallback) => {
+    const v = cfg.inspect(key);
+    return v.globalValue !== undefined ? v.globalValue : fallback;
+  };
+  const server = { command: user('server.path', 'lxir'), args: user('server.args', ['lsp']) };
   client = new lc.LanguageClient('lxir', 'lxir', server, {
     documentSelector: [{ scheme: 'file', language: 'lxir' }],
   });

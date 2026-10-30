@@ -6,10 +6,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 fn project() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/project")
-        .canonicalize()
-        .unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/project")
 }
 
 fn uri(p: &Path) -> String {

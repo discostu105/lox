@@ -92,7 +92,9 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
 
 /// The `file://` URI of `path`.
 pub fn path_to_uri(path: &Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
+    let s = path.to_string_lossy();
+    // Windows verbatim paths (`canonicalize`): `\\?\C:\x` → `C:/x`.
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s).replace('\\', "/");
     let mut out = String::from("file://");
     if !s.starts_with('/') {
         out.push('/');
@@ -136,6 +138,10 @@ mod tests {
             Some(PathBuf::from("c:/x/a.lxir"))
         );
         assert_eq!(uri_to_path("untitled:1"), None);
+        assert_eq!(
+            path_to_uri(Path::new(r"\\?\C:\x\a.lxir")),
+            "file:///C:/x/a.lxir"
+        );
     }
 
     #[test]
