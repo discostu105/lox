@@ -19,8 +19,11 @@
 //! 4. Show what the push changes. Nothing to push ends here.
 //! 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced,
 //!    verified to extract to exactly the compiled file. Its app catalogue
-//!    (`LoxAPP3.json`) is Loxone Config's from before: controls of the app the
-//!    push renames, moves or deletes are named. `permissions.bin` is
+//!    (`LoxAPP3.json`, Loxone Config's from before) gets what the push changes
+//!    about the app's controls (`lxir::catalogue`: names, rooms, categories,
+//!    deleted and hidden controls, new push buttons and virtual inputs) and a
+//!    new `lastModified`; what it cannot carry over is named, for a save from
+//!    Loxone Config. `permissions.bin` is
 //!    regenerated for the compiled config when lxir reproduces the live one
 //!    byte for byte; otherwise the live file stays, and the report says when
 //!    it no longer matches the compiled access rights. Without `--force` the
@@ -34,8 +37,7 @@
 //!    differ from the program file's, staging reports it and `--force`
 //!    refuses unless `--discard-custom-changes` (see `push_users`).
 //! 7. Download again: the Miniserver must now run exactly the compiled file.
-//!    With app controls changed, compare the catalogue it serves with the
-//!    uploaded one: unchanged means the app still shows them as before.
+//!    With app controls changed, check that it serves the uploaded catalogue.
 //! 8. Move the project forward: lock, out file and `base` in lox.toml point at
 //!    the verified state.
 //!
@@ -228,11 +230,15 @@ pub(crate) struct PushReport {
     pub changes: Vec<String>,
     /// Custom changes on the Miniserver that loading the upload deletes
     pub custom_changes_pending: Vec<CustomChange>,
-    /// Controls of the app the push renames, moves, deletes, shows or hides;
-    /// the uploaded app catalogue still describes them as before
+    /// Controls of the app whose entries the uploaded app catalogue gets:
+    /// renamed, moved, deleted, hidden or new
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub app_catalogue_updated: Vec<StaleEntry>,
+    /// Changes to controls of the app that the uploaded catalogue does not
+    /// carry; the app shows them as before until Loxone Config saves
     pub app_catalogue_stale: Vec<StaleEntry>,
-    /// After the push: whether the Miniserver serves a rebuilt catalogue
-    /// (`false`: the uploaded one, so the app still shows the old state)
+    /// After the push: whether the Miniserver serves a catalogue other than
+    /// the uploaded one (`false`: the uploaded one)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_catalogue_rebuilt: Option<bool>,
     /// What the staged ZIP carries as `permissions.bin`: `unchanged`,
@@ -368,6 +374,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         kept_as_live,
         changes: Vec::new(),
         custom_changes_pending: pending,
+        app_catalogue_updated: Vec::new(),
         app_catalogue_stale: Vec::new(),
         app_catalogue_rebuilt: None,
         permissions: None,
@@ -389,42 +396,45 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         }
     }
     report.compiled = Some(compiled_path.clone());
-    let catalogue = match app_catalogue::from_zip(&live_zip) {
+    let (live_doc, compiled_doc) = (parse(&live_xml)?, parse(&compiled)?);
+    let catalogue = match app_catalogue::update(&live_zip, &live_doc, &compiled_doc) {
         Ok(catalogue) => catalogue,
         Err(e) => {
             say(&format!(
-                "Warning: cannot read the app catalogue of {name}: {e:#}"
+                "Warning: cannot update the app catalogue of {name}, it stays as live: {e:#}"
             ));
             None
         }
     };
-    let (live_doc, compiled_doc) = (parse(&live_xml)?, parse(&compiled)?);
-    if let Some(catalogue) = &catalogue {
-        let d = lxir::diff::diff(&live_doc, &compiled_doc);
-        report.app_catalogue_stale =
-            app_catalogue::stale_entries(catalogue, &d, &live_doc, &compiled_doc);
-    }
-    if !report.app_catalogue_stale.is_empty() {
-        let list: String = report
-            .app_catalogue_stale
-            .iter()
-            .map(|e| format!("\n  \"{}\": {}", e.app_name, e.change))
-            .collect();
-        say(&format!(
-            "Note: the push changes controls of the app:{list}\n\
-             The upload carries Loxone Config's app catalogue ({}, saved {}) from before, \
-             which still shows them as they were; the Miniserver does not rebuild it. A save \
-             from Loxone Config rewrites it.",
-            app_catalogue::MEMBER,
-            catalogue
-                .as_ref()
-                .and_then(app_catalogue::last_modified)
-                .unwrap_or("unknown")
-        ));
+    if let Some(c) = &catalogue {
+        report.app_catalogue_updated = c.updated.clone();
+        report.app_catalogue_stale = c.stale.clone();
+        let list = |entries: &[StaleEntry]| -> String {
+            entries
+                .iter()
+                .map(|e| format!("\n  \"{}\": {}", e.app_name, e.change))
+                .collect()
+        };
+        if !c.updated.is_empty() {
+            say(&format!(
+                "{}: updated for the controls of the app the push changes:{}",
+                app_catalogue::MEMBER,
+                list(&c.updated)
+            ));
+        }
+        if !c.stale.is_empty() {
+            say(&format!(
+                "Note: {} does not carry these changes to controls of the app:{}\n\
+                 The app shows them as before until Loxone Config saves the project.",
+                app_catalogue::MEMBER,
+                list(&c.stale)
+            ));
+        }
     }
 
     // 5. Stage exactly the compiled bytes, with the access table to match.
-    let permissions = permissions_for(&live_zip, &live_doc, &compiled_doc)?;
+    let new_catalogue = catalogue.as_ref().and_then(|c| c.content.as_deref());
+    let permissions = permissions_for(&live_zip, &live_doc, &compiled_doc, new_catalogue)?;
     report.permissions = Some(permissions.status);
     report.permissions_stale = permissions.stale;
     match (&permissions.content, &permissions.kept_because) {
@@ -446,6 +456,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         .as_deref()
         .map(|c| (loxcc::PERMISSIONS_ENTRY, c))
         .into_iter()
+        .chain(new_catalogue.map(|c| (app_catalogue::MEMBER, c)))
         .collect();
     let staged = loxcc::stage_upload_zip_replacing(&live_zip, &compiled, &replace)?;
     let staged_path = file("push.zip");
@@ -502,8 +513,15 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         ));
     }
 
-    if let (false, Some(uploaded)) = (report.app_catalogue_stale.is_empty(), &catalogue) {
-        report.app_catalogue_rebuilt = check_served_catalogue(ms, uploaded, &say);
+    if let Some(c) = &catalogue
+        && (c.content.is_some() || !c.stale.is_empty())
+    {
+        let uploaded = match &c.content {
+            Some(new) => app_catalogue::parse(new)?,
+            None => c.live.clone(),
+        };
+        report.app_catalogue_rebuilt =
+            check_served_catalogue(ms, &uploaded, c.content.is_some(), &say);
     }
 
     // 8. The verified state is the project's new base.
@@ -585,13 +603,14 @@ fn check_custom_changes(
 }
 
 /// After a push that changed controls of the app: does the Miniserver serve
-/// the uploaded catalogue (`Some(false)`) or one it rebuilt (`Some(true)`)?
-/// Compares `lastModified`, the time Loxone Config wrote it: the served
-/// catalogue may be filtered for the user, so the rest can differ anyway.
-/// Only says what it finds; `None` when it cannot tell.
+/// the uploaded catalogue (`Some(false)`) or another one (`Some(true)`)?
+/// Compares `lastModified`: the served catalogue may be filtered for the
+/// user, so the rest can differ anyway. `updated`: the push updated the
+/// catalogue. Only says what it finds; `None` when it cannot tell.
 fn check_served_catalogue(
     ms: &dyn Miniserver,
     uploaded: &serde_json::Value,
+    updated: bool,
     say: &dyn Fn(&str),
 ) -> Option<bool> {
     let served = match ms.app_catalogue().and_then(|b| app_catalogue::parse(&b)) {
@@ -607,19 +626,24 @@ fn check_served_catalogue(
         app_catalogue::last_modified(uploaded),
         app_catalogue::last_modified(&served),
     ) else {
-        say("Warning: an app catalogue without lastModified; cannot tell whether it was rebuilt.");
+        say("Warning: an app catalogue without lastModified; cannot tell which one it serves.");
         return None;
     };
     if was != now {
         say(&format!(
-            "The Miniserver serves a rebuilt app catalogue (lastModified {now}, uploaded {was})."
+            "Warning: the Miniserver serves another app catalogue than the uploaded one \
+             (lastModified {now}, uploaded {was})."
         ));
         return Some(true);
     }
-    say(&format!(
-        "The Miniserver serves the uploaded app catalogue (lastModified {was}): the app still \
-         shows the changed controls as they were until Loxone Config saves the project."
-    ));
+    say(&if updated {
+        format!("The Miniserver serves the updated app catalogue (lastModified {was}).")
+    } else {
+        format!(
+            "The Miniserver serves the uploaded app catalogue (lastModified {was}): the app \
+             still shows the changes named above as before until Loxone Config saves the project."
+        )
+    });
     Some(false)
 }
 
@@ -668,7 +692,14 @@ struct Permissions {
 /// Only when the generator reproduces the live file byte for byte does the
 /// push trust it with the compiled config; otherwise the live file stays,
 /// stale when the compiled config assigns users and groups differently.
-fn permissions_for(live_zip: &[u8], live: &LoxoneDoc, compiled: &LoxoneDoc) -> Result<Permissions> {
+/// `compiled_catalogue`: the catalogue staged with the compiled config, when
+/// the push updates it.
+fn permissions_for(
+    live_zip: &[u8],
+    live: &LoxoneDoc,
+    compiled: &LoxoneDoc,
+    compiled_catalogue: Option<&[u8]>,
+) -> Result<Permissions> {
     use lxir::permissions::{assignments, encode, generate};
     let Some(bin) = loxcc::read_entry(live_zip, loxcc::PERMISSIONS_ENTRY)? else {
         return Ok(Permissions {
@@ -686,8 +717,12 @@ fn permissions_for(live_zip: &[u8], live: &LoxoneDoc, compiled: &LoxoneDoc) -> R
         if encode(&live_bin) != bin {
             return Err("lxir does not reproduce the live file".to_string());
         }
+        let compiled_app = match compiled_catalogue {
+            Some(c) => String::from_utf8(c.to_vec()).expect("lxir writes UTF-8"),
+            None => app,
+        };
         Ok(encode(
-            &generate(compiled, &app).map_err(|e| e.to_string())?,
+            &generate(compiled, &compiled_app).map_err(|e| e.to_string())?,
         ))
     });
     Ok(match regenerated {
@@ -1354,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn the_served_catalogue_tells_whether_the_miniserver_rebuilt_it() {
+    fn the_served_catalogue_tells_whether_it_is_the_uploaded_one() {
         use std::io::Write;
         let uploaded = r#"{"lastModified":"2026-10-29 17:15:28","controls":{}}"#;
         let zip_with = |catalogue: &str| {
@@ -1370,7 +1405,7 @@ mod tests {
 
         let same = FakeMiniserver::new(zip_with(uploaded));
         assert_eq!(
-            check_served_catalogue(&same, &uploaded_json, &say),
+            check_served_catalogue(&same, &uploaded_json, false, &say),
             Some(false)
         );
         assert!(said.borrow()[0].contains("2026-10-29 17:15:28"));
@@ -1379,12 +1414,68 @@ mod tests {
             r#"{"lastModified":"2026-10-29 18:02:11","controls":{}}"#,
         ));
         assert_eq!(
-            check_served_catalogue(&rebuilt, &uploaded_json, &say),
+            check_served_catalogue(&rebuilt, &uploaded_json, true, &say),
             Some(true)
         );
 
         let none = FakeMiniserver::new(config_zip(b"<x/>"));
-        assert_eq!(check_served_catalogue(&none, &uploaded_json, &say), None);
+        assert_eq!(
+            check_served_catalogue(&none, &uploaded_json, false, &say),
+            None
+        );
+    }
+
+    #[test]
+    fn push_carries_a_rename_into_the_app_catalogue() {
+        use std::io::Write;
+        let dir = project();
+        fs::write(
+            dir.path().join("pages/zz_name.lxir"),
+            "extern technik = Switch(uuid: \"30000006-0000-0060-ffff504f94112233\")\n\
+             technik.title = \"Poolpumpe\"\n",
+        )
+        .unwrap();
+        let pumpe = "30000006-0000-0060-ffff504f94112233";
+        let catalogue = format!(
+            "\u{feff}{{\"lastModified\":\"2026-10-29 17:15:28\",\"controls\":{{\"U:{pumpe}\":\
+             {{\"name\":\"Freigabe\",\"type\":\"Switch\",\"uuidAction\":\"{pumpe}\"}}}}}}"
+        );
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("sps0.LoxCC", opts).unwrap();
+        w.write_all(&loxcc::compress_loxcc(&base(dir.path())).unwrap())
+            .unwrap();
+        w.start_file(app_catalogue::MEMBER, opts).unwrap();
+        w.write_all(catalogue.as_bytes()).unwrap();
+        let ms = FakeMiniserver::new(w.finish().unwrap().into_inner());
+
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        let changes: Vec<&str> = report
+            .app_catalogue_updated
+            .iter()
+            .map(|e| e.change.as_str())
+            .collect();
+        assert_eq!(changes, ["renamed \"Freigabe\" → \"Poolpumpe\""]);
+        assert!(report.app_catalogue_stale.is_empty());
+        let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
+        let uploaded = app_catalogue::parse(
+            &loxcc::read_entry(&staged, app_catalogue::MEMBER)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            uploaded["controls"][format!("U:{pumpe}")]["name"],
+            "Poolpumpe"
+        );
+        assert_ne!(
+            app_catalogue::last_modified(&uploaded),
+            Some("2026-10-29 17:15:28")
+        );
+        // The fake serves what it was given: the updated catalogue.
+        assert_eq!(report.app_catalogue_rebuilt, Some(false));
     }
 
     #[test]

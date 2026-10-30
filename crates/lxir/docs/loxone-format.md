@@ -678,6 +678,58 @@ corpus_permissions`).
   or derives the rights from the program, so whether a stale file
   matters.
 
+## The app catalogue: `LoxAPP3.json`
+
+Loxone Config writes `LoxAPP3.json` into the program ZIP when it saves
+to the Miniserver: the structure the app reads. The Miniserver serves it
+as `/data/LoxApp3.json` exactly as uploaded and reports its
+`lastModified` as `/jdev/sps/LoxAPPversion3`; it never rebuilds it
+(#155). `lxir::catalogue` edits it for a compile.
+
+Evidence: three Loxone Config 17.2 saves of one installation
+(2026-10-29, 148 controls each), their catalogue's `lastModified` equal
+to the program's `Date=`; and two pushes to the same Miniserver
+(2026-10-30).
+
+- **Text.** UTF-8 with a BOM, one line, compact, no escapes beyond JSON's
+  own (`/` and non-ASCII unescaped). The keys of `controls`, `modes`,
+  `autopilot` and `messageCenter` are `U:<uuid>`; those of `rooms` and
+  `cats` are the bare UUID. The order of `controls` is not document
+  order (unexplained).
+- **Every control.** `name` is the object's `Desc=` when set, else its
+  `Title=`; `room`/`cat` are `<IoData Pr=/Cr=>`; `isFavorite` is
+  `UseInFav="true"`. 148 of 148 in each save.
+- **Which objects are listed.** Not every `Visu="true"` object: a
+  `VirtualIn` no `InputRef` uses (2 in each save), a `PushButton` with
+  neither room nor category (1), the weather server, the device monitor,
+  a `TreeActor`, `MeterAbsBi` blocks are not.
+- **Entries by block type.** Key order `name, type, uuidAction, room,
+  cat, defaultRating (0), isFavorite, isSecured (false), defaultIcon,
+  restrictions (0), details, states`. `defaultIcon` is `null` without
+  `IconV=`; with one it is a file name (`IconsFilled/login-key.svg`)
+  the program does not carry.
+  - `PButtonT` → `Pushbutton`, details `{"jLockable":true}`, states
+    `jLocked` (the `Reset` connector with the top bit of its first byte
+    set: `1de6…` → `9de6…`), `active` (`Q`).
+  - `PushButton` → `Switch` when its last `<Display>` has `Type="1"`,
+    else `Pushbutton`; details `{"jLockable":true}`, states `jLocked` (as
+    above), `active` (`Q`), `lockedOn` (the third `SpStates=` UUID).
+  - `VirtualIn` with `Analog="false"` → `InfoOnlyDigital` when its
+    `<Display>` has `StateOnly="true"` (details `jLockable` false, texts
+    `Aus`/`Ein`, colours `#FF0054`/`#8DFF70`), else `Switch` (details
+    `{"jLockable":false,"type":71}`); states `active`: the input's own
+    UUID.
+  Hiding these 19 objects per save and showing them again gives back
+  Loxone Config's entries byte for byte, but for the one with an icon
+  (`LXIR_CATALOGUE_CORPUS=<dir> cargo test -p lxir --test catalogue`).
+- **The app reloads on `lastModified`.** A push that renamed a virtual
+  input and set `lastModified` to the push time (2026-10-30): the
+  Miniserver served the new name, and `LoxAPPversion3` answered the new
+  time. `permissions.bin` follows the catalogue's control order (above).
+- **Unknown:** the entries of the other block types (taken over as they
+  are), whether Loxone Config drops an entry when the room is removed,
+  and where it puts a new entry (lxir appends it).
+
 ## UUID anatomy
 
 Format `{8}-{4}-{4}-{16}` hex — the last segment is 8 bytes, so these are
