@@ -971,10 +971,25 @@ impl LoxMcp {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_control(&self, Parameters(q): Parameters<ControlQuery>) -> ToolResponse {
-        respond(
-            self.blocking(move |lox| ops::get_control(lox, &q.name, q.room.as_deref()))
-                .await,
-        )
+        let read = self
+            .blocking(move |lox| {
+                let state = ops::get_control(lox, &q.name, q.room.as_deref())?;
+                let live = ops::live_states(&lox.get_structure()?["controls"][&state.control.uuid]);
+                Ok((state, live, lox.cfg.clone()))
+            })
+            .await;
+        let (mut state, live, cfg) = match read {
+            Ok(r) => r,
+            Err(e) => return fail(e),
+        };
+        if let Some(live) = live {
+            let wait = std::time::Duration::from_secs(10);
+            match crate::stream::initial_states(&cfg, &live.uuids(), wait).await {
+                Ok(values) => ops::apply_live_states(&mut state, &live, &values),
+                Err(e) => return fail(e),
+            }
+        }
+        respond(Ok(state))
     }
 
     #[tool(

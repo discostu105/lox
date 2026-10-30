@@ -469,6 +469,94 @@ pub fn get_control(lox: &mut LoxClient, name: &str, room: Option<&str>) -> Resul
     })
 }
 
+/// States of a control that only the WebSocket reports correctly: a
+/// lighting controller's circuits are subcontrols, and `/all` answers 383
+/// for every one of them whatever the mood (#171).
+#[derive(Debug, Default, PartialEq)]
+pub struct LiveStates {
+    /// Output label → state UUID (the circuits)
+    pub outputs: Vec<(String, String)>,
+    /// State name → state UUID
+    pub states: Vec<(String, String)>,
+}
+
+impl LiveStates {
+    pub fn uuids(&self) -> Vec<String> {
+        self.outputs
+            .iter()
+            .chain(&self.states)
+            .map(|(_, u)| u.clone())
+            .collect()
+    }
+}
+
+/// The live states of a control (its `LoxAPP3.json` entry), if its `/all`
+/// answer is wrong for them.
+pub fn live_states(ctrl: &Value) -> Option<LiveStates> {
+    if ctrl["type"] != "LightControllerV2" {
+        return None;
+    }
+    let mut live = LiveStates::default();
+    let mut circuits: Vec<(String, String)> = Vec::new();
+    for (key, sub) in ctrl["subControls"].as_object().into_iter().flatten() {
+        // the master switch/color acts on all circuits; it is not one
+        if key.ends_with("/masterValue") || key.ends_with("/masterColor") {
+            continue;
+        }
+        let states = &sub["states"];
+        let Some(uuid) = ["active", "position", "value", "color"]
+            .iter()
+            .find_map(|k| states[*k].as_str())
+        else {
+            continue;
+        };
+        let name = json_val_str(&sub["name"]).unwrap_or_default();
+        circuits.push((name, uuid.to_string()));
+    }
+    for (i, (name, uuid)) in circuits.iter().enumerate() {
+        let twice = circuits.iter().filter(|(n, _)| n == name).count() > 1;
+        let label = if twice {
+            format!("{} ({})", name, i + 1)
+        } else {
+            name.clone()
+        };
+        live.outputs.push((label, uuid.clone()));
+    }
+    if let Some(uuid) = ctrl["states"]["activeMoods"].as_str() {
+        live.states.push(("activeMoods".into(), uuid.to_string()));
+    }
+    Some(live)
+}
+
+/// Replace what `/all` reported for `live` with the WebSocket values. A
+/// circuit whose state did not arrive reads `null`; a JSON text state is
+/// parsed (`activeMoods` → `[778]`).
+pub fn apply_live_states(
+    state: &mut ControlState,
+    live: &LiveStates,
+    values: &std::collections::HashMap<String, Value>,
+) {
+    state.outputs = live
+        .outputs
+        .iter()
+        .map(|(label, uuid)| {
+            (
+                label.clone(),
+                values.get(uuid).cloned().unwrap_or(Value::Null),
+            )
+        })
+        .collect();
+    for (name, uuid) in &live.states {
+        if let Some(v) = values.get(uuid) {
+            let v = match v.as_str().map(serde_json::from_str::<Value>) {
+                Some(Ok(parsed)) => parsed,
+                _ => v.clone(),
+            };
+            state.states.insert(name.clone(), v);
+        }
+    }
+}
+
 pub fn list_sensors(lox: &mut LoxClient, kind: &str, room: Option<&str>) -> Result<SensorList> {
     let controls = lox.list_controls(None, room)?;
     let mut sensors = Vec::new();
@@ -841,6 +929,62 @@ mod tests {
         assert_eq!(outputs.get("Relais Lichter Büro (2)"), Some(&json!(383)));
         assert_eq!(outputs.get("Spots"), Some(&json!(40)));
         assert_eq!(outputs.len(), 3, "unnamed outputs are skipped");
+    }
+
+    #[test]
+    fn lighting_circuits_come_from_their_subcontrol_states() {
+        // the Pool controller's LoxAPP3.json entry, shortened
+        let ctrl = json!({
+            "type": "LightControllerV2",
+            "states": { "activeMoods": "m-uuid", "moodList": "l-uuid" },
+            "subControls": {
+                "lc/masterValue": { "name": "Master-Schalter", "type": "Switch",
+                                    "states": { "active": "master" } },
+                "lc/AI1": { "name": "Rot", "type": "Switch", "states": { "active": "a1" } },
+                "lc/AI2": { "name": "Spots", "type": "Dimmer",
+                            "states": { "position": "a2", "min": "x" } },
+                "lc/AI3": { "name": "Rot", "type": "Switch", "states": { "active": "a3" } }
+            }
+        });
+        let live = live_states(&ctrl).unwrap();
+        assert_eq!(
+            live.outputs,
+            [
+                ("Rot (1)".to_string(), "a1".to_string()),
+                ("Spots".to_string(), "a2".to_string()),
+                ("Rot (3)".to_string(), "a3".to_string()),
+            ]
+        );
+        assert_eq!(
+            live.states,
+            [("activeMoods".to_string(), "m-uuid".to_string())]
+        );
+        assert!(live_states(&json!({ "type": "Switch" })).is_none());
+
+        let mut state = ControlState {
+            control: ControlRef {
+                name: "Pool".into(),
+                typ: "LightControllerV2".into(),
+                uuid: "lc".into(),
+                room: None,
+                category: None,
+                tool: None,
+            },
+            value: json!(0),
+            states: BTreeMap::new(),
+            outputs: BTreeMap::from([("Rot (1)".to_string(), json!(383))]),
+            secured: false,
+        };
+        let values = std::collections::HashMap::from([
+            ("a1".to_string(), json!(0)),
+            ("a2".to_string(), json!(40)),
+            ("m-uuid".to_string(), json!("[778]")),
+        ]);
+        apply_live_states(&mut state, &live, &values);
+        assert_eq!(state.outputs.get("Rot (1)"), Some(&json!(0)));
+        assert_eq!(state.outputs.get("Spots"), Some(&json!(40)));
+        assert_eq!(state.outputs.get("Rot (3)"), Some(&Value::Null));
+        assert_eq!(state.states.get("activeMoods"), Some(&json!([778])));
     }
 
     #[test]
