@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.28.1] — 2026-10-30
+
+### Fixed
+- **MCP `get_control`** on a lighting controller (LightControllerV2) reports each circuit's real value and the active moods (`activeMoods`). The circuit values come from the Miniserver's live states over the WebSocket, because the HTTP read gave 383 for every circuit, whatever the mood.
+
 ## [0.28.0] — 2026-10-30 — a language server for config as code
 
 `lox ir lsp` brings lxir into your editor: errors at the right line while you type, hover with the object an extern resolves to, port completion and formatting.
