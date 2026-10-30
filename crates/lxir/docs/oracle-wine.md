@@ -211,6 +211,12 @@ SIGSEGVs it on load (minidump in the prefix's
 the same way is fine. The synthetic corpus is sufficient for the XML/UUID
 layers but is **not loadable** by the real tool — it lacks required
 structure. Oracle runs must always compile onto a real base config.
+Re-learned on 2026-10-30 (#174): every synthetic file crashes in
+17.2.8.28 too, right after the document's docking panes are built, even
+in a fresh prefix with an empty `Documents` folder and no network, while
+a real config opens in the same prefix minutes later. Its crash box is
+also captioned `LoxoneConfig`, like the recovery dialog, so
+`oracle.sh` now watches the dumps folder and stops with that diagnosis.
 
 ## The second-batch bless + mint oracle (session 8) — passed
 
@@ -558,7 +564,8 @@ scripts/oracle.sh run compiled.Loxone --out saved.Loxone   # open → save → d
 
 starts Xvfb, seeds the prefix's ProgramData from the installed package
 (as the packaged launcher does for its own prefix), opens a **copy** in
-the isolated wineprefix, answers the recovery dialog with No, unmaps the
+the isolated wineprefix, answers the recovery dialog with No (and stops
+when a fresh minidump shows that Loxone Config crashed instead), unmaps the
 news overlay, saves via Ctrl+S (md5-polled), runs `lxir diff` compiled →
 GUI-saved, and tears the rig
 down (`--keep` to leave it warm; `up`/`open`/`save`/`shot`/`status`/

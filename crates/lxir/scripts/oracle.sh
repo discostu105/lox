@@ -133,12 +133,30 @@ message_box() {
     return 0
 }
 
+# A crash leaves a minidump in the prefix and puts up a message box
+# captioned "LoxoneConfig" too ("Loxone Config muss aufgrund eines
+# Fehlers beendet werden", 329x128) — it must not be answered like the
+# recovery dialog. A dump newer than the launch marker is the tell.
+dumps() { echo "$prefix/drive_c/users/$USER/AppData/Local/Temp/Loxone/Loxone Config/Dumps"; }
+
+check_crash() {
+    local dump
+    [ -f "$work/launch.stamp" ] || return 0
+    dump=$(find "$(dumps)" -name 'LoxoneConfig_*.dmp' -newer "$work/launch.stamp" 2>/dev/null | head -1)
+    [ -n "$dump" ] || return 0
+    WINEPREFIX=$prefix wineserver -k 2>/dev/null || true
+    die "Loxone Config crashed while opening the file ($(basename "$dump")).
+A synthetic config (like examples/out) crashes it on load: compile onto a
+real base config instead (docs/oracle-wine.md, \"The first real-world change\")."
+}
+
 # The auto-backup recovery dialog's caption is "LoxoneConfig" (no
 # space). Answer No — the file must open exactly as compiled. Alt+N is
 # unreliable on Xvfb; fall back to clicking where a Wine message box
 # puts its No button (right half, bottom row).
 dismiss_recovery() {
     local id g x y w h
+    check_crash
     id=$(xd search --onlyvisible --name '^LoxoneConfig$' 2>/dev/null | head -1 || true)
     [ -n "$id" ] || return 0
     note "recovery dialog up — answering No"
@@ -178,6 +196,7 @@ open_file() {
     cp -f "$src" "$copy"
     printf '%s\n' "$copy" >"$work/open.path"
     winpath="Z:$(realpath "$copy" | tr / '\\')"
+    touch "$work/launch.stamp"
     note "opening copy $copy"
     # The launcher must not inherit our stdout: it lives as long as the
     # GUI, so `oracle.sh run … | tail` would wait for Loxone Config to
@@ -212,6 +231,7 @@ save_file() {
     xd key ctrl+s
     i=0
     while [ "$(md5sum "$copy" | cut -d' ' -f1)" = "$sum" ]; do
+        check_crash
         i=$((i + 1))
         if [ "$i" -gt 30 ]; then
             [ -n "$(message_box)" ] &&
