@@ -34,7 +34,8 @@
 
 use crate::connectors::{
     MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_params,
-    builtin, carried_attrs, carried_children, container_type, message_params, ref_link_type,
+    builtin, carried_attrs, carried_children, container_type, message_params, object_tree,
+    ref_link_type,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
@@ -137,6 +138,10 @@ fn page_of(doc: &LoxoneDoc, path: &[usize]) -> Option<String> {
 }
 
 fn harvest_residue(el: &Element) -> Residue {
+    // A virtual or Modbus device and its I/Os (D64) carry everything the
+    // rebuild does not write: the source states identity and settings,
+    // the rest of the element is the GUI's (D19).
+    let periphery = crate::periphery::periphery(el.attr("Type").unwrap_or("")).is_some();
     Residue {
         layout: Layout::of_element(el),
         page: None,
@@ -150,7 +155,8 @@ fn harvest_residue(el: &Element) -> Residue {
             .attrs
             .iter()
             .filter(|a| {
-                matches!(a.name.as_str(), "Cl" | "LtE" | "WF")
+                (periphery && !matches!(a.name.as_str(), "Type" | "V" | "U" | "Title" | "Nio"))
+                    || matches!(a.name.as_str(), "Cl" | "LtE" | "WF")
                     || GUI_OWNED_ATTRS.contains(&a.name.as_str())
                     || carried_attrs(el.attr("Type").unwrap_or("")).contains(&a.name.as_str())
             })
@@ -159,7 +165,8 @@ fn harvest_residue(el: &Element) -> Residue {
         children: el
             .child_elements()
             .filter(|c| {
-                GUI_OWNED_CHILDREN.contains(&c.name.as_str())
+                (periphery && c.name != "Co")
+                    || GUI_OWNED_CHILDREN.contains(&c.name.as_str())
                     || carried_children(el.attr("Type").unwrap_or("")).contains(&c.name.as_str())
             })
             .cloned()
@@ -299,6 +306,21 @@ pub fn compile(
 
     // --- Resolve externs (against the untouched base).
     let extern_uuid = resolve_externs(&doc, module, lock)?;
+    // An extern is the GUI's object: one the source manages is rebuilt
+    // from its declaration, and a statement on it would be lost (D64 —
+    // an adopted device takes its I/O along).
+    for (x, u) in &extern_uuid {
+        if let Some((s, _)) = lock
+            .objects
+            .iter()
+            .find(|(s, o)| o.uuid == *u && module.blocks().any(|b| &b.slug == *s))
+        {
+            return Err(Error::Compile(format!(
+                "extern `{x}` resolves to `{u}`, which the source manages as `{s}` — \
+                 reference `{s}` instead"
+            )));
+        }
+    }
     // XML type and title per object, for `mirrors:` targets (D33) — taken
     // before teardown so it covers everything the base knows.
     let type_by_uuid: BTreeMap<String, (String, Option<String>)> = doc
@@ -320,7 +342,7 @@ pub fn compile(
     // adds back returns to its place among them, so whichever writer last
     // ordered a connector — Loxone Config sorts on save — keeps its order.
     let mut base_in_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for w in all_base_wires {
+    for w in all_base_wires.clone() {
         base_in_order
             .entry(w.to_port)
             .or_default()
@@ -355,7 +377,44 @@ pub fn compile(
             .filter_map(|o| Some((o.uuid.clone(), page_of(&doc, idx.by_uuid.get(&o.uuid)?)?)))
             .collect()
     };
-    for obj in lock.objects.values() {
+    // The element each managed object of the object tree sits in (D64): an
+    // I/O goes back into the caption of its device it was in.
+    // Parent and grandparent, and each such parent's objects in base order.
+    let mut base_parent: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+    let mut base_tree_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    {
+        let idx = doc.index();
+        for o in lock.objects.values().filter(|o| object_tree(&o.block_type)) {
+            let Some(path) = idx.by_uuid.get(&o.uuid) else {
+                continue;
+            };
+            let Some(parent) = doc.element_at(&path[..path.len() - 1]) else {
+                continue;
+            };
+            let Some(pu) = parent.attr("U") else { continue };
+            let grand = doc
+                .element_at(&path[..path.len() - 2])
+                .and_then(|g| g.attr("U"))
+                .map(str::to_string);
+            base_parent.insert(o.uuid.clone(), (pu.to_string(), grand));
+            base_tree_order.entry(pu.to_string()).or_insert_with(|| {
+                parent
+                    .child_elements()
+                    .filter(|c| c.name == "C")
+                    .filter_map(|c| c.attr("U").map(str::to_string))
+                    .collect()
+            });
+        }
+    }
+    // Innermost first: a managed I/O leaves its managed device before the
+    // device goes, so neither carries the other.
+    let mut teardown: Vec<&LockedObject> = lock.objects.values().collect();
+    {
+        let idx = doc.index();
+        let depth = |o: &LockedObject| idx.by_uuid.get(&o.uuid).map_or(0, Vec::len);
+        teardown.sort_by_key(|o| std::cmp::Reverse(depth(o)));
+    }
+    for obj in teardown {
         if let Some(el) = doc.remove_by_uuid(&obj.uuid) {
             let mut r = harvest_residue(&el);
             r.page = base_page.get(&obj.uuid).cloned();
@@ -520,7 +579,11 @@ pub fn compile(
     // Object-tree containers (D54), first of each type in document order.
     let mut containers: BTreeMap<String, String> = BTreeMap::new();
     for o in doc.objects() {
-        if o.block_type == "VirtualInCaption" {
+        if o.block_type == "VirtualInCaption"
+            || crate::periphery::PERIPHERY
+                .iter()
+                .any(|p| matches!(p.home, crate::periphery::Home::Folder(f) if f == o.block_type))
+        {
             containers
                 .entry(o.block_type.clone())
                 .or_insert(o.uuid.clone());
@@ -597,15 +660,19 @@ pub fn compile(
         }
         // D54: an object of the object tree (a VirtualIn) is appended to
         // its container, which the base has exactly once — never pinned,
-        // placed, or governed by `page`.
-        if let Some(container) = container_type(&block.block_type) {
-            let uuid = containers.get(container).cloned().ok_or_else(|| {
-                Error::Compile(format!(
-                    "block `{}`: the base config has no <C Type=\"{container}\"> to \
-                     hold a minted {}",
-                    block.slug, block.block_type
-                ))
-            })?;
+        // placed, or governed by `page`. An I/O (D64) goes into its device,
+        // resolved once every block has its UUID.
+        if object_tree(&block.block_type) {
+            let uuid = match container_type(&block.block_type) {
+                Some(container) => containers.get(container).cloned().ok_or_else(|| {
+                    Error::Compile(format!(
+                        "block `{}`: the base config has no <C Type=\"{container}\"> to \
+                         hold a minted {}",
+                        block.slug, block.block_type
+                    ))
+                })?,
+                None => String::new(),
+            };
             entry.page_uuid = None;
             entry.layout = None;
             entry.superseded_layout = None;
@@ -699,6 +766,34 @@ pub fn compile(
             },
         );
     }
+    // D64: an I/O goes into the device its `device:` names — into the
+    // caption of that device it sat in, if the base had it in one.
+    for block in module.blocks() {
+        if crate::periphery::device_types(&block.block_type).is_empty() {
+            continue;
+        }
+        let target = block
+            .params()
+            .find_map(|(k, v)| match (k, v) {
+                ("device", Value::Ref(t)) => Some(t.as_str()),
+                _ => None,
+            })
+            .expect("validate_ports requires device: on an I/O");
+        let device = match managed.get(target) {
+            Some(p) => p.uuid.clone(),
+            None => extern_uuid.get(target).cloned().ok_or_else(|| {
+                Error::Compile(format!(
+                    "block `{}`: its device `{target}` did not resolve",
+                    block.slug
+                ))
+            })?,
+        };
+        let plan = managed.get_mut(&block.slug).expect("planned above");
+        plan.page_uuid = match base_parent.get(&plan.uuid) {
+            Some((parent, Some(grand))) if *grand == device => parent.clone(),
+            _ => device,
+        };
+    }
 
     // Record the mint high-water mark — only when something was minted, so
     // a mint-free compile leaves the lock byte-identical.
@@ -721,7 +816,9 @@ pub fn compile(
         for (k, v) in block.params() {
             // `mirrors:` is an identity binding, not a value (D33) —
             // resolved separately below.
-            if is_ref_type(&block.block_type) && k == "mirrors" {
+            if (is_ref_type(&block.block_type) && k == "mirrors")
+                || crate::periphery::is_device_binding(&block.block_type, k)
+            {
                 continue;
             }
             if message_params(&block.block_type).contains(&k) {
@@ -859,9 +956,10 @@ pub fn compile(
         .block_version()
         .filter(|v| VERIFIED_BLOCK_VERSIONS.contains(&v.as_str()))
         .unwrap_or_else(|| VERIFIED_BLOCK_VERSIONS[0].to_string());
-    // A fresh VirtualIn gets the next free `VI<n>` designation (D54) —
-    // past every one the torn-down base and the carried residue hold.
-    let mut next_vi = doc
+    // A fresh VirtualIn gets the next free `VI<n>` designation (D54), a
+    // fresh virtual or Modbus object the next of its prefix (D64) — past
+    // every one the torn-down base and the carried residue hold.
+    let inames: Vec<String> = doc
         .objects()
         .iter()
         .filter_map(|o| doc.element_at(&o.path)?.attr("IName").map(String::from))
@@ -871,11 +969,36 @@ pub fn compile(
                 .filter(|(n, _)| n == "IName")
                 .map(|(_, v)| v.clone())
         }))
-        .filter_map(|n| n.strip_prefix("VI")?.parse::<u32>().ok())
-        .max()
-        .unwrap_or(0)
-        + 1;
-    for block in module.blocks() {
+        .collect();
+    let mut next_iname: BTreeMap<&str, u32> = BTreeMap::new();
+    for prefix in
+        std::iter::once("VI").chain(crate::periphery::PERIPHERY.iter().filter_map(|p| p.iname))
+    {
+        let n = inames
+            .iter()
+            .filter_map(|n| n.strip_prefix(prefix)?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        next_iname.insert(prefix, n + 1);
+    }
+    // Devices before what hangs below them (D64), so a minted I/O finds
+    // its minted device.
+    let rank = |t: &str| {
+        if crate::periphery::device_types(t).is_empty() {
+            0
+        } else if crate::periphery::PERIPHERY
+            .iter()
+            .any(|p| crate::periphery::device_types(p.block_type).contains(&t))
+        {
+            1
+        } else {
+            2
+        }
+    };
+    let mut build_order: Vec<_> = module.blocks().collect();
+    build_order.sort_by_key(|b| rank(&b.block_type));
+    for block in build_order {
+        let pt = crate::periphery::periphery(&block.block_type);
         let plan = &managed[&block.slug];
         let res = residue.get(&plan.uuid);
         let carried = |name: &str| {
@@ -884,14 +1007,34 @@ pub fn compile(
         };
         let mut el = Element::new("C");
         el.set_attr("Type", &block.block_type);
-        if block.block_type == "VirtualIn" {
+        let iname_prefix = if block.block_type == "VirtualIn" {
+            Some("VI")
+        } else {
+            pt.and_then(|p| p.iname)
+        };
+        if let Some(prefix) = iname_prefix {
             match carried("IName") {
                 Some(v) => el.set_attr_raw("IName", v),
                 None => {
-                    el.set_attr("IName", &format!("VI{next_vi}"));
-                    next_vi += 1;
+                    let n = next_iname.get_mut(prefix).expect("every prefix counted");
+                    el.set_attr("IName", &format!("{prefix}{n}"));
+                    *n += 1;
                 }
             }
+        }
+        if res.is_none()
+            && let Some(p) = pt
+            && let Some(missing) = p
+                .required
+                .iter()
+                .find(|a| !managed_attrs.contains_key(&(block.slug.clone(), (**a).to_string())))
+        {
+            return Err(Error::Compile(format!(
+                "block `{}`: a new {} needs `{missing}:` ({})",
+                block.slug,
+                block.block_type,
+                p.required.join(", ")
+            )));
         }
         el.set_attr("V", &block_version);
         el.set_attr("U", &plan.uuid);
@@ -916,11 +1059,20 @@ pub fn compile(
         // `WF` on a GUI save). Only a fresh mint writes the defaults; a
         // virtual input has the folder's grey (corpus) and the same `WF`
         // a save gives a page block (oracle session 18).
-        let wf = "147456";
-        let cl = if plan.placed {
-            "141,255,112"
-        } else {
-            "238,238,238"
+        let mint_attr = |name: &str| {
+            pt.and_then(|p| p.mint_attrs.iter().find(|(n, _)| *n == name))
+                .map(|(_, v)| *v)
+        };
+        let wf = match mint_attr("WF") {
+            Some(v) => v.unwrap_or_default(),
+            None if pt.is_some() => "",
+            None => "147456",
+        };
+        let cl = match mint_attr("Cl") {
+            Some(v) => v.unwrap_or_default(),
+            None if pt.is_some() => "",
+            None if plan.placed => "141,255,112",
+            None => "238,238,238",
         };
         // A fresh message ref (D51) gets what Loxone Config gives one:
         // black, and no `WF=`.
@@ -929,9 +1081,13 @@ pub fn compile(
             (Some(_), Some(v)) => el.set_attr_raw("Cl", v),
             (Some(_), None) => {}
             (None, _) if message_ref => el.set_attr("Cl", "0,0,0"),
+            (None, _) if cl.is_empty() => {}
             (None, _) => el.set_attr("Cl", cl),
         }
-        el.set_attr("Nio", &plan.keys.len().to_string());
+        // A device without connectors has no `Nio=` (D64).
+        if !plan.keys.is_empty() || pt.is_none() {
+            el.set_attr("Nio", &plan.keys.len().to_string());
+        }
         // Minted-ref identity (D33), in the GUI's observed attribute
         // order: `Ref=` after `Nio=`; `Analog=` or `Text=` (D48), then
         // `LinkRefType=`, after `WF=`.
@@ -944,7 +1100,7 @@ pub fn compile(
         match (res, carried("WF")) {
             (Some(_), Some(v)) => el.set_attr_raw("WF", v),
             (Some(_), None) => {}
-            (None, _) if message_ref => {}
+            (None, _) if message_ref || wf.is_empty() => {}
             (None, _) => el.set_attr("WF", wf),
         }
         if let Some(m) = mirror_of.get(&block.slug) {
@@ -959,6 +1115,25 @@ pub fn compile(
         }
         if block.block_type == "VirtualIn" {
             virtual_in_attrs(&mut el, &block.slug, &managed_attrs, res)?;
+        }
+        // A fresh virtual or Modbus object (D64): its settings and the
+        // defaults a save gives one, in the order the save writes them.
+        if res.is_none()
+            && let Some(p) = pt
+        {
+            for (name, default) in p.mint_attrs {
+                if matches!(*name, "Cl" | "Nio" | "WF") {
+                    continue;
+                }
+                match managed_attrs.get(&(block.slug.clone(), (*name).to_string())) {
+                    Some(v) => el.set_attr(name, v),
+                    None => {
+                        if let Some(d) = default {
+                            el.set_attr(name, d);
+                        }
+                    }
+                }
+            }
         }
         for name in attr_params(&block.block_type) {
             if let Some(v) = managed_attrs.get(&(block.slug.clone(), (*name).to_string())) {
@@ -1043,6 +1218,15 @@ pub fn compile(
                 r.attr_order.iter().position(|n| *n == a.name)
             });
             order_connectors(&mut el, &r.co_order);
+        } else if let Some(p) = pt {
+            for (name, attrs, open) in p.mint_children {
+                let mut c = Element::new(*name);
+                for (k, v) in *attrs {
+                    c.set_attr(k, v);
+                }
+                c.self_closing = !open;
+                el.push_child(c);
+            }
         } else if block.block_type == "VirtualIn" {
             // What a save gives a fresh virtual input (oracle session
             // 18): shown in the app, one decimal — the GUI's from then on.
@@ -1055,6 +1239,29 @@ pub fn compile(
             display.set_attr("Unit", "<v.1>");
             display.set_attr("StateOnly", "true");
             el.push_child(display);
+        }
+        // The object tree (D64): a device or I/O goes into its folder or
+        // device by UUID — inserting a device shifts its siblings' paths.
+        if pt.is_some() {
+            let order = base_tree_order.get(&plan.page_uuid);
+            let container = find_c_mut(&mut doc.xml.root, &plan.page_uuid).ok_or_else(|| {
+                Error::Compile(format!(
+                    "block `{}`: the object `{}` it goes into is not in the config",
+                    block.slug, plan.page_uuid
+                ))
+            })?;
+            if let Some(f) = container_type(&block.block_type)
+                && container.attr("Type") != Some(f)
+            {
+                return Err(Error::Compile(format!(
+                    "block `{}`: object `{}` is a `{}`, not a {f}",
+                    block.slug,
+                    plan.page_uuid,
+                    container.attr("Type").unwrap_or("?")
+                )));
+            }
+            insert_in_page(container, el, order.map_or(&[], Vec::as_slice));
+            continue;
         }
         let page_path = page_index.by_uuid.get(&plan.page_uuid).ok_or_else(|| {
             Error::Compile(format!(
@@ -1094,6 +1301,8 @@ pub fn compile(
         /// The ref object itself (owner of `port`).
         ref_uuid: String,
         page: Option<String>,
+        /// An OutputRef's `AQ`, which feeds the sink it mirrors.
+        feeds: Option<String>,
     }
     let routed_objects = doc.objects();
     let managed_uuids: BTreeSet<&str> = managed.values().map(|p| p.uuid.as_str()).collect();
@@ -1136,6 +1345,7 @@ pub fn compile(
                             port: s.uuid.clone(),
                             ref_uuid: o.uuid.clone(),
                             page: page.clone(),
+                            feeds: None,
                         });
                     }
                 }
@@ -1147,12 +1357,15 @@ pub fn compile(
                     port: ai.uuid.clone(),
                     ref_uuid: o.uuid.clone(),
                     page,
+                    feeds: Some(aq.uuid.clone()),
                 },
             );
         }
     }
+    // From the base's wires: a managed sink (a Modbus actuator, D64) lost
+    // its `<In>` from the ref with the teardown.
     let mut out_routes: BTreeMap<String, Vec<MirrorRoute>> = BTreeMap::new();
-    for w in doc.wires() {
+    for w in &all_base_wires {
         if let Some(r) = aq_of_outputref.get(&w.from_port) {
             out_routes
                 .entry(w.to_port.clone())
@@ -1285,6 +1498,21 @@ pub fn compile(
                 };
                 match pick_route(cands, from_page.as_ref(), &pin) {
                     Ok(Some(r)) => {
+                        // A managed sink is fed by the ref again.
+                        if let Some(aq) = r.feeds.as_ref().filter(|_| !to.is_extern) {
+                            let key = (to.port_uuid.clone(), aq.clone());
+                            add_wire(
+                                &mut doc,
+                                &to.owner_uuid,
+                                &to.port_uuid,
+                                aq,
+                                residue
+                                    .get(&to.owner_uuid)
+                                    .and_then(|r| r.wire_flags.get(&key))
+                                    .map(String::as_str),
+                                base_in_order.get(&to.port_uuid).map_or(&[], Vec::as_slice),
+                            )?;
+                        }
                         to.owner_uuid = r.ref_uuid;
                         to.port_uuid = r.port;
                         to.is_extern = true;

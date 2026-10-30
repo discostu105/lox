@@ -111,9 +111,61 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 mirrors = Some(target);
                 continue;
             }
+            // `device:` on an I/O names its device (D64): a managed block or
+            // an extern of one of the types it may hang below.
+            if crate::periphery::is_device_binding(&block.block_type, key) {
+                let Value::Ref(target) = v else {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `device:` takes the name of the device (an extern \
+                         or managed block), not a literal",
+                        block.slug
+                    )));
+                };
+                let ty = module
+                    .blocks()
+                    .find(|b| &b.slug == target)
+                    .map(|b| b.block_type.as_str())
+                    .or_else(|| {
+                        module
+                            .externs()
+                            .find(|e| &e.slug == target)
+                            .map(|e| e.block_type.as_str())
+                    });
+                let allowed = crate::periphery::device_types(&block.block_type);
+                match ty {
+                    None => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: `device: {target}` — no extern or managed block \
+                             of this module has that name",
+                            block.slug
+                        )));
+                    }
+                    Some(t) if !allowed.contains(&t) => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: a {} hangs below a {}, but `{target}` is a {t}",
+                            block.slug,
+                            block.block_type,
+                            allowed.join(" or ")
+                        )));
+                    }
+                    Some(_) => {}
+                }
+                continue;
+            }
             known_port(module, &block.slug, key)?;
             // A suffixed value must fit the port's documented unit (D52).
             module.resolve_value_for(v, &block.block_type, &block.slug, key)?;
+        }
+        if !crate::periphery::device_types(&block.block_type).is_empty()
+            && !block.params().any(|(k, _)| k == "device")
+        {
+            return Err(Error::Compile(format!(
+                "block `{}`: a {} hangs below its device — name it with `device: <slug>` \
+                 (a {} of this module, managed or extern)",
+                block.slug,
+                block.block_type,
+                crate::periphery::device_types(&block.block_type).join(" or ")
+            )));
         }
         if is_ref_type(&block.block_type) {
             if mirrors.is_none() {

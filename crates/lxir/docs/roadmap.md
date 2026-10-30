@@ -380,6 +380,10 @@ haus/
       `.category` (D63). `lxir coverage` reports what the source owns.
       The house: 154 of 159 page blocks managed (the rest: five
       app-made Automatic Designer rules).
+- [x] Virtual and Modbus devices 2026-10-31 (D64): the HTTP/UDP/text
+      virtual inputs, virtual outputs and Modbus servers with their I/O,
+      minted from source and adopted with their I/O (`device:`). The
+      house: all 17 devices and 195 I/O managed.
 - [x] Drift fingerprint 2026-08-25 (D21): `semantic_fingerprint` hashes
       exactly the projection the semantic diff compares (locale-suspect
       titles excluded), recorded in the lock at adopt/compile; `lxir

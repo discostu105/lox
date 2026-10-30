@@ -1906,7 +1906,18 @@ impl Module {
                                 // checked by `validate_ports`. On any other
                                 // type the key is a mistake worth a message
                                 // clearer than the constant-resolution one.
-                                if binding.port == "mirrors" {
+                                if binding.port == "device" {
+                                    // The device an I/O hangs below (D64),
+                                    // checked by `validate_ports`.
+                                    if crate::periphery::device_types(&b.block_type).is_empty() {
+                                        return compile_err(format!(
+                                            "`device:` names the device an I/O of a virtual \
+                                             or Modbus device hangs below; {} has none (in \
+                                             `{} = {}(…)`)",
+                                            b.block_type, b.slug, b.block_type
+                                        ));
+                                    }
+                                } else if binding.port == "mirrors" {
                                     if !matches!(
                                         b.block_type.as_str(),
                                         "InputRef" | "OutputRef" | "OutputRefLM"

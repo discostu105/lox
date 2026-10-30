@@ -1962,3 +1962,30 @@ Anything unverified is an error, not a heuristic:
   is still an error — its label is its title. Validated: oracle session
   25 (room claims on nine minted blocks: empty diff); live, the probe
   blocks in room "Zentral".
+- **D64 — Virtual and Modbus devices from source** (2026-10-31). The
+  devices behind the virtual inputs and outputs and the Modbus servers
+  are declared like blocks: VirtualHttpIn, VirtualUdpIn, VirtualTextIn,
+  VirtualOut, ModbusServer, ModbusDev, and the I/O below them
+  (VirtualHttpInCmd, VirtualUdpInCmd, VirtualOutCmd, ModbusASensor,
+  ModbusSensor, ModbusAActor). Where an object goes follows from its
+  type: a device into its folder (VirtualInCaption, VirtualOutCaption,
+  the WeatherCaption Loxone Config calls "Netzwerkperipherie"), an I/O
+  into the device its `device:` binding names — a slug, of a managed
+  block or an extern, of the one type (or two) that can hold it. Their
+  settings (`Address`, `Poll`, `Check`, `ModbusAddress`, …) are element
+  attributes, bound like attribute parameters; a new device or I/O
+  needs the ones that make it work (`connectors::periphery`). The rest
+  of the element (IoData, Display, `Cl`, `WF`, attributes no table
+  names) is the GUI's and carried, as for page blocks (D19). `IName=`
+  is minted per prefix past the highest in use (`VHI`, `VCI` shared by
+  the HTTP and UDP commands, `VUI`, `VTI`, `VQ`, `VQC`, `AMQ` shared by
+  the analog sensor and the actuator, `IM`) and kept. The rebuild puts
+  a device's I/O back in base order, and a managed device carries no
+  I/O it does not manage: `adopt` takes a device with everything below
+  it, promoting the externs the source has on them (D62), and an extern
+  that resolves to a managed object is an error. A wire into a managed
+  actuator that the base draws through an OutputRef on the writer's page
+  is drawn the same way again (D34). Validated: oracle session 26 (one
+  of each type minted: empty diff, recompile of the save byte-identical);
+  the house's 17 devices with their 195 I/O adopted and rebuilt
+  byte-identically; live on the Miniserver (below).

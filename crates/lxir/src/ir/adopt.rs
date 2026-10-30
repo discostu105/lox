@@ -34,6 +34,7 @@ use crate::ir::ast::{ArgItem, Binding, BindingKind, Item, MatchSpec, Module, Por
 use crate::ir::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED};
 use crate::ir::validate::validate_ports;
 use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
+use crate::periphery::periphery;
 use crate::xml::{Element, Node};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -104,7 +105,11 @@ pub struct AdoptedBlock {
     /// statement on it (its `extern` line, `<-` wires, port assignments,
     /// `.title` claim) moved into the declaration — strip them from the
     /// source with [`Module::strip_extern`].
-    pub promoted: bool,
+    pub promoted: Vec<String>,
+    /// The block sits on a logic page (`page_title` names it); a virtual
+    /// or Modbus device (D64) sits in the periphery tree instead, and
+    /// `page_title` names its folder.
+    pub on_page: bool,
 }
 
 /// Adopt the single existing object `uuid` as managed block `slug` into an
@@ -154,7 +159,9 @@ pub fn adopt_one(
             o.block_type
         )));
     }
-    if let Some(container) = container_type(&o.block_type) {
+    if periphery(&o.block_type).is_none()
+        && let Some(container) = container_type(&o.block_type)
+    {
         return Err(fail(format!(
             "cannot adopt {ident}: an object of the `{container}` folder is minted \
              from source but not adopted (D54) — reference it as an extern"
@@ -193,9 +200,6 @@ pub fn adopt_one(
             doc.config_version().as_deref().unwrap_or("(none)")
         )));
     }
-    let el = doc.element_at(&o.path).expect("path from objects()");
-    verify_rebuildable(el, o).map_err(|why| fail(format!("cannot adopt {ident}: {why}")))?;
-
     let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
         && slug
             .bytes()
@@ -227,6 +231,11 @@ pub fn adopt_one(
         )));
     }
     taken.insert(slug.to_string());
+    if periphery(&o.block_type).is_some() {
+        return super::adopt_tree::adopt_device(doc, o, slug, raw, module, lock, taken);
+    }
+    let el = doc.element_at(&o.path).expect("path from objects()");
+    verify_rebuildable(el, o).map_err(|why| fail(format!("cannot adopt {ident}: {why}")))?;
 
     // Lift exactly this block: every other managed-type object is excluded,
     // so wired neighbors — managed blocks included — surface as externs.
@@ -490,14 +499,15 @@ pub fn adopt_one(
         items,
         page_title: lift.page_title(page).to_string(),
         new_externs: new_slugs,
-        promoted: promoted.is_some(),
+        promoted: promoted.into_iter().collect(),
+        on_page: true,
     })
 }
 
 /// Why extern `x` (object `uuid`) cannot be promoted to a managed block,
 /// if it cannot: a statement the declaration could not hold, or a
 /// withdrawal still on its way to the Miniserver.
-fn check_promotable(
+pub(super) fn check_promotable(
     doc: &LoxoneDoc,
     x: &str,
     uuid: &str,

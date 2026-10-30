@@ -599,6 +599,22 @@ MeterAbsSt on a probe page, wired to virtual inputs.
   direction, so a save never proves a connector's direction; the
   tables rest on corpus wires (connector-db.md).
 
+## Virtual and Modbus devices (session 26, D64) — passed
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28). One minted object of each of the twelve types: an HTTP and
+a UDP virtual input with a command each, a virtual text input, a
+virtual output with a command, a Modbus server with a device and an
+analog sensor, a digital sensor and an actuator.
+
+- **Pass:** the semantic diff was empty. Loxone Config takes devices
+  with no captions, no `Online` children and no display settings; the
+  save adds them (`Cl` on the HTTP command, an empty `<IoData></IoData>`,
+  `Display` defaults, `Tx="false"`, `ModbusCoilQuantity="1"`, `WF` on
+  the output command, `WF="16384"` on the text input). A recompile
+  against the saved file was byte-identical: what the save added is
+  carried.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

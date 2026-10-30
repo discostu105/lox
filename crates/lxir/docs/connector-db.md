@@ -332,6 +332,18 @@ GUI writes (zones, timers, `statGrp`, meter attributes such as `PwrN`,
 and TpfController are adopt-only: Loxone Config creates them when it
 pairs the device.
 
+## Virtual and Modbus devices, admitted 2026-10-31 (D64)
+
+The devices (VirtualHttpIn, VirtualUdpIn, VirtualOut, ModbusServer)
+have no connectors. ModbusDev has one, `AQ` (Input, never wired in the
+corpus). The I/O: VirtualHttpInCmd and VirtualUdpInCmd `[AQ, Q]`,
+VirtualTextIn `[TQ]`, ModbusASensor and ModbusSensor `[Q, Qe]`, all
+Output. VirtualOutCmd and ModbusAActor `[I]`, Input. These are the
+connector sets of every corpus instance that carries connectors, and
+corpus wires prove the directions. The table lives in
+`src/periphery.rs` together with the settings each type binds and the
+folder or device it goes into. Mint-validated in oracle session 26.
+
 ## Growing the table
 
 Add configs to the corpus (any installation helps — foreign corpora

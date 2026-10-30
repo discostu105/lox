@@ -1043,6 +1043,20 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "MeterAbsUni",
     "MeterAbsBi",
     "MeterAbsSt",
+    // Virtual devices and Modbus (D64): objects of the object tree, see
+    // `crate::periphery`.
+    "VirtualHttpIn",
+    "VirtualHttpInCmd",
+    "VirtualUdpIn",
+    "VirtualUdpInCmd",
+    "VirtualTextIn",
+    "VirtualOut",
+    "VirtualOutCmd",
+    "ModbusServer",
+    "ModbusDev",
+    "ModbusASensor",
+    "ModbusSensor",
+    "ModbusAActor",
 ];
 
 /// Block versions (`V=` on `<C>`) the builtin table is verified for,
@@ -1068,7 +1082,7 @@ pub fn attr_params(block_type: &str) -> &'static [&'static str] {
         "Formula" => &["Formula"],
         "Code16" => &["Code"],
         "VirtualIn" => &["Analog", "MinVal", "MaxVal", "DefVal"],
-        _ => &[],
+        t => crate::periphery::periphery(t).map_or(&[], |p| p.settings),
     }
 }
 
@@ -1078,8 +1092,15 @@ pub fn attr_params(block_type: &str) -> &'static [&'static str] {
 pub fn container_type(block_type: &str) -> Option<&'static str> {
     match block_type {
         "VirtualIn" => Some("VirtualInCaption"),
-        _ => None,
+        t => crate::periphery::folder(t),
     }
+}
+
+/// An object of the object tree rather than a page block: a virtual input
+/// (D54), or a virtual device, Modbus device or one of their I/Os (D64).
+/// Never placed, never governed by `page`.
+pub fn object_tree(block_type: &str) -> bool {
+    container_type(block_type).is_some() || crate::periphery::periphery(block_type).is_some()
 }
 
 /// Per-type GUI-owned attributes (D19) beyond the global
@@ -1284,7 +1305,7 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "InputRef" => Some(INPUT_REF),
         "OutputRef" | "OutputRefLM" => Some(OUTPUT_REF),
         "VirtualIn" => Some(VIRTUAL_IN),
-        _ => None,
+        t => crate::periphery::periphery(t).map(|p| p.ports),
     }
 }
 
