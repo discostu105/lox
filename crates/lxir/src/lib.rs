@@ -52,11 +52,13 @@ pub mod lock;
 pub mod lsp;
 pub mod moods;
 pub mod observed_defaults;
+pub mod periphery;
 pub mod permissions;
 pub mod port_meta;
 pub mod project;
 pub mod render;
 pub mod scan;
+pub mod settings;
 pub mod uuid;
 pub mod xml;
 

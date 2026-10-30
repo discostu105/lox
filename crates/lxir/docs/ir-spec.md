@@ -394,6 +394,41 @@ wire directly into blocks on any page.
   are referenced as externs (`extern x = VirtualIn(iname: "VI3")`);
   `adopt` does not take them over.
 
+### Virtual and Modbus devices — the object tree (D64)
+
+```text
+zaehler = VirtualHttpIn("Zähler", Address: "http://192.0.2.10/status", Poll: 60)
+leistung = VirtualHttpInCmd("Leistung", device: zaehler, Check: "\"power\":\\v")
+wp = ModbusServer("Wärmepumpe", Address: "192.0.2.12:502")
+wp_regler = ModbusDev("Regler", device: wp)
+vorlauf = ModbusASensor("Vorlauf", device: wp_regler, ModbusAddress: 1)
+sollwert = ModbusAActor("Sollwert", device: wp_regler, ModbusAddress: 3, I: plus.AQ)
+```
+
+A device goes into its folder: VirtualHttpIn, VirtualUdpIn and
+VirtualTextIn into "Virtual Inputs", VirtualOut into "Virtual Outputs",
+ModbusServer into "Netzwerkperipherie". An I/O goes into the device
+that `device:` names, by slug: a managed block or an extern of the
+type that holds it (VirtualHttpInCmd → VirtualHttpIn, VirtualUdpInCmd →
+VirtualUdpIn, VirtualOutCmd → VirtualOut, ModbusDev → ModbusServer, the
+Modbus I/O → ModbusDev). Like VirtualIn, none of them has a position or
+follows `page`.
+
+- The settings are attribute parameters: `Address:`, `Poll:`, `Check:`,
+  `ModbusAddress:`, `ModbusPollingCycle:` and the rest
+  (`connectors::periphery` lists them per type). A new one is refused
+  without the settings that make it work (`Address` and `Poll` for an
+  HTTP input, `Check` for a command, `ModbusAddress` for a Modbus I/O).
+- Strings are source strings: a backslash is written `\\`, so Loxone's
+  `\v` placeholder in a command's check is `"\\v"`.
+- `IName=` (VHI1, VCI3, AMQ12, …) is minted once and kept.
+- `adopt --uuid <device>` takes the device and all I/O below it: each
+  I/O gets the slug `<device slug>_<title>`, or keeps its slug when it
+  was an extern (its statements move into the declaration, D62). An
+  extern of an object the source manages is an error.
+- `extern … (device: "<serial>")` is something else: an extern matched
+  by the serial of a physical device.
+
 ### `<-` — wire onto an extern port
 
 ```text
@@ -424,6 +459,34 @@ Like `<-`, this is for **extern targets only**. A managed block's
 parameters belong in its argument list — assigning a managed port is a
 validation error pointing there. Assigning a port reference
 (`x.Port = y.Q`) is a parse error suggesting `<-`.
+
+### `=` on a setting — the settings of a physical input or output (D65)
+
+```text
+extern garten = LoxAIRAsensor(uuid: "30000010-0000-0100-ffff504f94112233")
+
+garten.Desc = "Bodenfühler im Beet"
+garten.Unit = "<v.1> °C"
+garten.MinTime = 600
+```
+
+On an extern of an extension's, Tree, Air or 1-Wire input or output
+(LoxAIRsensor, LoxAIRAsensor, LoxAIRactor, LoxAIRAactor, TreeSensor,
+TreeAsensor, TreeActor, TreeAactor, Actor, DigitalIn, VoltageIn,
+Lox1wireAsensor), a setting name in place of a port claims that
+setting: `Desc`, `Unit` (the display unit), `SourceValLow`,
+`DestValLow`, `SourceValHigh`, `DestValHigh`, `MinVal`, `MaxVal`,
+`MinChange`, `MinTime`, `ResetTime`, `AverageTime`, `MaxTime`. As with a
+port, the original is kept in the lock and restored when the statement
+leaves the source.
+
+- `Desc`, the low ends of the correction, `MinVal`, `ResetTime` and
+  `AverageTime` may be added to an object that has none (a save leaves
+  them out at their default). The others are only rewritten: claiming
+  one the object does not carry is an error.
+- `Desc` is the name the app shows; setting it renames the control in
+  the app.
+- On any other type a setting name is an error.
 
 ### `.title` / `.room` / `.category` — assign an extern object (D39)
 

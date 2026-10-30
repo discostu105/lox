@@ -1962,3 +1962,65 @@ Anything unverified is an error, not a heuristic:
   is still an error — its label is its title. Validated: oracle session
   25 (room claims on nine minted blocks: empty diff); live, the probe
   blocks in room "Zentral".
+- **D64 — Virtual and Modbus devices from source** (2026-10-31). The
+  devices behind the virtual inputs and outputs and the Modbus servers
+  are declared like blocks: VirtualHttpIn, VirtualUdpIn, VirtualTextIn,
+  VirtualOut, ModbusServer, ModbusDev, and the I/O below them
+  (VirtualHttpInCmd, VirtualUdpInCmd, VirtualOutCmd, ModbusASensor,
+  ModbusSensor, ModbusAActor). Where an object goes follows from its
+  type: a device into its folder (VirtualInCaption, VirtualOutCaption,
+  the WeatherCaption Loxone Config calls "Netzwerkperipherie"), an I/O
+  into the device its `device:` binding names — a slug, of a managed
+  block or an extern, of the one type (or two) that can hold it. Their
+  settings (`Address`, `Poll`, `Check`, `ModbusAddress`, …) are element
+  attributes, bound like attribute parameters; a new device or I/O
+  needs the ones that make it work (`connectors::periphery`). The rest
+  of the element (IoData, Display, `Cl`, `WF`, attributes no table
+  names) is the GUI's and carried, as for page blocks (D19). `IName=`
+  is minted per prefix past the highest in use (`VHI`, `VCI` shared by
+  the HTTP and UDP commands, `VUI`, `VTI`, `VQ`, `VQC`, `AMQ` shared by
+  the analog sensor and the actuator, `IM`) and kept. The rebuild puts
+  a device's I/O back in base order, and a managed device carries no
+  I/O it does not manage: `adopt` takes a device with everything below
+  it, promoting the externs the source has on them (D62), and an extern
+  that resolves to a managed object is an error. A wire into a managed
+  actuator that the base draws through an OutputRef on the writer's page
+  is drawn the same way again (D34). Validated: oracle session 26 (one
+  of each type minted: empty diff, recompile of the save byte-identical);
+  the house's 17 devices with their 195 I/O adopted and rebuilt
+  byte-identically; live 2026-10-31 on the house Miniserver (17.2.8):
+  a new HTTP input with a command, a command in an adopted device, a
+  text input and a Modbus register read in an adopted device, pushed
+  (the commands and the register delivered values) and removed again,
+  both with a byte fixpoint. A device's teardown carries the I/O the
+  GUI added below it, never a withdrawn one (its tombstone holds, also
+  inside the captions a device groups its I/O in).
+- **D65 — Settings of physical inputs and outputs from source**
+  (2026-10-31). The inputs and outputs of the extensions, Tree and Air
+  devices and 1-Wire sensors (`settings::SETTING_TYPES`) only Loxone
+  Config creates, but their settings are plain attributes: the
+  description, the display unit, the analog correction
+  (`SourceValLow/High`, `DestValLow/High`), the range (`MinVal`,
+  `MaxVal`), and the transmission timing (`MinChange`, `MinTime`,
+  `ResetTime`, `AverageTime`, `MaxTime`). `x.MinTime = 600` on an extern
+  of such a type claims one, the way `x.Port = v` claims a `Def=`
+  (D31): the original goes into the lock under `<object>#<setting>` and
+  comes back when the statement leaves the source, with the same
+  tombstone until the restore is deployed. `Unit` is `Unit=` of the
+  object's `<Display>`. A setting the element lacks is added only where
+  a save omits it at its default (`Desc`, the low ends of the
+  correction, `MinVal`, `ResetTime`, `AverageTime`), at the place a save
+  writes it (`Desc` right after `Type`, the rest in Loxone's order); the
+  others are rewritten, never added — an analog correction on a digital
+  input is an error, not an attribute. `Desc` is the name the app shows
+  (the catalogue's rule), so a description renames the app control; a
+  new unit is carried into the catalogue's value formats by the push.
+  The semantic diff compares these settings, and the drift fingerprint
+  (v8) hashes them together with the device settings of D64; a lock
+  written by an older lxir (v7) still reads as in sync. Validated:
+  oracle session 27 (description, unit, low end, averaging and time on
+  two Air sensors: empty diff, the save kept every attribute where lxir
+  wrote it, a recompile of the save byte-identical); live 2026-10-31 on
+  the house Miniserver: description and unit of a garden sensor pushed
+  (the Miniserver formatted the value as `8.2 °C`, the app served
+  `%.1f °C`) and withdrawn (element byte-identical to before, `8.2°`).

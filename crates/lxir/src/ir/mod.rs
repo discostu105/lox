@@ -57,6 +57,7 @@
 
 mod access;
 mod adopt;
+mod adopt_tree;
 mod ast;
 mod compile;
 mod decompile;

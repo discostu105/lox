@@ -1412,10 +1412,14 @@ fn cmd_adopt_one(
     for f in paths {
         let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
         let mut text = src.clone();
-        if adopted.promoted {
+        if !adopted.promoted.is_empty() {
             let mut m =
                 Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
-            if m.strip_extern(slug) {
+            let mut stripped = false;
+            for x in &adopted.promoted {
+                stripped |= m.strip_extern(x);
+            }
+            if stripped {
                 text = m.to_text();
             }
         }
@@ -1423,16 +1427,22 @@ fn cmd_adopt_one(
     }
     if !files.iter().any(|(f, _, _)| *f == target) {
         // A fresh page file opens with its `page` statement (D28), so the
-        // adopted blocks stay pinned to the page they were drawn on.
-        let text = Module {
-            items: vec![lxir::ir::Item::Page(lxir::ir::PageDecl {
-                title: adopted.page_title.clone(),
-                room: None,
-                category: None,
-                comment: None,
-            })],
-        }
-        .to_text();
+        // adopted blocks stay pinned to the page they were drawn on; a
+        // device's file (D64) needs none — its blocks find their place in
+        // the periphery tree by `device:` and type.
+        let text = if adopted.on_page {
+            Module {
+                items: vec![lxir::ir::Item::Page(lxir::ir::PageDecl {
+                    title: adopted.page_title.clone(),
+                    room: None,
+                    category: None,
+                    comment: None,
+                })],
+            }
+            .to_text()
+        } else {
+            String::new()
+        };
         files.push((target.clone(), String::new(), text));
         files.sort_by(|a, b| a.0.cmp(&b.0));
     }
@@ -1440,16 +1450,22 @@ fn cmd_adopt_one(
         .iter_mut()
         .find(|(f, _, _)| *f == target)
         .expect("target file listed above");
-    if !text.ends_with('\n') {
+    if !text.is_empty() {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
         text.push('\n');
     }
-    text.push('\n');
     text.push_str(
         &Module {
             items: adopted.items.clone(),
         }
         .to_text(),
     );
+    // In the form `lxir fmt` writes, so the file stays canonical.
+    *text = Module::parse_fragment(text)
+        .map_err(|e| format!("{}: {e}", target.display()))?
+        .to_text();
 
     let mut merged = Module { items: Vec::new() };
     for (f, _, text) in &files {
@@ -1498,10 +1514,12 @@ fn cmd_adopt_one(
     }
     lock.save(Path::new(lock_path))?;
 
-    if adopted.promoted {
+    if !adopted.promoted.is_empty() {
         println!(
-            "promoted extern `{slug}` to a managed block: its statements moved into \
+            "promoted extern{} `{}` to managed: the statements moved into \
              the declaration{}",
+            if adopted.promoted.len() == 1 { "" } else { "s" },
+            adopted.promoted.join("`, `"),
             if rewritten.is_empty() {
                 String::new()
             } else {
@@ -1510,7 +1528,12 @@ fn cmd_adopt_one(
         );
     }
     println!(
-        "adopted uuid {uuid} as `{slug}` on page \"{}\"{}",
+        "adopted uuid {uuid} as `{slug}` {} \"{}\"{}",
+        if adopted.on_page {
+            "on page"
+        } else {
+            "in folder"
+        },
         adopted.page_title,
         if adopted.new_externs.is_empty() {
             String::new()
@@ -1804,6 +1827,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = lxir::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v7(&doc) == *recorded {
+        // Recorded before device settings joined the projection (D64/D65).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to device settings — the next compile \
+             records the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v6(&doc) == *recorded {
         // Recorded before LightController2 moods joined the projection (D58).

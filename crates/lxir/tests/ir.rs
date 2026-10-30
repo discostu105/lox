@@ -1139,7 +1139,7 @@ fn incremental_adopt_promotes_an_extern() {
 
     let mut promoted_lock = lock.clone();
     let adopted = adopt_one(&base, OR_UUID, "nachtlicht", &module, &mut promoted_lock).unwrap();
-    assert!(adopted.promoted);
+    assert_eq!(adopted.promoted, ["nachtlicht"]);
     let text = Module {
         items: adopted.items.clone(),
     }

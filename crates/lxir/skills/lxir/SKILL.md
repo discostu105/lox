@@ -58,6 +58,18 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - Match externs by `iname:` or `uuid:` where you can. Titles are
   locale-volatile; narrow a repeated title with `room:`, `category:` or
   `device: "<serial>"`.
+- Virtual and Modbus devices are blocks too (D64): `wp = ModbusServer("WP",
+  Address: "192.0.2.12:502")`, `regler = ModbusDev("Regler", device: wp)`,
+  `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`.
+  On a block, `device:` names the managed or extern device (by slug) that
+  the I/O hangs in. Write Loxone's `\v` as `"\\v"`. `lxir adopt --uuid
+  <device>` takes an existing device over together with its I/O.
+- The settings of a physical input or output are claims on its extern
+  (D65): `fuehler.Unit = "<v.1> °C"`, `fuehler.MinTime = 600`,
+  `taster.Desc = "Klingel"`. The original returns when the line goes.
+  `Desc` is the app's name for the control. Only `Desc`, the low ends of
+  the correction, `MinVal`, `ResetTime` and `AverageTime` can be added;
+  the rest must already be on the object.
 - `page "Title"` puts the blocks that follow on that page. When a page
   is full, `page "Title" (room: "…")` creates a new one (the room is
   required); without `room:` a missing title is an error.

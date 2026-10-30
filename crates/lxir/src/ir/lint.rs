@@ -104,11 +104,12 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                     if let Value::Ref(name) = v {
                         // `mirrors:` on a minted ref names an object (D33);
                         // every other `Ref` value is a `let` reference.
-                        if k == "mirrors"
+                        if (k == "mirrors"
                             && matches!(
                                 b.block_type.as_str(),
                                 "InputRef" | "OutputRef" | "OutputRefLM"
-                            )
+                            ))
+                            || crate::periphery::is_device_binding(&b.block_type, k)
                         {
                             object_refs.insert(name);
                         } else {

@@ -121,7 +121,8 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile) -> Coverage {
         // Off the pages, only objects a wire can reach count: rooms,
         // categories, users and folders have no connectors.
         let el = doc.element_at(&o.path).expect("path from objects()");
-        if !on_page && !el.child_elements().any(|c| c.name == "Co") {
+        let device = crate::periphery::periphery(&o.block_type).is_some();
+        if !on_page && !device && !el.child_elements().any(|c| c.name == "Co") {
             continue;
         }
         let part = if on_page && container_type(&o.block_type).is_none() {
@@ -147,7 +148,20 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile) -> Coverage {
                 Some(_) => t.externs += 1,
                 None => t.untouched += 1,
             }
-            if on_page && matches!(t.support, Some(Support::Managed | Support::AdoptOnly)) {
+            // A virtual or Modbus device is adopted with its I/O (D64): the
+            // topmost one the source does not manage is the work left.
+            let topmost = device
+                && !(1..o.path.len()).any(|n| {
+                    doc.element_at(&o.path[..n]).is_some_and(|a| {
+                        a.name == "C"
+                            && a.attr("Type")
+                                .is_some_and(|t| crate::periphery::periphery(t).is_some())
+                            && a.attr("U").is_some_and(|u| !managed.contains(u))
+                    })
+                });
+            if (on_page || topmost)
+                && matches!(t.support, Some(Support::Managed | Support::AdoptOnly))
+            {
                 t.adoptable.push(Adoptable {
                     uuid: o.uuid.clone(),
                     title: o.title.clone(),
@@ -224,6 +238,25 @@ impl Coverage {
                 todo.len()
             ));
             for a in todo {
+                s.push_str(&format!(
+                    "  {} {:?}{}\n",
+                    a.uuid,
+                    a.title.as_deref().unwrap_or(""),
+                    a.extern_slug
+                        .as_deref()
+                        .map(|x| format!(" (extern `{x}`)"))
+                        .unwrap_or_default()
+                ));
+            }
+        }
+        let devices: Vec<&Adoptable> = self.periphery.iter().flat_map(|r| &r.adoptable).collect();
+        if !devices.is_empty() {
+            s.push_str(&format!(
+                "virtual and Modbus devices not managed yet ({}) — `lxir adopt <cfg> \
+                 --uuid <uuid> --as <slug> …` takes the I/O below along:\n",
+                devices.len()
+            ));
+            for a in devices {
                 s.push_str(&format!(
                     "  {} {:?}{}\n",
                     a.uuid,
