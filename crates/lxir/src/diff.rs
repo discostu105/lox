@@ -22,10 +22,43 @@ use std::collections::{BTreeMap, BTreeSet};
 /// same, and a diff blind to it would call an edited rule "semantically
 /// empty" — the exact hole D18 closed for `Formula=`.
 fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
-    attr_params(block_type)
+    diff_attrs_v(block_type, FINGERPRINT_VERSION)
+}
+
+/// The attribute set of fingerprint `version`: from v8 on, the settings
+/// of virtual and Modbus devices (D64) and of physical inputs and
+/// outputs (D65; `Unit` is `<Display Unit=…>`, see [`setting_value`]).
+fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
+    let params: &'static [&'static str] =
+        if version < 8 && crate::periphery::periphery(block_type).is_some() {
+            &[]
+        } else {
+            attr_params(block_type)
+        };
+    let settings = if version >= 8 {
+        crate::settings::names(block_type)
+    } else {
+        Vec::new()
+    };
+    params
         .iter()
         .copied()
+        .chain(settings)
         .chain((block_type == "AutopilotRule").then_some("APC"))
+}
+
+const FINGERPRINT_VERSION: u8 = 8;
+
+/// One compared attribute of an object: its own, or `Unit` on its
+/// `<Display>` for a physical input or output (D65).
+fn setting_value(doc: &LoxoneDoc, o: &ObjectSummary, name: &str) -> Option<String> {
+    let el = doc.element_at(&o.path)?;
+    let el = if name == "Unit" && crate::settings::setting(&o.block_type, name).is_some() {
+        el.child_elements().find(|e| e.name == "Display")?
+    } else {
+        el
+    };
+    el.attr_decoded(name).map(|v| v.into_owned())
 }
 
 /// The comparison/fingerprint form of one such attribute value. `APC=`
@@ -475,11 +508,7 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                     });
                 }
                 for name in diff_attrs(&ob.block_type) {
-                    let attr = |doc: &LoxoneDoc, o: &ObjectSummary| {
-                        doc.element_at(&o.path)
-                            .and_then(|el| el.attr_decoded(name).map(|v| v.into_owned()))
-                    };
-                    let (va, vb) = (attr(a, oa), attr(b, ob));
+                    let (va, vb) = (setting_value(a, oa, name), setting_value(b, ob, name));
                     if canonical_attr(name, &va) != canonical_attr(name, &vb) {
                         out.param_changes.push(ParamChange {
                             object_uuid: uuid.clone(),
@@ -526,6 +555,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// answer "did another writer change something?" from one parse, no
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, FINGERPRINT_VERSION)
+}
+
+/// The fingerprint as lxir wrote it before the settings of virtual and
+/// Modbus devices (D64) and of physical inputs and outputs (D65) joined
+/// the projection. `lxir drift` accepts it so an upgrade alone does not
+/// read as drift; the next compile records the current form.
+pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 7)
 }
 
@@ -590,7 +627,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         4 => b"lxir-fingerprint-v4".to_vec(),
         5 => b"lxir-fingerprint-v5".to_vec(),
         6 => b"lxir-fingerprint-v6".to_vec(),
-        _ => b"lxir-fingerprint-v7".to_vec(),
+        7 => b"lxir-fingerprint-v7".to_vec(),
+        _ => b"lxir-fingerprint-v8".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -615,13 +653,11 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         // (`diff_attrs`/`canonical_attr`): a projection extension only
         // moves the fingerprint of documents that carry the new
         // attribute — rule-free configs hash as before.
-        for name in diff_attrs(&o.block_type) {
+        for name in diff_attrs_v(&o.block_type, version) {
             if version < 3 && file_params(&o.block_type).contains(&name) {
                 continue;
             }
-            let value = doc
-                .element_at(&o.path)
-                .and_then(|el| el.attr_decoded(name).map(|v| v.into_owned()));
+            let value = setting_value(doc, o, name);
             if let Some(v) = canonical_attr(name, &value) {
                 field(&mut buf, b'a', name);
                 field(&mut buf, b'v', &v);

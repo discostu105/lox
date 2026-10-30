@@ -460,6 +460,34 @@ parameters belong in its argument list — assigning a managed port is a
 validation error pointing there. Assigning a port reference
 (`x.Port = y.Q`) is a parse error suggesting `<-`.
 
+### `=` on a setting — the settings of a physical input or output (D65)
+
+```text
+extern garten = LoxAIRAsensor(uuid: "30000010-0000-0100-ffff504f94112233")
+
+garten.Desc = "Bodenfühler im Beet"
+garten.Unit = "<v.1> °C"
+garten.MinTime = 600
+```
+
+On an extern of an extension's, Tree, Air or 1-Wire input or output
+(LoxAIRsensor, LoxAIRAsensor, LoxAIRactor, LoxAIRAactor, TreeSensor,
+TreeAsensor, TreeActor, TreeAactor, Actor, DigitalIn, VoltageIn,
+Lox1wireAsensor), a setting name in place of a port claims that
+setting: `Desc`, `Unit` (the display unit), `SourceValLow`,
+`DestValLow`, `SourceValHigh`, `DestValHigh`, `MinVal`, `MaxVal`,
+`MinChange`, `MinTime`, `ResetTime`, `AverageTime`, `MaxTime`. As with a
+port, the original is kept in the lock and restored when the statement
+leaves the source.
+
+- `Desc`, the low ends of the correction, `MinVal`, `ResetTime` and
+  `AverageTime` may be added to an object that has none (a save leaves
+  them out at their default). The others are only rewritten: claiming
+  one the object does not carry is an error.
+- `Desc` is the name the app shows; setting it renames the control in
+  the app.
+- On any other type a setting name is an error.
+
 ### `.title` / `.room` / `.category` — assign an extern object (D39)
 
 ```text

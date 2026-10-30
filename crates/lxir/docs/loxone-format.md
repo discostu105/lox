@@ -755,6 +755,11 @@ to the program's `Date=`; and two pushes to the same Miniserver
   (`LXIR_CATALOGUE_CORPUS=<dir> cargo test -p lxir --test catalogue`).
   The corpus holds catalogues Loxone Config wrote; a catalogue from an
   older push is stale against its program and no evidence.
+- **A new display unit** (`<Display Unit=>`) is the entry's
+  `details.format` and its statistic outputs' `format`; the push
+  rewrites them (2026-10-31: the Miniserver served `%.1f °C` after a
+  unit change from `<v.1>°`). A unit with no printf form stays for a
+  save.
 - **The app reloads on `lastModified`.** A push that renamed a virtual
   input and set `lastModified` to the push time (2026-10-30): the
   Miniserver served the new name, and `LoxAPPversion3` answered the new

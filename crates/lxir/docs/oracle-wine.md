@@ -615,6 +615,21 @@ analog sensor, a digital sensor and an actuator.
   against the saved file was byte-identical: what the save added is
   carried.
 
+## Settings of physical inputs and outputs (session 27, D65) — passed
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28), on top of session 26's devices. On an Air temperature
+sensor: an added `Desc`, a rewritten `Unit` on its `<Display>` and
+`MinTime`, an added `DestValLow` and `AverageTime`; on an Air digital
+input an added `Desc`.
+
+- **Pass:** the semantic diff was empty. The save kept every attribute
+  where lxir wrote it (`Desc` right after `Type`, `DestValLow` before
+  `SourceValHigh`, `AverageTime` after `MinTime`). It set `WF` bit 0x10
+  on the analog sensor (16384 → 16400; the digital input had it
+  already) — GUI bookkeeping, carried. A recompile against the saved
+  file was byte-identical.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

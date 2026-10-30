@@ -173,6 +173,48 @@ pub fn update(
                 _ => left.push(change(what)),
             }
         }
+        // A display unit (D65) is the value format of the entry and of its
+        // statistic outputs (`%` doubled in the entry only).
+        let unit = |el: &Element| {
+            el.child_elements()
+                .find(|c| c.name == "Display")
+                .and_then(|d| d.attr_decoded("Unit"))
+                .map(|u| u.into_owned())
+        };
+        let (unit_was, unit_now) = (was.shown(&uuid).and_then(unit), shown.and_then(unit));
+        if unit_was != unit_now {
+            let what = format!(
+                "unit \"{}\" → \"{}\"",
+                unit_was.as_deref().unwrap_or(""),
+                unit_now.as_deref().unwrap_or("")
+            );
+            let formats = unit_was
+                .as_deref()
+                .and_then(value_format)
+                .zip(unit_now.as_deref().and_then(value_format));
+            let spans = formats.as_ref().map_or_else(Vec::new, |(from, to)| {
+                format_values(body, entry.value.clone())
+                    .into_iter()
+                    .filter_map(|r| {
+                        let v: String = serde_json::from_str(&body[r.clone()]).ok()?;
+                        let to = if v == from.0 {
+                            &to.0
+                        } else if v == from.1 {
+                            &to.1
+                        } else {
+                            return None;
+                        };
+                        Some((r, json_str(to)))
+                    })
+                    .collect()
+            });
+            if spans.is_empty() {
+                left.push(change(what));
+            } else {
+                edits.extend(spans);
+                applied.push(change(what));
+            }
+        }
         if new.favorite != old.favorite
             && let Some(m) = field("isFavorite")
         {
@@ -764,6 +806,33 @@ fn value_end(s: &str, i: usize) -> Result<usize, String> {
     }
 }
 
+/// The string values of the `"format"` members anywhere in `range`.
+fn format_values(s: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    const KEY: &str = "\"format\"";
+    let mut out = Vec::new();
+    let mut from = range.start;
+    while let Some(at) = s[from..range.end].find(KEY).map(|i| from + i) {
+        from = at + KEY.len();
+        // A key, not the tail of an escaped string.
+        if s[..at].ends_with('\\') {
+            continue;
+        }
+        let colon = skip_ws(s, from);
+        if s.as_bytes().get(colon) != Some(&b':') {
+            continue;
+        }
+        let start = skip_ws(s, colon + 1);
+        if s.as_bytes().get(start) == Some(&b'"')
+            && let Ok(end) = value_end(s, start)
+            && end <= range.end
+        {
+            out.push(start..end);
+            from = end;
+        }
+    }
+    out
+}
+
 fn skip_ws(s: &str, mut i: usize) -> usize {
     let b = s.as_bytes();
     while i < b.len() && b[i].is_ascii_whitespace() {
@@ -1042,6 +1111,40 @@ mod tests {
         assert!(u.applied.is_empty());
         assert_eq!(u.text, cat);
         assert!(whats(&u).1[0].ends_with("which the catalogue does not list"));
+    }
+
+    #[test]
+    fn a_new_unit_rewrites_the_formats() {
+        let sensor = |unit: &str| {
+            format!(
+                r#"<C Type="LoxAIRAsensor" U="{NEW}" Title="Feuchte" Analog="true" StatsType="11" StatsAutoDel="1">
+					<Co K="AQ" U="0f000000-0000-0041-00ff000000000000"/>
+					<Co K="Q" U="0f000000-0000-0042-01ff000000000000"/>
+					<IoData Visu="true" Cr="{CAT}" Pr="{ROOM}" St="4"/>
+					<Display Type="2" Unit="{unit}" StateOnly="true"/>
+				</C>"#
+            )
+        };
+        let (was, now) = (
+            doc("Licht", ROOM, &sensor("&lt;v&gt;%")),
+            doc("Licht", ROOM, &sensor("&lt;v.1&gt; % rF")),
+        );
+        let el = |d: &LoxoneDoc| {
+            let o = d.objects().into_iter().find(|o| o.uuid == NEW).unwrap();
+            entry(d.element_at(&o.path).unwrap()).unwrap()
+        };
+        let cat = catalogue(&format!(",\"U:{NEW}\":{}", el(&was)));
+        let u = update(&cat, &was, &now, NOW).unwrap();
+        assert_eq!(whats(&u).0, ["unit \"<v>%\" → \"<v.1> % rF\""]);
+        let want =
+            catalogue(&format!(",\"U:{NEW}\":{}", el(&now))).replace("2026-10-29 17:15:28", NOW);
+        assert_eq!(u.text, want);
+
+        // A unit the app has no format for stays for a save.
+        let odd = doc("Licht", ROOM, &sensor("&lt;v.1&gt; &lt;b&gt;"));
+        let u = update(&cat, &was, &odd, NOW).unwrap();
+        assert!(u.applied.is_empty());
+        assert_eq!(whats(&u).1, ["unit \"<v>%\" → \"<v.1> <b>\""]);
     }
 
     #[test]

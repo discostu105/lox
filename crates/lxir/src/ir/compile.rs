@@ -1630,6 +1630,34 @@ pub fn compile(
     // --- Port assignments (always extern ports — validate rejects managed
     //     targets).
     for s in module.sets() {
+        // A setting of a physical input or output (D65): an attribute of
+        // the extern object, with the port assignments' lifecycle.
+        if let Some(e) = module.externs().find(|e| e.slug == s.target.slug)
+            && let Some(addable) = crate::settings::setting(&e.block_type, &s.target.port)
+            && let Some(owner) = extern_uuid.get(&s.target.slug)
+            && find_c(&doc.xml.root, owner).is_some_and(|c| {
+                !c.child_elements()
+                    .any(|co| co.name == "Co" && co.attr("K") == Some(s.target.port.as_str()))
+            })
+        {
+            let value = module
+                .resolve_value_for(&s.value, &e.block_type, &s.target.slug, &s.target.port)?
+                .into_owned();
+            let original = read_setting(&doc, owner, &s.target.port);
+            if original.is_none() && !addable {
+                return Err(Error::Compile(format!(
+                    "`{}.{}`: the object ({owner}) carries no `{}` — lxir rewrites \
+                     this setting, it never adds one (it belongs to another kind \
+                     of input or output)",
+                    s.target.slug, s.target.port, s.target.port
+                )));
+            }
+            write_setting(&mut doc, owner, &s.target.port, Some(&value));
+            lock.set_originals
+                .entry(crate::settings::key(owner, &s.target.port))
+                .or_insert(original);
+            continue;
+        }
         let target = resolve_port(
             &doc,
             &managed,
@@ -1637,6 +1665,24 @@ pub fn compile(
             &s.target.slug,
             &s.target.port,
             PortDir::Param,
+        )
+        .map_err(
+            |err| match module.externs().find(|e| e.slug == s.target.slug) {
+                Some(e)
+                    if crate::settings::is_setting(&s.target.port)
+                        && crate::settings::setting(&e.block_type, &s.target.port).is_none() =>
+                {
+                    Error::Compile(format!(
+                        "`{}.{}`: {} is not a physical input or output whose settings \
+                     the source can own ({})",
+                        s.target.slug,
+                        s.target.port,
+                        e.block_type,
+                        crate::settings::SETTING_TYPES.join(", ")
+                    ))
+                }
+                _ => err,
+            },
         )?;
         let extern_type = module
             .externs()
@@ -2664,6 +2710,9 @@ fn remove_wire(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> bool {
 
 /// The current (decoded) `Def=` of an extern port, if any.
 fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
+    if let Some((owner, name)) = crate::settings::split_key(port_uuid) {
+        return read_setting(doc, owner, name);
+    }
     find_co_mut(&mut doc.xml.root, port_uuid)
         .and_then(|co| co.attr_decoded("Def").map(|v| v.into_owned()))
 }
@@ -2711,12 +2760,61 @@ fn apply_def(
 
 /// Restore an extern port's `Def=` to its pre-`set` state.
 fn restore_def(doc: &mut LoxoneDoc, port_uuid: &str, original: Option<&str>) {
+    if let Some((owner, name)) = crate::settings::split_key(port_uuid) {
+        write_setting(doc, owner, name, original);
+        return;
+    }
     if let Some(co) = find_co_mut(&mut doc.xml.root, port_uuid) {
         match original {
             Some(v) => set_attr_ordered(co, "Def", v, &["U"]),
             None => {
                 co.remove_attr("Def");
             }
+        }
+    }
+}
+
+/// A setting of a physical input or output (D65): an attribute of the
+/// object, or `Unit=` of its `<Display>`.
+fn read_setting(doc: &LoxoneDoc, owner: &str, name: &str) -> Option<String> {
+    let c = find_c(&doc.xml.root, owner)?;
+    let el = if name == "Unit" {
+        c.child_elements().find(|e| e.name == "Display")?
+    } else {
+        c
+    };
+    el.attr_decoded(name).map(|v| v.into_owned())
+}
+
+/// Write (or, with `None`, remove) a setting; an added attribute goes
+/// where Loxone Config writes it.
+fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&str>) {
+    let Some(c) = find_c_mut(&mut doc.xml.root, owner) else {
+        return;
+    };
+    let el = if name == "Unit" {
+        match c.child_elements_mut().find(|e| e.name == "Display") {
+            Some(d) => d,
+            None => return,
+        }
+    } else {
+        c
+    };
+    match value {
+        None => {
+            el.remove_attr(name);
+        }
+        Some(v) if el.attr(name).is_some() => el.set_attr(name, v),
+        Some(v) => {
+            let names: Vec<&str> = el.attrs.iter().map(|a| a.name.as_str()).collect();
+            let pos = crate::settings::insert_position(&names, name);
+            el.attrs.insert(
+                pos,
+                crate::xml::Attr {
+                    name: name.to_string(),
+                    value: crate::xml::escape(v).into_owned(),
+                },
+            );
         }
     }
 }
