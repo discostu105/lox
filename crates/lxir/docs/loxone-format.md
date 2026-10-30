@@ -766,9 +766,11 @@ its own evidence; these are leads, marked by how far they hold.
   with a point (`I1*0.5`). **Live-verified 2026-10-30** (firmware
   17.2.8.28, four pushed Formula blocks, `R` read via
   `/dev/sps/io/<uuid>/all`): `0.5*4` and `0,5*4` both give 2, `2.5`
-  and `2,5` both 2.5 — the Miniserver reads either separator. Whether
-  the Loxone Config GUI rewrites or flags a point is not checked
-  (oracle). Integer constants are unaffected.
+  and `2,5` both 2.5 — the Miniserver reads either separator. **Oracle
+  2026-10-30** (Loxone Config 17.2.8.28): a compiled `Formula="I1*0.5+2.25"`
+  opened without a message and came back from the save verbatim, so the
+  GUI neither rewrites nor rejects the point. The compiler keeps it.
+  Integer constants are unaffected.
 - **`AnalogMultiplexer2` selects 1-based.** Live: `Select=0` drove the
   output to 0, `1` passed `Input1`, `2` `Input2` — like the four-way
   `AnalogMultiplexer`, and unlike lox-sim's model (`0`→`Input1`,

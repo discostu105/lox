@@ -95,11 +95,11 @@ types) contradict each other. Results and methodology:
       circuit kind, minted controllers seeded with the stock moods,
       oracle- and live-verified. Lifted by decompile/adopt 2026-10-30
       (#170). Open: the `HCL`/sequence settings (`<SeqConf>`).
-- [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
+- [x] Decimal constants in folded `Formula`s (D35): the compiler writes
       `I1*0.5`, every corpus formula with a fraction writes `0,5`. Live
-      2026-10-30: the Miniserver reads both (`0.5*4` = `0,5*4` = 2).
-      Open: whether the Loxone Config GUI rewrites or flags the point
-      (oracle).
+      2026-10-30: the Miniserver reads both (`0.5*4` = `0,5*4` = 2), and
+      the oracle the same day: the GUI saves `I1*0.5+2.25` verbatim. The
+      point stays.
 - [ ] Lint: more than eight Program blocks (`Code1`–`Code16`), which
       lox-cli reports the Miniserver ignores beyond the eighth.
 

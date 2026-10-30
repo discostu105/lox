@@ -554,6 +554,16 @@ config (Loxone Config 17.2.8.28).
   - The children came back byte-identical.
   - The semantic diff was empty.
 
+## Decimal points in a Formula (session 23, D35) — passed
+
+Ran 2026-10-30 against a copy of the house config: one `Memory` fed by
+`montag.Q * 0.5 + 2.25`, folded into `Formula="I1*0.5+2.25"`. Every
+corpus formula writes a decimal comma. Loxone Config opened the file
+without a message, and the save kept the formula byte for byte; the
+semantic diff was empty. Only `Py2` (block height) and `WF` changed,
+both known. With the live check of the same day (the Miniserver
+evaluates either separator) the point is settled.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):
