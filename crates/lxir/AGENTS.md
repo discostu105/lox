@@ -33,8 +33,7 @@ cargo run --bin lxir -- help     # the CLI (also: lox ir help)
   regenerate `examples/out/` via `cargo run --example compile` and the
   project artifacts via `lxir compile --time 1767225600` inside
   `examples/project/` ([examples/README.md](examples/README.md)).
-- Dual-licensed GPL-3.0-or-later / commercial (see [LICENSE](LICENSE)) —
-  same scheme as lox. Published on crates.io as `lxir`; lox itself uses
+- Apache-2.0 (see [LICENSE](LICENSE)), same as lox. Published on crates.io as `lxir`; lox itself uses
   it by path.
 - This crate lives in the lox workspace (`crates/lxir`). It stays
   network-free: transport, LoxCC and credentials belong to lox (`src/`).

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/discostu105/lox/actions/workflows/ci.yml/badge.svg)](https://github.com/discostu105/lox/actions/workflows/ci.yml)
 [![Release](https://github.com/discostu105/lox/actions/workflows/release.yml/badge.svg)](https://github.com/discostu105/lox/actions/workflows/release.yml)
-[![License: GPL-3.0 or commercial](https://img.shields.io/badge/License-GPL--3.0%20%7C%20commercial-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.91%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
@@ -459,4 +459,4 @@ This project is an experiment. Expect rough edges. Not every Miniserver configur
 
 ## License
 
-Dual-licensed: [GPL-3.0](LICENSE-GPL) or a [commercial license](LICENSE-COMMERCIAL). See [LICENSE](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).

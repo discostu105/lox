@@ -8,8 +8,7 @@ repository = "https://github.com/discostu105/lox"
 readme = "README.md"
 keywords = ["loxone", "home-automation", "smart-home", "compiler", "config"]
 categories = ["command-line-utilities", "parser-implementations"]
-# Dual-licensed: recipient chooses GPL-3.0 or a commercial license (see LICENSE).
-license = "GPL-3.0-or-later OR LicenseRef-Commercial"
+license = "Apache-2.0"
 # Dev-only trees stay out of the package (the corpus is gitignored anyway).
 exclude = ["/corpus", "/docs/data", "/tools", "/scripts", "/.github", "/AGENTS.md"]
 

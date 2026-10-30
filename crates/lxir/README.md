@@ -408,8 +408,5 @@ install a binary named `lox`.
 
 ## License
 
-Dual-licensed, the same scheme as `lox`: use it under the
-[GPL-3.0](LICENSE-GPL), or obtain a
-[commercial license](LICENSE-COMMERCIAL) for proprietary redistribution —
-see [LICENSE](LICENSE). Early v0, published on
+Licensed under the [Apache License 2.0](LICENSE), the same as `lox`. Early v0, published on
 [crates.io](https://crates.io/crates/lxir) as `lxir`.
