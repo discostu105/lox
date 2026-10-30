@@ -26,6 +26,15 @@ into CHANGELOG.md under the new version and deletes the fragments. It
 prints the tag and, in Actions, writes `tag=…` to $GITHUB_OUTPUT. With
 nothing to release it leaves every file alone.
 
+A `<topic>.summary.md` fragment is optional: its first line is the
+release's tagline (the version heading and the GitHub release title,
+`vX.Y.Z — tagline`), the rest the intro above the sections.
+
+`--notes vX.Y.Z` prints the GitHub release notes of a released version
+from CHANGELOG.md (release.yml runs it): the intro, then the sections
+under the release headings (`### Added` → `## ✨ New`, …), lines
+unwrapped. In Actions it writes the title to $GITHUB_OUTPUT as `name=…`.
+
 `--dry-run` prints the decision and the notes and changes nothing.
 `--check` only checks the fragments' names and that CHANGELOG.md has
 nothing under Unreleased (CI runs it on every PR). Needs
@@ -49,9 +58,20 @@ BOT_SUBJECTS = re.compile(r"^(Release v\d|brew: update formula)")
 # Keep a Changelog's sections, in its order.
 SECTIONS = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
 FRAGMENT_DIR = "changelog.d"
+# The optional tagline and intro of a release, not a changelog section.
+SUMMARY = "Summary"
 FRAGMENT_NAME = re.compile(
-    r"^[\w.-]+\.(" + "|".join(s.lower() for s in SECTIONS) + r")\.md$"
+    r"^[\w.-]+\.(" + "|".join(s.lower() for s in SECTIONS + [SUMMARY]) + r")\.md$"
 )
+# The headings the GitHub release uses for the changelog's sections.
+RELEASE_HEADINGS = {
+    "Added": "✨ New",
+    "Changed": "🚀 Improvements",
+    "Deprecated": "⚠️ Deprecated",
+    "Removed": "🗑️ Removed",
+    "Fixed": "🐛 Bug Fixes",
+    "Security": "🔒 Security",
+}
 
 
 def git(*args):
@@ -148,7 +168,7 @@ def fragments():
         path = f"{FRAGMENT_DIR}/{name}"
         m = FRAGMENT_NAME.match(name)
         if not m:
-            sections = ", ".join(s.lower() for s in SECTIONS)
+            sections = ", ".join(s.lower() for s in SECTIONS + [SUMMARY])
             errors.append(f"{path}: name it <topic>.<section>.md, the section one of {sections}")
             continue
         with open(path, encoding="utf-8") as f:
@@ -156,7 +176,7 @@ def fragments():
         if not text:
             errors.append(f"{path}: empty")
             continue
-        if not text.startswith("- "):
+        if m.group(1) != SUMMARY.lower() and not text.startswith("- "):
             text = "- " + text
         entries.append((path, m.group(1).capitalize(), text))
     if errors:
@@ -165,9 +185,22 @@ def fragments():
     return entries
 
 
+def summary(entries):
+    """(tagline, intro) from the summary fragments: their first lines joined
+    into one tagline, the rest into the intro."""
+    taglines, intros = [], []
+    for _, section, text in entries:
+        if section == SUMMARY:
+            first, _, rest = text.partition("\n")
+            taglines.append(first.strip().rstrip("."))
+            if rest.strip():
+                intros.append(rest.strip())
+    return "; ".join(taglines), "\n\n".join(intros)
+
+
 def release_notes(body, entries):
     """The Unreleased section's own text merged with the fragments, by
-    section."""
+    section; the summary's intro goes first."""
     preamble, sections, current = [], {}, None
     for line in body.splitlines():
         m = re.match(r"^### (.+?)\s*$", line)
@@ -182,8 +215,9 @@ def release_notes(body, entries):
         while lines and not lines[-1].strip():
             lines.pop()
     for _, section, text in entries:
-        sections.setdefault(section, []).append(text)
-    parts = ["\n".join(preamble).strip()]
+        if section != SUMMARY:
+            sections.setdefault(section, []).append(text)
+    parts = [summary(entries)[1], "\n".join(preamble).strip()]
     for section in SECTIONS + [s for s in sections if s not in SECTIONS]:
         text = "\n".join(sections.get(section, [])).strip()
         if text:
@@ -217,7 +251,7 @@ def unreleased(changelog):
     return m.end(), m.end() + rest.start() if rest else len(changelog)
 
 
-def release_changelog(changelog, version, units, notes):
+def release_changelog(changelog, version, units, notes, tagline):
     start, end = unreleased(changelog)
     body = notes
     if not body:
@@ -228,7 +262,58 @@ def release_changelog(changelog, version, units, notes):
         ]
         body = "### Changed\n" + "\n".join(lines)
     date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    return f"{changelog[:start]}\n## [{version}] — {date}\n\n{body}\n\n{changelog[end:]}"
+    heading = f"## [{version}] — {date}" + (f" — {tagline}" if tagline else "")
+    return f"{changelog[:start]}\n{heading}\n\n{body}\n\n{changelog[end:]}"
+
+
+def unwrap(text):
+    """Join the hard-wrapped continuation lines of the changelog: GitHub
+    keeps every line break of a release body. Code blocks, sub-bullets and
+    blank lines stay as they are."""
+    out, in_code = [], False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            out.append(line)
+        elif in_code or not stripped:
+            out.append(line)
+        elif (
+            line[0] == " "
+            and out
+            and out[-1].strip()
+            and not out[-1].strip().startswith("```")
+            and not re.match(r"^\s*([-*+]|\d+\.)\s", line)
+        ):
+            out[-1] = out[-1].rstrip() + " " + stripped
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def github_notes(changelog, tag):
+    """(title, body) of the GitHub release of a version in CHANGELOG.md."""
+    version = re.escape(tag.lstrip("v"))
+    m = re.search(
+        rf"^## \[{version}\]([^\n]*)\n(.*?)(?=^## \[|^\[[^\]]+\]: |\Z)", changelog, re.M | re.S
+    )
+    if not m:
+        return tag, ""
+    # "— 2026-10-30" or "— 2026-10-30 — tagline"
+    tagline = m.group(1).split(" — ", 2)[2].strip() if m.group(1).count(" — ") >= 2 else ""
+    title = f"{tag} — {tagline}" if tagline else tag
+    lines = []
+    for line in m.group(2).strip().splitlines():
+        h = re.match(r"^### (.+?)\s*$", line)
+        if h:
+            line = f"## {RELEASE_HEADINGS.get(h.group(1), h.group(1))}"
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append(line)
+            lines.append("")
+        else:
+            lines.append(line)
+    return title, unwrap("\n".join(lines)).strip()
 
 
 def package_version(cargo_toml):
@@ -261,6 +346,18 @@ def main():
     if "--check" in sys.argv[1:]:
         check()
         return
+    if "--notes" in sys.argv[1:]:
+        args = sys.argv[sys.argv.index("--notes") + 1:]
+        if not args:
+            sys.exit("--notes needs a tag (vX.Y.Z)")
+        with open("CHANGELOG.md", encoding="utf-8") as f:
+            title, body = github_notes(f.read(), args[0])
+        print(body)
+        print(f"Title: {title}", file=sys.stderr)
+        if os.environ.get("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                f.write(f"name={title}\n")
+        return
     try:
         tag = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*").strip()
     except subprocess.CalledProcessError:
@@ -277,6 +374,7 @@ def main():
     start, end = unreleased(changelog)
     entries = fragments()
     notes = release_notes(changelog[start:end], entries)
+    tagline = summary(entries)[0]
     labeled = any(label.startswith("release:") for u in units for label in u["labels"])
     if not labeled and re.search(r"^### Added$", notes, re.M):
         level = max(level, "minor", key=LEVELS.index)
@@ -286,11 +384,16 @@ def main():
     version = fmt(current if current > last else bump(last, level))
     print(f"Release v{version} ({level if current <= last else 'version from Cargo.toml'}, last {tag}).")
     if dry_run:
-        print(f"\n{notes or '(no notes: the PR titles become the notes)'}")
+        if not notes:
+            print("\n(no notes: the PR titles become the notes)")
+            return
+        preview = release_changelog(changelog, version, units, notes, tagline)
+        title, body = github_notes(preview, f"v{version}")
+        print(f"\nGitHub release: {title}\n\n{body}")
         return
     set_versions(version)
     with open("CHANGELOG.md", "w", encoding="utf-8") as f:
-        f.write(release_changelog(changelog, version, units, notes))
+        f.write(release_changelog(changelog, version, units, notes, tagline))
     for path, _, _ in entries:
         os.remove(path)
     if os.environ.get("GITHUB_OUTPUT"):

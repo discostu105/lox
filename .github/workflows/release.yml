@@ -147,21 +147,17 @@ jobs:
           pattern: lox-*
           merge-multiple: true
 
-      # The CHANGELOG section of this version, above GitHub's list of PRs
+      # The CHANGELOG section of this version in the release style (title
+      # "vX.Y.Z — tagline", emoji headings), above GitHub's list of PRs
       - name: Release notes
-        run: |
-          python3 - "$TAG" > release-notes.md <<'PYEOF'
-          import re, sys
-          version = re.escape(sys.argv[1].lstrip("v"))
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(rf"^## \[{version}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]: |\Z)", text, re.M | re.S)
-          print(m.group(1).strip() if m else "")
-          PYEOF
+        id: notes
+        run: python3 .github/scripts/prepare_release.py --notes "$TAG" > release-notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
+          name: ${{ steps.notes.outputs.name }}
           files: artifacts/*
           body_path: release-notes.md
           generate_release_notes: true
