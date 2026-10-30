@@ -493,9 +493,11 @@ Each step stops the push when it fails:
    cannot read stop `--force` (a staging run only warns).
 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
    file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app catalogue
-   (`LoxAPP3.json`, what the app shows) is Loxone Config's from before: controls of the app the push renames, moves
-   to another room or category, or deletes are named (`app_catalogue_stale` in `-o json`). A save from Loxone
-   Config rewrites the catalogue. `permissions.bin`, which lists who may use each object, is regenerated for the
+   (`LoxAPP3.json`, what the app shows; the Miniserver never rebuilds it) gets what the push changes about the
+   app's controls: new names, rooms, categories and favourites, deleted and hidden controls, and entries for new push
+   buttons and digital virtual inputs that have a room and a category (`app_catalogue_updated` in `-o json`). Its
+   `lastModified` becomes the push time, so the app reloads. What it cannot carry over (other block types, a
+   room the catalogue does not list, an icon) is named (`app_catalogue_stale`) until a save from Loxone Config. `permissions.bin`, which lists who may use each object, is regenerated for the
    compiled config when lxir reproduces the live file byte for byte (`permissions` in the JSON report:
    `unchanged`, `regenerated`). Otherwise the live file stays (`kept`), and when the compiled config assigns users
    and groups differently the push warns that it is stale (`permissions_stale: true`).
@@ -509,8 +511,8 @@ Each step stops the push when it fails:
    `--discard-custom-changes` to delete them.
 7. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
    fails and the project is left as it was. When app controls changed, the push also reads the catalogue the
-   Miniserver serves and says whether it is still the uploaded one (same `lastModified`: the app shows the old
-   names) or rebuilt (`app_catalogue_rebuilt`).
+   Miniserver serves and checks that it is the uploaded one (same `lastModified`; `app_catalogue_rebuilt: true`
+   when not).
 8. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
 
 A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:

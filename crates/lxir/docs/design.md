@@ -1870,3 +1870,30 @@ Anything unverified is an error, not a heuristic:
     that some `rule <extern>` also declares, is refused.
   Validated: oracle session 24 (byte-identical but for `WF=`, which the
   save drops from every rule). Not yet run live on a Miniserver.
+- **D61 — The app catalogue follows the compile** (2026-10-30). The
+  Miniserver serves the `LoxAPP3.json` of the upload as it is, so a push
+  that only replaced `sps0.LoxCC` left the app on the last save from
+  Loxone Config (#155). `lxir::catalogue::update` carries a compile into
+  the catalogue of the config it compiled against.
+  - **Text edits, not a rewrite.** Only the values that change are
+    replaced; the rest stays as Loxone Config wrote it (its key order,
+    its number formatting). `lastModified` becomes the push time, which
+    makes the app reload.
+  - **What the compile changes, nothing else.** An entry changes where
+    the live and compiled objects differ in name, room, category or
+    favourite flag; one whose object the compile deletes or hides goes,
+    unless another entry names it (a central block's list). Staleness
+    from before (an older push) stays: fixing it would mean trusting the
+    rules for every entry.
+  - **New entries only for evidenced types** (push buttons, digital
+    virtual inputs; *LoxAPP3.json* in loxone-format.md), and only where
+    Loxone Config lists them (a room and a category the catalogue knows;
+    a virtual input a page uses). Like `permissions.bin`, the generator
+    proves itself on the live file first: a type with a listed entry it
+    does not reproduce gets no new ones.
+  - **The rest is named**: a room the catalogue does not list, an icon,
+    other block types; the push reports them for a save from Loxone
+    Config.
+  Validated: three Config saves (every entry of the three types back
+  byte for byte); a push to the house and back (the served catalogue
+  and `LoxAPPversion3` followed).

@@ -472,6 +472,14 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       has not been pushed yet).
 - [ ] Deleting rules from source (`removed`-style tombstone) — only with
       a use for it.
+- [x] The app catalogue follows the compile 2026-10-30 (D61, #155):
+      `lxir::catalogue` edits `LoxAPP3.json` for names, rooms,
+      categories, deletions and new push buttons/virtual inputs; the push
+      uploads it with a new `lastModified`. Validated on three Config saves
+      and live (rename there and back).
+- [ ] Catalogue entries for more block types (light controllers, meters,
+      `InfoOnlyAnalog`), and the notification question of #155 — each
+      from Config saves that list them.
 
 ## Tooling & ecosystem
 

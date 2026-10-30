@@ -18,7 +18,8 @@
 //!   users and access), with locale-rename noise classification.
 //! - [`access`] — users, groups, credentials and access rights, read as a
 //!   model; secrets only ever print as fingerprints. [`permissions`]
-//!   reads and generates the `permissions.bin` that goes with them.
+//!   reads and generates the `permissions.bin` that goes with them;
+//!   [`catalogue`] carries a compile into the app's `LoxAPP3.json`.
 //! - [`layout`] — page geometry: footprints, port rows, wires, and the
 //!   placement of blocks that have no position yet; [`render`] draws a
 //!   page as SVG with layout metrics.
@@ -38,6 +39,7 @@ extern crate self as lxir;
 
 pub mod access;
 pub mod autopilot;
+pub mod catalogue;
 pub mod cli;
 pub mod connectors;
 pub mod diff;
