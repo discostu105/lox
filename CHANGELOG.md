@@ -10,6 +10,16 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-30
+
+### Added
+- **`lxir adopt` and `lxir decompile`** now turn a config's existing lighting moods into source: a `moods` set and a claim per controller, so taking over a house no longer means typing every mood by hand (#170)
+  - Controllers with the same moods share one set, ready to move into a room template
+  - Adopted and compiled again, the config stays byte-identical; a controller with only the stock "Viel Licht" is left alone
+
+### Fixed
+- **`lxir compile`**: changing a controller's moods keeps the off mood "Aus" at its place when it sits between other moods, instead of moving it to the end
+
 ## [0.25.0] — 2026-10-30 — lighting moods from source
 
 The moods of every room are code now: declare a set of moods once, and give it to each Lichtsteuerung from a room template.

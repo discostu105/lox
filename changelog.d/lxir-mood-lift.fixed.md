@@ -1,1 +1,0 @@
-- **`lxir compile`**: changing a controller's moods keeps the off mood "Aus" at its place when it sits between other moods, instead of moving it to the end
