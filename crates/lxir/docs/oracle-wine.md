@@ -582,6 +582,23 @@ regel_probe "lxir Probe-Regel"`: a weekday sentinel event, a time event,
 - A recompile against the saved file created nothing (six rules), left
   the lock's `rules` entry as it was, and diffed empty against it.
 
+## House control types (session 25, D62/D63) — passed
+
+Ran 2026-10-30 against copies of the house config (Loxone Config
+17.2.8.28). One minted block each of Alarm, SmokeAlarm, Irrigation,
+HeatIRoomController2, EFM, MeterDig, MeterAbsUni, MeterAbsBi and
+MeterAbsSt on a probe page, wired to virtual inputs.
+
+- **Pass:** the semantic diff was empty. The save added what the GUI
+  keeps inside these blocks — zones, `Timer`, `statGrp`, the meters'
+  root, `IoData`, `SpStates` — and a recompile against the saved file
+  was byte-identical (the carried children converge).
+- With `.room`/`.category` on the nine blocks: empty diff again; the
+  save kept `Cr=`/`Pr=` as compiled.
+- A direction finding: the save keeps a wire drawn in the wrong
+  direction, so a save never proves a connector's direction; the
+  tables rest on corpus wires (connector-db.md).
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

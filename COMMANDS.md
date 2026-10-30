@@ -404,6 +404,7 @@ lox ir compile --base current.Loxone --module pages/ --lock haus.lock.json \
 lox ir diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
 lox ir diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
 lox ir drift current.Loxone            # did another writer change the config since the last compile?
+lox ir coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched (--json)
 lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
 lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
 lox ir decompile current.Loxone        # the IR view of every page (read-only)

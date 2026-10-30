@@ -265,6 +265,7 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 - Everything the source doesn't manage (hardware, rooms, visualization, other logic) passes through byte for
   byte. `lox ir diff` shows it.
 - `lox ir drift` tells you when Loxone Config or the app changed the config since.
+- `lox ir coverage` shows how much of the config the source owns.
 - `lox config push --force` deploys a project: drift check, compile against the live config, a check for user
   changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
   runs the compiled file.

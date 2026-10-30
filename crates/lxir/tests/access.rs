@@ -959,7 +959,8 @@ fn decompile_lifts_access_rights() {
         ),
         "{text}"
     );
-    assert!(text.contains("extern front_door = NfcCodeTouch(title: \"Front door\")"));
+    // The Code Touch is a managed block since the house-control batch.
+    assert!(text.contains("front_door = NfcCodeTouch("), "{text}");
 
     // Adopted, the declaration compiles back to the same rights.
     let (m, mut lock, _) = lxir::ir::adopt(&parse(&base)).unwrap();
