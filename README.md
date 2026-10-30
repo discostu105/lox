@@ -6,310 +6,101 @@
 [![Rust](https://img.shields.io/badge/Rust-1.91%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
-**Fast, scriptable command-line interface for Loxone Miniserver.**
-Single binary. No runtime. No cloud. Works in scripts, cron jobs, and AI agent pipelines.
+`lox` controls, monitors and manages a [Loxone](https://www.loxone.com) Miniserver from the terminal.
+It talks to the Miniserver directly over your local network: no cloud, no runtime, one ~4 MB binary for
+Windows, macOS and Linux.
 
----
-
-## Why this exists
-
-The Loxone app is great for everyday use — but it offers no API or scripting support for automation, CI/CD pipelines, or headless environments.
-
-`lox` gives you a proper CLI so you can:
-
-- **Script your home** — bash, Python, cron, whatever
-- **Connect AI agents** — Claude, GPT, or any LLM tool can control your home via shell commands
-- **Chain commands** — `lox if "Temperatur" gt 25 && lox blind "Südseite" pos 80`
-- **Integrate with anything** — exit codes, JSON output, stdin/stdout
+The Loxone app is made for tapping on a phone. `lox` covers what it can't: scripts, cron jobs, headless
+machines, AI agents, and treating the Miniserver config like source code.
 
 ```bash
-# Turn off all lights when leaving
-lox off "Licht Wohnzimmer Zentral" && lox blind "Südseite" full-up
-
-# AI agent can call these:
-lox ls --type LightControllerV2 -o json | jq '.[].name'
-lox light mood "Wohnzimmer" off
-lox status -o json | jq '.plc_running'
-
-# Disambiguate sensors with the same name using --room or bracket syntax
-lox get "Temperatur" --room "Schlafzimmer"
-lox get "Temperatur [OG Kinderzimmer Bastian]"
-
-# Quick energy overview
-lox energy
-
-# Conditionally close blinds
+lox on "Licht Wohnzimmer"                        # switch a light
+lox blind "Beschattung Süd" pos 70               # move a blind
+lox get "Temperatur [Schlafzimmer]"              # read a sensor
 lox if "Temperatur Außen" gt 28 && lox blind "Beschattung Süd" pos 70
+lox tui                                          # live terminal UI
 ```
 
----
+## What it can do
 
-## For AI Agents
+| | |
+|---|---|
+| **Control** | Lights, moods, dimmers, colors, blinds, gates, thermostats, alarms, door locks, intercoms, wallboxes, virtual inputs, scenes. Controls are found by name, no UUIDs. |
+| **Monitor** | Sensors, energy meters, statistics, device health (batteries, signal, offline devices), a real-time state stream, OpenTelemetry export. |
+| **Terminal UI** | `lox tui`: a full-screen live view of the house, with rooms, events, energy flow, system stats and the config wiring behind each control. |
+| **AI agents** | JSON output and exit codes on every command, `--dry-run`, a command schema, and an MCP server (`lox mcp serve`) for Claude, ChatGPT, Cursor and others. |
+| **Config versioning** | Download the Miniserver config into git on a schedule, with commit messages that list the logic that changed. Diff, inspect and restore any version. |
+| **Config as code** | Write logic in `.lxir` text files, review it in a pull request, compile it into the config and deploy it with a verified upload. |
+| **Access** | NFC tags and access codes for users, the door access log, and *why can't this user open the door?* |
 
-This CLI was designed for AI agent integration. Every command:
+## Contents
 
-- Exits `0` on success, non-zero on error
-- Has `-o json` flag for structured output
-- Uses fuzzy name matching — agents don't need UUIDs
-- Supports `--room` flag and `[Room]` bracket syntax to resolve ambiguous names
-- Returns readable errors with suggestions
-- `--dry-run` validates without executing — preview what would happen
-- `--trace-id` correlates agent actions across logs
-- `--non-interactive` fails instead of prompting (implied by `-o json`)
-- `lox schema` lets agents discover available commands programmatically
-- Errors return structured JSON envelopes with categorized error codes
-
-**Example: give an LLM a shell tool**
-```json
-{
-  "name": "lox",
-  "description": "Control Loxone smart home. Use -o json for structured output.",
-  "parameters": {
-    "command": { "type": "string", "description": "e.g. 'on Wohnzimmer', 'blind Südseite pos 50', 'energy'" }
-  }
-}
-```
-
-The agent calls `lox <command>` as a shell tool and reads stdout. That's it.
-
-An agent can discover your home (`lox ls -o json`), read sensor values, control devices, and check conditions — all without any custom integration layer.
-
-**MCP server (Claude Desktop, ChatGPT, Cursor, …):** clients that only speak the
-[Model Context Protocol](https://modelcontextprotocol.io) can launch `lox mcp serve` directly.
-Built on the official Rust MCP SDK, it speaks MCP 2026-07-28 and every older revision, and exposes
-schema-typed tools (rooms, controls, live state, switches, blinds, lights, climate, scenes, the config
-wiring behind a control — *why is this on?* — and door access: *why can't she open the door?*) over stdio.
-It can also learn NFC tags at a Code Touch and pair them with users, and set access codes.
-Doors, gates, the alarm, every change to users and any control you list under `confirm:` ask **you** to confirm in the MCP client before anything is sent.
-
-```bash
-lox mcp config                        # print a ready-to-paste client config
-claude mcp add loxone -- lox mcp serve   # Claude Code
-lox mcp tools                         # list the tools a client will see
-```
-
-See the [AI agent guide](docs/guides/ai-agents.md#mcp-server) for the tool list and safety model.
-
-**Agent-friendly workflow:**
-```bash
-lox schema -o json                    # discover available commands
-lox ls -o json                        # discover controls
-lox --dry-run on "Licht" -o json      # preview before executing
-lox --trace-id "run-42" on "Licht"    # execute with tracing
-lox health --problems -o json         # check device health
-```
+- [Install](#install) · [Setup](#setup)
+- [Controlling the home](#controlling-the-home) · [Terminal UI](#terminal-ui) · [AI agents and MCP](#ai-agents-and-mcp)
+- [Config versioning](#config-versioning-gitops) · [Config as code](#config-as-code-lxir)
+- [Configuration reference](#configuration-reference) · [Requirements](#requirements)
+- [Documentation](#documentation) · [Related projects](#related-projects) · [Status](#status) · [License](#license)
 
 ---
 
 ## Install
 
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex
-```
-This downloads the latest release to `%LOCALAPPDATA%\lox` and adds it to your PATH.
-
-Or install manually: download `lox-windows-x86_64.exe` from the [latest release](https://github.com/discostu105/lox/releases/latest), rename to `lox.exe`, and place it somewhere on your PATH.
-
-**Homebrew (macOS/Linux):**
+**Homebrew (macOS, Linux)**
 ```bash
 brew tap discostu105/lox https://github.com/discostu105/lox
 brew install discostu105/lox/lox
 ```
 
-**Build from source (all platforms):**
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex
+```
+This puts the latest release in `%LOCALAPPDATA%\lox` and adds it to your PATH. To install by hand, download
+`lox-windows-x86_64.exe` from the [latest release](https://github.com/discostu105/lox/releases/latest), rename it
+to `lox.exe` and put it on your PATH.
+
+**From source** (Rust 1.91+, no OpenSSL needed)
 ```bash
 git clone https://github.com/discostu105/lox
 cd lox
-cargo build --release
+cargo build --release      # → target/release/lox
 ```
-The binary is at `target/release/lox` (or `lox.exe` on Windows). Copy it somewhere on your PATH.
-
-**Requirements (source):** Rust 1.91+. No OpenSSL. No runtime dependencies. Works on Windows, macOS, and Linux.
 
 ## Setup
 
 ```bash
 lox setup set --host https://192.168.1.100 --user USER --pass PASS
-lox status                    # check the connection
-lox ls                        # what lox can see
+lox status                 # check the connection
+lox ls                     # list the controls lox can see
 ```
 
-To keep the password out of your shell history and the process list, read it into `LOX_PASS` instead of passing
-`--pass`: `read -rs LOX_PASS && export LOX_PASS`. `--serial` is optional:
-it names the Miniserver's folder in the [config repo](#config-versioning-gitops) and its OpenTelemetry `device.id`.
+To keep the password out of your shell history and the process list, use `LOX_PASS` instead of `--pass`:
+`read -rs LOX_PASS && export LOX_PASS`. More options (several Miniservers, aliases, completions) are under
+[Configuration reference](#configuration-reference).
 
-Config location:
-- **macOS/Linux:** `~/.lox/config.yaml`
-- **Windows:** `C:\Users\<YOU>\.lox\config.yaml`
+---
 
-### Multiple Miniservers
+## Controlling the home
 
-Manage multiple connections with named contexts:
+Names are matched as case-insensitive substrings. When a name matches several controls, add the room with
+`--room` or as `"Name [Room]"`.
 
 ```bash
-lox ctx add home --host https://192.168.1.100 --user admin --pass secret
-lox ctx add office --host https://10.0.0.50 --user admin --pass secret
-lox ctx use home              # switch active context
-lox --ctx office status       # one-off command against a different context
+lox ls -t Jalousie -r "EG"                 # filter by type, room, category
+lox get "Temperatur" --room "Schlafzimmer" # read a control's state
+lox on "Licht Wohnzimmer"                  # on / off
+lox light mood "Wohnzimmer" plus           # next light mood
+lox thermostat "Heizung" temp 22.5         # set the temperature
+lox alarm "Alarmanlage" arm                # arm the alarm
+lox sensors --type door-window             # open windows and doors
+lox energy                                 # energy meters
+lox health --problems                      # low batteries, weak signal, offline devices
+lox run abend                              # run a scene
+lox stream --room "Kitchen" -o json        # state changes as they happen
+lox otel serve --endpoint http://…         # push metrics, logs and traces via OTLP
 ```
 
-### Aliases
-
-Add short names for frequently-used controls in your `config.yaml`:
-
-```yaml
-host: https://192.168.1.100
-user: admin
-pass: secret
-aliases:
-  wz: "1d8af56e-036e-e9ad-ffffed57184a04d2"   # Lichtsteuerung Wohnzimmer
-  kueche: "20236c09-0055-6e94-ffffed57184a04d2" # Licht Küche Insel
-```
-
-Then use short names directly: `lox on wz`, `lox off kueche`
-
-### Shell Completions
-
-**Homebrew** installs completions automatically — no extra steps needed.
-
-**Manual install** (one command, auto-detects your shell):
-```bash
-lox completions --install
-```
-
-Or generate to stdout for custom setups: `lox completions bash|zsh|fish|powershell`
-
-**PowerShell** — add this to your `$PROFILE`:
-```powershell
-lox completions powershell | Out-String | Invoke-Expression
-```
-
----
-
-## Commands
-
-Quick overview — see **[COMMANDS.md](COMMANDS.md)** for the full reference with all options.
-
-```bash
-lox ls                                  # List all controls
-lox ls -t Jalousie -r "EG"             # Filter by type/room/category
-lox get "Temperatur [Schlafzimmer]"     # Read a control's state
-lox on "Licht Wohnzimmer"              # Turn on
-lox off "Licht Wohnzimmer"             # Turn off
-lox blind "Beschattung Süd" pos 50     # Blind to 50%
-lox light mood "Licht" plus            # Next light mood
-lox light moods "Licht"                # List available moods
-lox thermostat "Heizung" temp 22.5     # Set temperature
-lox alarm "Alarmanlage" arm            # Arm alarm
-lox tui                                # Live terminal UI — btop for your house
-lox tui --demo                         # …try it without a Miniserver
-lox stream --room "Kitchen" -o json    # Real-time WebSocket state stream
-lox otel serve --endpoint http://..   # Push metrics, logs & traces via OTLP
-lox if "Temperatur" gt 25 && echo hot  # Conditional logic
-lox energy                             # Energy meters
-lox sensors --type door-window         # Open windows and doors
-lox config download --extract          # Download & extract Loxone Config
-lox config compress out.Loxone --template dl.zip  # Upload ZIP from a download, only sps0.LoxCC replaced
-lox config push --force                # Deploy an lxir project: compile, upload, restart the program, verify
-lox config init ~/loxone-config        # Init git repo for config versioning
-lox config pull                        # Download, diff & git-commit config
-lox config log                         # Show config change history
-lox config diff v271                   # What changed in the logic since version 271
-lox config wiring "Licht" --trace up   # What drives this light, back to the sensors
-lox config show -p Wohnzimmer          # A logic page as lxir source
-lox config find bewegung               # Search blocks by name, type, device, room
-lox config lint                        # Dead blocks, unwired inputs and motors, duplicate names
-lox config history "Licht"             # How one block changed over time
-lox config restore abc123 --force      # Restore config from git history
-lox ir check                           # Config as code: validate .lxir modules
-lox ir compile                         # … compile them into the config
-lox ir drift live.Loxone               # Has anyone else changed the config since?
-lox ir lsp                             # … and a language server for your editor
-lox run abend                          # Run a scene
-lox health --problems                  # Device health (battery, signal, offline)
-lox access check alice                 # Why alice may (not) open the NFC Code Touch
-lox access log "Code Touch"            # Who opened when, denied attempts
-lox access learn "Code Touch" --user alice --name "alice phone"  # Read an NFC tag, pair it
-lox user code set alice                # New access code (hidden prompt)
-lox schema blind                       # Command schema for AI agent discovery
-lox mcp serve                          # MCP server for Claude Desktop, ChatGPT, Cursor, …
-lox completions bash                   # Generate shell completions
-```
-
----
-
-## Terminal UI
-
-`lox tui` is a full-screen, keyboard-first live view of your installation — **btop for your house**.
-
-![lox tui --demo: rooms, controls, charts, wiring, palette, events, energy flow, system, logs, config history](docs/media/lox-tui-demo.gif)
-
-<sub>Recorded from `lox tui --demo` with [scripts/demo-video](scripts/demo-video/) — reproducible, no Miniserver needed.</sub>
-
-What's in it:
-
-- **Home** — room cards, what needs attention (open windows, low batteries, offline devices), pinned controls, a live feed
-- **Rooms** — every control with its live value; `␣` toggles, `+`/`-` dim, `=` sets a value, `m` picks a mood, `a` shows all actions
-- **Events** — every state change as it happens, filterable, with "what happened just before" correlation
-- **Energy** — animated PV / home / grid / battery flow, meters, today's curve
-- **System** — CPU, heap, devices, CAN bus & LAN, the Miniserver log, and config history with logic diffs:
-  `⏎` browses a snapshot (pages, blocks, lxir source, `/` search), `m` compares any two commits, `w` opens a changed block's wiring
-- **Sites** — all your Miniservers at a glance; switch live
-- **Wiring** (`w`) — the config program around a control, with live values on the wires: *why is this light on?*
-  Parameters, devices and rooms at a glance, `t` traces the path to the sensors or actuators, `H` shows the block's history
-- **History** (`c`) — any control's statistics over 6 h to a year, with period compare, a cursor and extra series
-
-```bash
-lox tui                 # connect to the current context
-lox tui --demo          # a synthetic demo house, no Miniserver needed
-lox tui --read-only     # wall display: look, don't touch
-```
-
-`:` opens a fuzzy palette for rooms, controls, scenes and any `lox` command; `?` shows the keys; `y` copies the
-equivalent `lox` command for scripting. Doors, alarms, gates and controls on your `confirm:` list ask for confirmation, reboot and update ask you to type
-the context name. See [COMMANDS.md](COMMANDS.md#terminal-ui) for all flags and keys.
-
-The Wiring view, the snapshot browser and the logic diffs are built on [lxir](crates/lxir), which parses
-`.Loxone` configs into program blocks and wires.
-
----
-
-## Scenes
-
-YAML files in `~/.lox/scenes/`:
-
-```yaml
-# ~/.lox/scenes/abend.yaml
-name: Abend
-steps:
-  - control: "Lichtsteuerung Wohnzimmer"
-    cmd: on
-  - control: "Beschattung Südseite"
-    cmd: "pos 70"
-  - control: "LED Küche"
-    cmd: off
-    delay_ms: 500
-```
-
----
-
-## Performance
-
-The structure (`LoxApp3.json`) is cached per context for 24 h; `lox cache refresh` after you change the config:
-
-| Operation | Cold | Warm |
-|-----------|------|------|
-| `lox on "Licht"` | ~1.2s | ~80ms |
-| `lox ls` | ~1.2s | ~80ms |
-| `lox ls --values` | ~1.2s + N×req | slower (one HTTP request per control) |
-| `lox status` | ~120ms | ~120ms |
-
----
-
-## Supported Control Types
-
-| Type | Commands |
+| Control type | Commands |
 |------|----------|
 | `LightControllerV2` | `on`, `off`, `light mood <name> plus/minus/off/<id>`, `light moods <name>` |
 | `Jalousie` / `CentralJalousie` | `blind <name> up/down/stop/shade/pos <0-100>` |
@@ -324,28 +115,111 @@ The structure (`LoxApp3.json`) is cached per context for 24 h; `lox cache refres
 | Sensors, meters | `get`, `sensors`, `energy`, `history` (read-only) |
 | Any | `send <name> <raw-command>`, `lock`, `unlock` |
 
----
+**Scenes** are YAML files in `~/.lox/scenes/`, run with `lox run <name>`:
 
-## Config Versioning (GitOps)
-
-Track Miniserver configuration changes in a git repository — automated backups with meaningful commit messages:
-
-```bash
-# One-time setup
-lox config init ~/loxone-config
-
-# Pull current config, diff against previous, commit with semantic message
-lox config pull
-
-# View history
-lox config log
-
-# Restore a previous version (loaded on the next reboot)
-lox config restore abc123 --force && lox reboot --yes
+```yaml
+# ~/.lox/scenes/abend.yaml
+name: Abend
+steps:
+  - control: "Lichtsteuerung Wohnzimmer"
+    cmd: on
+  - control: "Beschattung Südseite"
+    cmd: "pos 70"
+  - control: "LED Küche"
+    cmd: off
+    delay_ms: 500
 ```
 
-Each pull downloads the config via FTP, decompresses the proprietary LoxCC format to XML, diffs the logic
-(blocks, parameters and wires, per page) against the previous snapshot, and commits with a meaningful message like:
+**Users and door access**
+
+```bash
+lox access check alice                 # why alice may (not) open the NFC Code Touch
+lox access log "Code Touch"            # who opened when, denied attempts
+lox access learn "Code Touch" --user alice --name "alice phone"  # read an NFC tag, pair it
+lox user code set alice                # new access code (hidden prompt)
+```
+
+Every command and flag is in **[COMMANDS.md](COMMANDS.md)**.
+
+---
+
+## Terminal UI
+
+`lox tui` is a full-screen, keyboard-driven live view of your installation, like btop for your house.
+
+![lox tui --demo: rooms, controls, charts, wiring, palette, events, energy flow, system, logs, config history](docs/media/lox-tui-demo.gif)
+
+<sub>Recorded from `lox tui --demo` with [scripts/demo-video](scripts/demo-video/). No Miniserver needed.</sub>
+
+```bash
+lox tui                 # connect to the current context
+lox tui --demo          # a synthetic demo house
+lox tui --read-only     # wall display: look, don't touch
+```
+
+- **Home**: room cards, what needs attention (open windows, low batteries, offline devices), pinned controls, a live feed
+- **Rooms**: every control with its live value; `␣` toggles, `+`/`-` dims, `=` sets a value, `m` picks a mood, `a` shows all actions
+- **Events**: every state change as it happens, filterable, with what happened just before
+- **Energy**: animated PV / home / grid / battery flow, meters, today's curve
+- **System**: CPU, heap, devices, CAN bus and LAN, the Miniserver log, and config history with logic diffs
+  (`⏎` browses a snapshot, `m` compares two commits, `w` opens a changed block's wiring)
+- **Sites**: all your Miniservers at a glance; switch live
+- **Wiring** (`w`): the config program around a control with live values on the wires, to answer *why is this
+  light on?* `t` traces the path to the sensors or actuators, `H` shows the block's history
+- **History** (`c`): a control's statistics over 6 h to a year, with period compare, a cursor and extra series
+
+`:` opens a fuzzy palette for rooms, controls, scenes and any `lox` command, `?` lists the keys, and `y` copies
+the equivalent `lox` command. Doors, alarms, gates and controls on your `confirm:` list ask before acting;
+reboot and update ask you to type the context name. All keys and flags:
+[COMMANDS.md](COMMANDS.md#terminal-ui).
+
+---
+
+## AI agents and MCP
+
+Every command exits `0` on success and non-zero on error, and `-o json` gives structured output (errors too,
+as JSON envelopes with error codes). An agent with a shell tool can discover the house and act on it without
+a custom integration:
+
+```bash
+lox schema -o json                    # discover the commands
+lox ls -o json                        # discover the controls
+lox --dry-run on "Licht" -o json      # preview before executing
+lox --trace-id "run-42" on "Licht"    # execute, correlated in the logs
+lox health --problems -o json         # check device health
+```
+
+`--non-interactive` fails instead of prompting (implied by `-o json`).
+
+**MCP server.** Clients that speak the [Model Context Protocol](https://modelcontextprotocol.io) (Claude
+Desktop, Claude Code, ChatGPT, Cursor, …) can launch `lox mcp serve`. It exposes typed tools over stdio:
+rooms, controls, live state, switches, blinds, lights, climate, scenes, the config wiring behind a control,
+door access, learning NFC tags and setting access codes. Doors, gates, the alarm, every change to users and
+any control on your `confirm:` list ask you to confirm in the client before anything is sent.
+
+```bash
+lox mcp config                           # print a ready-to-paste client config
+claude mcp add loxone -- lox mcp serve   # Claude Code
+lox mcp tools                            # the tools a client will see
+```
+
+Tool list and safety model: [AI agent guide](docs/guides/ai-agents.md#mcp-server).
+
+---
+
+## Config versioning (GitOps)
+
+Keep the Miniserver configuration in a git repository, with one commit per change:
+
+```bash
+lox config init ~/loxone-config               # one-time setup
+lox config pull                               # download, diff, commit (--quiet for cron)
+lox config log                                # history
+lox config restore abc123 --force && lox reboot --yes   # back to an old version
+```
+
+Each pull downloads the config over FTP, decompresses Loxone's LoxCC format to XML, diffs the logic (blocks,
+parameters and wires, per page) against the previous snapshot and writes it into the commit message:
 
 ```
 [504F94AABBCC] Config backup 2026-03-08 18:22:56 (v42)
@@ -358,104 +232,165 @@ Each pull downloads the config via FTP, decompresses the proprietary LoxCC forma
 + wire   Motion Garage.Q → Garage light.Tg
 ```
 
-Every snapshot stays inspectable: `lox config diff` between any two (commit, version, save date or file),
-`lox config show/wiring/find/lint --at v42` on an old one, `lox config history <block>` for one block over time.
+Every snapshot stays inspectable:
 
-**Cron-friendly:** `lox config pull --quiet` for automated nightly backups.
+```bash
+lox config diff v271                   # what changed in the logic since version 271
+lox config wiring "Licht" --trace up   # what drives this light, back to the sensors
+lox config show -p Wohnzimmer          # a logic page as lxir source
+lox config find bewegung               # search blocks by name, type, device, room
+lox config lint                        # dead blocks, unwired inputs and motors, duplicate names
+lox config history "Licht"             # how one block changed over time
+```
 
-**Multi-Miniserver:** each Miniserver gets its own subdirectory (by serial number).
+`--at v42` runs `show`, `wiring`, `find` and `lint` on an old snapshot. Each Miniserver gets its own
+subdirectory (by serial number). A restore uploads the original backup ZIP from git as `sps_new.zip`, without
+recompressing it, and the Miniserver loads it on its next start.
 
-**Safe restore:** uploads the original backup ZIP from git history as `sps_new.zip` (no recompression), which the
-Miniserver loads on its next start.
+Guide: [Config versioning](docs/guides/config-versioning.md).
 
 ---
 
-## Config as Code (lxir)
+## Config as code (lxir)
 
-Write Miniserver logic as text, review it in a pull request, compile it into the real config:
+Write Miniserver logic as text, review it in a pull request, and compile it into the real config:
 
 ```text
 temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: 28)
 jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 ```
 
-`lox ir compile` writes exactly the XML Loxone Config would have drawn and pins every UUID it mints in a
-lockfile, so the next compile changes only what you changed. Everything you don't manage — hardware, rooms,
-visualization, other logic — passes through byte for byte. `lox ir diff` proves it, `lox ir drift` tells you
-when the GUI or the app wrote to the config since. `lox config push --force` deploys a project end to end: drift
-check, compile against the live config, a check for user changes the upload would discard, byte-exact upload,
-reboot, and a download that proves the Miniserver runs exactly the compiled file.
+- `lox ir compile` writes the same XML Loxone Config would have written, and pins every UUID it creates in a
+  lockfile, so the next compile changes only what you changed.
+- Everything the source doesn't manage (hardware, rooms, visualization, other logic) passes through byte for
+  byte. `lox ir diff` shows it.
+- `lox ir drift` tells you when Loxone Config or the app changed the config since.
+- `lox config push --force` deploys a project: drift check, compile against the live config, a check for user
+  changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
+  runs the compiled file.
+- `lox ir lsp` is a language server for your editor.
 
 ```bash
 lox config download --extract --save-as base.zip   # the deployed config → base.Loxone
 lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json   # take over existing blocks
-$EDITOR pages/*.lxir                                 # with base, module, lock in lox.toml:
+$EDITOR pages/*.lxir                                # with base, module and lock in lox.toml:
 lox ir compile && lox config diff base.Loxone out.Loxone
-lox config push --force                              # deploy, verified
+lox config push --force                             # deploy, verified
 ```
 
-Walkthrough: the [Config as Code guide](docs/guides/config-as-code.md). Reference:
-[COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the [lxir docs](crates/lxir/README.md) (language, lockfile).
+Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). Reference:
+[COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the [lxir docs](crates/lxir/README.md).
 
-The toolchain is the [`lxir`](crates/lxir) crate in this repository: a network-free library (also on
-[crates.io](https://crates.io/crates/lxir)) that `lox` builds on for `lox ir`, the logic diffs, the Wiring view
+The toolchain is the [`lxir`](crates/lxir) crate in this repository, a library without network access (also on
+[crates.io](https://crates.io/crates/lxir)). `lox` uses it for `lox ir`, the logic diffs, the TUI's Wiring view
 and `lox config show/wiring/find/lint/history`.
 
 ---
 
-## Architecture
+## Configuration reference
+
+The config lives in `~/.lox/config.yaml` (Windows: `C:\Users\<YOU>\.lox\config.yaml`). `--serial` in
+`lox setup set` is optional: it names the Miniserver's folder in the config repo and its OpenTelemetry
+`device.id`.
+
+**Several Miniservers**: named contexts.
+
+```bash
+lox ctx add home --host https://192.168.1.100 --user admin --pass secret
+lox ctx add office --host https://10.0.0.50 --user admin --pass secret
+lox ctx use home              # switch the active context
+lox --ctx office status       # one command against another context
+```
+
+**Aliases**: short names for controls you use often.
+
+```yaml
+host: https://192.168.1.100
+user: admin
+pass: secret
+aliases:
+  wz: "1d8af56e-036e-e9ad-ffffed57184a04d2"     # Lichtsteuerung Wohnzimmer
+  kueche: "20236c09-0055-6e94-ffffed57184a04d2" # Licht Küche Insel
+```
+
+Then `lox on wz`, `lox off kueche`.
+
+**Shell completions**: Homebrew installs them. Otherwise run `lox completions --install` (detects your
+shell), or print them with `lox completions bash|zsh|fish|powershell`. For PowerShell, add this to `$PROFILE`:
+
+```powershell
+lox completions powershell | Out-String | Invoke-Expression
+```
+
+**Files**
 
 ```
 ~/.lox/
   config.yaml          # host, credentials, aliases, confirm: list (one Miniserver or named contexts)
   tui.yaml             # lox tui preferences
   contexts/<name>/     # per context (a single-Miniserver config keeps these directly in ~/.lox/)
-    cache/structure.json   # LoxApp3.json (24h TTL, ~150KB)
+    cache/structure.json   # LoxApp3.json (24 h TTL, ~150 KB)
     token.json         # token auth (optional)
     scenes/*.yaml      # your scenes
 ```
 
-Single static Rust binary ~4MB. TLS via rustls (no OpenSSL). Self-signed certs accepted. Works on Windows, macOS, and Linux.
+**Caching**: the structure file (`LoxApp3.json`) is cached for 24 h. Run `lox cache refresh` after you change
+the config in Loxone Config.
+
+| Operation | Cold cache | Warm cache |
+|-----------|------|------|
+| `lox on "Licht"`, `lox ls` | ~1.2 s | ~80 ms |
+| `lox ls --values` | ~1.2 s + one request per control | one request per control |
+| `lox status` | ~120 ms | ~120 ms |
 
 ---
 
 ## Requirements
 
-- Loxone Miniserver Gen 1/2, firmware 12.0+
-- Local network access (or DynDNS)
-- For `lox log`: Admin user
-- **Platforms:** Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
+- Loxone Miniserver Gen 1 or Gen 2, firmware 12.0+
+- Network access to the Miniserver (local, or DynDNS)
+- An admin user for `lox log`
+- Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
+
+TLS uses rustls; the Miniserver's self-signed certificate is accepted unless you set `verify_ssl: true`.
+
+## Documentation
+
+- [COMMANDS.md](COMMANDS.md): every command and flag
+- [Getting started](docs/getting-started.md)
+- Guides: [AI agents](docs/guides/ai-agents.md), [Terminal UI](docs/guides/tui.md),
+  [Config versioning](docs/guides/config-versioning.md), [Config as code](docs/guides/config-as-code.md),
+  [Scenes](docs/guides/scenes.md), [OpenTelemetry](docs/guides/opentelemetry.md)
+- [Architecture](docs/architecture.md) and [contributing](docs/contributing.md)
+- The docs as a website: [discostu105.github.io/lox](https://discostu105.github.io/lox)
 
 ---
 
 ## Related projects
 
 - **[lxir](crates/lxir)**: the config-as-code toolchain behind `lox ir`, the logic diffs and `lox config push`.
-  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir). It was
-  merged into this repository with its history and is developed here now, as `crates/lxir`. Its crates.io
-  package is [`lxir`](https://crates.io/crates/lxir). The standalone repository receives no further changes.
+  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir), was merged
+  into this repository with its history, and is developed here as `crates/lxir`. Its crates.io package is
+  [`lxir`](https://crates.io/crates/lxir). The standalone repository receives no further changes.
 - **[eisber/lox-cli](https://github.com/eisber/lox-cli)**: a separate project by Markus Cozowicz, based on an
-  earlier version of lox. Its own code is AGPL-3.0 or commercial. It takes another approach to editing a
-  config:
-  - An AI agent builds the logic with one command per step (`lox config add`, `set-param`, `wire-connector`),
-    and lox-cli writes each step straight into the `.Loxone` XML.
+  earlier version of lox. Its own code is AGPL-3.0 or commercial. It edits a config differently:
+  - An AI agent builds the logic one command per step (`lox config add`, `set-param`, `wire-connector`), and
+    lox-cli writes each step straight into the `.Loxone` XML.
   - It tests the result in an offline simulator, `lox sim`.
-  - lox, by contrast, keeps the logic as `.lxir` source and compiles it with pinned UUIDs. Everything the
-    source doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
+  - lox instead keeps the logic as `.lxir` source and compiles it with pinned UUIDs. Everything the source
+    doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
 
-  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios
-  through lox-cli's `lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects install a binary
-  named `lox`, so give one of them another name if you install both.
-
----
+  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios through
+  lox-cli's `lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects install a binary named
+  `lox`, so rename one of them if you install both.
 
 ## Status
 
-This project is an experiment. Expect rough edges. Not every Miniserver configuration has been tested. If you like the project, please help and contribute.
+This project is an experiment. Expect rough edges; not every Miniserver configuration has been tested.
+Contributions are welcome.
 
-**Use at your own risk.** Commands that modify your Miniserver (e.g., `config upload`, `reboot`, `update`) can affect your live system. Always have a backup.
-
----
+**Use at your own risk.** Commands that change your Miniserver (`config upload`, `config push`, `reboot`,
+`update`, …) affect your live system. Keep a backup.
 
 ## License
 
