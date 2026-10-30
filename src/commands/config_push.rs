@@ -25,8 +25,11 @@
 //!    byte for byte; otherwise the live file stays, and the report says when
 //!    it no longer matches the compiled access rights. Without `--force` the
 //!    push ends here.
-//! 6. Upload it as `sps_new.zip`, which the Miniserver loads on start, reboot,
-//!    and wait until it answers again. Loading it drops the Miniserver's
+//! 6. Upload it as `sps_new.zip` and restart the program (`/jdev/sps/restart`,
+//!    what Loxone Config's save does): the Miniserver loads the file within
+//!    seconds, renames it to its next program file and runs it — no reboot.
+//!    `--reboot` restarts the whole Miniserver instead, which loads it on
+//!    start. Loading it drops the Miniserver's
 //!    custom changes, users edited in the app among them: when the live users
 //!    differ from the program file's, staging reports it and `--force`
 //!    refuses unless `--discard-custom-changes` (see `push_users`).
@@ -67,6 +70,12 @@ pub(crate) trait Miniserver {
     fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>>;
     /// Upload a config ZIP as `/prog/sps_new.zip`.
     fn upload(&self, zip: &[u8]) -> Result<()>;
+    /// Restart the program (PLC), which loads `sps_new.zip`.
+    fn restart_program(&self) -> Result<()>;
+    /// Return once the restarted program runs the upload: the newest program
+    /// file is no longer `before` (loading renames `sps_new.zip`) and the PLC
+    /// runs.
+    fn wait_until_loaded(&self, before: &str) -> Result<()>;
     fn reboot(&self) -> Result<()>;
     /// Return once the Miniserver answers again after a reboot.
     fn wait_until_up(&self) -> Result<()>;
@@ -75,7 +84,7 @@ pub(crate) trait Miniserver {
 }
 
 /// The Miniserver of the connection settings: FTP for configs, HTTP for the
-/// reboot.
+/// restart.
 pub(crate) struct LiveMiniserver {
     cfg: Config,
 }
@@ -117,6 +126,38 @@ impl Miniserver for LiveMiniserver {
         ftp::upload_config(&self.cfg, zip)
     }
 
+    fn restart_program(&self) -> Result<()> {
+        LoxClient::new(self.cfg.clone())?.get_text("/jdev/sps/restart")?;
+        Ok(())
+    }
+
+    fn wait_until_loaded(&self, before: &str) -> Result<()> {
+        // House Miniserver, firmware 17.2: `PLC change` (6) at once, the
+        // file loaded and renamed within a second, running (5) after 2.2 s.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let client = LoxClient::new(self.cfg.clone())?;
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let running = client
+                .get_json("/jdev/sps/state")
+                .is_ok_and(|v| v["LL"]["value"].as_str() == Some(PLC_RUNNING));
+            if running
+                && ftp::list_backups(&self.cfg)
+                    .is_ok_and(|b| b.first().is_some_and(|n| n.filename != before))
+            {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                bail!(
+                    "The Miniserver did not run the upload within a minute of the program \
+                     restart (its newest program file is still {before}). Check it, then \
+                     compare what it runs with the compiled file (`lox config download \
+                     --extract`, `lox ir diff`), or push again with --reboot."
+                );
+            }
+        }
+    }
+
     fn reboot(&self) -> Result<()> {
         LoxClient::new(self.cfg.clone())?.get_text("/jdev/sys/reboot")?;
         Ok(())
@@ -148,11 +189,17 @@ impl Miniserver for LiveMiniserver {
     }
 }
 
+/// `/jdev/sps/state` while the program runs (the Web Services list: 5 =
+/// "PLC running").
+const PLC_RUNNING: &str = "5";
+
 pub(crate) struct PushOptions {
     /// The project directory (holds lox.toml).
     pub project: PathBuf,
-    /// Upload and reboot; without it the push ends after staging.
+    /// Upload and apply; without it the push ends after staging.
     pub force: bool,
+    /// Apply by rebooting the Miniserver instead of restarting the program.
+    pub reboot: bool,
     /// The download the (byte-patched) base was built from.
     pub patched_from: Option<PathBuf>,
     pub allow_removals: bool,
@@ -409,20 +456,26 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         report.outcome = "staged";
         say(&format!(
             "Staged {} (extracts to exactly {}). Run again with --force to upload it and \
-             reboot the Miniserver.",
+             restart the program.",
             staged_path.display(),
             compiled_path.display()
         ));
         return Ok(report);
     }
 
-    // 6. Upload, reboot, wait.
+    // 6. Upload, then load it: a program restart, or a reboot.
     say(&format!("Uploading as {}...", ftp::CONFIG_UPLOAD_NAME));
     ms.upload(&staged)?;
-    say("Rebooting the Miniserver...");
-    ms.reboot()?;
-    say("Waiting for the Miniserver to come back...");
-    ms.wait_until_up()?;
+    if opts.reboot {
+        say("Rebooting the Miniserver...");
+        ms.reboot()?;
+        say("Waiting for the Miniserver to come back...");
+        ms.wait_until_up()?;
+    } else {
+        say("Restarting the program...");
+        ms.restart_program()?;
+        ms.wait_until_loaded(&name)?;
+    }
 
     // 7. Verify what it runs now.
     say("Downloading the config again to verify...");
@@ -796,7 +849,8 @@ mod tests {
     use std::cell::RefCell;
 
     /// A Miniserver in memory: serves its current config ZIP; an upload
-    /// becomes the current config on reboot, as `sps_new.zip` does.
+    /// becomes the current config on a program restart or reboot, as
+    /// `sps_new.zip` does.
     struct FakeMiniserver {
         serial: Option<String>,
         current: RefCell<Vec<u8>>,
@@ -804,6 +858,7 @@ mod tests {
         users: Option<Vec<crate::usermgmt::User>>,
         uploaded: RefCell<Option<Vec<u8>>>,
         reboots: RefCell<usize>,
+        restarts: RefCell<usize>,
         /// The files of /sys/custom; `None`: listing it fails
         custom: Option<Vec<(String, Vec<u8>)>>,
     }
@@ -816,8 +871,22 @@ mod tests {
                 users: Some(Vec::new()),
                 uploaded: RefCell::new(None),
                 reboots: RefCell::new(0),
+                restarts: RefCell::new(0),
                 custom: Some(Vec::new()),
             }
+        }
+    }
+
+    impl FakeMiniserver {
+        /// What loading `sps_new.zip` does: the upload becomes the program.
+        fn load(&self) {
+            if let Some(zip) = self.uploaded.borrow_mut().take() {
+                *self.current.borrow_mut() = zip;
+            }
+        }
+        /// How often the push applied an upload, either way.
+        fn applies(&self) -> usize {
+            *self.reboots.borrow() + *self.restarts.borrow()
         }
     }
 
@@ -849,11 +918,17 @@ mod tests {
             *self.uploaded.borrow_mut() = Some(zip.to_vec());
             Ok(())
         }
+        fn restart_program(&self) -> Result<()> {
+            *self.restarts.borrow_mut() += 1;
+            self.load();
+            Ok(())
+        }
+        fn wait_until_loaded(&self, _before: &str) -> Result<()> {
+            Ok(())
+        }
         fn reboot(&self) -> Result<()> {
             *self.reboots.borrow_mut() += 1;
-            if let Some(zip) = self.uploaded.borrow_mut().take() {
-                *self.current.borrow_mut() = zip;
-            }
+            self.load();
             Ok(())
         }
         fn wait_until_up(&self) -> Result<()> {
@@ -924,6 +999,7 @@ mod tests {
             accept_version: None,
             backup_dir: None,
             discard_custom_changes: false,
+            reboot: false,
         }
     }
 
@@ -932,7 +1008,7 @@ mod tests {
     }
 
     #[test]
-    fn push_uploads_reboots_verifies_and_moves_the_base() {
+    fn push_uploads_restarts_verifies_and_moves_the_base() {
         let dir = project();
         let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
 
@@ -941,7 +1017,9 @@ mod tests {
         assert_eq!(report.outcome, "pushed");
         assert!(!report.rebased);
         assert!(report.changes.iter().any(|l| l.starts_with('=')));
-        assert_eq!(*ms.reboots.borrow(), 1);
+        // Loaded by a program restart, as Loxone Config's save does.
+        assert_eq!(*ms.restarts.borrow(), 1);
+        assert_eq!(*ms.reboots.borrow(), 0);
         // The Miniserver runs exactly the compiled file, side files untouched.
         let compiled = fs::read(report.compiled.unwrap()).unwrap();
         let live = ms.current.borrow().clone();
@@ -971,7 +1049,24 @@ mod tests {
         // Pushing again: nothing left to do.
         let again = push(&ms, &options(dir.path(), true), true).unwrap();
         assert_eq!(again.outcome, "nothing-to-push");
+        assert_eq!(ms.applies(), 1);
+    }
+
+    #[test]
+    fn push_with_reboot_reboots_instead() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        let opts = PushOptions {
+            reboot: true,
+            ..options(dir.path(), true)
+        };
+        let report = push(&ms, &opts, true).unwrap();
+        assert_eq!(report.outcome, "pushed");
         assert_eq!(*ms.reboots.borrow(), 1);
+        assert_eq!(*ms.restarts.borrow(), 0);
+        let compiled = fs::read(report.compiled.unwrap()).unwrap();
+        let live = ms.current.borrow().clone();
+        assert_eq!(loxcc::extract_and_decompress(&live).unwrap(), compiled);
     }
 
     #[test]
@@ -985,7 +1080,7 @@ mod tests {
 
         assert_eq!(report.outcome, "staged");
         assert!(ms.uploaded.borrow().is_none());
-        assert_eq!(*ms.reboots.borrow(), 0);
+        assert_eq!(ms.applies(), 0);
         let staged = fs::read(report.staged.unwrap()).unwrap();
         let compiled = fs::read(report.compiled.unwrap()).unwrap();
         assert_eq!(loxcc::extract_and_decompress(&staged).unwrap(), compiled);
@@ -1052,7 +1147,7 @@ mod tests {
             "{msg}"
         );
         assert!(ms.uploaded.borrow().is_none());
-        assert_eq!(*ms.reboots.borrow(), 0);
+        assert_eq!(ms.applies(), 0);
     }
 
     #[test]
@@ -1206,7 +1301,7 @@ mod tests {
         assert!(msg.contains(&format!("\"{title}\"")), "{msg}");
         assert!(msg.contains("--discard-custom-changes"), "{msg}");
         assert!(ms.uploaded.borrow().is_none());
-        assert_eq!(*ms.reboots.borrow(), 0);
+        assert_eq!(ms.applies(), 0);
     }
 
     #[test]

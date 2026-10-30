@@ -157,7 +157,7 @@ lxir diff current.Loxone out.Loxone
 
 # 6. Deploy. In a lox.toml project (base, module, lock, serial):
 lox config push            # drift check, compile, show the changes, stage
-lox config push --force    # upload byte-exact, reboot, verify, move base
+lox config push --force    # upload byte-exact, restart the program, verify, move base
 #    Or open out.Loxone in Loxone Config and upload from there.
 #    Upload exactly the file you diffed — a tool that re-serializes
 #    or re-wires on the way (lox-cli's `config push`) can change it.
