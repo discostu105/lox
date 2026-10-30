@@ -211,6 +211,12 @@ SIGSEGVs it on load (minidump in the prefix's
 the same way is fine. The synthetic corpus is sufficient for the XML/UUID
 layers but is **not loadable** by the real tool — it lacks required
 structure. Oracle runs must always compile onto a real base config.
+Re-learned on 2026-10-30 (#174): every synthetic file crashes in
+17.2.8.28 too, right after the document's docking panes are built, even
+in a fresh prefix with an empty `Documents` folder and no network, while
+a real config opens in the same prefix minutes later. Its crash box is
+also captioned `LoxoneConfig`, like the recovery dialog, so
+`oracle.sh` now watches the dumps folder and stops with that diagnosis.
 
 ## The second-batch bless + mint oracle (session 8) — passed
 
@@ -548,6 +554,16 @@ config (Loxone Config 17.2.8.28).
   - The children came back byte-identical.
   - The semantic diff was empty.
 
+## Decimal points in a Formula (session 23, D35) — passed
+
+Ran 2026-10-30 against a copy of the house config: one `Memory` fed by
+`montag.Q * 0.5 + 2.25`, folded into `Formula="I1*0.5+2.25"`. Every
+corpus formula writes a decimal comma. Loxone Config opened the file
+without a message, and the save kept the formula byte for byte; the
+semantic diff was empty. Only `Py2` (block height) and `WF` changed,
+both known. With the live check of the same day (the Miniserver
+evaluates either separator) the point is settled.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):
@@ -558,7 +574,8 @@ scripts/oracle.sh run compiled.Loxone --out saved.Loxone   # open → save → d
 
 starts Xvfb, seeds the prefix's ProgramData from the installed package
 (as the packaged launcher does for its own prefix), opens a **copy** in
-the isolated wineprefix, answers the recovery dialog with No, unmaps the
+the isolated wineprefix, answers the recovery dialog with No (and stops
+when a fresh minidump shows that Loxone Config crashed instead), unmaps the
 news overlay, saves via Ctrl+S (md5-polled), runs `lxir diff` compiled →
 GUI-saved, and tears the rig
 down (`--keep` to leave it warm; `up`/`open`/`save`/`shot`/`status`/
