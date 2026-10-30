@@ -10,6 +10,16 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-10-30 — the app sees what you push
+
+`lox config push` no longer leaves the app on the last Loxone Config save: it edits the app catalogue for the controls a push renames, moves, removes or adds.
+
+### Added
+- **`lxir::catalogue`**: carries a compile into the app catalogue `LoxAPP3.json` as text edits, with entries for push buttons and digital virtual inputs validated against Loxone Config saves.
+
+### Changed
+- **`lox config push`** updates the app catalogue (`LoxAPP3.json`) it uploads: renamed, moved, deleted and hidden controls, and new push buttons and digital virtual inputs with a room and a category, get their entries, and a new `lastModified` makes the app reload. What it cannot carry over is still named (`app_catalogue_updated`, `app_catalogue_stale` in `-o json`).
+
 ## [0.30.0] — 2026-10-30 — pushes without a reboot
 
 `lox config push` now applies a config the way Loxone Config does: it restarts only the program, and the Miniserver runs the new config about two seconds later.

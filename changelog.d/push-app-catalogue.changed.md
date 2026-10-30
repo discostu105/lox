@@ -1,1 +1,0 @@
-- **`lox config push`** updates the app catalogue (`LoxAPP3.json`) it uploads: renamed, moved, deleted and hidden controls, and new push buttons and digital virtual inputs with a room and a category, get their entries, and a new `lastModified` makes the app reload. What it cannot carry over is still named (`app_catalogue_updated`, `app_catalogue_stale` in `-o json`).

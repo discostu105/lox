@@ -1,1 +1,0 @@
-- **`lxir::catalogue`**: carries a compile into the app catalogue `LoxAPP3.json` as text edits, with entries for push buttons and digital virtual inputs validated against Loxone Config saves.
