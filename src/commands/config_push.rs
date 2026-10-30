@@ -181,8 +181,8 @@ pub(crate) struct PushReport {
     pub changes: Vec<String>,
     /// Custom changes on the Miniserver that loading the upload deletes
     pub custom_changes_pending: Vec<CustomChange>,
-    /// Controls of the app the push renames, moves or deletes; the uploaded
-    /// app catalogue still describes them as before
+    /// Controls of the app the push renames, moves, deletes, shows or hides;
+    /// the uploaded app catalogue still describes them as before
     pub app_catalogue_stale: Vec<StaleEntry>,
     /// After the push: whether the Miniserver serves a rebuilt catalogue
     /// (`false`: the uploaded one, so the app still shows the old state)
@@ -354,7 +354,8 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let (live_doc, compiled_doc) = (parse(&live_xml)?, parse(&compiled)?);
     if let Some(catalogue) = &catalogue {
         let d = lxir::diff::diff(&live_doc, &compiled_doc);
-        report.app_catalogue_stale = app_catalogue::stale_entries(catalogue, &d);
+        report.app_catalogue_stale =
+            app_catalogue::stale_entries(catalogue, &d, &live_doc, &compiled_doc);
     }
     if !report.app_catalogue_stale.is_empty() {
         let list: String = report
@@ -364,9 +365,14 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
             .collect();
         say(&format!(
             "Note: the push changes controls of the app:{list}\n\
-             The upload carries Loxone Config's app catalogue ({}) from before, which still \
-             shows them as they were. A save from Loxone Config rewrites it.",
-            app_catalogue::MEMBER
+             The upload carries Loxone Config's app catalogue ({}, saved {}) from before, \
+             which still shows them as they were; the Miniserver does not rebuild it. A save \
+             from Loxone Config rewrites it.",
+            app_catalogue::MEMBER,
+            catalogue
+                .as_ref()
+                .and_then(app_catalogue::last_modified)
+                .unwrap_or("unknown")
         ));
     }
 

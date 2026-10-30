@@ -96,10 +96,10 @@ types) contradict each other. Results and methodology:
       oracle- and live-verified. Lifted by decompile/adopt 2026-10-30
       (#170). Open: the `HCL`/sequence settings (`<SeqConf>`).
 - [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
-      `I1*0.5`, every corpus formula with a fraction writes `0,5`.
-      Verify which the Miniserver reads (oracle: does the GUI rewrite or
-      flag it; live: the value) before an agent relies on fractions;
-      integer constants are unaffected.
+      `I1*0.5`, every corpus formula with a fraction writes `0,5`. Live
+      2026-10-30: the Miniserver reads both (`0.5*4` = `0,5*4` = 2).
+      Open: whether the Loxone Config GUI rewrites or flags the point
+      (oracle).
 - [ ] Lint: more than eight Program blocks (`Code1`–`Code16`), which
       lox-cli reports the Miniserver ignores beyond the eighth.
 
