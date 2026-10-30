@@ -30,6 +30,11 @@
 //! (D49), in both scopes, with an extern for every Code Touch that has
 //! any: adopting a config takes its access over unchanged.
 //!
+//! LightController2 moods lift into `moods` sets with a claim per
+//! controller (D58), in both scopes, again with an extern for every
+//! controller that has moods of its own: controllers with the same moods
+//! share one set. A controller with only the stock moods is left alone.
+//!
 //! Match specs for externs prefer stability over readability:
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
@@ -39,8 +44,8 @@ use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::ir::ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
-    BlockDecl, ExternDecl, Item, MatchSpec, Module, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind,
-    RuleDecl, Value, WireDecl,
+    BlockDecl, ExternDecl, Item, MatchSpec, Module, MoodLine, MoodsClaim, MoodsDecl, MoodsItem,
+    PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, Value, WireDecl,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -198,6 +203,12 @@ pub(super) struct Lift {
     /// The `rule` declaration of each Automatic Designer rule whose
     /// payload reads as the documented shapes (D57).
     rule_decls: BTreeMap<usize, RuleDecl>,
+    /// Mood sets lifted from LightController2s (D58), each with the
+    /// bucket it is declared in: the earliest of its controllers'.
+    mood_sets: Vec<(MoodsDecl, Option<usize>)>,
+    /// Each controller with moods of its own: the index of the set it
+    /// claims, or why its moods cannot be written as one.
+    pub(super) mood_claims: BTreeMap<usize, std::result::Result<usize, String>>,
 }
 
 /// One page's (or the periphery's) share of the lifted items, as indexes
@@ -504,6 +515,25 @@ impl Lift {
             liftable_rules.push((i, apc));
         }
 
+        // LightController2s with moods of their own (D58), in both scopes:
+        // the claim needs the controller as an extern — also one excluded
+        // from management, whose moods a claim owns all the same.
+        type Lines = std::result::Result<Vec<MoodLine>, String>;
+        let mut mood_lines: Vec<(usize, Lines)> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type != "LightController2" {
+                continue;
+            }
+            let Some(lines) = doc.element_at(&o.path).and_then(super::moods::lift) else {
+                continue;
+            };
+            if !lifted[i] {
+                lifted[i] = true;
+                externs.push(i);
+            }
+            mood_lines.push((i, lines));
+        }
+
         // Slug assignment: managed first (document order), then externs
         // (seed order, then order of first wire reference), all in one
         // namespace.
@@ -516,6 +546,33 @@ impl Lift {
             let slug = slugs.assign(base.unwrap_or(&o.block_type));
             obj_of_slug.insert(slug.clone(), i);
             slug_of.insert(o.uuid.clone(), slug);
+        }
+        // One set per distinct list of moods, named after the first
+        // controller that has it.
+        let mut mood_sets: Vec<(MoodsDecl, Option<usize>)> = Vec::new();
+        let mut mood_claims: BTreeMap<usize, std::result::Result<usize, String>> = BTreeMap::new();
+        for (i, lines) in mood_lines {
+            let page = page_of.get(&objects[i].uuid).copied();
+            let claim = lines.map(|lines| {
+                if let Some(k) = mood_sets
+                    .iter()
+                    .position(|(set, _)| set.moods().eq(lines.iter()))
+                {
+                    mood_sets[k].1 = mood_sets[k].1.min(page);
+                    return k;
+                }
+                let name = slugs.assign(&format!("{}_moods", slug_of[&objects[i].uuid]));
+                let body = lines.into_iter().map(MoodsItem::Mood).collect();
+                let set = MoodsDecl {
+                    name,
+                    body,
+                    comment: None,
+                    end_comment: None,
+                };
+                mood_sets.push((set, page));
+                mood_sets.len() - 1
+            });
+            mood_claims.insert(i, claim);
         }
 
         // Match specs for every lifted object (managed ones may be needed
@@ -831,6 +888,8 @@ impl Lift {
             rule_notes,
             access_decls,
             rule_decls,
+            mood_sets,
+            mood_claims,
         }
     }
 
@@ -859,6 +918,48 @@ impl Lift {
                 ))),
                 None => {}
             }
+        }
+    }
+
+    /// The mood sets and claims of a bucket's controllers (D58). A
+    /// `self_contained` module declares every set its claims name; in
+    /// one shared namespace each set is declared once, in its home
+    /// bucket.
+    fn push_moods(
+        &self,
+        page: Option<usize>,
+        b: &Bucket,
+        self_contained: bool,
+        items: &mut Vec<Item>,
+    ) {
+        let claims: Vec<(usize, &std::result::Result<usize, String>)> = b
+            .externs
+            .iter()
+            .chain(&b.blocks)
+            .filter_map(|i| Some((*i, self.mood_claims.get(i)?)))
+            .collect();
+        for (k, (set, home)) in self.mood_sets.iter().enumerate() {
+            let wanted = if self_contained {
+                claims
+                    .iter()
+                    .any(|(_, c)| c.as_ref().is_ok_and(|ck| *ck == k))
+            } else {
+                *home == page
+            };
+            if wanted {
+                items.push(Item::Moods(set.clone()));
+            }
+        }
+        for (i, claim) in claims {
+            let slug = self.slug_of[&self.objects[i].uuid].clone();
+            items.push(match claim {
+                Ok(k) => Item::MoodsClaim(MoodsClaim {
+                    slug,
+                    moods: self.mood_sets[*k].0.name.clone(),
+                    comment: None,
+                }),
+                Err(why) => Item::Comment(format!(" moods {slug}: not lifted — {why}")),
+            });
         }
     }
 
@@ -925,6 +1026,7 @@ impl Lift {
         }
         self.push_access(&b.externs, &mut items);
         self.push_rules(&b.externs, &mut items);
+        self.push_moods(page, b, false, &mut items);
         items
     }
 
@@ -1043,6 +1145,7 @@ impl Lift {
             }
             self.push_access(&b.externs, &mut items);
             self.push_rules(&b.externs, &mut items);
+            self.push_moods(page, &b, true, &mut items);
 
             let module = Module { items };
             module.validate()?;

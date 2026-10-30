@@ -17,14 +17,18 @@
 //! no-op, byte for byte. The lock pins the UUID of each mood the compiler
 //! minted until a base carries it ([`crate::lock::Lockfile::moods`]).
 //!
+//! Decompile and adopt read it the other way round ([`lift`]): a
+//! controller's own moods become the lines of a set, which compile back
+//! to the same bytes.
+//!
 //! A controller without moods — one minted from source, before any
 //! Loxone Config save — first gets what that save would write: the stock
 //! moods "Viel Licht" and "Aus" and their behaviour defaults ([`seed`]).
 
-use super::ast::{Module, MoodLine, MoodsDecl};
+use super::ast::{Module, MoodLine, MoodSetting, MoodsDecl};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
-use crate::moods::{MoodValue, Moods, OFF_SID, encode};
+use crate::moods::{MoodValue, Moods, OFF_SID, encode, settings};
 use crate::uuid::Minter;
 use crate::xml::{Element, Node};
 use std::collections::{BTreeMap, BTreeSet};
@@ -328,10 +332,17 @@ fn rewrite(
         }
         moods.push(m);
     }
-    // The off mood keeps its place: first stays first, anywhere else
-    // goes last — where Loxone Config puts it.
+    // The off mood keeps its place: first stays first, last stays last
+    // (new moods go before it, where Loxone Config puts them), anywhere
+    // else keeps its index.
     if let Some(pos) = old.iter().position(is_off) {
-        let at = if pos == 0 { 0 } else { moods.len() };
+        let at = if pos == 0 {
+            0
+        } else if pos + 1 == old.len() {
+            moods.len()
+        } else {
+            pos.min(moods.len())
+        };
         moods.insert(at, old[pos].clone());
     }
     scenes.set_attr("Num", &moods.len().to_string());
@@ -345,4 +356,54 @@ fn rewrite(
 
 fn name_of(e: &Element) -> String {
     e.attr_decoded("Name").unwrap_or_default().into_owned()
+}
+
+/// A controller's moods as the lines of a `moods` set — the decompile
+/// and adopt side of a claim: every mood but the off mood, in order,
+/// each circuit in source terms. Compiled back as a claim onto the same
+/// controller it is a no-op, byte for byte. `None` when there is nothing
+/// for source to own: no moods, or only the stock "Viel Licht" a first
+/// Loxone Config save writes ([`seed`]). `Err` names what keeps the moods
+/// from being written as a set; they stay with Loxone Config.
+pub(super) fn lift(el: &Element) -> Option<std::result::Result<Vec<MoodLine>, String>> {
+    let have = Moods::read(el)?;
+    let moods: Vec<_> = have.moods.iter().filter(|m| !m.is_off()).collect();
+    if let [m] = moods[..]
+        && m.name == "Viel Licht"
+        && m.sid.as_deref() == Some("777")
+        && m.qs.iter().all(|&q| q == 1)
+    {
+        return None;
+    }
+    let lines = || {
+        have.prefixes()?;
+        let off = have.moods.iter().find(|m| m.is_off());
+        let mut names: BTreeSet<&str> = BTreeSet::new();
+        moods
+            .iter()
+            .map(|m| {
+                if m.name.is_empty() {
+                    return Err("a mood without a name".to_string());
+                }
+                if !names.insert(&m.name) || off.is_some_and(|o| o.name == m.name) {
+                    return Err(format!("two moods named \"{}\"", m.name));
+                }
+                let settings = settings(&m.qs)
+                    .into_iter()
+                    .map(|(circuit, value)| {
+                        let circuit = circuit.map(u8::try_from).transpose().map_err(|_| {
+                            format!("{} circuits — more than source can name", have.outputs)
+                        })?;
+                        Ok(MoodSetting { circuit, value })
+                    })
+                    .collect::<std::result::Result<_, String>>()?;
+                Ok(MoodLine {
+                    name: m.name.clone(),
+                    settings,
+                    comment: None,
+                })
+            })
+            .collect()
+    };
+    Some(lines())
 }

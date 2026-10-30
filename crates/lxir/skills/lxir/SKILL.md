@@ -74,7 +74,8 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   per circuit kind), `<controller>.moods = <set>` writes them onto a
   LightController2. Claim it in a room template to give every room the
   same moods; wire switch buttons to `Sel1`…`Sel8` to select them. The
-  off mood "Aus" is implicit.
+  off mood "Aus" is implicit. `lxir adopt` lifts existing moods into
+  sets (`<slug>_moods`), so start from those rather than retyping them.
 - To take over logic someone drew in the GUI, use `lxir adopt`, then
   confirm with `lxir diff --exit-code` that the takeover changed nothing.
   The decompile view is for reading and does not compile.

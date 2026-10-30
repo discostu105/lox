@@ -196,6 +196,7 @@ pub fn adopt_one(
         .chain(raw.items.iter().filter_map(|i| match i {
             Item::Template(t) => Some(t.name.clone()),
             Item::Instance(b) => Some(b.slug.clone()),
+            Item::Moods(m) => Some(m.name.clone()),
             _ => None,
         }))
         .chain(lock.objects.keys().cloned())
@@ -237,10 +238,20 @@ pub fn adopt_one(
     let lift_slug = |i: usize| lift.slug_of[&lift.objects[i].uuid].clone();
     let mut rename: BTreeMap<String, String> = BTreeMap::new();
     rename.insert(lift_slug(ti), slug.to_string());
+    // A controller the lift declared only for its moods is not this
+    // block's business: adopting one block appends no mood claims.
+    let mut used: BTreeSet<&str> = lift.block_decls[&ti]
+        .input_wires()
+        .map(|(_, src)| src.slug.as_str())
+        .collect();
+    used.extend(lift.wires.iter().map(|(w, _, _)| w.to.slug.as_str()));
     let mut new_externs: Vec<(usize, String)> = Vec::new();
     for &i in &lift.externs {
         let u = &lift.objects[i].uuid;
         let ls = lift_slug(i);
+        if lift.mood_claims.contains_key(&i) && !used.contains(ls.as_str()) {
+            continue;
+        }
         let existing = lock
             .objects
             .iter()

@@ -3975,3 +3975,128 @@ fn a_template_gives_every_room_its_moods() {
     assert_eq!(order("wohnen_lc"), "\"Viel Licht\", \"Lesen\", \"Aus\"");
     assert_eq!(order("kochen_lc"), "\"Viel Licht\", \"Kochen\", \"Aus\"");
 }
+
+/// [`mood_base`] with a second controller, "Licht Zwei", that has the
+/// same moods.
+fn two_controller_mood_base() -> LoxoneDoc {
+    let base = String::from_utf8(mood_base().to_bytes()).unwrap();
+    let start = base.find("\t\t\t<C Type=\"LightController2\"").unwrap();
+    let end = base[start..].find("\t\t\t</C>\r\n").unwrap() + start + "\t\t\t</C>\r\n".len();
+    let twin = base[start..end]
+        .replace("00000040-", "00000041-")
+        .replace("Licht Test", "Licht Zwei")
+        .replace("Py=\"100\"", "Py=\"300\"")
+        .replace("Py2=\"136\"", "Py2=\"336\"");
+    LoxoneDoc::parse(format!("{}{twin}{}", &base[..end], &base[end..]).as_bytes()).unwrap()
+}
+
+#[test]
+fn existing_moods_lift_into_a_set_and_compile_back_unchanged() {
+    // #170: decompile and adopt write a controller's own moods as a set
+    // and a claim; adopted and compiled, the config is byte-identical.
+    let set = "\t\"Viel Licht\": all on, AQ2 rgb(100, 100, 100), AQ3 temp(100%, 6500K)\n\
+               \t\"Lesen\": AQ1 on, AQ3 temp(80%, 2700K)\n\
+               \t\"Kino\": AQ2 rgb(0, 0, 20)\n\
+               \t\"Roh\": AQ3 1700000000\n";
+    let base = compile_moods(set).unwrap();
+    let (view, _) = decompile(&base, &DecompileOptions::default()).unwrap();
+    let text = view.to_text();
+    // One circuit of three is on: no `all` to factor out.
+    let lifted = set.replace("all on, AQ2", "AQ1 on, AQ2");
+    assert!(
+        text.contains(&format!("moods licht_test_moods\n{lifted}end\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains("licht_test.moods = licht_test_moods\n"),
+        "{text}"
+    );
+
+    let (module, mut lock, report) = adopt(&base).unwrap();
+    assert_eq!(module.moods_claims().count(), 1, "{report:?}");
+    let out = compile(&base, &module, &mut lock, &mood_opts()).unwrap();
+    assert!(
+        out.to_bytes() == base.to_bytes(),
+        "adopt + compile is a no-op"
+    );
+    assert!(lock.moods.is_empty(), "nothing minted");
+}
+
+#[test]
+fn only_controllers_with_their_own_moods_are_lifted() {
+    // The stock "Viel Licht" (every circuit on) is what a first save
+    // writes — nothing for source to own.
+    let stock = String::from_utf8(mood_base().to_bytes())
+        .unwrap()
+        .replace("Q2=\"1173841924\" Q3=\"1811619236\"", "Q2=\"1\" Q3=\"1\"")
+        .replace("Q2=\"1073741824\" Q3=\"1610612736\"", "Q2=\"0\" Q3=\"0\"");
+    let stock = LoxoneDoc::parse(stock.as_bytes()).unwrap();
+    let (view, _) = decompile(&stock, &DecompileOptions::default()).unwrap();
+    assert_eq!(view.mood_sets().count(), 0, "{}", view.to_text());
+
+    // Two controllers with the same moods share one set.
+    let twins = two_controller_mood_base();
+    let (view, _) = decompile(&twins, &DecompileOptions::default()).unwrap();
+    let sets: Vec<_> = view.mood_sets().map(|s| s.name.as_str()).collect();
+    assert_eq!(sets, ["licht_test_moods"]);
+    let claims: Vec<String> = view.moods_claims().map(|c| c.to_string()).collect();
+    assert_eq!(
+        claims,
+        [
+            "licht_test.moods = licht_test_moods",
+            "licht_zwei.moods = licht_test_moods"
+        ]
+    );
+    let (pages, _) = decompile_pages(&twins, &DecompileOptions::default()).unwrap();
+    assert_eq!(pages[0].module.mood_sets().count(), 1);
+
+    // Moods source cannot write stay with Loxone Config, said in a comment.
+    let dup = String::from_utf8(mood_base().to_bytes())
+        .unwrap()
+        .replace("Name=\"Aus\"", "Name=\"Viel Licht\"");
+    let (view, _) = decompile(
+        &LoxoneDoc::parse(dup.as_bytes()).unwrap(),
+        &DecompileOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(view.moods_claims().count(), 0);
+    assert!(
+        view.to_text()
+            .contains("# moods licht_test: not lifted — two moods named \"Viel Licht\""),
+        "{}",
+        view.to_text()
+    );
+}
+
+#[test]
+fn the_off_mood_keeps_its_place_in_the_list() {
+    // Loxone Config may keep "Aus" between moods; a rewrite leaves it there.
+    let base = String::from_utf8(mood_base().to_bytes()).unwrap().replace(
+        "\t\t\t\t</LightscenesC>",
+        "\t\t\t\t\t<LightsceneC Name=\"Kino\" UUID=\"00000040-0000-0012-ffff000000000001\" \
+         Outputs=\"3\" SID=\"1\" CID=\"12\" Q1=\"1\" Q2=\"1073741824\" Q3=\"1610612736\"/>\r\n\
+         \t\t\t\t</LightscenesC>",
+    );
+    let base = base.replace("Num=\"2\"", "Num=\"3\"");
+    let src = "extern licht = LightController2(title: \"Licht Test\")\n\
+               moods abend\n\t\"Kino\": AQ1 on\n\t\"Viel Licht\": all on\nend\n\
+               licht.moods = abend\n";
+    let out = compile(
+        &LoxoneDoc::parse(base.as_bytes()).unwrap(),
+        &Module::parse(src).unwrap(),
+        &mut Lockfile::new(),
+        &mood_opts(),
+    )
+    .unwrap();
+    let names: Vec<String> = moods_of(&out)
+        .iter()
+        .map(|m| {
+            m.split(" SID")
+                .next()
+                .unwrap()
+                .replace(" Move=true", "")
+                .replace(" ReadOnly=true", "")
+        })
+        .collect();
+    assert_eq!(names, ["Name=Kino", "Name=Aus", "Name=Viel Licht"]);
+}

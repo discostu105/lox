@@ -1,0 +1,3 @@
+- **`lxir adopt` and `lxir decompile`** now turn a config's existing lighting moods into source: a `moods` set and a claim per controller, so taking over a house no longer means typing every mood by hand (#170)
+  - Controllers with the same moods share one set, ready to move into a room template
+  - Adopted and compiled again, the config stays byte-identical; a controller with only the stock "Viel Licht" is left alone

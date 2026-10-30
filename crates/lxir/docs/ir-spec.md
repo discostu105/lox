@@ -1004,7 +1004,8 @@ Config's *Lichtkreise*):
 
 The claim writes the controller's moods in the set's order, plus its
 off mood ("Aus"), which every controller keeps, source never lists, and
-which stays where it is (first or last). A mood keeps its identity by
+which stays where it is (first stays first, last stays last with new
+moods before it, anywhere else keeps its index). A mood keeps its identity by
 **name**: one the controller already has keeps its UUID, scene id and
 flags and only gets the set's values, so the buttons and the app keep
 addressing it; a new one gets the next free scene id, the way Loxone
@@ -1025,6 +1026,18 @@ allowed in a template body, so a room template can give every room the
 same moods: `<lc>.moods = <param>` with a string value parameter
 naming the set (`template raum(stimmungen = "standard")`, called as
 `raum(stimmungen: "kueche")`).
+
+`lxir decompile` and `lxir adopt` lift a controller's own moods into a
+set and a claim (#170), with every such controller as an extern;
+controllers with the same moods share one set, named after the first
+(`<slug>_moods`). A controller with only the stock "Viel Licht" (every
+circuit on) is left out — there is nothing to own — and one whose moods
+cannot be written as a set (two moods of the same name) keeps them in
+Loxone Config, with a `# moods <slug>: not lifted — …` comment saying
+why. Each mood is written the way it compiles back exactly: `all <v>`
+for the value more than half the circuits share, then the circuits that
+differ. Adopted and compiled, a config comes back byte-identical.
+`lxir adopt --uuid` (one block) appends no mood claims.
 
 `lxir diff` compares the moods of every LightController2, claimed or
 not, one change per mood in these terms (`LightController2 "Licht"

@@ -93,8 +93,8 @@ types) contradict each other. Results and methodology:
 - [x] LightController2 moods from source (2026-10-30, D58): `moods`
       sets claimed onto controllers (also from templates), values per
       circuit kind, minted controllers seeded with the stock moods,
-      oracle- and live-verified. Open: lifting existing moods in
-      decompile/adopt; the `HCL`/sequence settings (`<SeqConf>`).
+      oracle- and live-verified. Lifted by decompile/adopt 2026-10-30
+      (#170). Open: the `HCL`/sequence settings (`<SeqConf>`).
 - [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
       `I1*0.5`, every corpus formula with a fraction writes `0,5`.
       Verify which the Miniserver reads (oracle: does the GUI rewrite or

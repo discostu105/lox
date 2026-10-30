@@ -1807,7 +1807,17 @@ Anything unverified is an error, not a heuristic:
   - **Semantics.** Diff and fingerprint (v7) carry every controller's
     moods as rendered source values; drift accepts a lock's v6
     fingerprint.
-  Not lifted by decompile/adopt yet (moods stay GUI content until
-  declared). Validated: oracle sessions 21–22 (Loxone Config 17.2.8.28
+  - **Lift** (2026-10-30, #170). Decompile and adopt write every
+    controller's own moods as a set (one per distinct mood list, shared
+    by name of the first controller) plus a claim, pulling the
+    controller in as an extern — also one adopt refuses to manage, whose
+    moods a claim owns all the same. The stock "Viel Licht" alone is not
+    lifted. Rendering factors the majority value (`all on, AQ3 off`) and
+    compiles back to the same `Q` values; adopt + compile is
+    byte-identical (house config: 9 controllers; corpus: 20 controllers
+    in 9 configs, each also surviving a reorder-and-restore). Lifting
+    showed the off mood is not always first or last (4 of 22 corpus
+    controllers keep it in the middle), so a rewrite now keeps its index.
+  Validated: oracle sessions 21–22 (Loxone Config 17.2.8.28
   keeps minted and seeded moods byte-identical) and live on the house
   Miniserver.
