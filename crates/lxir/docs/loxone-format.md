@@ -355,8 +355,8 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   projection, canonicalized as parsed JSON per the point above), and
   rendered as comment lines in the decompile full view. Since D57 a
   `rule` declaration edits the rules of the documented shapes (time,
-  weekday; actions with an observed `descID`); lxir never creates or
-  deletes one.
+  weekday; actions with an observed `descID`); since D60 a named one
+  creates a rule the config lacks (below), and lxir never deletes one.
 - **Activation is two flags** (live, 2026-10-30): the engine runs a
   rule only with `"active": true` *and* `"activeIfValid": true`. Rules
   with `active` alone (the house's for three months, and compiled
@@ -376,6 +376,18 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   compact) with `STA="1"` right after `APC=` was accepted by the
   Miniserver and came back byte-identical in the verifying download. Weekday indices count from Monday = 0 (`arrValues`
   `[3, 4]` = Thursday, Friday).
+- **A rule created outside the app** (D60, oracle session 24,
+  2026-10-30): an element shaped like the house's rules — `V`, `Cl`,
+  `Nio="7"`, `WF` and `ref=` copied from an existing rule, the seven
+  connectors minted right before the rule (port UUIDs = the rule's
+  counter − 7 + index, index byte in segment 4, as 5/5 house rules
+  show), `<IoData></IoData>`, placed in the column below the last rule
+  (the house's gap: 168 between `Py2` and the next `Py`, four of five)
+  and a payload in the app's key order with `id` = its UUID and
+  `name` = `Title` — survives a Loxone Config open+save byte-identically
+  but for `WF=`, which the save drops from **every** rule (the five
+  Miniserver-written ones too), and the semantic diff is empty.
+  A Miniserver run of such a rule is not yet verified.
 
 ## Touch Pure Flex tiles: `<btns>` on a `TreeDevice`
 

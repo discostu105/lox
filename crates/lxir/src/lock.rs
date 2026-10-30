@@ -33,11 +33,11 @@ use std::path::Path;
 /// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
 /// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
 /// (D42); v5 the pages the compiler created (`pages`, D56); v6 the light
-/// moods it minted (`moods`, D58). Older locks load fine (the maps default to empty); saving always
+/// moods it minted (`moods`, D58); v7 the named rules (`rules`, D60). Older locks load fine (the maps default to empty); saving always
 /// writes the current version, so an old binary — whose version check
 /// refuses the newer number — can never silently drop state it does not
 /// know about.
-pub const LOCKFILE_VERSION: u32 = 6;
+pub const LOCKFILE_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -105,6 +105,12 @@ pub struct Lockfile {
     /// its identity.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moods: BTreeMap<String, BTreeMap<String, String>>,
+    /// Named Automatic Designer rules (D60: `rule <slug> "Name"`), slug →
+    /// rule UUID — found by name in the base or created by the compiler.
+    /// A base without the rule gets it again under the same UUID; the
+    /// source owns its name. An entry lives as long as its declaration.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rules: BTreeMap<String, String>,
 }
 
 /// One attribute claim (D39). Values are decoded: a title as text, a room

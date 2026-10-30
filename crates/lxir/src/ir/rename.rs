@@ -27,6 +27,8 @@ use crate::lock::Lockfile;
 pub enum RekeyKind {
     Object,
     Extern,
+    /// A named rule (D60, `rule <slug> "Name"`).
+    Rule,
 }
 
 /// One lockfile key move implied by a rename: `(old, new, kind)`.
@@ -374,6 +376,7 @@ pub fn lock_rekeys(old_module: &Module, new_module: &Module) -> Result<Vec<Rekey
             .filter_map(|i| match i {
                 Item::Block(b) => Some((RekeyKind::Object, b.slug.clone())),
                 Item::Extern(e) => Some((RekeyKind::Extern, e.slug.clone())),
+                Item::Rule(r) if r.title.is_some() => Some((RekeyKind::Rule, r.slug.clone())),
                 _ => None,
             })
             .collect())
@@ -415,6 +418,17 @@ pub fn apply_rekeys(lock: &mut Lockfile, rekeys: &[Rekey]) -> Result<usize> {
                         )));
                     }
                     lock.externals.insert(new.clone(), entry);
+                    moved += 1;
+                }
+            }
+            RekeyKind::Rule => {
+                if let Some(uuid) = lock.rules.remove(old.as_str()) {
+                    if lock.rules.contains_key(new.as_str()) {
+                        return Err(Error::Lock(format!(
+                            "rule slug `{new}` already exists in lock"
+                        )));
+                    }
+                    lock.rules.insert(new.clone(), uuid);
                     moved += 1;
                 }
             }

@@ -564,6 +564,24 @@ semantic diff was empty. Only `Py2` (block height) and `WF` changed,
 both known. With the live check of the same day (the Miniserver
 evaluates either separator) the point is settled.
 
+## Automatic Designer rules (session 24, D57/D60) — passed
+
+Ran 2026-10-30 against copies of the house config (Loxone Config
+17.2.8.28). First the round trip, the old roadmap question: an
+open+save of the base kept all five rules' `APC=` byte-identical — key
+order, compact spelling and the two raw CRLFs inside the JSON
+included. Then the probe: a compile adding a named rule (`rule
+regel_probe "lxir Probe-Regel"`: a weekday sentinel event, a time event,
+`off` to a PushButton) below the five on the special page.
+
+- **Pass:** the created rule came back byte-identical — payload,
+  position, colour, the seven connectors and `ref=` — except `WF=`,
+  which the save drops from all six rules alike (view state, as on page
+  blocks). The semantic diff was empty; NextObj rose by the usual two,
+  `NumO=` was recounted and `TId=` stamps appeared as on every save.
+- A recompile against the saved file created nothing (six rules), left
+  the lock's `rules` entry as it was, and diffed empty against it.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

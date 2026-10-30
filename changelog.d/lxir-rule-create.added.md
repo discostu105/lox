@@ -1,0 +1,4 @@
+- **lxir `rule <slug> "Name"`**: create Automatic Designer rules from source. A named rule is the config's rule of that name, or a new one the compile adds below the existing rules, inactive until its body says `active`
+  - The same body as for existing rules (`active`/`inactive`, `when time`, `when weekday`, `then <block> "<command>"`); changing the name in source renames the rule
+  - The lock pins the rule's UUID (lockfile v7), so compiles before the push are a fixpoint and `lxir rename` keeps the rule
+  - Checked with Loxone Config: it keeps a created rule on open and save. The config needs at least one rule made in the app first

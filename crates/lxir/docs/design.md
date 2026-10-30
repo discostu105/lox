@@ -1755,8 +1755,8 @@ Anything unverified is an error, not a heuristic:
     reads as active only with both. `STA="1"` follows: set right after
     `APC=`, removed when inactive (10/10 corpus rules, the app's save).
   - **No creation, no deletion.** The rule block, its name, its
-    `ref=` and its position stay the app's; a declaration addresses an
-    existing rule by extern, and removing it releases the rule
+    `ref=` and its position stay the app's (creation came with D60); a
+    declaration addresses an existing rule by extern, and removing it releases the rule
     unchanged (no lock state, like D41/D53 claims). Rules whose payload
     has any other shape (control-state conditions, operating modes, OR
     groups, several event groups) are neither lifted nor writable — the
@@ -1844,3 +1844,29 @@ Anything unverified is an error, not a heuristic:
     so hover still shows the base object while the text does not parse.
   Validated: protocol tests (`tests/lsp.rs`), Neovim 0.12 and VS Code
   (headless, through the bundled client).
+- **D60 — Creating Automatic Designer rules** (2026-10-30). D57 left
+  creation to the app; the oracle now answers the question it waited on
+  (session 24: Loxone Config keeps a compiler-created rule). `rule
+  <slug> "Name"` declares a rule by name, with the D57 body.
+  - **Name finds, lock keeps.** The compile takes the base's one rule
+    of that name (two of one name are refused) and pins its UUID in the
+    lock (v7 `rules`, slug → UUID), like pages (D56): a base without
+    the UUID gets the rule again under it, and from then on the source
+    owns the name — changing it rewrites `Title=` and the payload's
+    `name` instead of creating a second rule. Keyed by slug, not name,
+    so that a rename in source is a rename; `lxir rename` rekeys it.
+  - **Built from the base's own rules.** A new rule copies `V`, `Cl`,
+    `Nio`, `WF` and `ref=` (the `AutoPilot` container) from the
+    document's last rule, goes on that rule's page below the page's
+    rules (gap 168, the house's), and mints its seven connectors right
+    before itself, as the Miniserver does, so their UUIDs follow from
+    the rule's. It starts inactive and empty; the D57 edit then writes
+    the body, so a created rule takes the same evidence rules (action
+    `descID`s) as an edited one. A config with no rule is refused:
+    where rules live (a special page, logic pages) is the app's choice,
+    and one rule made in the app settles it.
+  - **No deletion.** Removing the declaration drops the lock entry and
+    leaves the rule; a slug already declared otherwise, or a named rule
+    that some `rule <extern>` also declares, is refused.
+  Validated: oracle session 24 (byte-identical but for `WF=`, which the
+  save drops from every rule). Not yet run live on a Miniserver.
