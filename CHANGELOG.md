@@ -10,6 +10,13 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-10-30 — pushes without a reboot
+
+`lox config push` now applies a config the way Loxone Config does: it restarts only the program, and the Miniserver runs the new config about two seconds later.
+
+### Changed
+- **`lox config push`**: applies the upload in seconds without rebooting the Miniserver. Like Loxone Config's save, it restarts only the program, which loads the new config and keeps remanent values. A push now takes a few seconds instead of over a minute. `--reboot` restarts the whole Miniserver as before
+
 ## [0.29.0] — 2026-10-30
 
 ### Added

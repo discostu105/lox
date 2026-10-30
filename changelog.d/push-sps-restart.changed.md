@@ -1,1 +1,0 @@
-- **`lox config push`**: applies the upload in seconds without rebooting the Miniserver. Like Loxone Config's save, it restarts only the program, which loads the new config and keeps remanent values. A push now takes a few seconds instead of over a minute. `--reboot` restarts the whole Miniserver as before
