@@ -704,10 +704,12 @@ to the program's `Date=`; and two pushes to the same Miniserver
   neither room nor category (1), the weather server, the device monitor,
   a `TreeActor`, `MeterAbsBi` blocks are not.
 - **Entries by block type.** Key order `name, type, uuidAction, room,
-  cat, defaultRating (0), isFavorite, isSecured (false), defaultIcon,
-  restrictions (0), details, states`. `defaultIcon` is `null` without
-  `IconV=`; with one it is a file name (`IconsFilled/login-key.svg`)
-  the program does not carry.
+  cat, defaultRating (0), isFavorite, isSecured (false),
+  [hasControlNotes], defaultIcon, restrictions (0), details, states,
+  [statistic]`. `hasControlNotes` (`true`) is there when the object has
+  notes (`NTXT=`, one object; the documentation `NDOC=` adds nothing).
+  `defaultIcon` is `null` without `IconV=`; with one it is a file name
+  (`IconsFilled/login-key.svg`) the program does not carry.
   - `PButtonT` → `Pushbutton`, details `{"jLockable":true}`, states
     `jLocked` (the `Reset` connector with the top bit of its first byte
     set: `1de6…` → `9de6…`), `active` (`Q`).
@@ -719,15 +721,48 @@ to the program's `Date=`; and two pushes to the same Miniserver
     `Aus`/`Ein`, colours `#FF0054`/`#8DFF70`), else `Switch` (details
     `{"jLockable":false,"type":71}`); states `active`: the input's own
     UUID.
-  Hiding these 19 objects per save and showing them again gives back
-  Loxone Config's entries byte for byte, but for the one with an icon
+  - `Memory`, `DigitalIn`, `LoxAIRsensor`, `LoxAIRactor` with a
+    `<Display StateOnly="true">` (no attributes beyond `Type`, `Unit`,
+    `StateOnly`) → `InfoOnlyDigital`, details and `active` as the
+    virtual input's.
+  - `TreeAsensor`, `LoxAIRAsensor`, `Lox1wireAsensor`, `ModbusASensor`,
+    `ModbusAActor`, likewise → `InfoOnlyAnalog`, details
+    `{"jLockable":false,"format":F}`: the display unit with `<v>` as
+    `%.0f`, `<v.N>` as `%.Nf` and `%` doubled (`<v>%` → `%.0f%%`,
+    `<v.1> °C` → `%.1f °C`); states `value` (the object's UUID) and
+    `error`: the `Qe` connector, or `Q` beside `AQ` (none on the
+    actor).
+  - `statistic`, after `states`, when the object has `StatsType=`:
+    `{"frequency":1,"outputs":[{"id":0,"name":N,"uuid":U,"visuType":1}]}`
+    for an `InfoOnlyDigital` with `StatsType="7"`, and
+    `{"frequency":11,"outputs":[{"id":0,"name":N,"format":F,"uuid":U,"visuType":0}]}`
+    for an `InfoOnlyAnalog` with `StatsType="11"` (`F` with `%` as it
+    is); `N` the entry's name, `U` the first `<Co>`. No other
+    `StatsType` was seen.
+  - `PulseAt` → `PulseAt`, details
+    `{"jLockable":true,"pulseDurationLocked":false}`, states `jLocked`
+    (the `InputDisable` connector, top bit set), `isActive` (`Q`),
+    `pulseDuration` (`Time`), `startTime`, `oneTimePulseDate`, `type`
+    (the three `SpStates=` UUIDs in order).
+  - `DayTimer` with `On=""`, `Off=""` and no `Analog=` → `Daytimer`,
+    details `{"jLockable":true,"analog":false,"text":{"on":"Aktiv","off":"Inaktiv"}}`,
+    states `jLocked` (`Reset`, top bit set), `mode` (`AQm`), `override`
+    (`AQmt`), `value` (`AQ`), `needsActivation` and `modeList` (the two
+    `SpStates=`), `entriesAndDefaultValue` (the object's UUID),
+    `resetActive` (`Reset`).
+  Hiding these objects per save (67) and showing them again gives back
+  Loxone Config's entries byte for byte, but for the two with an icon
   (`LXIR_CATALOGUE_CORPUS=<dir> cargo test -p lxir --test catalogue`).
+  The corpus holds catalogues Loxone Config wrote; a catalogue from an
+  older push is stale against its program and no evidence.
 - **The app reloads on `lastModified`.** A push that renamed a virtual
   input and set `lastModified` to the push time (2026-10-30): the
   Miniserver served the new name, and `LoxAPPversion3` answered the new
   time. `permissions.bin` follows the catalogue's control order (above).
 - **Unknown:** the entries of the other block types (taken over as they
-  are), whether Loxone Config drops an entry when the room is removed,
+  are: light controllers, shading, meters, the energy flow monitor,
+  intercom, alarms, irrigation, room controllers), analog day timers,
+  display texts of an object's own, other `StatsType` values, whether Loxone Config drops an entry when the room is removed,
   and where it puts a new entry (lxir appends it).
 
 ## UUID anatomy

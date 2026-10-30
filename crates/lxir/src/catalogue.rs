@@ -307,7 +307,7 @@ fn trusted_types(
             continue;
         };
         let same = match (object(&json, 0), object(body, e.value.start)) {
-            (Ok((ours, _)), Ok((theirs, _))) => ["type", "details", "states"].iter().all(|k| {
+            (Ok((ours, _)), Ok((theirs, _))) => SELF_CHECKED.iter().all(|k| {
                 let a = ours
                     .iter()
                     .find(|m| m.key == *k)
@@ -332,7 +332,41 @@ fn trusted_types(
 }
 
 /// The block types [`entry`] knows.
-const KNOWN: [&str; 3] = ["PButtonT", "PushButton", "VirtualIn"];
+pub const KNOWN: [&str; 14] = [
+    "PButtonT",
+    "PushButton",
+    "VirtualIn",
+    "Memory",
+    "DigitalIn",
+    "LoxAIRsensor",
+    "TreeAsensor",
+    "LoxAIRAsensor",
+    "Lox1wireAsensor",
+    "ModbusASensor",
+    "ModbusAActor",
+    "PulseAt",
+    "DayTimer",
+    "LoxAIRactor",
+];
+
+/// The members of an entry the self-check compares (the rest come from
+/// [`view`]).
+const SELF_CHECKED: [&str; 4] = ["type", "details", "states", "statistic"];
+
+/// Objects shown as a digital info display (`InfoOnlyDigital`): their
+/// state is their own UUID.
+const INFO_DIGITAL: [&str; 4] = ["Memory", "DigitalIn", "LoxAIRsensor", "LoxAIRactor"];
+
+/// Objects shown as an analog info display (`InfoOnlyAnalog`).
+const INFO_ANALOG: [&str; 5] = [
+    "TreeAsensor",
+    "LoxAIRAsensor",
+    "Lox1wireAsensor",
+    "ModbusASensor",
+    "ModbusAActor",
+];
+
+const ON_OFF: &str = r##"{"jLockable":false,"text":{"off":"Aus","on":"Ein"},"color":{"off":"#FF0054","on":"#8DFF70"}}"##;
 
 /// The catalogue entry Loxone Config writes for `el`, compact, in its key
 /// order; `None` for a type (or variant) whose entry is not known, and for
@@ -381,7 +415,7 @@ fn entry(el: &Element) -> Option<String> {
         "VirtualIn" if el.attr("Analog") == Some("false") => {
             let info = display.is_some_and(|d| d.attr("StateOnly") == Some("true"));
             let details = if info {
-                r##"{"jLockable":false,"text":{"off":"Aus","on":"Ein"},"color":{"off":"#FF0054","on":"#8DFF70"}}"##
+                ON_OFF
             } else {
                 r#"{"jLockable":false,"type":71}"#
             };
@@ -391,16 +425,154 @@ fn entry(el: &Element) -> Option<String> {
                 format!(r#"{{"active":{}}}"#, json_str(uuid)),
             )
         }
+        t if INFO_DIGITAL.contains(&t) && state_only(display) => (
+            "InfoOnlyDigital",
+            ON_OFF.to_string(),
+            format!(r#"{{"active":{}}}"#, json_str(uuid)),
+        ),
+        t if INFO_ANALOG.contains(&t) && state_only(display) => {
+            let (format, _) = value_format(&display?.attr_decoded("Unit")?)?;
+            // The error output: `Qe`, or `Q` beside the value `AQ`.
+            let error = co("Qe").or_else(|| co("AQ").and(co("Q")));
+            (
+                "InfoOnlyAnalog",
+                format!(r#"{{"jLockable":false,"format":{}}}"#, json_str(&format)),
+                match error {
+                    Some(e) => {
+                        format!(r#"{{"value":{},"error":{}}}"#, json_str(uuid), json_str(&e))
+                    }
+                    None => format!(r#"{{"value":{}}}"#, json_str(uuid)),
+                },
+            )
+        }
+        // The pulse at a time of day: locked by its disable input; start
+        // time, one-time date and type are its special states.
+        "PulseAt" => {
+            let sp: Vec<&str> = el.attr("SpStates")?.split(',').collect();
+            let [start, date, kind] = sp[..] else {
+                return None;
+            };
+            (
+                "PulseAt",
+                r#"{"jLockable":true,"pulseDurationLocked":false}"#.to_string(),
+                format!(
+                    r#"{{"jLocked":{},"isActive":{},"pulseDuration":{},"startTime":{},"oneTimePulseDate":{},"type":{}}}"#,
+                    json_str(&locked(&co("InputDisable")?)?),
+                    json_str(&co("Q")?),
+                    json_str(&co("Time")?),
+                    json_str(start),
+                    json_str(date),
+                    json_str(kind),
+                ),
+            )
+        }
+        // A digital day timer with the default texts.
+        "DayTimer"
+            if el.attr("Analog").is_none()
+                && el.attr("On") == Some("")
+                && el.attr("Off") == Some("") =>
+        {
+            let sp: Vec<&str> = el.attr("SpStates")?.split(',').collect();
+            let [needs_activation, modes] = sp[..] else {
+                return None;
+            };
+            let reset = co("Reset")?;
+            (
+                "Daytimer",
+                r#"{"jLockable":true,"analog":false,"text":{"on":"Aktiv","off":"Inaktiv"}}"#
+                    .to_string(),
+                format!(
+                    r#"{{"jLocked":{},"mode":{},"override":{},"value":{},"needsActivation":{},"modeList":{},"entriesAndDefaultValue":{},"resetActive":{}}}"#,
+                    json_str(&locked(&reset)?),
+                    json_str(&co("AQm")?),
+                    json_str(&co("AQmt")?),
+                    json_str(&co("AQ")?),
+                    json_str(needs_activation),
+                    json_str(modes),
+                    json_str(uuid),
+                    json_str(&reset),
+                ),
+            )
+        }
         _ => return None,
     };
     let v = view(el);
+    let statistic = match el.attr("StatsType") {
+        None => String::new(),
+        Some(stats) => {
+            // The first connector is the one recorded.
+            let recorded = el.child_elements().find(|c| c.name == "Co")?.attr("U")?;
+            let output = match (ty, stats) {
+                ("InfoOnlyDigital", "7") => format!(
+                    r#"{{"frequency":1,"outputs":[{{"id":0,"name":{},"uuid":{},"visuType":1}}]}}"#,
+                    json_str(&v.name),
+                    json_str(recorded)
+                ),
+                ("InfoOnlyAnalog", "11") => {
+                    let (_, plain) = value_format(&display?.attr_decoded("Unit")?)?;
+                    format!(
+                        r#"{{"frequency":11,"outputs":[{{"id":0,"name":{},"format":{},"uuid":{},"visuType":0}}]}}"#,
+                        json_str(&v.name),
+                        json_str(&plain),
+                        json_str(recorded)
+                    )
+                }
+                _ => return None,
+            };
+            format!(r#","statistic":{output}"#)
+        }
+    };
+    // Notes on the object (`NTXT=`, not the documentation `NDOC=`).
+    let notes = if el.attr("NTXT").is_some_and(|t| !t.is_empty()) {
+        r#""hasControlNotes":true,"#
+    } else {
+        ""
+    };
     Some(format!(
-        r#"{{"name":{},"type":"{ty}","uuidAction":{},"room":{},"cat":{},"defaultRating":0,"isFavorite":{},"isSecured":false,"defaultIcon":null,"restrictions":0,"details":{details},"states":{states}}}"#,
+        r#"{{"name":{},"type":"{ty}","uuidAction":{},"room":{},"cat":{},"defaultRating":0,"isFavorite":{},"isSecured":false,{notes}"defaultIcon":null,"restrictions":0,"details":{details},"states":{states}{statistic}}}"#,
         json_str(&v.name),
         json_str(uuid),
         json_str(v.room.as_deref()?),
         json_str(v.cat.as_deref()?),
         v.favorite,
+    ))
+}
+
+/// The display shows the state only, with no settings beyond its type and
+/// unit (texts or colours of its own are not known).
+fn state_only(display: Option<&Element>) -> bool {
+    display.is_some_and(|d| {
+        d.attr("StateOnly") == Some("true")
+            && d.attrs
+                .iter()
+                .all(|a| ["Type", "Unit", "StateOnly"].contains(&a.name.as_str()))
+    })
+}
+
+/// The app's printf format of a display unit: `<v>` is `%.0f`, `<v.N>`
+/// is `%.Nf`, the rest is literal. As the entry's `format` (`%` doubled)
+/// and as the statistic's (`%` as it is).
+fn value_format(unit: &str) -> Option<(String, String)> {
+    let open = unit.find("<v")?;
+    let close = open + unit[open..].find('>')?;
+    let digits = match &unit[open + 2..close] {
+        "" => "0",
+        d => d
+            .strip_prefix('.')
+            .filter(|d| d.len() == 1 && d.bytes().all(|b| b.is_ascii_digit()))?,
+    };
+    let (before, after) = (&unit[..open], &unit[close + 1..]);
+    if before.contains('<') || after.contains('<') {
+        return None;
+    }
+    let value = format!("%.{digits}f");
+    Some((
+        format!(
+            "{}{value}{}",
+            before.replace('%', "%%"),
+            after.replace('%', "%%")
+        ),
+        format!("{before}{value}{after}"),
     ))
 }
 
@@ -723,6 +895,111 @@ mod tests {
         // In document order, as text: the button's entry is Loxone Config's.
         let button = cat.find(&format!("\"U:{BUTTON}\"")).unwrap();
         assert!(back.text.ends_with(&cat[button..]), "{}", back.text);
+    }
+
+    /// The entry of the one object of type `ty` in a page holding `xml`.
+    fn entry_of(ty: &str, xml: &str) -> Option<String> {
+        let d = doc("Licht", ROOM, xml);
+        let o = d.objects().into_iter().find(|o| o.block_type == ty)?;
+        entry(d.element_at(&o.path)?)
+    }
+
+    /// The tail of an entry after `restrictions` (what the type decides).
+    fn tail(e: &str) -> &str {
+        &e[e.find("\"details\"").unwrap()..]
+    }
+
+    #[test]
+    fn info_displays_pulses_and_day_timers_follow_loxone_config() {
+        // A memory flag with statistics and notes: an info display; the
+        // first connector is recorded.
+        let memory = entry_of(
+            "Memory",
+            r#"<C Type="Memory" U="0f000000-0000-0030-ffff000000000000" Title="Anwesend" StatsType="7" StatsAutoDel="1" NTXT="Notiz">
+					<Co K="Input" U="0f000000-0000-0031-00ff000000000000"/>
+					<Co K="AQ" U="0f000000-0000-0032-01ff000000000000"/>
+					<Co K="Q" U="0f000000-0000-0033-02ff000000000000"/>
+					<IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000"/>
+					<Display Unit="&lt;v.1&gt;" StateOnly="true"/>
+				</C>"#,
+        )
+        .unwrap();
+        assert!(memory.contains(r#""isSecured":false,"hasControlNotes":true,"defaultIcon""#));
+        assert_eq!(
+            tail(&memory),
+            r##""details":{"jLockable":false,"text":{"off":"Aus","on":"Ein"},"color":{"off":"#FF0054","on":"#8DFF70"}},"states":{"active":"0f000000-0000-0030-ffff000000000000"},"statistic":{"frequency":1,"outputs":[{"id":0,"name":"Anwesend","uuid":"0f000000-0000-0031-00ff000000000000","visuType":1}]}}"##
+        );
+
+        // An analog sensor: the unit becomes a printf format (`%` doubled
+        // in the entry, not in the statistic), `Q` beside `AQ` is the error.
+        let sensor = entry_of(
+            "LoxAIRAsensor",
+            r#"<C Type="LoxAIRAsensor" U="0f000000-0000-0040-ffff000000000000" Title="Feuchte" Analog="true" StatsType="11" StatsAutoDel="1">
+					<Co K="AQ" U="0f000000-0000-0041-00ff000000000000"/>
+					<Co K="Q" U="0f000000-0000-0042-01ff000000000000"/>
+					<IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000" St="4"/>
+					<Display Type="2" Unit="&lt;v&gt;%" StateOnly="true"/>
+				</C>"#,
+        )
+        .unwrap();
+        assert_eq!(
+            tail(&sensor),
+            r#""details":{"jLockable":false,"format":"%.0f%%"},"states":{"value":"0f000000-0000-0040-ffff000000000000","error":"0f000000-0000-0042-01ff000000000000"},"statistic":{"frequency":11,"outputs":[{"id":0,"name":"Feuchte","format":"%.0f%","uuid":"0f000000-0000-0041-00ff000000000000","visuType":0}]}}"#
+        );
+        // Display texts of its own, or a statistics type not seen: no entry.
+        assert!(entry_of("LoxAIRAsensor", r#"<C Type="LoxAIRAsensor" U="0f000000-0000-0040-ffff000000000000" Title="F" Analog="true"><Co K="AQ" U="0f000000-0000-0041-00ff000000000000"/><IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000"/><Display Unit="&lt;v&gt;" StateOnly="true" TextOn="x"/></C>"#).is_none());
+        assert!(entry_of("Memory", r#"<C Type="Memory" U="0f000000-0000-0030-ffff000000000000" Title="A" StatsType="3"><Co K="Input" U="0f000000-0000-0031-00ff000000000000"/><IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000"/><Display StateOnly="true"/></C>"#).is_none());
+
+        let pulse = entry_of(
+            "PulseAt",
+            r#"<C Type="PulseAt" U="0f000000-0000-0050-ffff000000000000" Title="Impuls" SpStates="0f000000-0000-0056-ffff000000000000,0f000000-0000-0057-ffff000000000000,0f000000-0000-0058-ffff000000000000" Typ="0">
+					<Co K="InputDisable" U="0f000000-0000-0051-00ff000000000000"/>
+					<Co K="Time" Def="1" U="0f000000-0000-0053-02ff000000000000"/>
+					<Co K="Q" U="0f000000-0000-0054-03ff000000000000"/>
+					<IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000"/>
+				</C>"#,
+        )
+        .unwrap();
+        assert_eq!(
+            tail(&pulse),
+            r#""details":{"jLockable":true,"pulseDurationLocked":false},"states":{"jLocked":"8f000000-0000-0051-00ff000000000000","isActive":"0f000000-0000-0054-03ff000000000000","pulseDuration":"0f000000-0000-0053-02ff000000000000","startTime":"0f000000-0000-0056-ffff000000000000","oneTimePulseDate":"0f000000-0000-0057-ffff000000000000","type":"0f000000-0000-0058-ffff000000000000"}}"#
+        );
+
+        let timer = entry_of(
+            "DayTimer",
+            r#"<C Type="DayTimer" U="0f000000-0000-0060-ffff000000000000" Title="Schaltuhr" On="" Off="" SpStates="0f000000-0000-0068-ffff000000000000,0f000000-0000-0069-ffff000000000000">
+					<Co K="Reset" U="0f000000-0000-0061-01ff000000000000"/>
+					<Co K="AQ" U="0f000000-0000-0062-07ff000000000000"/>
+					<Co K="AQm" U="0f000000-0000-0063-0aff000000000000"/>
+					<Co K="AQmt" U="0f000000-0000-0064-0bff000000000000"/>
+					<IoData Visu="true" Cr="0f000000-0000-00b1-ffff000000000000" Pr="0f000000-0000-00a1-ffff000000000000"/>
+				</C>"#,
+        )
+        .unwrap();
+        assert!(timer.contains(r#""type":"Daytimer""#));
+        assert_eq!(
+            tail(&timer),
+            r#""details":{"jLockable":true,"analog":false,"text":{"on":"Aktiv","off":"Inaktiv"}},"states":{"jLocked":"8f000000-0000-0061-01ff000000000000","mode":"0f000000-0000-0063-0aff000000000000","override":"0f000000-0000-0064-0bff000000000000","value":"0f000000-0000-0062-07ff000000000000","needsActivation":"0f000000-0000-0068-ffff000000000000","modeList":"0f000000-0000-0069-ffff000000000000","entriesAndDefaultValue":"0f000000-0000-0060-ffff000000000000","resetActive":"0f000000-0000-0061-01ff000000000000"}}"#
+        );
+    }
+
+    #[test]
+    fn units_become_printf_formats() {
+        assert_eq!(
+            value_format("<v.1> °C"),
+            Some(("%.1f °C".into(), "%.1f °C".into()))
+        );
+        assert_eq!(
+            value_format("<v>%"),
+            Some(("%.0f%%".into(), "%.0f%".into()))
+        );
+        assert_eq!(
+            value_format("<v>ppm"),
+            Some(("%.0fppm".into(), "%.0fppm".into()))
+        );
+        assert_eq!(value_format("<v.12>"), None);
+        assert_eq!(value_format("<v.1> <v.2>"), None);
+        assert_eq!(value_format("kein Wert"), None);
     }
 
     #[test]

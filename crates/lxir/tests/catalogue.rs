@@ -11,7 +11,7 @@
 //! gives back Loxone Config's entries byte for byte.
 
 use lxir::LoxoneDoc;
-use lxir::catalogue::update;
+use lxir::catalogue::{KNOWN, update};
 
 #[test]
 fn hidden_and_shown_again_gives_loxone_configs_entries() {
@@ -37,7 +37,7 @@ fn hidden_and_shown_again_gives_loxone_configs_entries() {
         let mut hidden = doc.clone();
         let mut n = 0;
         for o in doc.objects() {
-            if !["PButtonT", "PushButton", "VirtualIn"].contains(&o.block_type.as_str()) {
+            if !KNOWN.contains(&o.block_type.as_str()) {
                 continue;
             }
             let el = hidden.element_at_mut(&o.path).unwrap();

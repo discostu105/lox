@@ -217,7 +217,7 @@ Each step stops the push when it fails:
    users with the program file and lists what differs (needs an admin connection).
 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
    file. The app's catalogue in it (`LoxAPP3.json`) gets the push's changes to the app's controls: names, rooms,
-   categories, deleted controls, new push buttons and switches. What it cannot carry over is named; the app shows
+   categories, deleted controls, new push buttons, switches, memory flags, timers and sensor displays. What it cannot carry over is named; the app shows
    those as before until Loxone Config saves. If your module grants or
    revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided lxir
    reproduces the live one exactly; otherwise the push warns that it stays stale. Without `--force` the push ends
