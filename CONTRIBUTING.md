@@ -43,6 +43,7 @@ lox token fetch          # acquire auth token
 
 ## PR Process
 
+- Contributions are licensed under the project's [Apache-2.0 license](LICENSE)
 - One feature or fix per PR
 - Tests expected for new logic (pure functions are easy to unit-test)
 - Run `cargo fmt` and `cargo clippy` before submitting

@@ -2,7 +2,7 @@ class Lox < Formula
   desc "Loxone Miniserver CLI — control lights, blinds, and automations from your terminal"
   homepage "https://github.com/discostu105/lox"
   version "0.33.0"
-  license "MIT"
+  license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?

@@ -13,7 +13,7 @@ repository = "https://github.com/discostu105/lox"
 homepage = "https://github.com/discostu105/lox"
 keywords = ["loxone", "smarthome", "home-automation", "cli", "miniserver"]
 categories = ["command-line-utilities", "network-programming"]
-license = "GPL-3.0-or-later OR LicenseRef-Commercial"
+license = "Apache-2.0"
 readme = "README.md"
 # The crates.io name `lox` belongs to another project; lox ships as release
 # binaries and through Homebrew.
