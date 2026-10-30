@@ -477,9 +477,12 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       categories, deletions and new push buttons/virtual inputs; the push
       uploads it with a new `lastModified`. Validated on three Config saves
       and live (rename there and back).
-- [ ] Catalogue entries for more block types (light controllers, meters,
-      `InfoOnlyAnalog`), and the notification question of #155 — each
-      from Config saves that list them.
+- [x] Catalogue entries for memory flags, pulses at a time, digital day
+      timers and the info displays of sensors (`InfoOnlyAnalog`/
+      `InfoOnlyDigital`, with statistics), 2026-10-30 (#184).
+- [ ] Catalogue entries for light controllers, shading and meters, and
+      the notification question of #155 — each from Config saves that
+      list them (#184).
 
 ## Tooling & ecosystem
 

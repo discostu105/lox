@@ -495,7 +495,8 @@ Each step stops the push when it fails:
    file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app catalogue
    (`LoxAPP3.json`, what the app shows; the Miniserver never rebuilds it) gets what the push changes about the
    app's controls: new names, rooms, categories and favourites, deleted and hidden controls, and entries for new push
-   buttons and digital virtual inputs that have a room and a category (`app_catalogue_updated` in `-o json`). Its
+   buttons, digital virtual inputs, memory flags, pulses at a time, digital day timers and sensor info displays that
+   have a room and a category (`app_catalogue_updated` in `-o json`). Its
    `lastModified` becomes the push time, so the app reloads. What it cannot carry over (other block types, a
    room the catalogue does not list, an icon) is named (`app_catalogue_stale`) until a save from Loxone Config. `permissions.bin`, which lists who may use each object, is regenerated for the
    compiled config when lxir reproduces the live file byte for byte (`permissions` in the JSON report:

@@ -1900,7 +1900,9 @@ Anything unverified is an error, not a heuristic:
     from before (an older push) stays: fixing it would mean trusting the
     rules for every entry.
   - **New entries only for evidenced types** (push buttons, digital
-    virtual inputs; *LoxAPP3.json* in loxone-format.md), and only where
+    virtual inputs, memory flags, pulses at a time, digital day timers,
+    info displays of sensors and inputs; *LoxAPP3.json* in
+    loxone-format.md), and only where
     Loxone Config lists them (a room and a category the catalogue knows;
     a virtual input a page uses). Like `permissions.bin`, the generator
     proves itself on the live file first: a type with a listed entry it
@@ -1908,6 +1910,6 @@ Anything unverified is an error, not a heuristic:
   - **The rest is named**: a room the catalogue does not list, an icon,
     other block types; the push reports them for a save from Loxone
     Config.
-  Validated: three Config saves (every entry of the three types back
-  byte for byte); a push to the house and back (the served catalogue
+  Validated: three Config saves (every entry of the known types back
+  byte for byte, 62 per save); a push to the house and back (the served catalogue
   and `LoxAPPversion3` followed).
