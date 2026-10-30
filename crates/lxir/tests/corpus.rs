@@ -17,7 +17,8 @@ use lxir::Lockfile;
 use lxir::LoxoneDoc;
 use lxir::connectors::{BUILTIN_TYPES, PortDir, builtin, merge, observe};
 use lxir::ir::{
-    AccessDecl, CompileOptions, DecompileOptions, Item, Module, adopt, compile, decompile,
+    AccessDecl, CompileOptions, DecompileOptions, Item, Module, MoodsClaim, adopt, compile,
+    decompile,
 };
 use lxir::uuid::parse_serial;
 use std::collections::BTreeMap;
@@ -172,6 +173,75 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         decls += access.len();
     }
     eprintln!("corpus: {decls} access declarations in {configs} configs are byte fixpoints");
+}
+
+#[test]
+fn corpus_mood_sets_are_byte_fixpoints() {
+    // Every controller's lifted moods (D58), claimed back onto it, must
+    // reproduce the bytes; reversed and restored, the semantic diff must
+    // be empty again (moods keep their identity by name).
+    let Some(files) = corpus() else {
+        eprintln!("LXIR_CORPUS not set — skipping corpus mood fixpoints");
+        return;
+    };
+    let (mut configs, mut claims, mut not_lifted) = (0usize, 0usize, 0usize);
+    for path in &files {
+        let name = path.display();
+        let bytes = std::fs::read(path).unwrap();
+        let base = LoxoneDoc::parse(&bytes).unwrap();
+        // Controllers as externs: the claims alone are under test.
+        let view_opts = DecompileOptions {
+            managed_types: Default::default(),
+            ..DecompileOptions::default()
+        };
+        let Ok((view, _)) = decompile(&base, &view_opts) else {
+            continue;
+        };
+        not_lifted += view
+            .items
+            .iter()
+            .filter(|i| matches!(i, Item::Comment(c) if c.contains(": not lifted") && c.starts_with(" moods ")))
+            .count();
+        let lifted: Vec<&MoodsClaim> = view.moods_claims().collect();
+        if lifted.is_empty() {
+            continue;
+        }
+        let module = |reverse: bool| Module {
+            items: view
+                .externs()
+                .filter(|e| lifted.iter().any(|c| c.slug == e.slug))
+                .map(|e| Item::Extern(e.clone()))
+                .chain(view.mood_sets().map(|s| {
+                    let mut s = s.clone();
+                    if reverse {
+                        s.body.reverse();
+                    }
+                    Item::Moods(s)
+                }))
+                .chain(lifted.iter().map(|c| Item::MoodsClaim((*c).clone())))
+                .collect(),
+        };
+        let compiled = |doc: &LoxoneDoc, reverse: bool| {
+            compile(doc, &module(reverse), &mut Lockfile::new(), &opts())
+                .unwrap_or_else(|e| panic!("{name}: compile failed: {e}"))
+        };
+        assert!(
+            compiled(&base, false).to_bytes() == bytes,
+            "{name}: the lifted mood sets do not reproduce the bytes"
+        );
+        let reversed = compiled(&base, true);
+        let restored = compiled(&reversed, false);
+        assert!(
+            lxir::diff::diff(&base, &restored).is_empty(),
+            "{name}: reversing and restoring the moods is not a no-op"
+        );
+        configs += 1;
+        claims += lifted.len();
+    }
+    eprintln!(
+        "corpus: {claims} mood claims in {configs} configs are byte fixpoints; \
+         {not_lifted} controllers not lifted"
+    );
 }
 
 #[test]

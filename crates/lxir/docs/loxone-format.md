@@ -800,6 +800,9 @@ its own evidence; these are leads, marked by how far they hold.
     `CID` 12, 13…, i.e. the lowest free above the off mood's. lox-cli's
     "from `SID` 2 / `CID` 9" does not match that; the corpus also has
     `CID` 7 and 8. What `CID` means is unknown; lxir only keeps it unique.
+  - **Order.** The off mood's place varies: of 43 corpus controllers
+    with moods, 16 keep it last, 2 first, 4 in the middle, and 21 have
+    none at all (older configs).
   - **First save.** A controller's first Loxone Config save writes the
     stock moods and defaults, recorded in
     [oracle-wine.md](oracle-wine.md) (sessions 21–22).

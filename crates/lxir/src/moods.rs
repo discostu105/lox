@@ -232,8 +232,10 @@ impl Moods {
 /// most circuits share (when that is more than half of them and not
 /// `off`), then every circuit that differs from it — `all on, AQ3 off`,
 /// `AQ1 temp(80%, 2700K)`. Circuits left out are off; a mood with
-/// every circuit off reads `all off`.
-pub fn render(qs: &[u32]) -> String {
+/// every circuit off reads `all off`. As pairs of circuit number
+/// (`None`: `all`) and value — the settings of a `moods` line, which
+/// compile back to exactly `qs`.
+pub fn settings(qs: &[u32]) -> Vec<(Option<usize>, MoodValue)> {
     let values: Vec<MoodValue> = qs.iter().map(|&q| decode(q)).collect();
     let mut counts: Vec<(MoodValue, usize)> = Vec::new();
     for v in &values {
@@ -247,21 +249,29 @@ pub fn render(qs: &[u32]) -> String {
         .max_by_key(|(_, n)| *n)
         .filter(|(v, n)| *v != MoodValue::Off && *n * 2 > values.len())
         .map(|(v, _)| *v);
-    let mut parts = Vec::new();
-    if let Some(b) = base {
-        parts.push(format!("all {b}"));
-    }
+    let mut out: Vec<(Option<usize>, MoodValue)> = base.map(|b| (None, b)).into_iter().collect();
     let default = base.unwrap_or(MoodValue::Off);
     for (i, v) in values.iter().enumerate() {
         if *v != default {
-            parts.push(format!("AQ{} {v}", i + 1));
+            out.push((Some(i + 1), *v));
         }
     }
-    if parts.is_empty() {
-        "all off".into()
-    } else {
-        parts.join(", ")
+    if out.is_empty() {
+        out.push((None, MoodValue::Off));
     }
+    out
+}
+
+/// [`settings`] as text: `all on, AQ2 off`.
+pub fn render(qs: &[u32]) -> String {
+    settings(qs)
+        .iter()
+        .map(|(c, v)| match c {
+            Some(n) => format!("AQ{n} {v}"),
+            None => format!("all {v}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The moods of a LightController2 for the diff and the fingerprint,

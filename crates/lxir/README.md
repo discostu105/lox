@@ -75,6 +75,8 @@ Lighting moods are declared once and claimed per room:
 makes them a Lichtsteuerung's mood list. A claim inside a room template
 gives every room the same four moods; existing moods keep their
 identity by name, so the switch buttons keep selecting them (D58).
+`lxir adopt` writes a config's existing moods as such sets, one per
+distinct mood list, ready to be moved into a template.
 
 PicoC programs live in their own files: `hue = Code16("Hue", Code:
 file("hue.c"), AI1: rgb.AQ)` compiles the file into the program block,
