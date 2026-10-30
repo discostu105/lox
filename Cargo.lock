@@ -1980,7 +1980,7 @@ dependencies = [
 
 [[package]]
 name = "lox"
-version = "0.23.1"
+version = "0.24.0"
 dependencies = [
  "aes",
  "anyhow",
