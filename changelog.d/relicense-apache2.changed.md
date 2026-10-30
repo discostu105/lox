@@ -1,2 +1,0 @@
-- **License** changed from GPL-3.0 / commercial to Apache-2.0, for `lox` and the `lxir` crate
-  - No copyleft, no commercial license: use, modify and redistribute freely, including in closed-source products

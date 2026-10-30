@@ -10,6 +10,12 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-10-30
+
+### Changed
+- **License** changed from GPL-3.0 / commercial to Apache-2.0, for `lox` and the `lxir` crate
+  - No copyleft, no commercial license: use, modify and redistribute freely, including in closed-source products
+
 ## [0.33.0] — 2026-10-30
 
 ### Added
