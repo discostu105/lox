@@ -1883,7 +1883,11 @@ Anything unverified is an error, not a heuristic:
     leaves the rule; a slug already declared otherwise, or a named rule
     that some `rule <extern>` also declares, is refused.
   Validated: oracle session 24 (byte-identical but for `WF=`, which the
-  save drops from every rule). Not yet run live on a Miniserver.
+  save drops from every rule); live on the house (firmware 17.2.8.28,
+  2026-10-30, #181): a created rule, pushed with a verified byte-exact
+  download, ran at its compiled minute (22:40:00) and switched its
+  target; pushed again as `inactive`, it stopped. Unchecked: the app's
+  Automatic Designer listing it.
 - **D61 — The app catalogue follows the compile** (2026-10-30). The
   Miniserver serves the `LoxAPP3.json` of the upload as it is, so a push
   that only replaced `sps0.LoxCC` left the app on the last save from
