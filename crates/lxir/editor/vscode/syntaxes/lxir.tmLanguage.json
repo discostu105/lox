@@ -8,6 +8,7 @@
     { "include": "#test" },
     { "include": "#tiles" },
     { "include": "#access" },
+    { "include": "#moods" },
     { "include": "#end" },
     { "include": "#page" },
     { "include": "#extern" },
@@ -142,6 +143,32 @@
         }
       ]
     },
+    "moods": {
+      "comment": "moods <name> … end with \"<title>\": all on, AQ1 temp(80%, 4700K) lines (D58)",
+      "patterns": [
+        {
+          "match": "^\\s*(moods)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
+          "captures": {
+            "1": { "name": "keyword.control.moods.lxir" },
+            "2": { "name": "entity.name.function.lxir" }
+          }
+        },
+        {
+          "match": "\\b(all)\\s+(on|off)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.moods.lxir" },
+            "2": { "name": "constant.language.lxir" }
+          }
+        },
+        {
+          "match": "\\b(AQ[0-9]+)\\s+(temp|rgb|on|off)\\b",
+          "captures": {
+            "1": { "name": "variable.parameter.lxir" },
+            "2": { "name": "keyword.other.moods.lxir" }
+          }
+        }
+      ]
+    },
     "tiles": {
       "comment": "tiles <name> … end with tile <i>(…) entries (D41)",
       "patterns": [
@@ -253,7 +280,7 @@
         { "include": "#file" },
         { "include": "#string" },
         {
-          "match": "([a-z][a-z0-9_]*)\\s*(:)",
+          "match": "([A-Za-z][A-Za-z0-9_]*)\\s*(:)",
           "captures": {
             "1": { "name": "variable.parameter.lxir" },
             "2": { "name": "punctuation.separator.lxir" }
