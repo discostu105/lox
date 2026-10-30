@@ -151,6 +151,16 @@ USAGE:
         the changes (prefixed with the page if they all sit on one), then
         the changes by type, title and port name.
 
+  lxir coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]
+        How much of the config the source governs: every object by type
+        — logic on pages, and the periphery (devices, virtual I/O) —
+        counted managed, extern, or untouched against the lockfile, with
+        what lxir can do with the type (managed, adopt-only for blocks
+        Loxone Config creates when pairing a device, reference for types
+        without a verified connector table). Lists the page blocks a
+        `lxir adopt --uuid` could take over next. Without a lock or
+        project, everything counts as untouched.
+
   lxir drift <cfg.Loxone> [--lock <lock.json>]
         Check a config (typically a fresh download) against the semantic
         fingerprint the lockfile recorded at the last adopt/compile.
@@ -267,6 +277,7 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["adopt", rest @ ..] => cmd_adopt(rest),
         ["diff", rest @ ..] => cmd_diff(rest),
         ["drift", rest @ ..] => cmd_drift(rest),
+        ["coverage", rest @ ..] => cmd_coverage(rest),
         ["repair", rest @ ..] => cmd_repair(rest),
         ["scan", rest @ ..] => cmd_scan(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
@@ -1382,40 +1393,38 @@ fn cmd_adopt_one(
     let mut lock = Lockfile::load(Path::new(lock_path))?;
     let adopted = adopt_one(&doc, uuid, slug, &module, &mut lock)?;
 
-    let mut merged = module;
-    merged.items.extend(adopted.items.iter().cloned());
-    merged.validate()?;
-    validate_ports(&merged)?;
-    // Nothing is minted in a no-op rebuild, so serial and mint time are
-    // inert — placeholders keep the verification self-contained.
-    let vopts = CompileOptions {
-        machine: parse_serial("000000000000")?,
-        mint_time_unix: 0,
-        page_title: None,
-        allow_removals: false,
-        accept_version: None,
-        relayout: Vec::new(),
-    };
-    let out = compile(&doc, &merged, &mut lock.clone(), &vopts)?;
-    let d = lxir::diff::diff(&doc, &out);
-    if !d.is_empty() {
-        return Err(format!(
-            "adoption verification failed — rebuilding with the updated module/lock \
-             is not a semantic no-op (nothing was written):\n{d:#?}"
-        )
-        .into());
-    }
-
-    let target = if Path::new(module_path).is_dir() {
+    // Every fragment's new text, verified as it will be written: the block
+    // goes into its page's file — under that file's `page` statement — and
+    // a promoted extern's statements, which are the block's arguments now,
+    // leave every fragment that holds them.
+    let is_dir = Path::new(module_path).is_dir();
+    let target = if is_dir {
         Path::new(module_path).join(format!("{}.lxir", slugify(&adopted.page_title)))
     } else {
         PathBuf::from(module_path)
     };
-    let mut text = std::fs::read_to_string(&target).unwrap_or_default();
-    if text.is_empty() {
+    let mut files: Vec<(PathBuf, String, String)> = Vec::new();
+    let paths = if is_dir {
+        module_dir_files(Path::new(module_path)).map_err(|(p, e)| format!("{p}: {e}"))?
+    } else {
+        vec![PathBuf::from(module_path)]
+    };
+    for f in paths {
+        let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+        let mut text = src.clone();
+        if adopted.promoted {
+            let mut m =
+                Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
+            if m.strip_extern(slug) {
+                text = m.to_text();
+            }
+        }
+        files.push((f, src, text));
+    }
+    if !files.iter().any(|(f, _, _)| *f == target) {
         // A fresh page file opens with its `page` statement (D28), so the
         // adopted blocks stay pinned to the page they were drawn on.
-        text = Module {
+        let text = Module {
             items: vec![lxir::ir::Item::Page(lxir::ir::PageDecl {
                 title: adopted.page_title.clone(),
                 room: None,
@@ -1424,7 +1433,13 @@ fn cmd_adopt_one(
             })],
         }
         .to_text();
+        files.push((target.clone(), String::new(), text));
+        files.sort_by(|a, b| a.0.cmp(&b.0));
     }
+    let (_, _, text) = files
+        .iter_mut()
+        .find(|(f, _, _)| *f == target)
+        .expect("target file listed above");
     if !text.ends_with('\n') {
         text.push('\n');
     }
@@ -1435,9 +1450,65 @@ fn cmd_adopt_one(
         }
         .to_text(),
     );
-    std::fs::write(&target, text)?;
+
+    let mut merged = Module { items: Vec::new() };
+    for (f, _, text) in &files {
+        let mut m = Module::parse_fragment(text).map_err(|e| format!("{}: {e}", f.display()))?;
+        m.load_files(fragment_dir(f))
+            .map_err(|e| format!("{}: {e}", f.display()))?;
+        merged.items.extend(m.items);
+    }
+    // The checks `lxir check` runs: references resolve in the expanded,
+    // desugared module (template instances and expressions included).
+    let (desugared, _) = merged.expand()?.desugar()?;
+    desugared.validate()?;
+    validate_ports(&desugared)?;
+    // Nothing is minted in a no-op rebuild, so serial and mint time are
+    // inert — placeholders keep the verification self-contained.
+    let vopts = CompileOptions {
+        machine: parse_serial("000000000000")?,
+        mint_time_unix: 0,
+        page_title: None,
+        allow_removals: false,
+        accept_version: None,
+        relayout: Vec::new(),
+    };
+    let mut vlock = lock.clone();
+    let out = compile(&doc, &merged, &mut vlock, &vopts)?;
+    // The block's wires onto externs are recorded by a compile; take them
+    // from this one so the next compile leaves the lock as written.
+    lock.extern_wires = vlock.extern_wires;
+    let d = lxir::diff::diff(&doc, &out);
+    if !d.is_empty() {
+        return Err(format!(
+            "adoption verification failed — rebuilding with the updated module/lock \
+             is not a semantic no-op (nothing was written):\n{d:#?}"
+        )
+        .into());
+    }
+
+    let mut rewritten = Vec::new();
+    for (f, src, text) in &files {
+        if src != text {
+            std::fs::write(f, text).map_err(|e| format!("{}: {e}", f.display()))?;
+            if *f != target {
+                rewritten.push(f.display().to_string());
+            }
+        }
+    }
     lock.save(Path::new(lock_path))?;
 
+    if adopted.promoted {
+        println!(
+            "promoted extern `{slug}` to a managed block: its statements moved into \
+             the declaration{}",
+            if rewritten.is_empty() {
+                String::new()
+            } else {
+                format!(" (also rewritten: {})", rewritten.join(", "))
+            }
+        );
+    }
     println!(
         "adopted uuid {uuid} as `{slug}` on page \"{}\"{}",
         adopted.page_title,
@@ -1639,6 +1710,42 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
     );
     if exit_code && !d.is_empty() {
         return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
+    const USAGE: &str =
+        "usage: lxir coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]";
+    let json = args.contains(&"--json");
+    let rest: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    let (config, lock_path) = match rest.as_slice() {
+        [] => (None, None),
+        [p] if Path::new(p).is_dir() => (None, Some(*p)),
+        [config] if !config.starts_with('-') => (Some(config.to_string()), None),
+        [config, "--lock", lock] | ["--lock", lock, config] => {
+            (Some(config.to_string()), Some(*lock))
+        }
+        _ => return Err(USAGE.into()),
+    };
+    let (config, lock) = match (config, lock_path) {
+        (Some(c), Some(l)) => (c, Lockfile::load(Path::new(l))?),
+        // A bare config: nothing is source yet — the report is what an
+        // adoption could take over.
+        (Some(c), None) => (c, Lockfile::new()),
+        (None, dir) => {
+            let dir = dir.unwrap_or(".");
+            let f = Project::find(Path::new(dir))
+                .ok_or_else(|| format!("no lox.toml in `{dir}` — {USAGE}"))?;
+            let p = Project::load(&f)?;
+            (p.base.display().to_string(), Lockfile::load(&p.lock)?)
+        }
+    };
+    let report = lxir::coverage::coverage(&read_doc(&config)?, &lock);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", report.to_text());
     }
     Ok(ExitCode::SUCCESS)
 }

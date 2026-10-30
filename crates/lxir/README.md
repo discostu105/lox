@@ -167,6 +167,9 @@ After a push, download again and keep that file as the new base
 (`lox config push` does both) — `lxir drift` tells you when someone else
 (GUI, app, Miniserver) has written to the config since, *before* you
 compile over their change.
+`lxir coverage --lock modules/haus.lock.json current.Loxone` shows how
+much of the config the source owns, type by type, and lists the blocks
+left to adopt (an extern adopts under its own slug and becomes managed).
 Everything you did not adopt passes through byte-for-byte; the diff in
 step 5 is the proof, every time.
 

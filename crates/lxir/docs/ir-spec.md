@@ -468,9 +468,10 @@ minted ref (`mirrors:`) of a claimed extern carries the claimed title.
 
 Rules:
 
-- **Externs only.** A managed block's title is its label
-  (`slug = Type("…", …)`); its room/category stay with Loxone Config
-  (D19). Both are validation errors naming the remedy.
+- **Title: externs only.** A managed block's title is its label
+  (`slug = Type("…", …)`); `.title` on it is a validation error naming
+  the remedy. Its `.room` and `.category` are allowed (D63): the compile
+  writes them on every rebuild, with no lock state and no followers.
 - **Not what it is matched by.** `title:` matcher plus `.title`,
   `room:` plus `.room`, `category:` plus `.category` are refused: after
   the push the match would no longer find the object. Pin by `uuid:` or

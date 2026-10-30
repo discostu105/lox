@@ -458,7 +458,8 @@ impl Lift {
         }
 
         // NFC Code Touch blocks with access rights (D49), in both scopes:
-        // the `access` declaration needs the block as an extern.
+        // the `access` declaration needs the block lifted — as an extern,
+        // unless it is lifted as a managed block already.
         let access = crate::access::AccessModel::read(doc);
         let rights = access.access_rights();
         let mut with_rights: Vec<usize> = Vec::new();
@@ -906,10 +907,11 @@ impl Lift {
         }
     }
 
-    /// The `access` declarations of the given externs (D49); a block whose
-    /// rights cannot be written as one gets a comment saying why.
-    fn push_access(&self, externs: &[usize], items: &mut Vec<Item>) {
-        for i in externs {
+    /// The `access` declarations of the given lifted objects (D49); a
+    /// block whose rights cannot be written as one gets a comment saying
+    /// why.
+    fn push_access<'a>(&self, objs: impl IntoIterator<Item = &'a usize>, items: &mut Vec<Item>) {
+        for i in objs {
             match self.access_decls.get(i) {
                 Some(Ok(decl)) => items.push(Item::Access(decl.clone())),
                 Some(Err(why)) => items.push(Item::Comment(format!(
@@ -1024,7 +1026,7 @@ impl Lift {
         for &wi in &b.wires {
             items.push(Item::Wire(self.wires[wi].0.clone()));
         }
-        self.push_access(&b.externs, &mut items);
+        self.push_access(b.externs.iter().chain(&b.blocks), &mut items);
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
         items
@@ -1143,7 +1145,7 @@ impl Lift {
             for &wi in &b.wires {
                 items.push(Item::Wire(self.wires[wi].0.clone()));
             }
-            self.push_access(&b.externs, &mut items);
+            self.push_access(b.externs.iter().chain(&b.blocks), &mut items);
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
 

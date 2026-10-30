@@ -1562,6 +1562,23 @@ impl Module {
         })
     }
 
+    /// Drop every statement that makes `slug` an extern — its `extern`
+    /// declaration, the wires, expressions and assignments onto its ports,
+    /// its attribute claims — when the object is promoted to a managed
+    /// block that states them as arguments. Reports whether anything went.
+    pub fn strip_extern(&mut self, slug: &str) -> bool {
+        let before = self.items.len();
+        self.items.retain(|i| match i {
+            Item::Extern(e) => e.slug != slug,
+            Item::Wire(w) => w.to.slug != slug,
+            Item::ExprWire(w) => w.to.slug != slug,
+            Item::Set(s) => s.target.slug != slug,
+            Item::Attr(a) => a.slug != slug,
+            _ => true,
+        });
+        self.items.len() != before
+    }
+
     /// The `<-` statements (wires onto extern ports).
     pub fn extern_wires(&self) -> impl Iterator<Item = &WireDecl> {
         self.items.iter().filter_map(|i| match i {
@@ -1980,23 +1997,17 @@ impl Module {
                     let target = format!("{}.{}", a.slug, a.attr);
                     match names.get(a.slug.as_str()) {
                         Some(NameKind::Extern) => {}
+                        // A managed block's room and category are the
+                        // source's when it states them (D63); its title
+                        // is its label.
+                        Some(NameKind::Block) if a.attr != Attr::Title => {}
                         Some(NameKind::Block) => {
-                            let instead = match a.attr {
-                                Attr::Title => format!(
-                                    "give it a label instead (`{} = {}(\"…\", …)`)",
-                                    a.slug,
-                                    block_type(&a.slug)
-                                ),
-                                Attr::Room | Attr::Category => format!(
-                                    "a managed block's {} stays with Loxone Config \
-                                     (carried forward from the base, D19)",
-                                    a.attr
-                                ),
-                            };
                             return compile_err(format!(
-                                "`{target} = …` targets managed block `{}` — {instead}; \
-                                 attribute assignment is for externs only",
-                                a.slug
+                                "`{target} = …` targets managed block `{}` — give it a \
+                                 label instead (`{} = {}(\"…\", …)`)",
+                                a.slug,
+                                a.slug,
+                                block_type(&a.slug)
                             ));
                         }
                         _ => object_ref(&PortRef {
@@ -2340,11 +2351,18 @@ impl Module {
                         RightKind::Recipients => "recipients belong to",
                     };
                     match names.get(a.slug.as_str()) {
-                        Some(NameKind::Extern) => {
-                            let ty = self
-                                .externs()
-                                .find(|e| e.slug == a.slug)
-                                .map_or("", |e| e.block_type.as_str());
+                        // A managed block works as well: an adopted Code
+                        // Touch keeps its rights in the source.
+                        Some(kind @ (NameKind::Extern | NameKind::Block)) => {
+                            let ty = if matches!(kind, NameKind::Extern) {
+                                self.externs()
+                                    .find(|e| e.slug == a.slug)
+                                    .map_or("", |e| e.block_type.as_str())
+                            } else {
+                                self.blocks()
+                                    .find(|b| b.slug == a.slug)
+                                    .map_or("", |b| b.block_type.as_str())
+                            };
                             if ty != ty_want {
                                 return compile_err(format!(
                                     "{ctx}: {what} {noun}, a `{ty_want}` — `{}` is declared \
