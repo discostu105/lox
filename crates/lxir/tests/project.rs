@@ -124,6 +124,7 @@ fn drift_accepts_a_fingerprint_recorded_by_an_older_lxir() {
     for (older, label) in [
         (lxir::diff::semantic_fingerprint_v1(&out), "drift v1"),
         (lxir::diff::semantic_fingerprint_v5(&out), "drift v5"),
+        (lxir::diff::semantic_fingerprint_v6(&out), "drift v6"),
     ] {
         let lock = std::fs::read_to_string(&lock_path).unwrap();
         assert!(lock.contains(&current));

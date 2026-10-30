@@ -161,6 +161,13 @@ rule regel                           # an app rule (D57): active, all
 	then pumpe "on"
 end
 
+moods wohnen                         # light moods (D58), by name; the off
+	"Viel Licht": all on             # mood ("Aus") is implicit
+	"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)
+end
+extern licht = LightController2(title: "Lichtsteuerung")
+licht.moods = wohnen                 # also inside a template body
+
 removed old_gate                     # confirmed delete of a managed block
 moved beschatten -> schatten_gate    # slug rename, UUIDs survive
 ```
@@ -229,6 +236,10 @@ it only when it matches what you intended.
 | `a rule belongs to an Automatic Designer rule` / `not an Automatic Designer rule` | `rule` on a block of another type | declare `rule` only on an `AutopilotRule` extern |
 | `lxir writes only the documented shapes` | the rule has conditions lxir cannot write (a control's state, an operating mode, OR groups) | drop the declaration; edit that rule in the app |
 | `knows no action code (descID)` | a `then` to a block type/command no rule of the config uses yet | create one rule action of that kind in the app once; the compile copies its code |
+| `does not fit a switch or dimmer circuit` (and the other kinds) | a mood value of the wrong kind for that circuit (`rgb()` on a relay, `on` on a colour circuit) | use what the message says the circuit takes; `off` fits everywhere |
+| `is the controller's built-in off mood` | the set lists "Aus" (SID 778) | leave it out — every controller keeps it, always off |
+| `cannot be dropped` (moods) | the set leaves out "Viel Licht" (the motion mood) or a mood the motion settings name | keep it in the set; its values are yours to set |
+| `the controller has N circuits` | `AQ<n>` above the controller's circuit count | name an existing circuit |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
 
 After any failed `compile`, the lockfile on disk is untouched (the CLI saves
@@ -246,7 +257,8 @@ only on success) — just fix and re-run.
   tile programs it declared, access rights (`TIM=`) on Code Touches
   with an `access` declaration, and recipients (`ACT=`) of notifications
   with a `recipients` declaration, and the `APC=`/`STA=` of rules with a
-  `rule` declaration whose content changed. Everything else in the config is
+  `rule` declaration whose content changed, and the moods
+  (`<LightscenesC>`) of controllers with a `moods` claim. Everything else in the config is
   preserved byte-for-byte.
 - Extern-port originals and extern wires are tracked in the lock, so
   deleting IR lines cleanly reverts their effects on the next compile.

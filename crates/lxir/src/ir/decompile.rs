@@ -1155,7 +1155,7 @@ fn is_ident(s: &str) -> bool {
 /// hands them out and the parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule",
+    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule", "moods",
 ];
 
 /// Slug generation with umlaut transliteration and `_2`-style

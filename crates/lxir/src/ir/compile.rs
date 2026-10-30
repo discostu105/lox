@@ -455,7 +455,11 @@ pub fn compile(
     // UUID (older locks have no mark). With a fixed mint time the bare
     // per-run counter would mint a later-added block into a collision.
     minter.seed(lock.counters.next_mint);
-    for u in lock.pages.values() {
+    for u in lock
+        .pages
+        .values()
+        .chain(lock.moods.values().flat_map(|m| m.values()))
+    {
         minter.avoid(u);
     }
     for o in lock.objects.values() {
@@ -1472,6 +1476,15 @@ pub fn compile(
     //     schedules are the base's; no lock state, like tiles.
     super::access::apply(&mut doc, module, &uuid_of)?;
     super::rule::apply(&mut doc, module, &uuid_of)?;
+    // LightController2 moods (D58): the claimed `<LightscenesC>` list; a
+    //     new mood mints its UUID (pinned in the lock until the base has
+    //     it), so the mint mark moves with it.
+    let mint_mark = minter.counter();
+    let minted_moods = std::mem::take(&mut lock.moods);
+    lock.moods = super::moods::apply(&mut doc, module, &uuid_of, &minted_moods, &mut minter)?;
+    if minter.counter() != mint_mark {
+        lock.counters.next_mint = minter.counter();
+    }
 
     // --- Placement (D42), once every wire is drawn: blocks without a
     //     position, and those on pages laid out afresh, go where their

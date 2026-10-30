@@ -1639,6 +1639,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
         Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v6(&doc) == *recorded {
+        // Recorded before LightController2 moods joined the projection (D58).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to light moods — the next compile records \
+             the current form)"
+        );
+        Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v5(&doc) == *recorded {
         // Recorded before DayTimer schedules joined the projection (D53).
         println!(

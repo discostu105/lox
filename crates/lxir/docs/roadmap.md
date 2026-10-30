@@ -90,17 +90,11 @@ types) contradict each other. Results and methodology:
       before falling back to `uuid:`. Open: Air devices (their id is in
       `IP=`, not `Serial=`); decompile narrowing by room, which would
       resolve more repeated Tree titles than the serial does.
-- [ ] LightController2 moods from source. Surveyed 2026-10-29: a mood
-      is a `<LightsceneC>` in `<LightscenesC Num= Outputs= FC=>` with a
-      minted `UUID=`, a scene id `SID=` that `<LSConfig OpM= ScMv=>`
-      references (777/778 are the built-in "Viel Licht"/"Aus"), a `CID=`
-      of unknown meaning, `ReadOnly`/`Move` flags, and one `Q<n>=` per
-      circuit whose encoding follows the circuit type (dimmer 0–100,
-      switch 0/1, packed colour: `0x60000000 + R + 1000·G + 1000000·B`
-      in percent, per lox-cli; see loxone-format.md for how far the
-      corpus bears out its numbering rules). Needs an oracle-driven design before
-      it can be claimed; values on *existing* moods by name are the
-      likely first step.
+- [x] LightController2 moods from source (2026-10-30, D58): `moods`
+      sets claimed onto controllers (also from templates), values per
+      circuit kind, minted controllers seeded with the stock moods,
+      oracle- and live-verified. Open: lifting existing moods in
+      decompile/adopt; the `HCL`/sequence settings (`<SeqConf>`).
 - [ ] Decimal constants in folded `Formula`s (D35): the compiler writes
       `I1*0.5`, every corpus formula with a fraction writes `0,5`.
       Verify which the Miniserver reads (oracle: does the GUI rewrite or

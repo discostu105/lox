@@ -69,6 +69,13 @@ schedule (`user "alice": "Always"`), and owns that block's access
 rights: whoever it leaves out loses them (D49). Users, their tags and
 codes stay with Loxone Config and the app.
 
+Lighting moods are declared once and claimed per room:
+`moods wohnen … end` lists moods by name with circuit values
+(`"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)`), and `licht.moods = wohnen`
+makes them a Lichtsteuerung's mood list. A claim inside a room template
+gives every room the same four moods; existing moods keep their
+identity by name, so the switch buttons keep selecting them (D58).
+
 PicoC programs live in their own files: `hue = Code16("Hue", Code:
 file("hue.c"), AI1: rgb.AQ)` compiles the file into the program block,
 written the way Loxone Config writes it (D40).

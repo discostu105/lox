@@ -154,6 +154,9 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             Item::ScheduleClaim(c) => {
                 object_refs.insert(&c.slug);
             }
+            Item::MoodsClaim(c) => {
+                object_refs.insert(&c.slug);
+            }
             // A rule uses its own block and its action targets (D57).
             Item::Rule(r) => {
                 object_refs.insert(&r.slug);

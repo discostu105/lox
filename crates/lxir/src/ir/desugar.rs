@@ -61,6 +61,7 @@ impl Module {
                 Item::Template(t) => Some(t.name.as_str()),
                 Item::Tiles(t) => Some(t.name.as_str()),
                 Item::Schedule(t) => Some(t.name.as_str()),
+                Item::Moods(t) => Some(t.name.as_str()),
                 _ => None,
             })
             .collect();

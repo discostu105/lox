@@ -344,6 +344,8 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut open_schedule: Option<ScheduleDecl> = None;
     // A `rule` whose body is still open (until `end`) — D57.
     let mut open_rule: Option<RuleDecl> = None;
+    // A `moods` set whose body is still open (until `end`) — D58.
+    let mut open_moods: Option<MoodsDecl> = None;
 
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
@@ -399,6 +401,10 @@ pub fn parse(src: &str) -> Result<Module> {
                     r.body.push(RuleItem::Comment(text));
                     continue;
                 }
+                if let Some(m) = open_moods.as_mut() {
+                    m.body.push(MoodsItem::Comment(text));
+                    continue;
+                }
                 match open_test.as_mut() {
                     Some(t) => t.body.push(TestItem::Comment(text)),
                     None => sink(&mut open_template, &mut items).push(Item::Comment(text)),
@@ -419,6 +425,21 @@ pub fn parse(src: &str) -> Result<Module> {
                 t.body.push(ScheduleItem::Line(parse_schedule_line(
                     &toks, comment, lineno,
                 )?));
+            }
+            continue;
+        }
+
+        // Inside a `moods` body every line is a mood (or `end`).
+        if let Some(m) = open_moods.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut m = open_moods.take().unwrap();
+                m.end_comment = comment;
+                items.push(Item::Moods(m));
+            } else {
+                m.body
+                    .push(MoodsItem::Mood(parse_mood_line(&toks, comment, lineno)?));
             }
             continue;
         }
@@ -559,6 +580,7 @@ pub fn parse(src: &str) -> Result<Module> {
                     | "tiles"
                     | "tile"
                     | "schedule"
+                    | "moods"
             ) || (kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_)))))
         {
             return Err(err(format!(
@@ -661,6 +683,17 @@ pub fn parse(src: &str) -> Result<Module> {
                     return Err(err("expected `schedule <name>`".into()));
                 };
                 open_schedule = Some(ScheduleDecl {
+                    name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "moods" => {
+                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                    return Err(err("expected `moods <name>`".into()));
+                };
+                open_moods = Some(MoodsDecl {
                     name: check_slug(name, lineno)?,
                     body: Vec::new(),
                     comment,
@@ -1046,6 +1079,12 @@ pub fn parse(src: &str) -> Result<Module> {
             msg: format!("unclosed `rule {}` — missing `end`", r.slug),
         });
     }
+    if let Some(m) = open_moods {
+        return Err(Error::IrParse {
+            line: src.lines().count(),
+            msg: format!("unclosed `moods {}` — missing `end`", m.name),
+        });
+    }
     if let Some(t) = open_template {
         return Err(Error::IrParse {
             line: src.lines().count(),
@@ -1125,6 +1164,119 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
 
 /// One statement of a `test` body (D36): a port injection, `tick`,
 /// `expect`, or `clock`.
+/// One line of a `moods` body (D58): `"<name>": <setting>, …`, a
+/// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
+/// `<n>%`, `rgb(<r>, <g>, <b>)` (percent), `temp(<n>%, <k>K)` or a bare
+/// number (the stored value verbatim).
+fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<MoodLine> {
+    use crate::moods::MoodValue;
+    let err = |msg: String| Error::IrParse { line: lineno, msg };
+    let usage = "a mood is `\"<name>\": all <value>, AQ<n> <value>, …` — values are `on`, \
+                 `off`, `<n>%`, `rgb(<r>, <g>, <b>)`, `temp(<n>%, <k>K)`";
+    let [Tok::Str(name), Tok::Colon, rest @ ..] = toks else {
+        return Err(err(format!("expected a mood; {usage}")));
+    };
+    if rest.is_empty() {
+        return Err(err(format!(
+            "mood \"{name}\" sets no circuit — write `all off` for a dark mood; {usage}"
+        )));
+    }
+    let pct = |t: &Tok| -> Result<u8> {
+        let n = match t {
+            Tok::UnitNum(n, Unit::Pct) | Tok::Num(n) => n,
+            _ => return Err(err(format!("expected a percentage (0 … 100); {usage}"))),
+        };
+        n.parse::<u8>()
+            .ok()
+            .filter(|p| *p <= 100)
+            .ok_or_else(|| err(format!("`{n}` is not a whole percentage (0 … 100)")))
+    };
+    // Settings split at top-level commas (`rgb(…)` carries its own).
+    let mut parts: Vec<&[Tok]> = Vec::new();
+    let (mut depth, mut start) = (0usize, 0usize);
+    for (i, t) in rest.iter().enumerate() {
+        match t {
+            Tok::LParen => depth += 1,
+            Tok::RParen => depth = depth.saturating_sub(1),
+            Tok::Comma if depth == 0 => {
+                parts.push(&rest[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&rest[start..]);
+    let mut settings = Vec::new();
+    for part in parts {
+        let (circuit, value) = match part {
+            [Tok::Ident(c), value @ ..] if c == "all" => (None, value),
+            [Tok::Ident(c), value @ ..] if c.starts_with("AQ") => match c[2..].parse::<u8>() {
+                Ok(n) if n >= 1 && !c[2..].starts_with('0') => (Some(n), value),
+                _ => return Err(err(format!("`{c}` is not a circuit (`AQ1`, `AQ2`, …)"))),
+            },
+            [] => return Err(err(format!("empty setting; {usage}"))),
+            _ => return Err(err(format!("expected `all` or a circuit `AQ<n>`; {usage}"))),
+        };
+        let value = match value {
+            [Tok::Ident(v)] if v == "on" => MoodValue::On,
+            [Tok::Ident(v)] if v == "off" => MoodValue::Off,
+            [p @ Tok::UnitNum(_, Unit::Pct)] => MoodValue::Pct(pct(p)?),
+            [Tok::Num(n)] => MoodValue::Raw(n.parse().map_err(|_| {
+                err(format!(
+                    "`{n}` is not a stored mood value (a whole number below 2³²) — a \
+                     percentage takes `%`"
+                ))
+            })?),
+            [
+                Tok::Ident(f),
+                Tok::LParen,
+                r,
+                Tok::Comma,
+                g,
+                Tok::Comma,
+                b,
+                Tok::RParen,
+            ] if f == "rgb" => MoodValue::Rgb(pct(r)?, pct(g)?, pct(b)?),
+            [
+                Tok::Ident(f),
+                Tok::LParen,
+                b,
+                Tok::Comma,
+                Tok::UnitNum(k, Unit::K),
+                Tok::RParen,
+            ] if f == "temp" => {
+                let kelvin = k
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|k| (1000..=9999).contains(k))
+                    .ok_or_else(|| {
+                        err(format!(
+                            "`{k}K` is not a colour temperature (1000K … 9999K)"
+                        ))
+                    })?;
+                MoodValue::Temp(pct(b)?, kelvin)
+            }
+            [Tok::Ident(f), ..] if f == "rgb" => {
+                return Err(err(
+                    "expected `rgb(<r>, <g>, <b>)`, each 0 … 100 percent".into()
+                ));
+            }
+            [Tok::Ident(f), ..] if f == "temp" => {
+                return Err(err(
+                    "expected `temp(<n>%, <k>K)`, e.g. `temp(80%, 2700K)`".into()
+                ));
+            }
+            _ => return Err(err(format!("expected a value; {usage}"))),
+        };
+        settings.push(MoodSetting { circuit, value });
+    }
+    Ok(MoodLine {
+        name: name.clone(),
+        settings,
+        comment,
+    })
+}
+
 /// One line of a `schedule` body (D53): day keywords, then either `off`
 /// or comma-separated intervals `HH:MM-HH:MM [= <number>] [activate]`.
 fn parse_schedule_line(
@@ -1427,6 +1579,11 @@ fn parse_ident_statement(
                     "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
                 )));
             }
+            if tp == "moods" {
+                return Err(err(format!(
+                    "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
+                )));
+            }
             let to = PortRef {
                 slug: ts.clone(),
                 port: tp.clone(),
@@ -1502,6 +1659,23 @@ fn parse_ident_statement(
             items.push(Item::ScheduleClaim(ScheduleClaim {
                 slug: ts.clone(),
                 schedule: name.clone(),
+                comment,
+            }));
+            Ok(())
+        }
+        // slug.moods = name — a LightController2 mood claim (D58). Unlike
+        // the other claims it may sit in a template body: one mood set for
+        // every room the template stamps out.
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "moods" => {
+            let [Tok::Ident(name)] = rest else {
+                return Err(err(format!(
+                    "expected `{ts}.moods = <name>` — the name of a `moods` set (or, in a \
+                     template body, of the value parameter that passes one)"
+                )));
+            };
+            items.push(Item::MoodsClaim(MoodsClaim {
+                slug: ts.clone(),
+                moods: name.clone(),
                 comment,
             }));
             Ok(())
