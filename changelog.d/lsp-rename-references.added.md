@@ -1,1 +1,0 @@
-- **`lox ir lsp`** finds references and renames module-level names (constants, externs, blocks, templates, instances) across a module's fragments. In a project, rename is `lxir rename`'s verified plan, and the lockfile is re-keyed in the same edit. "did you mean `X`?" diagnostics get a quick fix.

@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-30
+
+### Added
+- **`lox ir lsp`** finds references and renames module-level names (constants, externs, blocks, templates, instances) across a module's fragments. In a project, rename is `lxir rename`'s verified plan, and the lockfile is re-keyed in the same edit. "did you mean `X`?" diagnostics get a quick fix.
+
 ## [0.31.0] — 2026-10-30 — the app sees what you push
 
 `lox config push` no longer leaves the app on the last Loxone Config save: it edits the app catalogue for the controls a push renames, moves, removes or adds.
