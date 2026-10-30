@@ -804,6 +804,109 @@ const INTERCOM: &[PortSpec] = &[
     p("API", Api),
 ];
 
+// The meters (2026-10-30): the house's 32 statistics meters — digital
+// (MeterDig) and absolute uni-/bidirectional/storage (MeterAbsUni,
+// MeterAbsBi, MeterAbsSt). Key order: every corpus instance (house V178,
+// corpus V172/V178) materializes the full set in this order, matching the
+// legacy db. Directions: corpus sinks (`A`, `Pf`, `Slvl`) and `Def` (`Ppwr`)
+// where wired; everything else follows the legacy db with zero corpus
+// contradiction — the reset and meter-reading inputs (`R`, `Mr*`) by the
+// inert-flag rule, the readings `OR*` and `OMr*` as outputs. `OutputAPI` is
+// wired both ways where the corpus wires it (Api), otherwise legacy's
+// output (docs/connector-db.md, "The meters").
+const METER_DIG: &[PortSpec] = &[
+    p("A", Input),
+    p("R", Input),
+    p("Ppwr", Param),
+    p("Mro", Param),
+    p("OPf", Output),
+    p("OMr", Output),
+    p("ORd", Output),
+    p("ORld", Output),
+    p("ORw", Output),
+    p("ORlw", Output),
+    p("ORm", Output),
+    p("ORlm", Output),
+    p("ORy", Output),
+    p("ORly", Output),
+    p("OutputAPI", Output),
+];
+const METER_ABS_UNI: &[PortSpec] = &[
+    p("Pf", Input),
+    p("Mr", Input),
+    p("R", Input),
+    p("Mro", Param),
+    p("OPf", Output),
+    p("OMr", Output),
+    p("ORd", Output),
+    p("ORld", Output),
+    p("ORw", Output),
+    p("ORlw", Output),
+    p("ORm", Output),
+    p("ORlm", Output),
+    p("ORy", Output),
+    p("ORly", Output),
+    p("OutputAPI", Api),
+];
+const METER_ABS_BI: &[PortSpec] = &[
+    p("Pf", Input),
+    p("Mr1", Input),
+    p("Mr2", Input),
+    p("R", Input),
+    p("Mro1", Param),
+    p("Mro2", Param),
+    p("OPf", Output),
+    p("OMr1", Output),
+    p("ORd1", Output),
+    p("ORld1", Output),
+    p("ORw1", Output),
+    p("ORlw1", Output),
+    p("ORm1", Output),
+    p("ORlm1", Output),
+    p("ORy1", Output),
+    p("ORly1", Output),
+    p("OMr2", Output),
+    p("ORd2", Output),
+    p("ORld2", Output),
+    p("ORw2", Output),
+    p("ORlw2", Output),
+    p("ORm2", Output),
+    p("ORlm2", Output),
+    p("ORy2", Output),
+    p("ORly2", Output),
+    p("OutputAPI", Api),
+];
+const METER_ABS_ST: &[PortSpec] = &[
+    p("Pf", Input),
+    p("Mr1", Input),
+    p("Mr2", Input),
+    p("Slvl", Input),
+    p("R", Input),
+    p("Mro1", Param),
+    p("Mro2", Param),
+    p("OPf", Output),
+    p("OMr1", Output),
+    p("ORd1", Output),
+    p("ORld1", Output),
+    p("ORw1", Output),
+    p("ORlw1", Output),
+    p("ORm1", Output),
+    p("ORlm1", Output),
+    p("ORy1", Output),
+    p("ORly1", Output),
+    p("OMr2", Output),
+    p("ORd2", Output),
+    p("ORld2", Output),
+    p("ORw2", Output),
+    p("ORwl2", Output),
+    p("ORm2", Output),
+    p("ORlm2", Output),
+    p("ORy2", Output),
+    p("ORly2", Output),
+    p("OSlvl", Output),
+    p("OutputAPI", Output),
+];
+
 // Mirror blocks: the on-page visual representation of an object living
 // elsewhere (an I/O device, a system object, a block on another page).
 // `AI`/`I` are fed by wires from the mirrored object's outputs; the
@@ -936,6 +1039,10 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "TpfController",
     "NfcCodeTouch",
     "Intercom",
+    "MeterDig",
+    "MeterAbsUni",
+    "MeterAbsBi",
+    "MeterAbsSt",
 ];
 
 /// Block versions (`V=` on `<C>`) the builtin table is verified for,
@@ -1028,6 +1135,18 @@ pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
         "TpfController" => &["PRE"],
         "NfcCodeTouch" => &["Ref", "SpCdUuid", "OStr", "HSize", "AP", "NAUTT"],
         "Intercom" => &["Ref", "Objects", "ans", "OutName1", "OutName2", "OutName3"],
+        // The meter dialog: units, recording and statistics settings, the
+        // storage's level cap, an EFM member's `NOEFM`.
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt" => &[
+            "PwrN",
+            "Un1",
+            "Un2",
+            "UnSt",
+            "Rec",
+            "StatsType",
+            "NOEFM",
+            "MaxLvl",
+        ],
         _ => &[],
     }
 }
@@ -1046,6 +1165,8 @@ pub fn carried_children(block_type: &str) -> &'static [&'static str] {
         "Irrigation" => &["zone"],
         "EFM" => &["root", "statGrp", "C"],
         "NfcCodeTouch" => &["C"],
+        // The statistics groups the meter records into (Statistics V2).
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt" => &["statGrp"],
         _ => &[],
     }
 }
@@ -1156,6 +1277,10 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "TpfController" => Some(TPF_CONTROLLER),
         "NfcCodeTouch" => Some(NFC_CODE_TOUCH),
         "Intercom" => Some(INTERCOM),
+        "MeterDig" => Some(METER_DIG),
+        "MeterAbsUni" => Some(METER_ABS_UNI),
+        "MeterAbsBi" => Some(METER_ABS_BI),
+        "MeterAbsSt" => Some(METER_ABS_ST),
         "InputRef" => Some(INPUT_REF),
         "OutputRef" | "OutputRefLM" => Some(OUTPUT_REF),
         "VirtualIn" => Some(VIRTUAL_IN),

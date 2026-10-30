@@ -219,6 +219,7 @@ pub fn adopt_one(
         }))
         .chain(lock.objects.keys().cloned())
         .chain(lock.externals.keys().cloned())
+        .chain(lock.rules.keys().cloned())
         .collect();
     if promoted.is_none() && taken.contains(slug) {
         return Err(fail(format!(
@@ -279,6 +280,13 @@ pub fn adopt_one(
                 lock.externals
                     .iter()
                     .find(|(_, le)| &le.uuid == u)
+                    .map(|(s, _)| s.clone())
+            })
+            // A rule (D60) the source declares already has its slug.
+            .or_else(|| {
+                lock.rules
+                    .iter()
+                    .find(|(_, ru)| *ru == u)
                     .map(|(s, _)| s.clone())
             });
         let fin = existing.unwrap_or_else(|| {

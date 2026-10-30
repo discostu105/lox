@@ -411,7 +411,13 @@ pub fn compile(
     // can leave a tombstone if they vanish from source (the rebuild below
     // re-records the ones that stay).
     let mut wires_present: BTreeSet<LockedWire> = BTreeSet::new();
+    // The GUI's flag on a wire (`FLG=`) is its own; one the base carried
+    // on a wire of ours goes back on with the rebuilt wire.
+    let mut extern_wire_flags: BTreeMap<(String, String), String> = BTreeMap::new();
     for w in &old_wires {
+        if let Some(flg) = wire_flag(&mut doc, &w.from, &w.to) {
+            extern_wire_flags.insert((w.to.clone(), w.from.clone()), flg);
+        }
         if remove_wire(&mut doc, &w.from, &w.to) {
             wires_present.insert(w.clone());
         }
@@ -1309,10 +1315,11 @@ pub fn compile(
                 }
             }
         }
-        let flg = residue.get(&to.owner_uuid).and_then(|r| {
-            r.wire_flags
-                .get(&(to.port_uuid.clone(), from.port_uuid.clone()))
-        });
+        let key = (to.port_uuid.clone(), from.port_uuid.clone());
+        let flg = residue
+            .get(&to.owner_uuid)
+            .and_then(|r| r.wire_flags.get(&key))
+            .or_else(|| extern_wire_flags.get(&key));
         add_wire(
             &mut doc,
             &to.owner_uuid,
@@ -2329,6 +2336,15 @@ fn add_wire(
 /// the previous compile owned).
 /// Returns whether a wire was actually present (and thus removed) — the
 /// tombstone lifecycle (D31) keys on this.
+/// The raw `FLG=` of the `<In>` wiring `from_port` into `to_port`.
+fn wire_flag(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> Option<String> {
+    find_co_mut(&mut doc.xml.root, to_port)?
+        .child_elements()
+        .find(|e| e.name == "In" && e.attr("Input") == Some(from_port))?
+        .attr("FLG")
+        .map(str::to_string)
+}
+
 fn remove_wire(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> bool {
     if let Some(co) = find_co_mut(&mut doc.xml.root, to_port) {
         let before = co.children.len();

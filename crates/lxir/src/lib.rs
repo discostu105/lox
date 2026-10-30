@@ -42,6 +42,7 @@ pub mod autopilot;
 pub mod catalogue;
 pub mod cli;
 pub mod connectors;
+pub mod coverage;
 pub mod diff;
 pub mod doc;
 pub mod error;

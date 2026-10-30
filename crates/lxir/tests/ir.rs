@@ -1101,6 +1101,113 @@ fn incremental_adopt_claims_a_gui_drawn_block() {
     assert!(err.to_string().contains("--accept-version"), "{err}");
 }
 
+/// The GUI-drawn Or with only I1 wired in Loxone Config; I2 is left for
+/// the source to wire.
+const INCR_OR_HALF: &str = "\t\t\t<C Type=\"Or\" V=\"175\" \
+     U=\"00000030-0000-0000-ffff000000000001\" Title=\"Nachtlicht\" \
+     Px=\"200\" Py=\"200\" Px2=\"254\" Py2=\"236\" Nio=\"3\">\
+     <Co K=\"I1\" U=\"00000030-0000-0001-01ff000000000001\" Nc=\"1\">\
+     <In Input=\"00000010-0000-0001-01ff000000000001\"/></Co>\
+     <Co K=\"I2\" U=\"00000030-0000-0002-01ff000000000001\" Nc=\"0\"/>\
+     <Co K=\"Q\" U=\"00000030-0000-0003-01ff000000000001\" Nc=\"0\"/></C>\r\n";
+
+#[test]
+fn incremental_adopt_promotes_an_extern() {
+    let (mut module, mut lock, _) = adopt(&incr_base("", INCR_I2_UNWIRED)).unwrap();
+    // The Or is an extern of the module, and the source wires its I2.
+    module.items.extend(
+        Module::parse(
+            "extern sensor_b = VirtualIn(title: \"Sensor B\")\n\
+             extern nachtlicht = Or(title: \"Nachtlicht\")\n\
+             nachtlicht.I2 <- sensor_b.Q # vom Bewegungsmelder\n",
+        )
+        .unwrap()
+        .items,
+    );
+    let base = compile(
+        &incr_base(INCR_OR_HALF, INCR_I2_UNWIRED),
+        &module,
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(lock.extern_wires.len(), 1);
+
+    // Promoting keeps the slug every statement already uses.
+    let err = adopt_one(&base, OR_UUID, "licht", &module, &mut lock.clone()).unwrap_err();
+    assert!(err.to_string().contains("`--as nachtlicht`"), "{err}");
+
+    let mut promoted_lock = lock.clone();
+    let adopted = adopt_one(&base, OR_UUID, "nachtlicht", &module, &mut promoted_lock).unwrap();
+    assert!(adopted.promoted);
+    let text = Module {
+        items: adopted.items.clone(),
+    }
+    .to_text();
+    // The GUI's wire and the source's wire are both arguments now — the
+    // source's once, with its comment.
+    assert!(text.contains("I1: sensor_a.Q"), "{text}");
+    assert_eq!(text.matches("I2: sensor_b.Q").count(), 1, "{text}");
+    assert!(text.contains("# vom Bewegungsmelder"), "{text}");
+    assert!(!promoted_lock.externals.contains_key("nachtlicht"));
+    assert!(promoted_lock.extern_wires.is_empty());
+    assert_eq!(promoted_lock.objects["nachtlicht"].uuid, OR_UUID);
+
+    // The source without the extern's statements plus the declaration
+    // rebuilds the config unchanged.
+    assert!(module.strip_extern("nachtlicht"));
+    module.items.extend(adopted.items);
+    module.validate().unwrap();
+    let noop_opts = CompileOptions {
+        page_title: None,
+        ..opts()
+    };
+    let out = compile(&base, &module, &mut promoted_lock, &noop_opts).unwrap();
+    let d = lxir::diff::diff(&base, &out);
+    assert!(d.is_empty(), "{d:#?}");
+}
+
+#[test]
+fn extern_wire_keeps_the_guis_flag() {
+    let (mut module, mut lock, _) = adopt(&incr_base("", INCR_I2_UNWIRED)).unwrap();
+    module.items.extend(
+        Module::parse(
+            "extern sensor_b = VirtualIn(title: \"Sensor B\")\n\
+             extern nachtlicht = Or(title: \"Nachtlicht\")\n\
+             nachtlicht.I2 <- sensor_b.Q\n",
+        )
+        .unwrap()
+        .items,
+    );
+    let first = compile(
+        &incr_base(INCR_OR_HALF, INCR_I2_UNWIRED),
+        &module,
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    // Loxone Config flags the wire; the next compile rebuilds it with
+    // the flag on.
+    let wire = "<In Input=\"00000011-0000-0001-01ff000000000001\"/>";
+    let text = String::from_utf8(first.to_bytes()).unwrap();
+    assert_eq!(text.matches(wire).count(), 1, "{text}");
+    let flagged = text.replace(
+        wire,
+        "<In Input=\"00000011-0000-0001-01ff000000000001\" FLG=\"1\"/>",
+    );
+    let base = LoxoneDoc::parse(flagged.as_bytes()).unwrap();
+    let out = String::from_utf8(
+        compile(&base, &module, &mut lock, &opts())
+            .unwrap()
+            .to_bytes(),
+    )
+    .unwrap();
+    assert!(
+        out.contains("<In Input=\"00000011-0000-0001-01ff000000000001\" FLG=\"1\"/>"),
+        "{out}"
+    );
+}
+
 #[test]
 fn incremental_adopt_refuses_claimed_or_unverified_identities() {
     let module = module();
@@ -1125,6 +1232,7 @@ fn incremental_adopt_refuses_claimed_or_unverified_identities() {
     let extern_uuid = lock.externals["jal_sued"].uuid.clone();
     let err = adopt_one(&base, &extern_uuid, "x", &module, &mut lock.clone()).unwrap_err();
     assert!(err.to_string().contains("extern `jal_sued`"), "{err}");
+    assert!(err.to_string().contains("--as jal_sued"), "{err}");
 
     let vi = base
         .objects()
