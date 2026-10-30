@@ -1,5 +1,0 @@
-- **`lxir lsp` / `lox ir lsp`**: a language server for `.lxir` modules, so editors show errors and help while you write config as code
-  - Diagnostics as you type (what `check` and `lint` report). On save in a `lox.toml` project, the module is also compiled against the base config in memory (extern resolution, lockfile, dead outputs); nothing is written
-  - Go to definition across the fragments of a module; hover shows the object an extern resolves to (type, title, room, page, UUID) and a port's direction and documented range
-  - Completion of ports after `name.` and of block types after `name =`, plus formatting and the outline
-  - The VS Code extension in `crates/lxir/editor/vscode` starts it (run `npm install --omit=dev` once in that folder). For Neovim, see the lxir README
