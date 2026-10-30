@@ -280,7 +280,7 @@
         { "include": "#file" },
         { "include": "#string" },
         {
-          "match": "([a-z][a-z0-9_]*)\\s*(:)",
+          "match": "([A-Za-z][A-Za-z0-9_]*)\\s*(:)",
           "captures": {
             "1": { "name": "variable.parameter.lxir" },
             "2": { "name": "punctuation.separator.lxir" }
