@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-10-30
+
+### Added
+- **`lox config push`** writes app catalogue entries for more block types: memory flags, pulses at a time, digital day timers and the info displays of sensors and inputs (digital and analog, with statistics). Each one reproduces Loxone Config's entries byte for byte.
+
 ## [0.32.0] — 2026-10-30
 
 ### Added
