@@ -27,7 +27,7 @@ observe output), `sha2` (slug entities, config hashes), `thiserror`.
 | `src/render.rs` | `lxir render`: one page as SVG, `PageMetrics` (overlaps, backward and long wires, crossings, wire length) | read-only |
 | `src/scan.rs` | `lxir scan`: personal data in a config by rule (location, person, access code, credential, remote access, mail, network, hardware serial) | reports element, attribute and length only, never a value; CI runs it over every committed `.Loxone` |
 | `src/autopilot.rs` | Automatic Designer `APC=` payload: parse/canonicalize, view summary, field-path change list (D37) | read-only; untyped JSON so unknown fields still diff |
-| `src/lsp/` | `lxir lsp` (D59): JSON-RPC framing and handlers (`mod.rs`), the protocol-free analysis: diagnostics, lexical declarations, hover, completion (`analysis.rs`), UTF-16 columns and `file://` URIs (`text.rs`) | writes nothing; the deep check compiles on a copy of the lock |
+| `src/lsp/` | `lxir lsp` (D59): JSON-RPC framing and handlers (`mod.rs`), the protocol-free analysis: diagnostics, lexical declarations, hover, completion, references and rename (`analysis.rs`), UTF-16 columns and `file://` URIs (`text.rs`) | writes nothing; the deep check compiles on a copy of the lock |
 | `src/project.rs` | `Project`: `lox.toml` load/parse (strict flat TOML subset), path resolution against the file's directory | refuses everything outside the subset with pointed errors (D25) |
 | `src/bin/lxir.rs` | CLI; thin wrappers over the public API only | no semantics of its own |
 

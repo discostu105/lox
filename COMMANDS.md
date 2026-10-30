@@ -410,7 +410,7 @@ lox ir decompile current.Loxone        # the IR view of every page (read-only)
 lox ir rename old_name new_name        # rename across sources and lockfile, identities kept
 lox ir lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
 lox ir test --lox ~/lox-cli/lox        # `test … end` blocks through lox-cli's simulator (`lox sim`)
-lox ir lsp                             # language server for editors (stdio): diagnostics, hover, completion
+lox ir lsp                             # language server for editors (stdio): diagnostics, hover, completion, rename
 ```
 
 Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.

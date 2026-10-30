@@ -335,7 +335,12 @@ commands and repo rules at a glance.
 - hover: the base object an extern resolves to (type, title, room, page,
   UUID), and the ports and port facts of a type;
 - completion of ports after `name.` and of block types after `name =`;
-- formatting (`lxir fmt`) and the outline.
+- formatting (`lxir fmt`) and the outline;
+- find references and rename of a module-level name (constant, extern,
+  block, template, instance) across the fragments; in a project, rename
+  is `lxir rename` (verified to change only titles, the lockfile
+  re-keyed with it); the editor applies the edits;
+- quick fixes for "did you mean `X`?".
 
 `editor/vscode/` contains the VS Code extension for `.lxir` files: syntax
 highlighting, comment/bracket support, snippets for all statement forms,
