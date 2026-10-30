@@ -467,7 +467,7 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       "Name"` takes the config's rule of that name or creates one below
       the last rule, filed like it; the lock pins its UUID (v7 `rules`).
       Oracle-validated (session 24).
-- [ ] Live check of a created rule: push one, see it in the app and run
+- [ ] Live check of a created rule (#181): push one, see it in the app and run
       at its time (the Miniserver loads program rules, D57; a created one
       has not been pushed yet).
 - [ ] Deleting rules from source (`removed`-style tombstone) — only with
