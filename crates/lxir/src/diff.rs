@@ -444,6 +444,24 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         });
                     }
                 }
+                // A LightController2's moods (D58), one change per mood
+                // in source terms, plus their order.
+                let (ma, mb) = (
+                    crate::moods::mood_fields(a, oa),
+                    crate::moods::mood_fields(b, ob),
+                );
+                for key in ma.keys().chain(mb.keys()).collect::<BTreeSet<_>>() {
+                    let (from, to) = (ma.get(key), mb.get(key));
+                    if from != to {
+                        out.param_changes.push(ParamChange {
+                            object_uuid: uuid.clone(),
+                            block_type: ob.block_type.clone(),
+                            port_key: key.clone(),
+                            from: from.cloned(),
+                            to: to.cloned(),
+                        });
+                    }
+                }
                 // A DayTimer's switching times (D53), by day group.
                 for (key, from, to) in
                     schedule_changes(&schedule_columns(a, oa), &schedule_columns(b, ob))
@@ -508,6 +526,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// answer "did another writer change something?" from one parse, no
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 7)
+}
+
+/// The fingerprint as lxir wrote it before LightController2 moods
+/// (`<LightscenesC>`) joined the projection (D58). `lxir drift` accepts
+/// it so an upgrade alone does not read as drift; the next compile
+/// records the current form.
+pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 6)
 }
 
@@ -563,7 +589,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         3 => b"lxir-fingerprint-v3".to_vec(),
         4 => b"lxir-fingerprint-v4".to_vec(),
         5 => b"lxir-fingerprint-v5".to_vec(),
-        _ => b"lxir-fingerprint-v6".to_vec(),
+        6 => b"lxir-fingerprint-v6".to_vec(),
+        _ => b"lxir-fingerprint-v7".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -623,6 +650,12 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         if version >= 6 {
             for ((_, mode), v) in schedule_columns(doc, o) {
                 field(&mut buf, b's', &mode);
+                field(&mut buf, b'v', &v);
+            }
+        }
+        if version >= 7 {
+            for (key, v) in crate::moods::mood_fields(doc, o) {
+                field(&mut buf, b'l', &key);
                 field(&mut buf, b'v', &v);
             }
         }

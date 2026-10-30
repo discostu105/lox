@@ -22,6 +22,8 @@
 //! - [`layout`] — page geometry: footprints, port rows, wires, and the
 //!   placement of blocks that have no position yet; [`render`] draws a
 //!   page as SVG with layout metrics.
+//! - [`moods`] — LightController2 moods: the read model and the circuit
+//!   value codec.
 //! - [`project`] — `lox.toml` project files: one directory, one deployment
 //!   target, zero flags.
 //!
@@ -44,6 +46,7 @@ pub mod error;
 pub mod ir;
 pub mod layout;
 pub mod lock;
+pub mod moods;
 pub mod observed_defaults;
 pub mod permissions;
 pub mod port_meta;

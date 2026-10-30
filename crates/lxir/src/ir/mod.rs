@@ -38,6 +38,12 @@
 //!     user "<title>"                            Notification — `ACT=` on it;
 //!     group "<title>"                           its messages come from
 //! end                                           `OutputRefLM` blocks)
+//! moods   <name>                               (D58: LightController2 moods;
+//!     "<mood>": all on, AQ<n> <value>, …        values on|off|40%|rgb(r,g,b)|
+//! end                                           temp(80%, 2700K))
+//! <slug>.moods = <name>                        (write the set onto a
+//!                                               LightController2; also in a
+//!                                               template body)
 //! ```
 //!
 //! In a block's argument list, the value decides the meaning: a literal or
@@ -56,6 +62,7 @@ mod compile;
 mod decompile;
 mod desugar;
 mod lint;
+mod moods;
 mod parser;
 mod rename;
 mod rule;
@@ -71,10 +78,11 @@ pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adop
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl, Binding,
     BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl, ExternDecl, Interval,
-    Item, LetDecl, MatchSpec, Module, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE,
-    RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim,
-    ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp,
-    TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
+    Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem,
+    MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl,
+    RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine,
+    SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl,
+    TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile};
 pub use decompile::{

@@ -32,11 +32,12 @@ use std::path::Path;
 
 /// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
 /// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
-/// (D42); v5 the pages the compiler created (`pages`, D56). Older locks load fine (the maps default to empty); saving always
+/// (D42); v5 the pages the compiler created (`pages`, D56); v6 the light
+/// moods it minted (`moods`, D58). Older locks load fine (the maps default to empty); saving always
 /// writes the current version, so an old binary — whose version check
 /// refuses the newer number — can never silently drop state it does not
 /// know about.
-pub const LOCKFILE_VERSION: u32 = 5;
+pub const LOCKFILE_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -97,6 +98,13 @@ pub struct Lockfile {
     /// Config) is refused. An entry lives as long as its statement.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pages: BTreeMap<String, String>,
+    /// Light moods the compiler minted (D58), controller UUID → mood name
+    /// → mood UUID: a recompile against a base from before the
+    /// deployment mints the same moods again. An entry lives until a base
+    /// carries the mood — from then on the controller's own `UUID=` is
+    /// its identity.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub moods: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// One attribute claim (D39). Values are decoded: a title as text, a room

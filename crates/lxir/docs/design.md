@@ -1771,3 +1771,43 @@ Anything unverified is an error, not a heuristic:
   a compile setting both flags ran at its compiled minute (00:37:00 in
   the rule log). Compiling the original declaration
   back restored the original bytes. See loxone-format.md.
+- **D58 — Lighting moods from source** (2026-10-30). Asked for by a
+  user: "four moods in each room, with the same colors, with all the
+  buttons on the switches… Loxone Config won't let me for loop it".
+  A `moods <set>` declaration lists moods by name with circuit values;
+  `<controller>.moods = <set>` writes the set onto a LightController2's
+  `<LightscenesC>`, also from a template body — the loop the GUI lacks.
+  - **Name is identity.** Buttons, the app and `<LSConfig>` address a
+    mood by `SID=`; matching by name keeps an existing mood's
+    `UUID=`/`SID=`/`CID=`/flags and rewrites only its `Q<n>=`, so an
+    adopted controller compiles byte-identical and a recoloured mood
+    stays on its button. New moods take the lowest free `SID` from 1
+    (776–778 built-in) and the lowest free `CID` above the off mood's —
+    what the house's GUI-made moods show. The off mood (`SID` 778) is
+    implicit; the motion mood (777) and any `<LSConfig>`-named mood
+    cannot be dropped (the controller depends on them), only re-valued.
+  - **Values per circuit kind, read off the moods.** The top four bits
+    of a `Q` value are a property of the circuit, never of the mood (0
+    inconsistencies over 648 corpus circuit columns), so the compile
+    reads each circuit's kind from the existing moods and encodes
+    `on`/`N%`/`rgb()`/`temp()` for it, refusing what does not fit. A
+    value outside the decoded packings round-trips as a raw number.
+  - **Seeding a minted controller.** Loxone Config backfills a bare
+    controller's moods on its first save (oracle session 9); session 21
+    recorded exactly what it writes, and a claim on a controller with
+    no `<LightscenesC>` writes the same (stock moods, `<LSConfig>`,
+    `<IoData>`, `<PSD>`, `<HCL>`, `<COHist>`) before applying the set.
+    Its circuits then read as switch/dimmer circuits — the kind changes
+    only when Loxone Config assigns an actuator.
+  - **Lock state for minted moods only.** A minted mood's UUID is pinned
+    (`moods`, lock v6) until a base carries it, so compiles before the
+    push are a lock fixpoint; afterwards the base's `UUID=` is the
+    identity and the entry retires. No other lock state: removing a
+    claim leaves the moods as written (like D41/D53).
+  - **Semantics.** Diff and fingerprint (v7) carry every controller's
+    moods as rendered source values; drift accepts a lock's v6
+    fingerprint.
+  Not lifted by decompile/adopt yet (moods stay GUI content until
+  declared). Validated: oracle sessions 21–22 (Loxone Config 17.2.8.28
+  keeps minted and seeded moods byte-identical) and live on the house
+  Miniserver.

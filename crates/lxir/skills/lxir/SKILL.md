@@ -1,6 +1,6 @@
 ---
 name: lxir
-description: Author and change Loxone Miniserver logic as source code with the lxir toolchain — .lxir modules compiled against a base .Loxone config with a UUID-pinning lockfile. Use when asked to add, change, review or explain automations (blocks, wires, parameters, schedules, Automatic Designer rules, virtual inputs) in a Loxone config, or to work in a directory with a lox.toml.
+description: Author and change Loxone Miniserver logic as source code with the lxir toolchain — .lxir modules compiled against a base .Loxone config with a UUID-pinning lockfile. Use when asked to add, change, review or explain automations (blocks, wires, parameters, schedules, Automatic Designer rules, light moods, virtual inputs) in a Loxone config, or to work in a directory with a lox.toml.
 ---
 
 # Loxone logic with lxir
@@ -69,6 +69,12 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - An Automatic Designer rule is created in the app and named as an extern
   `AutopilotRule(…)`; `rule <it> … end` (`active`, `when time 07:30`,
   `when weekday mon`, `then <block> "on"`) says what it does.
+- Light moods: `moods <set> … end` lists moods by name (`"Lesen": all on,
+  AQ3 temp(60%, 2700K)`; values `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`
+  per circuit kind), `<controller>.moods = <set>` writes them onto a
+  LightController2. Claim it in a room template to give every room the
+  same moods; wire switch buttons to `Sel1`…`Sel8` to select them. The
+  off mood "Aus" is implicit.
 - To take over logic someone drew in the GUI, use `lxir adopt`, then
   confirm with `lxir diff --exit-code` that the takeover changed nothing.
   The decompile view is for reading and does not compile.

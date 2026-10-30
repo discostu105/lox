@@ -9,8 +9,8 @@
 
 use crate::error::{Error, Result};
 use crate::ir::ast::{
-    ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, Module, Operand, PortRef,
-    SetDecl, TemplateDecl, TemplateParam, Value, WireDecl,
+    ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, Module, MoodsClaim,
+    Operand, PortRef, SetDecl, TemplateDecl, TemplateParam, Value, WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -324,6 +324,28 @@ impl Module {
                     value: map_value(&s.value)?,
                     comment: s.comment.clone(),
                 })),
+                // A mood claim (D58) on a body block: the set is named
+                // directly, or by a value parameter so each instance can
+                // pass its own (`stimmungen = "standard"`, overridden with
+                // `stimmungen: "kueche"`).
+                Item::MoodsClaim(c) => {
+                    let moods = match values.get(c.moods.as_str()) {
+                        Some(Value::Ref(name) | Value::Str(name)) => name.clone(),
+                        Some(other) => {
+                            return Err(fail(format!(
+                                "`{c}`: parameter `{}` passes `{other}`, not the name of a \
+                                 `moods` set",
+                                c.moods
+                            )));
+                        }
+                        None => c.moods.clone(),
+                    };
+                    out.push(Item::MoodsClaim(MoodsClaim {
+                        slug: map_slug(&c.slug),
+                        moods,
+                        comment: c.comment.clone(),
+                    }));
+                }
                 // Template-source commentary, not per-instance content.
                 Item::Comment(_) => {}
                 other => {

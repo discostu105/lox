@@ -775,17 +775,36 @@ its own evidence; these are leads, marked by how far they hold.
   with `MaxVal="1000"` fed air pressure (~1024 hPa) read 0 until
   `MaxVal` was raised. `MinVal=`/`MaxVal=` are attribute parameters
   (D54); set them to cover the values the input will receive.
-- **LightController2 moods** (`<LightscenesC Num= Outputs= FC=>` holding
-  `<LightsceneC Name= UUID= SID= CID= Outputs= Q1=…>`). An RGB output's
-  `Q<n>` packs percent channels as `0x60000000 + R + 1000·G +
-  1000000·B` (each 0–100), unlike an RGB actor's 0–255 composite; 22
-  corpus values carry that prefix, beside 372 smaller non-zero values
-  of other output kinds. Built-in moods: corpus `SID="778"` is "Off"/
-  "Aus" (11×), `SID="777"` "Viel Licht"/"Bright"/"Cleaning" (6×).
-  lox-cli numbers new moods from `SID` 2 and `CID` 9, treating 1 and
-  776 as reserved; the corpus has user moods at `SID="1"` (6×) and
-  `CID` 7 and 8, so that rule does not hold for every config. Input
-  for the moods item on the roadmap.
+- **LightController2 moods** (D58).
+  - **Shape.** A `<LightscenesC Num= Outputs= FC=>` holds one
+    `<LightsceneC Name= UUID= [Move="true"|ReadOnly="true"] Outputs= SID=
+    CID= Q1=…Q<Outputs>>` per mood, in the app's list order. `Outputs` is
+    18 on every observed controller. `<LSConfig OpM= ScMv= ScAc=>` names
+    moods by `SID`.
+  - **`Q<n>` belongs to circuit `AQ<n>`**, whose name is `NameAI<n-1>`.
+    Its top four bits are a property of the circuit, never of the mood:
+    132 corpus files, 648 circuit columns, 0 disagreements. The prefixes:
+    - 0: switch 0/1, or a plain dimmer 0–100.
+    - 1: dimmer 0–100.
+    - 4: RGB, percent channels `R + 1000·G + 1000000·B`.
+    - 5 and 6: that RGB packing, or tunable white
+      `200000000 + 10000·brightness% + kelvin` (house: `0x5000_0000 +
+      201002700` is 100 % at 2700 K).
+  - **Built-in moods.**
+    - `SID="778"` is the off mood ("Aus"/"Off", `ReadOnly`, house
+      `CID` 11). Its values are the circuit prefixes with a zero payload.
+    - `SID="777"` is the motion mood ("Viel Licht"/"Bright", `Move`,
+      `CID` 22).
+    - `SID="776"` is the alarm-clock mood.
+  - **New moods.** The house's GUI-made moods take `SID` 1, 2, 3… and
+    `CID` 12, 13…, i.e. the lowest free above the off mood's. lox-cli's
+    "from `SID` 2 / `CID` 9" does not match that; the corpus also has
+    `CID` 7 and 8. What `CID` means is unknown; lxir only keeps it unique.
+  - **First save.** A controller's first Loxone Config save writes the
+    stock moods and defaults, recorded in
+    [oracle-wine.md](oracle-wine.md) (sessions 21–22).
+  - **Activation.** The Miniserver recalls a mood live with
+    `changeTo/<SID>`.
 - **Only eight Program blocks run.** Reported: the Miniserver executes
   the first eight `Code1`/`Code4`/`Code8`/`Code16` blocks and ignores
   the rest; Loxone Config warns on save. No corpus config has more than

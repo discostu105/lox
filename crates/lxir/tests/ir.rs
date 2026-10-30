@@ -3631,3 +3631,347 @@ fn diff_summary_is_a_commit_message_in_names() {
     );
     assert_eq!(summary(&base, &base), "no semantic change\n");
 }
+
+/// A page with one LightController2 of three circuits — a switch (AQ1),
+/// an RGB (AQ2) and a tunable-white circuit (AQ3) — carrying the stock
+/// moods of a Loxone Config save: "Viel Licht" (the motion mood) and
+/// "Aus" (the off mood). Its `<LightscenesC>` is the house shape cut to
+/// three outputs.
+fn mood_base() -> LoxoneDoc {
+    LoxoneDoc::parse(
+        b"<ControlList Version=\"1\" NextObj=\"50\">\r\n\
+          \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\" ConfigVersion=\"17010727\">\r\n\
+          \t\t<C Type=\"Page\" U=\"00000005-0000-0000-ffff000000000001\" Title=\"Licht\">\r\n\
+          \t\t\t<C Type=\"LightController2\" V=\"178\" U=\"00000040-0000-0000-ffff000000000001\" \
+          Title=\"Licht Test\" Px=\"100\" Py=\"100\" Px2=\"154\" Py2=\"136\" Nio=\"4\">\r\n\
+          \t\t\t\t<Co K=\"Sel1\" U=\"00000040-0000-0001-01ff000000000001\"/>\r\n\
+          \t\t\t\t<Co K=\"AQ1\" U=\"00000040-0000-0002-01ff000000000001\"/>\r\n\
+          \t\t\t\t<Co K=\"AQ2\" U=\"00000040-0000-0003-01ff000000000001\"/>\r\n\
+          \t\t\t\t<Co K=\"AQ3\" U=\"00000040-0000-0004-01ff000000000001\"/>\r\n\
+          \t\t\t\t<LightscenesC FC=\"0040FFFF,008080FF,00FFFF80,0040FF40\" Outputs=\"3\" Num=\"2\">\r\n\
+          \t\t\t\t\t<LightsceneC Name=\"Viel Licht\" UUID=\"00000040-0000-0010-ffff000000000001\" \
+          Move=\"true\" Outputs=\"3\" SID=\"777\" CID=\"22\" Q1=\"1\" Q2=\"1173841924\" Q3=\"1811619236\"/>\r\n\
+          \t\t\t\t\t<LightsceneC Name=\"Aus\" UUID=\"00000040-0000-0011-ffff000000000001\" \
+          ReadOnly=\"true\" Outputs=\"3\" SID=\"778\" CID=\"11\" Q1=\"0\" Q2=\"1073741824\" Q3=\"1610612736\"/>\r\n\
+          \t\t\t\t</LightscenesC>\r\n\
+          \t\t\t\t<LSConfig OpM=\"778\" ScMv=\"777\" ScAc=\"2\"/>\r\n\
+          \t\t\t</C>\r\n\
+          \t\t</C>\r\n\
+          \t</C>\r\n\
+          </ControlList>\r\n",
+    )
+    .unwrap()
+}
+
+fn mood_opts() -> CompileOptions {
+    CompileOptions {
+        page_title: Some("Licht".into()),
+        ..opts()
+    }
+}
+
+fn compile_moods(set: &str) -> lxir::Result<LoxoneDoc> {
+    let src = format!(
+        "extern licht = LightController2(title: \"Licht Test\")\n\
+         moods abend\n{set}end\nlicht.moods = abend\n"
+    );
+    compile(
+        &mood_base(),
+        &Module::parse(&src)?,
+        &mut Lockfile::new(),
+        &mood_opts(),
+    )
+}
+
+fn moods_of(doc: &LoxoneDoc) -> Vec<String> {
+    let o = doc
+        .objects()
+        .into_iter()
+        .find(|o| o.block_type == "LightController2")
+        .unwrap();
+    let scenes = doc.element_at(&o.path).unwrap();
+    let scenes = scenes
+        .child_elements()
+        .find(|c| c.name == "LightscenesC")
+        .unwrap();
+    assert_eq!(
+        scenes.attr("Num"),
+        Some(scenes.child_elements().count().to_string().as_str())
+    );
+    scenes
+        .child_elements()
+        .map(|e| {
+            e.attrs
+                .iter()
+                .filter(|a| a.name != "UUID" && a.name != "Outputs")
+                .map(|a| format!("{}={}", a.name, a.value))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
+#[test]
+fn moods_write_onto_a_light_controller() {
+    // D58: a moods claim makes the controller's mood list the set's, plus
+    // the off mood; values are encoded per circuit kind.
+    let set = "\t\"Viel Licht\": all on, AQ2 rgb(100, 100, 100), AQ3 temp(100%, 6500K)\n\
+               \t\"Lesen\": AQ1 on, AQ3 temp(80%, 2700K)\n\
+               \t\"Kino\": AQ2 rgb(0, 0, 20)\n";
+    let module = Module::parse(&format!("moods abend\n{set}end\n")).unwrap();
+    assert_eq!(
+        Module::parse(&module.to_text()).unwrap(),
+        module,
+        "fmt round-trips"
+    );
+
+    let out = compile_moods(set).unwrap();
+    assert_eq!(
+        moods_of(&out),
+        [
+            "Name=Viel Licht Move=true SID=777 CID=22 Q1=1 Q2=1173841924 Q3=1811619236",
+            "Name=Lesen SID=1 CID=12 Q1=1 Q2=1073741824 Q3=1811415436",
+            "Name=Kino SID=2 CID=13 Q1=0 Q2=1093741824 Q3=1610612736",
+            "Name=Aus ReadOnly=true SID=778 CID=11 Q1=0 Q2=1073741824 Q3=1610612736",
+        ],
+        "kept moods keep their ids, new ones take the next free, the off mood stays last"
+    );
+    // New moods get a minted UUID.
+    let xml = String::from_utf8(out.to_bytes()).unwrap();
+    let lesen = &xml[xml.find("Name=\"Lesen\"").unwrap()..];
+    assert!(
+        lesen[..60].contains("-ffff504f94112233\""),
+        "minted on this machine: {lesen:.80}"
+    );
+
+    // Recompiling the output converges.
+    let again = compile(
+        &out,
+        &Module::parse(&format!(
+            "extern licht = LightController2(title: \"Licht Test\")\n\
+             moods abend\n{set}end\nlicht.moods = abend\n"
+        ))
+        .unwrap(),
+        &mut Lockfile::new(),
+        &mood_opts(),
+    )
+    .unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+
+    // The stock moods as they are: nothing changes, byte for byte.
+    let same =
+        compile_moods("\t\"Viel Licht\": all on, AQ2 rgb(100, 100, 100), AQ3 temp(100%, 6500K)\n")
+            .unwrap();
+    let unclaimed = compile(
+        &mood_base(),
+        &Module::parse("extern licht = LightController2(title: \"Licht Test\")\n").unwrap(),
+        &mut Lockfile::new(),
+        &mood_opts(),
+    )
+    .unwrap();
+    assert_eq!(same.to_bytes(), unclaimed.to_bytes());
+
+    // Dropping a mood deletes it; renaming one is a drop plus a new mood.
+    let fewer = compile(&out, &Module::parse(
+        "extern licht = LightController2(title: \"Licht Test\")\n\
+         moods abend\n\t\"Viel Licht\": all on\n\t\"Kino\": AQ2 rgb(0, 0, 20)\nend\nlicht.moods = abend\n",
+    ).unwrap(), &mut Lockfile::new(), &mood_opts())
+    .unwrap();
+    let names: Vec<String> = moods_of(&fewer)
+        .iter()
+        .map(|m| m.split(" SID").next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Name=Viel Licht Move=true",
+            "Name=Kino",
+            "Name=Aus ReadOnly=true"
+        ]
+    );
+}
+
+#[test]
+fn mood_changes_are_semantic() {
+    let a = mood_base();
+    let b = compile_moods(
+        "\t\"Viel Licht\": all on, AQ2 rgb(100, 100, 100), AQ3 temp(100%, 6500K)\n\
+         \t\"Lesen\": AQ1 on, AQ3 temp(80%, 2700K)\n",
+    )
+    .unwrap();
+    let d = lxir::diff::diff(&a, &b);
+    let changes: Vec<(&str, Option<&str>, Option<&str>)> = d
+        .param_changes
+        .iter()
+        .map(|p| (p.port_key.as_str(), p.from.as_deref(), p.to.as_deref()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            ("mood \"Lesen\"", None, Some("AQ1 on, AQ3 temp(80%, 2700K)")),
+            (
+                "moods",
+                Some("\"Viel Licht\", \"Aus\""),
+                Some("\"Viel Licht\", \"Lesen\", \"Aus\"")
+            ),
+        ]
+    );
+    use lxir::diff::{semantic_fingerprint, semantic_fingerprint_v6};
+    assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
+    assert_eq!(semantic_fingerprint_v6(&a), semantic_fingerprint_v6(&b));
+}
+
+#[test]
+fn mood_misuse_is_reported() {
+    for (set, needle) in [
+        (
+            "\t\"Viel Licht\": all on\n\t\"Lesen\": AQ2 on\n",
+            "`on` does not fit",
+        ),
+        (
+            "\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 rgb(1, 2, 3)\n",
+            "does not fit",
+        ),
+        (
+            "\t\"Viel Licht\": all on\n\t\"Aus\": all off\n",
+            "built-in off mood",
+        ),
+        (
+            "\t\"Lesen\": AQ1 on\n",
+            "\"Viel Licht\" is a built-in mood (SID 777)",
+        ),
+        (
+            "\t\"Viel Licht\": all on, AQ4 on\n",
+            "the controller has 3 circuits",
+        ),
+        ("\t\"Viel Licht\": AQ1 on, AQ1 off\n", "AQ1"),
+        (
+            "\t\"Viel Licht\": all on\n\t\"Viel Licht\": all off\n",
+            "Viel Licht",
+        ),
+    ] {
+        let err = compile_moods(set).unwrap_err().to_string();
+        assert!(err.contains(needle), "{set}: {err}");
+    }
+    for (src, needle) in [
+        (
+            "extern licht = LightController2(title: \"Licht Test\")\n\
+             moods abend\n\t\"Viel Licht\": all on\nend\nlicht.moods = abnd\n",
+            "did you mean `abend`?",
+        ),
+        (
+            "extern licht = LightController2(title: \"Licht Test\")\n\
+             moods abend\n\t\"Viel Licht\": all on\nend\n\
+             licht.moods = abend\nlicht.moods = abend\n",
+            "licht",
+        ),
+    ] {
+        let err = Module::parse(src)
+            .and_then(|m| compile(&mood_base(), &m, &mut Lockfile::new(), &mood_opts()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{src}: {err}");
+    }
+}
+
+#[test]
+fn mood_identities_are_lock_pinned_until_deployed() {
+    // A mood the compiler mints keeps its UUID through every recompile
+    // against the same base — the lock is a fixpoint — and the entry
+    // retires once the base carries the mood.
+    let src = "extern licht = LightController2(title: \"Licht Test\")\n\
+               moods abend\n\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 on\nend\n\
+               licht.moods = abend\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&mood_base(), &module, &mut lock, &mood_opts()).unwrap();
+    let pinned = &lock.moods["00000040-0000-0000-ffff000000000001"];
+    assert_eq!(pinned.keys().collect::<Vec<_>>(), ["Lesen"]);
+    let mut again = lock.clone();
+    let out2 = compile(&mood_base(), &module, &mut again, &mood_opts()).unwrap();
+    assert_eq!(out2.to_bytes(), out.to_bytes());
+    assert_eq!(again, lock, "lock fixpoint");
+    // Deployed: the base has "Lesen" — nothing left to pin.
+    let mut after = lock.clone();
+    compile(&out, &module, &mut after, &mood_opts()).unwrap();
+    assert!(after.moods.is_empty(), "{:?}", after.moods);
+}
+
+#[test]
+fn a_minted_controller_gets_the_stock_moods_first() {
+    // Oracle session 21: Loxone Config's first save writes the stock
+    // moods and their defaults into a bare LightController2. lxir writes
+    // the same, so the claim applies straight away.
+    let src = "neu = LightController2(\"Neu\")\n\
+               moods abend\n\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 on, AQ2 40%\nend\n\
+               neu.moods = abend\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&mood_base(), &module, &mut lock, &mood_opts()).unwrap();
+    let uuid = &lock.objects["neu"].uuid;
+    let o = out.objects().into_iter().find(|o| &o.uuid == uuid).unwrap();
+    let el = out.element_at(&o.path).unwrap();
+    let children: Vec<&str> = el
+        .child_elements()
+        .filter(|c| c.name != "Co")
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(
+        children,
+        ["LightscenesC", "LSConfig", "IoData", "PSD", "HCL", "COHist"]
+    );
+    let lsconfig = el.child_elements().find(|c| c.name == "LSConfig").unwrap();
+    assert_eq!(
+        (
+            lsconfig.attr("OpM"),
+            lsconfig.attr("ScMv"),
+            lsconfig.attr("ScAc")
+        ),
+        (Some("778"), Some("777"), Some("1"))
+    );
+    let fields = lxir::moods::mood_fields(&out, &o);
+    assert_eq!(fields["moods"], "\"Viel Licht\", \"Lesen\", \"Aus\"");
+    assert_eq!(fields["mood \"Viel Licht\""], "all on");
+    assert_eq!(fields["mood \"Lesen\""], "AQ1 on, AQ2 40%");
+    assert_eq!(fields["mood \"Aus\""], "all off");
+    assert_eq!(
+        lock.moods[uuid].keys().collect::<Vec<_>>(),
+        ["Aus", "Lesen", "Viel Licht"]
+    );
+    let mut again = lock.clone();
+    let out2 = compile(&mood_base(), &module, &mut again, &mood_opts()).unwrap();
+    assert_eq!(out2.to_bytes(), out.to_bytes());
+    assert_eq!(again, lock, "lock fixpoint");
+}
+
+#[test]
+fn a_template_gives_every_room_its_moods() {
+    // The loop Loxone Config lacks: one claim in a room template, the set
+    // a value parameter with a default.
+    let src = "moods abend\n\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 on\nend\n\
+               moods kueche\n\t\"Viel Licht\": all on\n\t\"Kochen\": AQ1 50%\nend\n\
+               template raum(stimmungen = \"abend\")\n\
+               \tlc = LightController2(\"Licht\")\n\
+               \tlc.moods = stimmungen\n\
+               end\n\
+               wohnen = raum()\n\
+               kochen = raum(stimmungen: \"kueche\")\n";
+    let module = Module::parse(src).unwrap();
+    assert_eq!(
+        Module::parse(&module.to_text()).unwrap(),
+        module,
+        "fmt round-trips"
+    );
+    let mut lock = Lockfile::new();
+    let out = compile(&mood_base(), &module, &mut lock, &mood_opts()).unwrap();
+    let order = |slug: &str| {
+        let o = out
+            .objects()
+            .into_iter()
+            .find(|o| o.uuid == lock.objects[slug].uuid)
+            .unwrap();
+        lxir::moods::mood_fields(&out, &o)["moods"].clone()
+    };
+    assert_eq!(order("wohnen_lc"), "\"Viel Licht\", \"Lesen\", \"Aus\"");
+    assert_eq!(order("kochen_lc"), "\"Viel Licht\", \"Kochen\", \"Aus\"");
+}

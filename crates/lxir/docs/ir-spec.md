@@ -970,6 +970,68 @@ a rule with other conditions (a control's state, an operating mode, OR
 groups) stays a comment and must not be declared. Removing a
 declaration leaves the rule as last written. Top-level only.
 
+### `moods` — the moods of a lighting controller (D58)
+
+```text
+moods wohnen                        # one set, any number of controllers
+	"Viel Licht": all on, AQ4 rgb(100, 100, 100)
+	"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)
+	"Kino": AQ4 rgb(0, 0, 20)
+end
+
+wohnzimmer_lc.moods = wohnen
+esszimmer_lc.moods = wohnen
+```
+
+A `moods` set names a list of moods; a claim
+`<controller>.moods = <name>` makes it the mood list of one
+LightController2 (Lichtsteuerung) — an extern or a managed block — and
+one set may be claimed by any number of controllers. Each line is a
+mood: its name, then the values of its circuits (`AQ1` … `AQ18`, Loxone
+Config's *Lichtkreise*):
+
+- **`all <value>`**, first if given, sets every circuit it fits; a
+  circuit it does not fit (`all on` on a colour circuit) stays off.
+- **`AQ<n> <value>`** sets one circuit and wins over `all`. A circuit
+  the mood does not mention is off.
+- **Values** follow the circuit's kind, which the controller's existing
+  moods tell: `on`/`off` and a percentage (`40%`) on a switch or dimmer
+  circuit, `rgb(r, g, b)` (each 0–100, percent) on a colour circuit,
+  `temp(<brightness>%, <kelvin>K)` on a tunable-white one, `off`
+  everywhere. A value the circuit cannot take is a compile error naming
+  what it takes. A bare number is written as stored, for the encodings
+  lxir does not spell.
+
+The claim writes the controller's moods in the set's order, plus its
+off mood ("Aus"), which every controller keeps, source never lists, and
+which stays where it is (first or last). A mood keeps its identity by
+**name**: one the controller already has keeps its UUID, scene id and
+flags and only gets the set's values, so the buttons and the app keep
+addressing it; a new one gets the next free scene id, the way Loxone
+Config numbers them; one the set leaves out is deleted — except the
+built-in "Viel Licht" (the motion mood) and any mood the controller's
+motion settings name, which must stay in the set (with values of your
+choice). A claim whose moods already match changes nothing, byte for
+byte. Moods select through the controller's `Sel1`…`Sel8` inputs in list
+order, so wiring a switch's buttons to them is ordinary source.
+
+A controller minted from source has no moods until Loxone Config saves
+it; a claim on it first writes what that save would — the stock "Viel
+Licht" and "Aus" and their defaults (oracle-verified) — then the set.
+The lock pins the UUID of every mood the compiler minted until a base
+carries it ([lockfile-spec.md](lockfile-spec.md)). Removing a claim
+leaves the moods as last written. One claim per controller; claims are
+allowed in a template body, so a room template can give every room the
+same moods: `<lc>.moods = <param>` with a string value parameter
+naming the set (`template raum(stimmungen = "standard")`, called as
+`raum(stimmungen: "kueche")`).
+
+`lxir diff` compares the moods of every LightController2, claimed or
+not, one change per mood in these terms (`LightController2 "Licht"
+mood "Lesen": all on -> AQ1 80%`) plus the order of the names; the
+semantic fingerprint (v7) includes them, so `lxir drift` reports moods
+edited in Loxone Config or the app.
+
 ### Push notifications: `OutputRefLM` and `recipients` (D51)
 
 ```text

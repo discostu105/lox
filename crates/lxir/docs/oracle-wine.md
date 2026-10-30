@@ -522,6 +522,32 @@ created from source (`page "…" (room: "…")`), no `LtE=`.
   the saved file created nothing and left the lock's `pages` entry as
   it was.
 
+## Lighting moods (sessions 21–22, D58) — passed
+
+Ran 2026-10-30 with `scripts/oracle.sh` against a copy of the house
+config (Loxone Config 17.2.8.28).
+
+- **Session 21:** two probes in one file. One was a mood minted by a
+  claim onto an existing controller ("Weiß", next free `SID` 3 / `CID`
+  14). The other was a bare `LightController2` with no claim.
+  - The minted mood came back byte-identical.
+  - The bare controller gained the stock first-save content:
+    `<LightscenesC FC="0040FFFF,008080FF,00FFFF80,0040FF40" Outputs="18"
+    Num="2">` with "Viel Licht" (`Move="true"`, `SID` 777, `CID` 22,
+    every `Q` 1) and "Aus" (`ReadOnly="true"`, `SID` 778, `CID` 11,
+    every `Q` 0).
+  - It also gained `<LSConfig OpM="778" ScMv="777" ScAc="1"/>`,
+    `<IoData Visu="true" Rating="1"/>`, `<PSD As="-2" Ae="1380" Amin="1"
+    Amax="4" Dmin="30" Dmax="180" V="20"/>`, `<HCL T="2" M="0"
+    TMIN="2000" TMAX="6500" FROM="0" TO="0"/>` and `<COHist TRK_NE="20"
+    TRK_MAX="100"/>`.
+  - Separately, the attributes `uuidSeqencing`/`uuidSeqenceIx`/
+    `SpStates` were added, and `WF` changed.
+- **Session 22:** lxir wrote that content itself on a claim (seeded
+  stock moods plus a claimed "Lesen").
+  - The children came back byte-identical.
+  - The semantic diff was empty.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

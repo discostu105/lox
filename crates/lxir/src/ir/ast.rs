@@ -60,6 +60,12 @@ pub enum Item {
     /// `<timer>.schedule = <name>` — write a schedule onto a DayTimer,
     /// extern or managed (D53).
     ScheduleClaim(ScheduleClaim),
+    /// `moods <name>` … `end` — a named set of LightController2 moods
+    /// (D58).
+    Moods(MoodsDecl),
+    /// `<controller>.moods = <name>` — write a mood set onto a
+    /// LightController2, extern or managed (D58).
+    MoodsClaim(MoodsClaim),
     /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
     /// active or not, its conditions and its actions (D57).
     Rule(RuleDecl),
@@ -1276,6 +1282,96 @@ impl fmt::Display for ScheduleClaim {
     }
 }
 
+/// `moods <name>` … `end` — a named set of LightController2 moods (D58):
+/// per mood its name and the value of each lighting circuit. Like a
+/// `schedule` it declares nothing by itself; each
+/// `<controller>.moods = <name>` claim writes it onto one controller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoodsDecl {
+    pub name: String,
+    pub body: Vec<MoodsItem>,
+    /// Trailing `#` comment on the header line, verbatim.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the `end` line, verbatim.
+    pub end_comment: Option<String>,
+}
+
+impl MoodsDecl {
+    pub fn moods(&self) -> impl Iterator<Item = &MoodLine> {
+        self.body.iter().filter_map(|i| match i {
+            MoodsItem::Mood(m) => Some(m),
+            MoodsItem::Comment(_) => None,
+        })
+    }
+}
+
+/// One statement of a `moods` body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoodsItem {
+    Mood(MoodLine),
+    /// Whole-line `#` comment, verbatim.
+    Comment(String),
+}
+
+/// `"Kochen": all on, AQ3 temp(80%, 2700K)` — a mood's name (the app's
+/// mood title) and its circuit values, in order. A circuit no setting
+/// names is off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoodLine {
+    pub name: String,
+    pub settings: Vec<MoodSetting>,
+    /// Trailing `#` comment, verbatim.
+    pub comment: Option<String>,
+}
+
+/// `AQ3 temp(80%, 2700K)` or `all on`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoodSetting {
+    /// The circuit number (`AQ<n>`); `None` is `all` — every circuit.
+    pub circuit: Option<u8>,
+    pub value: crate::moods::MoodValue,
+}
+
+impl fmt::Display for MoodSetting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.circuit {
+            Some(n) => write!(f, "AQ{n} {}", self.value),
+            None => write!(f, "all {}", self.value),
+        }
+    }
+}
+
+impl fmt::Display for MoodLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:", quote(&self.name))?;
+        for (i, s) in self.settings.iter().enumerate() {
+            write!(f, "{}{s}", if i == 0 { " " } else { ", " })?;
+        }
+        if let Some(c) = &self.comment {
+            write!(f, " #{c}")?;
+        }
+        Ok(())
+    }
+}
+
+/// `<controller>.moods = <name>` — claim the moods of a LightController2
+/// (D58). Allowed in a template body, so one declaration sets up every
+/// room the template stamps out. No lock state: withdrawing it leaves the
+/// last written moods in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoodsClaim {
+    pub slug: String,
+    pub moods: String,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for MoodsClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.moods = {}", self.slug, self.moods)
+    }
+}
+
 /// `rule <slug>` … `end` — an extern Automatic Designer rule
 /// (`AutopilotRule`) as source (D57): whether it is active, the
 /// conditions that must all hold, and the commands it then sends. The
@@ -1374,6 +1470,7 @@ enum NameKind {
     Instance,
     Tiles,
     Schedule,
+    Moods,
 }
 
 impl NameKind {
@@ -1386,6 +1483,7 @@ impl NameKind {
             NameKind::Instance => "a template instance",
             NameKind::Tiles => "a `tiles` set",
             NameKind::Schedule => "a `schedule`",
+            NameKind::Moods => "a `moods` set",
         }
     }
 }
@@ -1501,6 +1599,20 @@ impl Module {
     pub fn schedules(&self) -> impl Iterator<Item = &ScheduleDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Schedule(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    pub fn mood_sets(&self) -> impl Iterator<Item = &MoodsDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Moods(m) => Some(m),
+            _ => None,
+        })
+    }
+
+    pub fn moods_claims(&self) -> impl Iterator<Item = &MoodsClaim> {
+        self.items.iter().filter_map(|i| match i {
+            Item::MoodsClaim(c) => Some(c),
             _ => None,
         })
     }
@@ -1651,6 +1763,7 @@ impl Module {
                 Item::Instance(b) => (b.slug.as_str(), NameKind::Instance),
                 Item::Tiles(t) => (t.name.as_str(), NameKind::Tiles),
                 Item::Schedule(t) => (t.name.as_str(), NameKind::Schedule),
+                Item::Moods(t) => (t.name.as_str(), NameKind::Moods),
                 _ => continue,
             };
             if names.insert(name, kind).is_some() {
@@ -1753,6 +1866,7 @@ impl Module {
         let mut tiles_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut access_declared: BTreeSet<&str> = BTreeSet::new();
         let mut schedules_claimed: BTreeSet<&str> = BTreeSet::new();
+        let mut moods_claimed: BTreeSet<&str> = BTreeSet::new();
         let mut rules_declared: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             match item {
@@ -1986,8 +2100,11 @@ impl Module {
                                     }
                                 }
                             }
-                            Item::Wire(_) | Item::ExprWire(_) | Item::Set(_) | Item::Comment(_) => {
-                            }
+                            Item::Wire(_)
+                            | Item::ExprWire(_)
+                            | Item::Set(_)
+                            | Item::MoodsClaim(_)
+                            | Item::Comment(_) => {}
                             _ => {
                                 return compile_err(format!(
                                     "template `{}`: only block declarations, wires, port \
@@ -2372,6 +2489,92 @@ impl Module {
                         ));
                     }
                 }
+                Item::Moods(t) => {
+                    let mut names: BTreeSet<&str> = BTreeSet::new();
+                    for m in t.moods() {
+                        let ctx = format!("`moods {}`, mood {}", t.name, quote(&m.name));
+                        if m.name.is_empty() {
+                            return compile_err(format!("`moods {}`: a mood needs a name", t.name));
+                        }
+                        if !names.insert(&m.name) {
+                            return compile_err(format!(
+                                "{ctx}: listed twice — a controller's mood names are unique"
+                            ));
+                        }
+                        let mut circuits: BTreeSet<Option<u8>> = BTreeSet::new();
+                        for (i, setting) in m.settings.iter().enumerate() {
+                            if setting.circuit.is_none() && i != 0 {
+                                return compile_err(format!(
+                                    "{ctx}: `{setting}` must come first — it sets every \
+                                     circuit, and the settings after it name the exceptions"
+                                ));
+                            }
+                            if !circuits.insert(setting.circuit) {
+                                return compile_err(format!(
+                                    "{ctx}: `{setting}` sets a circuit twice"
+                                ));
+                            }
+                        }
+                    }
+                }
+                Item::MoodsClaim(c) => {
+                    let ty = match names.get(c.slug.as_str()) {
+                        Some(NameKind::Extern) => self
+                            .externs()
+                            .find(|e| e.slug == c.slug)
+                            .map_or("", |e| e.block_type.as_str()),
+                        Some(NameKind::Block) => block_type(&c.slug),
+                        None if !flattened => "LightController2",
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {} — moods are claimed on a \
+                                 LightController2 (an extern or a managed block)",
+                                c.slug,
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            return compile_err(format!(
+                                "`{c}`: undeclared slug `{}` — declare the controller as \
+                                 `extern {} = LightController2(…)` or as a block",
+                                c.slug, c.slug
+                            ));
+                        }
+                    };
+                    if ty != "LightController2" {
+                        return compile_err(format!(
+                            "`{c}`: moods belong to a `LightController2` — `{}` is a `{ty}`",
+                            c.slug
+                        ));
+                    }
+                    match names.get(c.moods.as_str()) {
+                        Some(NameKind::Moods) => {}
+                        Some(kind) => {
+                            return compile_err(format!(
+                                "`{c}`: `{}` is {}, not a `moods` set",
+                                c.moods,
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            let hint = super::validate::suggest(
+                                &c.moods,
+                                self.mood_sets().map(|t| t.name.as_str()),
+                            );
+                            return compile_err(format!(
+                                "`{c}`: no `moods {}` is declared{hint}",
+                                c.moods
+                            ));
+                        }
+                    }
+                    if !moods_claimed.insert(&c.slug) {
+                        return compile_err(format!(
+                            "duplicate assignment `{}.moods = …` — a controller takes one \
+                             mood set",
+                            c.slug
+                        ));
+                    }
+                }
                 Item::Rule(r) => {
                     let ctx = format!("`rule {}`", r.slug);
                     match names.get(r.slug.as_str()) {
@@ -2564,7 +2767,11 @@ impl Module {
                 Item::Extern(_) => 0,
                 Item::Block(_) => 1,
                 Item::Wire(_) | Item::ExprWire(_) => 2,
-                Item::Set(_) | Item::Attr(_) | Item::TilesClaim(_) | Item::ScheduleClaim(_) => 3,
+                Item::Set(_)
+                | Item::Attr(_)
+                | Item::TilesClaim(_)
+                | Item::ScheduleClaim(_)
+                | Item::MoodsClaim(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
                 Item::Moved(_) => 6,
@@ -2578,6 +2785,7 @@ impl Module {
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
                 Item::Schedule(_) => 14,
+                Item::Moods(_) => 16,
                 Item::Rule(_) => 15,
             }
         }
@@ -2794,6 +3002,20 @@ impl Module {
                     prev_multiline = true;
                 }
                 Item::ScheduleClaim(c) => {
+                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+                }
+                Item::Moods(t) => {
+                    out.push_str(&format!("moods {}{}\n", t.name, tail(&t.comment)));
+                    for stmt in &t.body {
+                        match stmt {
+                            MoodsItem::Mood(m) => out.push_str(&format!("\t{m}\n")),
+                            MoodsItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                        }
+                    }
+                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                    prev_multiline = true;
+                }
+                Item::MoodsClaim(c) => {
                     out.push_str(&format!("{c}{}\n", tail(&c.comment)));
                 }
                 Item::Rule(r) => {
