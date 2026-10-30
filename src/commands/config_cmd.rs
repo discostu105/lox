@@ -538,6 +538,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             accept_version,
             backup_dir,
             discard_custom_changes,
+            reboot,
         } => {
             let ms = config_push::LiveMiniserver::new(Config::load()?);
             let opts = config_push::PushOptions {
@@ -548,6 +549,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 accept_version,
                 backup_dir: backup_dir.map(Into::into),
                 discard_custom_changes,
+                reboot,
             };
             let report = config_push::push(&ms, &opts, ctx.quiet)?;
             if ctx.json {

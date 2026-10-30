@@ -120,7 +120,7 @@ lox config devices file.Loxone            # list hardware devices
 ```
 
 `upload` refuses anything that is not a config ZIP and only stages it: `lox reboot --yes` loads it. To upload,
-reboot and verify in one go, deploy with [`lox config push`](/lox/guides/config-as-code#deploy-with-lox-config-push).
+load (a program restart, no reboot) and verify in one go, deploy with [`lox config push`](/lox/guides/config-as-code#deploy-with-lox-config-push).
 
 {: .warning }
 An upload replaces the whole program and deletes the Miniserver's custom changes: what the app, the web UI or the
@@ -167,7 +167,7 @@ lox ir check                              # validate .lxir modules (in a lox.tom
 lox ir compile                            # base + module + lock → out.Loxone
 lox config diff base.Loxone out.Loxone    # review the change by name
 lox config push                           # drift check, compile, stage (dry run)
-lox config push --force                   # upload, reboot, verify, move base
+lox config push --force                   # upload, restart the program, verify, move base
 lox ir help                               # every lxir command and flag
 ```
 

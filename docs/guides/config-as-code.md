@@ -198,7 +198,7 @@ readable in Loxone Config.
 
 ```bash
 lox config push              # dry run: download live, drift check, compile, show the changes, stage
-lox config push --force      # … then upload, reboot, wait, verify, move base forward
+lox config push --force      # … then upload, restart the program, verify, move base forward
 git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 ```
 
@@ -221,7 +221,8 @@ Each step stops the push when it fails:
    revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided lxir
    reproduces the live one exactly; otherwise the push warns that it stays stale. Without `--force` the push ends
    here.
-6. Upload as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes). Users changed live
+6. Upload as `/prog/sps_new.zip` and restart the program, as Loxone Config's save does: the Miniserver runs the
+   new program within seconds, remanent values kept (`--reboot` reboots it instead, about a minute). Users changed live
    stop the upload: load and save the program in Loxone Config first, or pass `--discard-custom-changes`.
 7. Download again: the Miniserver must run exactly the compiled file, or the push fails and the project stays as it
    was.

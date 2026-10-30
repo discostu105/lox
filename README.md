@@ -211,7 +211,7 @@ lox energy                             # Energy meters
 lox sensors --type door-window         # Open windows and doors
 lox config download --extract          # Download & extract Loxone Config
 lox config compress out.Loxone --template dl.zip  # Upload ZIP from a download, only sps0.LoxCC replaced
-lox config push --force                # Deploy an lxir project: compile, upload, reboot, verify
+lox config push --force                # Deploy an lxir project: compile, upload, restart the program, verify
 lox config init ~/loxone-config        # Init git repo for config versioning
 lox config pull                        # Download, diff & git-commit config
 lox config log                         # Show config change history

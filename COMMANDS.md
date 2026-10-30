@@ -339,7 +339,7 @@ Multi-Miniserver: each serial gets its own subdirectory in the repo.
 `upload` and `restore` write the ZIP to `/prog/sps_new.zip`, the file the Miniserver loads on its next start; `lox reboot` applies it.
 Both refuse a file that is not a config ZIP. A `.Loxone` file becomes one with `lox config compress FILE --template DOWNLOAD.zip`.
 Both list the Miniserver's custom changes first (see `lox config push`): loading the upload deletes them.
-To upload, reboot and verify in one go, deploy with `lox config push` instead.
+To upload, load (a program restart, no reboot) and verify in one go, deploy with `lox config push` instead.
 
 ### Inspecting the logic (read-only)
 
@@ -460,7 +460,8 @@ Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). The language
 
 ```bash
 lox config push                        # in a lox.toml project: download, drift check, compile, stage
-lox config push --force                # … then upload, reboot, wait, verify and move the base forward
+lox config push --force                # … then upload, restart the program, verify and move the base forward
+lox config push --force --reboot       # load the upload by rebooting the Miniserver instead (about a minute)
 lox config push ~/r50 --force -o json  # another project dir; JSON report on stdout
 lox config push --patched-from backups/dl.Loxone --force  # base is a byte patch of that download
 lox config push --allow-removals --force   # delete managed blocks gone from the module
@@ -498,7 +499,11 @@ Each step stops the push when it fails:
    compiled config when lxir reproduces the live file byte for byte (`permissions` in the JSON report:
    `unchanged`, `regenerated`). Otherwise the live file stays (`kept`), and when the compiled config assigns users
    and groups differently the push warns that it is stale (`permissions_stale: true`).
-6. Upload it as `/prog/sps_new.zip`, reboot, wait until the Miniserver answers (up to 5 minutes). Users changed
+6. Upload it as `/prog/sps_new.zip` and restart the program (`/jdev/sps/restart`), as Loxone Config's save does:
+   the Miniserver loads the file, renames it to its next program file and runs it again within seconds (about 2 s
+   on a Miniserver Gen 2, firmware 17.2), keeping remanent values. The push waits until the PLC runs
+   (`/jdev/sps/state` 5) and the newest program file has changed, at most a minute. `--reboot` reboots the
+   Miniserver instead and waits until it answers (up to 5 minutes). Users changed
    live stop `--force` before the upload (error `user_changes_pending`): load the program from the Miniserver in
    Loxone Config and save it back, so the program file holds the changes and the push keeps them, or pass
    `--discard-custom-changes` to delete them.

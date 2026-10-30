@@ -1586,15 +1586,20 @@ pub(crate) enum ConfigCmd {
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
-    /// Deploy an lxir project: drift check, compile, stage, upload, reboot,
-    /// verify (requires --force to upload)
+    /// Deploy an lxir project: drift check, compile, stage, upload, program
+    /// restart, verify (requires --force to upload)
     Push {
         /// Project directory (holds lox.toml)
         #[arg(default_value = ".")]
         project: String,
-        /// Upload the staged config and reboot the Miniserver
+        /// Upload the staged config and restart the program, which loads it
+        /// within seconds (as Loxone Config's save does)
         #[arg(long)]
         force: bool,
+        /// Load the upload by rebooting the Miniserver instead (about a
+        /// minute) — for changes the running system only takes on start
+        #[arg(long)]
+        reboot: bool,
         /// The base is a byte patch of this download (.Loxone); the live
         /// config must still be exactly it
         #[arg(long, value_name = "FILE")]
