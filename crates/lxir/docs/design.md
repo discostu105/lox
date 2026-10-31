@@ -1646,9 +1646,12 @@ Anything unverified is an error, not a heuristic:
     `MaxVal:`, `DefVal:` are attribute parameters with claim semantics
     (D40): written while bound, the GUI's otherwise. The `<IoData>`
     room/category binding and `<Display>` stay GUI-owned.
-  - **Not adopted.** Existing VirtualIns stay externs (`iname:`
-    matching); `adopt` refuses them. Adopting would add nothing an
-    extern cannot do.
+  - **Adopted one at a time** (since #198, 2026-10-31; refused until
+    then). `lxir adopt --uuid` takes an existing VirtualIn the way it
+    takes a device (D64): promoting an extern on it, its input-dialog
+    settings carried, and rebuilt in its base place in the folder (the
+    tree's order, as for a device's I/O). A whole-config adopt leaves
+    them externs. The house's nine adopted and rebuilt byte-identically.
   Validated with the oracle (session 18): see oracle-wine.md.
 - **D55 — device-narrowed extern matching** (2026-10-29). Identical
   hardware repeats its I/O titles: every Tree push-button interface has

@@ -390,9 +390,12 @@ wire directly into blocks on any page.
   read 0 ([loxone-format.md](loxone-format.md)).
 - The room/category binding (`<IoData>`) and display settings stay
   with Loxone Config.
-- A base without the folder is a compile error. Existing virtual inputs
-  are referenced as externs (`extern x = VirtualIn(iname: "VI3")`);
-  `adopt` does not take them over.
+- A base without the folder is a compile error. An existing virtual
+  input is an extern (`extern x = VirtualIn(iname: "VI3")`) or, with
+  `lxir adopt --uuid <it> --as <slug>`, a managed block (#198): rebuilt
+  in its place in the folder, its settings left to the GUI until bound;
+  an extern on it is promoted (`--as` its slug). A whole-config `adopt`
+  leaves virtual inputs as externs, as it does devices.
 
 ### Virtual and Modbus devices — the object tree (D64)
 

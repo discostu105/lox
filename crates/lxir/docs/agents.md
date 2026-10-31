@@ -210,7 +210,6 @@ it only when it matches what you intended.
 | `user-defined operating modes are not supported yet` | a quoted mode title in a schedule line | use the built-in days; user modes stay with Loxone Config |
 | `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
 | `` `Analog:` is "true" or "false" `` | a VirtualIn's `Analog:` got another value | write `Analog: "true"` (or drop it: digital) |
-| `cannot adopt VirtualIn …: … minted from source but not adopted` | `adopt` pointed at an existing virtual input | reference it as `extern x = VirtualIn(iname: "VI3")` |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |

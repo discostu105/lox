@@ -69,9 +69,9 @@ types) contradict each other. Results and methodology:
 - [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
       land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
       input range as claimed attribute parameters, and the defaults a
-      save writes (oracle session 18). Open: adopting existing ones
-      (they stay externs); a room/category for minted ones (the D39
-      claims work on externs only).
+      save writes (oracle session 18). Existing ones are adopted one at
+      a time since 2026-10-31 (#198). Open: a room/category for minted
+      ones (the D39 claims work on externs only).
 - [x] Eval harness over lox-cli's task set (2026-10-29,
       `tools/eval/`): 260 of 475 tasks use only mintable types; a
       10-case sample passes 9, and the failure is lox-sim's DayTimer model

@@ -164,14 +164,6 @@ pub fn adopt_one(
             o.block_type
         )));
     }
-    if periphery(&o.block_type).is_none()
-        && let Some(container) = container_type(&o.block_type)
-    {
-        return Err(fail(format!(
-            "cannot adopt {ident}: an object of the `{container}` folder is minted \
-             from source but not adopted (D54) — reference it as an extern"
-        )));
-    }
     if let Some((s, _)) = lock.objects.iter().find(|(_, lo)| lo.uuid == uuid) {
         return Err(fail(format!(
             "{ident} is already managed as `{s}` — nothing to adopt"
@@ -236,7 +228,9 @@ pub fn adopt_one(
         )));
     }
     taken.insert(slug.to_string());
-    if periphery(&o.block_type).is_some() {
+    // An object of the object tree (D54, D64): a virtual input, a device
+    // with what hangs below it.
+    if container_type(&o.block_type).is_some() || periphery(&o.block_type).is_some() {
         return super::adopt_tree::adopt_device(doc, o, slug, raw, module, lock, taken);
     }
     let el = doc.element_at(&o.path).expect("path from objects()");

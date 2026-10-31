@@ -1380,7 +1380,10 @@ pub fn compile(
                 page.attr("Type").unwrap_or("?")
             )));
         }
-        let order = base_page_order.get(&plan.page_uuid);
+        // A VirtualIn's folder (D54) is no page: its order is the tree's.
+        let order = base_page_order
+            .get(&plan.page_uuid)
+            .or_else(|| base_tree_order.get(&plan.page_uuid));
         insert_in_page(page, el, order.map_or(&[], Vec::as_slice));
     }
 
