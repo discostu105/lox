@@ -37,8 +37,8 @@ self-signed certificates.
 
 | File | Purpose |
 |:-----|:--------|
-| `src/main.rs` | clap definitions and command dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
-| `src/commands/` | Command implementations: `control`, `inspect`, `system`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx` |
+| `src/main.rs` | The top-level clap definitions (`Cli`, `Cmd`) and command dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
+| `src/commands/` | Command implementations, each module with its clap subcommand enum: `control`, `inspect`, `energy`, `system`, `access`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx`, `completions`, `schema` |
 | `src/util.rs` | Shared helpers |
 | `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery; `connection()` and `client()` build the loxone-client side |
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |

@@ -8,7 +8,27 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::logic::{self, BlockRef, Logic, TraceView, WireView};
 use crate::snapshot::{self, Snapshot};
-use crate::{ConfigSource, TraceDir};
+
+/// Which config a `lox config show/wiring/find/lint` looks at.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub(crate) struct ConfigSource {
+    /// A snapshot of the config repo: commit, version (v273) or date (2026-08-25)
+    #[arg(long, value_name = "SNAPSHOT")]
+    pub at: Option<String>,
+    /// A config file (ZIP or .Loxone)
+    #[arg(long, value_name = "PATH", conflicts_with = "at")]
+    pub file: Option<String>,
+    /// Read the newest backup from the Miniserver via FTP (read-only)
+    #[arg(long, conflicts_with_all = ["at", "file"])]
+    pub download: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TraceDir {
+    Up,
+    Down,
+    Both,
+}
 
 fn print_json(v: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(v)?);

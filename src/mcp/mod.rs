@@ -9,6 +9,7 @@ mod ops;
 mod server;
 
 use anyhow::Result;
+use clap::{Args, Subcommand};
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
 
@@ -84,8 +85,52 @@ fn launch_args(opts: &ServerOptions) -> (String, Vec<String>) {
     (exe, args)
 }
 
-pub fn cmd_mcp(ctx: &RunContext, action: crate::McpCmd) -> Result<()> {
-    use crate::McpCmd;
+/// Safety policy of the MCP server, fixed at startup.
+#[derive(Args, Clone, Copy)]
+pub(crate) struct McpPolicy {
+    /// Expose read tools only (no actions)
+    #[arg(long, conflicts_with_all = ["allow_risky", "allow_raw"])]
+    read_only: bool,
+    /// Run high-risk actions (doors, gates, alarm, user changes, the `confirm:` list) without asking the user to confirm
+    #[arg(long)]
+    allow_risky: bool,
+    /// Expose the send_command tool for raw Loxone commands
+    #[arg(long)]
+    allow_raw: bool,
+}
+
+impl McpPolicy {
+    pub(crate) fn options(&self, dry_run: bool) -> ServerOptions {
+        ServerOptions {
+            read_only: self.read_only,
+            allow_risky: self.allow_risky,
+            allow_raw: self.allow_raw,
+            dry_run,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum McpCmd {
+    /// Run the MCP server on stdio (launched by the MCP client)
+    Serve {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
+    /// Print ready-to-paste MCP client configuration
+    Config {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
+    /// List the tools the server exposes under a policy
+    #[command(alias = "list")]
+    Tools {
+        #[command(flatten)]
+        policy: McpPolicy,
+    },
+}
+
+pub fn cmd_mcp(ctx: &RunContext, action: McpCmd) -> Result<()> {
     match action {
         McpCmd::Serve { policy } => serve_stdio(policy.options(ctx.dry_run)),
         McpCmd::Config { policy } => {

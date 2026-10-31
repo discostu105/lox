@@ -107,7 +107,8 @@ standalone repo github.com/discostu105/lxir via `git subtree` (history kept); th
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | All CLI commands (30+), clap argument parsing and dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
+| `src/main.rs` | The top-level `Cli`/`Cmd` clap definitions (help template, global flags), dispatch to the command modules, the JSON error envelope (`categorize_error`); `lox logic` hands its arguments to `loxone_config::cli` |
+| `src/commands/*.rs` | One module per command group, each owning its clap subcommand enum next to its handler: `control` (on/off, blind, light, input, music, …), `inspect` (ls, get, stream, if, autopilot, …), `energy`, `system` (status, update, files, otel, …), `access` (user, access), `config_cmd` (setup, alias, scene, cache, token, config), `ctx`; `completions.rs` (`lox completions`), `schema.rs` (`lox schema`). `lox mcp`'s `McpCmd` lives in `src/mcp/mod.rs` |
 | `src/util.rs` | Small shared helpers: `xml_attr`/`json_val_str`, `http_status`, RGB→HSV, path encoding, terminal formatting |
 | `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
