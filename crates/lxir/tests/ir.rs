@@ -1546,6 +1546,13 @@ fn template_misuse_is_reported() {
         &format!("extern j = AutoJalousie(title: \"X\")\n{tmpl}a = t(x: j)\n"),
         "expects a VirtualIn",
     );
+    // `any` takes every type; the port is checked after expansion.
+    let any = "template u(x: any)\n\ty = Not(I: x.Q)\nend\n";
+    Module::parse(&format!(
+        "extern j = AutoJalousie(title: \"X\")\n{any}a = u(x: j)\n"
+    ))
+    .unwrap();
+    fails("template u(x: anything)\nend\n", "invalid block type");
 }
 
 #[test]

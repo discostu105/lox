@@ -41,6 +41,7 @@ extern crate self as lxir;
 
 pub mod access;
 pub mod autopilot;
+pub mod blockdoc;
 pub mod catalogue;
 pub mod cli;
 pub mod connectors;
@@ -50,6 +51,7 @@ pub mod doc;
 pub mod error;
 pub mod ir;
 pub mod layout;
+pub mod library;
 pub mod lock;
 pub mod lsp;
 pub mod moods;

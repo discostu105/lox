@@ -18,7 +18,8 @@ lockfile pins every UUID the compiler minted. The full guide is
 - Upload to a Miniserver. Compiling produces a file; pushing it is the
   human's step.
 - Invent block types or port names. `lxir types` lists what can be
-  minted, `lxir types <Type>` its ports, units, labels and ranges.
+  minted and what each type is for (`lxir types --search delay`),
+  `lxir types <Type>` its ports, units, labels and ranges.
   An extern's ports are whatever the base config has: the error lists them.
 - Commit a real config. `lxir scan <file|dir>` exits 1 when one carries
   personal data (it says where, never what).
@@ -28,6 +29,7 @@ lockfile pins every UUID the compiler minted. The full guide is
 
 ```sh
 lxir decompile current.Loxone               # what exists, by page (read-only view)
+lxir templates                               # ready-made, tested templates
 lxir types Monoflop                          # a type's ports before using it
 $EDITOR pages/<page>.lxir                    # declare blocks, wires, parameters
 lxir check --json pages/                     # types, ports, directions; no base needed
@@ -88,6 +90,14 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   (`"Party" 18:00-24:00`); `party = Mode("Party")` creates a mode of your
   own, and `party.Q` is on while it is active. Users are never declared:
   they belong to the Miniserver's user management.
+- Before building a common automation by hand, look in `lxir templates`
+  (motion and staircase light, push-button, heating and humidity
+  hysteresis, CO2 ventilation, door and water alarms, intrusion
+  alarm, awning protection). `lxir templates <name> > pages/licht.lxir`
+  copies the file into the module; one line calls it
+  (`flur = bewegungslicht(bewegung: pir_flur)`) and its result is
+  `<instance>_ausgang.Q`, wired to the actuator
+  (`licht_flur.I <- flur_ausgang.Q`). Sensors are read at `Q`.
 - Light moods: `moods <set> … end` lists moods by name (`"Lesen": all on,
   AQ3 temp(60%, 2700K)`; values `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`
   per circuit kind), `<controller>.moods = <set>` writes them onto a

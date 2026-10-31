@@ -1,0 +1,75 @@
+# Tests der Klimavorlagen (templates/klima.lxir) im Simulator.
+
+page "Logik"
+
+temperatur = VirtualIn("Raumtemperatur")
+co2 = VirtualIn("CO2")
+fenster = VirtualIn("Fenster offen")
+feuchte = VirtualIn("Luftfeuchte")
+
+heizung = heizung_hysterese(
+	temperatur: temperatur,
+)
+
+frost = frostschutz(
+	temperatur: temperatur,
+)
+
+lueftung = lueftung_co2(
+	co2: co2,
+	fenster: fenster,
+)
+
+keller = entfeuchter(
+	feuchte: feuchte,
+)
+
+test "heizung_hysterese: zwischen den Schwellen bleibt der Zustand"
+	temperatur.Q = 19
+	tick 2
+	expect heizung_ausgang.Q == 1
+	temperatur.Q = 21
+	tick 2
+	expect heizung_ausgang.Q == 1
+	temperatur.Q = 22.5
+	tick 2
+	expect heizung_ausgang.Q == 0
+	temperatur.Q = 21
+	tick 2
+	expect heizung_ausgang.Q == 0
+end
+
+test "frostschutz"
+	temperatur.Q = 8
+	tick 2
+	expect frost_ausgang.Q == 0
+	temperatur.Q = 3
+	tick 2
+	expect frost_ausgang.Q == 1
+end
+
+test "lueftung_co2: nach 5 Minuten, nur bei geschlossenem Fenster"
+	co2.Q = 1400
+	tick 240
+	expect lueftung_ausgang.Q == 0
+	tick 70
+	expect lueftung_ausgang.Q == 1
+	fenster.Q = 1
+	tick 2
+	expect lueftung_ausgang.Q == 0
+end
+
+test "entfeuchter: Hysterese"
+	feuchte.Q = 70
+	tick 2
+	expect keller_ausgang.Q == 1
+	feuchte.Q = 60
+	tick 2
+	expect keller_ausgang.Q == 1
+	feuchte.Q = 50
+	tick 2
+	expect keller_ausgang.Q == 0
+	feuchte.Q = 60
+	tick 2
+	expect keller_ausgang.Q == 0
+end

@@ -611,7 +611,12 @@ pub fn parse(src: &str) -> Result<Module> {
                             (Some(Tok::Ident(n)), Some(Tok::Colon), Some(Tok::Ident(ty))) => {
                                 params.push(TemplateParam::Object {
                                     name: check_slug(n, lineno)?,
-                                    block_type: check_type(ty, lineno)?,
+                                    // `any` takes an object of every type.
+                                    block_type: if ty == "any" {
+                                        ty.clone()
+                                    } else {
+                                        check_type(ty, lineno)?
+                                    },
                                 });
                             }
                             (

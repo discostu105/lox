@@ -411,6 +411,8 @@ lox ir decompile current.Loxone        # the IR view of every page (read-only)
 lox ir rename old_name new_name        # rename across sources and lockfile, identities kept
 lox ir lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
 lox ir test                            # `test … end` blocks in lxir's simulator
+lox ir types --search delay            # block types by name or purpose; `lox ir types OnDelay`: its ports
+lox ir templates                       # tested templates (motion light, hysteresis, alarms, …) to copy
 lox ir test --lox ~/lox-cli/lox        # … or in lox-cli's simulator (`lox sim`)
 lox ir lsp                             # language server for editors (stdio): diagnostics, hover, completion, rename
 ```

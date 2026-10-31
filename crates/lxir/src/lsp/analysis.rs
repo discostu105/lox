@@ -825,6 +825,12 @@ fn dir_name(d: PortDir) -> &'static str {
 
 fn type_hover(ty: &str) -> String {
     let mut md = format!("**{ty}**\n");
+    if let Some(s) = crate::blockdoc::summary(ty) {
+        md.push_str(&format!("\n{s}\n"));
+    }
+    if let Some(url) = crate::blockdoc::kb_url(ty) {
+        md.push_str(&format!("\n[Loxone documentation]({url})\n"));
+    }
     for p in builtin(ty).unwrap_or_default() {
         md.push_str(&format!("\n- `{}` {}", p.key, dir_name(p.dir)));
         if let Some(l) = port_meta(ty, p.key).and_then(|m| m.label) {

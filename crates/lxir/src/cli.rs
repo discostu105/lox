@@ -199,14 +199,22 @@ USAGE:
         against the observed keys) and reports agreements, conflicts,
         and coverage gaps per type.
 
-  lxir types [<Type>] [--json]
-        The builtin block types the compiler mints, and per type its
-        ports: key, direction, and — where Loxone documents them (D52) —
+  lxir types [<Type> | --search <text>] [--json]
+        The builtin block types the compiler mints, each with what it is
+        for; --search lists the types whose name or purpose mentions the
+        text (`--search hysteresis`). Per type its purpose, the Loxone
+        knowledge-base page where known, and its ports: key, direction, and — where Loxone documents them (D52) —
         the unit a value is in (a suffixed value scales into it: `2h` is
         `120` on a minutes port), the canvas label (`Tr` for
         `InputTrigger`), the documented range (checked by `lxir lint`)
         and default, plus the corpus-observed GUI default (D30) and the
         attribute parameters. Without a type: one line per type.
+
+  lxir templates [<file | template>]
+        The template library: per template its parameters and what it
+        does (lights, climate, safety, shading; each tested in the
+        simulator). With a name: the library file's source, to copy into
+        the module directory and call with one line.
 
   lxir roundtrip <cfg.Loxone>
         Verify the file re-serializes byte-identically (exit 1 if not).
@@ -282,6 +290,8 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["scan", rest @ ..] => cmd_scan(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
         ["types", rest @ ..] => cmd_types(rest),
+        ["templates"] => cmd_templates(None),
+        ["templates", name] => cmd_templates(Some(name)),
         ["roundtrip", path] => cmd_roundtrip(path),
         ["render", rest @ ..] => cmd_render(rest),
         ["lsp"] | ["lsp", "--stdio"] => {
@@ -1950,10 +1960,47 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
 
 /// `lxir types`: the builtin table with its documented port facts — the
 /// reference an author (or agent) writes a block against.
+fn cmd_templates(name: Option<&str>) -> Result<ExitCode, AnyError> {
+    use lxir::library;
+    let Some(name) = name else {
+        let mut file = "";
+        for e in library::entries() {
+            if e.file != file {
+                println!("{}{}.lxir", if file.is_empty() { "" } else { "\n" }, e.file);
+                file = e.file;
+            }
+            println!("  {}({})", e.name, e.params);
+            println!("      {}", e.description);
+        }
+        println!("\n`lxir templates <file | template>` prints a file to copy into the module.");
+        return Ok(ExitCode::SUCCESS);
+    };
+    let Some((_, source)) = library::source(name) else {
+        let names: Vec<String> = library::FILES
+            .iter()
+            .map(|(f, _)| f.to_string())
+            .chain(library::entries().into_iter().map(|e| e.name))
+            .collect();
+        return Err(format!("no template or file `{name}` (known: {})", names.join(", ")).into());
+    };
+    print!("{source}");
+    Ok(ExitCode::SUCCESS)
+}
+
 fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
     use lxir::connectors;
     let json = args.contains(&"--json");
-    let names: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    let mut names: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    // `--search <text>`: the types whose name or purpose mentions it.
+    let search = match names.iter().position(|a| *a == "--search") {
+        Some(i) if i + 1 < names.len() => {
+            let q = names.remove(i + 1);
+            names.remove(i);
+            Some(q)
+        }
+        Some(_) => return Err("usage: lxir types --search <text> [--json]".into()),
+        None => None,
+    };
     let dir = |d: connectors::PortDir| match d {
         connectors::PortDir::Input => "input",
         connectors::PortDir::Output => "output",
@@ -1979,20 +2026,23 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             .collect();
         Some(serde_json::json!({
             "type": t,
+            "summary": lxir::blockdoc::summary(t),
+            "docs": lxir::blockdoc::kb_url(t),
             "ports": ports,
             "attr_params": connectors::attr_params(t),
         }))
     };
     match names.as_slice() {
         [] => {
+            let types: Vec<&str> = match search {
+                Some(q) => lxir::blockdoc::search(q),
+                None => connectors::BUILTIN_TYPES.to_vec(),
+            };
             if json {
-                let all: Vec<_> = connectors::BUILTIN_TYPES
-                    .iter()
-                    .filter_map(|t| describe(t))
-                    .collect();
+                let all: Vec<_> = types.iter().filter_map(|t| describe(t)).collect();
                 println!("{}", serde_json::to_string_pretty(&all)?);
             } else {
-                for t in connectors::BUILTIN_TYPES {
+                for t in &types {
                     let ports = connectors::builtin(t).unwrap_or_default();
                     let count = |d| ports.iter().filter(|p| p.dir == d).count();
                     println!(
@@ -2001,6 +2051,13 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                         count(connectors::PortDir::Output),
                         count(connectors::PortDir::Param),
                     );
+                    if let Some(s) = lxir::blockdoc::summary(t) {
+                        println!("    {s}");
+                    }
+                }
+                if types.is_empty() {
+                    eprintln!("no type mentions `{}`", search.unwrap_or_default());
+                    return Ok(ExitCode::FAILURE);
                 }
             }
             Ok(ExitCode::SUCCESS)
@@ -2021,6 +2078,12 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 return Ok(ExitCode::SUCCESS);
             }
             println!("{t}");
+            if let Some(summary) = lxir::blockdoc::summary(t) {
+                println!("  {summary}");
+            }
+            if let Some(url) = lxir::blockdoc::kb_url(t) {
+                println!("  {url}");
+            }
             let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
             for port in desc["ports"].as_array().into_iter().flatten() {
                 let range = match (port["min"].as_str(), port["max"].as_str()) {
@@ -2053,7 +2116,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        _ => Err("usage: lxir types [<Type>] [--json]".into()),
+        _ => Err("usage: lxir types [<Type> | --search <text>] [--json]".into()),
     }
 }
 

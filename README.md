@@ -270,6 +270,8 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
   changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
   runs the compiled file.
 - `lox ir lsp` is a language server for your editor.
+- `lox ir templates` ships tested templates for common automations, and `lox ir types --search` says what
+  each block type is for.
 
 ```bash
 lox config download --extract --save-as base.zip   # the deployed config → base.Loxone

@@ -1,0 +1,47 @@
+# Tests der Beschattungsvorlagen (templates/beschattung.lxir) im Simulator.
+
+page "Logik"
+
+wind = VirtualIn("Windgeschwindigkeit")
+regen = VirtualIn("Regen")
+helligkeit = VirtualIn("Helligkeit")
+aussentemp = VirtualIn("Außentemperatur")
+
+markise = markise_schutz(
+	wind: wind,
+	regen: regen,
+)
+
+sonne = sonnenschutz(
+	helligkeit: helligkeit,
+	aussentemp: aussentemp,
+)
+
+test "markise_schutz: sofort ein, Freigabe nach 10 ruhigen Minuten"
+	wind.Q = 55
+	tick 2
+	expect markise_ausgang.Q == 1
+	wind.Q = 10
+	tick 300
+	expect markise_ausgang.Q == 1
+	regen.Q = 1
+	tick 2
+	regen.Q = 0
+	tick 500
+	expect markise_ausgang.Q == 1
+	tick 120
+	expect markise_ausgang.Q == 0
+end
+
+test "sonnenschutz: hell und warm"
+	helligkeit.Q = 50000
+	aussentemp.Q = 20
+	tick 2
+	expect sonne_ausgang.Q == 0
+	aussentemp.Q = 28
+	tick 2
+	expect sonne_ausgang.Q == 1
+	helligkeit.Q = 5000
+	tick 2
+	expect sonne_ausgang.Q == 0
+end
