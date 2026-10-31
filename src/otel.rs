@@ -244,29 +244,28 @@ type PrevValues = HashMap<String, f64>;
 
 /// Record system diagnostics as metrics.
 fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) -> Result<()> {
-    let gauge_metrics: &[(&str, &str, &str)] = &[
-        ("/dev/sys/heap", "loxone.system.heap", "kBy"),
-        ("/jdev/sys/lastcpu", "loxone.system.cpu", "%"),
-        ("/jdev/sys/numtasks", "loxone.system.tasks", "{tasks}"),
-        ("/jdev/sys/ints", "loxone.system.interrupts", "{interrupts}"),
+    let heap = lox.heap().ok().flatten().map(|h| h.used_kb);
+    let d = lox.diagnostics().unwrap_or_default();
+    let gauges: [(&str, &str, Option<f64>); 5] = [
+        ("loxone.system.heap", "kBy", heap),
+        ("loxone.system.cpu", "%", d.cpu),
+        ("loxone.system.tasks", "{tasks}", d.tasks),
+        ("loxone.system.interrupts", "{interrupts}", d.interrupts),
         (
-            "/jdev/sys/comints",
             "loxone.system.comm_interrupts",
             "{interrupts}",
+            d.comm_interrupts,
         ),
     ];
-    for (path, name, unit) in gauge_metrics {
-        if let Ok(text) = lox.get_text(path)
-            && let Some(val) = extract_lox_value(&text)
-        {
+    for (name, unit, val) in gauges {
+        if let Some(val) = val {
             meter
-                .f64_gauge(*name)
-                .with_unit(*unit)
+                .f64_gauge(name)
+                .with_unit(unit)
                 .build()
                 .record(val, &[]);
         }
     }
-
     Ok(())
 }
 
@@ -280,8 +279,10 @@ fn record_cumulative(
     name: &str,
     delta: bool,
 ) {
-    if let Ok(text) = lox.get_text(path)
-        && let Some(current) = extract_lox_value(&text)
+    if let Some(current) = lox
+        .value(path)
+        .ok()
+        .and_then(|v| loxone_client::system::parse_counter(&v))
     {
         let val = if delta {
             let prev_val = prev.get(name).copied().unwrap_or(current);
@@ -678,46 +679,6 @@ fn emit_automation_trace(
 }
 
 // ── Helper ──────────────────────────────────────────────────────────────────
-
-/// Extract a numeric value from Loxone XML/JSON response.
-/// Handles both JSON `{"LL":{"value":"42"}}` and plain XML `value="42"` formats.
-/// Also handles values with unit suffixes like "352880/1016404kB" or "42.5%".
-fn extract_lox_value(text: &str) -> Option<f64> {
-    // Try JSON first
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text)
-        && let Some(val) = v.pointer("/LL/value")
-    {
-        // Handle both string ("123") and numeric (123) JSON values
-        if let Some(n) = val.as_f64() {
-            return Some(n);
-        }
-        if let Some(s) = val.as_str() {
-            return parse_numeric_prefix(s);
-        }
-    }
-    // Try XML attribute
-    let key = "value=\"";
-    if let Some(start) = text.find(key) {
-        let rest = &text[start + key.len()..];
-        if let Some(end) = rest.find('"') {
-            return parse_numeric_prefix(&rest[..end]);
-        }
-    }
-    None
-}
-
-/// Parse the leading numeric portion of a string, ignoring trailing
-/// units or denominators (e.g. "352880/1016404kB" → 352880.0).
-fn parse_numeric_prefix(s: &str) -> Option<f64> {
-    if let Ok(v) = s.parse::<f64>() {
-        return Some(v);
-    }
-    // Find the longest leading substring that parses as a number
-    let end = s
-        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
-        .unwrap_or(s.len());
-    if end > 0 { s[..end].parse().ok() } else { None }
-}
 
 // ── Serve (continuous daemon) ───────────────────────────────────────────────
 
@@ -1193,94 +1154,6 @@ mod tests {
     fn test_parse_headers_invalid() {
         let headers = vec!["no-equals-sign".to_string()];
         assert!(parse_headers(&headers).is_err());
-    }
-
-    #[test]
-    fn test_extract_lox_value_json() {
-        let text = r#"{"LL":{"value":"42.5","Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(42.5));
-    }
-
-    #[test]
-    fn test_extract_lox_value_json_numeric() {
-        // Gen2 Miniservers return numeric values without quotes
-        let text = r#"{"LL":{"control":"dev/sys/contextswitches","value":123456789,"Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(123456789.0));
-    }
-
-    #[test]
-    fn test_extract_lox_value_xml() {
-        let text = r#"<LL value="21.5" />"#;
-        assert_eq!(extract_lox_value(text), Some(21.5));
-    }
-
-    #[test]
-    fn test_extract_lox_value_with_unit_suffix() {
-        // Heap response: "352880/1016404kB"
-        let text = r#"<LL control="dev/sys/heap" value="352880/1016404kB" Code="200"/>"#;
-        assert_eq!(extract_lox_value(text), Some(352880.0));
-    }
-
-    #[test]
-    fn test_extract_lox_value_json_numeric_float() {
-        let text = r#"{"LL":{"value":2.75,"Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(2.75));
-    }
-
-    #[test]
-    fn test_extract_lox_value_json_numeric_zero() {
-        let text = r#"{"LL":{"value":0,"Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(0.0));
-    }
-
-    /// Regression: all OTLP diagnostic endpoints must extract values from
-    /// both Gen1 (XML, string) and Gen2 (JSON, numeric) response formats.
-    #[test]
-    fn test_extract_lox_value_all_diagnostic_formats() {
-        // Gen2 JSON numeric — the format that was broken
-        for (endpoint, num) in [
-            ("dev/sys/ints", 987654),
-            ("dev/sys/comints", 12345),
-            ("dev/sys/contextswitchesi", 98765432),
-            ("bus/parityerrors", 0),
-            ("lan/txu", 42),
-            ("lan/exh", 0),
-            ("lan/nob", 7),
-        ] {
-            let text = format!(
-                r#"{{"LL":{{"control":"{}","value":{},"Code":"200"}}}}"#,
-                endpoint, num
-            );
-            assert_eq!(
-                extract_lox_value(&text),
-                Some(num as f64),
-                "failed for endpoint {}",
-                endpoint
-            );
-        }
-
-        // Gen2 JSON string — CPU returns "CPU:12 SPS:26"
-        let text = r#"{"LL":{"value":"CPU:12 SPS:26","Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), None); // no leading number
-
-        // Gen2 JSON string with leading number — tasks
-        let text = r#"{"LL":{"value":"60","Code":"200"}}"#;
-        assert_eq!(extract_lox_value(text), Some(60.0));
-    }
-
-    #[test]
-    fn test_extract_lox_value_none() {
-        assert_eq!(extract_lox_value("no value here"), None);
-    }
-
-    #[test]
-    fn test_parse_numeric_prefix() {
-        assert_eq!(parse_numeric_prefix("42"), Some(42.0));
-        assert_eq!(parse_numeric_prefix("42.5"), Some(42.5));
-        assert_eq!(parse_numeric_prefix("352880/1016404kB"), Some(352880.0));
-        assert_eq!(parse_numeric_prefix("-1.5"), Some(-1.5));
-        assert_eq!(parse_numeric_prefix("abc"), None);
-        assert_eq!(parse_numeric_prefix(""), None);
     }
 
     #[test]

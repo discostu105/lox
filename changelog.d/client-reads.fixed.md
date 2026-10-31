@@ -1,0 +1,1 @@
+- **lox otel**: `loxone.system.cpu` is recorded again on current firmware (`CPU:12 SPS:26` read as no value).

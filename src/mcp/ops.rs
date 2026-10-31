@@ -859,38 +859,14 @@ pub fn access_check(
 }
 
 pub fn system_status(lox: &mut LoxClient) -> Result<SystemStatus> {
-    let read = |path: &str| -> Result<String> {
-        let text = lox.get_text(path)?;
-        Ok(crate::util::xml_attr(&text, "value")
-            .unwrap_or("")
-            .to_string())
-    };
-    let firmware = read("/dev/cfg/version")?;
-    let plc = read("/dev/sps/state")?;
-    let heap = read("/dev/sys/heap")?;
-    let plc_state = match plc.as_str() {
-        "5" => "running",
-        "3" => "started",
-        "7" => "error",
-        "1" => "booting",
-        "8" => "updating",
-        _ => "unknown",
-    };
-    let (heap_used_kb, heap_total_kb) = match heap.split_once('/') {
-        Some((used, total)) => {
-            let used = used.trim().parse::<f64>().ok();
-            let total = total.trim().trim_end_matches("kB").parse::<f64>().ok();
-            (used, total.filter(|t| *t > 0.0))
-        }
-        None => (None, None),
-    };
+    let sys = lox.system_status()?;
     Ok(SystemStatus {
-        firmware,
-        plc_state: plc_state.to_string(),
-        plc_running: plc == "5",
-        heap,
-        heap_used_kb,
-        heap_total_kb,
+        plc_state: sys.plc.name().to_string(),
+        plc_running: sys.plc.is_running(),
+        heap_used_kb: sys.heap.map(|h| h.used_kb),
+        heap_total_kb: sys.heap.map(|h| h.total_kb).filter(|t| *t > 0.0),
+        firmware: sys.firmware,
+        heap: sys.heap_raw,
     })
 }
 

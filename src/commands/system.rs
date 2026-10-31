@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use loxone_client::sdtest::{SdTestResult, parse_sdtest};
+use loxone_client::system::PlcState;
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::net::UdpSocket;
@@ -34,32 +35,30 @@ pub fn cmd_status(
     let show_bus = bus || all;
     let show_lan = lan || all;
     let lox = Config::load()?.client()?;
-    let version = lox.get_text("/dev/cfg/version")?;
-    let heap = lox.get_text("/dev/sys/heap")?;
-    let sps = lox.get_text("/dev/sps/state")?;
+    let sys = lox.system_status()?;
     let check = lox.get_text("/dev/sys/check")?;
     let status = lox.get_text("/data/status")?;
 
-    let ver = xml_attr(&version, "value").unwrap_or("?");
-    let heap_val = xml_attr(&heap, "value").unwrap_or("?");
-    let sps_num = xml_attr(&sps, "value").unwrap_or("?");
+    let ver = sys.firmware.as_str();
+    let heap_val = sys.heap_raw.as_str();
     let conn = xml_attr(&check, "value").unwrap_or("?");
 
-    let sps_label = match sps_num {
-        "5" => "✓ Running",
-        "3" => "Started",
-        "7" => "⚠ Error",
-        "1" => "Booting",
-        "8" => "Updating",
-        n => n,
+    let sps_label = match &sys.plc {
+        PlcState::Running => "✓ Running",
+        PlcState::Started => "Started",
+        PlcState::Error => "⚠ Error",
+        PlcState::Booting => "Booting",
+        PlcState::Updating => "Updating",
+        PlcState::Other(code) => code.as_str(),
     };
-    let heap_display = if let Some((used, total)) = heap_val.split_once('/') {
-        let t_str = total.trim_end_matches("kB");
-        let u: f64 = used.parse().unwrap_or(0.0);
-        let t: f64 = t_str.parse().unwrap_or(1.0);
-        format!("{} / {}  {}", kb_fmt(u), kb_fmt(t), bar(u, t))
-    } else {
-        heap_val.to_string()
+    let heap_display = match sys.heap {
+        Some(h) => format!(
+            "{} / {}  {}",
+            kb_fmt(h.used_kb),
+            kb_fmt(h.total_kb),
+            bar(h.used_kb, h.total_kb.max(1.0))
+        ),
+        None => heap_val.to_string(),
     };
 
     let ms_name = xml_attr(&status, "Name").unwrap_or("Loxone");
@@ -121,58 +120,39 @@ pub fn cmd_status(
         }
     }
     if show_diag {
-        let cpu = lox.get_text("/jdev/sys/lastcpu").unwrap_or_default();
-        let tasks = lox.get_text("/jdev/sys/numtasks").unwrap_or_default();
-        let ctx_sw = lox
-            .get_text("/jdev/sys/contextswitches")
-            .unwrap_or_default();
-        let ints = lox.get_text("/jdev/sys/ints").unwrap_or_default();
-        let comints = lox.get_text("/jdev/sys/comints").unwrap_or_default();
-        let ctx_swi = lox
-            .get_text("/jdev/sys/contextswitchesi")
-            .unwrap_or_default();
+        let d = lox.diagnostics().unwrap_or_default();
         let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
-        let cpu_val = xml_attr(&cpu, "value").unwrap_or("?");
-        let tasks_val = xml_attr(&tasks, "value").unwrap_or("?");
-        let ctx_val = xml_attr(&ctx_sw, "value").filter(|v| !v.is_empty());
-        let ints_val = xml_attr(&ints, "value").filter(|v| !v.is_empty());
-        let comints_val = xml_attr(&comints, "value").filter(|v| !v.is_empty());
-        let ctx_swi_val = xml_attr(&ctx_swi, "value").filter(|v| !v.is_empty());
         let sd_val = xml_attr(&sd, "value").unwrap_or("?");
         let sd_info = parse_sdtest(sd_val);
         if ctx.json {
-            let mut diag = serde_json::json!({
-                "cpu": cpu_val, "tasks": tasks_val,
+            let diag = serde_json::json!({
+                "cpu": d.cpu, "sps": d.sps, "tasks": d.tasks,
+                "context_switches": d.context_switches,
+                "context_switches_idle": d.context_switches_i,
+                "interrupts": d.interrupts,
+                "comm_interrupts": d.comm_interrupts,
                 "sd_card": sd_info.to_json(),
             });
-            if let Some(v) = ctx_val {
-                diag["context_switches"] = serde_json::json!(v);
-            }
-            if let Some(v) = ints_val {
-                diag["interrupts"] = serde_json::json!(v);
-            }
-            if let Some(v) = comints_val {
-                diag["comm_interrupts"] = serde_json::json!(v);
-            }
-            if let Some(v) = ctx_swi_val {
-                diag["context_switches_idle"] = serde_json::json!(v);
-            }
             println!("{}", diag);
         } else {
+            let num = |v: Option<f64>| v.map_or("—".to_string(), |n| format!("{n}"));
+            let cpu = match (d.cpu, d.sps) {
+                (Some(c), Some(s)) => format!("{c}% (PLC {s}%)"),
+                (Some(c), None) => format!("{c}%"),
+                _ => "—".to_string(),
+            };
             println!("┌─ Diagnostics ───────────────────────────────────────");
-            println!("│  CPU:              {}", cpu_val);
-            println!("│  Tasks:            {}", tasks_val);
-            if let Some(v) = ctx_val {
-                println!("│  Context switches: {}", v);
-            }
-            if let Some(v) = ints_val {
-                println!("│  Interrupts:       {}", v);
-            }
-            if let Some(v) = comints_val {
-                println!("│  Comm interrupts:  {}", v);
-            }
-            if let Some(v) = ctx_swi_val {
-                println!("│  Ctx switches (i): {}", v);
+            println!("│  CPU:              {}", cpu);
+            println!("│  Tasks:            {}", num(d.tasks));
+            for (label, v) in [
+                ("Context switches", d.context_switches),
+                ("Interrupts", d.interrupts),
+                ("Comm interrupts", d.comm_interrupts),
+                ("Ctx switches (i)", d.context_switches_i),
+            ] {
+                if let Some(v) = v {
+                    println!("│  {:<17} {}", format!("{label}:"), v);
+                }
             }
             print_sd_table(&sd_info);
             println!("└─────────────────────────────────────────────────────");

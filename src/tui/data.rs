@@ -305,34 +305,6 @@ impl Series {
 
 // ── Parsers for live responses ──────────────────────────────────────────────
 
-/// `CPU:12 SPS:23 Cycles:99` → (cpu, sps). Older firmware returns a bare number.
-pub fn parse_lastcpu(v: &str) -> (Option<f64>, Option<f64>) {
-    let num = |key: &str| {
-        v.split_whitespace()
-            .find_map(|p| p.strip_prefix(key))
-            .and_then(|n| n.trim_end_matches('%').parse::<f64>().ok())
-    };
-    let cpu = num("CPU:").or_else(|| v.trim().trim_end_matches('%').parse().ok());
-    (cpu, num("SPS:"))
-}
-
-/// `359276/1016404kB` → (used, total) in kB.
-pub fn parse_heap(v: &str) -> (Option<f64>, Option<f64>) {
-    match v.split_once('/') {
-        Some((u, t)) => (
-            u.trim().parse().ok(),
-            t.trim().trim_end_matches("kB").trim().parse().ok(),
-        ),
-        None => (None, None),
-    }
-}
-
-/// A plain numeric counter; empty strings (Gen 2) become `None`.
-pub fn parse_num(v: &str) -> Option<f64> {
-    let v = v.trim();
-    if v.is_empty() { None } else { v.parse().ok() }
-}
-
 /// Parse `/data/status` into devices (Tree, Air, network, extensions).
 pub fn parse_status_xml(xml: &str) -> Vec<Device> {
     use quick_xml::Reader;
@@ -457,21 +429,6 @@ mod tests {
         assert_eq!(clock_drift(43205.0, 36000.0, 7200.0), 5.0);
         // across midnight: MS 23:59:58, true 00:00:01 → 3 s slow
         assert_eq!(clock_drift(86398.0, 1.0, 0.0), -3.0);
-    }
-
-    #[test]
-    fn diag_values_real_shapes() {
-        assert_eq!(
-            parse_lastcpu("CPU:12 SPS:23 Cycles:99"),
-            (Some(12.0), Some(23.0))
-        );
-        assert_eq!(parse_lastcpu("38%"), (Some(38.0), None));
-        assert_eq!(
-            parse_heap("359276/1016404kB"),
-            (Some(359276.0), Some(1016404.0))
-        );
-        assert_eq!(parse_num(""), None);
-        assert_eq!(parse_num("64"), Some(64.0));
     }
 
     #[test]
