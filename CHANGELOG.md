@@ -10,6 +10,12 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-10-31
+
+### Added
+- **loxone-config** example library: five typical scenarios made for this repository with Loxone Config 17.2 from its factory default project (lighting with presence and moods, automatic shading with weather station and wind alarm, an intelligent room controller with window contact, an NFC Code Touch with users and access codes, an energy flow monitor with PV surplus to a heating rod), each with its Lox Logic view and page drawing
+- **`loxl scan --redact`** gives each distinct name its own placeholder (`redacted`, `redacted-2`, …), so redacted users stay apart and their access rights still lift
+
 ## [0.49.0] — 2026-10-31
 
 ### Added
