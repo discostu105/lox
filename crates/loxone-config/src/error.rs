@@ -28,7 +28,7 @@ pub enum Error {
     /// An extern's match spec resolved to more than one object. Contains a
     /// human-readable candidate list so callers can surface a fix.
     #[error(
-        "extern `{slug}`: {spec} is ambiguous — {count} candidates:\n{candidates}\nPin one with `uuid: \"…\"`."
+        "extern `{slug}`: {spec} matches {count} objects:\n{candidates}\nPin one with `uuid: \"…\"`."
     )]
     AmbiguousMatch {
         slug: String,

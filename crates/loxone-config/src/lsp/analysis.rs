@@ -83,9 +83,12 @@ pub fn suggestion(message: &str) -> Option<&str> {
 }
 
 /// The `(new, old)` of a diagnostic's "write `NEW` instead of `OLD`" —
-/// the exact replacement a v1 spelling names (D80).
+/// the exact replacement a v1 spelling names.
 pub fn replacement(message: &str) -> Option<(&str, &str)> {
-    let rest = &message[message.find("write `")? + "write `".len()..];
+    let at = message
+        .find("Write `")
+        .or_else(|| message.find("write `"))?;
+    let rest = &message[at + "write `".len()..];
     let (new, rest) = rest.split_once("` instead of `")?;
     let old = &rest[..rest.find('`')?];
     (!old.is_empty()).then_some((new, old))
@@ -538,7 +541,7 @@ impl Workspace {
         let text = current(path);
         let mut m = Module::parse_fragment(&text).map_err(|e| e.to_string())?;
         if scan(&text, path).iter().any(|d| d.slug == new) {
-            return Err(format!("`{new}` is already declared — pick a fresh name"));
+            return Err(format!("`{new}` is already declared. Pick another name."));
         }
         crate::logic::rename_slug(&mut m, &old, new);
         m.validate()
@@ -605,7 +608,7 @@ impl Workspace {
                 let lock = Lockfile::load(&project.lock).ok()?;
                 match lock.objects.get(&decl.slug) {
                     Some(o) => o.uuid.clone(),
-                    None => return Some("\nNot compiled yet: the next compile mints it.".into()),
+                    None => return Some("\nNot compiled yet: the next compile creates it.".into()),
                 }
             }
             _ => return None,

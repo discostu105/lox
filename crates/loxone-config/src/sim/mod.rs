@@ -1,4 +1,4 @@
-//! The logic simulator behind `loxl test` (D68): runs a compiled
+//! The logic simulator behind `loxl test`: runs a compiled
 //! `.Loxone` document cycle by cycle, without a Miniserver.
 //!
 //! Every block with a model ([`model`]) is evaluated once per tick in
@@ -377,8 +377,7 @@ impl Simulator {
             Support::Source => unreachable!("returned above"),
             Support::Unsupported(why) => {
                 return Err(format!(
-                    "{} is not simulated: {why} — set a port between it and the \
-                     expectation in the test",
+                    "{} is not simulated: {why}. Set a port between it and the expectation in the test.",
                     obj.describe()
                 ));
             }
@@ -484,8 +483,7 @@ impl Simulator {
         let fan_in = obj.model().map_or(FanIn::Single, Model::fan_in);
         if p.inputs.len() > 1 && fan_in == FanIn::Single {
             return Err(format!(
-                "{}: {} wires meet at `{}`; how this block combines them is not \
-                 documented",
+                "{}: {} wires meet at `{}`, and how this block combines them is not documented",
                 obj.describe(),
                 p.inputs.len(),
                 p.key

@@ -3,11 +3,10 @@
 //! An `AutopilotRule` block carries its entire rule — conditions
 //! ("events"), actions, activation flags — as JSON in the element's
 //! `APC=` attribute ([loxone-format.md](../docs/loxone-format.md)). This
-//! module gives the read side eyes (D37): a human summary for the
-//! decompile full view and a field-path diff for `loxl diff`. Since D57 it
-//! also reads a payload as a [`Rule`] — the shapes the corpus documents —
-//! and writes one back in the app's key order, for `rule` declarations
-//! (`logic::rule`).
+//! module gives a human summary for the decompile full view and a
+//! field-path diff for `loxl diff`. It also reads a payload as a [`Rule`]
+//! (the shapes seen in real configs) and writes one back in the app's key
+//! order, for `rule` declarations (`logic::rule`).
 //!
 //! The payload is handled as untyped JSON deliberately: a typed struct
 //! would silently drop fields a newer app version adds, and the diff
@@ -29,8 +28,8 @@ pub fn parse(apc: &str) -> Option<Value> {
 
 /// The payload in canonical text form (compact, keys sorted — serde's
 /// default map is ordered), for semantic comparison and fingerprinting.
-/// The raw attribute text is not stable enough to compare: two of the
-/// house config's rules carry a raw CRLF *inside* the JSON (the same
+/// The raw attribute text is not stable enough to compare: some
+/// real rules carry a raw CRLF *inside* the JSON (the same
 /// not-actually-XML deviation as `Code=`), so a writer reflowing the
 /// payload would read as drift on every rule. `None` if not JSON —
 /// comparisons fall back to the raw text.
@@ -99,8 +98,8 @@ fn event_line(event: &Value, resolve: &dyn Fn(&str) -> Option<String>) -> String
     if let Some(v) = event.get("value") {
         line.push_str(&format!(": value {v}"));
     }
-    // The modal operator (1) is elided like a GUI-default parameter
-    // (D30); anything else is a fact worth showing.
+    // The modal operator (1) is elided like a GUI-default parameter;
+    // anything else is a fact worth showing.
     if let Some(op) = event.get("operator").and_then(Value::as_i64)
         && op != 1
     {
@@ -189,11 +188,11 @@ fn join(path: &str, key: &str) -> String {
     }
 }
 
-// --- The rule model (D57, D73) -------------------------------------------
+// --- The rule model -------------------------------------------
 
 /// What a rule does: its condition groups — the rule runs when every
 /// event of one group holds (the app's sections: group `operator` 1 under
-/// rule `operator` 3, the only codes the app writes, D73) — and the
+/// rule `operator` 3, the only codes the app writes) — and the
 /// actions it then sends. Two payloads with the same `Rule` do the same
 /// thing, whatever their raw spelling.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,7 +330,7 @@ pub const MESSAGE: i64 = 98_101;
 const TIME: (i64, i64, i64) = (5, 272_001, 272);
 const WEEKDAY: (i64, i64, i64) = (3, 270_001, 270);
 /// The operating mode's condition and action (the capability table's
-/// one `type` 1 entry, D73).
+/// one `type` 1 entry).
 pub const MODE_EVENT: i64 = 21_001;
 pub const MODE_ACTION: i64 = 21_101;
 /// The `value` of a weekday event whose days are in `arrValues`.

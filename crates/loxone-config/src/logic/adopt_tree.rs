@@ -1,8 +1,8 @@
-//! Adopting a virtual or Modbus device (D64): the device and every I/O
+//! Adopting a virtual or Modbus device: the device and every I/O
 //! below it become managed blocks in one go — an I/O hangs below its
 //! device, so a managed device carries none it does not manage. Adopting
 //! one I/O alone leaves its device with the GUI (an extern its `device:`
-//! names). A virtual input (D54, #198) is adopted the same way: alone, its
+//! names). A virtual input (#198) is adopted the same way: alone, its
 //! input-dialog settings left to the GUI as for a minted one.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -160,8 +160,7 @@ pub(super) fn adopt_device(
         if let Some(x) = extern_slug.get(o.uuid.as_str()) {
             if o.uuid == root.uuid && *x != slug {
                 return Err(fail(format!(
-                    "{ident} is extern `{x}` of this module — promoting it keeps the \
-                     slug every statement already uses: adopt it `--as {x}`"
+                    "{ident} is extern `{x}` of this module. Adopt it `--as {x}` to keep the slug the statements already use."
                 )));
             }
             check_promotable(doc, x, &o.uuid, raw, expanded, lock)
@@ -193,7 +192,7 @@ pub(super) fn adopt_device(
         .iter()
         .map(|w| (w.to.clone(), w.from.clone()))
         .collect();
-    // A source wire the compile drew through an OutputRef (D34) lands on
+    // A source wire the compile drew through an OutputRef lands on
     // the ref's `AI`; the ref's `AQ` into the sink is the same wire.
     let source_to: BTreeSet<&str> = lock.extern_wires.iter().map(|w| w.to.as_str()).collect();
     for o in objects.iter().filter(|o| o.block_type == "OutputRef") {
@@ -307,7 +306,7 @@ pub(super) fn adopt_device(
                         if crate::connectors::bool_params(&o.block_type).contains(name)
                             && (v == "true" || v == "false")
                         {
-                            Value::Bool(v == "true") // `on`/`off` (D80)
+                            Value::Bool(v == "true") // `on`/`off`
                         } else {
                             value_of(&v)
                         },
@@ -356,8 +355,7 @@ pub(super) fn adopt_device(
                     },
                     Item::Set(st) if st.target.slug == s => {
                         return Err(fail(format!(
-                            "cannot promote `{s}`: `{s}.{} = …` sets a connector value, \
-                             which a {} does not take — remove it first",
+                            "cannot promote `{s}`: `{s}.{} = …` sets a connector value, which a {} does not take. Remove it first.",
                             st.target.port, o.block_type
                         )));
                     }

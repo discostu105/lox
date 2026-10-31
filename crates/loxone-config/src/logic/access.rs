@@ -1,5 +1,5 @@
-//! Access rights on NFC Code Touch blocks (D49) and the recipients of push
-//! notifications (D51).
+//! Access rights on NFC Code Touch blocks and the recipients of push
+//! notifications.
 //!
 //! A user or group may open a Code Touch when its `<PH>` list has a
 //! `<PRM REF="<block>" TIM="<schedule>"/>`: the right is on the block,
@@ -12,15 +12,15 @@
 //! schedules, and revokes what it does not list. Blocks without a
 //! declaration are not touched. Users, groups and schedules stay with
 //! Loxone Config and the app; the declaration names them by title, and a
-//! title that is missing or not unique is an error. Like tiles (D41) the
+//! title that is missing or not unique is an error. Like tiles the
 //! declaration keeps no lock state: withdrawing it leaves the rights as
 //! they are.
 //!
 //! A `recipients <slug>` declaration does the same for `ACT=` on a push
 //! notification (`Notification`): a user or group with `ACT=` on it gets
 //! the message. A new recipient gets `ACT="3"`, the value Loxone Config 17.2
-//! writes (oracle session 15); an `ACT=` already there counts whatever its
-//! value (older configs have `ACT="1"`) and stays.
+//! writes. An `ACT=` already there counts whatever its value (older configs
+//! have `ACT="1"`) and stays.
 //!
 //! The edit is the one Loxone Config makes (docs/loxone-format.md, *Users,
 //! groups and access rights*): a new right is a `<PRM REF TIM/>` appended
@@ -70,7 +70,7 @@ pub(crate) fn apply(
         let block = uuid_of[&a.slug].as_str();
         if let Some(other) = claimed.insert(block, &a.slug) {
             return Err(Error::Compile(format!(
-                "`{kw} {}` and `{kw} {other}` are the same block ({block}) — keep one",
+                "`{kw} {}` and `{kw} {other}` are the same block ({block}). Keep one.",
                 a.slug
             )));
         }
@@ -170,13 +170,11 @@ fn by_title<'a>(
         [] => {
             let hint = super::validate::suggest(title, candidates.iter().filter_map(|(_, t)| *t));
             Err(Error::Compile(format!(
-                "{ctx}: no {what} titled \"{title}\" in the config{hint} — users, groups \
-                 and access schedules are created in Loxone Config or the app"
+                "{ctx}: no {what} titled \"{title}\" in the config{hint}. Create users, groups and access schedules in Loxone Config or the app."
             )))
         }
         many => Err(Error::Compile(format!(
-            "{ctx}: {} {what}s are titled \"{title}\" ({}) — give them distinct titles \
-             in Loxone Config or the app",
+            "{ctx}: {} {what}s are titled \"{title}\" ({}). Give them distinct titles in Loxone Config or the app.",
             many.len(),
             many.join(", ")
         ))),
@@ -204,8 +202,7 @@ fn rewrite(el: &mut Element, principal: &str, plans: &[Plan]) -> Result<()> {
                     .collect();
                 if hits.len() > 1 {
                     return Err(Error::Compile(format!(
-                        "{} \"{}\" ({principal}) lists {} rights on the block {} — Loxone \
-                         Config writes one; fix it there before declaring its rights",
+                        "{} \"{}\" ({principal}) lists {} rights on the block {}, but Loxone Config writes one. Fix it in Loxone Config before declaring its rights.",
                         el.attr("Type").unwrap_or("object"),
                         el.attr_decoded("Title").unwrap_or_default(),
                         hits.len(),
@@ -351,9 +348,7 @@ pub fn lint_access(doc: &LoxoneDoc) -> Vec<LintFinding> {
                 kind: LintKind::NoAccessRight,
                 slug: u.title.clone().unwrap_or_else(|| u.uuid.clone()),
                 detail: format!(
-                    "user with {} but no access right on any NFC Code Touch, neither \
-                     directly nor through a group — the tag or code opens nothing; grant \
-                     one in an `access <code_touch>` declaration or in the app",
+                    "user with {} has no access right on any NFC Code Touch, so the tag or code opens nothing. Grant one in an `access <code_touch>` declaration or in the app.",
                     has.join(" and ")
                 ),
             }

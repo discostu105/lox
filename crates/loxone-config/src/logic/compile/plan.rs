@@ -24,7 +24,7 @@ pub(super) fn plan_blocks(
                 .and_then(|el| el.attr("U"))
                 .map(String::from)
         });
-    // `page "Title"` statements govern the blocks that follow them (D28).
+    // `page "Title"` statements govern the blocks that follow them.
     // The statement is authoritative: the named page must exist in the
     // base, and a governed block whose pin no longer matches a page with
     // that title moves. Placement is positional, so synthetic expression
@@ -47,7 +47,7 @@ pub(super) fn plan_blocks(
     // Title → page UUIDs in document order. Titles need not be unique; a
     // kept pin only has to match one of them.
     let mut pages_by_title: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    // Object-tree containers (D54), first of each type in document order.
+    // Object-tree containers, first of each type in document order.
     let mut containers: BTreeMap<String, String> = BTreeMap::new();
     for o in doc.objects() {
         if o.block_type == "VirtualInCaption"
@@ -67,7 +67,7 @@ pub(super) fn plan_blocks(
         }
     }
     let mut managed: BTreeMap<String, PlannedBlock> = BTreeMap::new();
-    // Pages to lay out afresh (D42), by UUID.
+    // Pages to lay out afresh, by UUID.
     let mut relayout_pages: BTreeSet<&str> = BTreeSet::new();
     for title in &opts.relayout {
         let uuids = pages_by_title.get(title.as_str()).ok_or_else(|| {
@@ -104,8 +104,8 @@ struct Pins<'a> {
     opts: &'a CompileOptions,
 }
 
-/// One block's plan: its pinned identity, then its container (object tree,
-/// D54) or its page (D28) and position (D42).
+/// One block's plan: its pinned identity, then its container (object tree)
+/// or its page and position.
 fn plan_block(
     pins: &Pins,
     lock: &mut Lockfile,
@@ -127,16 +127,16 @@ fn plan_block(
     let keys: Vec<String> = specs.iter().map(|s| s.key.to_string()).collect();
 
     let entry = pin_identity(lock, minter, desugar_info, block, &keys)?;
-    // D54: an object of the object tree (a VirtualIn) is appended to
-    // its container, which the base has exactly once — never pinned,
-    // placed, or governed by `page`. An I/O (D64) goes into its device,
+    // An object of the object tree (a VirtualIn) is appended to its
+    // container, which the base has exactly once. It is never pinned,
+    // placed, or governed by `page`. An I/O goes into its device,
     // resolved once every block has its UUID.
     if object_tree(&block.block_type) {
         let uuid = match container_type(&block.block_type) {
             Some(container) => containers.get(container).cloned().ok_or_else(|| {
                 Error::Compile(format!(
                     "block `{}`: the base config has no <C Type=\"{container}\"> to \
-                         hold a minted {}",
+                         hold a new {}",
                     block.slug, block.block_type
                 ))
             })?,
@@ -158,7 +158,7 @@ fn plan_block(
     }
     let pinned_before = entry.page_uuid.clone();
     let page_uuid = match declared_page.get(block.slug.as_str()) {
-        // Governed by a `page` statement (D28): keep a pin that still
+        // Governed by a `page` statement: keep a pin that still
         // matches a page with the declared title, otherwise (re)pin to
         // the first matching page in document order.
         Some(&title) => {
@@ -168,10 +168,7 @@ fn plan_block(
                 _ => {
                     let u = candidates.first().cloned().ok_or_else(|| {
                         Error::Compile(format!(
-                            "block `{}` is placed with `page \"{title}\"`, but the \
-                                 base config has no <C Type=\"Page\"> titled `{title}` — \
-                                 to create it, name its room: `page \"{title}\" \
-                                 (room: \"…\")` (D56)",
+                            "block `{}` is placed on page `{title}`, which the base config does not have. To create the page, name its room: `page \"{title}\" (room: \"…\")`.",
                             block.slug
                         ))
                     })?;
@@ -269,8 +266,8 @@ fn pin_identity<'a>(
             )));
         }
         return Err(Error::Compile(format!(
-            "block `{}` changed type from `{}` to `{}`; remove it from the lock first \
-                 (Lockfile::remove_object) to accept new identity",
+            "block `{}` changed type from `{}` to `{}`. Delete its lockfile entry first \
+                 to give it a new identity.",
             block.slug, entry.block_type, block.block_type
         )));
     }
@@ -283,16 +280,15 @@ fn pin_identity<'a>(
     if entry.uuid.is_empty() && adopt_only(&block.block_type) {
         return Err(Error::Compile(format!(
             "block `{}`: a {} is created by Loxone Config when it pairs the \
-                 device — adopt the existing one (`loxl adopt <cfg> --uuid …`) \
-                 instead of declaring a new one",
+                 device. Adopt the existing one (`loxl adopt <cfg> --uuid …`) \
+                 instead of declaring a new one.",
             block.slug, block.block_type
         )));
     }
     if entry.uuid.is_empty() {
         entry.uuid = minter.mint_object().to_string();
         lock.counters.next_obj += 1;
-        // D66: the special states a save would give it, for its entry
-        // in the app.
+        // The special states a save would give it, for its entry in the app.
         if let Some((n, _)) = save_defaults(&block.block_type) {
             entry.states = (0..n).map(|_| minter.mint_object().to_string()).collect();
         }
@@ -300,8 +296,8 @@ fn pin_identity<'a>(
     Ok(entry)
 }
 
-/// D64: an I/O goes into the device its `device:` names — into the caption
-/// of that device it sat in, if the base had it in one.
+/// An I/O goes into the device its `device:` names. If the base had it in
+/// a caption of that device, it goes back into that caption.
 pub(super) fn place_ios_in_devices(
     module: &Module,
     managed: &mut BTreeMap<String, PlannedBlock>,
@@ -344,13 +340,13 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
     let resolve = |v: &Value| -> Result<String> { Ok(module.resolve_value(v)?.to_string()) };
     let mut managed_defs: BTreeMap<(String, String), String> = BTreeMap::new();
     let mut managed_attrs: BTreeMap<(String, String), String> = BTreeMap::new();
-    // Message parameters of an `OutputRefLM` (D51), written onto its
+    // Message parameters of an `OutputRefLM`, written onto its
     // `<LoggerMailer>` child.
     let mut managed_msgs: BTreeMap<(String, String), String> = BTreeMap::new();
     for block in module.blocks() {
         let attrs = attr_params(&block.block_type);
         for (k, v) in block.params() {
-            // `mirrors:` is an identity binding, not a value (D33) —
+            // `mirrors:` is an identity binding, not a value —
             // resolved separately below.
             if (is_ref_type(&block.block_type) && k == "mirrors")
                 || crate::periphery::is_device_binding(&block.block_type, k)
@@ -391,7 +387,7 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
     })
 }
 
-/// `mirrors:` on minted refs (D33): resolves the mirrored object and
+/// `mirrors:` on minted refs: resolves the mirrored object and
 /// precomputes the identity attributes its element carries (`Ref=`,
 /// `LinkRefType=`, `Analog=`). The target is any managed block of this
 /// module (a block minted this very compile included — the ref is ours to
@@ -433,8 +429,7 @@ pub(super) fn resolve_mirrors(
                 ))
             })?;
             // The title the target ends up with: its own title claim, else
-            // the torn-down one — the base may still show a withdrawn claim
-            // (D43).
+            // the torn-down one — the base may still show a withdrawn claim.
             let title = match module
                 .attrs()
                 .find(|a| a.slug == target && a.attr == Attr::Title)
@@ -455,8 +450,8 @@ pub(super) fn resolve_mirrors(
         let (code, value) = if block.block_type == "OutputRefLM" {
             if target_type != MESSAGE_REF_TARGET {
                 return Err(Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}` — an \
-                     OutputRefLM mirrors a `{MESSAGE_REF_TARGET}`",
+                    "block `{}` mirrors `{target}` of type `{target_type}`, but an \
+                     OutputRefLM mirrors only a `{MESSAGE_REF_TARGET}`",
                     block.slug
                 )));
             }
@@ -464,10 +459,7 @@ pub(super) fn resolve_mirrors(
         } else {
             let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
                 Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}`, which has \
-                     no verified `LinkRefType=` code yet — extend \
-                     connectors::ref_link_type from corpus evidence before minting \
-                     a ref of it",
+                    "block `{}` mirrors `{target}` of type `{target_type}`, which loxl cannot mirror yet. Mirror a block of another type, or report the type as a loxl issue.",
                     block.slug
                 ))
             })?;

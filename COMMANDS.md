@@ -447,7 +447,7 @@ config with a lockfile that pins every UUID. The arguments go to `loxl` as they 
 so the Lox Logic docs apply word for word: `loxl compile` is `lox logic compile`. Nothing here talks to the Miniserver.
 
 ```bash
-lox logic help                            # every command and flag
+lox logic help                            # one line per command; `lox logic <cmd> --help` for its flags
 lox logic check pages/                    # parse + validate a module (line-numbered errors; --json)
 lox logic fmt --write pages/              # canonical formatting (--check for CI)
 lox logic compile                         # in a lox.toml project: base + module + lock → out.Loxone

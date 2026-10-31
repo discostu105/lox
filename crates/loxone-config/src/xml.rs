@@ -44,7 +44,7 @@ pub struct Element {
     /// `true` when serialized as `<Name …/>`. Elements with children are
     /// never self-closing; empty elements in Loxone output usually are,
     /// but not always — the GUI writes `<IoData></IoData>` even on fresh
-    /// blocks (oracle save 2026-08-25), so the flag must be preserved
+    /// blocks, so the flag must be preserved
     /// per element, never normalized.
     pub self_closing: bool,
 }

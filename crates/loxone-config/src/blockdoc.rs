@@ -30,7 +30,7 @@ pub fn summary(ty: &str) -> Option<&'static str> {
         }
         "AnalogThresholdTrigger" => {
             "Threshold switch: Q switches on when the input reaches On and off when it \
-             reaches Off — a hysteresis (heating, humidity)."
+             reaches Off, a hysteresis (heating, humidity)."
         }
         "Memory" => {
             "Memory flag: holds a value other blocks read; AQ is the input while wired, \
@@ -45,7 +45,7 @@ pub fn summary(ty: &str) -> Option<&'static str> {
              pulse; with duration 0 Q follows the input."
         }
         "AutoJalousie" => {
-            "Automatic shading: drives a blind or awning — up/down buttons, end \
+            "Automatic shading: drives a blind or awning with up/down buttons, end \
              positions, automatic sun shading (AutoShade), safety (wind, rain), target \
              position."
         }

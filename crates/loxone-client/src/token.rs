@@ -66,7 +66,7 @@ impl TokenStore {
                 .truncate(true)
                 .mode(0o600)
                 .open(path)?;
-            // mode() only applies on create; tighten files written by older versions
+            // mode() only applies on create, so an existing file is tightened here
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             f.write_all(json.as_bytes())?;
         }
@@ -365,7 +365,7 @@ pub async fn authenticate_ws(ws: &mut WsStream, conn: &Connection) -> Result<()>
             Ok(None) => {
                 TOKEN_REUSE_REJECTED.store(true, Ordering::Relaxed);
                 if crate::client::verbose() >= 1 {
-                    eprintln!("stored token rejected by the Miniserver; requesting a new one");
+                    eprintln!("Miniserver rejected the stored token, requesting a new one");
                 }
             }
             // The socket is likely unusable; the caller reconnects and, with

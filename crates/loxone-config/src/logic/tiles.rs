@@ -1,4 +1,4 @@
-//! Touch Pure Flex tile programs (D41).
+//! Touch Pure Flex tile programs.
 //!
 //! A Touch Pure Flex is a `TreeDevice` whose `<btns>` child lists its
 //! tiles: `<btn i="…">` with three function elements — `f1` (click),
@@ -52,8 +52,8 @@ pub const FUNCTIONS: [FunctionSlot; 3] = [
     },
 ];
 
-/// Command abbreviations whose block type configs back (docs/design.md
-/// D41): a `to:` target of another type is refused.
+/// Command abbreviations whose block type real configs back. A `to:`
+/// target of another type is refused.
 const KNOWN: &[(&str, &[&str])] = &[("As", &["AutoJalousie"]), ("Lico", &["LightController2"])];
 
 fn known_types(abbr: &str) -> Option<&'static [&'static str]> {
@@ -122,8 +122,7 @@ pub fn program(tile: &TileDecl) -> std::result::Result<TileProgram, String> {
         let k = b.port.as_str();
         let Some(key) = parse_key(k) else {
             return Err(format!(
-                "unknown key `{k}:` — a tile takes `click:`, `up:`, `down:`, `text:` and \
-                 `to:`, plus `click_`/`up_`/`down_` + `text:`/`to:` for one function"
+                "unknown key `{k}:`. A tile takes `click:`, `up:`, `down:`, `text:` and `to:`, or `click_`/`up_`/`down_` + `text:`/`to:` for one function."
             ));
         };
         if let Key::To(slot) = key {
@@ -153,15 +152,14 @@ pub fn program(tile: &TileDecl) -> std::result::Result<TileProgram, String> {
             Key::Command(i) => {
                 if value.is_empty() {
                     return Err(format!(
-                        "`{k}: \"\"` is no command — leave the key out to clear the \
-                         function"
+                        "`{k}: \"\"` is not a command. Leave the key out to clear the function."
                     ));
                 }
                 command[i] = Some(value);
             }
             Key::Text(None) => {
                 if value.is_empty() {
-                    return Err("`text: \"\"` — leave the key out instead".into());
+                    return Err("`text: \"\"` is empty. Leave the key out instead.".into());
                 }
                 text_all = Some(value);
             }
@@ -173,8 +171,7 @@ pub fn program(tile: &TileDecl) -> std::result::Result<TileProgram, String> {
         for (given, k) in [(text_all.is_some(), "text"), (to_all.is_some(), "to")] {
             if given {
                 return Err(format!(
-                    "`{k}:` without a command — give `click:`, `up:` or `down:`, or \
-                     write `tile {}()` to clear the tile",
+                    "`{k}:` without a command. Give `click:`, `up:` or `down:`, or write `tile {}()` to clear the tile.",
                     tile.index
                 ));
             }
@@ -186,8 +183,7 @@ pub fn program(tile: &TileDecl) -> std::result::Result<TileProgram, String> {
             for (given, what) in [(text[i].is_some(), "text"), (to[i].is_some(), "to")] {
                 if given {
                     return Err(format!(
-                        "`{key}_{what}:` without `{key}:` — a function without a \
-                         command has no {what}",
+                        "`{key}_{what}:` without `{key}:`. Add the `{key}:` command, since a function without one has no {what}.",
                         key = slot.key
                     ));
                 }
@@ -404,15 +400,14 @@ pub(crate) fn apply(
             if let Some(other) = claimed.insert(device_uuid, &c.slug) {
                 return fail(format!(
                     "`{c}` and `{other}.tiles = …` claim the tiles of the same device \
-                     ({device_uuid}) — keep one"
+                     ({device_uuid}). Keep one."
                 ));
             }
             let device = links.by_uuid[device_uuid];
             let device_el = links.element(device);
             let Some(btns_pos) = child_pos(device_el, "btns", None) else {
                 return fail(format!(
-                    "`{c}`: {} carries no `<btns>` — not a Touch Pure Flex tile layout \
-                     (Lox Logic programs existing tiles; lay them out in Loxone Config)",
+                    "`{c}`: {} has no Touch Pure Flex tile layout (no `<btns>`). Lay out the tiles in Loxone Config first.",
                     links.describe(device)
                 ));
             };
@@ -435,8 +430,7 @@ pub(crate) fn apply(
                         .filter_map(|e| e.attr("i"))
                         .collect();
                     return fail(format!(
-                        "{ctx}: {} has no tile {} (it has {}) — Lox Logic programs \
-                         existing tiles; add the tile in Loxone Config",
+                        "{ctx}: {} has no tile {} (it has {}). Add the tile in Loxone Config first.",
                         links.describe(device),
                         tile.index,
                         have.join(", ")
@@ -449,7 +443,7 @@ pub(crate) fn apply(
                     let ctx = format!("{ctx} {}", slot.key);
                     let Some(f_pos) = child_pos(btn, slot.element, None) else {
                         return fail(format!(
-                            "{ctx}: the tile has no `<{}>` — a layout Lox Logic does not know",
+                            "{ctx}: the tile has no `<{}>`, a layout loxl does not know",
                             slot.element
                         ));
                     };
@@ -458,8 +452,7 @@ pub(crate) fn apply(
                     };
                     if f_el.attr("bT") != slot.bt {
                         return fail(format!(
-                            "{ctx}: `<{}>` carries bT={:?}, expected {:?} — a layout \
-                             Lox Logic does not know",
+                            "{ctx}: `<{}>` has bT={:?}, expected {:?}, a layout loxl does not know",
                             slot.element,
                             f_el.attr("bT"),
                             slot.bt
@@ -470,11 +463,7 @@ pub(crate) fn apply(
                         let uuid = uuid_of[slug].as_str();
                         let Some(&target) = linked.get(uuid) else {
                             return fail(format!(
-                                "{ctx}: `to: {slug}` is not API-linked to `{}` — wire \
-                                 its `OutputAPI` to the device's API connector (in \
-                                 source `OutputAPI: <api>.I`, or through an \
-                                 `OutputRef(mirrors: <api>)` whose `AQ` feeds \
-                                 `<api>.I`; or in Loxone Config)",
+                                "{ctx}: `to: {slug}` is not API-linked to `{}`. Wire its `OutputAPI` to the device's API connector: `OutputAPI: <api>.I`, an `OutputRef(mirrors: <api>)` whose `AQ` feeds `<api>.I`, or in Loxone Config.",
                                 c.slug
                             ));
                         };
@@ -621,7 +610,7 @@ pub fn lint_tiles(module: &Module, compiled: &LoxoneDoc) -> Vec<LintFinding> {
                             slug: name.clone(),
                             detail: format!(
                                 "{what} addresses {abbr}, but no {}{} is API-linked to \
-                                 the device — the command reaches nothing",
+                                 the device, so the command reaches nothing",
                                 types.join("/"),
                                 if ctrls.is_empty() {
                                     ""
@@ -638,8 +627,8 @@ pub fn lint_tiles(module: &Module, compiled: &LoxoneDoc) -> Vec<LintFinding> {
                             slug: name.clone(),
                             detail: format!(
                                 "{what} names no target, so all {} API-linked {} \
-                                 blocks act on it ({}) — list the intended ones with \
-                                 `to:`",
+                                 blocks act on it ({}). List the intended ones with \
+                                 `to:`.",
                                 receivers.len(),
                                 types.join("/"),
                                 names.join(", ")

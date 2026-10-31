@@ -457,7 +457,7 @@ fn layout_stays_with_loxone_config() {
     let err = compile_err(&format!(
         "extern melder = TreeDevice(uuid: \"{MELDER}\")\ntiles t\n\ttile 2()\nend\nmelder.tiles = t\n"
     ));
-    assert!(err.contains("carries no `<btns>`"), "{err}");
+    assert!(err.contains("no `<btns>`"), "{err}");
     let err = compile_err(&format!(
         "extern flex2 = TreeDevice(uuid: \"{KUECHE}\")\ntiles t\n\ttile 2()\nend\nflex.tiles = t\nflex2.tiles = t\n"
     ));
@@ -515,7 +515,7 @@ fn statement_level_refusals() {
             "tiles t\n\ttile 2(click: \"x\", to: t)\nend\n",
             "names a `tiles` set, not a block",
         ),
-        ("tiles t\n\ttile 2(click: \"\")\nend\n", "is no command"),
+        ("tiles t\n\ttile 2(click: \"\")\nend\n", "is not a command"),
         (
             "tiles t\n\ttile 2(\"Label\")\nend\n",
             "takes no label string",

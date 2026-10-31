@@ -6,7 +6,7 @@ use super::*;
 
 /// Reads what the rebuild needs from the base before teardown changes it.
 pub(super) fn snapshot_base(doc: &LoxoneDoc, lock: &Lockfile) -> BaseSnapshot {
-    // XML type and title per object, for `mirrors:` targets (D33) — taken
+    // XML type and title per object, for `mirrors:` targets — taken
     // before teardown so it covers everything the base knows.
     let type_by_uuid: BTreeMap<String, (String, Option<String>)> = doc
         .objects()
@@ -14,16 +14,16 @@ pub(super) fn snapshot_base(doc: &LoxoneDoc, lock: &Lockfile) -> BaseSnapshot {
         .map(|o| (o.uuid.clone(), (o.block_type.clone(), o.title.clone())))
         .collect();
 
-    // Every wire the base carried, pre-teardown: the D34 routing pin.
-    // It remembers which mirror a consumer wire went through — the lock's
-    // extern_wires can't, since wires into managed sinks vanish with their
+    // Every wire the base carried, before teardown. It remembers which
+    // mirror a consumer wire went through, so the wire keeps its route.
+    // The lock's extern_wires can't, since wires into managed sinks vanish with their
     // block and are never recorded there.
     let all_base_wires = doc.wires();
     let base_wires: BTreeSet<(String, String)> = all_base_wires
         .iter()
         .map(|w| (w.from_port.clone(), w.to_port.clone()))
         .collect();
-    // Each sink's `<In>` sources in base order (D45): a wire the rebuild
+    // Each sink's `<In>` sources in base order: a wire the rebuild
     // adds back returns to its place among them, so whichever writer last
     // ordered a connector — Loxone Config sorts on save — keeps its order.
     let mut base_in_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -33,7 +33,7 @@ pub(super) fn snapshot_base(doc: &LoxoneDoc, lock: &Lockfile) -> BaseSnapshot {
             .or_default()
             .push(w.from_port);
     }
-    // Each page's objects in base order (D47): a rebuilt block goes back
+    // Each page's objects in base order: a rebuilt block goes back
     // to its place among them.
     let base_page_order: BTreeMap<String, Vec<String>> = doc
         .objects()
@@ -56,7 +56,7 @@ pub(super) fn snapshot_base(doc: &LoxoneDoc, lock: &Lockfile) -> BaseSnapshot {
             .filter_map(|o| Some((o.uuid.clone(), page_of(doc, idx.by_uuid.get(&o.uuid)?)?)))
             .collect()
     };
-    // The element each managed object of the object tree sits in (D64): an
+    // The element each managed object of the object tree sits in: an
     // I/O goes back into the caption of its device it was in.
     // Parent and grandparent, and each such parent's objects in base order.
     let mut base_parent: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
@@ -98,7 +98,7 @@ pub(super) fn snapshot_base(doc: &LoxoneDoc, lock: &Lockfile) -> BaseSnapshot {
 }
 
 /// Removes the managed objects, innermost first. Each removed element
-/// hands back its GUI-owned residue (D19) so the rebuild carries it
+/// hands back its GUI-owned residue so the rebuild carries it
 /// forward verbatim. Returns the residue by UUID and the tombstoned objects
 /// that went along inside a torn-down device.
 pub(super) fn tear_down_managed(
@@ -122,7 +122,7 @@ pub(super) fn tear_down_managed(
         if let Some(el) = doc.remove_by_uuid(&obj.uuid) {
             let mut r = harvest_residue(&el);
             // A device carries the I/O the GUI added to it, never one
-            // the source withdrew (its tombstone, D31) — also inside the
+            // the source withdrew (its tombstone) — also inside the
             // captions a device groups its I/O in.
             fn withdrawn(
                 c: &Element,
@@ -164,7 +164,7 @@ pub(super) fn tear_down_managed(
     (residue, in_torn_down)
 }
 
-/// The tombstone sweeps (D31) and the retirement of vanished slugs: pending
+/// The tombstone sweeps and the retirement of vanished slugs: pending
 /// removals of objects, wires and sets the base still carries are deleted
 /// again, the others are done.
 pub(super) fn sweep_tombstones(
@@ -174,11 +174,11 @@ pub(super) fn sweep_tombstones(
     residue: &BTreeMap<String, Residue>,
     in_torn_down: BTreeSet<String>,
 ) {
-    // Tombstone sweep (D31): a pending removal whose object still exists
+    // Tombstone sweep: a pending removal whose object still exists
     // in this base is deleted again (the base predates the deployment of
     // the removal); one the base no longer contains has reached the
     // Miniserver — its tombstone is done.
-    // A withdrawn device takes its withdrawn I/O along (D64).
+    // A withdrawn device takes its withdrawn I/O along.
     let pending: Vec<String> = lock.removed.keys().cloned().collect();
     let mut present: BTreeSet<String> = in_torn_down;
     for uuid in &pending {
@@ -213,11 +213,11 @@ pub(super) fn sweep_tombstones(
         }
     }
     lock.objects.retain(|slug, _| src_slugs.contains(slug));
-    // Withdrawn-wire sweep (D31): same lifecycle as object tombstones —
+    // Withdrawn-wire sweep: same lifecycle as object tombstones —
     // still in this base → delete again and keep; gone → retired.
     lock.removed_wires
         .retain(|w| remove_wire(doc, &w.from, &w.to));
-    // Withdrawn-set sweep (D31): a port still carrying the value we wrote
+    // Withdrawn-set sweep: a port still carrying the value we wrote
     // predates the deployment — restore the original again. A port already
     // showing the original is deployed; any third value means another
     // writer took the port over (drift will surface it). Both retire.
@@ -263,7 +263,7 @@ pub(super) fn tear_down_extern_edits(doc: &mut LoxoneDoc, lock: &mut Lockfile) -
         }
         restore_def(doc, port_uuid, original.as_deref());
     }
-    // Attribute claims (D39), the same two steps. Withdrawn first: an
+    // Attribute claims, the same two steps. Withdrawn first: an
     // object still showing the value we wrote predates the deployment —
     // restore again and keep the tombstone; any other value retires it.
     for (uuid, claims) in lock.removed_attrs.iter_mut() {

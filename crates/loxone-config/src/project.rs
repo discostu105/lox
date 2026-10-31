@@ -1,10 +1,8 @@
 //! Project files: a `lox.toml` marks a directory as one deployment target
-//! — base config, module sources, lockfile, compiled output — so the CLI
-//! runs without flags inside it (`loxl compile`) and scripts stop
-//! threading four paths around (Stufe 4; decision D25: the file split is
-//! source ergonomics, there is no `import` statement — every fragment
-//! shares one namespace and one lockfile, so the project file is the only
-//! project-level construct needed).
+//! (base config, module sources, lockfile, compiled output), so the CLI
+//! runs without flags inside it (`loxl compile`). There is no `import`
+//! statement: every source file shares one namespace and one lockfile, so
+//! the project file is the only project-level construct.
 //!
 //! The format is a strict, flat subset of TOML: `key = "string"` pairs
 //! and `#` comments. Tables, arrays, and non-string values are refused
@@ -82,7 +80,7 @@ impl Project {
             if line.starts_with('[') {
                 return Err(err(
                     lineno,
-                    "tables are not part of the project format — flat `key = \"value\"` lines only",
+                    "tables are not part of the project format. Use flat `key = \"value\"` lines.",
                 ));
             }
             let Some((key, rest)) = line.split_once('=') else {

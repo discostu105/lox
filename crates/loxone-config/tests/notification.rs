@@ -273,7 +273,7 @@ fn recipients_declarations_are_checked() {
     assert!(e.contains("no user titled \"dahna\""), "{e}");
     // An `access` body still needs its schedule.
     let e = error("extern door = NfcCodeTouch(title: \"x\")\naccess door\n\tuser \"dana\"\nend\n");
-    assert!(e.contains("name the user and the access schedule"), "{e}");
+    assert!(e.contains("Name the user and the access schedule"), "{e}");
 }
 
 #[test]

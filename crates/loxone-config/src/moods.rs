@@ -1,4 +1,4 @@
-//! LightController2 moods (*Stimmungen*, D58): the read model and the
+//! LightController2 moods (*Stimmungen*): the read model and the
 //! value codec shared by `moods` claims (`logic::moods`) and the semantic
 //! diff.
 //!
@@ -7,7 +7,7 @@
 //! per mood ([loxone-format.md](../docs/loxone-format.md)). `Q<n>` is the
 //! value of lighting circuit `n` — the circuit behind output `AQ<n>`.
 //! Its top four bits are a property of the *circuit*, not of the mood:
-//! across the 132-file corpus and the house config (648 circuit columns)
+//! across 133 real configs (648 circuit columns)
 //! no circuit carries two different prefixes. The low 28 bits are the
 //! value, in a decimal packing that follows the prefix:
 //!
@@ -83,7 +83,7 @@ pub fn encode(prefix: u32, value: MoodValue) -> Result<u32, String> {
     let packed = |payload: u32| (prefix << 28) | payload;
     let refuse = |what: &str| {
         Err(format!(
-            "{what} does not fit {} — {}",
+            "{what} does not fit {}: {}",
             kind(prefix),
             match prefix {
                 0 => "it takes `on`, `off` or a percentage",
@@ -214,9 +214,8 @@ impl Moods {
                 match out[i] {
                     Some(seen) if seen != p => {
                         return Err(format!(
-                            "circuit AQ{} carries two value kinds in its moods (prefixes \
-                             {seen} and {p}) — a config Lox Logic has not seen; edit its moods \
-                             in Loxone Config",
+                            "circuit AQ{} has two value kinds in its moods (prefixes {seen} and {p}), which \
+                             Lox Logic does not support. Edit its moods in Loxone Config.",
                             i + 1
                         ));
                     }

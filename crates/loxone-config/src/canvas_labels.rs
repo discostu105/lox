@@ -1,7 +1,7 @@
 //! Canvas labels of input keys that the TechDoc scrape behind
-//! `port_meta` lacks, read off Loxone Config's canvas (oracle session 34,
-//! docs/oracle-wine.md; the table is in loxone-format.md, *Canvas labels
-//! of input keys*). Hand-written: only oracle-verified entries.
+//! `port_meta` lacks, read off Loxone Config's canvas. The table is in
+//! loxone-format.md, *Canvas labels of input keys*. Hand-written: every
+//! entry is verified in Loxone Config.
 
 /// The label Loxone Config shows for a block's input key.
 pub fn label(block_type: &str, key: &str) -> Option<&'static str> {

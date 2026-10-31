@@ -8,8 +8,7 @@
 //! such data sits — element and attribute, never the value — so a CI
 //! step can refuse a commit that carries it.
 //!
-//! The rules come from the attributes of the house config and the web
-//! corpus. They look at *where* a value sits and whether it is set, not
+//! The rules come from the attributes of real configs. They look at *where* a value sits and whether it is set, not
 //! at the value itself, except for two shapes that are personal anywhere:
 //! a mail address, and a public IPv4 address.
 

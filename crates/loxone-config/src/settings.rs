@@ -1,4 +1,4 @@
-//! Settings of physical inputs and outputs the source may own (D65): the
+//! Settings of physical inputs and outputs the source may own: the
 //! description, the display unit, the analog correction and the
 //! transmission timing of an Air or Tree sensor, an extension's inputs
 //! and outputs. `x.MinTime = 5` on an extern of such a type claims the
@@ -62,17 +62,21 @@ const ORDER: &[&str] = &[
     "Idx",
 ];
 
-/// The Air and Tree devices whose own settings can be claimed (#197):
-/// the description and where the device is installed — the
-/// installation place and the switch board with its row and position.
-/// An Air device always carries the place and the board (103 of 103 in
-/// the corpus); a Tree device the place, the board only where it is
-/// mounted in one (31 of 111): a board added to another is dropped by
-/// the save (oracle session 29), so it is rewritten, never added. Not
-/// claimable: `PWMFrequency`, `UseDimmer`, `UseRGBDimmer` — every config
-/// in the corpus carries `123`/`true`, so what another value means is
-/// unknown; pairing and firmware stay in Loxone Config.
-pub const DEVICE_TYPES: &[&str] = &["LoxAIRDevice", "TreeDevice"];
+/// The Air and Tree devices whose own settings can be claimed (#197): the
+/// description, the installation place, and the switch board with its row
+/// and position.
+///
+/// Not claimable: `PWMFrequency`, `UseDimmer` and `UseRGBDimmer`, since what
+/// a value other than `123`/`true` means is unknown (no real config carries
+/// one). Pairing and firmware stay in Loxone Config.
+pub const DEVICE_TYPES: &[&str] = &[
+    // Always carries the place and the board (103 of 103 in real configs).
+    "LoxAIRDevice",
+    // Always carries the place. The board only where it is mounted in one
+    // (31 of 111). Loxone Config drops a board added to one without, so a
+    // board is rewritten, never added.
+    "TreeDevice",
+];
 
 /// The claimable device settings and whether a missing one may be added.
 fn device_settings(block_type: &str) -> &'static [(&'static str, bool)] {

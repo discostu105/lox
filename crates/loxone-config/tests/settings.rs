@@ -154,7 +154,7 @@ fn a_setting_the_object_lacks_is_added_only_where_a_save_omits_it() {
     let err = compile(&base(), &module, &mut Lockfile::default(), &opts())
         .unwrap_err()
         .to_string();
-    assert!(err.contains("never adds one"), "{err}");
+    assert!(err.contains("never adds"), "{err}");
 
     // A device has settings of its own, not an input's.
     let module = Module::parse(
@@ -375,5 +375,5 @@ fn device_settings_are_claimed_and_restored() {
     )
     .unwrap_err()
     .to_string();
-    assert!(err.contains("never adds one"), "{err}");
+    assert!(err.contains("never adds"), "{err}");
 }

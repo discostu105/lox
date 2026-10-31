@@ -26,9 +26,9 @@ pub enum PortDir {
     Output,
     Param,
     /// A bidirectional API connector: accepts wires in *and* serves as a
-    /// wire source. Direct evidence on `AutoJalousie.OutputAPI` — the real
-    /// house config wires into it on 4 instances and from it on 12, and
-    /// the corpus shows 12 sink / 36 source uses. Never carries `Def=`.
+    /// wire source. Direct evidence on `AutoJalousie.OutputAPI`: one large
+    /// real config wires into it on 4 instances and from it on 12, and the
+    /// other real configs show 12 sink and 36 source uses. Never carries `Def=`.
     Api,
 }
 
@@ -91,14 +91,14 @@ const THRESHOLD: &[PortSpec] = &[
     p("FallingEdge", Output),
 ];
 
-// Admitted 2026-08-25 after the mint-oracle run (docs/oracle-wine.md):
+// Admitted 2026-08-25 after the mint-oracle run (docs/oracle-sessions.md):
 // real-instance evidence (7×/5×/8× in one config, zero index conflicts),
 // legacy-db agreement on every overlapping port, and a minted minimal
 // instance of each surviving a Loxone Config open+save. These blocks
 // carry visualization children (`<IoData>`; PushButton also `<PSD>`,
 // Memory also `<Display>` and `Tp=`) that the GUI adds on save — the
 // compiler never authors them, but carries them forward verbatim on
-// rebuilds and adoption accepts them (GUI-owned residue, D19).
+// rebuilds and adoption accepts them (GUI-owned residue).
 const MEMORY: &[PortSpec] = &[p("Input", Input), p("AQ", Output), p("Q", Output)];
 const PUSH_BUTTON: &[PortSpec] = &[
     p("InputTrigger", Input),
@@ -122,9 +122,8 @@ const PBUTTON_T: &[PortSpec] = &[
     p("Time", Param),
     p("Q", Output),
     // Inert across the whole corpus (20 occurrences, no wire, no Def,
-    // absent from both legacy dbs) → Input by the inert-flag rule. The
-    // original Output classification was a name-prior the rule never
-    // supported; PushButton's flip to Api exposed it (docs/connector-db.md).
+    // absent from both legacy dbs) → Input by the inert-flag rule. The name
+    // alone does not make it an Output (docs/connector-db.md).
     p("OutputAPI", Input),
 ];
 
@@ -212,7 +211,7 @@ const PULSE_AT: &[PortSpec] = &[
 // Output with zero corpus contradiction; Manual/Mode/PulseTime
 // connector-map Param (sim agrees input-like); RtD/Remanence/OutputAPI
 // inert-flag Inputs. GUI-authored schedule entries (`<Entry>`) are
-// D19 residue, carried forward verbatim.
+// GUI-owned residue, carried forward verbatim.
 const DAY_TIMER: &[PortSpec] = &[
     p("InputTrigger", Input),
     p("Reset", Input),
@@ -246,11 +245,9 @@ const DAY_TIMER: &[PortSpec] = &[
 // Scene/OutputReset/OutputResetAll connector-map O (AQ1–AQ5 also
 // corpus-source, ×131 on AQ1); `MoveOn` carries Def everywhere but has a
 // sink wire — wire evidence precedes, and Input still admits the Def.
-// `OutputAPI` was admitted as an inert-flag Input (zero evidence, absent
-// from both legacy dbs) and flipped to Api on the pinned corpus
-// (2026-10-31): six V161 instances in one config are API-linked — a wire
-// from `OutputAPI` into an "API Connector" OutputRef's `AI` plus the
-// GUI's hidden reverse wire into `OutputAPI` (the PushButton story).
+// `OutputAPI` is Api: six V161 instances in one config are API-linked. Each
+// has a wire from `OutputAPI` into an "API Connector" OutputRef's `AI`,
+// plus the GUI's hidden reverse wire into `OutputAPI` (as on PushButton).
 const LIGHT_CONTROLLER2: &[PortSpec] = &[
     p("I1", Input),
     p("I2", Input),
@@ -524,10 +521,10 @@ const STATE: &[PortSpec] = &[
     p("OutputAPI", Input),
 ];
 
-// The house-control batch (2026-10-30): the eight logic types the r50
-// house used but Lox Logic could only reference. Connector set and order are
+// The house-control batch: eight logic types a large real config used
+// but Lox Logic could only reference. Connector set and order are
 // the Config 17.2 (V178) descriptor as the house's GUI-saved instances
-// carry it — Loxone Config writes every descriptor connector (D8), and
+// carry it — Loxone Config writes every descriptor connector, and
 // the corpus holds them in older generations only. Directions, per key
 // (docs/connector-db.md, "The house-control batch"): corpus wires where
 // they exist, else agreement of lox-cli's connector map with Loxone's
@@ -915,11 +912,11 @@ const METER_ABS_ST: &[PortSpec] = &[
 // Mirror blocks: the on-page visual representation of an object living
 // elsewhere (an I/O device, a system object, a block on another page).
 // `AI`/`I` are fed by wires from the mirrored object's outputs; the
-// page's logic consumes `AQ`/`Q`. Shape verified across the house
+// page's logic consumes `AQ`/`Q`. Shape verified across a large real
 // config: 189 InputRef (all `Nio="4"`, AI always fed, I on 143),
 // 154 OutputRef (all `Nio="2"`, AI fed on 151). The mirrored identity
 // itself is not a connector — it lives in the `Ref=` element attribute
-// (see `ref_link_type` and design.md D33).
+// (see `ref_link_type`).
 const INPUT_REF: &[PortSpec] = &[
     p("AI", Input),
     p("I", Input),
@@ -928,15 +925,14 @@ const INPUT_REF: &[PortSpec] = &[
 ];
 const OUTPUT_REF: &[PortSpec] = &[p("AI", Input), p("AQ", Output)];
 
-/// The XML type a minted message ref (`OutputRefLM`, D51) may mirror: a
+/// The XML type a minted message ref (`OutputRefLM`) may mirror: a
 /// push notification of the *Messages* tree. Loxone Config draws the
 /// notification on a page as an `OutputRefLM` with the `OutputRef` shape
-/// plus a `<LoggerMailer>` child carrying the message (oracle session 15,
-/// Config 17.2); it has no `LinkRefType=` and no value flag.
+/// plus a `<LoggerMailer>` child carrying the message (Config 17.2); it has no `LinkRefType=` and no value flag.
 pub const MESSAGE_REF_TARGET: &str = "Notification";
 
 /// What a ref says about its mirrored object's value: nothing for a
-/// digital one, `Analog="true"` or `Text="true"` (D33, D48).
+/// digital one, `Analog="true"` or `Text="true"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefValue {
     Digital,
@@ -945,7 +941,7 @@ pub enum RefValue {
 }
 use RefValue::{Analog, Digital, Text};
 
-// Virtual input (D54): an object of the "Virtual Inputs" folder, not a
+// Virtual input: an object of the "Virtual Inputs" folder, not a
 // page block — the value a user sets in the app. `Q` and `Qm` are both
 // sources on every one of the 113 corpus instances that carry
 // connectors (175 instances overall, Config 3.x through 17).
@@ -953,12 +949,12 @@ const VIRTUAL_IN: &[PortSpec] = &[p("Q", Output), p("Qm", Output)];
 
 /// `LinkRefType=` code and value flag a ref carries for a mirrored
 /// object of the given XML type — Loxone Config's internal type-registry
-/// number, learned from the house corpus (every code below observed on
+/// number, learned from real configs (every code below observed on
 /// real refs, deterministic per target type). A type not in this table
 /// cannot be mirrored by a minted ref yet: extend the table from
 /// corpus evidence rather than guessing the code.
 ///
-/// `Text=` follows the target type as deterministically (D48): every
+/// `Text=` follows the target type as deterministically: every
 /// ref of an `ApiActor` (36) and of a `VirtualTextIn` (12) across the
 /// corpus carries it, from Loxone Config 12.0 to 17.2.
 ///
@@ -1048,7 +1044,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "MeterAbsUni",
     "MeterAbsBi",
     "MeterAbsSt",
-    // Virtual devices and Modbus (D64): objects of the object tree, see
+    // Virtual devices and Modbus: objects of the object tree, see
     // `crate::periphery`.
     "VirtualHttpIn",
     "VirtualHttpInCmd",
@@ -1062,7 +1058,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "ModbusASensor",
     "ModbusSensor",
     "ModbusAActor",
-    // A user-defined operating mode (D69), in the "Betriebsmodi" folder.
+    // A user-defined operating mode, in the "Betriebsmodi" folder.
     "Mode",
 ];
 
@@ -1070,7 +1066,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
 /// oldest first. Loxone Config writes every object of a document at its
 /// release's block version on save (17.0 and 17.1 write 175, 17.2 writes
 /// 178), and every builtin type keeps its connector keys and indexes across
-/// these (D46). Compile emits the document's version when it is listed here.
+/// these. Compile emits the document's version when it is listed here.
 pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
 
 /// Element-attribute parameters per block type: logic Loxone stores as an
@@ -1081,7 +1077,7 @@ pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
 /// pair together.
 ///
 /// An attribute parameter that is also GUI-owned (`Code=` on Code16, see
-/// [`crate::doc::GUI_OWNED_ATTRS`]) is a *claim* (D40): carried verbatim
+/// [`crate::doc::GUI_OWNED_ATTRS`]) is a *claim*: carried verbatim
 /// from the base until the source binds it, written from source while it
 /// does. Decompile never lifts it, so adopting leaves it with the GUI.
 pub fn attr_params(block_type: &str) -> &'static [&'static str] {
@@ -1124,9 +1120,9 @@ pub fn clock_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
-/// Attribute parameters stored as the text `true`/`false` (D80): written
-/// `on`/`off` in source, they take nothing else. The corpus (149 configs
-/// and the house) holds no other value on any of them; a save leaves
+/// Attribute parameters stored as the text `true`/`false`: written
+/// `on`/`off` in source, they take nothing else. Real configs (150)
+/// hold no other value on any of them; a save leaves
 /// `Signed=`/`Analog=` out on a command whose box is unticked.
 pub fn bool_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
@@ -1137,8 +1133,8 @@ pub fn bool_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
-/// The container a block type lives in when it is not drawn on a page
-/// (D54): a minted object of such a type is appended to the base's one
+/// The container a block type lives in when it is not drawn on a page:
+/// a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.
 pub fn container_type(block_type: &str) -> Option<&'static str> {
     match block_type {
@@ -1147,20 +1143,20 @@ pub fn container_type(block_type: &str) -> Option<&'static str> {
     }
 }
 
-/// An object of the object tree rather than a page block: a virtual input
-/// (D54), or a virtual device, Modbus device or one of their I/Os (D64).
+/// An object of the object tree rather than a page block: a virtual input,
+/// or a virtual device, Modbus device or one of their I/Os.
 /// Never placed, never governed by `page`.
 pub fn object_tree(block_type: &str) -> bool {
     container_type(block_type).is_some() || crate::periphery::periphery(block_type).is_some()
 }
 
-/// Per-type GUI-owned attributes (D19) beyond the global
+/// Per-type GUI-owned attributes beyond the global
 /// [`crate::doc::GUI_OWNED_ATTRS`]: re-emitted verbatim from the base so a
 /// GUI save converges. A VirtualIn's input-dialog settings — `IName=` its
 /// `VI<n>` designation (minted once, then the GUI's), `Desc=`, `ValOT=`,
 /// `MinChange=`/`MinTime=` change filters, `EnVal=`, `DefOnFirstStart=`,
 /// `Idx=` — and the value range the source may also bind (a binding is a
-/// claim, as with `Code=` in D40).
+/// claim, as with `Code=`).
 pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "VirtualIn" => &[
@@ -1223,7 +1219,7 @@ pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
     }
 }
 
-/// Per-type GUI-owned child elements (D19) beyond the global
+/// Per-type GUI-owned child elements beyond the global
 /// [`crate::doc::GUI_OWNED_CHILDREN`], carried verbatim: the irrigation
 /// zones (`<zone nm=…>`), the room controller's heating schedule
 /// (`<Timer>` with its `<Entry>` rows), the energy flow monitor's node
@@ -1244,10 +1240,10 @@ pub fn carried_children(block_type: &str) -> &'static [&'static str] {
 }
 
 /// What a Loxone Config save gives a block minted from source whose app
-/// entry names it (D66, oracle session 28): the number of special states
+/// entry names it (verified with Loxone Config): the number of special states
 /// (`SpStates=`, minted once and pinned in the lock) and the child
 /// elements after the connectors, in the save's order. A block the base
-/// carries keeps its own (D19).
+/// carries keeps its own.
 pub fn save_defaults(block_type: &str) -> Option<SaveDefaults> {
     match block_type {
         "AutoJalousie" => Some((
@@ -1276,7 +1272,7 @@ pub fn adopt_only(block_type: &str) -> bool {
     matches!(block_type, "NfcCodeTouch" | "Intercom" | "TpfController")
 }
 
-/// Message parameters per block type (D51): the `<LoggerMailer>` child of
+/// Message parameters per block type: the `<LoggerMailer>` child of
 /// an `OutputRefLM` holds what a notification says when its input turns
 /// on (`On=`) and off (`Off=`), and the least time between two messages
 /// (`MinimumTime=`, milliseconds in the XML, seconds in the source like every
@@ -1289,7 +1285,7 @@ pub fn message_params(block_type: &str) -> &'static [&'static str] {
 }
 
 /// Attribute parameters holding program text — the only bindings that
-/// take a `file("…")` value (D40): a PicoC program is hundreds of lines,
+/// take a `file("…")` value: a PicoC program is hundreds of lines,
 /// which the line-oriented Lox Logic cannot hold inline.
 pub fn file_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
@@ -1298,10 +1294,10 @@ pub fn file_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
-/// The unit a port's value is in, as far as a suffixed value is concerned
-/// (D52). Known only where Loxone's documentation states one
-/// (`port_meta`); an undocumented port keeps the D27 behavior
-/// (time suffixes scale into seconds, `%`/`K` are annotations).
+/// The unit a port's value is in, as far as a suffixed value is concerned.
+/// Known only where Loxone's documentation states one
+/// (`port_meta`); an undocumented port keeps the default reading:
+/// time suffixes scale into seconds, `%`/`K` are annotations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortUnit {
     Seconds,
@@ -1518,7 +1514,7 @@ pub type LegacyDb = BTreeMap<String, LegacyType>;
 /// connector-map shape (`type -> {c, t}`) is taken as is. The documented
 /// shape — Loxone's TechDoc as scraped into
 /// `loxone-block-types-full.json` (`type -> {connectors: [{name, type:
-/// "Input"|"Output"|"Parameter"}]}`) — is folded into it (D52): a
+/// "Input"|"Output"|"Parameter"}]}`) — is folded into it: a
 /// `%d`-patterned name (`AQ%d`) expands to the observed keys it matches,
 /// and stays a literal pattern when none does, so it surfaces as
 /// legacy-only.
@@ -1742,10 +1738,10 @@ mod tests {
         assert_eq!((dt[7].key, dt[7].dir), ("AQ", PortDir::Output));
         assert_eq!((dt[11].key, dt[11].dir), ("AQmt", PortDir::Output));
         assert_eq!((dt[12].key, dt[12].dir), ("OutputAPI", PortDir::Input));
-        // Mint-oracle verified 2026-08-25 (docs/oracle-wine.md): minted
+        // Mint-oracle verified 2026-08-25 (docs/oracle-sessions.md): minted
         // minimal instances survived a GUI open+save; Memory's never-wired
         // `Q` proved an output by a compiled wire sourced from it surviving
-        // the save (off-descriptor wires get deleted, D8).
+        // the save (off-descriptor wires get deleted).
         let mem = builtin("Memory").unwrap();
         assert_eq!(mem.len(), 3);
         assert_eq!((mem[1].key, mem[1].dir), ("AQ", PortDir::Output));

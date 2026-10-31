@@ -1,6 +1,6 @@
-//! DayTimer schedules from source (D53).
+//! DayTimer schedules from source.
 //!
-//! A DayTimer keeps its schedule as GUI-owned content (D19): the
+//! A DayTimer keeps its schedule as GUI-owned content: the
 //! `Modes=` attribute lists the operating modes it has a column for, and
 //! one `<Entry>` child per interval names its mode by index into that
 //! list (`Ix=`, absent = 0), its span in minutes of the day (`From=`,
@@ -13,7 +13,7 @@
 //! The built-in operating modes have fixed UUIDs in every config
 //! (`00000000-0000-000N-1500000000000000`, corpus-wide) and are named by
 //! keyword. Any mode of the config, a user-defined one included, can be
-//! named by its title (D69): the title resolves against the compiled
+//! named by its title: the title resolves against the compiled
 //! document's `Mode` objects. A column's place in `Modes=` follows the
 //! modes' `Mode=` numbers, ascending — how every observed timer lists
 //! them (a user-defined mode, `Mode="-3"`, before Monday, `Mode="3"`).
@@ -79,8 +79,7 @@ impl Column {
 /// A schedule resolved to columns: column → its intervals, sorted by
 /// start. A column with no intervals is listed (the timer is off all
 /// day). The seven weekdays are always listed: Loxone Config fills a
-/// missing weekday column with an all-day entry on load (oracle session
-/// 18), so a weekday the schedule does not name is written as off,
+/// missing weekday column with an all-day entry on load, so a weekday the schedule does not name is written as off,
 /// explicitly.
 pub(crate) type Program<'a> = BTreeMap<Column, Vec<&'a Interval>>;
 
@@ -106,8 +105,7 @@ pub(crate) fn program(decl: &ScheduleDecl) -> std::result::Result<Program<'_>, S
         for iv in &line.intervals {
             if iv.from >= iv.to {
                 return Err(format!(
-                    "`{iv}` ends before it starts — split an interval across midnight \
-                     into two (`22:00-24:00` and `00:00-06:00` on the next day)"
+                    "`{iv}` ends before it starts. Split an interval across midnight into two (`22:00-24:00` and `00:00-06:00` on the next day)."
                 ));
             }
         }
@@ -180,14 +178,13 @@ fn resolve<'a>(
                         let titles: Vec<String> =
                             modes.iter().map(|(_, t, _)| format!("\"{t}\"")).collect();
                         return Err(format!(
-                            "the config has no operating mode titled \"{title}\" — it has {}",
+                            "the config has no operating mode titled \"{title}\". It has {}.",
                             titles.join(", ")
                         ));
                     }
                     _ => {
                         return Err(format!(
-                            "{} operating modes are titled \"{title}\" — rename one in \
-                             Loxone Config",
+                            "{} operating modes are titled \"{title}\". Rename one in Loxone Config.",
                             found.len()
                         ));
                     }
@@ -228,7 +225,7 @@ pub(crate) fn apply(
         if let Some(other) = claimed.insert(uuid, &c.slug) {
             return fail(format!(
                 "`{c}` and `{other}.schedule = …` claim the schedule of the same timer \
-                 ({uuid}) — keep one"
+                 ({uuid}). Keep one."
             ));
         }
         let decl = module
@@ -250,7 +247,7 @@ pub(crate) fn apply(
         let analog = el.attr("Analog") == Some("true");
         if analog && let Some(iv) = program.values().flatten().find(|iv| iv.value.is_none()) {
             return fail(format!(
-                "`{c}`: the timer is analog — `{iv}` needs a value (`{iv} = <value>`)"
+                "`{c}`: the timer is analog, so `{iv}` needs a value (`{iv} = <value>`)"
             ));
         }
         if !analog
@@ -260,8 +257,7 @@ pub(crate) fn apply(
                 .find(|iv| iv.value.as_deref().is_some_and(|v| v != "1"))
         {
             return fail(format!(
-                "`{c}`: the timer is digital — `{iv}` can only be on (drop the value); \
-                 values belong to an analog DayTimer"
+                "`{c}`: the timer is digital, so `{iv}` can only be on. Drop the value, or use an analog DayTimer."
             ));
         }
         write_schedule(el, &program);
@@ -403,7 +399,7 @@ mod tests {
         let d = decl("\t\"Partymodus\" 18:00-23:00\n");
         let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
         assert!(
-            err.contains("no operating mode titled \"Partymodus\" — it has \"Montag\", \"Party\""),
+            err.contains("no operating mode titled \"Partymodus\". It has \"Montag\", \"Party\""),
             "{err}"
         );
         let d = decl("\theating 00:00-24:00\n");

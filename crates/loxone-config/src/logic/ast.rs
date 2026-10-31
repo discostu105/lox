@@ -21,20 +21,20 @@ pub enum Item {
     Wire(WireDecl),
     Set(SetDecl),
     /// `target.title|room|category = value` — claim one attribute of an
-    /// extern object (D39).
+    /// extern object.
     Attr(AttrDecl),
     Let(LetDecl),
     Removed(RemovedDecl),
     Moved(MovedDecl),
-    /// `template <name>(<params>)` … `end` — a reusable statement body
-    /// (D23). Declares nothing by itself; each instantiation expands it.
+    /// `template <name>(<params>)` … `end` — a reusable statement body.
+    /// Declares nothing by itself; each instantiation expands it.
     Template(TemplateDecl),
     /// `<slug> = <template_name>(<param>: <arg>, …)` — a template
     /// instantiation, distinguished from a block declaration by the
     /// lowercase callee. Shares [`BlockDecl`]'s shape (`block_type`
     /// holds the template name; a label string is not allowed).
     Instance(BlockDecl),
-    /// `target.Port <- <expr>` — expression sugar (D24): the boolean
+    /// `target.Port <- <expr>` — expression sugar: the boolean
     /// expression desugars into managed gate/comparator blocks whose
     /// result is wired onto the extern port. A bare `slug.Port` RHS is a
     /// plain [`Item::Wire`], not an expression.
@@ -44,36 +44,35 @@ pub enum Item {
     /// lockfile). Its sub-blocks are `<slug>__<op><n>` (expression-owned).
     Signal(SignalDecl),
     /// `page "Title"` — the base-config page the following block
-    /// declarations are placed on (D28). Positional: governs every block
+    /// declarations are placed on. Positional: governs every block
     /// after it, until the next `page` statement; blocks above the first
     /// `page` statement keep the compile options' default page.
     Page(PageDecl),
-    /// `test "Name"` … `end` — a simulator-backed scenario (D36).
+    /// `test "Name"` … `end` — a simulator-backed scenario.
     /// `compile` ignores it entirely; `loxl test` compiles the module in
-    /// memory and replays the body in the simulator (D68).
+    /// memory and replays the body in the simulator.
     Test(TestDecl),
     /// `tiles <name>` … `end` — a named set of Touch Pure Flex tile
-    /// programs (D41).
+    /// programs.
     Tiles(TilesDecl),
     /// `<device>.tiles = <name>` — write a tiles set onto an extern Touch
-    /// Pure Flex (D41).
+    /// Pure Flex.
     TilesClaim(TilesClaim),
     /// `access <slug>` … `end` — who may open an extern NFC Code Touch,
-    /// and when (D49).
+    /// and when.
     Access(AccessDecl),
-    /// `schedule <name>` … `end` — a named DayTimer schedule (D53).
+    /// `schedule <name>` … `end` — a named DayTimer schedule.
     Schedule(ScheduleDecl),
     /// `<timer>.schedule = <name>` — write a schedule onto a DayTimer,
-    /// extern or managed (D53).
+    /// extern or managed.
     ScheduleClaim(ScheduleClaim),
-    /// `moods <name>` … `end` — a named set of LightController2 moods
-    /// (D58).
+    /// `moods <name>` … `end` — a named set of LightController2 moods.
     Moods(MoodsDecl),
     /// `<controller>.moods = <name>` — write a mood set onto a
-    /// LightController2, extern or managed (D58).
+    /// LightController2, extern or managed.
     MoodsClaim(MoodsClaim),
     /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
-    /// active or not, its conditions and its actions (D57).
+    /// active or not, its conditions and its actions.
     Rule(RuleDecl),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
@@ -96,12 +95,12 @@ pub enum Value {
     Str(String),
     /// Bare identifier referencing a `let` constant.
     Ref(String),
-    /// A number with a unit suffix (`40s`, `1.5h`, `2700K` — D27), kept as
+    /// A number with a unit suffix (`40s`, `1.5h`, `2700K`), kept as
     /// written; the compiler resolves it to the port's base unit
     /// (`1.5h` → `5400`) when emitting `Def=`.
     Unit { number: String, unit: Unit },
     /// `file("hue.c")` — text read from a file next to the declaring
-    /// `.loxl` file (D40); binds only program text (`Code:` on Code16).
+    /// `.loxl` file; binds only program text (`Code:` on Code16).
     /// `path` is kept as written; `text` is filled by
     /// [`Module::load_files`] (CRLF normalized to LF) and stays `None`
     /// for a module parsed from a string alone.
@@ -149,7 +148,7 @@ pub fn clock_text(seconds: u32) -> Option<String> {
     })
 }
 
-/// A value's unit suffix (D27). Time units scale to Loxone's base unit,
+/// A value's unit suffix. Time units scale to Loxone's base unit,
 /// seconds; `K` (color temperature) and `%` are annotations with factor 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
@@ -204,9 +203,10 @@ impl fmt::Display for Unit {
 }
 
 /// Resolve a suffixed value for a port whose documented unit is
-/// `port_unit` (D52): time suffixes scale into the port's own time unit
+/// `port_unit`: time suffixes scale into the port's own time unit
 /// (seconds or minutes), `%` and `K` bind only where they mean what the
-/// port is in. `None` (undocumented port) keeps the D27 reading. The
+/// port is in. `None` (undocumented port) keeps the default reading: time in seconds,
+/// `%` and `K` as annotations. The
 /// error is the reason, without the port's name (callers add it).
 pub(crate) fn scale_for_port(
     number: &str,
@@ -217,7 +217,7 @@ pub(crate) fn scale_for_port(
     let is_time = matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H);
     let mismatch = |pu: PortUnit| {
         Err(format!(
-            "`{number}{unit}` does not fit — the port is documented in {}",
+            "`{number}{unit}` does not fit. The port is documented in {}",
             pu.describe()
         ))
     };
@@ -228,8 +228,8 @@ pub(crate) fn scale_for_port(
             let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
             divide_exact(&seconds, 60).ok_or_else(|| {
                 format!(
-                    "`{number}{unit}` is no exact decimal number of minutes — \
-                     the port is documented in minutes; write it in `min`"
+                    "`{number}{unit}` is not an exact number of minutes, which the port takes. \
+                     Write it in `min`"
                 )
             })
         }
@@ -399,7 +399,7 @@ pub struct ExternDecl {
     /// Category constraint (`category: "Beleuchtung"`): the object's
     /// `<IoData Cr=…>` must point at a `Category` with this title.
     pub category: Option<String>,
-    /// Device constraint (`device: "B0123456"`, D55): the serial number of
+    /// Device constraint (`device: "B0123456"`): the serial number of
     /// the hardware the object belongs to — the `Serial=` of its nearest
     /// enclosing Tree device, extension or Miniserver. Narrows
     /// `iname`/`title` matching where identical devices repeat their I/O
@@ -431,7 +431,7 @@ pub enum MatchSpec {
     Uuid(String),
     IName(String),
     Title(String),
-    /// `mirrors: <slug>` (D32) — for `InputRef`/`OutputRef` externs only:
+    /// `mirrors: <slug>` — for `InputRef`/`OutputRef` externs only:
     /// matches the ref object whose `Ref=` attribute names the object the
     /// given slug resolves to (a managed block, or another extern of the
     /// module). Where a page holds several refs of the same target, the
@@ -517,7 +517,7 @@ pub enum ArgItem {
 }
 
 /// `Port: value` (parameter), `Port: slug.Port` (wire), or
-/// `Port: <expr>` (expression sugar, D26) inside a block's argument list.
+/// `Port: <expr>` (expression sugar) inside a block's argument list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub port: String,
@@ -532,9 +532,9 @@ pub enum BindingKind {
     Param(Value),
     /// A `slug.Port` source reference: becomes a wire into the port.
     Wire(PortRef),
-    /// A boolean expression (D26): desugars into gate/comparator blocks
+    /// A boolean expression: desugars into gate/comparator blocks
     /// whose result is wired into the port — the same machinery as the
-    /// `<-` expression statement (D24). A bare `slug.Port` stays a
+    /// `<-` expression statement. A bare `slug.Port` stays a
     /// [`BindingKind::Wire`], a bare value a [`BindingKind::Param`].
     Expr(Expr),
 }
@@ -561,7 +561,7 @@ pub struct WireDecl {
     pub comment: Option<String>,
 }
 
-/// `target.Port <- <expr>` — expression sugar on an extern port (D24).
+/// `target.Port <- <expr>` — expression sugar on an extern port.
 /// [`Module::desugar`] turns the expression into managed gate/comparator
 /// blocks (synthetic slugs `<target>_<port>__<op><n>`, locked like
 /// hand-written blocks but marked expression-owned) plus a plain wire from
@@ -607,7 +607,7 @@ pub enum Expr {
         lhs: Operand,
         rhs: Operand,
     },
-    /// Arithmetic (D24 formula backend). Children are always `Atom` or
+    /// Arithmetic. Children are always `Atom` or
     /// `Arith` (the parser rejects boolean subtrees); each maximal tree
     /// desugars to ONE `Formula` block.
     Arith {
@@ -794,7 +794,7 @@ pub struct SetDecl {
 pub use crate::lock::Attr;
 
 /// `target.title = "…"`, `target.room = "…"`, `target.category = "…"` —
-/// claim one attribute of an *extern* object (D39): its title, or its
+/// claim one attribute of an *extern* object: its title, or its
 /// room/category binding. A room or category is named by the title of its
 /// `Place`/`Category`. The original is preserved in the lockfile and
 /// restored when the statement leaves the source, like a port assignment;
@@ -833,7 +833,7 @@ pub struct LetDecl {
 
 /// `removed slug` — declares that a managed block's absence from source is
 /// intentional: the next compile deletes it from the config and moves its
-/// lockfile entry to a removal tombstone (D31), which keeps deleting the
+/// lockfile entry to a removal tombstone, which keeps deleting the
 /// object from bases predating the deployment. Scoped to one slug and
 /// reviewable in the diff (the in-language counterpart of Terraform's
 /// `removed` block). The statement may be deleted right after the compile
@@ -848,18 +848,18 @@ pub struct RemovedDecl {
 }
 
 /// `page "<Title>"` — names the `<C Type="Page">` the block declarations
-/// after it are (re)built on (D28). Authoritative: on every compile a
+/// after it are (re)built on. Authoritative: on every compile a
 /// governed block is pinned to a base page with this title — a pin that
 /// still matches a page so titled is kept (titles need not be unique), any
 /// other moves to the first matching page in document order, and a title no
 /// page carries is a compile error — unless the statement names a room
-/// (`page "<Title>" (room: "…")`): then the compiler creates the page (D56).
+/// (`page "<Title>" (room: "…")`): then the compiler creates the page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageDecl {
     /// Display title of a `<C Type="Page">` in the base config.
     pub title: String,
-    /// `room:` — the `Place` a page the compiler creates is assigned to
-    /// (D56). Only consulted when no page carries the title.
+    /// `room:` — the `Place` a page the compiler creates is assigned to.
+    /// Only consulted when no page carries the title.
     pub room: Option<String>,
     /// `category:` — the created page's `Category`; default: the
     /// unassigned one.
@@ -882,7 +882,7 @@ pub struct MovedDecl {
 }
 
 /// `template <name>(<params>)` … `end` — a reusable body of block, wire,
-/// and port-assignment statements (D23). Body slugs are private to the
+/// and port-assignment statements. Body slugs are private to the
 /// template: instance `sued` expands body block `hoch` to `sued_hoch`.
 /// Free identifiers (neither parameter nor body slug) resolve in the
 /// module namespace after expansion — a template may capture module
@@ -928,7 +928,7 @@ impl fmt::Display for TemplateParam {
     }
 }
 
-/// `test "<name>"` … `end` — an imperative simulator scenario (D36). The
+/// `test "<name>"` … `end` — an imperative simulator scenario. The
 /// body reads top to bottom: port assignments inject signals, `tick`
 /// advances simulated time, `expect` asserts a port's value, `clock` sets
 /// the simulated wall-clock. `loxl test` groups the statements into
@@ -953,7 +953,7 @@ pub enum TestItem {
     Inject(SetDecl),
     /// `tick <n> [dt <seconds>]` — advance the simulation `n` ticks of
     /// `dt` simulated seconds each (default 1s; a unit value like
-    /// `dt 100ms` scales). `tick <duration>` (`tick 5min`, D80) advances
+    /// `dt 100ms` scales). `tick <duration>` (`tick 5min`) advances
     /// that much simulated time, a whole number of ticks.
     Tick(TickDecl),
     /// `expect slug.Port <cmp> <value>` — assert a port's value after the
@@ -1062,8 +1062,8 @@ impl fmt::Display for TestItem {
     }
 }
 
-/// `tiles <name>` … `end` — a named set of Touch Pure Flex tile programs
-/// (D41). Declares nothing in the config by itself; each
+/// `tiles <name>` … `end` — a named set of Touch Pure Flex tile programs.
+/// Declares nothing in the config by itself; each
 /// `<device>.tiles = <name>` claim writes it onto one device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TilesDecl {
@@ -1094,8 +1094,8 @@ pub enum TilesItem {
 
 /// `tile <i>(click: "…", up: "…", down: "…", text: "…", to: <slug>, …)` —
 /// the program of the existing tile `i="<i>"`. Shares the argument-list
-/// shape of a block declaration (multi-line, comments); the keys and
-/// their meaning are D41's ([`super::tiles::program`]). `tile <i>()`
+/// shape of a block declaration (multi-line, comments). The keys and
+/// their meaning are in [`super::tiles::program`]. `tile <i>()`
 /// clears every function of the tile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TileDecl {
@@ -1117,7 +1117,7 @@ impl TileDecl {
 }
 
 /// `<device>.tiles = <set>` — claim the tile programs of an extern Touch
-/// Pure Flex (D41). Like a `Code:` program (D40) the claim keeps no lock
+/// Pure Flex. Like a `Code:` program the claim keeps no lock
 /// state: withdrawing it leaves the last pushed programs in place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TilesClaim {
@@ -1134,9 +1134,9 @@ impl fmt::Display for TilesClaim {
 }
 
 /// `access <slug>` … `end` — the access rights (`TIM=`) on an extern NFC
-/// Code Touch (D49): every user and group that may open it, each with the
+/// Code Touch: every user and group that may open it, each with the
 /// access schedule that says when. `recipients <slug>` … `end` — the
-/// recipients (`ACT=`) of an extern push notification (D51). The
+/// recipients (`ACT=`) of an extern push notification. The
 /// declaration owns the block's whole set of these rights; users, groups
 /// and schedules stay with Loxone Config and the app and are named by
 /// title.
@@ -1173,9 +1173,9 @@ pub enum AccessItem {
 /// writes, on which block type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RightKind {
-    /// `access`: `TIM=` on an NFC Code Touch (D49).
+    /// `access`: `TIM=` on an NFC Code Touch.
     Access,
-    /// `recipients`: `ACT=` on a push notification (D51).
+    /// `recipients`: `ACT=` on a push notification.
     Recipients,
 }
 
@@ -1228,7 +1228,7 @@ impl fmt::Display for AccessGrant {
     }
 }
 
-/// `schedule <name>` … `end` — a named DayTimer schedule (D53): per
+/// `schedule <name>` … `end` — a named DayTimer schedule: per
 /// operating mode, the intervals the timer is on and their values. Like a
 /// `tiles` set it declares nothing by itself; each
 /// `<timer>.schedule = <name>` claim writes it onto one DayTimer.
@@ -1261,7 +1261,7 @@ pub enum ScheduleItem {
 
 /// `mon tue 06:00-08:00 = 21.5, 17:00-22:00` — the days (operating-mode
 /// keywords, kept as written: `weekdays` stays `weekdays`; or modes by
-/// title, D69) and their intervals. No intervals (`holiday off`) lists the
+/// title) and their intervals. No intervals (`holiday off`) lists the
 /// modes with the timer off all day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleLine {
@@ -1273,7 +1273,7 @@ pub struct ScheduleLine {
 
 /// The days of a schedule line: a built-in keyword (`mon`, `weekdays`,
 /// `heating`, …) or an operating mode of the config by its title
-/// (`"Party"`, D69).
+/// (`"Party"`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Day {
     Keyword(String),
@@ -1333,7 +1333,7 @@ impl fmt::Display for ScheduleLine {
     }
 }
 
-/// `<timer>.schedule = <name>` — claim the schedule of a DayTimer (D53).
+/// `<timer>.schedule = <name>` — claim the schedule of a DayTimer.
 /// No lock state, like a tiles claim: withdrawing it leaves the last
 /// written schedule in place.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1350,7 +1350,7 @@ impl fmt::Display for ScheduleClaim {
     }
 }
 
-/// `moods <name>` … `end` — a named set of LightController2 moods (D58):
+/// `moods <name>` … `end` — a named set of LightController2 moods:
 /// per mood its name and the value of each lighting circuit. Like a
 /// `schedule` it declares nothing by itself; each
 /// `<controller>.moods = <name>` claim writes it onto one controller.
@@ -1422,8 +1422,8 @@ impl fmt::Display for MoodLine {
     }
 }
 
-/// `<controller>.moods = <name>` — claim the moods of a LightController2
-/// (D58). Allowed in a template body, so one declaration sets up every
+/// `<controller>.moods = <name>` — claim the moods of a LightController2.
+/// Allowed in a template body, so one declaration sets up every
 /// room the template stamps out. No lock state: withdrawing it leaves the
 /// last written moods in place.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1441,13 +1441,13 @@ impl fmt::Display for MoodsClaim {
 }
 
 /// `rule <slug>` … `end` — an extern Automatic Designer rule
-/// (`AutopilotRule`) as source (D57): whether it is active, the
+/// (`AutopilotRule`) as source: whether it is active, the
 /// conditions that must all hold, and the commands it then sends. The
 /// declaration owns exactly that part of the rule's `APC=` payload; its
 /// name, description and every field Lox Logic does not know stay as they
-/// are. Like `access` it keeps no lock state (a named rule does, D60).
+/// are. Like `access` it keeps no lock state (a named rule does).
 ///
-/// `rule <slug> "Title"` declares a rule by its name instead (D60): the
+/// `rule <slug> "Title"` declares a rule by its name instead: the
 /// base's rule of that title, or a new one the compile creates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleDecl {
@@ -1471,7 +1471,7 @@ impl RuleDecl {
     }
 
     /// The objects the body names: action targets, the blocks its
-    /// conditions watch and the modes it names by slug (D57, D73).
+    /// conditions watch and the modes it names by slug.
     pub fn slugs(&self) -> impl Iterator<Item = &str> {
         self.stmts().filter_map(|st| match &st.kind {
             RuleStmtKind::Then { target, .. }
@@ -1516,7 +1516,7 @@ pub enum RuleStmtKind {
     Weekday(Vec<String>),
     /// `then <slug> "<command>"` — the app command sent to a block.
     Then { target: String, command: String },
-    /// `when <slug>.<state> <op> <value>` — a block's state (D73): the
+    /// `when <slug>.<state> <op> <value>` — a block's state: the
     /// state as the app names it (`active`, `position`, `value`, …), a
     /// comparison and a number, `on` (1) or `off` (0), as written.
     State {
@@ -1526,38 +1526,38 @@ pub enum RuleStmtKind {
         value: String,
     },
     /// `when mode <mode>` / `when mode <mode> off` — an operating mode is
-    /// active (or not, D73).
+    /// active (or not).
     Mode { mode: ModeName, on: bool },
-    /// `then mode <mode> on|off` — switch an operating mode (D73).
+    /// `then mode <mode> on|off` — switch an operating mode.
     ThenMode { mode: ModeName, on: bool },
-    /// `when weather <field> <op> <value>` — a weather value (D76).
+    /// `when weather <field> <op> <value>` — a weather value.
     Weather {
         field: String,
         op: CmpOp,
         value: String,
     },
-    /// `when day <op> <n>` — the day of the month (D76).
+    /// `when day <op> <n>` — the day of the month.
     Day { op: CmpOp, value: String },
-    /// `when daylight` / `when daylight off` (D76).
+    /// `when daylight` / `when daylight off`.
     Daylight(bool),
-    /// `when sunrise|sunset|dawn|dusk` — the clock's pulse (D76).
+    /// `when sunrise|sunset|dawn|dusk` — the clock's pulse.
     Sun(String),
-    /// `when date YYYY-MM-DD` — that day (D76).
+    /// `when date YYYY-MM-DD` — that day.
     Date(String),
-    /// `then notify "<subject>" "<text>"` — a push notification (D76).
+    /// `then notify "<subject>" "<text>"` — a push notification.
     Notify { subject: String, text: String },
     /// `then mail "<to>" "<subject>" "<text>"` — through the cloud
-    /// mailer (D76).
+    /// mailer.
     Mail {
         to: String,
         subject: String,
         text: String,
     },
     /// `then wait <duration>` — the duration as written (`5s`, `500ms`,
-    /// `2min`, D76).
+    /// `2min`).
     Wait(String),
     /// `then message <severity> "<subject>" "<text>" [admins]` — a
-    /// system message (D76).
+    /// system message.
     Message {
         severity: String,
         subject: String,
@@ -1565,12 +1565,12 @@ pub enum RuleStmtKind {
         admins: bool,
     },
     /// `or` — the conditions after it are another group: the rule runs
-    /// when all conditions of one group hold (D73).
+    /// when all conditions of one group hold.
     Or,
 }
 
 /// An operating mode in a rule: an extern or minted `Mode` by slug, or a
-/// mode of the config by its title (as in a schedule, D69).
+/// mode of the config by its title (as in a schedule).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModeName {
     Slug(String),
@@ -1593,7 +1593,7 @@ impl fmt::Display for RuleStmtKind {
             RuleStmtKind::Active(false) => f.write_str("inactive"),
             RuleStmtKind::Time(m) => write!(f, "when time {:02}:{:02}", m / 60, m % 60),
             RuleStmtKind::Weekday(days) => write!(f, "when weekday {}", days.join(" ")),
-            // A one-word command is written bare (`then pumpe on`, D80).
+            // A one-word command is written bare (`then pumpe on`).
             RuleStmtKind::Then { target, command } if is_bare_command(command) => {
                 write!(f, "then {target} {command}")
             }
@@ -1655,7 +1655,7 @@ impl fmt::Display for RuleStmtKind {
 }
 
 /// A rule command that is one word (`on`, `pulse`, `fullup`): written
-/// bare, canonically (D80). Anything with spaces, digits first, or
+/// bare, canonically. Anything with spaces, digits first, or
 /// punctuation stays quoted.
 pub fn is_bare_command(command: &str) -> bool {
     let mut c = command.chars();
@@ -1663,7 +1663,7 @@ pub fn is_bare_command(command: &str) -> bool {
         && c.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// The block type a `rule` declaration applies to (D57).
+/// The block type a `rule` declaration applies to.
 pub const RULE_BLOCK_TYPE: &str = "AutopilotRule";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1678,7 +1678,7 @@ impl fmt::Display for PortRef {
     }
 }
 
-/// The block type an `access` declaration applies to (D49): the NFC Code
+/// The block type an `access` declaration applies to: the NFC Code
 /// Touch block, the only type with schedule rights (`TIM=`) in the
 /// observed configs.
 pub const ACCESS_BLOCK_TYPE: &str = "NfcCodeTouch";
@@ -1729,10 +1729,10 @@ impl Module {
         super::parser::parse(src)
     }
 
-    /// Read every `file("…")` value (D40) relative to `dir` — the directory
+    /// Read every `file("…")` value relative to `dir` — the directory
     /// of the `.loxl` file these items were parsed from — so each fragment
     /// resolves its own paths before the merge. CRLF becomes LF: Loxone's
-    /// own program text carries bare LF (the house program: 502 LF, no CR),
+    /// own program text carries bare LF (502 LF and no CR in a real program),
     /// so an editor's line endings never reach the config.
     pub fn load_files(&mut self, dir: &std::path::Path) -> Result<()> {
         fn load(items: &mut [Item], dir: &std::path::Path) -> Result<()> {
@@ -1793,9 +1793,9 @@ impl Module {
             Item::Wire(w) => w.to.slug != slug,
             Item::ExprWire(w) => w.to.slug != slug,
             Item::Set(s) => s.target.slug != slug,
-            // `.room`/`.category` hold on a managed block (D63).
+            // `.room`/`.category` hold on a managed block.
             Item::Attr(a) => a.slug != slug || a.attr != Attr::Title,
-            // An extern rule's edits (D57): a promoted rule is declared
+            // An extern rule's edits: a promoted rule is declared
             // by name, with its whole payload.
             Item::Rule(r) => r.title.is_some() || r.slug != slug,
             _ => true,
@@ -1836,7 +1836,7 @@ impl Module {
         })
     }
 
-    /// The attribute assignments on externs (D39).
+    /// The attribute assignments on externs.
     pub fn attrs(&self) -> impl Iterator<Item = &AttrDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Attr(a) => Some(a),
@@ -1958,8 +1958,8 @@ impl Module {
                 .and_then(|l| l.value.literal())
                 .ok_or_else(|| Error::Compile(format!("undeclared constant `{name}`"))),
             Value::File { path, text: None } => Err(Error::Compile(format!(
-                "`file({})` was not loaded — parse the module from its files \
-                 (`Module::load_files`), which reads it relative to the `.loxl` file",
+                "`file({})` was not loaded. Load the module from its `.loxl` files, \
+                 which resolve the path relative to the `.loxl` file",
                 quote(path)
             ))),
             other => other
@@ -1970,9 +1970,9 @@ impl Module {
 
     /// [`Self::resolve_value`] for a value bound to `port` of a block of
     /// `block_type`: a suffixed value — written inline or through a `let`
-    /// — scales into the port's documented unit (D52), and a suffix that
+    /// — scales into the port's documented unit, and a suffix that
     /// cannot mean what the port is in is refused; `on`/`off` becomes
-    /// `true`/`false` on a text-boolean attribute (D80). `slug` names the
+    /// `true`/`false` on a text-boolean attribute. `slug` names the
     /// binding in the error.
     pub fn resolve_value_for<'m>(
         &'m self,
@@ -2437,7 +2437,7 @@ mod tests {
         assert_eq!(scale_for_port("90", Unit::S, minutes).unwrap(), "1.5");
         assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
         let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
-        assert!(err.contains("documented in minutes"), "{err}");
+        assert!(err.contains("exact number of minutes"), "{err}");
 
         assert_eq!(
             scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),
@@ -2453,7 +2453,7 @@ mod tests {
         assert!(err.contains("`5s` does not fit"), "{err}");
         assert!(scale_for_port("5", Unit::S, Some(PortUnit::Other("°"))).is_err());
 
-        // Undocumented ports keep the D27 reading.
+        // Undocumented ports keep the default reading.
         assert_eq!(scale_for_port("45", Unit::Min, None).unwrap(), "2700");
         assert_eq!(scale_for_port("80", Unit::Pct, None).unwrap(), "80");
     }
