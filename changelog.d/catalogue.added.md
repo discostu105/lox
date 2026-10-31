@@ -1,2 +1,0 @@
-- **`lox config push`** lists jalousies, central light and shading blocks and meters in the app when a compile gives them a room and a category, with entries reproduced byte for byte from Loxone Config's; a jalousie minted from source gets the special states a save would give it, so it is in the app right after the push.
-- **`lox config push`** names a new control that cannot appear in the app because it has no room or category.

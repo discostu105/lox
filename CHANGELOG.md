@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-10-31 — new blocks in the app without a Loxone Config save
+
+A jalousie written in source now shows up in the Loxone app straight after the push, and the app catalogue knows jalousies, central blocks and meters.
+
+### Added
+- **`lox config push`** lists jalousies, central light and shading blocks and meters in the app when a compile gives them a room and a category, with entries reproduced byte for byte from Loxone Config's; a jalousie minted from source gets the special states a save would give it, so it is in the app right after the push.
+- **`lox config push`** names a new control that cannot appear in the app because it has no room or category.
+
 ## [0.36.0] — 2026-10-31 — devices and their settings in source
 
 The virtual inputs and outputs and the Modbus servers behind them are now source as well, declared, changed and adopted with their I/O like the logic on the pages. The settings of the physical sensors and actuators (description, unit, correction, timing) can be owned by the source too.
