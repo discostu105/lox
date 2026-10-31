@@ -327,244 +327,301 @@ fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item
 }
 
 pub fn parse(src: &str) -> Result<Module> {
-    let mut items = Vec::new();
-    // A block declaration whose `( … )` argument list is still open.
-    let mut open_call: Option<BlockDecl> = None;
-    // A `template` whose body is still open (until `end`).
-    let mut open_template: Option<TemplateDecl> = None;
-    // A `test` whose body is still open (until `end`) — D36.
-    let mut open_test: Option<TestDecl> = None;
-    // A `tiles` set whose body is still open (until `end`) — D41.
-    let mut open_tiles: Option<TilesDecl> = None;
-    // The index of the `tile` whose argument list `open_call` carries.
-    let mut open_tile: Option<u32> = None;
-    // An `access` declaration whose body is still open (until `end`) — D49.
-    let mut open_access: Option<AccessDecl> = None;
-    // A `schedule` whose body is still open (until `end`) — D53.
-    let mut open_schedule: Option<ScheduleDecl> = None;
-    // A `rule` whose body is still open (until `end`) — D57.
-    let mut open_rule: Option<RuleDecl> = None;
-    // A `moods` set whose body is still open (until `end`) — D58.
-    let mut open_moods: Option<MoodsDecl> = None;
-
+    let mut parser = Parser::default();
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
-        let err = |msg: String| Error::Parse { line: lineno, msg };
         let (toks, comment) = lex(raw, lineno)?;
+        parser.line(&toks, comment, lineno)?;
+    }
+    parser.finish(src.lines().count())
+}
 
-        if let Some(call) = open_call.as_mut() {
-            // Inside an open argument list: arguments, comments, or `)`.
-            if toks.is_empty() {
-                if let Some(text) = comment {
-                    call.args.push(ArgItem::Comment(text));
-                }
-                continue;
-            }
-            let outcome = parse_call_args(call, &toks, lineno)?;
-            if outcome.closed {
-                call.close_comment = comment;
-                if let Some(index) = open_tile.take() {
-                    let tile = finish_tile(open_call.take().unwrap(), index, lineno)?;
-                    let tiles = open_tiles.as_mut().expect("a tile is open only in a set");
-                    tiles.body.push(TilesItem::Tile(tile));
-                    continue;
-                }
-                let in_template = open_template.is_some();
-                let item = finish_call(open_call.take().unwrap(), in_template, lineno)?;
-                sink(&mut open_template, &mut items).push(item);
-            } else if let Some(text) = comment {
-                match call.args.last_mut() {
-                    Some(ArgItem::Binding(b)) if outcome.pushed_binding => b.comment = Some(text),
-                    _ => call.args.push(ArgItem::Comment(text)),
-                }
-            }
-            continue;
+/// The parser's state between lines: the items so far and the bodies
+/// still open.
+#[derive(Default)]
+struct Parser {
+    items: Vec<Item>,
+    /// A block declaration whose `( … )` argument list is still open.
+    open_call: Option<BlockDecl>,
+    /// A `template` whose body is still open (until `end`).
+    open_template: Option<TemplateDecl>,
+    /// A `test` whose body is still open (until `end`) — D36.
+    open_test: Option<TestDecl>,
+    /// A `tiles` set whose body is still open (until `end`) — D41.
+    open_tiles: Option<TilesDecl>,
+    /// The index of the `tile` whose argument list `open_call` carries.
+    open_tile: Option<u32>,
+    /// An `access` declaration whose body is still open (until `end`) — D49.
+    open_access: Option<AccessDecl>,
+    /// A `schedule` whose body is still open (until `end`) — D53.
+    open_schedule: Option<ScheduleDecl>,
+    /// A `rule` whose body is still open (until `end`) — D57.
+    open_rule: Option<RuleDecl>,
+    /// A `moods` set whose body is still open (until `end`) — D58.
+    open_moods: Option<MoodsDecl>,
+}
+
+impl Parser {
+    /// One source line, lexed.
+    fn line(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
+        if self.open_call.is_some() {
+            return self.call_line(toks, comment, lineno);
         }
-
         if toks.is_empty() {
-            // Blank line, or a whole-line comment — kept verbatim as an
-            // item so formatting is non-destructive.
-            if let Some(text) = comment {
-                if let Some(t) = open_tiles.as_mut() {
-                    t.body.push(TilesItem::Comment(text));
-                    continue;
-                }
-                if let Some(a) = open_access.as_mut() {
-                    a.body.push(AccessItem::Comment(text));
-                    continue;
-                }
-                if let Some(t) = open_schedule.as_mut() {
-                    t.body.push(ScheduleItem::Comment(text));
-                    continue;
-                }
-                if let Some(r) = open_rule.as_mut() {
-                    r.body.push(RuleItem::Comment(text));
-                    continue;
-                }
-                if let Some(m) = open_moods.as_mut() {
-                    m.body.push(MoodsItem::Comment(text));
-                    continue;
-                }
-                match open_test.as_mut() {
-                    Some(t) => t.body.push(TestItem::Comment(text)),
-                    None => sink(&mut open_template, &mut items).push(Item::Comment(text)),
-                }
-            }
-            continue;
+            self.comment_line(comment);
+            return Ok(());
         }
+        if self.in_body() {
+            return self.body_line(toks, comment, lineno);
+        }
+        self.refuse_in_template(toks, lineno)?;
+        self.statement(toks, comment, lineno)
+    }
 
+    /// Inside an open argument list: arguments, comments, or `)`.
+    fn call_line(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
+        let call = self.open_call.as_mut().expect("an argument list is open");
+        if toks.is_empty() {
+            if let Some(text) = comment {
+                call.args.push(ArgItem::Comment(text));
+            }
+            return Ok(());
+        }
+        let outcome = parse_call_args(call, toks, lineno)?;
+        if outcome.closed {
+            call.close_comment = comment;
+            if let Some(index) = self.open_tile.take() {
+                let tile = finish_tile(self.open_call.take().unwrap(), index, lineno)?;
+                let tiles = self
+                    .open_tiles
+                    .as_mut()
+                    .expect("a tile is open only in a set");
+                tiles.body.push(TilesItem::Tile(tile));
+                return Ok(());
+            }
+            let in_template = self.open_template.is_some();
+            let item = finish_call(self.open_call.take().unwrap(), in_template, lineno)?;
+            sink(&mut self.open_template, &mut self.items).push(item);
+        } else if let Some(text) = comment {
+            match call.args.last_mut() {
+                Some(ArgItem::Binding(b)) if outcome.pushed_binding => b.comment = Some(text),
+                _ => call.args.push(ArgItem::Comment(text)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Blank line, or a whole-line comment — kept verbatim as an item so
+    /// formatting is non-destructive.
+    fn comment_line(&mut self, comment: Option<String>) {
+        if let Some(text) = comment {
+            if let Some(t) = self.open_tiles.as_mut() {
+                t.body.push(TilesItem::Comment(text));
+                return;
+            }
+            if let Some(a) = self.open_access.as_mut() {
+                a.body.push(AccessItem::Comment(text));
+                return;
+            }
+            if let Some(t) = self.open_schedule.as_mut() {
+                t.body.push(ScheduleItem::Comment(text));
+                return;
+            }
+            if let Some(r) = self.open_rule.as_mut() {
+                r.body.push(RuleItem::Comment(text));
+                return;
+            }
+            if let Some(m) = self.open_moods.as_mut() {
+                m.body.push(MoodsItem::Comment(text));
+                return;
+            }
+            match self.open_test.as_mut() {
+                Some(t) => t.body.push(TestItem::Comment(text)),
+                None => sink(&mut self.open_template, &mut self.items).push(Item::Comment(text)),
+            }
+        }
+    }
+
+    /// Whether a `schedule`, `moods`, `rule`, `tiles`, `access` or `test`
+    /// body is open.
+    fn in_body(&self) -> bool {
+        self.open_schedule.is_some()
+            || self.open_moods.is_some()
+            || self.open_rule.is_some()
+            || self.open_tiles.is_some()
+            || self.open_access.is_some()
+            || self.open_test.is_some()
+    }
+
+    /// A line inside an open body: one of the body's lines, or `end`.
+    fn body_line(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
         // Inside a `schedule` body every line is a schedule line (or `end`).
-        if let Some(t) = open_schedule.as_mut() {
-            if let [Tok::Ident(kw)] = toks.as_slice()
+        if let Some(t) = self.open_schedule.as_mut() {
+            if let [Tok::Ident(kw)] = toks
                 && kw == "end"
             {
-                let mut t = open_schedule.take().unwrap();
+                let mut t = self.open_schedule.take().unwrap();
                 t.end_comment = comment;
-                items.push(Item::Schedule(t));
+                self.items.push(Item::Schedule(t));
             } else {
                 t.body.push(ScheduleItem::Line(parse_schedule_line(
-                    &toks, comment, lineno,
+                    toks, comment, lineno,
                 )?));
             }
-            continue;
+            return Ok(());
         }
 
         // Inside a `moods` body every line is a mood (or `end`).
-        if let Some(m) = open_moods.as_mut() {
-            if let [Tok::Ident(kw)] = toks.as_slice()
+        if let Some(m) = self.open_moods.as_mut() {
+            if let [Tok::Ident(kw)] = toks
                 && kw == "end"
             {
-                let mut m = open_moods.take().unwrap();
+                let mut m = self.open_moods.take().unwrap();
                 m.end_comment = comment;
-                items.push(Item::Moods(m));
+                self.items.push(Item::Moods(m));
             } else {
                 m.body
-                    .push(MoodsItem::Mood(parse_mood_line(&toks, comment, lineno)?));
+                    .push(MoodsItem::Mood(parse_mood_line(toks, comment, lineno)?));
             }
-            continue;
+            return Ok(());
         }
 
         // Inside a `rule` body every line is a rule statement (or `end`).
-        if let Some(r) = open_rule.as_mut() {
-            if let [Tok::Ident(kw)] = toks.as_slice()
+        if let Some(r) = self.open_rule.as_mut() {
+            if let [Tok::Ident(kw)] = toks
                 && kw == "end"
             {
-                let mut r = open_rule.take().unwrap();
+                let mut r = self.open_rule.take().unwrap();
                 r.end_comment = comment;
-                items.push(Item::Rule(r));
+                self.items.push(Item::Rule(r));
             } else {
                 r.body
-                    .push(RuleItem::Stmt(parse_rule_stmt(&toks, comment, lineno)?));
+                    .push(RuleItem::Stmt(parse_rule_stmt(toks, comment, lineno)?));
             }
-            continue;
+            return Ok(());
         }
 
-        // Inside a `tiles` body every line is a `tile` (or `end`).
-        if let Some(t) = open_tiles.as_mut() {
-            match toks.as_slice() {
-                [Tok::Ident(kw)] if kw == "end" => {
-                    let mut t = open_tiles.take().unwrap();
-                    t.end_comment = comment;
-                    items.push(Item::Tiles(t));
-                }
-                [Tok::Ident(kw), Tok::Num(n), Tok::LParen, rest @ ..] if kw == "tile" => {
-                    let index = match n.parse::<u32>() {
-                        Ok(i) if i > 0 => i,
-                        _ => {
-                            return Err(err(format!(
-                                "`tile {n}` — a tile index is a positive whole number \
-                                 (the tile's `i=` in the config)"
-                            )));
-                        }
-                    };
-                    let mut call = BlockDecl {
-                        slug: "tile".into(),
-                        block_type: n.clone(),
-                        title: None,
-                        args: Vec::new(),
-                        comment: None,
-                        close_comment: None,
-                    };
-                    let outcome = parse_call_args(&mut call, rest, lineno)?;
-                    call.comment = comment;
-                    if outcome.closed {
-                        t.body
-                            .push(TilesItem::Tile(finish_tile(call, index, lineno)?));
-                    } else {
-                        open_call = Some(call);
-                        open_tile = Some(index);
-                    }
-                }
-                _ => {
-                    return Err(err(format!(
-                        "expected `tile <i>(click: \"…\", up: \"…\", down: \"…\", \
-                         text: \"…\", to: <slug>, …)` or `end` in `tiles {}`",
-                        t.name
-                    )));
-                }
-            }
-            continue;
+        if self.open_tiles.is_some() {
+            return self.tiles_line(toks, comment, lineno);
         }
-
-        // Inside an `access` body every line is a grant (or `end`).
-        if let Some(a) = open_access.as_mut() {
-            match toks.as_slice() {
-                [Tok::Ident(kw)] if kw == "end" => {
-                    let mut a = open_access.take().unwrap();
-                    a.end_comment = comment;
-                    items.push(Item::Access(a));
-                }
-                [Tok::Ident(kw), Tok::Str(principal), rest @ ..]
-                    if (kw == "user" || kw == "group")
-                        && matches!(rest, [] | [Tok::Colon, Tok::Str(_)]) =>
-                {
-                    a.body.push(AccessItem::Grant(AccessGrant {
-                        kind: if kw == "user" {
-                            PrincipalKind::User
-                        } else {
-                            PrincipalKind::Group
-                        },
-                        principal: principal.clone(),
-                        schedule: match rest {
-                            [_, Tok::Str(schedule)] => Some(schedule.clone()),
-                            _ => None,
-                        },
-                        comment,
-                    }));
-                }
-                _ => {
-                    return Err(err(match a.right {
-                        RightKind::Access => format!(
-                            "expected `user \"<title>\": \"<schedule>\"`, \
-                             `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
-                            a.slug
-                        ),
-                        RightKind::Recipients => format!(
-                            "expected `user \"<title>\"`, `group \"<title>\"` or `end` in \
-                             `recipients {}`",
-                            a.slug
-                        ),
-                    }));
-                }
-            }
-            continue;
+        if self.open_access.is_some() {
+            return self.access_line(toks, comment, lineno);
         }
-
         // Inside a `test` body every line is a test statement (or `end`).
-        if let Some(t) = open_test.as_mut() {
-            if let [Tok::Ident(kw)] = toks.as_slice()
+        if let Some(t) = self.open_test.as_mut() {
+            if let [Tok::Ident(kw)] = toks
                 && kw == "end"
             {
-                let mut t = open_test.take().unwrap();
+                let mut t = self.open_test.take().unwrap();
                 t.end_comment = comment;
-                items.push(Item::Test(t));
+                self.items.push(Item::Test(t));
             } else {
-                t.body.push(parse_test_stmt(&toks, comment, lineno)?);
+                t.body.push(parse_test_stmt(toks, comment, lineno)?);
             }
-            continue;
+            return Ok(());
         }
+        unreachable!("body_line runs only inside an open body")
+    }
 
-        if open_template.is_some()
+    /// Inside a `tiles` body every line is a `tile` (or `end`).
+    fn tiles_line(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
+        let err = |msg: String| Error::Parse { line: lineno, msg };
+        let t = self.open_tiles.as_mut().expect("a tiles body is open");
+        match toks {
+            [Tok::Ident(kw)] if kw == "end" => {
+                let mut t = self.open_tiles.take().unwrap();
+                t.end_comment = comment;
+                self.items.push(Item::Tiles(t));
+            }
+            [Tok::Ident(kw), Tok::Num(n), Tok::LParen, rest @ ..] if kw == "tile" => {
+                let index = match n.parse::<u32>() {
+                    Ok(i) if i > 0 => i,
+                    _ => {
+                        return Err(err(format!(
+                            "`tile {n}` — a tile index is a positive whole number \
+                                 (the tile's `i=` in the config)"
+                        )));
+                    }
+                };
+                let mut call = BlockDecl {
+                    slug: "tile".into(),
+                    block_type: n.clone(),
+                    title: None,
+                    args: Vec::new(),
+                    comment: None,
+                    close_comment: None,
+                };
+                let outcome = parse_call_args(&mut call, rest, lineno)?;
+                call.comment = comment;
+                if outcome.closed {
+                    t.body
+                        .push(TilesItem::Tile(finish_tile(call, index, lineno)?));
+                } else {
+                    self.open_call = Some(call);
+                    self.open_tile = Some(index);
+                }
+            }
+            _ => {
+                return Err(err(format!(
+                    "expected `tile <i>(click: \"…\", up: \"…\", down: \"…\", \
+                         text: \"…\", to: <slug>, …)` or `end` in `tiles {}`",
+                    t.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Inside an `access` body every line is a grant (or `end`).
+    fn access_line(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
+        let err = |msg: String| Error::Parse { line: lineno, msg };
+        let a = self.open_access.as_mut().expect("an access body is open");
+        match toks {
+            [Tok::Ident(kw)] if kw == "end" => {
+                let mut a = self.open_access.take().unwrap();
+                a.end_comment = comment;
+                self.items.push(Item::Access(a));
+            }
+            [Tok::Ident(kw), Tok::Str(principal), rest @ ..]
+                if (kw == "user" || kw == "group")
+                    && matches!(rest, [] | [Tok::Colon, Tok::Str(_)]) =>
+            {
+                a.body.push(AccessItem::Grant(AccessGrant {
+                    kind: if kw == "user" {
+                        PrincipalKind::User
+                    } else {
+                        PrincipalKind::Group
+                    },
+                    principal: principal.clone(),
+                    schedule: match rest {
+                        [_, Tok::Str(schedule)] => Some(schedule.clone()),
+                        _ => None,
+                    },
+                    comment,
+                }));
+            }
+            _ => {
+                return Err(err(match a.right {
+                    RightKind::Access => format!(
+                        "expected `user \"<title>\": \"<schedule>\"`, \
+                             `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
+                        a.slug
+                    ),
+                    RightKind::Recipients => format!(
+                        "expected `user \"<title>\"`, `group \"<title>\"` or `end` in \
+                             `recipients {}`",
+                        a.slug
+                    ),
+                }));
+            }
+        }
+        Ok(())
+    }
+
+    /// Module-level statements are refused inside a template body (D23).
+    fn refuse_in_template(&self, toks: &[Tok], lineno: usize) -> Result<()> {
+        let err = |msg: String| Error::Parse { line: lineno, msg };
+        if self.open_template.is_some()
             && let Tok::Ident(kw) = &toks[0]
             && (matches!(
                 kw.as_str(),
@@ -588,84 +645,34 @@ pub fn parse(src: &str) -> Result<Module> {
                  declarations, wires, port assignments, and comments (D23)"
             )));
         }
+        Ok(())
+    }
 
+    /// A statement outside any body: a body opener, a declaration, or a
+    /// statement about an object.
+    fn statement(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
+        let err = |msg: String| Error::Parse { line: lineno, msg };
         match &toks[0] {
             Tok::Ident(kw) if kw == "template" => {
-                if open_template.is_some() {
+                if self.open_template.is_some() {
                     return Err(err(
                         "nested `template` — close the open one with `end`".into()
                     ));
                 }
-                let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks.as_slice()
-                else {
-                    return Err(err(
-                        "expected `template <name>(<param>: <Type> | <param> = <literal>, …)`"
-                            .into(),
-                    ));
-                };
-                let mut params = Vec::new();
-                if !rest.is_empty() {
-                    let mut it = rest.iter();
-                    loop {
-                        match (it.next(), it.next(), it.next()) {
-                            (Some(Tok::Ident(n)), Some(Tok::Colon), Some(Tok::Ident(ty))) => {
-                                params.push(TemplateParam::Object {
-                                    name: check_slug(n, lineno)?,
-                                    // `any` takes an object of every type.
-                                    block_type: if ty == "any" {
-                                        ty.clone()
-                                    } else {
-                                        check_type(ty, lineno)?
-                                    },
-                                });
-                            }
-                            (
-                                Some(Tok::Ident(n)),
-                                Some(Tok::Eq),
-                                Some(v @ (Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))),
-                            ) => {
-                                params.push(TemplateParam::Value {
-                                    name: check_slug(n, lineno)?,
-                                    default: value_of(v, lineno)?,
-                                });
-                            }
-                            _ => {
-                                return Err(err(
-                                    "expected `<name>: <Type>` (object parameter) or \
-                                     `<name> = <literal>` (value parameter with default)"
-                                        .into(),
-                                ));
-                            }
-                        }
-                        match it.next() {
-                            None => break,
-                            Some(Tok::Comma) => continue,
-                            Some(_) => {
-                                return Err(err("expected `,` between parameters".into()));
-                            }
-                        }
-                    }
-                }
-                open_template = Some(TemplateDecl {
-                    name: check_slug(name, lineno)?,
-                    params,
-                    body: Vec::new(),
-                    comment,
-                    end_comment: None,
-                });
+                self.open_template = Some(parse_template_head(toks, comment, lineno)?);
             }
             Tok::Ident(kw) if kw == "test" => {
-                if open_template.is_some() {
+                if self.open_template.is_some() {
                     return Err(err(
                         "`test` inside a template body — close the template with `end` \
                          first (tests are module-level)"
                             .into(),
                     ));
                 }
-                let [_, Tok::Str(name)] = toks.as_slice() else {
+                let [_, Tok::Str(name)] = toks else {
                     return Err(err("expected `test \"<name>\"`".into()));
                 };
-                open_test = Some(TestDecl {
+                self.open_test = Some(TestDecl {
                     name: name.clone(),
                     body: Vec::new(),
                     comment,
@@ -673,10 +680,10 @@ pub fn parse(src: &str) -> Result<Module> {
                 });
             }
             Tok::Ident(kw) if kw == "tiles" => {
-                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                let [_, Tok::Ident(name)] = toks else {
                     return Err(err("expected `tiles <name>`".into()));
                 };
-                open_tiles = Some(TilesDecl {
+                self.open_tiles = Some(TilesDecl {
                     name: check_slug(name, lineno)?,
                     body: Vec::new(),
                     comment,
@@ -684,10 +691,10 @@ pub fn parse(src: &str) -> Result<Module> {
                 });
             }
             Tok::Ident(kw) if kw == "schedule" => {
-                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                let [_, Tok::Ident(name)] = toks else {
                     return Err(err("expected `schedule <name>`".into()));
                 };
-                open_schedule = Some(ScheduleDecl {
+                self.open_schedule = Some(ScheduleDecl {
                     name: check_slug(name, lineno)?,
                     body: Vec::new(),
                     comment,
@@ -695,10 +702,10 @@ pub fn parse(src: &str) -> Result<Module> {
                 });
             }
             Tok::Ident(kw) if kw == "moods" => {
-                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                let [_, Tok::Ident(name)] = toks else {
                     return Err(err("expected `moods <name>`".into()));
                 };
-                open_moods = Some(MoodsDecl {
+                self.open_moods = Some(MoodsDecl {
                     name: check_slug(name, lineno)?,
                     body: Vec::new(),
                     comment,
@@ -707,23 +714,7 @@ pub fn parse(src: &str) -> Result<Module> {
             }
             // `rule` is a keyword only in front of a slug, like `access`.
             Tok::Ident(kw) if kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
-                let (slug, title) = match toks.as_slice() {
-                    [_, Tok::Ident(slug)] => (slug, None),
-                    [_, Tok::Ident(slug), Tok::Str(title)] => (slug, Some(title.clone())),
-                    _ => {
-                        return Err(err(
-                            "expected `rule <slug>` (the rule's extern) or `rule <slug> \"Name\"`"
-                                .into(),
-                        ));
-                    }
-                };
-                open_rule = Some(RuleDecl {
-                    slug: check_slug(slug, lineno)?,
-                    title,
-                    body: Vec::new(),
-                    comment,
-                    end_comment: None,
-                });
+                self.open_rule = Some(parse_rule_head(toks, comment, lineno)?);
             }
             Tok::Ident(kw) if kw == "tile" => {
                 return Err(err(
@@ -737,56 +728,21 @@ pub fn parse(src: &str) -> Result<Module> {
                 if (kw == "access" || kw == "recipients")
                     && !matches!(toks.get(1), Some(Tok::Eq | Tok::Dot | Tok::LArrow)) =>
             {
-                let right = if kw == "access" {
-                    RightKind::Access
-                } else {
-                    RightKind::Recipients
-                };
-                let [_, Tok::Ident(slug)] = toks.as_slice() else {
-                    return Err(err(match right {
-                        RightKind::Access => "expected `access <slug>` — the extern NFC Code \
-                                              Touch whose access rights the body lists"
-                            .into(),
-                        RightKind::Recipients => "expected `recipients <slug>` — the extern \
-                                                  push notification whose recipients the body \
-                                                  lists"
-                            .into(),
-                    }));
-                };
-                if open_template.is_some() {
-                    return Err(err(format!(
-                        "`{kw}` is not allowed inside a template body — declare {} at module \
-                         level ({})",
-                        match right {
-                            RightKind::Access => "access rights",
-                            RightKind::Recipients => "recipients",
-                        },
-                        match right {
-                            RightKind::Access => "D49",
-                            RightKind::Recipients => "D51",
-                        }
-                    )));
-                }
-                open_access = Some(AccessDecl {
-                    right,
-                    slug: check_slug(slug, lineno)?,
-                    body: Vec::new(),
-                    comment,
-                    end_comment: None,
-                });
+                let in_template = self.open_template.is_some();
+                self.open_access = Some(parse_access_head(kw, toks, comment, lineno, in_template)?);
             }
             Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
                 return Err(err(format!(
                     "`{kw}` is only allowed inside a `test \"…\"` … `end` body"
                 )));
             }
-            Tok::Ident(kw) if kw == "end" => match toks.as_slice() {
+            Tok::Ident(kw) if kw == "end" => match toks {
                 [_] => {
-                    let Some(mut t) = open_template.take() else {
+                    let Some(mut t) = self.open_template.take() else {
                         return Err(err("`end` without an open `template` or `test`".into()));
                     };
                     t.end_comment = comment;
-                    items.push(Item::Template(t));
+                    self.items.push(Item::Template(t));
                 }
                 _ => return Err(err("expected `end` on its own line".into())),
             },
@@ -797,150 +753,26 @@ pub fn parse(src: &str) -> Result<Module> {
                         .into(),
                 ));
             }
-            Tok::Ident(kw) if kw == "let" => match toks.as_slice() {
-                [_, Tok::Ident(name), Tok::Eq, val] => {
-                    let value = match value_of(val, lineno)? {
-                        Value::Ref(other) => {
-                            return Err(err(format!(
-                                "`let {name} = {other}` — a constant's value must be a \
-                                 number or a quoted string, not another identifier"
-                            )));
-                        }
-                        literal => literal,
-                    };
-                    items.push(Item::Let(LetDecl {
-                        name: check_slug(name, lineno)?,
-                        value,
-                        comment,
-                    }));
-                }
-                _ => return Err(err("expected `let <name> = <number | \"string\">`".into())),
-            },
-            Tok::Ident(kw) if kw == "extern" => match toks.as_slice() {
-                [
-                    _,
-                    Tok::Ident(slug),
-                    Tok::Eq,
-                    Tok::Ident(ty),
-                    Tok::LParen,
-                    rest @ ..,
-                    Tok::RParen,
-                ] => {
-                    // `kind: "value"` pairs, comma-separated: one primary
-                    // matcher (uuid|iname|title|mirrors) first, then
-                    // optional `room:` / `category:` constraints. Only
-                    // `mirrors:` takes a bare slug; everything else is a
-                    // quoted string.
-                    let mut pairs = Vec::new();
-                    let mut it = rest.iter();
-                    loop {
-                        match (it.next(), it.next(), it.next()) {
-                            (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
-                                pairs.push((k.as_str(), v.clone(), false));
-                            }
-                            (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Ident(v))) => {
-                                pairs.push((k.as_str(), v.clone(), true));
-                            }
-                            _ => {
-                                return Err(err(
-                                    "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
-                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
-                                     [, device: \"…\"])`"
-                                        .into(),
-                                ));
-                            }
-                        }
-                        match it.next() {
-                            None => break,
-                            Some(Tok::Comma) => continue,
-                            Some(_) => {
-                                return Err(err("expected `,` between matchers".into()));
-                            }
-                        }
-                    }
-                    let mut pairs = pairs.into_iter();
-                    let match_spec = match pairs.next() {
-                        Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_slug(&v, lineno)?),
-                        Some(("mirrors", _, false)) => {
-                            return Err(err("`mirrors:` names a slug, not a string — write \
-                                 `mirrors: status_alarm` without quotes"
-                                .into()));
-                        }
-                        Some((k, _, true)) => {
-                            return Err(err(format!("`{k}:` takes a quoted string")));
-                        }
-                        Some(("uuid", v, _)) => MatchSpec::Uuid(v),
-                        Some(("iname", v, _)) => MatchSpec::IName(v),
-                        Some(("title", v, _)) => MatchSpec::Title(v),
-                        Some((other, _, _)) => {
-                            return Err(err(format!(
-                                "unknown matcher `{other}` (expected uuid, iname, title, or \
-                                 mirrors first; room/category/device only narrow it)"
-                            )));
-                        }
-                        None => return Err(err("empty matcher list".into())),
-                    };
-                    let (mut room, mut category, mut device) = (None, None, None);
-                    for (k, v, is_ident) in pairs {
-                        if is_ident {
-                            return Err(err(format!("`{k}:` takes a quoted string")));
-                        }
-                        let slot = match k {
-                            "room" => &mut room,
-                            "category" => &mut category,
-                            "device" => &mut device,
-                            other => {
-                                return Err(err(format!(
-                                    "unknown constraint `{other}` (expected room, category \
-                                     or device)"
-                                )));
-                            }
-                        };
-                        if slot.replace(v).is_some() {
-                            return Err(err(format!("duplicate `{k}:` constraint")));
-                        }
-                    }
-                    let constrained = room.is_some() || category.is_some() || device.is_some();
-                    if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
-                        return Err(err("`uuid:` pins exactly — room/category/device \
-                             constraints are redundant and not allowed with it"
-                            .into()));
-                    }
-                    if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
-                        return Err(err(
-                            "`mirrors:` is narrowed by the file's `page` statement — \
-                             room/category/device constraints are not allowed with it"
-                                .into(),
-                        ));
-                    }
-                    items.push(Item::Extern(ExternDecl {
-                        slug: check_slug(slug, lineno)?,
-                        block_type: check_type(ty, lineno)?,
-                        match_spec,
-                        room,
-                        category,
-                        device,
-                        comment,
-                    }));
-                }
-                _ => {
-                    return Err(err(
-                        "expected `extern <slug> = <Type>(uuid|iname|title: \"…\")`".into(),
-                    ));
-                }
-            },
-            Tok::Ident(kw) if kw == "removed" => match toks.as_slice() {
+            Tok::Ident(kw) if kw == "let" => {
+                self.items
+                    .push(Item::Let(parse_let(toks, comment, lineno)?));
+            }
+            Tok::Ident(kw) if kw == "extern" => {
+                self.items
+                    .push(Item::Extern(parse_extern(toks, comment, lineno)?));
+            }
+            Tok::Ident(kw) if kw == "removed" => match toks {
                 [_, Tok::Ident(slug)] => {
-                    items.push(Item::Removed(RemovedDecl {
+                    self.items.push(Item::Removed(RemovedDecl {
                         slug: check_slug(slug, lineno)?,
                         comment,
                     }));
                 }
                 _ => return Err(err("expected `removed <slug>`".into())),
             },
-            Tok::Ident(kw) if kw == "moved" => match toks.as_slice() {
+            Tok::Ident(kw) if kw == "moved" => match toks {
                 [_, Tok::Ident(from), Tok::Arrow, Tok::Ident(to)] => {
-                    items.push(Item::Moved(MovedDecl {
+                    self.items.push(Item::Moved(MovedDecl {
                         from: check_slug(from, lineno)?,
                         to: check_slug(to, lineno)?,
                         comment,
@@ -948,62 +780,10 @@ pub fn parse(src: &str) -> Result<Module> {
                 }
                 _ => return Err(err("expected `moved <old_slug> -> <new_slug>`".into())),
             },
-            Tok::Ident(kw) if kw == "page" => match toks.as_slice() {
-                [_, Tok::Str(title)] => {
-                    items.push(Item::Page(PageDecl {
-                        title: title.clone(),
-                        room: None,
-                        category: None,
-                        comment,
-                    }));
-                }
-                [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
-                    // `page "T" (room: "…"[, category: "…"])` — what a page
-                    // the compiler creates is assigned to (D56).
-                    let (mut room, mut category) = (None, None);
-                    for arg in args.split(|t| matches!(t, Tok::Comma)) {
-                        let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
-                            return Err(err(
-                                "expected `page \"<Title>\" (room: \"…\"[, category: \"…\"])`"
-                                    .into(),
-                            ));
-                        };
-                        let slot = match k.as_str() {
-                            "room" => &mut room,
-                            "category" => &mut category,
-                            other => {
-                                return Err(err(format!(
-                                    "unknown page argument `{other}` (expected room or category)"
-                                )));
-                            }
-                        };
-                        if slot.replace(v.clone()).is_some() {
-                            return Err(err(format!("duplicate `{k}:` page argument")));
-                        }
-                    }
-                    if room.is_none() {
-                        return Err(err(
-                            "a page argument list needs `room:` — the room a created page \
-                             is assigned to (D56)"
-                                .into(),
-                        ));
-                    }
-                    items.push(Item::Page(PageDecl {
-                        title: title.clone(),
-                        room,
-                        category,
-                        comment,
-                    }));
-                }
-                _ => {
-                    return Err(err(
-                        "expected `page \"<Title>\"` — the quoted display title of a \
-                         page in the base config (D28), optionally `(room: \"…\"[, category: \"…\"])` \
-                         to create it (D56)"
-                            .into(),
-                    ));
-                }
-            },
+            Tok::Ident(kw) if kw == "page" => {
+                self.items
+                    .push(Item::Page(parse_page(toks, comment, lineno)?));
+            }
             // v0 keywords: reserved, with migration guidance.
             Tok::Ident(kw) if kw == "block" => {
                 return Err(err(
@@ -1034,13 +814,13 @@ pub fn parse(src: &str) -> Result<Module> {
             }
             // `(a, b).Setting = value` (#199) shares the claim forms' parser.
             Tok::Ident(_) | Tok::LParen => {
-                let in_template = open_template.is_some();
+                let in_template = self.open_template.is_some();
                 parse_ident_statement(
-                    &toks,
+                    toks,
                     comment,
                     lineno,
-                    sink(&mut open_template, &mut items),
-                    &mut open_call,
+                    sink(&mut self.open_template, &mut self.items),
+                    &mut self.open_call,
                     in_template,
                 )?;
             }
@@ -1053,65 +833,402 @@ pub fn parse(src: &str) -> Result<Module> {
                 ));
             }
         }
+        Ok(())
     }
 
-    if let Some(call) = open_call {
-        let what = match open_tile {
-            Some(i) => format!("tile {i}(…"),
-            None => format!("{} = {}(…", call.slug, call.block_type),
-        };
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `(` in `{what}`"),
-        });
+    /// End of input: every body and argument list must be closed.
+    fn finish(self, line_count: usize) -> Result<Module> {
+        if let Some(call) = self.open_call {
+            let what = match self.open_tile {
+                Some(i) => format!("tile {i}(…"),
+                None => format!("{} = {}(…", call.slug, call.block_type),
+            };
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `(` in `{what}`"),
+            });
+        }
+        if let Some(t) = self.open_tiles {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `tiles {}` — missing `end`", t.name),
+            });
+        }
+        if let Some(a) = self.open_access {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!(
+                    "unclosed `{} {}` — missing `end`",
+                    a.right.keyword(),
+                    a.slug
+                ),
+            });
+        }
+        if let Some(t) = self.open_schedule {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `schedule {}` — missing `end`", t.name),
+            });
+        }
+        if let Some(r) = self.open_rule {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `rule {}` — missing `end`", r.slug),
+            });
+        }
+        if let Some(m) = self.open_moods {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `moods {}` — missing `end`", m.name),
+            });
+        }
+        if let Some(t) = self.open_template {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `template {}` — missing `end`", t.name),
+            });
+        }
+        if let Some(t) = self.open_test {
+            return Err(Error::Parse {
+                line: line_count,
+                msg: format!("unclosed `test \"{}\"` — missing `end`", t.name),
+            });
+        }
+        Ok(Module { items: self.items })
     }
-    if let Some(t) = open_tiles {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `tiles {}` — missing `end`", t.name),
-        });
+}
+
+/// `template <name>(<param>: <Type> | <param> = <literal>, …)` opens a
+/// template body (D23).
+fn parse_template_head(
+    toks: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<TemplateDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks else {
+        return Err(err(
+            "expected `template <name>(<param>: <Type> | <param> = <literal>, …)`".into(),
+        ));
+    };
+    let mut params = Vec::new();
+    if !rest.is_empty() {
+        let mut it = rest.iter();
+        loop {
+            match (it.next(), it.next(), it.next()) {
+                (Some(Tok::Ident(n)), Some(Tok::Colon), Some(Tok::Ident(ty))) => {
+                    params.push(TemplateParam::Object {
+                        name: check_slug(n, lineno)?,
+                        // `any` takes an object of every type.
+                        block_type: if ty == "any" {
+                            ty.clone()
+                        } else {
+                            check_type(ty, lineno)?
+                        },
+                    });
+                }
+                (
+                    Some(Tok::Ident(n)),
+                    Some(Tok::Eq),
+                    Some(v @ (Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))),
+                ) => {
+                    params.push(TemplateParam::Value {
+                        name: check_slug(n, lineno)?,
+                        default: value_of(v, lineno)?,
+                    });
+                }
+                _ => {
+                    return Err(err("expected `<name>: <Type>` (object parameter) or \
+                                     `<name> = <literal>` (value parameter with default)"
+                        .into()));
+                }
+            }
+            match it.next() {
+                None => break,
+                Some(Tok::Comma) => continue,
+                Some(_) => {
+                    return Err(err("expected `,` between parameters".into()));
+                }
+            }
+        }
     }
-    if let Some(a) = open_access {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!(
-                "unclosed `{} {}` — missing `end`",
-                a.right.keyword(),
-                a.slug
-            ),
-        });
+    Ok(TemplateDecl {
+        name: check_slug(name, lineno)?,
+        params,
+        body: Vec::new(),
+        comment,
+        end_comment: None,
+    })
+}
+
+/// `rule <slug>` (an existing rule's extern) or `rule <slug> "Name"` (D57,
+/// D60) opens a rule body.
+fn parse_rule_head(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let (slug, title) = match toks {
+        [_, Tok::Ident(slug)] => (slug, None),
+        [_, Tok::Ident(slug), Tok::Str(title)] => (slug, Some(title.clone())),
+        _ => {
+            return Err(err(
+                "expected `rule <slug>` (the rule's extern) or `rule <slug> \"Name\"`".into(),
+            ));
+        }
+    };
+    Ok(RuleDecl {
+        slug: check_slug(slug, lineno)?,
+        title,
+        body: Vec::new(),
+        comment,
+        end_comment: None,
+    })
+}
+
+/// `access <slug>` (D49) or `recipients <slug>` (D51) opens a body of
+/// grants.
+fn parse_access_head(
+    kw: &str,
+    toks: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+    in_template: bool,
+) -> Result<AccessDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let right = if kw == "access" {
+        RightKind::Access
+    } else {
+        RightKind::Recipients
+    };
+    let [_, Tok::Ident(slug)] = toks else {
+        return Err(err(match right {
+            RightKind::Access => "expected `access <slug>` — the extern NFC Code \
+                                              Touch whose access rights the body lists"
+                .into(),
+            RightKind::Recipients => "expected `recipients <slug>` — the extern \
+                                                  push notification whose recipients the body \
+                                                  lists"
+                .into(),
+        }));
+    };
+    if in_template {
+        return Err(err(format!(
+            "`{kw}` is not allowed inside a template body — declare {} at module \
+                         level ({})",
+            match right {
+                RightKind::Access => "access rights",
+                RightKind::Recipients => "recipients",
+            },
+            match right {
+                RightKind::Access => "D49",
+                RightKind::Recipients => "D51",
+            }
+        )));
     }
-    if let Some(t) = open_schedule {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `schedule {}` — missing `end`", t.name),
-        });
+    Ok(AccessDecl {
+        right,
+        slug: check_slug(slug, lineno)?,
+        body: Vec::new(),
+        comment,
+        end_comment: None,
+    })
+}
+
+/// `let <name> = <number | "string">`.
+fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<LetDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    match toks {
+        [_, Tok::Ident(name), Tok::Eq, val] => {
+            let value = match value_of(val, lineno)? {
+                Value::Ref(other) => {
+                    return Err(err(format!(
+                        "`let {name} = {other}` — a constant's value must be a \
+                                 number or a quoted string, not another identifier"
+                    )));
+                }
+                literal => literal,
+            };
+            Ok(LetDecl {
+                name: check_slug(name, lineno)?,
+                value,
+                comment,
+            })
+        }
+        _ => Err(err("expected `let <name> = <number | \"string\">`".into())),
     }
-    if let Some(r) = open_rule {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `rule {}` — missing `end`", r.slug),
-        });
+}
+
+/// `extern <slug> = <Type>(<matcher>[, <constraint>…])`.
+fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<ExternDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    match toks {
+        [
+            _,
+            Tok::Ident(slug),
+            Tok::Eq,
+            Tok::Ident(ty),
+            Tok::LParen,
+            rest @ ..,
+            Tok::RParen,
+        ] => {
+            // `kind: "value"` pairs, comma-separated: one primary
+            // matcher (uuid|iname|title|mirrors) first, then
+            // optional `room:` / `category:` constraints. Only
+            // `mirrors:` takes a bare slug; everything else is a
+            // quoted string.
+            let mut pairs = Vec::new();
+            let mut it = rest.iter();
+            loop {
+                match (it.next(), it.next(), it.next()) {
+                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
+                        pairs.push((k.as_str(), v.clone(), false));
+                    }
+                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Ident(v))) => {
+                        pairs.push((k.as_str(), v.clone(), true));
+                    }
+                    _ => {
+                        return Err(err(
+                            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
+                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
+                                     [, device: \"…\"])`"
+                                .into(),
+                        ));
+                    }
+                }
+                match it.next() {
+                    None => break,
+                    Some(Tok::Comma) => continue,
+                    Some(_) => {
+                        return Err(err("expected `,` between matchers".into()));
+                    }
+                }
+            }
+            let mut pairs = pairs.into_iter();
+            let match_spec = match pairs.next() {
+                Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_slug(&v, lineno)?),
+                Some(("mirrors", _, false)) => {
+                    return Err(err("`mirrors:` names a slug, not a string — write \
+                                 `mirrors: status_alarm` without quotes"
+                        .into()));
+                }
+                Some((k, _, true)) => {
+                    return Err(err(format!("`{k}:` takes a quoted string")));
+                }
+                Some(("uuid", v, _)) => MatchSpec::Uuid(v),
+                Some(("iname", v, _)) => MatchSpec::IName(v),
+                Some(("title", v, _)) => MatchSpec::Title(v),
+                Some((other, _, _)) => {
+                    return Err(err(format!(
+                        "unknown matcher `{other}` (expected uuid, iname, title, or \
+                                 mirrors first; room/category/device only narrow it)"
+                    )));
+                }
+                None => return Err(err("empty matcher list".into())),
+            };
+            let (mut room, mut category, mut device) = (None, None, None);
+            for (k, v, is_ident) in pairs {
+                if is_ident {
+                    return Err(err(format!("`{k}:` takes a quoted string")));
+                }
+                let slot = match k {
+                    "room" => &mut room,
+                    "category" => &mut category,
+                    "device" => &mut device,
+                    other => {
+                        return Err(err(format!(
+                            "unknown constraint `{other}` (expected room, category \
+                                     or device)"
+                        )));
+                    }
+                };
+                if slot.replace(v).is_some() {
+                    return Err(err(format!("duplicate `{k}:` constraint")));
+                }
+            }
+            let constrained = room.is_some() || category.is_some() || device.is_some();
+            if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
+                return Err(err("`uuid:` pins exactly — room/category/device \
+                             constraints are redundant and not allowed with it"
+                    .into()));
+            }
+            if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
+                return Err(err(
+                    "`mirrors:` is narrowed by the file's `page` statement — \
+                             room/category/device constraints are not allowed with it"
+                        .into(),
+                ));
+            }
+            Ok(ExternDecl {
+                slug: check_slug(slug, lineno)?,
+                block_type: check_type(ty, lineno)?,
+                match_spec,
+                room,
+                category,
+                device,
+                comment,
+            })
+        }
+        _ => Err(err(
+            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\")`".into(),
+        )),
     }
-    if let Some(m) = open_moods {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `moods {}` — missing `end`", m.name),
-        });
+}
+
+/// `page "<Title>"` (D28), optionally `(room: "…"[, category: "…"])` to
+/// create it (D56).
+fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<PageDecl> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    match toks {
+        [_, Tok::Str(title)] => Ok(PageDecl {
+            title: title.clone(),
+            room: None,
+            category: None,
+            comment,
+        }),
+        [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
+            // `page "T" (room: "…"[, category: "…"])` — what a page
+            // the compiler creates is assigned to (D56).
+            let (mut room, mut category) = (None, None);
+            for arg in args.split(|t| matches!(t, Tok::Comma)) {
+                let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
+                    return Err(err(
+                        "expected `page \"<Title>\" (room: \"…\"[, category: \"…\"])`".into(),
+                    ));
+                };
+                let slot = match k.as_str() {
+                    "room" => &mut room,
+                    "category" => &mut category,
+                    other => {
+                        return Err(err(format!(
+                            "unknown page argument `{other}` (expected room or category)"
+                        )));
+                    }
+                };
+                if slot.replace(v.clone()).is_some() {
+                    return Err(err(format!("duplicate `{k}:` page argument")));
+                }
+            }
+            if room.is_none() {
+                return Err(err(
+                    "a page argument list needs `room:` — the room a created page \
+                             is assigned to (D56)"
+                        .into(),
+                ));
+            }
+            Ok(PageDecl {
+                title: title.clone(),
+                room,
+                category,
+                comment,
+            })
+        }
+        _ => {
+            Err(err(
+                        "expected `page \"<Title>\"` — the quoted display title of a \
+                         page in the base config (D28), optionally `(room: \"…\"[, category: \"…\"])` \
+                         to create it (D56)"
+                            .into(),
+                    ))
+        }
     }
-    if let Some(t) = open_template {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `template {}` — missing `end`", t.name),
-        });
-    }
-    if let Some(t) = open_test {
-        return Err(Error::Parse {
-            line: src.lines().count(),
-            msg: format!("unclosed `test \"{}\"` — missing `end`", t.name),
-        });
-    }
-    Ok(Module { items })
 }
 
 /// An operating mode in a rule line: a slug or a quoted title.
@@ -1142,6 +1259,18 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     let kind = match toks {
         [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
         [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
+        [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
+        [Tok::Ident(w), ..] if w == "when" => parse_rule_when(toks, lineno, usage)?,
+        [Tok::Ident(w), ..] if w == "then" => parse_rule_then(toks, lineno, usage)?,
+        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+    };
+    Ok(RuleStmt { kind, comment })
+}
+
+/// A `when …` condition line of a `rule` body (see [`parse_rule_stmt`]).
+fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtKind> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let kind = match toks {
         [
             Tok::Ident(w),
             Tok::Ident(k),
@@ -1179,7 +1308,6 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             }
             RuleStmtKind::Weekday(words)
         }
-        [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
         [Tok::Ident(w), Tok::Ident(k), mode, rest @ ..] if w == "when" && k == "mode" => {
             let on = match rest {
                 [] => true,
@@ -1271,7 +1399,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             }
             RuleStmtKind::Date(d.clone())
         }
-        [Tok::Ident(w), ..] if w == "when" => {
+        _ => {
             return Err(err(format!(
                 "Lox Logic knows the conditions `when time`, `when weekday`, `when mode`, \
                  `when <slug>.<state> <op> <value>`, `when weather <field> <op> <value>`, \
@@ -1279,6 +1407,14 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                  `when date \"YYYY-MM-DD\"`; {usage}"
             )));
         }
+    };
+    Ok(kind)
+}
+
+/// A `then …` action line of a `rule` body (see [`parse_rule_stmt`]).
+fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtKind> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let kind = match toks {
         [
             Tok::Ident(w),
             Tok::Ident(k),
@@ -1358,7 +1494,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
         }
         _ => return Err(err(format!("unexpected rule line; {usage}"))),
     };
-    Ok(RuleStmt { kind, comment })
+    Ok(kind)
 }
 
 /// One statement of a `test` body (D36): a port injection, `tick`,
@@ -1761,50 +1897,7 @@ fn parse_ident_statement(
             Tok::LArrow,
             rest @ ..,
         ] => {
-            if let Some(attr) = Attr::parse(tp) {
-                return Err(err(format!(
-                    "`{ts}.{attr}` is an object attribute, not a port — attributes \
-                     are assigned (`{ts}.{attr} = \"…\"`), never wired"
-                )));
-            }
-            if tp == "tiles" {
-                return Err(err(format!(
-                    "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
-                )));
-            }
-            if tp == "schedule" {
-                return Err(err(format!(
-                    "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
-                )));
-            }
-            if tp == "moods" {
-                return Err(err(format!(
-                    "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
-                )));
-            }
-            let to = PortRef {
-                slug: ts.clone(),
-                port: tp.clone(),
-            };
-            if rest.is_empty() {
-                return Err(err(format!(
-                    "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
-                     expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
-                     value, use `{ts}.{tp} = <value>`"
-                )));
-            }
-            match parse_expr(rest, lineno)? {
-                Expr::Atom(Operand::Port(from)) => {
-                    items.push(Item::Wire(WireDecl { to, from, comment }));
-                }
-                Expr::Atom(Operand::Value(v)) => {
-                    return Err(err(format!(
-                        "`{to} <- {v}` wires a constant — to assign a value, \
-                         use `{to} = {v}`"
-                    )));
-                }
-                expr => items.push(Item::ExprWire(ExprWireDecl { to, expr, comment })),
-            }
+            items.push(parse_wire(ts, tp, rest, comment, lineno)?);
             Ok(())
         }
         // slug.Port = value — a Def write on an extern port.
@@ -1889,55 +1982,7 @@ fn parse_ident_statement(
             Tok::Eq,
             val,
         ] => {
-            let mut slugs: Vec<&String> = Vec::new();
-            for (k, t) in inner.iter().enumerate() {
-                match t {
-                    Tok::Ident(s) if k % 2 == 0 => {
-                        if slugs.contains(&s) {
-                            return Err(err(format!("`{s}` is listed twice")));
-                        }
-                        slugs.push(s);
-                    }
-                    Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
-                    _ => {
-                        return Err(err(format!(
-                            "expected `(<slug>, <slug>, …).{tp} = <value>`"
-                        )));
-                    }
-                }
-            }
-            if slugs.is_empty() {
-                return Err(err(format!(
-                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
-                )));
-            }
-            if matches!(tp.as_str(), "tiles" | "schedule" | "moods") {
-                return Err(err(format!(
-                    "`.{tp}` takes one object; write a statement per object"
-                )));
-            }
-            let value = value_of(val, lineno)?;
-            for (k, s) in slugs.into_iter().enumerate() {
-                let comment = if k == 0 { comment.clone() } else { None };
-                items.push(match Attr::parse(tp) {
-                    Some(attr) => Item::Attr(AttrDecl {
-                        slug: s.clone(),
-                        attr,
-                        value: value.clone(),
-                        comment,
-                        bulk: Some(lineno),
-                    }),
-                    None => Item::Set(SetDecl {
-                        target: PortRef {
-                            slug: s.clone(),
-                            port: tp.clone(),
-                        },
-                        value: value.clone(),
-                        comment,
-                        bulk: Some(lineno),
-                    }),
-                });
-            }
+            items.extend(parse_bulk(inner, tp, val, comment, lineno)?);
             Ok(())
         }
         // slug.title|room|category = value — an attribute claim (D39).
@@ -1973,6 +2018,121 @@ fn parse_ident_statement(
                 .into(),
         )),
     }
+}
+
+/// `slug.Port <- …`: a plain wire (`slug.Port` RHS) or an expression
+/// that desugars into gate/comparator blocks (D24).
+fn parse_wire(
+    ts: &str,
+    tp: &str,
+    rest: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<Item> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    if let Some(attr) = Attr::parse(tp) {
+        return Err(err(format!(
+            "`{ts}.{attr}` is an object attribute, not a port — attributes \
+             are assigned (`{ts}.{attr} = \"…\"`), never wired"
+        )));
+    }
+    if tp == "tiles" {
+        return Err(err(format!(
+            "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
+        )));
+    }
+    if tp == "schedule" {
+        return Err(err(format!(
+            "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
+        )));
+    }
+    if tp == "moods" {
+        return Err(err(format!(
+            "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
+        )));
+    }
+    let to = PortRef {
+        slug: ts.to_string(),
+        port: tp.to_string(),
+    };
+    if rest.is_empty() {
+        return Err(err(format!(
+            "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
+             expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
+             value, use `{ts}.{tp} = <value>`"
+        )));
+    }
+    match parse_expr(rest, lineno)? {
+        Expr::Atom(Operand::Port(from)) => Ok(Item::Wire(WireDecl { to, from, comment })),
+        Expr::Atom(Operand::Value(v)) => Err(err(format!(
+            "`{to} <- {v}` wires a constant — to assign a value, \
+             use `{to} = {v}`"
+        ))),
+        expr => Ok(Item::ExprWire(ExprWireDecl { to, expr, comment })),
+    }
+}
+
+/// `(a, b, …).Setting = value`: one setting or attribute for several
+/// objects (#199) — a statement per object, each remembering the line.
+fn parse_bulk(
+    inner: &[Tok],
+    tp: &str,
+    val: &Tok,
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<Vec<Item>> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let mut items = Vec::new();
+    let mut slugs: Vec<&String> = Vec::new();
+    for (k, t) in inner.iter().enumerate() {
+        match t {
+            Tok::Ident(s) if k % 2 == 0 => {
+                if slugs.contains(&s) {
+                    return Err(err(format!("`{s}` is listed twice")));
+                }
+                slugs.push(s);
+            }
+            Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
+            _ => {
+                return Err(err(format!(
+                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                )));
+            }
+        }
+    }
+    if slugs.is_empty() {
+        return Err(err(format!(
+            "expected `(<slug>, <slug>, …).{tp} = <value>`"
+        )));
+    }
+    if matches!(tp, "tiles" | "schedule" | "moods") {
+        return Err(err(format!(
+            "`.{tp}` takes one object; write a statement per object"
+        )));
+    }
+    let value = value_of(val, lineno)?;
+    for (k, s) in slugs.into_iter().enumerate() {
+        let comment = if k == 0 { comment.clone() } else { None };
+        items.push(match Attr::parse(tp) {
+            Some(attr) => Item::Attr(AttrDecl {
+                slug: s.clone(),
+                attr,
+                value: value.clone(),
+                comment,
+                bulk: Some(lineno),
+            }),
+            None => Item::Set(SetDecl {
+                target: PortRef {
+                    slug: s.clone(),
+                    port: tp.to_string(),
+                },
+                value: value.clone(),
+                comment,
+                bulk: Some(lineno),
+            }),
+        });
+    }
+    Ok(items)
 }
 
 struct ArgOutcome {
