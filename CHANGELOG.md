@@ -10,6 +10,12 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-10-31
+
+### Added
+- **`lxir` agent cases** (`crates/lxir/tools/agent`): sixteen requests in plain German, each with hidden `lxir test` blocks and a reference solution; `run.py` lets Claude Code solve them with the lxir skill and reports the pass rate
+  - `lxir test` now reads an input of a block without a model through its wires, so tests can expect on what the logic sends to an actuator (`VirtualOutCmd.I`)
+
 ## [0.39.0] — 2026-10-31 — the whole house under source
 
 Rules can be deleted from source (`removed`), app-made rules and existing virtual inputs can be adopted, and a push no longer stops on the custom change of a rule deleted in the app. On the test house, all page logic and all virtual inputs are now managed.
