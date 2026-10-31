@@ -1332,6 +1332,9 @@ assignment is stored only in the moods' `SID`s ([loxone-format.md](loxone-format
 
 A controller created from source has no moods until Loxone Config saves it. A claim on it first
 writes what that save would (the stock "Viel Licht" and "Aus" with their defaults), then the set.
+Its circuits have no actuator either: Loxone Config writes `NameAI<n>=` only from its mood editor. On
+the Miniserver such a circuit is a switch, and a percentage reads 1 on its output
+([loxone-format.md](loxone-format.md)). Dimming needs the circuits set up in Loxone Config.
 
 - The lock pins the UUID of every mood the compiler created until a base carries it
   ([lockfile-spec.md](lockfile-spec.md)).

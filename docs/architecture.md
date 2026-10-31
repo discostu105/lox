@@ -25,31 +25,19 @@ nav_order: 5
   (`crates/loxone-client`): everything that talks to a Miniserver — HTTP, token auth, the WebSocket state stream,
   FTP, statistics. It takes a `Connection` (host, credentials, token and cache paths), reads no config files and
   is published on [crates.io](https://crates.io/crates/loxone-client).
-- **[`loxl`](https://github.com/discostu105/lox/tree/main/crates/loxone-config)** (`crates/loxone-config`): Loxone config as code — a
-  lossless `.Loxone` XML layer, the UUID model, the `.loxl` language and compiler, lockfile and semantic diff. It
-  never touches the network and is published on [crates.io](https://crates.io/crates/loxone-config). `lox logic` runs its CLI;
-  the logic diffs, `lox config show/wiring/find/lint/history` and the TUI's wiring view are built on it.
+- **[`loxone-config`](https://github.com/discostu105/lox/tree/main/crates/loxone-config)** (`crates/loxone-config`):
+  Loxone config as code. It holds a lossless `.Loxone` XML layer, the UUID model, the `.loxl` language and compiler,
+  the lockfile and the semantic diff. It never touches the network and is published on
+  [crates.io](https://crates.io/crates/loxone-config). Its CLI runs as the `loxl` binary and as `lox logic`. The
+  logic diffs, `lox config show/wiring/find/lint/history` and the TUI's wiring view are built on it.
 
 TLS is rustls (no OpenSSL). Certificate verification is off unless `verify_ssl: true` is set, since Miniservers use
 self-signed certificates.
 
 ## Source structure
 
-| File | Purpose |
-|:-----|:--------|
-| `src/main.rs` | The top-level clap definitions (`Cli`, `Cmd`) and command dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
-| `src/commands/` | Command implementations, each module with its clap subcommand enum: `control`, `inspect`, `energy`, `system`, `access`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx`, `completions`, `schema` |
-| `src/util.rs` | Shared helpers |
-| `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery; `connection()` and `client()` build the loxone-client side |
-| `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
-| `src/inventory.rs` | Shared reads: sensor and energy-meter controls, a light controller's moods |
-| `src/otel.rs` | OpenTelemetry metrics, logs and traces |
-| `src/loxone_xml.rs` | Users, devices and a summary of the program file (views over loxone-config) |
-| `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over loxone-config |
-| `src/scene.rs` | Scenes from YAML |
-| `src/mcp/` | `lox mcp`: MCP server on rmcp |
-| `src/tui/` | `lox tui` (cargo feature `tui`, on by default) |
-| `crates/loxone-client/src/` | `client.rs` (`LoxClient`: HTTP, control resolution, structure cache), `connection.rs`, `error.rs`, `ws.rs`, `token.rs`, `stream.rs` (event tables, sessions), `ftp.rs`, `statv2.rs` (Statistics V2), `stats.rs`, `sdtest.rs`, `time.rs` |
+The source files and the rules between them (front-ends share layers, never each other) are listed in
+[AGENTS.md](https://github.com/discostu105/lox/blob/main/AGENTS.md#source-files).
 
 ## Control resolution
 
@@ -66,13 +54,25 @@ an error that lists the candidates.
 
 ## Structure cache
 
-The Miniserver's `LoxApp3.json` (~150KB) is cached per context with a 24-hour TTL. Every command that needs control
-UUIDs loads it first.
+The Miniserver's `LoxApp3.json` (~150KB) is cached per context (`~/.lox/contexts/<name>/cache/structure.json`) with a
+24-hour TTL. Every command that needs control UUIDs loads it first.
 
 ```bash
 lox cache info      # where it is, how old
 lox cache refresh   # force re-fetch
 ```
+
+## Automatic rules
+
+Automatic rules (autopilot) are made in the Loxone app. There is no API to run or edit them.
+
+- The structure file's `autopilot` key holds one container for all rules. The rules themselves are
+  `AutopilotRule` objects in the program file, so `lox autopilot ls` reads them through the `lox config` sources.
+- The container's two states arrive only in the WebSocket's initial state dump. HTTP answers 404.
+- `changed` is the unix time of the last rule change, not of the last run.
+- `history` is text: recent runs separated by `|`, each `YYYY-MM-DD HH:MM:SS <rule uuid> <rule name>` in local time.
+- A rule saved in the app lands in the Miniserver's custom changes, not in a new program file. An upload discards
+  it, so compare `lox autopilot changed` with the time of the download the upload is based on.
 
 ## Mixed sync/async runtime
 
@@ -116,17 +116,29 @@ Project-local (auto-discovered by walking up from cwd):
 
 ## Loxone interfaces used
 
-| Endpoint | Purpose |
-|:---------|:--------|
-| `GET /data/LoxApp3.json` | Full structure (controls, rooms, categories, global states) |
-| `GET /jdev/sps/io/{uuid}/{cmd}` | Send a command to a control |
-| `GET /dev/sps/io/{uuid}/all` | All state outputs of a control (XML) |
-| `GET /dev/sys/heap`, `/jdev/sys/…`, `/jdev/cfg/…`, `/jdev/bus/…`, `/jdev/lan/…` | Status and diagnostics |
-| `GET /binstatisticdata/{uuid}/{period}` | Legacy statistics |
-| `GET /dev/sps/getStatistic/…` | Statistics V2 |
-| `GET /data/weatheru.bin` | Weather data |
-| `GET /dev/fsget/{path}` | Filesystem access |
-| `WSS /ws/rfc6455` | WebSocket: token auth, state streaming |
-| FTP | Config download and upload (`/prog`) |
-| `UDP :7070` | Miniserver discovery |
-| `HTTP :7091/zone/{n}/{cmd}` | Music server (unofficial) |
+```
+GET /data/LoxApp3.json              → full structure (controls, rooms, categories, globalStates)
+GET /jdev/sps/io/{uuid}/{cmd}       → send command → JSON response
+GET /dev/sps/io/{uuid}/all          → XML: all state outputs for a control
+GET /dev/sps/io/{name}/state        → input state by name
+GET /dev/sys/heap, /dev/sps/state, /dev/cfg/version, /data/status  → status info
+GET /jdev/sys/lastcpu, numtasks, contextswitches, sdtest           → diagnostics
+GET /jdev/sys/ints, comints, contextswitchesi                      → additional diagnostics
+GET /jdev/cfg/ip, mac, mask, gateway, dns1, dns2, dhcp, ntp       → network config
+GET /jdev/bus/packetssent, packetsreceived, ..., parityerrors      → CAN bus stats
+GET /jdev/lan/txp, txe, txc, txu, rxp, rxo, eof, exh, nob        → LAN stats
+GET /jdev/sys/date, /jdev/sys/time                                 → system clock
+GET /jdev/sps/LoxAPPversion3        → structure file version check
+GET /binstatisticdata/{uuid}/{period} → binary statistics (u32 ts + f64[] values)
+GET /dev/sps/getStatistic/{uuid}/raw/{fromUtc}/{toUtc}/all/{group}[/{output}] → Statistics V2 (u32 unix ts + f64[])
+GET /data/weatheru.bin              → binary weather data (108-byte entries)
+GET /dev/fsget/{path}               → filesystem access
+GET /jdev/sys/checktoken, refreshtoken, killtoken                  → token management
+GET /jdev/sys/reboot                → reboot Miniserver
+GET /jdev/sps/restart, /jdev/sps/state → restart the program (loads sps_new.zip), PLC state (5 = running)
+GET /jdev/sys/updatetolatestrelease → firmware update
+WSS /ws/rfc6455                     → WebSocket: token auth key exchange, state streaming
+FTP /prog, /sys/custom              → config download and upload, custom changes
+UDP :7070                           → Miniserver discovery (broadcast)
+HTTP :7091/zone/{n}/{cmd}           → Music server API (unofficial)
+```

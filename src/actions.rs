@@ -211,7 +211,7 @@ impl Action {
         self.commands().pop().unwrap_or_default()
     }
 
-    /// Confirmation level (§9 of the TUI design).
+    /// How much confirmation the action needs before it runs.
     pub fn risk(&self) -> Risk {
         match self {
             Action::Door(_) => Risk::Confirm,
@@ -835,7 +835,7 @@ mod tests {
             cmds(&parse_thermostat("mode", Some("5"), None).unwrap()),
             ["setOperatingMode/5"]
         );
-        // comfort/eco are temperature modes; they used to send operating modes 2/3
+        // comfort/eco are temperature modes, not operating modes
         assert!(parse_thermostat("mode", Some("eco"), None).is_err());
         assert!(parse_thermostat("mode", Some("comfort"), None).is_err());
         assert!(parse_thermostat("mode", Some("9"), None).is_err());

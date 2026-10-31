@@ -1,4 +1,4 @@
-//! Terminal runtime (§8.2): owns the terminal, the event loop and the backend.
+//! Terminal runtime: owns the terminal, the event loop and the backend.
 //!
 //! The UI thread runs a plain synchronous loop — poll input, drain backend
 //! messages, tick, draw. Everything slow lives on a background tokio runtime
@@ -211,7 +211,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
     loxone_client::client::set_verbose(0);
     let prefs = load_prefs();
 
-    // theme: flag → --no-color → tui.yaml → NO_COLOR → detection (§6.1)
+    // theme: flag → --no-color → tui.yaml → NO_COLOR → detection
     let flag_theme = match &args.theme {
         Some(t) => Some(
             ThemeName::parse(t)

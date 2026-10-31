@@ -1,5 +1,5 @@
 //! View models: what a control looks like right now (glyph, value, meter) and
-//! what the action vocabulary (§4.3) does to it.
+//! what the action vocabulary does to it.
 //!
 //! Pure functions over `House` + `Store`, shared by every screen, the hint notches
 //! and the tests.
@@ -524,7 +524,7 @@ pub fn temp_frac(t: f64) -> f64 {
     ((t - 14.0) / 14.0).clamp(0.0, 1.0)
 }
 
-// ── Action vocabulary (§4.3) ────────────────────────────────────────────────
+// ── Action vocabulary ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Verb {

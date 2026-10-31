@@ -1,4 +1,4 @@
-//! DotMeter — btop's memory-style dotted meter `⣿⣿⣿⣿⣀⣀⣀` for capacities (§6.3).
+//! DotMeter — btop's memory-style dotted meter `⣿⣿⣿⣿⣀⣀⣀` for capacities.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

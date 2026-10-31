@@ -1,5 +1,5 @@
-//! The pure `update(app, msg) -> effects` (§8.3). No I/O happens here, so the
-//! journeys (J1–J12) and edge cases are plain unit tests.
+//! The pure `update(app, msg) -> effects`. No I/O happens here, so the
+//! journeys and edge cases are plain unit tests.
 
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -15,12 +15,12 @@ use super::vm::{self, Plan, Verb};
 use crate::actions::{Action, AlarmCmd, BlindCmd, Risk, ThermoCmd};
 use loxone_client::stream::StateEvent;
 
-/// Minimum terminal size (§6.4)
+/// Minimum terminal size
 pub const MIN_W: u16 = 80;
 pub const MIN_H: u16 = 24;
 /// Rooms shows the inspector as a third pane from this width
 pub const WIDE_ROOMS: u16 = 140;
-/// Presses of a non-repeating key closer than this are auto-repeat (§4.1 rule 8)
+/// Presses of a non-repeating key closer than this are auto-repeat
 const REPEAT_GAP: f64 = 0.6;
 const PENDING_TIMEOUT: f64 = 3.0;
 const BULK_CONFIRM: usize = 10;
@@ -205,7 +205,7 @@ fn set_conn(app: &mut App, conn: Conn) {
     let was_live = app.conn == Conn::Live;
     match &conn {
         Conn::Live => {
-            // the initial state dump is applied silently (§7.2)
+            // the initial state dump is applied silently
             app.store.quiet_until = app.now + 2.0;
             if app.conn != Conn::Connecting {
                 app.log_msg(false, "connection", "live again", None);
@@ -469,7 +469,7 @@ fn poll(app: &mut App, kind: PollKind) -> Effect {
     Effect::Poll { req, kind }
 }
 
-/// Pollers run only for what is visible (§5.6, §5.7); a closed view stops polling.
+/// Pollers run only for what is visible; a closed view stops polling.
 pub fn schedule(app: &mut App) -> Vec<Effect> {
     let mut out = Vec::new();
     let sys = app.screen == Screen::System;
@@ -1024,7 +1024,7 @@ fn show(app: &mut App, s: Screen) {
     }
 }
 
-/// Freeze the live room sort while the room list has focus (§7.2).
+/// Freeze the live room sort while the room list has focus.
 fn freeze_rooms(app: &mut App) {
     if app.screen == Screen::Rooms && app.rooms.pane == 0 && app.rooms.sort != RoomSort::Name {
         if app.rooms.frozen.is_none() {
@@ -1794,7 +1794,7 @@ fn send_all(app: &mut App, plans: Vec<Plan>) -> Vec<Effect> {
 }
 
 /// Absolute value steps (`+`/`-` held down) sent to the same control within
-/// one frame collapse into the last one (§4.1 rule 8). Everything else passes
+/// one frame collapse into the last one. Everything else passes
 /// through in order.
 pub fn coalesce(effects: Vec<Effect>) -> Vec<Effect> {
     let last: std::collections::HashMap<Cid, usize> = effects
@@ -1829,7 +1829,7 @@ fn optimistic_of(a: &Action) -> Option<f64> {
 
 fn send(app: &mut App, p: Plan) -> Option<Effect> {
     let step = optimistic_of(&p.action).is_some();
-    // A conflicting write while the first is unconfirmed waits (§7.3)
+    // A conflicting write while the first is unconfirmed waits
     if !step
         && let Some(pe) = app.pending.get(&p.cid)
         && pe.state == PendState::Sent
@@ -2565,7 +2565,7 @@ pub fn state_text(app: &App, cid: Cid, state: &str, pretty: bool) -> Option<Stri
     Some(t)
 }
 
-/// Keys of the history chart (§5.10).
+/// Keys of the history chart.
 fn chart_key(app: &mut App, c: ChartState, code: &str) -> Vec<Effect> {
     let w = app.ui.borrow().chart_w.max(1);
     let mut c2 = c.clone();
@@ -2946,7 +2946,7 @@ fn palette_key(app: &mut App, k: KeyEvent, code: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// Palette history (secrets never stored, §9).
+/// Palette history (secrets never stored).
 fn remember(app: &mut App, line: &str) {
     let line = line.trim().to_string();
     if line.is_empty() || line.contains("--code") || line.contains("--secured") {

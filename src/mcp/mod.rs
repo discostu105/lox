@@ -1,4 +1,4 @@
-//! `lox mcp` — Model Context Protocol server (issue #107).
+//! `lox mcp`: the Model Context Protocol server.
 //!
 //! Built on rmcp, the official Rust SDK. Speaks MCP 2026-07-28 (stateless
 //! `server/discover` lifecycle, multi-round-trip requests, cache hints) and

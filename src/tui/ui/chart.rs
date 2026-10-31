@@ -1,4 +1,4 @@
-//! The history chart overlay (§5.10): one control's statistics over a chosen
+//! The history chart overlay: one control's statistics over a chosen
 //! timeframe, optional extra series and the previous period, a cursor, and a
 //! summary per series.
 

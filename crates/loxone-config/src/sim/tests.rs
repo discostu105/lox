@@ -880,7 +880,8 @@ fn blind_refuses_its_unmodelled_inputs_and_outputs() {
 }
 
 /// A `LightController2` `o<n>` with a motion mood setting AQ1 to `q1`
-/// and AQ2 to 40 %, Move/Brightness/Reset wired from virtual inputs 1…3.
+/// and AQ2 to 40 %, Move/Brightness/Reset wired from virtual inputs 1…3;
+/// both circuits have an actuator (`NameAI<n>=`).
 fn lights(n: u32, q1: u32, extra: &[&str]) -> String {
     let mut ports = vec![
         "Move<p1-AQ",
@@ -895,7 +896,8 @@ fn lights(n: u32, q1: u32, extra: &[&str]) -> String {
         "OutputReset",
     ];
     ports.extend_from_slice(extra);
-    let block = obj(n, "LightController2", &ports);
+    let named = " NameAI0=\"Decke\" NameAI1=\"Spots\"";
+    let block = obj_attrs(n, "LightController2", named, &ports);
     let moods = format!(
         "<LightscenesC FC=\"0\" Outputs=\"18\" Num=\"2\">\r\n\
          <LightsceneC Name=\"Viel Licht\" UUID=\"m1\" Move=\"true\" Outputs=\"18\" SID=\"777\" \
@@ -962,8 +964,14 @@ fn lights_refuse_ambiguous_moods_and_unmodelled_inputs() {
     sim.set("p5-AQ", 1.0);
     sim.tick(1.0);
     let err = sim.check("p4-AQ1").unwrap_err();
+    assert!(err.contains("Lc1 on a circuit with an actuator"), "{err}");
+    let d = doc(&(vin(5) + &lights(4, 100, &["RtD<p5-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.set("p5-AQ", 1.0);
+    sim.tick(1.0);
+    let err = sim.check("p4-AQ1").unwrap_err();
     assert!(
-        err.contains("its input Lc1 (`I1`) is not simulated"),
+        err.contains("its input Rtd (`RtD`) is not simulated"),
         "{err}"
     );
     let d = doc(&obj(4, "LightController2", &["AQ1"]));
@@ -974,8 +982,14 @@ fn lights_refuse_ambiguous_moods_and_unmodelled_inputs() {
 /// A `LightController2` `o20` with the moods "Viel Licht" (777, motion),
 /// A (1, AQ1 20 %), B (2, 40 %), C (3, 60 %) and off, in that order — the
 /// probe of oracle session 35 — and M+ (p11), M− (p12), T5/1 (p13),
-/// T5/2 (p14), On (p15), Buzzer (p16), Off (p17), Mo (p18) wired.
+/// T5/2 (p14), On (p15), Buzzer (p16), Off (p17), Mo (p18) wired; AQ1
+/// has an actuator (`NameAI0=`).
 fn mood_lights(extra: &[&str]) -> String {
+    mood_lights_with(" NameAI0=\"Decke\"", extra)
+}
+
+/// [`mood_lights`] with the block's attributes `attrs`.
+fn mood_lights_with(attrs: &str, extra: &[&str]) -> String {
     let mut ports = vec![
         "InputTriggerUp<p11-AQ",
         "InputTriggerDown<p12-AQ",
@@ -992,7 +1006,7 @@ fn mood_lights(extra: &[&str]) -> String {
         "Scene",
     ];
     ports.extend_from_slice(extra);
-    let block = obj(20, "LightController2", &ports);
+    let block = obj_attrs(20, "LightController2", attrs, &ports);
     let mood = |name: &str, sid: &str, q1: u32, flag: &str| {
         format!(
             "<LightsceneC Name=\"{name}\" UUID=\"m{sid}\"{flag} Outputs=\"18\" SID=\"{sid}\" \
@@ -1087,49 +1101,296 @@ fn lights_on_and_buzzer_select_the_bright_mood() {
 
 #[test]
 fn lights_refuse_unverified_manual_operation() {
-    let refused = |steps: &dyn Fn(&mut Simulator)| {
-        let d = doc(&mood_lights(&[]));
+    let refused = |extra: &[&str], steps: &dyn Fn(&mut Simulator)| {
+        let d = doc(&mood_lights(extra));
         let mut sim = Simulator::new(&d);
         sim.check("p20-Scene").unwrap();
         steps(&mut sim);
         sim.check("p20-Scene").unwrap_err()
     };
-    let err = refused(&|sim| {
-        pulse(sim, "p11-AQ");
+    let err = refused(&[], &|sim| {
+        for _ in 0..4 {
+            pulse(sim, "p11-AQ");
+            sim.tick(0.1);
+        }
+    });
+    assert!(err.contains("4 clicks on M+"), "{err}");
+    let err = refused(&[], &|sim| {
+        pulse(sim, "p13-AQ");
         sim.tick(0.1);
         pulse(sim, "p11-AQ");
     });
-    assert!(err.contains("a double click on M+"), "{err}");
-    let err = refused(&|sim| {
+    assert!(err.contains("while another input's click is open"), "{err}");
+    let err = refused(&["SceneMixTime=0.2"], &|sim| {
         sim.set("p13-AQ", 1.0);
         sim.tick(0.1);
+        sim.tick(0.5);
+    });
+    assert!(err.contains("not longer than Tdc"), "{err}");
+    let err = refused(&[], &|sim| {
+        click(sim, "p11-AQ");
+        pulse(sim, "p11-AQ");
+        sim.tick(0.1);
+        pulse(sim, "p11-AQ");
         sim.tick(1.0);
-    });
-    assert!(err.contains("T5/1 held for 1 s"), "{err}");
-    let err = refused(&|sim| {
-        click(sim, "p13-AQ");
-        sim.tick(31.0);
-        click(sim, "p13-AQ");
-    });
-    assert!(err.contains("more than 30 s"), "{err}");
-    let err = refused(&|sim| {
-        for _ in 0..4 {
-            click(sim, "p13-AQ");
-        }
         click(sim, "p18-AQ");
     });
-    assert!(err.contains("switched off by M+, M−, T5 or Mood"), "{err}");
-    let err = refused(&|sim| {
+    assert!(
+        err.contains("motion after a double or triple click switched the lights off"),
+        "{err}"
+    );
+    let err = refused(&[], &|sim| {
         click(sim, "p18-AQ");
         click(sim, "p11-AQ");
     });
     assert!(err.contains("wait to go off"), "{err}");
-    let err = refused(&|sim| {
+    let err = refused(&[], &|sim| {
         sim.set("p15-AQ", 1.0);
         sim.tick(1.0);
         click(sim, "p11-AQ");
     });
     assert!(err.contains("while On or Buzzer is held"), "{err}");
+}
+
+#[test]
+fn lights_circuit_without_an_actuator_reads_1() {
+    // Live (#261): a circuit without `NameAI<n>=` is a switch; 20 %,
+    // 40 % and 60 % all read 1.
+    let d = doc(&mood_lights_with("", &[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let ups: Vec<_> = (0..5).map(|_| click(&mut sim, "p11-AQ")).collect();
+    assert_eq!(
+        ups,
+        [(99.0, 1.0), (1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (0.0, 0.0)]
+    );
+    // Alarm on such a circuit is untested.
+    let alarm = ["Alarm<p19-AQ", "AlarmPeriod=10", "AlarmBrightness=70"];
+    let d = doc(&(vin(19) + &mood_lights_with("", &alarm)));
+    let mut sim = Simulator::new(&d);
+    click(&mut sim, "p13-AQ");
+    sim.set("p19-AQ", 1.0);
+    sim.tick(0.1);
+    let err = sim.check("p20-Scene").unwrap_err();
+    assert!(err.contains("a circuit without an actuator"), "{err}");
+}
+
+#[test]
+fn lights_click_acts_tdc_after_the_press_or_on_release() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    // A 50 ms tap acts Tdc (0.35 s) after the press.
+    sim.set("p11-AQ", 1.0);
+    sim.tick(0.05);
+    sim.set("p11-AQ", 0.0);
+    sim.tick(0.05);
+    sim.tick(0.2);
+    assert_eq!(sim.read("p20-Scene"), 0.0, "0.25 s after the press");
+    sim.tick(0.1);
+    assert_eq!(sim.read("p20-Scene"), 99.0, "0.35 s after the press");
+    // Held longer, it acts on release: M+ has no long click.
+    sim.tick(1.0);
+    sim.set("p11-AQ", 1.0);
+    sim.tick(0.1);
+    sim.tick(1.5);
+    assert_eq!(sim.read("p20-Scene"), 99.0, "M+ held");
+    sim.set("p11-AQ", 0.0);
+    sim.tick(0.1);
+    assert_eq!(sim.read("p20-Scene"), 1.0);
+    // Two clicks 0.6 s apart are two single clicks.
+    sim.tick(1.0);
+    pulse(&mut sim, "p11-AQ");
+    sim.tick(0.5);
+    pulse(&mut sim, "p11-AQ");
+    sim.tick(1.0);
+    assert_eq!(sim.read("p20-Scene"), 3.0);
+}
+
+#[test]
+fn lights_double_and_triple_click_switch_off_and_pulse_2c_3c() {
+    let d = doc(&mood_lights(&["OutputReset", "OutputResetAll"]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let state = |sim: &Simulator| {
+        (
+            sim.read("p20-Scene"),
+            sim.read("p20-OutputReset"),
+            sim.read("p20-OutputResetAll"),
+        )
+    };
+    let clicks = |sim: &mut Simulator, port: &str, n: usize| {
+        for k in 0..n {
+            if k > 0 {
+                sim.tick(0.1);
+            }
+            pulse(sim, port);
+        }
+        sim.tick(1.0);
+        state(sim)
+    };
+    assert_eq!(clicks(&mut sim, "p13-AQ", 1), (1.0, 0.0, 0.0));
+    assert_eq!(
+        clicks(&mut sim, "p13-AQ", 2),
+        (0.0, 1.0, 0.0),
+        "from a mood"
+    );
+    sim.tick(0.1);
+    assert_eq!(state(&sim), (0.0, 0.0, 0.0), "2C pulses");
+    assert_eq!(clicks(&mut sim, "p11-AQ", 2), (0.0, 1.0, 0.0), "from off");
+    assert_eq!(clicks(&mut sim, "p11-AQ", 1), (99.0, 0.0, 0.0));
+    assert_eq!(clicks(&mut sim, "p11-AQ", 3), (0.0, 1.0, 1.0), "triple");
+    sim.tick(0.1);
+    assert_eq!(state(&sim), (0.0, 0.0, 0.0));
+}
+
+/// T5 `port` held for `s` s: the mood while held, then after release.
+fn long_click(sim: &mut Simulator, port: &str, s: f64) -> (f64, f64) {
+    sim.set(port, 1.0);
+    sim.tick(0.1);
+    sim.tick(s);
+    let held = sim.read("p20-Scene");
+    sim.set(port, 0.0);
+    sim.tick(1.0);
+    (held, sim.read("p20-Scene"))
+}
+
+#[test]
+fn lights_long_t5_click_selects_mixes_and_unmixes() {
+    let d = doc(&mood_lights_with("", &[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    // From off it selects the mood while held (Mmd 1 s).
+    assert_eq!(
+        long_click(&mut sim, "p13-AQ", 0.8),
+        (0.0, 1.0),
+        "short of Mmd"
+    );
+    click(&mut sim, "p17-AQ");
+    assert_eq!(long_click(&mut sim, "p13-AQ", 1.0), (1.0, 1.0));
+    // With a mood on it mixes the other in: M −3 …
+    assert_eq!(long_click(&mut sim, "p14-AQ", 1.0), (-3.0, -3.0));
+    assert_eq!(sim.read("p20-AQ1"), 1.0);
+    // … and takes a mood of the mix out again.
+    assert_eq!(long_click(&mut sim, "p14-AQ", 1.0), (1.0, 1.0));
+    // A short click during a mix selects that mood alone.
+    long_click(&mut sim, "p14-AQ", 1.0);
+    assert_eq!(click(&mut sim, "p14-AQ").0, 2.0);
+    // The last mood out switches off.
+    assert_eq!(long_click(&mut sim, "p14-AQ", 1.0), (0.0, 0.0));
+    assert_eq!(sim.read("p20-AQ1"), 0.0);
+}
+
+#[test]
+fn lights_t5_steps_on_within_30_s_after_that_only_from_its_mood() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    assert_eq!(click(&mut sim, "p13-AQ").0, 1.0);
+    assert_eq!(click(&mut sim, "p13-AQ").0, 2.0);
+    sim.tick(31.0);
+    assert_eq!(click(&mut sim, "p13-AQ").0, 1.0, "B shows: back to A");
+    sim.tick(31.0);
+    assert_eq!(click(&mut sim, "p13-AQ").0, 2.0, "A shows: on to B");
+}
+
+#[test]
+fn lights_manual_step_to_off_holds_motion_back_for_pto() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    for _ in 0..4 {
+        click(&mut sim, "p13-AQ");
+    }
+    assert_eq!(sim.read("p20-Scene"), 0.0);
+    // Motion within Pto (300 s) is ignored and restarts it.
+    sim.tick(200.0);
+    assert_eq!(click(&mut sim, "p18-AQ").0, 0.0);
+    sim.tick(250.0);
+    assert_eq!(click(&mut sim, "p18-AQ").0, 0.0);
+    sim.tick(310.0);
+    assert_eq!(click(&mut sim, "p18-AQ").0, 99.0);
+}
+
+#[test]
+fn lights_lc_toggles_its_circuit_and_m_shows_0() {
+    let lc = ["I1<p19-AQ", "I2<p21-AQ", "AQ2"];
+    let d = doc(&(vin(19) + &vin(21) + &mood_lights_with("", &lc)));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let lights = |sim: &Simulator| {
+        (
+            sim.read("p20-Scene"),
+            sim.read("p20-AQ1"),
+            sim.read("p20-AQ2"),
+        )
+    };
+    click(&mut sim, "p13-AQ");
+    assert_eq!(lights(&sim), (1.0, 1.0, 0.0));
+    click(&mut sim, "p21-AQ");
+    assert_eq!(lights(&sim), (0.0, 1.0, 1.0), "Lc2 on, AQ1 stays");
+    click(&mut sim, "p19-AQ");
+    assert_eq!(lights(&sim), (0.0, 0.0, 1.0), "Lc1 off");
+    click(&mut sim, "p19-AQ");
+    assert_eq!(lights(&sim), (0.0, 1.0, 1.0));
+    // A mood afterwards is untested.
+    click(&mut sim, "p13-AQ");
+    let err = sim.check("p20-Scene").unwrap_err();
+    assert!(err.contains("after Lc or MBr set circuits"), "{err}");
+}
+
+#[test]
+fn lights_mbr_acts_on_a_change_like_a_manual_change() {
+    let d = doc(&(vin(19) + &mood_lights_with("", &["MasterBr<p19-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let mut master = |v: f64| {
+        sim.set("p19-AQ", v);
+        sim.tick(0.5);
+        (sim.read("p20-Scene"), sim.read("p20-AQ1"))
+    };
+    // While every light is off it changes nothing …
+    assert_eq!(master(0.0), (0.0, 0.0));
+    assert_eq!(master(50.0), (0.0, 0.0));
+    assert_eq!(master(0.0), (0.0, 0.0));
+    // … and a mood selected while MBr is 0 lights normally.
+    assert_eq!(click(&mut sim, "p13-AQ"), (1.0, 1.0));
+    let mut master = |v: f64| {
+        sim.set("p19-AQ", v);
+        sim.tick(0.5);
+        (sim.read("p20-Scene"), sim.read("p20-AQ1"))
+    };
+    assert_eq!(master(50.0), (0.0, 1.0));
+    assert_eq!(master(0.0), (0.0, 0.0));
+    assert_eq!(master(100.0), (0.0, 1.0));
+    // On a circuit with an actuator its value is untested.
+    let d = doc(&(vin(19) + &mood_lights(&["MasterBr<p19-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.tick(0.5);
+    click(&mut sim, "p13-AQ");
+    sim.set("p19-AQ", 50.0);
+    sim.tick(0.5);
+    let err = sim.check("p20-Scene").unwrap_err();
+    assert!(
+        err.contains("MBr on AQ1, a circuit with an actuator"),
+        "{err}"
+    );
+}
+
+#[test]
+fn lights_disp_ignores_motion() {
+    let d = doc(&(vin(5) + &lights(4, 100, &["EnMove<p5-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p4-AQ1").unwrap();
+    sim.set("p5-AQ", 1.0);
+    sim.tick(0.5);
+    pulse(&mut sim, "p1-AQ");
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ1"), 0.0, "DisP 1");
+    sim.set("p5-AQ", 0.0);
+    sim.tick(0.5);
+    pulse(&mut sim, "p1-AQ");
+    assert_eq!(sim.read("p4-AQ1"), 100.0, "DisP 0");
 }
 
 #[test]

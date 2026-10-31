@@ -250,9 +250,10 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   (switches, inputs, jalousies, central blocks, meters, …) and names the rest; a save from Loxone
   Config lists those.
 - **Tests simulate documented behavior only** ([simulator.md](simulator.md)) and name any block or
-  input in the way. A lighting controller simulates motion, Off, M+/M−, single clicks on T5, Mood, On,
-  Buzzer, Alarm (set Afi and MaxAbr) and output M. Double clicks, long clicks, Lc1–8 and motion after
-  a manual step to off are refused.
+  input in the way. A lighting controller simulates motion, DisP, Off, M+/M−, T5 (single, double and
+  triple clicks, long clicks and mixing, the 30 s rule), Mood, On, Buzzer, Lc1–8, MBr, Alarm (set Afi
+  and MaxAbr) and output M, as a Miniserver did in a live test. A circuit without an actuator reads 1
+  for any percentage, and a controller created from source has none.
 
 ## Errors and remedies
 

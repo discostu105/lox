@@ -530,8 +530,7 @@ mod tests {
         assert_eq!(loaded.aliases.get("light"), Some(&"some-uuid".to_string()));
     }
 
-    /// With `LOX_CONFIG` set, `save()` writes that file, not `~/.lox/config.yaml`
-    /// (it used to overwrite the global config).
+    /// With `LOX_CONFIG` set, `save()` writes that file, not `~/.lox/config.yaml`.
     #[test]
     fn save_writes_to_lox_config() {
         let _guard = ENV_LOCK.lock().unwrap();

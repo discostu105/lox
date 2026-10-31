@@ -1,4 +1,4 @@
-//! ⁵ System — overview, devices, bus & LAN, log, config history, update (§5.6).
+//! ⁵ System — overview, devices, bus & LAN, log, config history, update.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

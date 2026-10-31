@@ -1,4 +1,4 @@
-//! ³ Events — the live feed, newest at the bottom like `tail -f` (§5.4).
+//! ³ Events — the live feed, newest at the bottom like `tail -f`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

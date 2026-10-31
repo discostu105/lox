@@ -1382,6 +1382,10 @@ its own evidence; these are leads, marked by how far they hold.
     18 on every observed controller. `<LSConfig OpM= ScMv= ScAc=>` names
     moods by `SID`.
   - **`Q<n>` belongs to circuit `AQ<n>`**, whose name is `NameAI<n-1>`.
+    A circuit without `NameAI<n-1>=` (no actuator, as on a controller
+    created from source) is a switch on the Miniserver: moods of 20 %,
+    40 % and 60 % all read 1 on its output (a live test on a Miniserver,
+    [oracle-sessions.md](oracle-sessions.md)).
     Its top four bits are a property of the circuit, never of the mood:
     132 corpus files, 648 circuit columns, 0 disagreements. The prefixes:
     - 0: switch 0/1, or a plain dimmer 0–100.

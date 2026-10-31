@@ -1,4 +1,4 @@
-//! Untrusted-text handling and cell-width helpers (§7.3 "Untrusted text").
+//! Untrusted-text handling and cell-width helpers.
 //!
 //! Every string that comes from the Miniserver or the config (names, log lines,
 //! text states) goes through [`clean`] before it is drawn, so a crafted name can't
