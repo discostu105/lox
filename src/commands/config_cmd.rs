@@ -14,7 +14,7 @@ use crate::scene::Scene;
 use crate::util::json_val_str;
 use crate::{custom_changes, ftp, gitops, loxone_xml};
 use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
-use loxone_client::system::check_ll;
+use loxone_client::system::{check_ll, code_of};
 use loxone_client::token;
 use loxone_config::archive;
 
@@ -400,10 +400,8 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             // Hash the token with the key for the check endpoint
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
-            let code = resp
-                .pointer("/LL/Code")
-                .and_then(json_val_str)
-                .unwrap_or_else(|| "?".to_string());
+            // a Gen 1 string or a Gen 2 number; shown as text either way
+            let code = code_of(&resp).map_or_else(|| "?".to_string(), |c| c.to_string());
             if ctx.json {
                 println!(
                     "{}",
