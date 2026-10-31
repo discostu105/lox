@@ -797,6 +797,20 @@ fn the_container_watches_what_the_rules_watch() {
     assert!(co.contains("FLG=\"1\""), "{co}");
     // Stable; back to the old rules, only the weekday stays watched.
     assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    // Rules the compile does not change leave the list as the base has
+    // it, even none at all (a corpus config, #224); a changed rule
+    // derives it again.
+    let bare = out.replace(
+        co,
+        "<Co K=\"Input\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\">",
+    );
+    let bare = bare.replace(
+        "<Co K=\"Input\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\"></Co>",
+        "<Co K=\"Input\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\"/>",
+    );
+    assert!(!bare.contains("FLG=\"1\""), "{bare}");
+    assert_eq!(compile_rules(&bare, &src).unwrap(), bare);
+    assert!(compile_rules(&bare, AS_READ).unwrap().contains("FLG=\"1\""));
     let back = compile_rules(&out, AS_READ).unwrap();
     assert!(
         back.contains(

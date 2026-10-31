@@ -57,6 +57,12 @@ types) contradict each other. Results and methodology:
       `LOXL_CORPUS=corpus/web cargo test --release --test corpus`
       re-checks every admitted classification against every corpus
       config.
+- [x] Pinned corpus green (2026-10-31, #224, #225): two more `OutputAPI`
+      counterexamples flipped to `Api` (`LightController2` ×6 API
+      links, `MeterAbsSt` ×1 — [connector-db.md](connector-db.md)); the
+      access fixpoint test lifts every block as an extern (the keypads
+      are a managed type); rules the compile leaves unchanged no longer
+      rewrite the AutoPilot watch list (D73 amended).
 - [x] Demand-ranked batch (2026-10-29): `OnPulseDelay`, `OffDelay`,
       `OnDelay`, `StairwayLS`, `EdgeDetection`, `AnalogMultiplexer2`,
       `SRFlipFlop`, `State` — the most-needed unmintable types by

@@ -311,7 +311,9 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   condition, the mode's `Q` for a mode condition; a time condition adds
   none. A save writes them in reverse document order of the rules'
   conditions, each once (oracle session 31). Older corpus files mark
-  them `Hidden="true"`.
+  them `Hidden="true"`; one corpus config (V254, two rules on states
+  and a mode) has none at all. Why is not known; Lox Logic leaves such
+  a list alone until a compile changes the rules (D73).
 - **Rule element**: `Nio="7"` with connectors in index order
   `InputTrigger, Reset, On, run, Q, A, OutputAPI` (matching the app's
   documented Tr/R/O inputs and status outputs), an `<IoData>` child,

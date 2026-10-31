@@ -709,8 +709,34 @@ pub(crate) fn apply(
             _ => {}
         }
     }
-    watch_inputs(doc);
     Ok(())
+}
+
+/// Every rule's payload, by rule UUID: what [`watch`] compares.
+fn payloads(doc: &LoxoneDoc) -> BTreeMap<String, Option<String>> {
+    doc.objects()
+        .iter()
+        .filter(|o| o.block_type == RULE_BLOCK_TYPE)
+        .map(|o| {
+            let apc = doc
+                .element_at(&o.path)
+                .and_then(|el| el.attr("APC"))
+                .map(str::to_string);
+            (o.uuid.clone(), apc)
+        })
+        .collect()
+}
+
+/// Re-derives the AutoPilot container's watch list ([`watch_inputs`])
+/// when the compile changed the rules: rewrote a payload, created or
+/// deleted a rule (D73). Rules as the base has them leave the list as
+/// the base has it — the list is what a save derives from the rules, and
+/// a compile that changes none has nothing new to derive (the corpus has
+/// a config whose rules have no list at all, #224).
+pub(crate) fn watch(base: &LoxoneDoc, doc: &mut LoxoneDoc) {
+    if payloads(base) != payloads(doc) {
+        watch_inputs(doc);
+    }
 }
 
 /// The AutoPilot container's `Input` wires: Loxone Config wires every

@@ -128,9 +128,17 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         let name = path.display();
         let bytes = std::fs::read(path).unwrap();
         let base = LoxoneDoc::parse(&bytes).unwrap();
+        // Every block as an extern: the declarations alone are under test.
+        // (`NfcCodeTouch` is a managed type; with the default options a
+        // keypad with wires lifts as a block, which this module of externs
+        // and access declarations would not carry.)
+        let view_opts = DecompileOptions {
+            managed_types: Default::default(),
+            ..DecompileOptions::default()
+        };
         // Some views do not validate (unrelated to access); those configs
         // cannot show a declaration.
-        let Ok((view, _)) = decompile(&base, &DecompileOptions::default()) else {
+        let Ok((view, _)) = decompile(&base, &view_opts) else {
             continue;
         };
         let access: Vec<&AccessDecl> = view.access_decls().collect();

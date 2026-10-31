@@ -1933,6 +1933,7 @@ pub fn compile(
     lock.rules = super::rule::create(&mut doc, module, &uuid_of, &lock.rules, &mut minter)?;
     uuid_of.extend(lock.rules.iter().map(|(s, u)| (s.clone(), u.clone())));
     super::rule::apply(&mut doc, module, &uuid_of)?;
+    super::rule::watch(base, &mut doc);
     // LightController2 moods (D58): the claimed `<LightscenesC>` list; a
     //     new mood mints its UUID (pinned in the lock until the base has
     //     it).
