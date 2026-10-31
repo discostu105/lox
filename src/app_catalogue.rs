@@ -1,10 +1,9 @@
 //! The app catalogue in a config ZIP: `LoxAPP3.json`, which Loxone Config
 //! writes next to `sps0.LoxCC` and the Miniserver serves as
 //! `/data/LoxApp3.json` (the structure the app and `lox` read). The
-//! Miniserver does not rebuild it on start (2026-10-29: a push that added
-//! objects left the served catalogue at the `lastModified` of the last save,
-//! #155), so `lox config push` carries the changes to the app's controls
-//! into it ([`loxone_config::catalogue`]) and names what it cannot.
+//! Miniserver does not rebuild it on start, so `lox config push` carries the
+//! changes to the app's controls into it ([`loxone_config::catalogue`]) and
+//! names what it cannot.
 
 use anyhow::{Context, Result};
 use loxone_config::LoxoneDoc;

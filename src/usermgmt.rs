@@ -499,9 +499,8 @@ fn needs_user_management(e: impl Into<anyhow::Error>) -> anyhow::Error {
             .is_some_and(|c| matches!(c.code.as_str(), "401" | "403"));
     if refused {
         e.context(
-            "the Miniserver refused to show its user management — the user lox connects \
-             with needs the right to manage users (an admin); change it with \
-             `lox setup set --user <admin>`",
+            "the Miniserver refused to show its user management. Connect as a user with the \
+             right to manage users: `lox setup set --user <admin>`",
         )
     } else {
         e
@@ -1068,15 +1067,15 @@ pub fn check_access(
             if cu.last_edit.is_some() && user.last_edit.is_some() && cu.last_edit != user.last_edit
             {
                 warnings.push(
-                    "the user was changed after the program file was saved — rights edited \
-                     since are not in it; save in Loxone Config or check again after the next save"
+                    "the user was changed after the program file was saved, so newer rights \
+                     are missing. Save in Loxone Config and check again"
                         .into(),
                 );
             }
         }
         None => warnings.push(
-            "the user is not in the program file (created after it was saved?) — direct rights \
-             cannot be checked"
+            "the user is not in the program file (created after it was saved?), so direct \
+             rights cannot be checked"
                 .into(),
         ),
     }
@@ -1149,8 +1148,8 @@ pub fn check_access(
         (
             Verdict::UnknownFullAccess,
             format!(
-                "no access right; the user is in the full-access group {} — not verified to open \
-                 Code Touches, give the user an access right to be sure",
+                "no access right, only the full-access group {}, which may not open Code \
+                 Touches. Give the user an access right to be sure",
                 full_access.join(", ")
             ),
         )
@@ -1618,7 +1617,7 @@ mod tests {
         let carol = user("carol", CAROL, &[("Full access", FULL)], 1, 0);
         let c = check_access(&carol, &[], &m, &touch(None), 0);
         assert_eq!(c.verdict, Verdict::UnknownFullAccess, "{}", c.reason);
-        assert!(c.reason.contains("not verified"));
+        assert!(c.reason.contains("may not open"));
         // without the full-access group, the 'Never' right is no right
         let carol = user("carol", CAROL, &[], 1, 0);
         let listed = vec![Principal {

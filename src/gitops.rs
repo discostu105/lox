@@ -86,7 +86,6 @@ pub fn init(path: &Path, cfg: &Config) -> Result<PathBuf> {
         git(&repo, &["config", "user.email", "lox@localhost"])?;
     }
 
-    // Write .gitignore
     let gitignore = repo.join(".gitignore");
     if !gitignore.exists() {
         std::fs::write(&gitignore, "# lox config gitops\n*.tmp\n")?;
@@ -100,7 +99,6 @@ pub fn init(path: &Path, cfg: &Config) -> Result<PathBuf> {
         }
     }
 
-    // Create the miniserver subdirectory
     let ms = ms_dir(cfg);
     let ms_path = repo.join(&ms);
     std::fs::create_dir_all(&ms_path)?;

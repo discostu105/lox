@@ -1086,7 +1086,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Get wiring",
-        description = "Why does a control behave the way it does? Shows the Loxone Config logic around a control or logic block: what is wired to its inputs and outputs (sensors, other blocks, hardware), its non-default parameters, and with `trace` the whole path up to the sensors or down to the actuators. With `live` it also fills in the current value on every wire whose source is a state the app streams (and the control's own formatted value), so one call answers \"why is this light on?\"; wires without such a source have no value. Read-only.",
+        description = "Why does a control behave the way it does? Shows the Loxone Config logic around a control or logic block: what feeds its inputs and outputs, and its non-default parameters. `trace` follows the path up to the sensors or down to the actuators. `live` adds the current value on each wire where one is streamed. Read-only.",
         output_schema = schema_for_output::<ops::Wiring>(),
         annotations(read_only_hint = true, open_world_hint = false)
     )]
@@ -1167,7 +1167,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Check door access",
-        description = "Why may (or may not) a user open an NFC Code Touch? Joins the live user (state, groups, NFC tags, access codes) with the access rights in the Loxone Config program. Verdict per Code Touch: granted (with schedule, direct or via a group), no-access-right, no-credential, user-disabled, or unknown-full-access (only the full-access group, not verified to open doors). Warnings flag where the program file and the live state disagree.",
+        description = "Why may (or may not) a user open an NFC Code Touch? Checks the live user against the access rights in the Loxone Config program. Verdict per Code Touch: granted, no-access-right, no-credential, user-disabled or unknown-full-access. Warnings flag where the program file and the live state disagree.",
         output_schema = schema_for_output::<crate::usermgmt::AccessReport>(),
         annotations(read_only_hint = true, open_world_hint = false)
     )]
@@ -1451,7 +1451,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Learn NFC tag",
-        description = "Read an NFC tag's ID at an NFC Code Touch (its learn mode). Tell the user BEFORE calling: have the NFC tag or the unlocked phone ready and hold it to the reader right after confirming — learn mode waits timeout_secs (default 60). Returns the ID and, for a known tag, its name and user; a tag that is already paired opens the door instead of being learned. Learn mode always ends again. Pair the tag with assign_nfc_tag. A secured Code Touch needs the visualization password in LOX_VISU_PASSWORD or the config's visu_password_file (never ask the user for it). High-risk: the user is asked to confirm.",
+        description = "Read an NFC tag's ID at an NFC Code Touch. Before calling, tell the user to have the tag or unlocked phone ready to hold to the reader. It waits timeout_secs (default 60). Returns the ID and, for a known tag, its name and user. A tag that is already paired opens the door instead. Pair it with assign_nfc_tag. A secured Code Touch needs LOX_VISU_PASSWORD or visu_password_file. Never ask the user for it. High-risk: the user is asked to confirm.",
         output_schema = schema_for_output::<LearnedTag>(),
         annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false)
     )]

@@ -139,12 +139,10 @@ fn ctx_add(
 
     global.contexts.insert(name.clone(), entry);
 
-    // If no active context is set, make this one active
     if global.active_context.is_none() {
         global.active_context = Some(name.clone());
     }
 
-    // Create the context data directory
     let data_dir = Config::context_data_dir(&name);
     fs::create_dir_all(data_dir.join("cache"))?;
 
@@ -296,14 +294,12 @@ fn ctx_remove(ctx: &RunContext, name: String) -> Result<()> {
         bail!("Context '{}' not found", name);
     }
 
-    // Clear active if it was the removed context
     if global.active_context.as_deref() == Some(&name) {
         global.active_context = None;
     }
 
     global.save()?;
 
-    // Optionally remove context data directory
     let data_dir = Config::context_data_dir(&name);
     if data_dir.exists() {
         let _ = fs::remove_dir_all(&data_dir);
@@ -327,19 +323,16 @@ fn ctx_rename(ctx: &RunContext, old: String, new: String) -> Result<()> {
         .with_context(|| format!("Context '{}' not found", old))?;
 
     if global.contexts.contains_key(&new) {
-        // Put it back
         global.contexts.insert(old, entry);
         bail!("Context '{}' already exists", new);
     }
 
     global.contexts.insert(new.clone(), entry);
 
-    // Update active context reference
     if global.active_context.as_deref() == Some(&old) {
         global.active_context = Some(new.clone());
     }
 
-    // Rename data directory
     let old_dir = Config::context_data_dir(&old);
     let new_dir = Config::context_data_dir(&new);
     if old_dir.exists() {
@@ -374,11 +367,9 @@ fn ctx_init(
         bail!("Project-local .lox/ already exists in {}", cwd.display());
     }
 
-    // Create directory structure
     fs::create_dir_all(lox_dir.join("cache"))?;
     fs::create_dir_all(lox_dir.join("scenes"))?;
 
-    // Create config.yaml (with provided values or empty placeholders)
     let cfg = Config {
         host: host.unwrap_or_default(),
         user: user.unwrap_or_default(),
@@ -391,7 +382,6 @@ fn ctx_init(
     #[cfg(unix)]
     let _ = fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600));
 
-    // Create .gitignore
     let gitignore = "# Secrets — never commit\nconfig.yaml\ntoken.json\n\n# Cache — regenerated automatically\ncache/\n";
     fs::write(lox_dir.join(".gitignore"), gitignore)?;
 
@@ -439,14 +429,12 @@ fn ctx_migrate(ctx: &RunContext) -> Result<()> {
     let data_dir = Config::context_data_dir("default");
     fs::create_dir_all(data_dir.join("cache"))?;
 
-    // Move existing cache
     let old_cache = Config::dir().join("cache").join("structure.json");
     let new_cache = data_dir.join("cache").join("structure.json");
     if old_cache.exists() {
         fs::rename(&old_cache, &new_cache)?;
     }
 
-    // Move existing token
     let old_token = Config::dir().join("token.json");
     let new_token = data_dir.join("token.json");
     if old_token.exists() {
