@@ -25,7 +25,7 @@ fn yes_no(b: bool) -> &'static str {
 }
 
 pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
-    let lox = LoxClient::new(Config::load()?)?;
+    let lox = Config::load()?.client()?;
     match action {
         UserCmd::Ls => {
             let mut users = usermgmt::user_list(&lox)?;
@@ -75,7 +75,7 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
             if ctx.json {
                 return print_json(&u);
             }
-            let time = |t: Option<i64>| t.map(crate::lox_timestamp_to_string);
+            let time = |t: Option<i64>| t.map(crate::util::lox_timestamp_to_string);
             println!("{}", u.name);
             println!("  {:<13} {}", "UUID", u.uuid);
             if !u.description.is_empty() {
@@ -90,7 +90,7 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
             }
             println!("  {:<13} {}", "Admin", yes_no(u.is_admin));
             // lastEdit counts from 2009-01-01 UTC, unlike the validity times
-            if let Some(t) = u.last_edit.map(crate::lox_utc_timestamp_to_string) {
+            if let Some(t) = u.last_edit.map(crate::util::lox_utc_timestamp_to_string) {
                 println!("  {:<13} {}", "Last edit", t);
             }
             if let Some(t) = &u.trust_member {
@@ -277,7 +277,8 @@ fn cmd_learn(
     yes: bool,
 ) -> Result<()> {
     let timeout = learn_timeout(timeout)?;
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let cfg = Config::load()?;
+    let mut lox = cfg.client()?;
     let mut target = nfc_learn::target(&mut lox, code_touch)?;
     let owner = match user {
         Some(q) => Some(usermgmt::resolve_user(&lox, q)?),
@@ -307,9 +308,9 @@ fn cmd_learn(
         bail!("pairing the tag requires --yes: there is no terminal to confirm it on");
     }
     if target.secured {
-        target.visu_password = match crate::visu::from_settings(visu_password_file, &lox.cfg)? {
+        target.visu_password = match crate::visu::from_settings(visu_password_file, &cfg)? {
             Some(pw) => Some(pw),
-            None if can_ask(ctx) => Some(crate::visu::prompt(&lox.cfg.user)?),
+            None if can_ask(ctx) => Some(crate::visu::prompt(&cfg.user)?),
             None => return Err(target.needs_password().expect("secured, no password")),
         };
     }
@@ -323,7 +324,8 @@ fn cmd_learn(
     }
     let rt = tokio::runtime::Runtime::new()?;
     let learned = rt.block_on(async {
-        let mut session = crate::stream::Session::open(&lox.cfg, Duration::from_secs(20)).await?;
+        let mut session =
+            crate::stream::Session::open(&cfg.connection(), Duration::from_secs(20)).await?;
         let ctrl_c = async {
             // without a handler, never fire (Ctrl-C then ends the process)
             if tokio::signal::ctrl_c().await.is_err() {
@@ -391,7 +393,7 @@ fn pair_learned(
 pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
     match action {
         AccessCmd::Log { code_touch, lines } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let mut lox = Config::load()?.client()?;
             let log = usermgmt::read_access_log(&mut lox, &code_touch, lines)?;
             if ctx.json {
                 return print_json(&log);
@@ -439,7 +441,7 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
             }
         }
         AccessCmd::Perms { control } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let mut lox = Config::load()?.client()?;
             let p = usermgmt::read_control_permissions(&mut lox, &control)?;
             if ctx.json {
                 return print_json(&p);
@@ -481,9 +483,10 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
             code_touch,
             src,
         } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let cfg = Config::load()?;
+            let mut lox = cfg.client()?;
             let u = usermgmt::resolve_user(&lox, &user)?;
-            let snap = load_config(&lox.cfg, &src)?;
+            let snap = load_config(&cfg, &src)?;
             let report = usermgmt::access_report(
                 &mut lox,
                 &u,

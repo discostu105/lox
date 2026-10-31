@@ -35,7 +35,9 @@ self-signed certificates.
 |:-----|:--------|
 | `src/main.rs` | clap definitions and command dispatch; `lox ir` hands its arguments to `lxir::cli` |
 | `src/commands/` | Command implementations: `control`, `inspect`, `system`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx` |
+| `src/connection.rs` | `Connection`: host, credentials, TLS and the token/cache paths, built by `Config::connection()`; the transport modules take it instead of `Config` |
 | `src/client.rs` | `LoxClient` (HTTP): control resolution, structure cache |
+| `src/util.rs`, `src/stats.rs`, `src/sdtest.rs` | Shared helpers; statistics and weather files; the SD card test |
 | `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery |
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
 | `src/stream.rs`, `src/ws.rs`, `src/token.rs` | WebSocket state streaming, the connection, token auth |

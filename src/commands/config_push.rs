@@ -46,7 +46,6 @@
 //! byte-identical to DOWNLOAD, and the compile uses the patched base.
 
 use crate::app_catalogue::{self, StaleEntry};
-use crate::client::LoxClient;
 use crate::config::Config;
 use crate::custom_changes::{self, CustomChange};
 use crate::{ftp, logic};
@@ -105,7 +104,7 @@ impl Miniserver for LiveMiniserver {
 
     fn live_users(&self) -> Result<Vec<crate::usermgmt::User>> {
         use crate::usermgmt::{user, user_list};
-        let lox = LoxClient::new(self.cfg.clone())?;
+        let lox = self.cfg.client()?;
         user_list(&lox)?
             .iter()
             .map(|u| user(&lox, &u.uuid))
@@ -113,24 +112,24 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn download_newest(&self) -> Result<(String, Vec<u8>)> {
-        let newest = ftp::list_backups(&self.cfg)?
+        let newest = ftp::list_backups(&self.cfg.connection())?
             .into_iter()
             .next()
             .context("No configs found on the Miniserver")?;
-        let data = ftp::download_backup(&self.cfg, &newest.filename)?;
+        let data = ftp::download_backup(&self.cfg.connection(), &newest.filename)?;
         Ok((newest.filename, data))
     }
 
     fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
-        ftp::download_custom_changes(&self.cfg)
+        ftp::download_custom_changes(&self.cfg.connection())
     }
 
     fn upload(&self, zip: &[u8]) -> Result<()> {
-        ftp::upload_config(&self.cfg, zip)
+        ftp::upload_config(&self.cfg.connection(), zip)
     }
 
     fn restart_program(&self) -> Result<()> {
-        LoxClient::new(self.cfg.clone())?.get_text("/jdev/sps/restart")?;
+        self.cfg.client()?.get_text("/jdev/sps/restart")?;
         Ok(())
     }
 
@@ -138,14 +137,14 @@ impl Miniserver for LiveMiniserver {
         // House Miniserver, firmware 17.2: `PLC change` (6) at once, the
         // file loaded and renamed within a second, running (5) after 2.2 s.
         let deadline = Instant::now() + Duration::from_secs(60);
-        let client = LoxClient::new(self.cfg.clone())?;
+        let client = self.cfg.client()?;
         loop {
             std::thread::sleep(Duration::from_millis(500));
             let running = client
                 .get_json("/jdev/sps/state")
                 .is_ok_and(|v| v["LL"]["value"].as_str() == Some(PLC_RUNNING));
             if running
-                && ftp::list_backups(&self.cfg)
+                && ftp::list_backups(&self.cfg.connection())
                     .is_ok_and(|b| b.first().is_some_and(|n| n.filename != before))
             {
                 return Ok(());
@@ -162,7 +161,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn reboot(&self) -> Result<()> {
-        LoxClient::new(self.cfg.clone())?.get_text("/jdev/sys/reboot")?;
+        self.cfg.client()?.get_text("/jdev/sys/reboot")?;
         Ok(())
     }
 
@@ -171,7 +170,7 @@ impl Miniserver for LiveMiniserver {
         // request; that must not count as back.
         std::thread::sleep(Duration::from_secs(20));
         let deadline = Instant::now() + Duration::from_secs(300);
-        let client = LoxClient::new(self.cfg.clone())?;
+        let client = self.cfg.client()?;
         while client.get_text("/jdev/cfg/version").is_err() {
             if Instant::now() > deadline {
                 bail!(
@@ -188,7 +187,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn app_catalogue(&self) -> Result<Vec<u8>> {
-        LoxClient::new(self.cfg.clone())?.get_bytes("/data/LoxApp3.json")
+        self.cfg.client()?.get_bytes("/data/LoxApp3.json")
     }
 }
 
@@ -459,8 +458,12 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         .into_iter()
         .chain(new_catalogue.map(|c| (app_catalogue::MEMBER, c)))
         .collect();
-    let staged =
-        archive::stage_upload_zip_replacing(&live_zip, &compiled, &replace, crate::zip_now())?;
+    let staged = archive::stage_upload_zip_replacing(
+        &live_zip,
+        &compiled,
+        &replace,
+        crate::util::zip_now(),
+    )?;
     let staged_path = file("push.zip");
     fs::write(&staged_path, &staged)?;
     report.staged = Some(staged_path.clone());

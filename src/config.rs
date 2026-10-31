@@ -183,6 +183,31 @@ impl Config {
         self.data_dir.join("scenes")
     }
 
+    /// The structure cache file (`LoxAPP3.json`, 24 h TTL).
+    pub fn structure_cache_path(&self) -> PathBuf {
+        self.cache_dir().join("structure.json")
+    }
+
+    /// What the transport needs: host, credentials, TLS, and where the token
+    /// and the structure cache are kept. A Miniserver on localhost (the mock
+    /// servers of the tests) gets no structure cache.
+    pub fn connection(&self) -> crate::connection::Connection {
+        let local = self.host.contains("127.0.0.1") || self.host.contains("localhost");
+        crate::connection::Connection {
+            host: self.host.clone(),
+            user: self.user.clone(),
+            pass: self.pass.clone(),
+            verify_ssl: self.verify_ssl.unwrap_or(false),
+            token_path: Some(self.token_path()),
+            structure_cache: (!local).then(|| self.structure_cache_path()),
+        }
+    }
+
+    /// An HTTP client for this config's Miniserver, with its aliases.
+    pub fn client(&self) -> Result<crate::client::LoxClient> {
+        Ok(crate::client::LoxClient::new(self.connection())?.with_aliases(self.aliases.clone()))
+    }
+
     /// Load the effective config, considering context resolution:
     /// 1. `LOX_CONFIG` env var (flat format, bypass everything)
     /// 2. Project-local `.lox/` (walk up from cwd) — flat format

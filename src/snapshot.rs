@@ -257,11 +257,11 @@ pub fn current_with_version(cfg: &Config, version: Option<&str>) -> Result<Snaps
 
 /// Download the newest backup via FTP (read-only) and cache it.
 pub fn download(cfg: &Config, version: Option<&str>) -> Result<Snapshot> {
-    let backups = crate::ftp::list_backups(cfg)?;
+    let backups = crate::ftp::list_backups(&cfg.connection())?;
     let newest = backups
         .first()
         .context("no config backups on the Miniserver")?;
-    let zip = crate::ftp::download_backup(cfg, &newest.filename)?;
+    let zip = crate::ftp::download_backup(&cfg.connection(), &newest.filename)?;
     let xml = lxir::archive::extract_and_decompress(&zip)?;
     let cache = cache_path(cfg);
     if let Some(p) = cache.parent() {

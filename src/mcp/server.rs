@@ -71,12 +71,12 @@ const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 struct State {
     /// Fixed config (tests); `None` means `Config::load()` on demand.
     cfg: Option<Config>,
-    lox: Option<(LoxClient, Instant)>,
+    lox: Option<(ops::Lox, Instant)>,
 }
 
 impl State {
     /// The Miniserver client, created lazily and rebuilt after `CLIENT_TTL`.
-    fn client(&mut self) -> anyhow::Result<&mut LoxClient> {
+    fn client(&mut self) -> anyhow::Result<&mut ops::Lox> {
         let stale = self
             .lox
             .as_ref()
@@ -86,7 +86,7 @@ impl State {
                 Some(c) => c.clone(),
                 None => Config::load()?,
             };
-            self.lox = Some((LoxClient::new(cfg)?, Instant::now()));
+            self.lox = Some((ops::Lox::new(cfg)?, Instant::now()));
         }
         Ok(&mut self.lox.as_mut().expect("client just created").0)
     }
@@ -533,7 +533,8 @@ pub type LearnConnector = Arc<
 fn websocket_learn() -> LearnConnector {
     Arc::new(|cfg| {
         Box::pin(async move {
-            let session = crate::stream::Session::open(&cfg, Duration::from_secs(20)).await?;
+            let session =
+                crate::stream::Session::open(&cfg.connection(), Duration::from_secs(20)).await?;
             Ok(Box::new(session) as Box<dyn LearnIo>)
         })
     })
@@ -608,7 +609,7 @@ impl LoxMcp {
     /// Run blocking Miniserver work on tokio's blocking pool.
     async fn blocking<T, F>(&self, f: F) -> anyhow::Result<T>
     where
-        F: FnOnce(&mut LoxClient) -> anyhow::Result<T> + Send + 'static,
+        F: FnOnce(&mut ops::Lox) -> anyhow::Result<T> + Send + 'static,
         T: Send + 'static,
     {
         let state = self.state.clone();
@@ -888,7 +889,7 @@ impl LoxMcp {
     where
         F: FnOnce(&mut LoxClient) -> anyhow::Result<UserChange> + Send + 'static,
     {
-        let mut change = match self.blocking(plan).await {
+        let mut change = match self.blocking(move |lox| plan(lox)).await {
             Ok(c) => c,
             Err(e) => return fail(e),
         };
@@ -937,7 +938,7 @@ impl LoxMcp {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_rooms(&self) -> ToolResponse {
-        respond(self.blocking(ops::list_rooms).await)
+        respond(self.blocking(|lox| ops::list_rooms(lox)).await)
     }
 
     #[tool(
@@ -984,7 +985,7 @@ impl LoxMcp {
         };
         if let Some(live) = live {
             let wait = std::time::Duration::from_secs(10);
-            match crate::stream::initial_states(&cfg, &live.uuids(), wait).await {
+            match crate::stream::initial_states(&cfg.connection(), &live.uuids(), wait).await {
                 Ok(values) => ops::apply_live_states(&mut state, &live, &values),
                 Err(e) => return fail(e),
             }
@@ -1023,7 +1024,7 @@ impl LoxMcp {
             Ok(r) => r,
             Err(e) => return fail(e),
         };
-        let moods = crate::commands::control::fetch_mood_list_json(&cfg, &mood_list)
+        let moods = crate::commands::control::fetch_mood_list_json(&cfg.connection(), &mood_list)
             .await
             .and_then(|json| actions::parse_mood_list(&json));
         respond(moods.map(|moods| {
@@ -1057,7 +1058,7 @@ impl LoxMcp {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn system_status(&self) -> ToolResponse {
-        respond(self.blocking(ops::system_status).await)
+        respond(self.blocking(|lox| ops::system_status(lox)).await)
     }
 
     #[tool(
@@ -1095,7 +1096,7 @@ impl LoxMcp {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_users(&self) -> ToolResponse {
-        respond(self.blocking(ops::list_users).await)
+        respond(self.blocking(|lox| ops::list_users(lox)).await)
     }
 
     #[tool(

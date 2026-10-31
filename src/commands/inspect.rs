@@ -5,15 +5,16 @@ use std::io::Cursor;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::client::{Control, LoxClient};
+use crate::client::Control;
 use crate::commands::RunContext;
 use crate::config::Config;
-use crate::stream;
-use crate::{
-    AutopilotCmd, StatsEntry, eval_op, find_stats_files, lox_epoch, matches_filters, now_hms,
-    parse_stats_entries, parse_weather_entry, print_stream_event, stats_data_offset,
-    stats_file_path, stats_period, xml_attr,
+use crate::stats::{
+    StatsEntry, find_stats_files, parse_stats_entries, parse_weather_entry, stats_data_offset,
+    stats_file_path, stats_period,
 };
+use crate::stream;
+use crate::util::{lox_epoch, now_hms, xml_attr};
+use crate::{AutopilotCmd, eval_op, matches_filters, print_stream_event};
 
 pub fn cmd_ls(
     ctx: &RunContext,
@@ -23,7 +24,7 @@ pub fn cmd_ls(
     cat: Option<String>,
     favorites: bool,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let controls = lox.list_controls_ext(
         r#type.as_deref(),
         room.as_deref(),
@@ -86,7 +87,7 @@ pub fn cmd_ls(
 }
 
 pub fn cmd_get(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid_resolved)?;
     let xml = lox.get_all(&ctrl.uuid)?;
@@ -143,7 +144,7 @@ pub fn cmd_get(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> 
 }
 
 pub fn cmd_info(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid_resolved)?;
     let ctrl_json = lox.get_control_json(&ctrl.uuid)?;
@@ -213,7 +214,7 @@ pub fn cmd_info(ctx: &RunContext, name_or_uuid: String, room: Option<String>) ->
 }
 
 pub fn cmd_watch(_ctx: &RunContext, name_or_uuid: String, interval: u64) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let ctrl = lox.find_control(&name_or_uuid)?;
     println!(
         "Watching '{}' every {}s  (Ctrl+C to stop)",
@@ -252,7 +253,7 @@ pub fn cmd_stream(
     reconnect: bool,
 ) -> Result<()> {
     let cfg = Config::load()?;
-    let mut lox = LoxClient::new(cfg.clone())?;
+    let mut lox = cfg.client()?;
     let mut state_map = stream::build_state_uuid_map(lox.get_structure()?);
     if !ctx.quiet {
         eprintln!("Streaming state changes (Ctrl+C to stop)...");
@@ -276,7 +277,7 @@ pub fn cmd_stream(
     loop {
         let mut out_of_service = false;
         let result = rt.block_on(stream::stream_events_while(
-            &cfg,
+            &cfg.connection(),
             Duration::from_secs(STREAM_CONNECT_TIMEOUT_SECS),
             |events| {
                 ever_live = true;
@@ -392,8 +393,8 @@ pub fn cmd_stream(
 
 /// Re-read the structure from the Miniserver, bypassing the cache.
 fn fetch_fresh_structure(cfg: &Config) -> Result<Value> {
-    let _ = std::fs::remove_file(LoxClient::cache_path(cfg));
-    Ok(LoxClient::new(cfg.clone())?.get_structure()?.clone())
+    let _ = std::fs::remove_file(cfg.structure_cache_path());
+    Ok(cfg.client()?.get_structure()?.clone())
 }
 
 /// Gap marker: a status line on stderr and, with `-o json`, an event line on
@@ -529,7 +530,7 @@ pub fn cmd_if(
     value: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid_resolved)?;
     let xml = lox.get_all(&ctrl.uuid)?;
@@ -558,7 +559,7 @@ pub fn cmd_if(
 }
 
 pub fn cmd_rooms(ctx: &RunContext) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let structure = lox.get_structure()?;
     if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
         let mut entries: Vec<_> = rooms
@@ -586,7 +587,7 @@ pub fn cmd_rooms(ctx: &RunContext) -> Result<()> {
 }
 
 pub fn cmd_categories(ctx: &RunContext) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let cats = lox.list_categories()?;
     if ctx.json {
         let arr: Vec<_> = cats
@@ -606,7 +607,7 @@ pub fn cmd_categories(ctx: &RunContext) -> Result<()> {
 }
 
 pub fn cmd_globals(ctx: &RunContext) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let globals = lox.get_global_states()?;
     if ctx.json {
         let mut map = serde_json::Map::new();
@@ -638,7 +639,7 @@ pub fn cmd_globals(ctx: &RunContext) -> Result<()> {
 }
 
 pub fn cmd_modes(ctx: &RunContext) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let modes = lox.get_operating_modes()?;
     let globals = lox.get_global_states().unwrap_or_default();
     let current_mode = globals
@@ -708,7 +709,7 @@ pub fn is_energy_type(typ: &str) -> bool {
 }
 
 pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let type_lower = r#type.to_lowercase();
     let type_filter: Option<&str> = match type_lower.as_str() {
         "temperature" | "temp" => Some("InfoOnlyAnalog"),
@@ -757,7 +758,7 @@ pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Re
 }
 
 pub fn cmd_energy(ctx: &RunContext, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let controls = lox.list_controls(None, room.as_deref())?;
     let energy: Vec<_> = controls.iter().filter(|c| is_energy_type(&c.typ)).collect();
     if ctx.json {
@@ -795,7 +796,7 @@ pub fn cmd_energy(ctx: &RunContext, room: Option<String>) -> Result<()> {
 }
 
 pub fn cmd_weather(ctx: &RunContext, forecast: bool) -> Result<()> {
-    let lox = LoxClient::new(Config::load()?)?;
+    let lox = Config::load()?.client()?;
     let data = lox.get_bytes("/data/weatheru.bin")?;
     if data.is_empty() {
         println!("No weather data available on the Miniserver.");
@@ -847,7 +848,7 @@ pub fn cmd_weather(ctx: &RunContext, forecast: bool) -> Result<()> {
 }
 
 pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let structure = lox.get_structure()?.clone();
     let mut rooms: HashMap<String, String> = HashMap::new();
     if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
@@ -925,7 +926,7 @@ pub fn cmd_history(
     day: Option<String>,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid)?;
 
@@ -1088,7 +1089,7 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         }
         AutopilotCmd::Changed { explain, since } => {
             let cfg = Config::load()?;
-            let ap = LoxClient::new(cfg.clone())?.autopilot()?;
+            let ap = cfg.client()?.autopilot()?;
             let (secs, at) = parse_changed(&read_state(&cfg, &ap.state_changed)?)?;
             let why = explain
                 .then(|| explain_changes(&cfg, since.as_deref()))
@@ -1127,7 +1128,7 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         }
         AutopilotCmd::State { name_or_uuid } => {
             let cfg = Config::load()?;
-            let ap = LoxClient::new(cfg.clone())?.autopilot()?;
+            let ap = cfg.client()?.autopilot()?;
             let runs = parse_autopilot_history(&read_state(&cfg, &ap.state_history)?);
             let hits = runs_of(&runs, &name_or_uuid)?;
             let last = hits.iter().max_by(|a, b| a.time.cmp(&b.time));
@@ -1269,16 +1270,22 @@ impl ChangeReport {
 fn explain_changes(cfg: &Config, since: Option<&str>) -> Result<ChangeReport> {
     use crate::{ftp, logic::Logic, snapshot};
     use lxir::archive;
-    let backups = ftp::list_backups(cfg)?;
+    let backups = ftp::list_backups(&cfg.connection())?;
     let newest = backups
         .first()
         .context("no program files in /prog on the Miniserver")?;
-    let new_xml = archive::extract_and_decompress(&ftp::download_backup(cfg, &newest.filename)?)?;
+    let new_xml = archive::extract_and_decompress(&ftp::download_backup(
+        &cfg.connection(),
+        &newest.filename,
+    )?)?;
     let base = match since {
         Some(f) => Some(snapshot::file(f)?),
         None => match backups.get(1) {
             Some(b) => Some(snapshot::Snapshot {
-                bytes: archive::extract_and_decompress(&ftp::download_backup(cfg, &b.filename)?)?,
+                bytes: archive::extract_and_decompress(&ftp::download_backup(
+                    &cfg.connection(),
+                    &b.filename,
+                )?)?,
                 label: b.filename.clone(),
             }),
             None => None,
@@ -1292,7 +1299,7 @@ fn explain_changes(cfg: &Config, since: Option<&str>) -> Result<ChangeReport> {
         }
         None => Default::default(),
     };
-    let files = ftp::download_custom_changes(cfg)?;
+    let files = ftp::download_custom_changes(&cfg.connection())?;
     Ok(ChangeReport {
         newest: newest.filename.clone(),
         compared_with: base.map(|b| b.label),
@@ -1346,7 +1353,7 @@ fn read_state(cfg: &Config, uuid: &str) -> Result<String> {
     rt.block_on(async {
         tokio::time::timeout(
             Duration::from_secs(10),
-            stream::stream_events_until(cfg, |ev| match ev {
+            stream::stream_events_until(&cfg.connection(), |ev| match ev {
                 stream::StateEvent::ValueState { uuid, value } if *uuid == target => {
                     Some(value.to_string())
                 }

@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::http::Request;
 
 use rand::RngCore as _;
 
-use crate::config::Config;
+use crate::connection::Connection;
 
 // ── TLS (accept all) ─────────────────────────────────────────────────────────
 
@@ -17,13 +17,13 @@ fn make_tls_config() -> Arc<ClientConfig> {
     let _ = ring::default_provider().install_default();
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let mut cfg = ClientConfig::builder()
+    let mut tls = ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
-    cfg.dangerous()
+    tls.dangerous()
         .set_certificate_verifier(Arc::new(NoCertVerifier));
-    cfg.enable_early_data = true;
-    Arc::new(cfg)
+    tls.enable_early_data = true;
+    Arc::new(tls)
 }
 
 #[derive(Debug)]
@@ -65,16 +65,16 @@ impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
 // ── WS Client ────────────────────────────────────────────────────────────────
 
 pub struct LoxWsClient {
-    cfg: Config,
+    conn: Connection,
 }
 
 impl LoxWsClient {
-    pub fn new(cfg: Config) -> Self {
-        Self { cfg }
+    pub fn new(conn: Connection) -> Self {
+        Self { conn }
     }
 
     fn ws_url(&self) -> String {
-        self.cfg
+        self.conn
             .host
             .replace("https://", "wss://")
             .replace("http://", "ws://")
@@ -95,7 +95,7 @@ impl LoxWsClient {
         let tls_cfg = make_tls_config();
         let basic = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            format!("{}:{}", self.cfg.user, self.cfg.pass),
+            format!("{}:{}", self.conn.user, self.conn.pass),
         );
         let req = Request::builder()
             .uri(&url)

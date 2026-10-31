@@ -396,7 +396,7 @@ pub fn parse_status_xml(xml: &str) -> Vec<Device> {
 /// (unix time, first output value) points.
 pub fn parse_stats(data: &[u8], num_outputs: usize, lox_epoch_unix: i64) -> Series {
     let entry = 8 + num_outputs.max(1) * 8;
-    let off = crate::stats_data_offset(data, entry).unwrap_or(0);
+    let off = crate::stats::stats_data_offset(data, entry).unwrap_or(0);
     let mut points = Vec::new();
     let mut i = off;
     while i + entry <= data.len() {

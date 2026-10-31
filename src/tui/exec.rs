@@ -182,7 +182,7 @@ impl Live {
         cfg: Config,
         roles: BTreeMap<String, String>,
     ) -> Result<Live> {
-        let client = Arc::new(LoxClient::new(cfg.clone())?);
+        let client = Arc::new(cfg.client()?);
         Ok(Live {
             rt,
             tx,
@@ -195,7 +195,7 @@ impl Live {
 
     /// Load the structure (cache or fetch), blocking. Used at startup.
     pub fn load_structure(cfg: &Config) -> Result<Value> {
-        let mut c = LoxClient::new(cfg.clone())?;
+        let mut c = cfg.client()?;
         Ok(c.get_structure()?.clone())
     }
 
@@ -409,11 +409,11 @@ impl Live {
                 });
             }
             Effect::Refresh => {
-                let _ = std::fs::remove_file(LoxClient::cache_path(&self.cfg));
+                let _ = std::fs::remove_file(self.cfg.structure_cache_path());
                 self.restart(app.ctx_name.clone(), true);
             }
             Effect::SwitchContext(name) => match context_config(&name) {
-                Ok(cfg) => match LoxClient::new(cfg.clone()) {
+                Ok(cfg) => match cfg.client() {
                     Ok(c) => {
                         self.cfg = cfg;
                         self.client = Arc::new(c);
@@ -581,7 +581,7 @@ async fn stream_loop_inner(
                 && v.trim() != last_modified.trim()
             {
                 let c2 = cfg.clone();
-                let _ = std::fs::remove_file(LoxClient::cache_path(&cfg));
+                let _ = std::fs::remove_file(cfg.structure_cache_path());
                 if let Ok(Ok(st)) =
                     tokio::task::spawn_blocking(move || Live::load_structure(&c2)).await
                 {
@@ -609,7 +609,7 @@ async fn stream_loop_inner(
         let live_flag = Arc::new(Mutex::new(false));
         let lf = live_flag.clone();
         let res = crate::stream::stream_session(
-            &cfg,
+            &cfg.connection(),
             stop.clone(),
             move || {
                 *lf.lock().unwrap() = true;
@@ -801,7 +801,7 @@ fn diag(client: &LoxClient) -> Result<Diag> {
 /// offset is fetched once per Miniserver; the request's midpoint is "now".
 fn clock_drift(client: &LoxClient) -> Option<f64> {
     static TZ: Mutex<Option<(String, f64)>> = Mutex::new(None);
-    let host = client.cfg.host.clone();
+    let host = client.connection().host.clone();
     let tz = {
         let mut tz = TZ.lock().unwrap_or_else(|e| e.into_inner());
         match tz.as_ref() {
@@ -929,7 +929,7 @@ fn sites(ctx: &PollCtx) -> Vec<SiteStatus> {
         match context_config(name) {
             Ok(cfg) => {
                 s.host = host_of(&cfg);
-                match LoxClient::new(cfg) {
+                match cfg.client() {
                     Ok(c) => {
                         let t0 = Instant::now();
                         match jdev(&c, "/jdev/cfg/version") {
@@ -1014,7 +1014,7 @@ fn history_range(
     let mut listing: Option<String> = None;
     let mut any = false;
     for p in months(from, to) {
-        let data = match client.get_bytes(&crate::stats_file_path(uuid, &p)) {
+        let data = match client.get_bytes(&crate::stats::stats_file_path(uuid, &p)) {
             Ok(d) if d.len() > 12 => vec![d],
             _ => {
                 // some firmware versions name the files differently: look them up
@@ -1024,7 +1024,7 @@ fn history_range(
                 let files: Vec<String> = listing
                     .as_deref()
                     .map(|l| {
-                        crate::find_stats_files(l, uuid, &p)
+                        crate::stats::find_stats_files(l, uuid, &p)
                             .into_iter()
                             .map(|s| s.to_string())
                             .collect()
@@ -1652,7 +1652,7 @@ mod live_probe {
                 let _ = stop_tx.send(true);
             });
             let r = crate::stream::stream_session(
-                &cfg,
+                &cfg.connection(),
                 stop_rx,
                 || {},
                 move |b| {

@@ -80,8 +80,8 @@ pub(crate) fn pending(model: &AccessModel, live: &[User]) -> Vec<PendingUserChan
                 {
                     changes.push(format!(
                         "last edit: {} live, {} in the program file",
-                        crate::lox_utc_timestamp_to_string(live),
-                        crate::lox_utc_timestamp_to_string(file)
+                        crate::util::lox_utc_timestamp_to_string(live),
+                        crate::util::lox_utc_timestamp_to_string(file)
                     ));
                 }
                 if let Some(groups) = group_change(model, user) {

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use suppaftp::FtpStream;
 
-use crate::config::Config;
+use crate::connection::Connection;
 
 /// Retry an FTP operation up to 3 times with exponential backoff.
 fn ftp_with_retry<T, F>(f: F) -> Result<T>
@@ -73,12 +73,12 @@ pub fn parse_backup_name(name: &str, size: u64) -> Option<BackupInfo> {
 }
 
 /// Connect to the Miniserver FTP and list backup ZIPs in /prog/.
-pub fn list_backups(cfg: &Config) -> Result<Vec<BackupInfo>> {
-    let host = ftp_host(cfg);
+pub fn list_backups(conn: &Connection) -> Result<Vec<BackupInfo>> {
+    let host = ftp_host(conn);
     let listing = ftp_with_retry(|| {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-        ftp.login(&cfg.user, &cfg.pass)
+        ftp.login(&conn.user, &conn.pass)
             .context("FTP login failed — check your admin credentials in lox config")?;
         let listing = ftp.list(Some("/prog")).unwrap_or_default();
         ftp.quit().ok();
@@ -111,13 +111,13 @@ pub fn list_backups(cfg: &Config) -> Result<Vec<BackupInfo>> {
 }
 
 /// Download a specific backup file from the Miniserver.
-pub fn download_backup(cfg: &Config, filename: &str) -> Result<Vec<u8>> {
-    let host = ftp_host(cfg);
+pub fn download_backup(conn: &Connection, filename: &str) -> Result<Vec<u8>> {
+    let host = ftp_host(conn);
     let path = format!("/prog/{}", filename);
     ftp_with_retry(|| {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-        ftp.login(&cfg.user, &cfg.pass)
+        ftp.login(&conn.user, &conn.pass)
             .context("FTP login failed — check your admin credentials")?;
         ftp.transfer_type(suppaftp::types::FileType::Binary)
             .context("Failed to set binary transfer mode")?;
@@ -130,19 +130,19 @@ pub fn download_backup(cfg: &Config, filename: &str) -> Result<Vec<u8>> {
 }
 
 /// The file name the Miniserver loads as its new config on start (it logs
-/// `Loading sps_new.zip`). Loxone Config uploads under this name too; a
+/// `Loading sps_new.zip`). Loxone Connection uploads under this name too; a
 /// backup re-uploaded under its own name is not loaded.
 pub const CONFIG_UPLOAD_NAME: &str = "sps_new.zip";
 
 /// Upload a config ZIP as `/prog/sps_new.zip`, the config the Miniserver
 /// starts from after its next reboot.
-pub fn upload_config(cfg: &Config, data: &[u8]) -> Result<()> {
-    let host = ftp_host(cfg);
+pub fn upload_config(conn: &Connection, data: &[u8]) -> Result<()> {
+    let host = ftp_host(conn);
     let path = format!("/prog/{}", CONFIG_UPLOAD_NAME);
     ftp_with_retry(|| {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-        ftp.login(&cfg.user, &cfg.pass)
+        ftp.login(&conn.user, &conn.pass)
             .context("FTP login failed — check your admin credentials")?;
         ftp.transfer_type(suppaftp::types::FileType::Binary)
             .context("Failed to set binary transfer mode")?;
@@ -160,14 +160,14 @@ pub const CUSTOM_CHANGES_DIR: &str = "/sys/custom";
 
 /// Download every `*.LoxCC` in /sys/custom: file name and bytes. A directory
 /// that does not exist (FTP 550) holds none.
-pub fn download_custom_changes(cfg: &Config) -> Result<Vec<(String, Vec<u8>)>> {
+pub fn download_custom_changes(conn: &Connection) -> Result<Vec<(String, Vec<u8>)>> {
     use suppaftp::FtpError;
     use suppaftp::Status;
-    let host = ftp_host(cfg);
+    let host = ftp_host(conn);
     ftp_with_retry(|| {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
-        ftp.login(&cfg.user, &cfg.pass)
+        ftp.login(&conn.user, &conn.pass)
             .context("FTP login failed — check your admin credentials")?;
         let names = match ftp.nlst(Some(CUSTOM_CHANGES_DIR)) {
             Ok(names) => names,
@@ -199,13 +199,13 @@ pub fn download_custom_changes(cfg: &Config) -> Result<Vec<(String, Vec<u8>)>> {
 }
 
 /// Extract the FTP hostname from config (strip scheme, port, trailing slash).
-fn ftp_host(cfg: &Config) -> String {
-    cfg.host
+fn ftp_host(conn: &Connection) -> String {
+    conn.host
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .split(':')
         .next()
-        .unwrap_or(&cfg.host)
+        .unwrap_or(&conn.host)
         .trim_end_matches('/')
         .to_string()
 }
@@ -233,20 +233,20 @@ mod tests {
 
     #[test]
     fn test_ftp_host_strips_scheme() {
-        let cfg = Config {
+        let conn = Connection {
             host: "https://192.168.1.77".into(),
             ..Default::default()
         };
-        assert_eq!(ftp_host(&cfg), "192.168.1.77");
+        assert_eq!(ftp_host(&conn), "192.168.1.77");
     }
 
     #[test]
     fn test_ftp_host_strips_port() {
-        let cfg = Config {
+        let conn = Connection {
             host: "https://192.168.1.77:8443".into(),
             ..Default::default()
         };
-        assert_eq!(ftp_host(&cfg), "192.168.1.77");
+        assert_eq!(ftp_host(&conn), "192.168.1.77");
     }
 
     #[test]

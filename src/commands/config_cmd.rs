@@ -10,9 +10,10 @@ use crate::commands::{RunContext, config_insight, config_push};
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::token;
+use crate::util::json_val_str;
 use crate::{
     AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, custom_changes,
-    detect_shell, ftp, gitops, install_completions, json_val_str, loxone_xml,
+    detect_shell, ftp, gitops, install_completions, loxone_xml,
 };
 use lxir::archive;
 
@@ -172,7 +173,7 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
 
 pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
     let cfg = Config::load()?;
-    let cache = LoxClient::cache_path(&cfg);
+    let cache = cfg.structure_cache_path();
     match action {
         CacheCmd::Info => {
             if cache.exists() {
@@ -205,7 +206,7 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
             }
         }
         CacheCmd::Check => {
-            let lox = LoxClient::new(cfg)?;
+            let lox = cfg.client()?;
             let resp = lox.get_json("/jdev/sps/LoxAPPversion3")?;
             let remote_ver = resp
                 .pointer("/LL/value")
@@ -238,7 +239,7 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
             if cache.exists() {
                 let _ = fs::remove_file(&cache);
             }
-            LoxClient::load_or_fetch_structure(&cfg, &client)?;
+            LoxClient::load_or_fetch_structure(&cfg.connection(), &client)?;
             println!("✓ Structure cache refreshed ({:?})", cache);
         }
     }
@@ -251,7 +252,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
         TokenCmd::Fetch => {
             println!("Fetching token from Miniserver...");
             let rt = tokio::runtime::Runtime::new()?;
-            match rt.block_on(token::acquire_token(&cfg)) {
+            match rt.block_on(token::acquire_token(&cfg.connection())) {
                 Ok(ts) => {
                     let _exp =
                         std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts.valid_until);
@@ -261,13 +262,13 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                             .unwrap()
                             .as_secs(),
                     ) / 86400;
-                    println!("✓ Token saved to {:?}", token::TokenStore::path_for(&cfg));
+                    println!("✓ Token saved to {:?}", cfg.token_path());
                     println!("  Valid for: {} days", days);
                 }
                 Err(e) => bail!("Token fetch failed: {}", e),
             }
         }
-        TokenCmd::Info => match token::TokenStore::load_for(&cfg) {
+        TokenCmd::Info => match token::TokenStore::load_for(&cfg.connection()) {
             Some(ts) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -292,7 +293,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             None => println!("No token saved. Using Basic Auth. Run: lox token fetch"),
         },
         TokenCmd::Clear => {
-            let path = token::TokenStore::path_for(&cfg);
+            let path = cfg.token_path();
             if path.exists() {
                 fs::remove_file(&path)?;
                 println!("✓ Token cleared (reverting to Basic Auth)");
@@ -301,9 +302,9 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Check => {
-            let ts = token::TokenStore::load_for(&cfg)
+            let ts = token::TokenStore::load_for(&cfg.connection())
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let lox = LoxClient::new(cfg.clone())?;
+            let lox = cfg.client()?;
             // Hash the token with the key for the check endpoint
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/checktoken/{}/{}", hash, cfg.user))?;
@@ -326,9 +327,9 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Refresh => {
-            let ts = token::TokenStore::load_for(&cfg)
+            let ts = token::TokenStore::load_for(&cfg.connection())
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let lox = LoxClient::new(cfg.clone())?;
+            let lox = cfg.client()?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
             let code = resp
@@ -352,7 +353,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                         key: ts.key,
                         valid_until: unix_until,
                     };
-                    new_ts.save_for(&cfg)?;
+                    new_ts.save_for(&cfg.connection())?;
                     let days = unix_until.saturating_sub(
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -368,9 +369,9 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Revoke => {
-            let ts = token::TokenStore::load_for(&cfg)
+            let ts = token::TokenStore::load_for(&cfg.connection())
                 .ok_or_else(|| anyhow::anyhow!("No token saved. Run: lox token fetch"))?;
-            let lox = LoxClient::new(cfg.clone())?;
+            let lox = cfg.client()?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
             let code = resp
@@ -379,7 +380,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
                 .unwrap_or_else(|| "?".to_string());
             if code == "200" {
                 // Remove local token
-                let path = token::TokenStore::path_for(&cfg);
+                let path = cfg.token_path();
                 if path.exists() {
                     fs::remove_file(&path)?;
                 }
@@ -396,7 +397,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
     match action {
         ConfigCmd::Ls => {
             let cfg = Config::load()?;
-            let backups = ftp::list_backups(&cfg)?;
+            let backups = ftp::list_backups(&cfg.connection())?;
             if backups.is_empty() {
                 println!("No configs found on the Miniserver.");
             } else if ctx.json {
@@ -428,7 +429,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         }
         ConfigCmd::Download { save_as, extract } => {
             let cfg = Config::load()?;
-            let backups = ftp::list_backups(&cfg)?;
+            let backups = ftp::list_backups(&cfg.connection())?;
             if backups.is_empty() {
                 bail!("No configs found on the Miniserver.");
             }
@@ -438,7 +439,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 newest.filename,
                 newest.size / 1024
             );
-            let data = ftp::download_backup(&cfg, &newest.filename)?;
+            let data = ftp::download_backup(&cfg.connection(), &newest.filename)?;
             let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
             fs::write(&out_path, &data)?;
             println!("Saved to {}", out_path);
@@ -496,7 +497,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 Some(template) => {
                     let shell =
                         fs::read(template).with_context(|| format!("Cannot read {}", template))?;
-                    let staged = archive::stage_upload_zip(&shell, &xml, crate::zip_now())
+                    let staged = archive::stage_upload_zip(&shell, &xml, crate::util::zip_now())
                         .with_context(|| format!("Cannot stage {} into {}", file, template))?;
                     (staged, save_as.unwrap_or_else(|| format!("{stem}.zip")))
                 }
@@ -594,7 +595,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 ftp::CONFIG_UPLOAD_NAME,
                 data.len() / 1024
             );
-            ftp::upload_config(&cfg, &data)?;
+            ftp::upload_config(&cfg.connection(), &data)?;
             println!("Upload complete.");
             println!("Reboot the Miniserver to load it: lox reboot");
         }

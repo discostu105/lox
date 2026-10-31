@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::config::Config;
+use crate::connection::Connection;
 use crate::token::WsStream;
 use crate::ws::LoxWsClient;
 
@@ -564,16 +564,16 @@ pub fn parse_binary_payload(msg_type: u8, data: &[u8]) -> Result<Vec<StateEvent>
 /// Required before any commands (like enablebinstatusupdate) are accepted.
 /// Reuses the stored token (`authwithtoken`) and only requests a new one when
 /// there is none or it was rejected — see [`crate::token::authenticate_ws`].
-pub async fn ws_authenticate(ws: &mut WsStream, cfg: &Config) -> Result<()> {
-    crate::token::authenticate_ws(ws, cfg).await
+pub async fn ws_authenticate(ws: &mut WsStream, conn: &Connection) -> Result<()> {
+    crate::token::authenticate_ws(ws, conn).await
 }
 
 /// Connect, authenticate and subscribe to binary status updates.
-async fn open_subscribed(cfg: &Config) -> Result<WsStream> {
-    let ws_client = LoxWsClient::new(cfg.clone());
+async fn open_subscribed(conn: &Connection) -> Result<WsStream> {
+    let ws_client = LoxWsClient::new(conn.clone());
     let (mut ws, _resp) = ws_client.connect_raw().await?;
     let reuse_rejected_before = crate::token::token_reuse_rejected();
-    if let Err(e) = ws_authenticate(&mut ws, cfg).await {
+    if let Err(e) = ws_authenticate(&mut ws, conn).await {
         // The stored token was just rejected and the fallback `gettoken` failed
         // on the same socket (the Miniserver may close it after a failed
         // login): retry once on a fresh connection, which skips the token.
@@ -581,7 +581,7 @@ async fn open_subscribed(cfg: &Config) -> Result<WsStream> {
             return Err(e);
         }
         ws = ws_client.connect_raw().await?.0;
-        ws_authenticate(&mut ws, cfg).await?;
+        ws_authenticate(&mut ws, conn).await?;
     }
     ws.send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
         .await?;
@@ -641,11 +641,11 @@ where
 ///
 /// Runs until the connection is closed or an error occurs; keepalives keep an
 /// otherwise idle socket open.
-pub async fn stream_events<F>(cfg: &Config, mut handler: F) -> Result<()>
+pub async fn stream_events<F>(conn: &Connection, mut handler: F) -> Result<()>
 where
     F: FnMut(Vec<StateEvent>) -> Result<()>,
 {
-    let mut ws = open_subscribed(cfg).await?;
+    let mut ws = open_subscribed(conn).await?;
     pump(&mut ws, |events| handler(events).map(|()| true)).await
 }
 
@@ -655,14 +655,14 @@ where
 /// that is still starting up cannot hang. Returns `Ok(())` when stopped or
 /// when the server closed the socket; the caller decides whether to reconnect.
 pub async fn stream_events_while<F>(
-    cfg: &Config,
+    conn: &Connection,
     connect_timeout: Duration,
     handler: F,
 ) -> Result<()>
 where
     F: FnMut(Vec<StateEvent>) -> Result<bool>,
 {
-    let mut ws = tokio::time::timeout(connect_timeout, open_subscribed(cfg))
+    let mut ws = tokio::time::timeout(connect_timeout, open_subscribed(conn))
         .await
         .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     pump(&mut ws, handler).await
@@ -676,7 +676,7 @@ where
 /// stopped or when the server closed the socket; the caller reconnects.
 #[cfg(feature = "tui")]
 pub async fn stream_session<F>(
-    cfg: &Config,
+    conn: &Connection,
     mut stop: tokio::sync::watch::Receiver<bool>,
     on_live: impl FnOnce(),
     mut handler: F,
@@ -684,7 +684,7 @@ pub async fn stream_session<F>(
 where
     F: FnMut(Vec<StateEvent>) -> bool,
 {
-    let mut ws = tokio::time::timeout(Duration::from_secs(20), open_subscribed(cfg))
+    let mut ws = tokio::time::timeout(Duration::from_secs(20), open_subscribed(conn))
         .await
         .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     on_live();
@@ -747,8 +747,8 @@ pub struct Session {
 
 impl Session {
     /// Connect, authenticate and subscribe within `connect_timeout`.
-    pub async fn open(cfg: &Config, connect_timeout: Duration) -> Result<Self> {
-        let ws = tokio::time::timeout(connect_timeout, open_subscribed(cfg))
+    pub async fn open(conn: &Connection, connect_timeout: Duration) -> Result<Self> {
+        let ws = tokio::time::timeout(connect_timeout, open_subscribed(conn))
             .await
             .map_err(|_| anyhow::anyhow!("connect timeout"))??;
         let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
@@ -805,11 +805,11 @@ impl Session {
 ///
 /// Like `stream_events` but supports early exit — useful when you only need
 /// a specific state value from the initial state dump (e.g. moodList).
-pub async fn stream_events_until<F, T>(cfg: &Config, mut finder: F) -> Result<T>
+pub async fn stream_events_until<F, T>(conn: &Connection, mut finder: F) -> Result<T>
 where
     F: FnMut(&StateEvent) -> Option<T>,
 {
-    let mut ws = open_subscribed(cfg).await?;
+    let mut ws = open_subscribed(conn).await?;
     let mut found = None;
     pump(&mut ws, |events| {
         found = events.iter().find_map(&mut finder);
@@ -824,7 +824,7 @@ where
 /// arrived, or after `wait` with those that did (a UUID the Miniserver does
 /// not send never arrives).
 pub async fn initial_states(
-    cfg: &Config,
+    conn: &Connection,
     uuids: &[String],
     wait: Duration,
 ) -> Result<HashMap<String, serde_json::Value>> {
@@ -832,7 +832,7 @@ pub async fn initial_states(
     if uuids.is_empty() {
         return Ok(found);
     }
-    let mut ws = tokio::time::timeout(wait, open_subscribed(cfg))
+    let mut ws = tokio::time::timeout(wait, open_subscribed(conn))
         .await
         .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     let collect = pump(&mut ws, |events| {

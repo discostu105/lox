@@ -5,7 +5,6 @@ use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
@@ -95,7 +94,7 @@ impl std::fmt::Display for HttpStatusError {
 
 impl std::error::Error for HttpStatusError {}
 
-use crate::config::Config;
+use crate::connection::Connection;
 
 pub const USER_AGENT: &str = concat!("lox-cli/", env!("CARGO_PKG_VERSION"));
 
@@ -134,8 +133,10 @@ pub struct Control {
 // ── LoxClient ─────────────────────────────────────────────────────────────────
 
 pub struct LoxClient {
-    pub cfg: Config,
+    conn: Connection,
     pub client: Client,
+    /// Name → UUID shortcuts, checked before the structure (`with_aliases`)
+    aliases: HashMap<String, String>,
     structure: Option<Value>,
 }
 
@@ -172,9 +173,9 @@ impl LoxClient {
         })
     }
 
-    pub fn new(cfg: Config) -> Result<Self> {
-        let verify_ssl = cfg.verify_ssl.unwrap_or(false);
-        let redirect_policy = Self::same_origin_redirect_policy(&cfg.host);
+    pub fn new(conn: Connection) -> Result<Self> {
+        let verify_ssl = conn.verify_ssl;
+        let redirect_policy = Self::same_origin_redirect_policy(&conn.host);
         let lox = Self {
             client: Client::builder()
                 .user_agent(USER_AGENT)
@@ -183,7 +184,8 @@ impl LoxClient {
                 .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
                 .build()
                 .context("failed to build HTTP client")?,
-            cfg,
+            conn,
+            aliases: HashMap::new(),
             structure: None,
         };
 
@@ -194,6 +196,21 @@ impl LoxClient {
         Ok(lox)
     }
 
+    /// Name → UUID aliases that [`Self::resolve`] checks before the structure.
+    pub fn with_aliases(mut self, aliases: HashMap<String, String>) -> Self {
+        self.aliases = aliases;
+        self
+    }
+
+    /// The UUID an alias names.
+    pub fn alias(&self, name: &str) -> Option<&str> {
+        self.aliases.get(name).map(String::as_str)
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn apply_auth(
         &self,
         rb: reqwest::blocking::RequestBuilder,
@@ -201,11 +218,11 @@ impl LoxClient {
         // Always use password for HTTP basic auth.
         // Loxone tokens are for WebSocket auth only — they can't be
         // used as HTTP basic auth passwords.
-        rb.basic_auth(&self.cfg.user, Some(&self.cfg.pass))
+        rb.basic_auth(&self.conn.user, Some(&self.conn.pass))
     }
 
     pub fn get_text(&self, path: &str) -> Result<String> {
-        let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
@@ -235,7 +252,7 @@ impl LoxClient {
     }
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
-        let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
@@ -267,7 +284,7 @@ impl LoxClient {
     }
 
     pub fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
-        let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
@@ -306,7 +323,7 @@ impl LoxClient {
             Some((secret, shown)) => s.replace(secret, shown),
             None => s.to_string(),
         };
-        let url = format!("{}/{}", self.cfg.host, path.trim_start_matches('/'));
+        let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&hide(&url)));
         }
@@ -360,22 +377,17 @@ impl LoxClient {
 
     pub fn get_structure(&mut self) -> Result<&Value> {
         if self.structure.is_none() {
-            self.structure = Some(Self::load_or_fetch_structure(&self.cfg, &self.client)?);
+            self.structure = Some(Self::load_or_fetch_structure(&self.conn, &self.client)?);
         }
         self.structure
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("structure not loaded"))
     }
 
-    pub fn cache_path(cfg: &Config) -> PathBuf {
-        cfg.cache_dir().join("structure.json")
-    }
-
-    pub fn load_or_fetch_structure(cfg: &Config, client: &Client) -> Result<Value> {
-        let cache = Self::cache_path(cfg);
-        // Skip disk cache for localhost hosts (used in tests with mock servers)
-        let use_cache = !cfg.host.contains("127.0.0.1") && !cfg.host.contains("localhost");
-        if use_cache
+    /// The structure file: from `conn.structure_cache` while it is younger
+    /// than 24 hours, else fetched (and cached).
+    pub fn load_or_fetch_structure(conn: &Connection, client: &Client) -> Result<Value> {
+        if let Some(cache) = &conn.structure_cache
             && let Ok(meta) = cache.metadata()
             && let Ok(modified) = meta.modified()
         {
@@ -383,7 +395,7 @@ impl LoxClient {
                 .duration_since(modified)
                 .unwrap_or_default();
             if age.as_secs() < CACHE_TTL_SECS
-                && let Ok(data) = fs::read_to_string(&cache)
+                && let Ok(data) = fs::read_to_string(cache)
                 && let Ok(v) = serde_json::from_str::<Value>(&data)
             {
                 if verbose() >= 1 {
@@ -396,13 +408,13 @@ impl LoxClient {
                 return Ok(v);
             }
         }
-        let url = format!("{}/data/LoxApp3.json", cfg.host);
+        let url = conn.url("/data/LoxApp3.json");
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
         let resp = client
             .get(&url)
-            .basic_auth(&cfg.user, Some(&cfg.pass))
+            .basic_auth(&conn.user, Some(&conn.pass))
             .send()?;
         if verbose() >= 1 {
             eprintln!(
@@ -416,11 +428,11 @@ impl LoxClient {
             eprintln!("  body: <{} bytes>", resp.len());
         }
         let v: Value = serde_json::from_slice(&resp)?;
-        if use_cache {
+        if let Some(cache) = &conn.structure_cache {
             if let Some(parent) = cache.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let _ = fs::write(&cache, &resp);
+            let _ = fs::write(cache, &resp);
         }
         Ok(v)
     }
@@ -583,7 +595,7 @@ impl LoxClient {
         if is_uuid(name_or_uuid) {
             return Ok(name_or_uuid.to_string());
         }
-        if let Some(uuid) = self.cfg.aliases.get(name_or_uuid) {
+        if let Some(uuid) = self.aliases.get(name_or_uuid) {
             return Ok(uuid.clone());
         }
         let (name_part, room_part) = if let Some(idx) = name_or_uuid.rfind('[') {
@@ -793,14 +805,8 @@ mod tests {
     use super::*;
     use httpmock::prelude::*;
 
-    fn mock_config(server: &MockServer) -> Config {
-        Config {
-            host: server.base_url(),
-            user: "test".into(),
-            pass: "test".into(),
-            verify_ssl: Some(false),
-            ..Default::default()
-        }
+    fn mock_config(server: &MockServer) -> Connection {
+        Connection::new(server.base_url(), "test", "test")
     }
 
     // ── list_controls ─────────────────────────────────────────────────────────
@@ -1149,10 +1155,10 @@ mod tests {
     fn test_resolve_alias() {
         let server = MockServer::start();
         // No HTTP call expected — alias resolves immediately
-        let mut cfg = mock_config(&server);
-        cfg.aliases
-            .insert("mylight".into(), "alias-uuid-1234567890".into());
-        let mut client = LoxClient::new(cfg).unwrap();
+        let aliases = HashMap::from([("mylight".into(), "alias-uuid-1234567890".into())]);
+        let mut client = LoxClient::new(mock_config(&server))
+            .unwrap()
+            .with_aliases(aliases);
         let uuid = client.resolve_with_room("mylight", None).unwrap();
         assert_eq!(uuid, "alias-uuid-1234567890");
     }
