@@ -259,7 +259,13 @@ Operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
 lox input set "Sollwert Heizung" 21.5
 lox input set "Sollwert Heizung" 21.5 -r "Wohnzimmer"  # disambiguate with room
 lox input pulse "Taster"
+lox input pulse "Test Frostwarnung"   # a virtual input not shown in the app
 ```
+
+Virtual inputs that are not shown in the app are missing from the structure file, but the Miniserver takes
+commands for them all the same. A name that matches no control is looked up among the `VirtualIn` and
+`VirtualTextIn` blocks of the newest config available offline (config repo, else the download cached by
+`lox config … --download`).
 
 ---
 

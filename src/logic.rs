@@ -945,6 +945,45 @@ impl Logic {
             .filter(|b| b.has_ports && !b.is_ref())
     }
 
+    /// A virtual input (`VirtualIn`, `VirtualTextIn`) by title: exact
+    /// (case-insensitive) first, else a unique substring. The Miniserver takes
+    /// commands for every virtual input, but `LoxApp3.json` lists only those
+    /// shown in the app. `None` when nothing matches; ambiguity is an error.
+    pub fn virtual_input(&self, name: &str) -> Result<Option<&Block>> {
+        let name = name.trim();
+        let lname = name.to_lowercase();
+        let cands: Vec<&Block> = self
+            .order
+            .iter()
+            .filter_map(|u| self.blocks.get(u))
+            .filter(|b| matches!(b.typ.as_str(), "VirtualIn" | "VirtualTextIn"))
+            .filter(|b| b.title.to_lowercase().contains(&lname))
+            .collect();
+        let exact: Vec<&Block> = cands
+            .iter()
+            .copied()
+            .filter(|b| b.title.eq_ignore_ascii_case(name))
+            .collect();
+        match (cands.len(), exact.len()) {
+            (0, _) => Ok(None),
+            (1, _) => Ok(Some(cands[0])),
+            (_, 1) => Ok(Some(exact[0])),
+            _ => {
+                let list: Vec<String> = cands
+                    .iter()
+                    .take(12)
+                    .map(|b| format!("  {} — {} · {}", b.title, b.typ, b.uuid))
+                    .collect();
+                bail!(
+                    "'{}' matches {} virtual inputs — use the full name or the UUID:\n{}",
+                    name,
+                    cands.len(),
+                    list.join("\n")
+                )
+            }
+        }
+    }
+
     /// Search titles, inames, types, devices, rooms and pages. Every word of
     /// the query must match; exact titles first.
     pub fn search(&self, query: &str) -> Vec<&Block> {
@@ -1946,6 +1985,41 @@ fn sort_changes(lines: Vec<DiffLine>, rules: &HashMap<String, String>) -> Change
         }
     }
     out
+}
+
+#[cfg(test)]
+mod virtual_input_tests {
+    use super::*;
+
+    const XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<ControlList><C Type="LoxLIVE" U="0">
+  <C Type="VirtualInCaption" U="c1" Title="Virtuelle Eingänge">
+    <C Type="VirtualIn" U="v1" Title="Test Frostwarnung"><Co K="Q" U="v1q"/></C>
+    <C Type="VirtualIn" U="v2" Title="Test"><Co K="Q" U="v2q"/></C>
+    <C Type="VirtualTextIn" U="v3" Title="gefriertruhe_verbrauch"><Co K="TQ" U="v3q"/></C>
+    <C Type="VirtualIn" U="v4" Title="Wasser 1 Rasen"><Co K="Q" U="v4q"/></C>
+    <C Type="VirtualIn" U="v5" Title="Wasser 2 Beet"><Co K="Q" U="v5q"/></C>
+  </C>
+  <C Type="Page" U="p1" Title="Garten">
+    <C Type="Or" U="o1" Title="Frost oder Test"><Co K="Q" U="o1q"/></C>
+  </C>
+</C></ControlList>"#;
+
+    #[test]
+    fn finds_virtual_inputs_by_title() {
+        let l = Logic::parse(XML.as_bytes()).unwrap();
+        let uuid = |n: &str| l.virtual_input(n).unwrap().map(|b| b.uuid.clone());
+        assert_eq!(uuid("test frostwarnung").as_deref(), Some("v1"));
+        assert_eq!(uuid("Frostwarnung").as_deref(), Some("v1"));
+        // an exact title wins over the titles containing it
+        assert_eq!(uuid("Test").as_deref(), Some("v2"));
+        assert_eq!(uuid("gefriertruhe").as_deref(), Some("v3"));
+        // logic blocks are not inputs
+        assert_eq!(uuid("Frost oder Test"), None);
+        assert_eq!(uuid("nothing"), None);
+        let err = l.virtual_input("Wasser").unwrap_err().to_string();
+        assert!(err.contains("matches 2 virtual inputs"), "{err}");
+    }
 }
 
 // the fixtures are the demo house of the TUI
