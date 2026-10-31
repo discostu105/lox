@@ -6,6 +6,7 @@ use ratatui::style::{Modifier, Style};
 
 use super::common;
 use super::inspector::{resample, stretch};
+use crate::energy::{self, Flow, NodeReading};
 use crate::tui::app::{App, ERange, Hit, PollKind};
 use crate::tui::data;
 use crate::tui::keymap::{Cmd, Ctx};
@@ -21,20 +22,19 @@ use crate::tui::widgets::meter::meter;
 use crate::tui::widgets::notchbox::{Hint, Notch, NotchBox};
 use crate::tui::widgets::{cell, put};
 
-/// Current power flows (kW). Grid: + import / − export. Battery: + charging.
+/// The energy flow (shared with `lox energy flow`) and the chargers / wallboxes.
 #[derive(Debug, Default, Clone)]
 pub struct Flows {
-    pub pv: Option<f64>,
-    pub grid: Option<f64>,
-    pub batt: Option<f64>,
-    pub soc: Option<f64>,
-    pub home: Option<f64>,
+    pub flow: Flow,
     /// (name, kW) of chargers / wallboxes
     pub chargers: Vec<(String, f64)>,
-    /// State UUIDs for sparklines
-    pub pv_uuid: Option<String>,
-    pub grid_uuid: Option<String>,
-    pub home_uuid: Option<String>,
+}
+
+impl std::ops::Deref for Flows {
+    type Target = Flow;
+    fn deref(&self) -> &Flow {
+        &self.flow
+    }
 }
 
 /// Power (kW) of a node: the EFM node state if the Miniserver has sent it, else
@@ -49,58 +49,31 @@ fn node_power<'a>(app: &'a App, n: &'a EnergyNode) -> Option<(f64, &'a str)> {
         .find_map(|u| app.store.num(u).map(|v| (v, u)))
 }
 
-fn sum(app: &App, role: Role) -> (Option<f64>, Option<String>) {
-    let h = &app.house;
-    let mut total = None;
-    let mut first = None;
-    for n in h.energy.by_role(role) {
-        if let Some((v, u)) = node_power(app, n) {
-            *total.get_or_insert(0.0) += v;
-            first.get_or_insert_with(|| u.to_string());
-        } else if let Some(u) = n.power_uuid(h) {
-            first.get_or_insert_with(|| u.to_string());
-        }
-    }
-    // last resort: the EFM's aggregate outputs
-    if total.is_none()
-        && let Some(efm) = h.energy.efm
-    {
-        let st = match role {
-            Role::Grid => "Gpwr",
-            Role::Production => "Ppwr",
-            Role::Storage => "Spwr",
-            Role::Load => "",
-        };
-        if let Some(u) = h.ctrls[efm].state(st)
-            && let Some(v) = app.store.num(u)
-        {
-            total = Some(v);
-            first.get_or_insert_with(|| u.to_string());
-        }
-    }
-    (total, first)
-}
-
 pub fn flows(app: &App) -> Flows {
     let h = &app.house;
-    let (pv, pv_uuid) = sum(app, Role::Production);
-    let (grid, grid_uuid) = sum(app, Role::Grid);
-    // Loxone reports storage like a source (+ discharging, as the grid's + import);
-    // flipped here so + means charging
-    let batt = sum(app, Role::Storage).0.map(|b| -b);
-    let soc = h
+    let readings: Vec<NodeReading> = h
         .energy
-        .by_role(Role::Storage)
-        .find_map(|n| n.ctrl.and_then(|c| app.store.st(h, c, "storage")))
-        .or_else(|| h.energy.efm.and_then(|c| app.store.st(h, c, "Ssoc")));
-    // Home: the EFM's Load node if it carries power, else production + grid − storage
-    let (load, home_uuid) = sum(app, Role::Load);
-    let home = load.or_else(|| {
-        if pv.is_none() && grid.is_none() {
-            None
-        } else {
-            Some(pv.unwrap_or(0.0) + grid.unwrap_or(0.0) - batt.unwrap_or(0.0))
-        }
+        .nodes
+        .iter()
+        .map(|n| {
+            let found = node_power(app, n);
+            NodeReading {
+                role: n.role,
+                power: found.map(|(v, _)| v),
+                soc: n
+                    .ctrl
+                    .filter(|_| n.role == Role::Storage)
+                    .and_then(|c| app.store.st(h, c, "storage")),
+                uuid: found
+                    .map(|(_, u)| u)
+                    .or_else(|| n.power_uuid(h))
+                    .map(String::from),
+            }
+        })
+        .collect();
+    let flow = energy::flow(&readings, |name| {
+        let u = h.ctrls[h.energy.efm?].state(name)?;
+        app.store.num(u).map(|v| (v, Some(u.to_string())))
     });
     let chargers = h
         .top_level()
@@ -113,17 +86,7 @@ pub fn flows(app: &App) -> Flows {
             Some((h.ctrls[c].name.clone(), p))
         })
         .collect();
-    Flows {
-        pv,
-        grid,
-        batt,
-        soc,
-        home,
-        chargers,
-        pv_uuid,
-        grid_uuid,
-        home_uuid,
-    }
+    Flows { flow, chargers }
 }
 
 pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
@@ -221,12 +184,7 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
     let mut nb = NotchBox::new()
         .title(Notch::new("⁴energy"))
         .title(Notch::new("now").active(true));
-    if let Some(pv) = f.pv
-        && pv > 0.05
-    {
-        // self-use: share of production not exported
-        let export = f.grid.map(|g| (-g).max(0.0)).unwrap_or(0.0);
-        let self_use = (((pv - export) / pv) * 100.0).clamp(0.0, 100.0);
+    if let Some(self_use) = f.self_use() {
         nb = nb.meta(Notch::new(format!("self-use {:.0}%", self_use)));
     }
     let inner = nb.render(area, buf, th);
@@ -294,12 +252,14 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
         th.s_color(th.grid),
         th,
     );
-    let gsub = match f.grid {
-        Some(g) if g < -0.01 => Some(("exporting", th.s_ok())),
-        Some(g) if g > 0.01 => Some(("importing", th.s_warn())),
-        Some(_) => Some(("idle", th.s_dim())),
-        None => None,
-    };
+    let gsub = f.grid_direction().map(|d| {
+        let style = match d {
+            "exporting" => th.s_ok(),
+            "importing" => th.s_warn(),
+            _ => th.s_dim(),
+        };
+        (d, style)
+    });
     node_box(
         app,
         buf,
@@ -355,8 +315,9 @@ fn flow_pane(app: &App, area: Rect, buf: &mut Buffer) {
                 None,
                 f.soc.map(|s| ((s / 100.0).clamp(0.0, 1.0), Grad::Batt)),
             );
-            if let Some(b) = f.batt.filter(|b| b.abs() > 0.01) {
-                let what = if b > 0.0 { "charging" } else { "discharging" };
+            if let (Some(b), Some(what)) = (f.batt, f.battery_direction())
+                && what != "idle"
+            {
                 let t = format!("{} {}", fmt_kw(b.abs()), what);
                 let tx = if both {
                     lx.saturating_sub(t.chars().count() as u16 + 1)

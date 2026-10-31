@@ -115,8 +115,29 @@ lox schema blind                      # show schema for a specific command
 lox sensors                           # all readings: temperature, door/window, motion, smoke
 lox sensors --type door-window        # what's open (also: temperature, motion, smoke)
 lox sensors -r "Wohnzimmer"           # one room
-lox energy                            # energy meters (power, totals)
+lox energy                            # energy meters and the energy flow monitor (current value)
 lox energy -r Keller
+lox energy flow                       # energy flow now: production, consumption, grid, battery
+lox energy flow -o json               # the same, plus every node of the flow monitor
+lox energy --top                      # the 10 meters with the highest current power
+lox energy --top 5 -r Keller -o json  # top 5 in one room
+```
+
+`lox energy flow` reads the Energy Flow Monitor (`/dev/sps/io/{uuid}/all`: its `Gpwr`/`Ppwr`/`Spwr` outputs and the
+power of each node) and the battery meter's state of charge. Values are in the Miniserver's unit (the monitor's
+format, usually kW). Grid: imported / exported; battery: charging / discharging (JSON `battery`: + charging,
+`grid`: + import); self-use is the share of production not exported. Without a flow monitor, meters named like PV,
+grid (Netz, Bezug) or a storage meter stand in; the `roles:` overrides in `~/.lox/tui.yaml` apply here as in
+`lox tui`.
+
+```
+Energiefluss (Zentral)
+
+Production       0.078 kW  ░░░░░░░░░░░░░░░░
+Consumption      2.593 kW  ████████████████
+Grid             2.526 kW  ████████████████  importing
+Battery          0.011 kW  ░░░░░░░░░░░░░░░░  9 % charging
+Self-use            100 %
 ```
 
 ---
@@ -665,7 +686,8 @@ lox --dry-run mcp serve               # every action is a dry run
 ```
 
 MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
-Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `list_light_moods`, `list_scenes`,
+Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `get_energy_flow` (the energy flow, `top` ranks
+the meters), `list_light_moods`, `list_scenes`,
 `system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down),
 `list_users`, `get_user`, `access_log`, `access_check` (see [Users & Door Access](#users--door-access); `access_check`
 downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`,

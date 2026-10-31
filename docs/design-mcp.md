@@ -81,6 +81,7 @@ a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destr
 | `list_controls` | `name?`, `room?`, `type?`, `category?`, `favorites_only?` | name, type, room, category, uuid, and the tool that operates it |
 | `get_control` | `name`, `room?` | live value, state attributes and named outputs |
 | `list_sensors` | `kind?` (all, temperature, door-window, motion, smoke, energy), `room?` | sensor readings |
+| `get_energy_flow` | `top?` | production, consumption, grid import/export, battery charge and state of charge, the flow monitor's nodes; with `top`, the meters ranked by current power |
 | `list_light_moods` | `name`, `room?` | mood IDs and names of a lighting controller (WebSocket) |
 | `list_scenes` | — | local `lox` scenes with description and step count |
 | `system_status` | — | firmware, PLC state, heap |

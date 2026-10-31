@@ -16,6 +16,7 @@ mod app_catalogue;
 mod commands;
 mod config;
 mod custom_changes;
+mod energy;
 mod gitops;
 mod logic;
 mod loxone_xml;
@@ -583,10 +584,16 @@ pub(crate) enum Cmd {
         #[arg(long, short = 'r')]
         room: Option<String>,
     },
-    /// Show energy meter readings
+    /// Energy meter readings, the energy flow, the meters ranked by power
+    #[command(args_conflicts_with_subcommands = true)]
     Energy {
         #[arg(long, short = 'r')]
         room: Option<String>,
+        /// Rank the meters by current power, highest first (N defaults to 10)
+        #[arg(long, value_name = "N", num_args = 0..=1, default_missing_value = "10")]
+        top: Option<usize>,
+        #[command(subcommand)]
+        action: Option<EnergyCmd>,
     },
     /// Show weather data
     Weather {
@@ -829,6 +836,12 @@ impl McpPolicy {
             dry_run,
         }
     }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum EnergyCmd {
+    /// Energy flow now: production, consumption, grid import/export, battery
+    Flow,
 }
 
 #[derive(Subcommand)]
@@ -1796,7 +1809,11 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Globals => commands::inspect::cmd_globals(&ctx),
         Cmd::Modes => commands::inspect::cmd_modes(&ctx),
         Cmd::Sensors { r#type, room } => commands::inspect::cmd_sensors(&ctx, r#type, room),
-        Cmd::Energy { room } => commands::inspect::cmd_energy(&ctx, room),
+        Cmd::Energy {
+            action: Some(EnergyCmd::Flow),
+            ..
+        } => commands::energy::cmd_flow(&ctx),
+        Cmd::Energy { room, top, .. } => commands::energy::cmd_energy(&ctx, room, top),
         Cmd::Weather { forecast } => commands::inspect::cmd_weather(&ctx, forecast),
         Cmd::Stats => commands::inspect::cmd_stats(&ctx),
         Cmd::History {

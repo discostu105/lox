@@ -611,6 +611,25 @@ pub fn list_sensors(lox: &mut LoxClient, kind: &str, room: Option<&str>) -> Resu
     })
 }
 
+/// The energy flow, and optionally the meters ranked by power.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EnergyFlow {
+    #[serde(flatten)]
+    pub flow: crate::energy::FlowReport,
+    /// Meters by current power, highest first (with `top`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_meters: Option<Vec<crate::energy::MeterPower>>,
+}
+
+pub fn energy_flow(lox: &mut LoxClient, top: Option<usize>) -> Result<EnergyFlow> {
+    let flow = crate::energy::read_flow(lox)?;
+    let top_meters = match top {
+        Some(n) => Some(crate::energy::top_meters(lox, None, n)?.0),
+        None => None,
+    };
+    Ok(EnergyFlow { flow, top_meters })
+}
+
 pub fn list_scenes(cfg: &Config) -> Result<SceneList> {
     let mut scenes = Vec::new();
     for id in Scene::list_with_config(cfg)? {

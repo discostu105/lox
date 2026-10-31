@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::Value;
 
 use crate::actions::{self, RiskTarget};
+use crate::energy;
 
 use super::text::{clean, natural_key};
 
@@ -58,13 +59,13 @@ impl Kind {
             "Alarm" => Kind::Alarm,
             "SmokeAlarm" => Kind::Smoke,
             "Meter" => Kind::Meter,
-            "EFM" | "EnergyManager2" => Kind::Efm,
             "InfoOnlyAnalog" => Kind::Analog,
             "InfoOnlyDigital" => Kind::Digital,
             "PresenceDetector" => Kind::Presence,
             "Daytimer" | "IRCV2Daytimer" => Kind::Daytimer,
             "TextState" | "InfoOnlyText" => Kind::Text,
             "Slider" | "UpDownDigital" | "ValueSelector" | "UpDownAnalog" => Kind::Slider,
+            t if crate::energy::is_flow_monitor(t) => Kind::Efm,
             t if t.contains("Intercom") => Kind::Intercom,
             t if t.contains("DoorLock") => Kind::DoorLock,
             t if t.contains("Charger") || t.contains("Wallbox") => Kind::Charger,
@@ -199,14 +200,7 @@ pub struct Cat {
     pub image: Option<String>,
 }
 
-/// Energy roles of an EFM node (from `details.nodes[].nodeType`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    Grid,
-    Production,
-    Storage,
-    Load,
-}
+pub use crate::energy::Role;
 
 #[derive(Debug, Clone)]
 pub struct EnergyNode {
@@ -410,20 +404,12 @@ impl House {
         house.energy.meters = (0..house.ctrls.len())
             .filter(|c| house.ctrls[*c].kind == Kind::Meter && house.ctrls[*c].parent.is_none())
             .collect();
-        house.energy.efm = (0..house.ctrls.len())
-            .find(|c| house.ctrls[*c].kind == Kind::Efm && house.ctrls[*c].parent.is_none());
-        if let Some(e) = house.energy.efm
-            && let Some(nodes) = house.ctrls[e]
-                .details
-                .get("nodes")
-                .and_then(|n| n.as_array())
-        {
-            let nodes = nodes.clone();
-            house.energy.nodes = nodes.iter().filter_map(|n| house.energy_node(n)).collect();
-        }
-        if house.energy.nodes.is_empty() {
-            house.energy.nodes = house.heuristic_energy_nodes();
-        }
+        let layout = energy::Layout::from_structure(st);
+        house.energy.efm = layout
+            .efm
+            .as_deref()
+            .and_then(|u| house.by_uuid.get(u).copied());
+        house.energy.nodes = layout.nodes.iter().map(|n| house.energy_node(n)).collect();
         house
     }
 
@@ -531,53 +517,12 @@ impl House {
         cid
     }
 
-    fn energy_node(&self, n: &Value) -> Option<EnergyNode> {
-        let role = match n.get("nodeType").and_then(|t| t.as_str())? {
-            "Grid" => Role::Grid,
-            "Production" => Role::Production,
-            "Storage" => Role::Storage,
-            "Load" => Role::Load,
-            _ => return None,
-        };
-        let ctrl = n
-            .get("ctrlUuid")
-            .and_then(|u| u.as_str())
-            .and_then(|u| self.by_uuid.get(u).copied());
-        Some(EnergyNode {
-            role,
-            ctrl,
-            power_state: n
-                .get("actualEfmState")
-                .and_then(|u| u.as_str())
-                .map(|u| u.to_string()),
-        })
-    }
-
-    /// Without an EFM: guess roles from meter types and names (overridable in tui.yaml).
-    fn heuristic_energy_nodes(&self) -> Vec<EnergyNode> {
-        let mut out = Vec::new();
-        for &m in &self.energy.meters {
-            let c = &self.ctrls[m];
-            let lname = c.name.to_lowercase();
-            let role = if c.meter_type() == "storage" {
-                Role::Storage
-            } else if lname.contains("pv") || lname.contains("solar") || lname.contains("photovolt")
-            {
-                Role::Production
-            } else if c.meter_type() == "bidirectional"
-                && (lname.contains("grid") || lname.contains("netz") || lname.contains("bezug"))
-            {
-                Role::Grid
-            } else {
-                continue;
-            };
-            out.push(EnergyNode {
-                role,
-                ctrl: Some(m),
-                power_state: None,
-            });
+    fn energy_node(&self, n: &energy::NodeSpec) -> EnergyNode {
+        EnergyNode {
+            role: n.role,
+            ctrl: n.ctrl.as_deref().and_then(|u| self.by_uuid.get(u).copied()),
+            power_state: n.power_state.clone(),
         }
-        out
     }
 
     /// Mark the controls on the `confirm:` list of the config; a listed control's
@@ -606,30 +551,32 @@ impl House {
 
     /// Apply role overrides from `tui.yaml`: meter name/UUID → role.
     pub fn apply_role_overrides(&mut self, overrides: &BTreeMap<String, String>) {
-        for (key, role) in overrides {
-            let role = match role.to_lowercase().as_str() {
-                "grid" => Role::Grid,
-                "pv" | "production" | "solar" => Role::Production,
-                "battery" | "storage" => Role::Storage,
-                "load" | "home" | "consumption" => Role::Load,
-                _ => continue,
-            };
-            let Some(cid) = self.by_uuid.get(key).copied().or_else(|| {
-                self.energy
-                    .meters
-                    .iter()
-                    .copied()
-                    .find(|c| self.ctrls[*c].name.eq_ignore_ascii_case(key))
-            }) else {
-                continue;
-            };
-            self.energy.nodes.retain(|n| n.ctrl != Some(cid));
-            self.energy.nodes.push(EnergyNode {
-                role,
-                ctrl: Some(cid),
-                power_state: None,
-            });
-        }
+        let uuid = |c: Option<Cid>| c.map(|c| self.ctrls[c].uuid.clone());
+        let mut nodes: Vec<energy::NodeSpec> = self
+            .energy
+            .nodes
+            .iter()
+            .map(|n| energy::NodeSpec {
+                role: n.role,
+                ctrl: uuid(n.ctrl),
+                power_state: n.power_state.clone(),
+                title: None,
+            })
+            .collect();
+        let meters: Vec<energy::MeterInfo> = self
+            .energy
+            .meters
+            .iter()
+            .map(|&m| energy::MeterInfo {
+                uuid: self.ctrls[m].uuid.clone(),
+                name: self.ctrls[m].name.clone(),
+                meter_type: self.ctrls[m].meter_type().to_string(),
+            })
+            .collect();
+        energy::apply_overrides(&mut nodes, overrides, &meters, |u| {
+            self.by_uuid.contains_key(u)
+        });
+        self.energy.nodes = nodes.iter().map(|n| self.energy_node(n)).collect();
     }
 
     pub fn room_name(&self, c: Cid) -> Option<&str> {

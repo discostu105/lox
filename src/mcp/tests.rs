@@ -576,6 +576,114 @@ async fn list_sensors_reads_values() {
     assert!(err, "{}", out);
 }
 
+const EFM: &str = "0f1e2d3c-00e0-1111-ffff0000000000e0";
+const GRID_METER: &str = "0f1e2d3c-00e1-1111-ffff0000000000e1";
+const PV_METER: &str = "0f1e2d3c-00e2-1111-ffff0000000000e2";
+const BATT_METER: &str = "0f1e2d3c-00e3-1111-ffff0000000000e3";
+
+/// A Miniserver with an energy flow monitor (grid, PV, battery; no load node).
+async fn energy_miniserver() -> MockServer {
+    let server = MockServer::start_async().await;
+    let mut s = structure();
+    let node = |t: &str, title: &str, ctrl: &str, st: &str| json!({ "nodeType": t, "title": title, "ctrlUuid": ctrl, "actualEfmState": st });
+    s["controls"][EFM] = json!({
+        "name": "Energiefluss", "type": "EFM", "room": "r3",
+        "details": { "actualFormat": "%.3fkW", "nodes": [
+            node("Grid", "Netz", GRID_METER, "s-grid"),
+            node("Production", "PV", PV_METER, "s-pv"),
+            node("Storage", "Speicher", BATT_METER, "s-batt"),
+        ] },
+    });
+    for (u, name, typ) in [
+        (GRID_METER, "Netz", "bidirectional"),
+        (PV_METER, "PV", "unidirectional"),
+        (BATT_METER, "Speicher", "storage"),
+    ] {
+        s["controls"][u] = json!({
+            "name": name, "type": "Meter", "room": "r3",
+            "details": { "type": typ, "actualFormat": "%.3fkW" },
+        });
+    }
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200).json_body(s);
+        })
+        .await;
+    for (u, body) in [
+        (
+            EFM,
+            r#"<LL value="-1.000" Code="200">
+                <output name="Gpwr" nr="1" value="-1.000"/>
+                <output name="Ppwr" nr="2" value="3.000"/>
+                <output name="Spwr" nr="4" value="-0.500"/>
+                <SpecialState uuid="s-grid" nr="1" value="-1.000"/>
+                <SpecialState uuid="s-pv" nr="2" value="3.000"/>
+                <SpecialState uuid="s-batt" nr="3" value="-0.500"/></LL>"#,
+        ),
+        (GRID_METER, r#"<LL value="-1.000" Code="200"/>"#),
+        (PV_METER, r#"<LL value="3.000" Code="200"/>"#),
+        (
+            BATT_METER,
+            r#"<LL value="-0.500" Code="200"><output name="Slvl" nr="16" value="85.000"/></LL>"#,
+        ),
+    ] {
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path(format!("/dev/sps/io/{}/all", u));
+                then.status(200).body(body);
+            })
+            .await;
+    }
+    server
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn energy_flow_breaks_down_the_efm() {
+    let ms = energy_miniserver().await;
+    let opts = ServerOptions {
+        read_only: true,
+        ..Default::default()
+    };
+    let client = session(&ms, opts, Lifecycle::Modern).await;
+    assert!(
+        tool_names(&client)
+            .await
+            .contains(&"get_energy_flow".to_string())
+    );
+    let (out, err) = call(&client, "get_energy_flow", json!({})).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["monitor"]["name"], "Energiefluss");
+    assert_eq!(out["unit"], "kW");
+    assert_eq!(out["production"], 3.0);
+    assert_eq!(out["grid"], -1.0);
+    assert_eq!(out["grid_direction"], "exporting");
+    assert_eq!(out["battery"], 0.5, "+ charging");
+    assert_eq!(out["battery_direction"], "charging");
+    assert_eq!(out["battery_soc"], 85.0);
+    // no load node: production + grid − charging
+    assert_eq!(out["consumption"], 1.5);
+    assert_eq!(out["nodes"].as_array().unwrap().len(), 3);
+    assert!(out.get("top_meters").is_none());
+
+    let (out, err) = call(&client, "get_energy_flow", json!({ "top": 2 })).await;
+    assert!(!err, "{}", out);
+    let top = out["top_meters"].as_array().unwrap();
+    assert_eq!(top.len(), 2);
+    assert_eq!(top[0]["name"], "PV");
+    assert_eq!(top[0]["rank"], 1);
+    assert_eq!(top[1]["name"], "Speicher");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn energy_flow_without_meters_is_a_tool_error() {
+    let ms = miniserver().await;
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    let (out, err) = call(&client, "get_energy_flow", json!({})).await;
+    assert!(err, "{}", out);
+    assert!(out.to_string().contains("no energy flow"), "{}", out);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn system_status_parses_values() {
     let ms = miniserver().await;
