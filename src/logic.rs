@@ -191,6 +191,102 @@ pub struct WireView {
     /// Inputs only: other blocks the same source also drives
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<BlockRef>,
+    /// The wire's source connector: a streamed state UUID when the source
+    /// block is visualized
+    #[serde(skip)]
+    pub source: String,
+    /// The value on the wire now (`live`), when its source is a state the
+    /// Miniserver streams
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<LiveValue>,
+}
+
+/// The current value of a streamed state, as `get_wiring` with `live` reports
+/// it on a wire.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+pub struct LiveValue {
+    /// Number or text; null when the Miniserver sent no value for the state
+    pub value: serde_json::Value,
+    /// The value in the app control's own format (`22000lx`, `21.5°`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The app control that streams it (`Parent / Sub` for a subcontrol)
+    pub control: String,
+    /// Its state name (`value`, `active`, `position`)
+    pub state: String,
+}
+
+/// Who streams a state: the app control and the state's name, with the
+/// control's number format.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateOwner {
+    pub control: String,
+    pub state: String,
+    pub format: Option<String>,
+}
+
+/// State UUID → owner for every control and subcontrol of a `LoxAPP3.json`.
+/// A wire whose source connector is one of these carries a live value.
+pub fn state_owners(structure: &serde_json::Value) -> HashMap<String, StateOwner> {
+    fn add(out: &mut HashMap<String, StateOwner>, ctrl: &serde_json::Value, parent: Option<&str>) {
+        let own = ctrl["name"].as_str().unwrap_or_default();
+        let name = match parent {
+            Some(p) => format!("{} / {}", p, own),
+            None => own.to_string(),
+        };
+        let format = crate::util::control_format(ctrl);
+        for (state, uuid) in ctrl["states"].as_object().into_iter().flatten() {
+            if let Some(uuid) = uuid.as_str() {
+                out.insert(
+                    uuid.to_string(),
+                    StateOwner {
+                        control: name.clone(),
+                        state: state.clone(),
+                        format: format.clone(),
+                    },
+                );
+            }
+        }
+        for sub in ctrl["subControls"]
+            .as_object()
+            .into_iter()
+            .flat_map(|m| m.values())
+        {
+            add(out, sub, Some(own));
+        }
+    }
+    let mut out = HashMap::new();
+    for ctrl in structure["controls"]
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.values())
+    {
+        add(&mut out, ctrl, None);
+    }
+    out
+}
+
+/// A streamed value on a wire: `None` when `source` is no streamed state;
+/// a null `value` when it is but the Miniserver sent nothing for it.
+pub fn live_value(
+    owners: &HashMap<String, StateOwner>,
+    values: &HashMap<String, serde_json::Value>,
+    source: &str,
+) -> Option<LiveValue> {
+    let owner = owners.get(source)?;
+    let value = values
+        .get(source)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let text = value
+        .as_f64()
+        .and_then(|v| crate::util::state_text(owner.format.as_deref(), &owner.state, v));
+    Some(LiveValue {
+        value,
+        text,
+        control: owner.control.clone(),
+        state: owner.state.clone(),
+    })
 }
 
 /// One node of a traced wire path.
@@ -204,6 +300,13 @@ pub struct TraceView {
     /// A feedback loop: this block was already shown above
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub cycle: bool,
+    /// The wire's source connector
+    #[serde(skip)]
+    pub source: String,
+    /// The value on the wire to the parent node now (`live`), when its
+    /// source is a state the Miniserver streams
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<LiveValue>,
 }
 
 /// Everything wired around one block, for `lox config wiring` and MCP.
@@ -789,6 +892,8 @@ impl Logic {
             key: w.key.clone(),
             block: self.block_ref(&w.other, Some(&w.other_key)),
             also: w.also.iter().map(|a| self.block_ref(a, None)).collect(),
+            source: w.source.clone(),
+            live: None,
         };
         let traced = |up: bool, depth: usize| -> Vec<TraceView> {
             self.trace(&c.uuid, up, depth)
@@ -798,6 +903,8 @@ impl Logic {
                     parent_key: t.parent_key,
                     block: self.block_ref(&t.block, Some(&t.key)),
                     cycle: t.cycle,
+                    source: t.source,
+                    live: None,
                 })
                 .collect()
         };

@@ -688,7 +688,8 @@ lox --dry-run mcp serve               # every action is a dry run
 MCP clients launch `lox mcp serve` themselves; you normally only run `lox mcp config` and paste the result.
 Tools: `list_rooms`, `list_controls`, `get_control`, `list_sensors`, `get_energy_flow` (the energy flow, `top` ranks
 the meters), `list_light_moods`, `list_scenes`,
-`system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down),
+`system_status`, `get_wiring` (the config logic around a control: what drives it, what it drives, parameters, `trace` up/down;
+`live=true` adds the current value on each wire whose source the app streams, e.g. `22000lx`),
 `list_users`, `get_user`, `access_log`, `access_check` (see [Users & Door Access](#users--door-access); `access_check`
 downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`,
 `learn_nfc_tag`, `assign_nfc_tag`, `remove_nfc_tag`, `set_access_code` (and `send_command` with `--allow-raw`). Every tool

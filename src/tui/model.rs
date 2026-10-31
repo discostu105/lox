@@ -432,11 +432,7 @@ impl House {
             }
         }
         let details = c.get("details").cloned().unwrap_or(Value::Null);
-        let format = details
-            .get("format")
-            .or_else(|| details.get("actualFormat"))
-            .and_then(|f| f.as_str())
-            .map(|f| f.to_string());
+        let format = crate::util::control_format(c);
         let room = c
             .get("room")
             .and_then(|r| r.as_str())

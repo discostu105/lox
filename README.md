@@ -195,7 +195,7 @@ lox health --problems -o json         # check device health
 
 **MCP server.** Clients that speak the [Model Context Protocol](https://modelcontextprotocol.io) (Claude
 Desktop, Claude Code, ChatGPT, Cursor, …) can launch `lox mcp serve`. It exposes typed tools over stdio:
-rooms, controls, live state, switches, blinds, lights, climate, scenes, the config wiring behind a control,
+rooms, controls, live state, switches, blinds, lights, climate, scenes, the config wiring behind a control (with live values on the wires),
 door access, learning NFC tags and setting access codes. Doors, gates, the alarm, every change to users and
 any control on your `confirm:` list ask you to confirm in the client before anything is sent.
 

@@ -150,9 +150,107 @@ pub(crate) fn http_status(e: &anyhow::Error) -> Option<&loxone_client::HttpStatu
     })
 }
 
+/// Format a number with a C-style Loxone format string such as `%.1f°C`, `%.3fkW`, `%i%%`.
+pub fn lox_format(fmt: &str, v: f64) -> String {
+    let Some(pos) = fmt.find('%') else {
+        return format!("{} {}", trim_num(v, 1), fmt).trim().to_string();
+    };
+    let (pre, rest) = fmt.split_at(pos);
+    let rest = &rest[1..];
+    let mut chars = rest.char_indices();
+    let mut prec: Option<usize> = None;
+    let mut end = 0;
+    let mut spec = 'f';
+    let mut digits = String::new();
+    let mut seen_dot = false;
+    for (i, c) in chars.by_ref() {
+        if c == '.' {
+            seen_dot = true;
+        } else if c.is_ascii_digit() {
+            if seen_dot {
+                digits.push(c);
+            }
+        } else if c == '-' || c == '+' || c == ' ' || c == '0' || c == 'l' {
+            // flags / length modifiers
+        } else {
+            spec = c;
+            end = i + c.len_utf8();
+            break;
+        }
+    }
+    if seen_dot {
+        prec = digits.parse().ok();
+    }
+    let suffix = rest.get(end..).unwrap_or("").replace("%%", "%");
+    let num = match spec {
+        'i' | 'd' | 'u' => format!("{}", v.round() as i64),
+        '%' => return format!("{}%{}", pre, suffix),
+        's' => trim_num(v, 2),
+        _ => match prec {
+            Some(p) => format!("{:.*}", p, v),
+            None => format!("{:.6}", v),
+        },
+    };
+    format!("{}{}{}", pre, num, suffix)
+}
+
+fn trim_num(v: f64, prec: usize) -> String {
+    let s = format!("{:.*}", prec, v);
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
+
+/// A control's number format from its `details` (`format`, or a
+/// thermostat's `actualFormat`), as the app shows its value.
+pub fn control_format(ctrl: &Value) -> Option<String> {
+    let d = &ctrl["details"];
+    d["format"]
+        .as_str()
+        .or_else(|| d["actualFormat"].as_str())
+        .map(str::to_string)
+}
+
+/// A streamed state as the app shows it: a control's `value` state in the
+/// control's own format (`21.5°`, `22000lx`). `None` for other states and
+/// for controls without a format.
+pub fn state_text(format: Option<&str>, state: &str, v: f64) -> Option<String> {
+    match format {
+        Some(f) if state == "value" => Some(lox_format(f, v)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loxone_formats() {
+        assert_eq!(lox_format("%.1f°C", 21.456), "21.5°C");
+        assert_eq!(lox_format("%.3fkW", 1.5), "1.500kW");
+        assert_eq!(lox_format("%i%%", 42.4), "42%");
+        assert_eq!(lox_format("%.0f%%", 74.6), "75%");
+        assert_eq!(lox_format("%.1f°", 22.0), "22.0°");
+        assert_eq!(lox_format("Lux", 300.0), "300 Lux");
+        assert_eq!(lox_format("%.2f ppm", 400.0), "400.00 ppm");
+    }
+
+    #[test]
+    fn formatted_state_values() {
+        let ctrl = serde_json::json!({ "details": { "format": "%.0flx" } });
+        let f = control_format(&ctrl);
+        assert_eq!(
+            state_text(f.as_deref(), "value", 22000.0).as_deref(),
+            Some("22000lx")
+        );
+        assert_eq!(state_text(f.as_deref(), "active", 1.0), None);
+        assert_eq!(state_text(None, "value", 1.0), None);
+        let thermo = serde_json::json!({ "details": { "actualFormat": "%.1f°" } });
+        assert_eq!(control_format(&thermo).as_deref(), Some("%.1f°"));
+    }
 
     #[test]
     fn test_json_val_str_string() {
