@@ -2272,10 +2272,16 @@ Anything unverified is an error, not a heuristic:
   (oracle session 31): Loxone Config adds an `<In … FLG="1"/>` for every
   source a rule watches (a weekday condition the `DayOfWeek` block's
   `Q`, a state condition the state, a mode condition the mode's `Q`; a
-  time condition none), in reverse document order. Every compile sets
-  that list from the rules, so a compiled file has what a save writes;
-  it is left alone when a rule watches a source Lox Logic cannot place
+  time condition none), in reverse document order. A compile that
+  changes the rules (rewrites a payload, creates or deletes a rule) sets
+  that list from them, so a compiled file has what a save writes; it is
+  left alone when a rule watches a source Lox Logic cannot place
   (weather, dates). `adopt`'s no-op check does not count these wires.
+  Amended 2026-10-31 (#224): rules the compile leaves as the base has
+  them leave the list as the base has it. The corpus holds a config
+  whose two rules have no list at all (`UseCase-AC-TouchPureFlex`, V254
+  base with V172 objects); deriving the list there anyway broke the
+  rule fixpoint, and nothing in the source asked for the change.
 - **D74 — Calendar entries** (2026-10-31; #211). An entry of the
   *Betriebszeiten* calendar is a `CalendarEntry` object in the
   `CalendarCaption` folder, minted, adopted and edited like a virtual

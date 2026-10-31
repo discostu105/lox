@@ -186,6 +186,21 @@ Type coverage doubled (102 → 214). Consequences applied:
   the inert-flag rule classifies exactly this as Input. Same for the
   zero-evidence `OutputAPI` of the two new types below.
 
+The pinned corpus (2026-10-31, `tools/corpus-manifest.json`) brought in
+a file the old fetcher had overwritten under a colliding name, and with
+it two more `OutputAPI` counterexamples (#225):
+
+- **`LightController2.OutputAPI` flipped Input → `Api`**: six V161
+  instances in one config (`benjaminellmer/mc-hba`, `Loxone/HB_SS23.Loxone`)
+  are API-linked — a wire from `OutputAPI` into the `AI` of an
+  `OutputRef` titled "API Connector", plus the GUI's reverse
+  `<In … Hidden="true"/>` into `OutputAPI` (the API-link shape of
+  loxone-format.md). 6 source wires against an inert-flag Input.
+- **`MeterAbsSt.OutputAPI` flipped Output → `Api`**: one V172 instance
+  (`eisber/lox-cli`, `UseCase-wallbox-charging-modes`) has the same
+  API-link pair, the sink half contradicting the legacy-db Output.
+  MeterAbsUni/MeterAbsBi were admitted as `Api` on this evidence already.
+
 ## PulseAt and DayTimer, admitted 2026-08-25 (web corpus)
 
 | Type | Ports (element order) | Basis |
@@ -231,7 +246,7 @@ story), one swap (Switch2Button `On`/`Reset`). Every key resolved with
 
 | Type | Keys | Basis |
 |---|---|---|
-| `LightController2` | 75 | The largest admitted type. 23 house instances, one identical order; 86 corpus occurrences. 17 corpus-sink inputs (`Sel1` ×47, `Brightness` ×19, `Move` ×15); 16 Def-on-every-instance params + 5 connector-map-agreed; `AQ1`–`AQ20`/`Scene`/`OutputReset`/`OutputResetAll` connector-map O (`AQ1` corpus-source ×131); `MoveOn` carries Def everywhere *plus* one sink wire — wire evidence precedes, Input still admits the Def; `OutputAPI` zero-evidence → inert-flag Input |
+| `LightController2` | 75 | The largest admitted type. 23 house instances, one identical order; 86 corpus occurrences. 17 corpus-sink inputs (`Sel1` ×47, `Brightness` ×19, `Move` ×15); 16 Def-on-every-instance params + 5 connector-map-agreed; `AQ1`–`AQ20`/`Scene`/`OutputReset`/`OutputResetAll` connector-map O (`AQ1` corpus-source ×131); `MoveOn` carries Def everywhere *plus* one sink wire — wire evidence precedes, Input still admits the Def; `OutputAPI` zero-evidence → inert-flag Input at admission, `Api` since the pinned corpus (2026-10-31, below) |
 | `Switch2Button` | 9 | 49 occurrences; `InputTrigger` sink on every instance, `Q`/`Qon`/`Qoff` corpus-source ×16/×33/×15, `Time` Def everywhere, rest inert-flag |
 | `CentralShade` | 18 | 11 occurrences; `EndUp`/`EndDown`/`AutoShade`/`Safety`/`Gesture` corpus-sink, classic inputs connector-map I, `OutputAPI` connector-map O, appended `OutOpen`/`OutClose` inert-flag Input at admission, Output since oracle session 17 (wires from them survive the save; documented as outputs) |
 | `CentralLight` | 24 | 9 occurrences; `Reset`/`On`/`Alarm` corpus-sink, rest connector-map I, `OutputAPI` connector-map O, appended `OutActive` inert-flag Input at admission, Output since oracle session 17 |

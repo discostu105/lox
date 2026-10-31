@@ -246,9 +246,11 @@ const DAY_TIMER: &[PortSpec] = &[
 // Scene/OutputReset/OutputResetAll connector-map O (AQ1–AQ5 also
 // corpus-source, ×131 on AQ1); `MoveOn` carries Def everywhere but has a
 // sink wire — wire evidence precedes, and Input still admits the Def.
-// `OutputAPI` has zero evidence in any direction and is absent from both
-// legacy dbs → inert-flag Input (the PButtonT precedent; one observed
-// counterexample re-classifies).
+// `OutputAPI` was admitted as an inert-flag Input (zero evidence, absent
+// from both legacy dbs) and flipped to Api on the pinned corpus
+// (2026-10-31): six V161 instances in one config are API-linked — a wire
+// from `OutputAPI` into an "API Connector" OutputRef's `AI` plus the
+// GUI's hidden reverse wire into `OutputAPI` (the PushButton story).
 const LIGHT_CONTROLLER2: &[PortSpec] = &[
     p("I1", Input),
     p("I2", Input),
@@ -324,7 +326,7 @@ const LIGHT_CONTROLLER2: &[PortSpec] = &[
     p("Scene", Output),
     p("OutputReset", Output),
     p("OutputResetAll", Output),
-    p("OutputAPI", Input),
+    p("OutputAPI", Api),
 ];
 
 // Switch2Button: 49 corpus occurrences; the modern (V273 house, ×5 per
@@ -904,7 +906,10 @@ const METER_ABS_ST: &[PortSpec] = &[
     p("ORy2", Output),
     p("ORly2", Output),
     p("OSlvl", Output),
-    p("OutputAPI", Output),
+    // Api since the pinned corpus (2026-10-31): one V172 instance is
+    // API-linked (a wire into an "API Connector" OutputRef plus the GUI's
+    // hidden reverse wire), as MeterAbsUni/MeterAbsBi already were.
+    p("OutputAPI", Api),
 ];
 
 // Mirror blocks: the on-page visual representation of an object living
@@ -1730,7 +1735,9 @@ mod tests {
         assert_eq!((lc[32].key, lc[32].dir), ("MoveOn", PortDir::Input));
         assert_eq!((lc[51].key, lc[51].dir), ("AQ1", PortDir::Output));
         assert_eq!((lc[72].key, lc[72].dir), ("OutputReset", PortDir::Output));
-        assert_eq!((lc[74].key, lc[74].dir), ("OutputAPI", PortDir::Input));
+        // Flipped Input -> Api by the pinned corpus (2026-10-31): 6 API
+        // links, each a source wire plus the GUI's hidden reverse sink.
+        assert_eq!((lc[74].key, lc[74].dir), ("OutputAPI", PortDir::Api));
         let s2 = builtin("Switch2Button").unwrap();
         assert_eq!(s2.len(), 9);
         // Modern order: On before Reset (swapped relative to V74–162).
