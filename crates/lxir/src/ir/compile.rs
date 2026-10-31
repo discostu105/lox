@@ -272,6 +272,29 @@ pub fn compile(
     //     blocks — editing the expression IS the removal authorization).
     let src_slugs: BTreeSet<String> = module.blocks().map(|b| b.slug.clone()).collect();
     let removed_slugs: BTreeSet<&str> = module.removed().map(|r| r.slug.as_str()).collect();
+    // D67: `removed <rule>` deletes a named rule the lock pins (D60): its
+    // pin becomes a tombstone, which the sweep below deletes from every
+    // base that still has the rule, as for a block.
+    for r in module.removed() {
+        let Some(uuid) = lock.rules.get(&r.slug).cloned() else {
+            continue;
+        };
+        if let Some(target) = wired_from(base, &uuid) {
+            return Err(Error::Compile(format!(
+                "`removed {}`: the rule {uuid} drives {target} — remove that wire in \
+                 Loxone Config or the source first",
+                r.slug
+            )));
+        }
+        lock.rules.remove(&r.slug);
+        lock.removed.insert(
+            uuid,
+            crate::lock::Tombstone {
+                slug: r.slug.clone(),
+                block_type: crate::ir::ast::RULE_BLOCK_TYPE.to_string(),
+            },
+        );
+    }
     // A `removed` statement must name a block the lock still knows — as a
     // managed object (the removal happens now) or as a tombstone (D31, the
     // removal is compiled but not yet seen deployed). Once the tombstone
@@ -2913,6 +2936,27 @@ fn write_claimed(doc: &mut LoxoneDoc, uuid: &str, attr: Attr, value: &str) {
     {
         el.set_attr(name, value);
     }
+}
+
+/// The first object a wire from one of `uuid`'s connectors feeds: its
+/// title (or UUID), `None` when nothing is wired to the object.
+fn wired_from(doc: &LoxoneDoc, uuid: &str) -> Option<String> {
+    let objects = doc.objects();
+    let el = doc.element_at(&objects.iter().find(|o| o.uuid == uuid)?.path)?;
+    let outputs: BTreeSet<&str> = el
+        .child_elements()
+        .filter(|c| c.name == "Co")
+        .filter_map(|c| c.attr("U"))
+        .collect();
+    objects.iter().find_map(|o| {
+        let fed = doc
+            .element_at(&o.path)?
+            .child_elements()
+            .filter(|c| c.name == "Co")
+            .flat_map(|c| c.child_elements())
+            .any(|i| i.name == "In" && i.attr("Input").is_some_and(|u| outputs.contains(u)));
+        fed.then(|| o.title.clone().unwrap_or_else(|| o.uuid.clone()))
+    })
 }
 
 /// Bind a managed block to a room and/or category: `Pr=`/`Cr=` on its

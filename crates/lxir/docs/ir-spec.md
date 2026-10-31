@@ -564,6 +564,11 @@ is tolerated while the tombstone is pending, and once the removal has
 reached the deployed config a lingering statement is a compile error.
 Declaring a slug and `removed`-ing it in the same module is an error.
 
+The same statement deletes a named rule (`rule <slug> "Name"`, D60) in
+place of its declaration: the rule the lock pins is deleted with its
+connectors, under the same tombstone (D67). A rule whose outputs feed a
+block is refused until that wire is gone.
+
 ### `moved` — rename a managed block, keeping identity
 
 ```text

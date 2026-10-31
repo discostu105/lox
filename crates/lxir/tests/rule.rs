@@ -505,3 +505,54 @@ fn named_rules_are_checked() {
         .to_string();
     assert!(e.contains("create one in the app"), "{e}");
 }
+
+#[test]
+fn a_removed_rule_is_deleted_until_the_miniserver_runs_without_it() {
+    let base = placed_fixture();
+    let mut lock = Lockfile::new();
+    let created = compile_with(&base, NEW_RULE, &mut lock).unwrap();
+    let uuid = lock.rules["mittag"].clone();
+
+    // `removed` deletes it with its connectors, and the lock keeps a
+    // tombstone instead of the pin.
+    let out = compile_with(&created, "removed mittag\n", &mut lock).unwrap();
+    assert!(!out.contains(&uuid[..18]), "{out}");
+    assert_eq!(out, compile_with(&base, "", &mut Lockfile::new()).unwrap());
+    assert!(lock.rules.is_empty());
+    assert_eq!(lock.removed[&uuid].slug, "mittag");
+
+    // A base from before the deployment loses it again; the deployed one
+    // retires the tombstone, and the statement is then an error.
+    let mut again = lock.clone();
+    assert_eq!(
+        compile_with(&created, "removed mittag\n", &mut again).unwrap(),
+        out
+    );
+    assert_eq!(
+        compile_with(&out, "removed mittag\n", &mut again).unwrap(),
+        out
+    );
+    assert!(again.removed.is_empty());
+    let e = compile_with(&out, "removed mittag\n", &mut again).unwrap_err();
+    assert!(e.to_string().contains("delete the `removed` line"), "{e}");
+
+    // A rule that drives a block stays until that wire is gone.
+    let seq = u32::from_str_radix(&uuid[14..18], 16).unwrap();
+    let port = format!("{}{:04x}-04ff504f94112233", &uuid[..14], seq - 3);
+    assert!(
+        created.contains(&format!("<Co K=\"Q\" U=\"{port}\"/>")),
+        "{port}"
+    );
+    let light = "<Co K=\"Q\" U=\"40000004-0000-0041-01ffaaaaaaaa0004\"/>";
+    assert!(created.contains(light));
+    let wired = created.replace(
+        light,
+        &format!(
+            "<Co K=\"Q\" Nc=\"1\" U=\"40000004-0000-0041-01ffaaaaaaaa0004\"><In Input=\"{port}\"/></Co>"
+        ),
+    );
+    let mut l = Lockfile::new();
+    compile_with(&wired, NEW_RULE, &mut l).unwrap();
+    let e = compile_with(&wired, "removed mittag\n", &mut l).unwrap_err();
+    assert!(e.to_string().contains("drives Licht"), "{e}");
+}

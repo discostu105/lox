@@ -1,0 +1,1 @@
+- **`lox ir` / `lxir`**: `removed <slug>` deletes a named Automatic Designer rule from the program, the way it deletes a block. A rule deleted in the app thus stays deleted after the next push.

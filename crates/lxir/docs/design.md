@@ -1879,8 +1879,8 @@ Anything unverified is an error, not a heuristic:
     `descID`s) as an edited one. A config with no rule is refused:
     where rules live (a special page, logic pages) is the app's choice,
     and one rule made in the app settles it.
-  - **No deletion.** Removing the declaration drops the lock entry and
-    leaves the rule; a slug already declared otherwise, or a named rule
+  - **No deletion** (until D67). Removing the declaration drops the lock
+    entry and leaves the rule; a slug already declared otherwise, or a named rule
     that some `rule <extern>` also declares, is refused.
   Validated: oracle session 24 (byte-identical but for `WF=`, which the
   save drops from every rule); live on the house (firmware 17.2.8.28,
@@ -2049,3 +2049,16 @@ Anything unverified is an error, not a heuristic:
   controller) — their entries wait for a save. Validated: oracle
   session 28 (a minted jalousie: the save kept its states, `<IoData>`
   and `<COHist>`, a recompile of the save byte-identical).
+- **D67 — Deleting a rule from source** (2026-10-31). A rule deleted in
+  the app lives in the Miniserver's custom changes only: the program
+  file still has it, and the next upload brings it back. `removed
+  <slug>` in place of a `rule <slug> "Name"` declaration deletes the
+  rule the lock pins: the pin becomes a removal tombstone (D31) under the
+  rule's UUID, so every compile against a base that still holds the
+  rule deletes it (with its connectors, which live inside it) and a
+  deployed base retires the tombstone; then the statement is an error,
+  as for a block. The app catalogue lists only the rules container, not
+  single rules, so it is unchanged. A rule whose outputs feed a block is
+  refused (the wire would dangle). Removing only the declaration still
+  leaves the rule (D60). Validated live 2026-10-31 on the house: the
+  test rule of #181, deleted in the app, deleted by the push.
