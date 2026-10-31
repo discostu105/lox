@@ -1,11 +1,11 @@
 //! Emission: the managed `<C>` elements, built and inserted into their
-//! pinned page or container where the base had them (D47).
+//! pinned page or container where the base had them.
 
 use super::*;
 use crate::doc::DocIndex;
 
 /// Builds the managed `<C>` elements and inserts each into its pinned
-/// page, where the base had it (D47). The index is taken once after
+/// page, where the base had it. The index is taken once after
 /// teardown; inserting into a page never shifts the page paths.
 pub(super) fn emit_blocks(
     doc: &mut LoxoneDoc,
@@ -17,16 +17,15 @@ pub(super) fn emit_blocks(
         module, residue, ..
     } = *cx;
     let page_index = doc.index();
-    // D46: managed blocks carry the document's block version, so a GUI
-    // save has none to restamp — when the builtin table is verified for
-    // it. Otherwise they keep the version the table was first verified
+    // Managed blocks carry the document's block version if the builtin
+    // table is verified for it, so a GUI save has none to restamp. Otherwise they keep the version the table was first verified
     // for, and Loxone Config migrates them on load.
     let block_version = doc
         .block_version()
         .filter(|v| VERIFIED_BLOCK_VERSIONS.contains(&v.as_str()))
         .unwrap_or_else(|| VERIFIED_BLOCK_VERSIONS[0].to_string());
-    // A fresh VirtualIn gets the next free `VI<n>` designation (D54), a
-    // fresh virtual or Modbus object the next of its prefix (D64) — past
+    // A fresh VirtualIn gets the next free `VI<n>` designation, a
+    // fresh virtual or Modbus object the next of its prefix — past
     // every one the torn-down base and the carried residue hold.
     let inames: Vec<String> = doc
         .objects()
@@ -50,7 +49,7 @@ pub(super) fn emit_blocks(
             .unwrap_or(0);
         next_iname.insert(prefix, n + 1);
     }
-    // A fresh user-defined operating mode (D69) gets the next `Mode=`
+    // A fresh user-defined operating mode gets the next `Mode=`
     // number: one below the lowest the document or the residue holds (the
     // GUI numbers them -1, -2, … — built-in ones are 0 and up).
     let next_mode: i64 = doc
@@ -68,7 +67,7 @@ pub(super) fn emit_blocks(
         .unwrap_or(0)
         .min(0)
         - 1;
-    // Devices before what hangs below them (D64), so a minted I/O finds
+    // Devices before what hangs below them, so a minted I/O finds
     // its minted device.
     let rank = |t: &str| {
         if crate::periphery::device_types(t).is_empty() {
@@ -99,12 +98,12 @@ pub(super) fn emit_blocks(
 }
 
 /// Document-wide values a built element is stamped with: the block version
-/// (D46) and the next free designations of fresh objects.
+/// and the next free designations of fresh objects.
 struct Fresh {
     block_version: String,
-    /// Next `VI<n>` (D54) or periphery designation (D64) per prefix.
+    /// Next `VI<n>` or periphery designation per prefix.
     next_iname: BTreeMap<&'static str, u32>,
-    /// Next user-defined operating mode number (D69).
+    /// Next user-defined operating mode number.
     next_mode: i64,
 }
 
@@ -177,7 +176,7 @@ fn element_attrs(
         None => el.set_attr("Title", block.title.as_deref().unwrap_or(&block.slug)),
     }
     // Blocks without a position get theirs once the wires are drawn;
-    // objects of the object tree have none (D54).
+    // objects of the object tree have none.
     if plan.placed {
         let at = plan.layout.unwrap_or(Layout::at(0, 0, 0, 0));
         el.set_attr("Px", &at.px.to_string());
@@ -185,11 +184,11 @@ fn element_attrs(
         el.set_attr("Px2", &at.px2.to_string());
         el.set_attr("Py2", &at.py2.to_string());
     }
-    // D19: a block that existed in the base re-emits its GUI-owned
-    // display state verbatim — including *absence* (some types lose
-    // `WF` on a GUI save). Only a fresh mint writes the defaults; a
-    // virtual input has the folder's grey (corpus) and the same `WF`
-    // a save gives a page block (oracle session 18).
+    // A block that existed in the base re-emits its GUI-owned display
+    // state verbatim, including *absence* (some types lose `WF` on a GUI
+    // save). Only a fresh mint writes the defaults. A virtual input gets
+    // the folder's grey (seen in real configs) and the same `WF` a save
+    // gives a page block (verified with Loxone Config).
     let mint_attr = |name: &str| {
         pt.and_then(|p| p.mint_attrs.iter().find(|(n, _)| *n == name))
             .map(|(_, v)| *v)
@@ -205,7 +204,7 @@ fn element_attrs(
         None if plan.placed => "141,255,112",
         None => "238,238,238",
     };
-    // A fresh message ref (D51) gets what Loxone Config gives one:
+    // A fresh message ref gets what Loxone Config gives one:
     // black, and no `WF=`.
     let message_ref = block.block_type == "OutputRefLM";
     match (res, carried("Cl")) {
@@ -215,12 +214,12 @@ fn element_attrs(
         (None, _) if cl.is_empty() => {}
         (None, _) => el.set_attr("Cl", cl),
     }
-    // A device without connectors has no `Nio=` (D64).
+    // A device without connectors has no `Nio=`.
     if !plan.keys.is_empty() || pt.is_none() {
         el.set_attr("Nio", &plan.keys.len().to_string());
     }
-    // Minted-ref identity (D33), in the GUI's observed attribute
-    // order: `Ref=` after `Nio=`; `Analog=` or `Text=` (D48), then
+    // Minted-ref identity, in the GUI's observed attribute
+    // order: `Ref=` after `Nio=`; `Analog=` or `Text=`, then
     // `LinkRefType=`, after `WF=`.
     if let Some(m) = mirror_of.get(&block.slug) {
         el.set_attr("Ref", &m.ref_uuid);
@@ -253,7 +252,7 @@ fn element_attrs(
     if block.block_type == "VirtualIn" {
         virtual_in_attrs(&mut el, &block.slug, managed_attrs, res)?;
     }
-    // A fresh virtual or Modbus object (D64): its settings and the
+    // A fresh virtual or Modbus object: its settings and the
     // defaults a save gives one, in the order the save writes them.
     if res.is_none()
         && let Some(p) = pt
@@ -287,8 +286,8 @@ fn element_attrs(
     {
         return Err(Error::Compile(format!(
             "block `{}`: `At:` sets a fixed time of day, but the block fires on a \
-             time function (`Typ=\"{}\"`, set in Loxone Config) — remove `At:` or \
-             switch the block to a fixed time in Loxone Config",
+             time function (`Typ=\"{}\"`, set in Loxone Config). Remove `At:`, or \
+             switch the block to a fixed time in Loxone Config.",
             block.slug, typ.1
         )));
     }
@@ -315,7 +314,7 @@ fn element_attrs(
             // On a ref block the mirror identity is compiler-owned
             // (recomputed from `mirrors:` above) — carrying the base's
             // copy verbatim would clobber a retarget. A GUI-owned
-            // attribute the source binds (`Code:`, D40; `At:`, D79) takes
+            // attribute the source binds (`Code:`, `At:`) takes
             // the claimed value here, at the base's position; the claim
             // wins over the carried copy.
             let compiler_owned = matches!(n.as_str(), "Cl" | "LtE" | "WF" | "IName")
@@ -333,8 +332,8 @@ fn element_attrs(
     Ok(el)
 }
 
-/// The block's connectors in spec order: GUI-owned ones verbatim (D20),
-/// the rest with their bound or stale (D77) `Def=`.
+/// The block's connectors in spec order: GUI-owned ones verbatim,
+/// the rest with their bound or stale `Def=`.
 fn push_connectors(
     cx: &Rebuild,
     params: &Params,
@@ -349,14 +348,13 @@ fn push_connectors(
     let res = residue.get(&plan.uuid);
     for key in &plan.keys {
         // A GUI-owned (`Inv=`) connector is re-emitted verbatim at its
-        // spec position (D20); a parameter binding on it would be
+        // spec position; a parameter binding on it would be
         // silently overridden, so it is refused instead.
         if let Some(carried) = res.and_then(|r| r.gui_ports.get(key)) {
             if managed_defs.contains_key(&(block.slug.clone(), key.clone())) {
                 return Err(Error::Compile(format!(
-                    "block `{}`: connector `{key}` carries the GUI's input \
-                         inversion (`Inv=`) and is GUI-owned — its value cannot \
-                         be set from source; change it in Loxone Config instead",
+                    "block `{}`: connector `{key}` is inverted in Loxone Config, \
+                         so its value cannot be set from source. Change it in Loxone Config instead.",
                     block.slug
                 )));
             }
@@ -377,7 +375,7 @@ fn push_connectors(
                     )
             })
         {
-            // A stale constant under a wire the source keeps (D77).
+            // A stale constant under a wire the source keeps.
             co.set_attr_raw("Def", stale);
         }
         co.set_attr("U", &plan.ports[key]);
@@ -387,7 +385,7 @@ fn push_connectors(
 }
 
 /// The block's child elements after its connectors: a message ref's
-/// message (D51), then the carried residue in base order (D47) or what a
+/// message, then the carried residue in base order or what a
 /// save gives a fresh object.
 fn push_children(cx: &Rebuild, params: &Params, block: &BlockDecl, el: &mut Element) {
     let Rebuild {
@@ -401,7 +399,7 @@ fn push_children(cx: &Rebuild, params: &Params, block: &BlockDecl, el: &mut Elem
     let plan = &managed[&block.slug];
     let res = residue.get(&plan.uuid);
     let message_ref = block.block_type == "OutputRefLM";
-    // The message of a message ref (D51) follows its connectors, as
+    // The message of a message ref follows its connectors, as
     // Loxone Config writes it: the notification, the texts it sends on
     // and off (an empty one is left out), the least time between two
     // messages, and `NL="1"`, which every notification carries.
@@ -425,8 +423,8 @@ fn push_children(cx: &Rebuild, params: &Params, block: &BlockDecl, el: &mut Elem
         for c in &r.children {
             el.push_child(c.clone());
         }
-        // D47: attributes and connectors in the order the base wrote
-        // them; Loxone Config's order differs from ours (it writes
+        // Attributes and connectors in the order the base wrote them.
+        // Loxone Config's order differs from ours (it writes
         // `Desc=` right after `Type=`, 17.2 moves a connector).
         el.attrs = in_base_order(std::mem::take(&mut el.attrs), |a| {
             r.attr_order.iter().position(|n| *n == a.name)
@@ -481,7 +479,7 @@ fn insert_block(
     } = snap;
     let pt = crate::periphery::periphery(&block.block_type);
     let plan = &managed[&block.slug];
-    // The object tree (D64): a device or I/O goes into its folder or
+    // The object tree: a device or I/O goes into its folder or
     // device by UUID — inserting a device shifts its siblings' paths.
     if pt.is_some() {
         let order = base_tree_order.get(&plan.page_uuid);
@@ -522,7 +520,7 @@ fn insert_block(
             page.attr("Type").unwrap_or("?")
         )));
     }
-    // A VirtualIn's folder (D54) is no page: its order is the tree's.
+    // A VirtualIn's folder is no page: its order is the tree's.
     let order = base_page_order
         .get(&plan.page_uuid)
         .or_else(|| base_tree_order.get(&plan.page_uuid));
@@ -530,10 +528,9 @@ fn insert_block(
     Ok(())
 }
 
-/// A VirtualIn's input-dialog attributes (D54) in the order a Loxone
+/// A VirtualIn's input-dialog attributes in the order a Loxone
 /// Config save writes them. Each is the source's binding, else the base's
-/// value, else — on a fresh mint only — what a save fills in (oracle
-/// session 18): an analog input gets `EnVal="true"`, a digital one the
+/// value, else (on a fresh mint only) what a save fills in: an analog input gets `EnVal="true"`, a digital one the
 /// 0/1 range and its change filter.
 fn virtual_in_attrs(
     el: &mut Element,

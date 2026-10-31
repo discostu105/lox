@@ -1,4 +1,4 @@
-//! Automatic Designer rules from source (D57).
+//! Automatic Designer rules from source.
 //!
 //! An `AutopilotRule` block keeps its whole rule as JSON in `APC=`
 //! ([`crate::autopilot`]). A `rule <slug>` declaration owns what the rule
@@ -18,7 +18,7 @@
 //! refused when there is none. Rules with shapes outside the documented
 //! ones are not written at all.
 //!
-//! A named rule (`rule <slug> "Name"`, D60) is the source's own: [`create`]
+//! A named rule (`rule <slug> "Name"`) is the source's own: [`create`]
 //! finds it in the base (by its lock UUID, else by name) or builds it next
 //! to the rules the document already has, and from there it is edited
 //! like any other.
@@ -241,11 +241,11 @@ fn timezone(el: &Element) -> Option<String> {
 /// rules).
 const RULE_PORTS: [&str; 7] = ["InputTrigger", "Reset", "On", "run", "Q", "A", "OutputAPI"];
 
-/// The vertical gap between two rules stacked on their page (house
-/// config: four of five gaps).
+/// The vertical gap between two rules stacked on their page (four of five
+/// gaps in a real config).
 const RULE_GAP: i64 = 168;
 
-/// The rule UUIDs of the named rules (D60), slug → UUID, creating the ones
+/// The rule UUIDs of the named rules, slug → UUID, creating the ones
 /// the base lacks. `pinned` is the lock's map (slug → UUID); the result is
 /// its new content. A pinned UUID the base carries is the rule — the
 /// source owns its name, so a differing `Title=` is rewritten. Otherwise
@@ -279,8 +279,8 @@ pub(crate) fn create(
             && o.block_type != RULE_BLOCK_TYPE
         {
             return Err(Error::Compile(format!(
-                "{ctx}: the lock pins the rule to {}, which this config has as a `{}` — drop \
-                 the lock entry `rules.{}` to create the rule afresh",
+                "{ctx}: the lockfile maps the rule to {}, which is a `{}` in this config. Remove \
+                 the lockfile entry `rules.{}` to create the rule anew",
                 o.uuid, o.block_type, decl.slug
             )));
         }
@@ -300,7 +300,7 @@ pub(crate) fn create(
                 [] => build(&ctx, doc, title, pin, minter)?,
                 _ => {
                     return Err(Error::Compile(format!(
-                        "{ctx}: the config has {} rules of this name — rename all but one \
+                        "{ctx}: the config has {} rules of this name. Rename all but one \
                          in the app, or address one by its extern",
                         named.len()
                     )));
@@ -339,7 +339,7 @@ fn rename(ctx: &str, el: &mut Element, title: &str) -> Result<()> {
 /// last one. Everything not stated comes from that rule: the block
 /// version, size, colour and flags, the `ref=` to the `AutoPilot`
 /// container. A document without a rule is refused — where its rules live
-/// is the app's choice (a special page in the house config, logic pages in
+/// is the app's choice (a special page in one real config, logic pages in
 /// the use-case configs).
 fn build(
     ctx: &str,
@@ -355,8 +355,8 @@ fn build(
         .max_by_key(|o| o.path.clone())
     else {
         return Err(Error::Compile(format!(
-            "{ctx}: the config has no Automatic Designer rule yet — create one in the app \
-             once, then the compile adds new ones next to it"
+            "{ctx}: the config has no Automatic Designer rule yet. Create one in the app \
+             once, then compile again"
         )));
     };
     let template = doc
@@ -452,7 +452,7 @@ fn build(
 }
 
 /// A rule's connector UUIDs, derived from its own: Loxone mints the seven
-/// ports right before the rule (house config, 5/5), each with its index
+/// ports right before the rule (5 of 5 in a real config), each with its index
 /// and the rule's machine tail.
 fn rule_ports(rule: &str) -> Option<Vec<String>> {
     let u = LoxUuid::parse(rule).ok()?;
@@ -593,12 +593,12 @@ impl Context {
                     .map(|(_, t, _)| format!("\"{t}\""))
                     .collect();
                 Err(Error::Compile(format!(
-                    "{ctx}: `{mode}` is no operating mode of the config — it has {}",
+                    "{ctx}: `{mode}` is no operating mode of the config. It has {}",
                     titles.join(", ")
                 )))
             }
             _ => Err(Error::Compile(format!(
-                "{ctx}: {} operating modes are titled {mode} — rename one",
+                "{ctx}: {} operating modes are titled {mode}. Rename one",
                 found.len()
             ))),
         }
@@ -665,14 +665,14 @@ pub(crate) fn apply(
         let raw = el.attr_decoded("APC").unwrap_or_default().into_owned();
         let old = autopilot::parse(&raw).ok_or_else(|| {
             Error::Compile(format!(
-                "{ctx}: the rule has no readable payload (`APC=`) — create it in the app \
+                "{ctx}: the rule has no readable payload (`APC=`). Create it in the app \
                  or Loxone Config first"
             ))
         })?;
         let have = autopilot::interpret(&old).map_err(|why| {
             Error::Compile(format!(
-                "{ctx}: the rule has {why} — Lox Logic writes only the documented shapes; keep \
-                 this rule in the app and drop the declaration"
+                "{ctx}: the rule has {why}, which Lox Logic cannot write. Keep \
+                 this rule in the app and remove the declaration"
             ))
         })?;
         let want = wanted(&ctx, decl, uuid_of, &cx)?;
@@ -729,7 +729,7 @@ fn payloads(doc: &LoxoneDoc) -> BTreeMap<String, Option<String>> {
 
 /// Re-derives the AutoPilot container's watch list ([`watch_inputs`])
 /// when the compile changed the rules: rewrote a payload, created or
-/// deleted a rule (D73). Rules as the base has them leave the list as
+/// deleted a rule. Rules as the base has them leave the list as
 /// the base has it — the list is what a save derives from the rules, and
 /// a compile that changes none has nothing new to derive (the corpus has
 /// a config whose rules have no list at all, #224).
@@ -739,16 +739,21 @@ pub(crate) fn watch(base: &LoxoneDoc, doc: &mut LoxoneDoc) {
     }
 }
 
-/// The AutoPilot container's `Input` wires: Loxone Config wires every
-/// source a rule watches into it (`FLG="1"`) — a weekday condition the
-/// `DayOfWeek` block's `Q`, a state condition the state, a mode
-/// condition the mode's `Q` (oracle session 31; a time condition none);
-/// a weather condition the `AQ` of the `WeatherData` block of its field
-/// (`WType=`), a day-of-month or daylight condition the `Day` or
-/// `Daylight` block's `Q`, a date none (session 32). A save lists them
-/// in reverse document order. Left alone when a rule has a condition
-/// whose wiring is not observed (sun times) or whose block the config
-/// lacks, or when the set is right.
+/// The AutoPilot container's `Input` wires. Loxone Config wires every
+/// source a rule watches into it (`FLG="1"`):
+///
+/// | Condition | Source |
+/// |---|---|
+/// | weekday | the `DayOfWeek` block's `Q` |
+/// | state | the state |
+/// | mode | the mode's `Q` |
+/// | weather | the `AQ` of the `WeatherData` block of its field (`WType=`) |
+/// | day of month, daylight | the `Day` or `Daylight` block's `Q` |
+/// | time, date | none |
+///
+/// A save lists them in reverse document order. Left alone when the set
+/// is right, or when a rule has a condition whose wiring is not observed
+/// (sun times) or whose block the config lacks.
 fn watch_inputs(doc: &mut LoxoneDoc) {
     let objects = doc.objects();
     let output_of = |key: &str, pred: &dyn Fn(&crate::xml::Element) -> bool| -> Option<String> {
@@ -873,7 +878,7 @@ fn state_event(
     value: &str,
     cx: &Context,
 ) -> Result<Event> {
-    let fail = |m: String| Err(Error::Compile(format!("{ctx}: `{line}` — {m}")));
+    let fail = |m: String| Err(Error::Compile(format!("{ctx}: `{line}`: {m}")));
     let Some(cap) = cx.capability(control) else {
         return fail(if cx.app(control).is_some() {
             format!(
@@ -881,9 +886,8 @@ fn state_event(
                 cx.type_name(control)
             )
         } else {
-            "Lox Logic does not know this block's app view (its type and states) — only blocks \
-             shown in the app whose catalogue entry Lox Logic derives, or that a rule of the \
-             config already watches, can be watched"
+            "Lox Logic does not know this block's states in the app. Watch a block that \
+             Lox Logic's catalogue covers or that a rule of the config already watches"
                 .into()
         });
     };
@@ -939,7 +943,7 @@ fn state_event(
         (None, _) => {
             return fail(format!(
                 "the app offers {} conditions on `{state}` of a `{ty}` that Lox Logic cannot tell \
-                 apart — keep this rule in the app",
+                 apart. Keep this rule in the app",
                 analog.len()
             ));
         }
@@ -973,7 +977,7 @@ fn wanted(
     let resolve = |st: &RuleStmt, slug: &str| {
         uuid_of.get(slug).cloned().ok_or_else(|| {
             Error::Compile(format!(
-                "{ctx}: `{}` — `{slug}` resolves to no block",
+                "{ctx}: `{}`: `{slug}` resolves to no block",
                 st.kind
             ))
         })
@@ -1271,12 +1275,12 @@ fn rewrite(
                     });
                     return Err(Error::Compile(match offered {
                         Some(list) if !list.is_empty() => format!(
-                            "{ctx}: the app has no action `{command}` for this `{ty}` — it \
+                            "{ctx}: the app has no action `{command}` for this `{ty}`. It \
                              offers {list} (`<val0>` a number)"
                         ),
                         _ => format!(
                             "{ctx}: Lox Logic knows no action code (`descID`) for `{command}` on a \
-                             `{ty}` — create one such action in the app once, then the \
+                             `{ty}`. Create one such action in the app once, then the \
                              compile can copy it"
                         ),
                     }));

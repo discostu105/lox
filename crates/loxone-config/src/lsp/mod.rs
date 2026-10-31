@@ -361,7 +361,7 @@ impl<W: Write> Server<'_, W> {
             let e = self
                 .enc
                 .byte(l, end["character"].as_u64().unwrap_or(0) as u32);
-            // A v1 spelling whose error names its replacement (D80):
+            // A v1 spelling whose error names its replacement:
             // "write `clock 07:30` instead of `clock \"07:30\"`".
             if let Some((new, old)) = analysis::replacement(msg)
                 && let Some(at) = l.get(s..e).and_then(|r| r.find(old))

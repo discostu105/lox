@@ -221,7 +221,7 @@ fn errors_land_on_the_name_they_are_about() {
         d[0]["message"]
             .as_str()
             .unwrap()
-            .contains("takes both a value (`Input1: 3`) and a wire (`Input1: wasser.Q`)"),
+            .contains("has both a value (`Input1: 3`) and a wire (`Input1: wasser.Q`)"),
         "{d:?}"
     );
 

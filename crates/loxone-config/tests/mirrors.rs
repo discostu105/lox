@@ -255,5 +255,5 @@ fn mirror_refusals() {
     let out = loxl(&dir, &["compile"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(err.contains("no verified `LinkRefType=` code"), "{err}");
+    assert!(err.contains("which loxl cannot mirror yet"), "{err}");
 }

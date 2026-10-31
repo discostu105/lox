@@ -230,7 +230,7 @@ fn vanished_slug_is_a_hard_error_until_removed_from_lock() {
     .unwrap();
     let err = compile(&base, &smaller, &mut lock, &opts()).unwrap_err();
     assert!(err.to_string().contains("beschatten"), "{err}");
-    assert!(err.to_string().contains("allow_removals"), "{err}");
+    assert!(err.to_string().contains("--allow-removals"), "{err}");
 
     // Forgetting via remove_object also satisfies the sync check.
     lock.remove_object("beschatten").unwrap();
@@ -829,7 +829,7 @@ fn config_version_pin_refuses_an_unqualified_release() {
     )
     .unwrap();
     let err = compile(&bumped, &module, &mut lock.clone(), &opts()).unwrap_err();
-    assert!(err.to_string().contains("ConfigVersion"), "{err}");
+    assert!(err.to_string().contains("saved by Loxone Config"), "{err}");
     assert!(err.to_string().contains("--accept-version"), "{err}");
 
     // Acceptance must name the base's version exactly.
@@ -956,7 +956,7 @@ fn duplicate_uuids_are_refused_in_base_and_output() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("output would carry") && err.contains(&vi1_port),
+        err.contains("duplicate UUIDs") && err.contains(&vi1_port),
         "{err}"
     );
 }
@@ -1531,10 +1531,10 @@ fn template_misuse_is_reported() {
            template b(x: VirtualIn)\n\tz = a(x: x)\nend\n",
         "cannot instantiate another template",
     );
-    fails("use fassade(jal)\n", "v0 syntax");
+    fails("use fassade(jal)\n", "old syntax");
     fails(
         "template t(x: VirtualIn)\n\ty = Not(I: x.Q)\n",
-        "missing `end`",
+        "Close it with `end`",
     );
     fails("end\n", "`end` without an open `template`");
     // The instance slug names no object; the message points at the
@@ -1559,7 +1559,7 @@ fn template_misuse_is_reported() {
 
 #[test]
 fn grown_gate_inputs_are_refused() {
-    // Oracle-verified (docs/oracle-wine.md): Loxone Config 17 silently
+    // Oracle-verified (docs/oracle-sessions.md): Loxone Config 17 silently
     // deletes off-descriptor connectors on save. A grown `I3` must be a
     // compile error, never minted.
     let m = Module::parse(
@@ -2057,7 +2057,7 @@ fn page_statements_place_and_move_blocks() {
     let e = compile(&base_with_page("Regeln"), &bad, &mut lock.clone(), &opts()).unwrap_err();
     assert!(
         e.to_string()
-            .contains("no <C Type=\"Page\"> titled `Nirgendwo`"),
+            .contains("placed on page `Nirgendwo`, which the base config does not have"),
         "{e}"
     );
 }
@@ -2307,8 +2307,8 @@ heiss.Input1 <- sonne.Q
     let err = compile(&existing, &m, &mut Lockfile::new(), &opts())
         .unwrap_err()
         .to_string();
-    assert!(err.contains("Inv"), "{err}");
-    assert!(err.contains("GUI-owned"), "{err}");
+    assert!(err.contains("`Input1`"), "{err}");
+    assert!(err.contains("inverted in Loxone Config"), "{err}");
     let (module, mut lock, _) = adopt(&existing).unwrap();
     let mut text = module.to_text();
     text = text.replace("\tInput2: 50,", "\tInput1: 5,\n\tInput2: 50,");
@@ -2316,7 +2316,7 @@ heiss.Input1 <- sonne.Q
     let err = compile(&existing, &m, &mut lock, &opts())
         .unwrap_err()
         .to_string();
-    assert!(err.contains("Inv"), "{err}");
+    assert!(err.contains("`Input1`"), "{err}");
     assert!(err.contains("cannot be set"), "{err}");
 }
 
@@ -2555,7 +2555,7 @@ fn removal_tombstone_bridges_the_compile_to_push_window() {
     // A lingering `removed` after that is a hard error — the ratchet that
     // gets the transient statement cleaned up.
     let err = compile(&out1, &without, &mut lock, &opts()).unwrap_err();
-    assert!(err.to_string().contains("removal is complete"), "{err}");
+    assert!(err.to_string().contains("If the removal is done"), "{err}");
 
     // And a `removed` that never named anything errors immediately.
     let typo = Module::parse("removed nie_da\n").unwrap();
@@ -2881,7 +2881,7 @@ fn expression_misuse_is_reported() {
     };
 
     // Parse-level shape errors.
-    fails("jal.AutoShade <- a.Q and \"x\"", "strings have no place");
+    fails("jal.AutoShade <- a.Q and \"x\"", "cannot contain strings");
     fails("jal.AutoShade <- a.Q < b.Q < 5", "comparisons do not chain");
     fails(
         "jal.AutoShade <- (a.Q and b.Q) >= 5",
@@ -2893,7 +2893,7 @@ fn expression_misuse_is_reported() {
         "jal.AutoShade <- and a.Q",
         "expected an operand, found `and`",
     );
-    fails("jal.AutoShade <- 5", "use `jal.AutoShade = 5`");
+    fails("jal.AutoShade <- 5", "write `jal.AutoShade = 5`");
     fails("let and = 5", "reserved word");
     fails("or = And(I1: a.Q, I2: b.Q)", "reserved word");
 
@@ -3072,7 +3072,7 @@ fn expression_binding_misuse_is_reported() {
         );
     };
 
-    fails("I1: a.Q and \"x\"", "strings have no place");
+    fails("I1: a.Q and \"x\"", "cannot contain strings");
     fails("I1: nix.Q and a.Q", "reference to undeclared slug `nix`");
     fails("I1: 5 and a.Q", "cannot drive a gate input");
     fails("I1: schwelle >= 28", "compares two constants");
@@ -3291,10 +3291,10 @@ fn arithmetic_misuse_is_reported() {
     // Operand shape errors.
     fails("jal.AutoShade <- 1 + 2", "computes on constants only");
     fails("jal.AutoShade <- a.Q + 40s", "carries a unit");
-    fails("jal.AutoShade <- a.Q + \"x\"", "strings have no place");
+    fails("jal.AutoShade <- a.Q + \"x\"", "cannot contain strings");
     fails(
         "let s = \"x\"\njal.AutoShade <- a.Q * s",
-        "formulas compute on plain numbers",
+        "ormulas compute on plain numbers",
     );
 
     // A Formula block takes at most 4 inputs.
@@ -3398,7 +3398,7 @@ fn unit_suffixes_follow_the_documented_port_unit() {
         ),
         (
             "jal = AutoJalousie(AutoShadeTime: 10s)",
-            "`jal.AutoShadeTime`: `10s` is no exact",
+            "`jal.AutoShadeTime`: `10s` is not an exact",
         ),
         (
             "jal_sued.TargetPos = 5s",
@@ -3427,9 +3427,7 @@ fn canvas_labels_point_at_the_port_key() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains(
-            "`Tr` is the label Loxone Config shows on the canvas — the port is `InputTrigger`"
-        ),
+        err.contains("`Tr` is the canvas label of port `InputTrigger`"),
         "{err}"
     );
 }
@@ -3707,12 +3705,12 @@ fn virtual_inputs_are_minted_into_their_folder() {
     let err = Module::parse("x = VirtualIn(Analog: \"true\")\n").unwrap_err();
     assert!(
         err.to_string()
-            .contains("write `Analog: on` instead of `Analog: \"true\"`"),
+            .contains("Write `Analog: on` instead of `Analog: \"true\"`"),
         "{err}"
     );
     let via_let = Module::parse("let a = \"false\"\nx = VirtualIn(Analog: a)\n").unwrap();
     let err = compile(&base(), &via_let, &mut Lockfile::new(), &opts()).unwrap_err();
-    assert!(err.to_string().contains("write `Analog: off`"), "{err}");
+    assert!(err.to_string().contains("Write `Analog: off`"), "{err}");
 }
 
 #[test]
@@ -4413,7 +4411,7 @@ fn a_stale_constant_under_a_wire_survives_adopt_and_compile() {
             .unwrap_err();
     assert!(
         e.to_string()
-            .contains("block `heiss`: port `Input1` takes both a value (`Input1: 20`) and a wire"),
+            .contains("block `heiss`: port `Input1` has both a value (`Input1: 20`) and a wire"),
         "{e}"
     );
 

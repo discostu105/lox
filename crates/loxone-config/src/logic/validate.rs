@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
 
 /// `InputRef`/`OutputRef`/`OutputRefLM` — block types whose managed form
-/// mirrors another object (`mirrors:` binding, design.md D33, D51).
+/// mirrors another object (`mirrors:` binding).
 pub(super) fn is_ref_type(block_type: &str) -> bool {
     matches!(block_type, "InputRef" | "OutputRef" | "OutputRefLM")
 }
@@ -26,7 +26,7 @@ pub(super) fn is_ref_type(block_type: &str) -> bool {
 /// twice — forward on the ref's `AI`, and in reverse on the block's
 /// `OutputAPI`, naming the ref's `AI` (docs/loxone-format.md, "API
 /// distribution wires are recorded in reverse"; 61 of 61 such reverse
-/// wires in the corpus and the house config sit on `OutputAPI`). Callers
+/// wires in real configs sit on `OutputAPI`). Callers
 /// check the sink side.
 pub(super) fn api_mirror_entry(ref_type: &str, port: &str, mirrored: Option<&str>) -> bool {
     ref_type == "OutputRef" && port == "AI" && mirrored == Some("ApiActor")
@@ -61,13 +61,13 @@ pub fn validate_ports(module: &Module) -> Result<()> {
         }
         let mut mirrors = None;
         for (key, v) in block.params() {
-            // A file holds program text (D40) — nothing else takes one.
+            // A file holds program text — nothing else takes one.
             if let Value::File { .. } = v
                 && !file_params(&block.block_type).contains(&key)
             {
                 return Err(Error::Compile(format!(
-                    "block `{}`: `{key}: {v}` — a file binds only program text \
-                     (`Code:` on a Code16 program block); write other values inline",
+                    "block `{}`: `{key}: {v}`: only program text (`Code:` on a Code16 program block) \
+                     takes a file. Write other values inline",
                     block.slug
                 )));
             }
@@ -81,8 +81,8 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             match resolved {
                 Some(Value::Clock(_)) if !clock => {
                     return Err(Error::Compile(format!(
-                        "block `{}`: `{key}: {v}` — a time of day binds only the fire \
-                         time of a timed block (`At:` on PulseAt)",
+                        "block `{}`: `{key}: {v}`: only the fire time of a timed block \
+                         (`At:` on PulseAt) takes a time of day",
                         block.slug
                     )));
                 }
@@ -96,7 +96,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 _ => {}
             }
             // A text-boolean attribute (`Analog:` on VirtualIn) is `on` or
-            // `off` and nothing else (D80).
+            // `off` and nothing else.
             if bool_params(&block.block_type).contains(&key) {
                 match resolved {
                     Some(Value::Bool(_)) | None => {}
@@ -109,7 +109,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                     }
                     Some(_) => {
                         return Err(Error::Compile(format!(
-                            "block `{}`: `{key}: {v}` — `{key}:` is on or off: \
+                            "block `{}`: `{key}: {v}` is not on or off. Write \
                              `{key}: on` or `{key}: off`",
                             block.slug
                         )));
@@ -121,7 +121,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             if attr_params(&block.block_type).contains(&key) {
                 continue;
             }
-            // Message parameters (D51) live on the `<LoggerMailer>` child:
+            // Message parameters live on the `<LoggerMailer>` child:
             // texts, and a duration for `MinimumTime`.
             if message_params(&block.block_type).contains(&key) {
                 if key == "MinimumTime"
@@ -136,7 +136,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 continue;
             }
             // `mirrors:` on a minted ref names the mirrored object — an
-            // identity binding, not a connector (D33).
+            // identity binding, not a connector.
             if is_ref_type(&block.block_type) && key == "mirrors" {
                 let Value::Ref(target) = v else {
                     return Err(Error::Compile(format!(
@@ -157,7 +157,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 mirrors = Some(target);
                 continue;
             }
-            // `device:` on an I/O names its device (D64): a managed block or
+            // `device:` on an I/O names its device: a managed block or
             // an extern of one of the types it may hang below.
             if crate::periphery::is_device_binding(&block.block_type, key) {
                 let Value::Ref(target) = v else {
@@ -181,7 +181,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 match ty {
                     None => {
                         return Err(Error::Compile(format!(
-                            "block `{}`: `device: {target}` — no extern or managed block \
+                            "block `{}`: `device: {target}`. No extern or managed block \
                              of this module has that name",
                             block.slug
                         )));
@@ -199,14 +199,14 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 continue;
             }
             known_port(module, &block.slug, key)?;
-            // A suffixed value must fit the port's documented unit (D52).
+            // A suffixed value must fit the port's documented unit.
             module.resolve_value_for(v, &block.block_type, &block.slug, key)?;
         }
         if !crate::periphery::device_types(&block.block_type).is_empty()
             && !block.params().any(|(k, _)| k == "device")
         {
             return Err(Error::Compile(format!(
-                "block `{}`: a {} hangs below its device — name it with `device: <slug>` \
+                "block `{}`: a {} hangs below its device. Name it with `device: <slug>` \
                  (a {} of this module, managed or extern)",
                 block.slug,
                 block.block_type,
@@ -216,13 +216,12 @@ pub fn validate_ports(module: &Module) -> Result<()> {
         if is_ref_type(&block.block_type) {
             if mirrors.is_none() {
                 return Err(Error::Compile(format!(
-                    "block `{}`: a minted {} mirrors another object — declare the \
-                     target with `mirrors: <name>` (to reference an existing ref \
-                     in the base instead, use `extern`)",
+                    "block `{}`: a new {} mirrors another object. Name the target with \
+                     `mirrors: <name>`, or use `extern` to reference an existing one in the base",
                     block.slug, block.block_type
                 )));
             }
-            // A message ref (D51) shows a notification and nothing else.
+            // A message ref shows a notification and nothing else.
             if block.block_type == "OutputRefLM"
                 && let Some(target) = mirrors
             {
@@ -232,7 +231,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                     .map(|e| e.block_type.as_str());
                 if t != Some(MESSAGE_REF_TARGET) {
                     return Err(Error::Compile(format!(
-                        "block `{}`: an OutputRefLM mirrors a push notification — \
+                        "block `{}`: an OutputRefLM mirrors a push notification, so \
                          `{target}` must be an extern `{MESSAGE_REF_TARGET}(…)`",
                         block.slug
                     )));
@@ -243,7 +242,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             if block.title.is_some() {
                 return Err(Error::Compile(format!(
                     "block `{}`: a {}'s title is derived from its `mirrors:` \
-                     target by Loxone Config — remove the label",
+                     target by Loxone Config. Remove the label",
                     block.slug, block.block_type
                 )));
             }
@@ -251,7 +250,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
     }
 
     // Port assignments on externs: the extern's declared type documents
-    // the port's unit as well as a managed block's would (D52).
+    // the port's unit as well as a managed block's would.
     for set in module.sets() {
         if let Some(e) = module.externs().find(|e| e.slug == set.target.slug) {
             module.resolve_value_for(
@@ -263,7 +262,7 @@ pub fn validate_ports(module: &Module) -> Result<()> {
         }
     }
 
-    // Test statements (D36): a referenced port on a managed block must
+    // Test statements: a referenced port on a managed block must
     // exist. Direction is deliberately unrestricted — the simulator
     // injects into inputs and overrides outputs alike, and `expect` reads
     // either side.
@@ -304,8 +303,8 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             }
             if attr_params(&block.block_type).contains(&endpoint.port.as_str()) {
                 return Err(Error::Compile(format!(
-                    "`{endpoint}` is an attribute parameter, not a connector — \
-                     it takes a value (`{port}: \"…\"`), never a wire",
+                    "`{endpoint}` is an attribute parameter, not a connector. \
+                     It takes a value (`{port}: \"…\"`), never a wire",
                     port = endpoint.port,
                 )));
             }
@@ -361,13 +360,13 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
             .strip_prefix('I')
             .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
     {
-        "; Loxone Config gates are fixed two-input (a grown I3 is \
-         silently deleted on save) — cascade 2-input gates instead"
+        "; And and Or gates have two inputs in Loxone Config, so cascade \
+         2-input gates instead"
     } else {
         ""
     };
     // The canvas shows short labels (`Tr`, `Don`), not connector keys — a
-    // name copied off the screen gets pointed at its key (D52).
+    // name copied off the screen gets pointed at its key.
     let labeled: Vec<&str> = specs
         .iter()
         .filter(|s| port_meta(&block.block_type, s.key).and_then(|m| m.label) == Some(key))
@@ -383,7 +382,7 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
         )
     } else {
         format!(
-            "; `{key}` is the label Loxone Config shows on the canvas — the port is `{}`",
+            "; `{key}` is the canvas label of port `{}`",
             labeled.join("` or `")
         )
     };

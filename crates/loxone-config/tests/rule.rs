@@ -516,7 +516,7 @@ fn named_rules_are_checked() {
     let e = compile(&parse(&no_rules), &m, &mut Lockfile::new(), &opts())
         .unwrap_err()
         .to_string();
-    assert!(e.contains("create one in the app"), "{e}");
+    assert!(e.contains("Create one in the app"), "{e}");
 }
 
 #[test]
@@ -642,7 +642,7 @@ fn a_rule_is_adopted_only_with_a_name_of_its_own() {
     let err = adopt_one(&parse(&fixture()), RULE_OFF, "pumpe", &module, &mut lock)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("not a free, valid slug"), "{err}");
+    assert!(err.contains("is taken or not a valid slug"), "{err}");
 }
 
 // --- More shapes (D73): control states, operating modes, `or` groups.

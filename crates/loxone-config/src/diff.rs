@@ -14,20 +14,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Element attributes the diff projection compares for a block type: the
 /// language-surface attribute parameters (`Formula=`, Code16's program
-/// text `Code=` — D40), plus `APC=` on
+/// text `Code=`), plus `APC=` on
 /// `AutopilotRule` — the app-owned Automatic Designer rule payload.
 /// `APC` is *not* an `attr_params` entry because it is not language
 /// surface (the app and the Miniserver own those blocks; Lox Logic never
 /// writes them), but it is block logic stored in an attribute all the
 /// same, and a diff blind to it would call an edited rule "semantically
-/// empty" — the exact hole D18 closed for `Formula=`.
+/// empty". The same holds for `Formula=`.
 fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
     diff_attrs_v(block_type, FINGERPRINT_VERSION)
 }
 
 /// The attribute set of fingerprint `version`: from v8 on, the settings
-/// of virtual and Modbus devices (D64) and of physical inputs and
-/// outputs (D65; `Unit` is `<Display Unit=…>`, see [`setting_value`]).
+/// of virtual and Modbus devices and of physical inputs and
+/// outputs (`Unit` is `<Display Unit=…>`, see [`setting_value`]).
 fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
     let params: &'static [&'static str] = if (version < 8
         && crate::periphery::periphery(block_type).is_some())
@@ -55,7 +55,7 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
 const FINGERPRINT_VERSION: u8 = 10;
 
 /// One compared attribute of an object: its own, or `Unit` on its
-/// `<Display>` for a physical input or output (D65).
+/// `<Display>` for a physical input or output.
 fn setting_value(doc: &LoxoneDoc, o: &ObjectSummary, name: &str) -> Option<String> {
     let el = doc.element_at(&o.path)?;
     let el = if name == "Unit" && crate::settings::setting(&o.block_type, name).is_some() {
@@ -101,7 +101,7 @@ pub struct DocDiff {
     pub removed: Vec<ObjectSummary>,
     pub renamed: Vec<Rename>,
     pub param_changes: Vec<ParamChange>,
-    /// Room/category binding changes (D39).
+    /// Room/category binding changes.
     pub placements: Vec<PlacementChange>,
     pub wires_added: Vec<WireView>,
     pub wires_removed: Vec<WireView>,
@@ -176,7 +176,7 @@ pub struct PlacementChange {
 
 /// The room/category bindings of one object, from its `<IoData>` child —
 /// where every binding lives (docs/loxone-format.md). Since Lox Logic can
-/// rewrite them (D39), they are part of the projection: a diff blind to
+/// rewrite them, they are part of the projection: a diff blind to
 /// them would call a moved device semantically empty.
 fn placement(doc: &LoxoneDoc, o: &ObjectSummary) -> [(&'static str, Option<String>); 2] {
     let io = doc
@@ -186,7 +186,7 @@ fn placement(doc: &LoxoneDoc, o: &ObjectSummary) -> [(&'static str, Option<Strin
     [("room", get("Pr")), ("category", get("Cr"))]
 }
 
-/// The programmed functions of a Touch Pure Flex's tiles (D41), keyed
+/// The programmed functions of a Touch Pure Flex's tiles, keyed
 /// `tile <i> click|up|down`: every attribute of the function element
 /// except the fixed `bT=`, decoded, `api`/`cT`/`ctrls` first. A function
 /// without one is left out — like a port without `Def=`, it reads the
@@ -232,7 +232,7 @@ fn tile_functions(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String
     out
 }
 
-/// What an object's `<LoggerMailer>` does (D51): the notification,
+/// What an object's `<LoggerMailer>` does: the notification,
 /// logger, mailer, caller or tracker it reports to, the texts it sends on
 /// and off, and the least time between two messages — one entry per
 /// attribute, keyed `message <attr>`. A message ref (`OutputRefLM`) is one
@@ -255,13 +255,13 @@ fn message_fields(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String
         .unwrap_or_default()
 }
 
-/// The day keywords of the built-in operating modes (D53), by the `N` of
+/// The day keywords of the built-in operating modes, by the `N` of
 /// their fixed UUID `00000000-0000-000N-15…` — the schedule's own words.
 const MODE_DAYS: [&str; 10] = [
     "holiday", "vacation", "dayoff", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
 ];
 
-/// A DayTimer's switching times (D53), one column per operating mode in
+/// A DayTimer's switching times, one column per operating mode in
 /// `Modes=`: the column's key orders the built-in modes as a schedule
 /// names them (holiday … sun, then any other mode by title or UUID), the
 /// value is its intervals in source terms — `21:00-24:00 activate`,
@@ -479,10 +479,10 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                 // Block logic stored as an element attribute — attribute
                 // parameters (`Formula=`) and the Automatic Designer rule
                 // payload (`APC=`); see `diff_attrs`.
-                // Touch Pure Flex tile programs (D41), one change per
+                // Touch Pure Flex tile programs, one change per
                 // function.
                 let (mut ta, mut tb) = (tile_functions(a, oa), tile_functions(b, ob));
-                // …and the message of a `<LoggerMailer>` (D51).
+                // …and the message of a `<LoggerMailer>`.
                 ta.extend(message_fields(a, oa));
                 tb.extend(message_fields(b, ob));
                 for key in ta.keys().chain(tb.keys()).collect::<BTreeSet<_>>() {
@@ -497,7 +497,7 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         });
                     }
                 }
-                // A LightController2's moods (D58), one change per mood
+                // A LightController2's moods, one change per mood
                 // in source terms, plus their order.
                 let (ma, mb) = (
                     crate::moods::mood_fields(a, oa),
@@ -515,7 +515,7 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         });
                     }
                 }
-                // A DayTimer's switching times (D53), by day group.
+                // A DayTimer's switching times, by day group.
                 for (key, from, to) in
                     schedule_changes(&schedule_columns(a, oa), &schedule_columns(b, ob))
                 {
@@ -568,93 +568,80 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// renames and the details of users and groups (suspect titles are left
 /// out, so re-saving a config under another UI locale does not read as
 /// drift; neither do position moves or the save fingerprint, which the
-/// projection never sees). Users and groups count as objects here, UUID,
-/// type and title, as they did before the diff moved them into its
-/// users/access section. Their credentials, members, rights and last
-/// edits stay outside: a fingerprint that took them in would read every
-/// lockfile recorded so far as drift. Recorded in the lockfile
+/// projection never sees). Users and groups count as objects here: UUID,
+/// type and title. Their credentials, members, rights and last edits stay
+/// outside, so existing lockfiles do not read as drift. Recorded in the lockfile
 /// at adopt/compile; `loxl drift` recomputes it over a fresh download to
-/// answer "did another writer change something?" from one parse, no
+/// answer "did Loxone Config or the app change something?" from one parse, no
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// The fingerprint as Lox Logic wrote it before a PulseAt's fire time
-/// (`Sec=`, #248) joined the projection. `loxl drift` accepts it so an
-/// upgrade alone does not read as drift; the next compile records the
-/// current form.
+/// Fingerprint version 9: the current version without a PulseAt's fire time
+/// (`Sec=`, #248).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v9(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 9)
 }
 
-/// The fingerprint as Lox Logic wrote it before the settings of Air and Tree
-/// devices (#197) joined the projection. `loxl drift` accepts it so an
-/// upgrade alone does not read as drift; the next compile records the
-/// current form.
+/// Fingerprint version 8: version 9 without the settings of Air and Tree
+/// devices (#197).
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 8)
 }
 
-/// The fingerprint as Lox Logic wrote it before the settings of virtual and
-/// Modbus devices (D64) and of physical inputs and outputs (D65) joined
-/// the projection. `loxl drift` accepts it so an upgrade alone does not
-/// read as drift; the next compile records the current form.
+/// Fingerprint version 7: version 8 without the settings of virtual and Modbus
+/// devices and of physical inputs and outputs.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 7)
 }
 
-/// The fingerprint as Lox Logic wrote it before LightController2 moods
-/// (`<LightscenesC>`) joined the projection (D58). `loxl drift` accepts
-/// it so an upgrade alone does not read as drift; the next compile
-/// records the current form.
+/// Fingerprint version 6: version 7 without LightController2 moods
+/// (`<LightscenesC>`).
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 6)
 }
 
-/// The fingerprint as Lox Logic wrote it before DayTimer schedules (`Modes=`
-/// and the `<Entry>` list) joined the projection (D53, lox#162). `loxl
-/// drift` accepts it so an upgrade alone does not read as drift; the next
-/// compile records the current form.
+/// Fingerprint version 5: version 6 without DayTimer schedules (`Modes=` and
+/// the `<Entry>` list).
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v5(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 5)
 }
 
-/// The fingerprint as Lox Logic wrote it before messages (`<LoggerMailer>`)
-/// joined the projection (D51). `loxl drift` accepts it so an upgrade
-/// alone does not read as drift; the next compile records the current
-/// form.
+/// Fingerprint version 4: version 5 without messages (`<LoggerMailer>`).
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v4(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 4)
 }
 
-/// The fingerprint as Lox Logic wrote it before Touch Pure Flex tile programs
-/// joined the projection (D41). `loxl drift` accepts it so an upgrade
-/// alone does not read as drift; the next compile records the current
-/// form.
+/// Fingerprint version 3: version 4 without Touch Pure Flex tile programs.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v3(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 3)
 }
 
-/// The fingerprint as Lox Logic wrote it before program text (`Code=` on
-/// Code16) joined the projection (D40). `loxl drift` accepts it so an
-/// upgrade alone does not read as drift; the next compile records the
-/// current form.
+/// Fingerprint version 2: version 3 without program text (`Code=` on Code16).
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v2(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 2)
 }
 
-/// The fingerprint as Lox Logic wrote it before room/category bindings joined
-/// the projection (D39) — recorded in every lock compiled until then.
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v2`].
+/// Fingerprint version 1: version 2 without room/category bindings.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v1(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 1)
@@ -754,7 +741,7 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
     crate::lock::sha256_hex(&buf)
 }
 
-/// A program-text change (`Code=`, D40) as a compact line diff instead of
+/// A program-text change (`Code=`) as a compact line diff instead of
 /// two blobs: common leading and trailing lines are cut, the differing
 /// middle shows as `-`/`+` lines, at most eight per side, each cut at
 /// 100 characters. One contiguous hunk — enough to see what moved
@@ -1149,7 +1136,7 @@ mod tests {
         assert_eq!(semantic_fingerprint(&a), semantic_fingerprint(&reflowed));
 
         // A numeric reference is not a line break to Loxone but literal
-        // text, which breaks the JSON — a real change (D40).
+        // text, which breaks the JSON — a real change.
         let escaped = doc_with("{ &quot;active&quot; :&#xD;&#xA;true }");
         assert_eq!(diff(&a, &escaped).param_changes.len(), 1);
     }
@@ -1177,7 +1164,7 @@ mod tests {
     #[test]
     fn day_timer_schedules_read_in_source_terms() {
         // `Modes=` columns by index, `From` absent = 0, a value where the
-        // timer is analog, a user mode by its title (D53, lox#162).
+        // timer is analog, a user mode by its title (lox#162).
         let timer = |entries: &str| {
             let s = format!(
                 "<ControlList Version=\"1\" NextObj=\"5\">\r\n\
@@ -1303,8 +1290,8 @@ mod tests {
         assert_eq!(p.from_title.as_deref(), Some("Bad"));
         assert_eq!(p.to_title.as_deref(), Some("Garten"));
 
-        // v2 sees the move; v1 (what older versions of Lox Logic recorded, D21) does not —
-        // `loxl drift` accepts a v1 fingerprint against the v1 form only.
+        // v2 sees the move, v1 does not. `loxl drift` accepts a v1
+        // fingerprint against the v1 form only.
         assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
         assert_eq!(semantic_fingerprint_v1(&a), semantic_fingerprint_v1(&b));
         assert_ne!(semantic_fingerprint(&a), semantic_fingerprint_v1(&a));

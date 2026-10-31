@@ -9,7 +9,7 @@ enum Tok {
     Ident(String),
     Str(String),
     Num(String),
-    /// A number with a unit suffix (`40s`, `1.5h` — D27).
+    /// A number with a unit suffix (`40s`, `1.5h`).
     UnitNum(String, Unit),
     Colon,
     Dot,
@@ -21,11 +21,11 @@ enum Tok {
     RParen,
     LBrace,
     RBrace,
-    /// Comparison operators (expression sugar, D24).
+    /// Comparison operators (expression sugar).
     Cmp(CmpOp),
-    /// `~=` — approximately-equal, valid only in a test `expect` (D36).
+    /// `~=` — approximately-equal, valid only in a test `expect`.
     Approx,
-    /// Arithmetic operators (formula backend, D24). `-` is only lexed as
+    /// Arithmetic operators (formula backend). `-` is only lexed as
     /// binary minus after a token that can end an operand — everywhere
     /// else it starts a negative number.
     Plus,
@@ -223,7 +223,7 @@ fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
 }
 
 /// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
-/// immediately following letter run or `%` is a unit suffix (D27):
+/// immediately following letter run or `%` is a unit suffix:
 /// `40s`, `1.5h`, `2700K`, `70%`.
 fn number(
     s: String,
@@ -279,14 +279,13 @@ fn sink<'a>(
     }
 }
 
-/// A closed `tile <i>(…)` argument list becomes the tile (D41).
+/// A closed `tile <i>(…)` argument list becomes the tile.
 fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
     if call.title.is_some() {
         return Err(Error::Parse {
             line: lineno,
             msg: format!(
-                "`tile {index}(…)` takes no label string — the status text is \
-                 `text: \"…\"`"
+                "`tile {index}(…)` takes no label string. Set the status text with `text: \"…\"`."
             ),
         });
     }
@@ -298,8 +297,8 @@ fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
     })
 }
 
-/// A closed call becomes a block declaration or — lowercase callee — a
-/// template instantiation.
+/// A closed call becomes a block declaration, or a template instantiation
+/// when the callee is lowercase.
 fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
     let lower = call
         .block_type
@@ -312,14 +311,13 @@ fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item
     let err = |msg: String| Error::Parse { line: lineno, msg };
     if in_template {
         return Err(err(format!(
-            "`{} = {}(…)` — a template body cannot instantiate another template (v1)",
+            "`{} = {}(…)`: a template body cannot instantiate another template",
             call.slug, call.block_type
         )));
     }
     if call.title.is_some() {
         return Err(err(format!(
-            "`{} = {}(…)`: an instantiation takes no label string — titles belong \
-             on the template's blocks",
+            "`{} = {}(…)`: an instantiation takes no label string. Put titles on the template's blocks.",
             call.slug, call.block_type
         )));
     }
@@ -357,19 +355,19 @@ struct Parser {
     open_call: Option<BlockDecl>,
     /// A `template` whose body is still open (until `end`).
     open_template: Option<TemplateDecl>,
-    /// A `test` whose body is still open (until `end`) — D36.
+    /// A `test` whose body is still open (until `end`).
     open_test: Option<TestDecl>,
-    /// A `tiles` set whose body is still open (until `end`) — D41.
+    /// A `tiles` set whose body is still open (until `end`).
     open_tiles: Option<TilesDecl>,
     /// The index of the `tile` whose argument list `open_call` carries.
     open_tile: Option<u32>,
-    /// An `access` declaration whose body is still open (until `end`) — D49.
+    /// An `access` declaration whose body is still open (until `end`).
     open_access: Option<AccessDecl>,
-    /// A `schedule` whose body is still open (until `end`) — D53.
+    /// A `schedule` whose body is still open (until `end`).
     open_schedule: Option<ScheduleDecl>,
-    /// A `rule` whose body is still open (until `end`) — D57.
+    /// A `rule` whose body is still open (until `end`).
     open_rule: Option<RuleDecl>,
-    /// A `moods` set whose body is still open (until `end`) — D58.
+    /// A `moods` set whose body is still open (until `end`).
     open_moods: Option<MoodsDecl>,
 }
 
@@ -550,8 +548,7 @@ impl Parser {
                     Ok(i) if i > 0 => i,
                     _ => {
                         return Err(err(format!(
-                            "`tile {n}` — a tile index is a positive whole number \
-                                 (the tile's `i=` in the config)"
+                            "`tile {n}`: a tile index is a positive whole number (the tile's `i=` in the config)"
                         )));
                     }
                 };
@@ -630,7 +627,7 @@ impl Parser {
         Ok(())
     }
 
-    /// Module-level statements are refused inside a template body (D23).
+    /// Module-level statements are refused inside a template body.
     fn refuse_in_template(&self, toks: &[Tok], lineno: usize) -> Result<()> {
         let err = |msg: String| Error::Parse { line: lineno, msg };
         if self.open_template.is_some()
@@ -653,8 +650,7 @@ impl Parser {
             ) || (kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_)))))
         {
             return Err(err(format!(
-                "`{kw}` is not allowed inside a template body — only block \
-                 declarations, named signals, wires, port assignments, and comments (D23)"
+                "`{kw}` is not allowed inside a template body. A body holds only block declarations, named signals, wires, port assignments and comments."
             )));
         }
         Ok(())
@@ -668,7 +664,7 @@ impl Parser {
             Tok::Ident(kw) if kw == "template" => {
                 if self.open_template.is_some() {
                     return Err(err(
-                        "nested `template` — close the open one with `end`".into()
+                        "nested `template`. Close the open one with `end`.".into()
                     ));
                 }
                 self.open_template = Some(parse_template_head(toks, comment, lineno)?);
@@ -676,8 +672,7 @@ impl Parser {
             Tok::Ident(kw) if kw == "test" => {
                 if self.open_template.is_some() {
                     return Err(err(
-                        "`test` inside a template body — close the template with `end` \
-                         first (tests are module-level)"
+                        "`test` is not allowed inside a template body. Close the template with `end` first."
                             .into(),
                     ));
                 }
@@ -760,8 +755,7 @@ impl Parser {
             },
             Tok::Ident(kw) if kw == "use" => {
                 return Err(err(
-                    "the `use` keyword is v0 syntax — instantiate a template as \
-                     `<slug> = <template_name>(<param>: <arg>, …)`"
+                    "the `use` keyword is old syntax. Instantiate a template as `<slug> = <template_name>(<param>: <arg>, …)`."
                         .into(),
                 ));
             }
@@ -799,28 +793,24 @@ impl Parser {
             // v0 keywords: reserved, with migration guidance.
             Tok::Ident(kw) if kw == "block" => {
                 return Err(err(
-                    "the `block` keyword is v0 syntax — declare a managed block as \
-                     `<slug> = <Type>(…)` with its inputs and parameters as arguments"
+                    "the `block` keyword is old syntax. Declare a block as `<slug> = <Type>(…)` with its inputs and parameters as arguments."
                         .into(),
                 ));
             }
             Tok::Ident(kw) if kw == "wire" => {
                 return Err(err(
-                    "the `wire` keyword is v0 syntax — a wire into a managed block is \
-                     written in its argument list (`<Port>: <source>.<Port>`); a wire \
-                     onto an extern port is `<extern>.<Port> <- <source>.<Port>`"
+                    "the `wire` keyword is old syntax. Wire a block input in its argument list (`<Port>: <source>.<Port>`), an extern port with `<extern>.<Port> <- <source>.<Port>`."
                         .into(),
                 ));
             }
             Tok::Ident(kw) if kw == "set" => {
                 return Err(err(
-                    "the `set` keyword is v0 syntax — write `<extern>.<Port> = <value>`".into(),
+                    "the `set` keyword is old syntax. Write `<extern>.<Port> = <value>`.".into(),
                 ));
             }
             Tok::LBrace | Tok::RBrace => {
                 return Err(err(
-                    "v0 `{ … }` block bodies were replaced by argument lists \
-                     (`<slug> = <Type>(…)`)"
+                    "`{ … }` block bodies are old syntax. Write an argument list: `<slug> = <Type>(…)`."
                         .into(),
                 ));
             }
@@ -858,14 +848,14 @@ impl Parser {
         if let Some(t) = self.open_tiles {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `tiles {}` — missing `end`", t.name),
+                msg: format!("unclosed `tiles {}`. Close it with `end`.", t.name),
             });
         }
         if let Some(a) = self.open_access {
             return Err(Error::Parse {
                 line: line_count,
                 msg: format!(
-                    "unclosed `{} {}` — missing `end`",
+                    "unclosed `{} {}`. Close it with `end`.",
                     a.right.keyword(),
                     a.slug
                 ),
@@ -874,31 +864,31 @@ impl Parser {
         if let Some(t) = self.open_schedule {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `schedule {}` — missing `end`", t.name),
+                msg: format!("unclosed `schedule {}`. Close it with `end`.", t.name),
             });
         }
         if let Some(r) = self.open_rule {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `rule {}` — missing `end`", r.slug),
+                msg: format!("unclosed `rule {}`. Close it with `end`.", r.slug),
             });
         }
         if let Some(m) = self.open_moods {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `moods {}` — missing `end`", m.name),
+                msg: format!("unclosed `moods {}`. Close it with `end`.", m.name),
             });
         }
         if let Some(t) = self.open_template {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `template {}` — missing `end`", t.name),
+                msg: format!("unclosed `template {}`. Close it with `end`.", t.name),
             });
         }
         if let Some(t) = self.open_test {
             return Err(Error::Parse {
                 line: line_count,
-                msg: format!("unclosed `test \"{}\"` — missing `end`", t.name),
+                msg: format!("unclosed `test \"{}\"`. Close it with `end`.", t.name),
             });
         }
         Ok(Module { items: self.items })
@@ -906,7 +896,7 @@ impl Parser {
 }
 
 /// `template <name>(<param>: <Type> | <param> = <literal>, …)` opens a
-/// template body (D23).
+/// template body.
 fn parse_template_head(
     toks: &[Tok],
     comment: Option<String>,
@@ -968,8 +958,8 @@ fn parse_template_head(
     })
 }
 
-/// `rule <slug>` (an existing rule's extern) or `rule <slug> "Name"` (D57,
-/// D60) opens a rule body.
+/// `rule <slug>` (an existing rule's extern) or `rule <slug> "Name"`
+/// opens a rule body.
 fn parse_rule_head(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let (slug, title) = match toks {
@@ -990,7 +980,7 @@ fn parse_rule_head(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     })
 }
 
-/// `access <slug>` (D49) or `recipients <slug>` (D51) opens a body of
+/// `access <slug>` or `recipients <slug>` opens a body of
 /// grants.
 fn parse_access_head(
     kw: &str,
@@ -1007,26 +997,18 @@ fn parse_access_head(
     };
     let [_, Tok::Ident(slug)] = toks else {
         return Err(err(match right {
-            RightKind::Access => "expected `access <slug>` — the extern NFC Code \
-                                              Touch whose access rights the body lists"
+            RightKind::Access => "expected `access <slug>`, where <slug> is the extern NFC Code Touch whose access rights the body lists"
                 .into(),
-            RightKind::Recipients => "expected `recipients <slug>` — the extern \
-                                                  push notification whose recipients the body \
-                                                  lists"
+            RightKind::Recipients => "expected `recipients <slug>`, where <slug> is the extern push notification whose recipients the body lists"
                 .into(),
         }));
     };
     if in_template {
         return Err(err(format!(
-            "`{kw}` is not allowed inside a template body — declare {} at module \
-                         level ({})",
+            "`{kw}` is not allowed inside a template body. Declare {} at the top level of the file.",
             match right {
                 RightKind::Access => "access rights",
                 RightKind::Recipients => "recipients",
-            },
-            match right {
-                RightKind::Access => "D49",
-                RightKind::Recipients => "D51",
             }
         )));
     }
@@ -1047,8 +1029,7 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
             let value = match value_of(val, lineno)? {
                 Value::Ref(other) => {
                     return Err(err(format!(
-                        "`let {name} = {other}` — a constant's value must be a \
-                                 number, `on`/`off` or a quoted string, not another identifier"
+                        "`let {name} = {other}`: a constant's value is a number, `on`/`off` or a quoted string, not another name"
                     )));
                 }
                 literal => literal,
@@ -1120,8 +1101,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             let match_spec = match pairs.next() {
                 Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_slug(&v, lineno)?),
                 Some(("mirrors", _, false)) => {
-                    return Err(err("`mirrors:` names a slug, not a string — write \
-                                 `mirrors: status_alarm` without quotes"
+                    return Err(err("`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
                         .into()));
                 }
                 Some((k, _, true)) => {
@@ -1132,8 +1112,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                 Some(("title", v, _)) => MatchSpec::Title(v),
                 Some((other, _, _)) => {
                     return Err(err(format!(
-                        "unknown matcher `{other}` (expected uuid, iname, title, or \
-                                 mirrors first; room/category/device only narrow it)"
+                        "unknown matcher `{other}`. Start with uuid, iname, title or mirrors, then narrow with room, category or device."
                     )));
                 }
                 None => return Err(err("empty matcher list".into())),
@@ -1160,14 +1139,14 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             }
             let constrained = room.is_some() || category.is_some() || device.is_some();
             if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
-                return Err(err("`uuid:` pins exactly — room/category/device \
-                             constraints are redundant and not allowed with it"
-                    .into()));
+                return Err(err(
+                    "`uuid:` matches exactly, so room, category and device are not allowed with it"
+                        .into(),
+                ));
             }
             if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
                 return Err(err(
-                    "`mirrors:` is narrowed by the file's `page` statement — \
-                             room/category/device constraints are not allowed with it"
+                    "room, category and device are not allowed with `mirrors:`. The file's `page` statement narrows it."
                         .into(),
                 ));
             }
@@ -1187,8 +1166,8 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
     }
 }
 
-/// `page "<Title>"` (D28), optionally `(room: "…"[, category: "…"])` to
-/// create it (D56).
+/// `page "<Title>"`, optionally `(room: "…"[, category: "…"])` to
+/// create it.
 fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<PageDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     match toks {
@@ -1200,7 +1179,7 @@ fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Pa
         }),
         [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
             // `page "T" (room: "…"[, category: "…"])` — what a page
-            // the compiler creates is assigned to (D56).
+            // the compiler creates is assigned to.
             let (mut room, mut category) = (None, None);
             for arg in args.split(|t| matches!(t, Tok::Comma)) {
                 let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
@@ -1223,8 +1202,7 @@ fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Pa
             }
             if room.is_none() {
                 return Err(err(
-                    "a page argument list needs `room:` — the room a created page \
-                             is assigned to (D56)"
+                    "a page argument list needs `room:`, the room the created page belongs to"
                         .into(),
                 ));
             }
@@ -1237,9 +1215,7 @@ fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Pa
         }
         _ => {
             Err(err(
-                        "expected `page \"<Title>\"` — the quoted display title of a \
-                         page in the base config (D28), optionally `(room: \"…\"[, category: \"…\"])` \
-                         to create it (D56)"
+                        "expected `page \"<Title>\"` with the title of a page in the base config. To create a new page, add `(room: \"…\"[, category: \"…\"])`."
                             .into(),
                     ))
         }
@@ -1253,19 +1229,19 @@ fn mode_name(tok: &Tok, lineno: usize, usage: &str) -> Result<ModeName> {
         Tok::Str(t) => Ok(ModeName::Title(t.clone())),
         _ => Err(Error::Parse {
             line: lineno,
-            msg: format!("a mode is a slug or a quoted title; {usage}"),
+            msg: format!("a mode is a slug or a quoted title. {usage}"),
         }),
     }
 }
 
-/// One statement of a `rule` body (D57, D73, D76): `active`/`inactive`,
+/// One statement of a `rule` body: `active`/`inactive`,
 /// `when time HH:MM`, `when weekday <days>`, `when mode <mode> [off]`,
 /// `when <slug>.<state> <op> <value>`, the weather, day, daylight, sun
 /// and date conditions, `or`, `then <slug> "<command>"`,
 /// `then mode <mode> on|off`, `then notify|mail|wait|message`.
 fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    let usage = "a rule line is `active`, `inactive`, `when time HH:MM`, \
+    let usage = "A rule line is `active`, `inactive`, `when time HH:MM`, \
                  `when weekday <days>`, `when mode <mode> [off]`, \
                  `when <slug>.<state> <op> <value>`, `when weather …`, `when day …`, \
                  `when daylight`, `when sunset`, `when date …`, `or`, \
@@ -1277,7 +1253,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
         [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
         [Tok::Ident(w), ..] if w == "when" => parse_rule_when(toks, lineno, usage)?,
         [Tok::Ident(w), ..] if w == "then" => parse_rule_then(toks, lineno, usage)?,
-        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+        _ => return Err(err(format!("unexpected rule line. {usage}"))),
     };
     Ok(RuleStmt { kind, comment })
 }
@@ -1311,14 +1287,14 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                     Tok::Comma => {}
                     _ => {
                         return Err(err(format!(
-                            "expected day keywords after `when weekday`; {usage}"
+                            "expected day keywords after `when weekday`. {usage}"
                         )));
                     }
                 }
             }
             if words.is_empty() {
                 return Err(err(format!(
-                    "`when weekday` needs at least one day; {usage}"
+                    "`when weekday` needs at least one day. {usage}"
                 )));
             }
             RuleStmtKind::Weekday(words)
@@ -1330,7 +1306,7 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                 [Tok::Ident(v)] if v == "off" => false,
                 _ => {
                     return Err(err(format!(
-                        "`when mode <mode>` ends with nothing, `on` or `off`; {usage}"
+                        "`when mode <mode>` ends with nothing, `on` or `off`. {usage}"
                     )));
                 }
             };
@@ -1399,7 +1375,7 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             [Tok::Ident(v)] if v == "off" => RuleStmtKind::Daylight(false),
             _ => {
                 return Err(err(format!(
-                    "`when daylight` ends with nothing, `on` or `off`; {usage}"
+                    "`when daylight` ends with nothing, `on` or `off`. {usage}"
                 )));
             }
         },
@@ -1411,12 +1387,11 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
         [Tok::Ident(w), Tok::Ident(k), Tok::Str(d)] if w == "when" && k == "date" => {
             return Err(err(if is_date(d) {
                 format!(
-                    "a date is written bare — write `when date {d}` instead of \
-                     `when date \"{d}\"`"
+                    "a date takes no quotes. Write `when date {d}` instead of `when date \"{d}\"`."
                 )
             } else {
                 format!(
-                    "`{d}` is not a date (YYYY-MM-DD); a date is written bare: `when date 2026-12-24`"
+                    "`{d}` is not a date. Write it as YYYY-MM-DD without quotes: `when date 2026-12-24`."
                 )
             }));
         }
@@ -1435,7 +1410,7 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                 "Lox Logic knows the conditions `when time`, `when weekday`, `when mode`, \
                  `when <slug>.<state> <op> <value>`, `when weather <field> <op> <value>`, \
                  `when day <op> <n>`, `when daylight`, `when sunrise|sunset|dawn|dusk` and \
-                 `when date YYYY-MM-DD`; {usage}"
+                 `when date YYYY-MM-DD`. {usage}"
             )));
         }
     };
@@ -1518,7 +1493,7 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             }
         }
         // `then pumpe on` — a one-word command is bare; `then x "on"`
-        // canonicalizes to it (D80).
+        // canonicalizes to it.
         [
             Tok::Ident(w),
             Tok::Ident(target),
@@ -1527,34 +1502,34 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             target: check_slug(target, lineno)?,
             command: command.clone(),
         },
-        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+        _ => return Err(err(format!("unexpected rule line. {usage}"))),
     };
     Ok(kind)
 }
 
-/// One statement of a `test` body (D36): a port injection, `tick`,
+/// One statement of a `test` body: a port injection, `tick`,
 /// `expect`, or `clock`.
-/// One line of a `moods` body (D58): `"<name>": <setting>, …`, a
+/// One line of a `moods` body: `"<name>": <setting>, …`, a
 /// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
 /// `<n>%`, `rgb(<r>, <g>, <b>)` (percent), `temp(<n>%, <k>K)` or a bare
 /// number (the stored value verbatim).
 fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<MoodLine> {
     use crate::moods::MoodValue;
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    let usage = "a mood is `\"<name>\": all <value>, AQ<n> <value>, …` — values are `on`, \
-                 `off`, `<n>%`, `rgb(<r>, <g>, <b>)`, `temp(<n>%, <k>K)`";
+    let usage = "A mood is `\"<name>\": all <value>, AQ<n> <value>, …` with the values `on`, \
+                 `off`, `<n>%`, `rgb(<r>, <g>, <b>)` or `temp(<n>%, <k>K)`.";
     let [Tok::Str(name), Tok::Colon, rest @ ..] = toks else {
-        return Err(err(format!("expected a mood; {usage}")));
+        return Err(err(format!("expected a mood. {usage}")));
     };
     if rest.is_empty() {
         return Err(err(format!(
-            "mood \"{name}\" sets no circuit — write `all off` for a dark mood; {usage}"
+            "mood \"{name}\" sets no circuit. Write `all off` for a dark mood."
         )));
     }
     let pct = |t: &Tok| -> Result<u8> {
         let n = match t {
             Tok::UnitNum(n, Unit::Pct) | Tok::Num(n) => n,
-            _ => return Err(err(format!("expected a percentage (0 … 100); {usage}"))),
+            _ => return Err(err(format!("expected a percentage (0 … 100). {usage}"))),
         };
         n.parse::<u8>()
             .ok()
@@ -1584,8 +1559,8 @@ fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 Ok(n) if n >= 1 && !c[2..].starts_with('0') => (Some(n), value),
                 _ => return Err(err(format!("`{c}` is not a circuit (`AQ1`, `AQ2`, …)"))),
             },
-            [] => return Err(err(format!("empty setting; {usage}"))),
-            _ => return Err(err(format!("expected `all` or a circuit `AQ<n>`; {usage}"))),
+            [] => return Err(err(format!("empty setting. {usage}"))),
+            _ => return Err(err(format!("expected `all` or a circuit `AQ<n>`. {usage}"))),
         };
         let value = match value {
             [Tok::Ident(v)] if v == "on" => MoodValue::On,
@@ -1593,8 +1568,7 @@ fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             [p @ Tok::UnitNum(_, Unit::Pct)] => MoodValue::Pct(pct(p)?),
             [Tok::Num(n)] => MoodValue::Raw(n.parse().map_err(|_| {
                 err(format!(
-                    "`{n}` is not a stored mood value (a whole number below 2³²) — a \
-                     percentage takes `%`"
+                    "`{n}` is not a valid mood value (a whole number below 2³²). Write a percentage with `%`."
                 ))
             })?),
             [
@@ -1636,7 +1610,7 @@ fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     "expected `temp(<n>%, <k>K)`, e.g. `temp(80%, 2700K)`".into()
                 ));
             }
-            _ => return Err(err(format!("expected a value; {usage}"))),
+            _ => return Err(err(format!("expected a value. {usage}"))),
         };
         settings.push(MoodSetting { circuit, value });
     }
@@ -1647,7 +1621,7 @@ fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     })
 }
 
-/// One line of a `schedule` body (D53): day keywords, then either `off`
+/// One line of a `schedule` body: day keywords, then either `off`
 /// or comma-separated intervals `HH:MM-HH:MM [= <number>] [activate]`.
 fn parse_schedule_line(
     toks: &[Tok],
@@ -1655,7 +1629,7 @@ fn parse_schedule_line(
     lineno: usize,
 ) -> Result<ScheduleLine> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    let usage = "a schedule line is `<days> HH:MM-HH:MM[ = <value>][ activate], …` or \
+    let usage = "A schedule line is `<days> HH:MM-HH:MM[ = <value>][ activate], …` or \
                  `<days> off`";
     let mut days = Vec::new();
     let mut i = 0;
@@ -1669,11 +1643,10 @@ fn parse_schedule_line(
                     if hint.is_empty()
                         && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
                     {
-                        hint = format!(" — did you mean `{short}`?");
+                        hint = format!("; did you mean `{short}`?");
                     }
                     return Err(err(format!(
-                        "unknown day `{w}`{hint} — days are {}, or an operating mode of \
-                         the config by its title (`\"Party\"`)",
+                        "unknown day `{w}`{hint}. Days are {}, or the title of an operating mode (`\"Party\"`).",
                         known.join(", ")
                     )));
                 }
@@ -1688,7 +1661,7 @@ fn parse_schedule_line(
         i += 1;
     }
     if days.is_empty() {
-        return Err(err(format!("expected a day first; {usage}")));
+        return Err(err(format!("expected a day first. {usage}")));
     }
     let rest = &toks[i..];
     if let [Tok::Ident(w)] = rest
@@ -1724,14 +1697,14 @@ fn parse_schedule_line(
                 Tok::Num(m2),
                 tail @ ..,
             ] => (time(h1, m1)?, time(h2, m2)?, tail),
-            [] => return Err(err(format!("empty interval; {usage}"))),
-            _ => return Err(err(format!("expected an interval `HH:MM-HH:MM`; {usage}"))),
+            [] => return Err(err(format!("empty interval. {usage}"))),
+            _ => return Err(err(format!("expected an interval `HH:MM-HH:MM`. {usage}"))),
         };
         let (value, tail) = match tail {
             [Tok::Eq, Tok::Num(v), tail @ ..] => (Some(v.clone()), tail),
             [Tok::Eq, ..] => {
                 return Err(err(format!(
-                    "expected a number after `=` (the timer's value in the interval); {usage}"
+                    "expected a number after `=` (the timer's value in the interval). {usage}"
                 )));
             }
             _ => (None, tail),
@@ -1739,7 +1712,7 @@ fn parse_schedule_line(
         let activate = match tail {
             [] => false,
             [Tok::Ident(w)] if w == "activate" => true,
-            _ => return Err(err(format!("unexpected tokens after an interval; {usage}"))),
+            _ => return Err(err(format!("unexpected tokens after an interval. {usage}"))),
         };
         intervals.push(Interval {
             from,
@@ -1766,8 +1739,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                         v @ (Value::Number(_) | Value::Unit { .. }) => v,
                         other => {
                             return Err(err(format!(
-                                "`dt {other}` — the tick length is a number of seconds \
-                                 or a unit value (`dt 0.1`, `dt 100ms`)"
+                                "`dt {other}`: the tick length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
                             )));
                         }
                     };
@@ -1785,14 +1757,12 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 Tok::Num(n) => {
                     let n: u64 = n.parse().map_err(|_| {
                         err(format!(
-                            "`tick {n}` — the tick count is a positive integer (or a \
-                             duration: `tick 5min`)"
+                            "`tick {n}`: the tick count is a positive integer or a duration (`tick 5min`)"
                         ))
                     })?;
                     (n, None)
                 }
-                // `tick 5min` — that much simulated time at the step's dt
-                // (D80).
+                // `tick 5min` — that much simulated time at the step's dt.
                 Tok::UnitNum(number, unit)
                     if matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H) =>
                 {
@@ -1806,8 +1776,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                         || {
                             let dt = dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
                             err(format!(
-                                "`tick {duration}` is no whole number of ticks of `dt {dt}` \
-                                 — make the duration a multiple of dt"
+                                "`tick {duration}` is not a whole number of `dt {dt}` ticks. Make the duration a multiple of dt."
                             ))
                         },
                     )?;
@@ -1822,7 +1791,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 }
             };
             if n == 0 {
-                return Err(err("`tick 0` advances nothing — use at least 1".into()));
+                return Err(err("`tick 0` advances nothing. Use at least 1.".into()));
             }
             Ok(TestItem::Tick(TickDecl {
                 n,
@@ -1887,8 +1856,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             Tok::LArrow,
             ..,
         ] => Err(err(format!(
-            "`{slug}.{port} <- …` — a test body injects values (`{slug}.{port} = 1`), \
-             it draws no wires"
+            "`{slug}.{port} <- …`: a test sets values and draws no wires. Write `{slug}.{port} = 1`."
         ))),
         _ => Err(err(
             "expected a test statement: `<slug>.<Port> = <value>`, `tick <n> [dt <s>]`, \
@@ -1949,17 +1917,14 @@ fn parse_ident_statement(
             if ty.starts_with(|c: char| c.is_ascii_uppercase()) =>
         {
             Err(err(format!(
-                "expected `(` after the type — a block declaration is `{slug} = {ty}(…)` \
-                 (a constant is `let {slug} = …`)"
+                "expected `(` after the type. Declare a block as `{slug} = {ty}(…)`, a constant as `let {slug} = …`."
             )))
         }
         [Tok::Ident(slug), Tok::Eq, Tok::Num(v)] => Err(err(format!(
-            "`{slug} = {v}` — did you mean `let {slug} = {v}`? (a bare name on the \
-             left is a constant, block or signal declaration; an extern port is \
-             `{slug}.<Port> = {v}`)"
+            "`{slug} = {v}`: did you mean the constant `let {slug} = {v}`? An extern port is set with `{slug}.<Port> = {v}`."
         ))),
         [Tok::Ident(slug), Tok::Eq, Tok::Str(_)] => Err(err(format!(
-            "`{slug} = \"…\"` — did you mean `let {slug} = \"…\"`?"
+            "`{slug} = \"…\"`: did you mean `let {slug} = \"…\"`?"
         ))),
         // slug = <expr> — a named signal (D81).
         [Tok::Ident(slug), Tok::Eq, rest @ ..] if !rest.is_empty() => {
@@ -1967,7 +1932,7 @@ fn parse_ident_statement(
             Ok(())
         }
         // slug.Port <- … — a plain wire (`slug.Port` RHS) or an
-        // expression that desugars into gate/comparator blocks (D24).
+        // expression that desugars into gate/comparator blocks.
         [
             Tok::Ident(ts),
             Tok::Dot,
@@ -1988,19 +1953,18 @@ fn parse_ident_statement(
             Tok::Dot,
             Tok::Ident(vp),
         ] => Err(err(format!(
-            "`{ts}.{tp} = {vs}.{vp}` — use `<-` to wire a port: `{ts}.{tp} <- {vs}.{vp}`"
+            "`{ts}.{tp} = {vs}.{vp}`: wire a port with `<-`, as in `{ts}.{tp} <- {vs}.{vp}`"
         ))),
-        // slug.tiles = set — a Touch Pure Flex tiles claim (D41).
+        // slug.tiles = set — a Touch Pure Flex tiles claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "tiles" => {
             let [Tok::Ident(set)] = rest else {
                 return Err(err(format!(
-                    "expected `{ts}.tiles = <name>` — the name of a `tiles` set"
+                    "expected `{ts}.tiles = <name>`, the name of a `tiles` set"
                 )));
             };
             if in_template {
                 return Err(err(
-                    "`.tiles` is not allowed inside a template body — claim tiles at \
-                     module level"
+                    "`.tiles` is not allowed inside a template body. Assign tiles at the top level of the file."
                         .into(),
                 ));
             }
@@ -2011,17 +1975,16 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
-        // slug.schedule = name — a DayTimer schedule claim (D53).
+        // slug.schedule = name — a DayTimer schedule claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "schedule" => {
             let [Tok::Ident(name)] = rest else {
                 return Err(err(format!(
-                    "expected `{ts}.schedule = <name>` — the name of a `schedule`"
+                    "expected `{ts}.schedule = <name>`, the name of a `schedule`"
                 )));
             };
             if in_template {
                 return Err(err(
-                    "`.schedule` is not allowed inside a template body — claim schedules \
-                     at module level"
+                    "`.schedule` is not allowed inside a template body. Assign schedules at the top level of the file."
                         .into(),
                 ));
             }
@@ -2032,14 +1995,13 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
-        // slug.moods = name — a LightController2 mood claim (D58). Unlike
+        // slug.moods = name — a LightController2 mood claim. Unlike
         // the other claims it may sit in a template body: one mood set for
         // every room the template stamps out.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "moods" => {
             let [Tok::Ident(name)] = rest else {
                 return Err(err(format!(
-                    "expected `{ts}.moods = <name>` — the name of a `moods` set (or, in a \
-                     template body, of the value parameter that passes one)"
+                    "expected `{ts}.moods = <name>`, the name of a `moods` set (in a template body: the value parameter that passes one)"
                 )));
             };
             items.push(Item::MoodsClaim(MoodsClaim {
@@ -2063,7 +2025,7 @@ fn parse_ident_statement(
             items.extend(parse_bulk(inner, tp, val, comment, lineno)?);
             Ok(())
         }
-        // slug.title|room|category = value — an attribute claim (D39).
+        // slug.title|room|category = value — an attribute claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
             items.push(Item::Attr(AttrDecl {
                 slug: ts.clone(),
@@ -2094,7 +2056,7 @@ fn parse_ident_statement(
 }
 
 /// `slug.Port <- …`: a plain wire (`slug.Port` RHS) or an expression
-/// that desugars into gate/comparator blocks (D24).
+/// that desugars into gate/comparator blocks.
 fn parse_wire(
     ts: &str,
     tp: &str,
@@ -2105,8 +2067,7 @@ fn parse_wire(
     let err = |msg: String| Error::Parse { line: lineno, msg };
     if let Some(attr) = Attr::parse(tp) {
         return Err(err(format!(
-            "`{ts}.{attr}` is an object attribute, not a port — attributes \
-             are assigned (`{ts}.{attr} = \"…\"`), never wired"
+            "`{ts}.{attr}` is an attribute, not a port, so it cannot be wired. Assign it: `{ts}.{attr} = \"…\"`."
         )));
     }
     if tp == "tiles" {
@@ -2130,22 +2091,19 @@ fn parse_wire(
     };
     if rest.is_empty() {
         return Err(err(format!(
-            "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
-             expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
-             value, use `{ts}.{tp} = <value>`"
+            "expected a source after `<-`: a port (`{ts}.{tp} <- <slug>.<Port>`) or an expression (`{ts}.{tp} <- a.Q and b.AQ >= 28`). To assign a value, write `{ts}.{tp} = <value>`."
         )));
     }
     match parse_expr(rest, lineno)? {
         Expr::Atom(Operand::Port(from)) => Ok(Item::Wire(WireDecl { to, from, comment })),
         Expr::Atom(Operand::Value(v)) => Err(err(format!(
-            "`{to} <- {v}` wires a constant — to assign a value, \
-             use `{to} = {v}`"
+            "`{to} <- {v}` wires a constant. To assign a value, write `{to} = {v}`."
         ))),
         expr => Ok(Item::ExprWire(ExprWireDecl { to, expr, comment })),
     }
 }
 
-/// `slug = <expr>`: a named signal (D81). The expression must be one —
+/// `slug = <expr>`: a named signal. The expression must be one —
 /// a bare port or value names no block of its own.
 fn parse_signal(slug: &str, rest: &[Tok], comment: Option<String>, lineno: usize) -> Result<Item> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
@@ -2202,7 +2160,7 @@ fn parse_bulk(
     }
     if matches!(tp, "tiles" | "schedule" | "moods") {
         return Err(err(format!(
-            "`.{tp}` takes one object; write a statement per object"
+            "`.{tp}` takes one object. Write one statement per object."
         )));
     }
     let value = value_of(val, lineno)?;
@@ -2263,7 +2221,7 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
             Some(Tok::Str(s)) => {
                 if call.title.is_some() {
                     return Err(err(
-                        "duplicate label — a block takes one label string".into()
+                        "duplicate label. A block takes one label string.".into()
                     ));
                 }
                 if !call.args.iter().any(|a| matches!(a, ArgItem::Binding(_))) {
@@ -2281,7 +2239,7 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                 }
                 // The binding value runs to the next top-level comma or the
                 // call's closing `)` — one value token, a `slug.Port`
-                // source, or an expression (D26).
+                // source, or an expression.
                 let start = i + 2;
                 let mut end = start;
                 let mut depth = 0usize;
@@ -2326,7 +2284,7 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
 }
 
 /// Classify one binding's value tokens: a literal or constant is a
-/// parameter, a `slug.Port` a wire, anything longer an expression (D26).
+/// parameter, a `slug.Port` a wire, anything longer an expression.
 /// A parenthesized bare port or value canonicalizes to the plain form —
 /// one spelling per fact.
 fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> {
@@ -2334,9 +2292,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
     Ok(match toks {
         [] => {
             return Err(err(format!(
-                "expected a value after `{port}:` — a number, quoted string, \
-                 constant name, source port (`<slug>.<Port>`), or an expression \
-                 like `a.Q and b.AQ >= 28`"
+                "expected a value after `{port}:`: a number, quoted string, constant, source port (`<slug>.<Port>`) or an expression like `a.Q and b.AQ >= 28`"
             )));
         }
         // A quoted string that reads as a number canonicalizes to the bare
@@ -2355,7 +2311,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
         clock if clock_toks(clock).is_some() => {
             BindingKind::Param(clock_value(clock, port, lineno)?)
         }
-        // `file("hue.c")` — program text from a file (D40); validate
+        // `file("hue.c")` — program text from a file; validate
         // decides which ports may take it.
         [Tok::Ident(f), Tok::LParen, Tok::Str(path), Tok::RParen] if f == "file" => {
             if path.is_empty() {
@@ -2368,8 +2324,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
         }
         [Tok::Ident(f), Tok::LParen, ..] if f == "file" => {
             return Err(err(format!(
-                "expected `{port}: file(\"<path>\")` — one quoted path, relative to \
-                 this .loxl file"
+                "expected `{port}: file(\"<path>\")` with one quoted path, relative to this .loxl file"
             )));
         }
         [Tok::Ident(slug), Tok::Dot, Tok::Ident(src_port)] => BindingKind::Wire(PortRef {
@@ -2433,7 +2388,7 @@ fn is_date(d: &str) -> bool {
     d.len() == 10 && crate::logic::rule::parse_date(d).is_some()
 }
 
-/// The canonical spec of a test's `clock` (D80): `HH:MM[:SS]` or
+/// The canonical spec of a test's `clock`: `HH:MM[:SS]` or
 /// `YYYY-MM-DD HH:MM[:SS]`, written bare like `At: 19:00`. The v1 quoted
 /// form is refused with its replacement.
 fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
@@ -2449,11 +2404,10 @@ fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
             Some(t) if date.is_none_or(is_date) => {
                 let new = date.map_or(t.clone(), |d| format!("{d} {t}"));
                 format!(
-                    "a test clock is written bare — write `clock {new}` instead of \
-                     `clock \"{old}\"`"
+                    "a test clock takes no quotes. Write `clock {new}` instead of `clock \"{old}\"`."
                 )
             }
-            _ => format!("`clock \"{old}\"` — a test clock is written bare; {usage}"),
+            _ => format!("`clock \"{old}\"`: a test clock takes no quotes ({usage})"),
         }));
     }
     let (date, time) = match date_toks(toks.get(..5).unwrap_or(&[]), lineno)? {
@@ -2471,10 +2425,10 @@ fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
 }
 
 /// The v2 replacement for a quoted boolean on a text-boolean attribute
-/// (`Analog: "true"` → `Analog: on`, D80).
+/// (`Analog: "true"` → `Analog: on`).
 pub(crate) fn bool_hint(port: &str, text: &str) -> String {
     let word = if text == "true" { "on" } else { "off" };
-    format!("`{port}:` is on or off — write `{port}: {word}` instead of `{port}: \"{text}\"`")
+    format!("`{port}:` is on or off. Write `{port}: {word}` instead of `{port}: \"{text}\"`.")
 }
 
 /// The `HH:MM[:SS]` text of a time-of-day token run (`19`, `:`, `00`),
@@ -2502,8 +2456,7 @@ fn clock_value(toks: &[Tok], name: &str, lineno: usize) -> Result<Value> {
         None => Err(Error::Parse {
             line: lineno,
             msg: format!(
-                "`{name}`: `{written}` is not a time of day — write `HH:MM` or \
-                 `HH:MM:SS`, 00:00 … 23:59:59"
+                "`{name}`: `{written}` is not a time of day. Write `HH:MM` or `HH:MM:SS`, from 00:00 to 23:59:59."
             ),
         }),
     }
@@ -2548,7 +2501,7 @@ fn check_slug(s: &str, lineno: usize) -> Result<String> {
     }
 }
 
-/// Parse the RHS of `<-` as an expression (D24). Precedence, loosest to
+/// Parse the RHS of `<-` as an expression. Precedence, loosest to
 /// tightest: `or` < `and` < `not` < comparison < `+ -` < `* /`; parens
 /// group; comparisons take plain operands and do not chain. Arithmetic
 /// stands alone — under a gate or a comparison it is deferred (v1) with a
@@ -2594,8 +2547,7 @@ impl ExprParser<'_> {
     fn no_arith(&self, e: &Expr, kw: &str) -> Result<()> {
         if matches!(e, Expr::Arith { .. }) {
             return Err(self.err(format!(
-                "arithmetic under `{kw}` is deferred (v1) — declare an explicit \
-                 `Formula` block and use its `AQ`"
+                "arithmetic under `{kw}` is not supported. Declare a `Formula` block and use its `AQ`."
             )));
         }
         Ok(())
@@ -2606,8 +2558,7 @@ impl ExprParser<'_> {
     fn ensure_arith(&self, e: &Expr) -> Result<()> {
         if !matches!(e, Expr::Atom(_) | Expr::Arith { .. }) {
             return Err(self.err(
-                "a boolean group cannot take part in arithmetic — gates and \
-                 comparisons produce on/off, not numbers (v1)"
+                "a boolean group cannot take part in arithmetic, since gates and comparisons produce on/off, not numbers"
                     .into(),
             ));
         }
@@ -2678,8 +2629,7 @@ impl ExprParser<'_> {
             self.pos += 1;
             if let Some(Tok::Cmp(op)) = self.peek() {
                 return Err(self.err(format!(
-                    "`(…) {}` — comparison operands are plain ports, numbers, or \
-                     constants, not parenthesized expressions (v1)",
+                    "`(…) {}`: a comparison takes ports, numbers or constants, not parenthesized expressions",
                     op.symbol()
                 )));
             }
@@ -2697,8 +2647,7 @@ impl ExprParser<'_> {
             let op = *op;
             let Expr::Atom(lhs) = e else {
                 return Err(self.err(format!(
-                    "arithmetic under `{}` is deferred (v1) — declare an explicit \
-                     `Formula` block and compare its `AQ`",
+                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
                     op.symbol()
                 )));
             };
@@ -2706,15 +2655,13 @@ impl ExprParser<'_> {
             let rhs = self.operand()?;
             if self.arith_op().is_some() {
                 return Err(self.err(format!(
-                    "arithmetic under `{}` is deferred (v1) — declare an explicit \
-                     `Formula` block and compare its `AQ`",
+                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
                     op.symbol()
                 )));
             }
             if matches!(self.peek(), Some(Tok::Cmp(_))) {
                 return Err(self.err(
-                    "comparisons do not chain (`a < b < c`) — split into two \
-                     comparisons joined with `and`"
+                    "comparisons do not chain (`a < b < c`). Write two comparisons joined with `and`."
                         .into(),
                 ));
             }
@@ -2817,9 +2764,9 @@ impl ExprParser<'_> {
                 self.pos += 1;
                 Ok(r)
             }
-            (Some(Tok::Str(_)), _, _) => Err(self.err(
-                "strings have no place in an expression — it compares numbers and ports".into(),
-            )),
+            (Some(Tok::Str(_)), _, _) => {
+                Err(self.err("an expression cannot contain strings, only numbers and ports".into()))
+            }
             _ => Err(self.err("expected an operand: `slug.Port`, a number, or a constant".into())),
         }
     }
@@ -3059,7 +3006,7 @@ sonne.Qm = 30 # override
 
         // Constants cannot reference constants.
         let e = Module::parse("let a = 1\nlet b = a\n").unwrap_err();
-        assert!(e.to_string().contains("not another identifier"), "{e}");
+        assert!(e.to_string().contains("not another name"), "{e}");
 
         // Undeclared references are errors, with a suggestion.
         let e =
@@ -3153,7 +3100,7 @@ sonne.Qm = 30 # override
     #[test]
     fn v0_keywords_carry_migration_guidance() {
         let e = Module::parse("block b: And\n").unwrap_err();
-        assert!(e.to_string().contains("v0 syntax"), "{e}");
+        assert!(e.to_string().contains("old syntax"), "{e}");
         assert!(e.to_string().contains("= <Type>("), "{e}");
         let e = Module::parse("wire a.Q -> b.I1\n").unwrap_err();
         assert!(e.to_string().contains("argument list"), "{e}");
@@ -3167,9 +3114,9 @@ sonne.Qm = 30 # override
     #[test]
     fn wrong_arrow_and_value_forms_are_guided() {
         let e = Module::parse("extern j = AutoJalousie(title: \"J\")\nj.Pos = j.Q\n").unwrap_err();
-        assert!(e.to_string().contains("use `<-` to wire"), "{e}");
+        assert!(e.to_string().contains("wire a port with `<-`"), "{e}");
         let e = Module::parse("extern j = AutoJalousie(title: \"J\")\nj.Pos <- 5\n").unwrap_err();
-        assert!(e.to_string().contains("use `j.Pos = 5`"), "{e}");
+        assert!(e.to_string().contains("write `j.Pos = 5`"), "{e}");
         let e = Module::parse("x = 28\n").unwrap_err();
         assert!(e.to_string().contains("let x = 28"), "{e}");
     }
@@ -3262,7 +3209,7 @@ sonne.Qm = 30 # override
         let e = Module::parse_fragment("v = VirtualIn(Analog: \"false\")\n").unwrap_err();
         assert!(
             e.to_string()
-                .contains("write `Analog: off` instead of `Analog: \"false\"`"),
+                .contains("Write `Analog: off` instead of `Analog: \"false\"`"),
             "{e}"
         );
         assert!(Module::parse_fragment("f = Formula(Formula: \"true\")\n").is_ok());
@@ -3309,15 +3256,15 @@ sonne.Qm = 30 # override
         // The v1 quoted clock names its replacement.
         let e = err("\tclock \"2026-01-03 7:30\"");
         assert!(
-            e.contains("write `clock 2026-01-03 07:30` instead of `clock \"2026-01-03 7:30\"`"),
+            e.contains("Write `clock 2026-01-03 07:30` instead of `clock \"2026-01-03 7:30\"`"),
             "{e}"
         );
-        assert!(err("\tclock \"spät\"").contains("written bare"));
+        assert!(err("\tclock \"spät\"").contains("takes no quotes"));
         assert!(err("\tclock 2026-02-30 07:00").contains("not a date"));
         assert!(err("\tclock 25:00").contains("not a time of day"));
         // A duration is a whole number of ticks.
         let e = err("\ttick 1s dt 300ms");
-        assert!(e.contains("no whole number of ticks of `dt 300ms`"), "{e}");
+        assert!(e.contains("not a whole number of `dt 300ms` ticks"), "{e}");
         assert!(err("\ttick 0s").contains("advances nothing"));
         assert!(err("\ttick 5%").contains("duration"));
     }
@@ -3338,7 +3285,7 @@ sonne.Qm = 30 # override
         let e = Module::parse_fragment("rule r\n\twhen date \"2026-12-24\"\nend\n").unwrap_err();
         assert!(
             e.to_string()
-                .contains("write `when date 2026-12-24` instead of `when date \"2026-12-24\"`"),
+                .contains("Write `when date 2026-12-24` instead of `when date \"2026-12-24\"`"),
             "{e}"
         );
     }

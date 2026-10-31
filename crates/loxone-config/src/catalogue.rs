@@ -125,7 +125,7 @@ pub fn update(
                 .iter()
                 .any(|t| t.to_ascii_lowercase().contains(&uuid))
             {
-                left.push(change(format!("{what}; other entries refer to it")));
+                left.push(change(format!("{what}: other entries refer to it")));
             } else {
                 removed.insert(idx);
                 applied.push(change(what.to_string()));
@@ -174,7 +174,7 @@ pub fn update(
                 _ => left.push(change(what)),
             }
         }
-        // A display unit (D65) is the value format of the entry and of its
+        // A display unit is the value format of the entry and of its
         // statistic outputs (`%` doubled in the entry only).
         let unit = |el: &Element| {
             el.child_elements()
@@ -332,7 +332,7 @@ pub fn update(
     })
 }
 
-/// The operating modes the compile adds, renames or deletes (D69), in
+/// The operating modes the compile adds, renames or deletes, in
 /// `operatingModes`: number → title, the program's modes in their order
 /// (live: a mode minted from source is missing from the app until this
 /// lists it).
@@ -528,7 +528,7 @@ fn entry(el: &Element, objs: &Objects) -> Option<String> {
 /// The app's view of the document's blocks, as the catalogue derives it:
 /// UUID (lowercase) → app control type and states (state name → UUID),
 /// for each object shown in the app whose entry Lox Logic knows. Automatic
-/// Designer conditions name a block's state by this map (D73).
+/// Designer conditions name a block's state by this map.
 pub(crate) fn app_controls(
     doc: &LoxoneDoc,
 ) -> BTreeMap<String, (String, BTreeMap<String, String>)> {
@@ -1987,7 +1987,7 @@ mod tests {
         );
         let cat = catalogue(&central);
         let u = update(&cat, &live, &compiled, NOW).unwrap();
-        assert_eq!(whats(&u).1, ["deleted; other entries refer to it"]);
+        assert_eq!(whats(&u).1, ["deleted: other entries refer to it"]);
         assert_eq!(u.text, cat);
     }
 

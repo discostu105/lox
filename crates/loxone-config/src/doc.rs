@@ -40,9 +40,9 @@ pub struct PortView {
     /// Source port UUIDs of incoming wires (`<In Input=…/>` children).
     pub inputs: Vec<String>,
     /// The connector carries the GUI's `Inv=` input-inversion flag and is
-    /// therefore **GUI-owned** (design decision D20): the rebuild carries
-    /// the whole `<Co>` verbatim — flag, `Def=`, wires — and the source is
-    /// refused from wiring or setting it. Unwired, the idiom means
+    /// therefore **GUI-owned**. The rebuild carries the whole `<Co>`
+    /// verbatim (flag, `Def=`, wires), and the source may not wire or set
+    /// it. Unwired, the idiom means
     /// "constant 1" (how the GUI encodes e.g. an enabled `Remanence`
     /// checkbox); wired, the wire's meaning is inverted and must not be
     /// restated in source.
@@ -56,118 +56,80 @@ pub struct WireView {
     pub to_port: String,
 }
 
-/// GUI-owned display attributes on block elements (design decision D19):
-/// carried forward verbatim through a rebuild, allowed by adoption. They
-/// follow `WF=` in element order. Evidence per entry (real config +
-/// 2026-08-25 oracle runs): `Tp=` Memory subtype, `Sun=` AutoJalousie,
-/// `SpStates=` visualization-state UUID lists (PushButton, AutoJalousie).
-/// `NDOC=` block documentation text and the `StatsType=`/`StatsAutoDel=`
-/// statistics settings (PushButton "WW-Boost" / two Memory blocks in the
-/// real config). Growing this list takes evidence — an attribute is only
-/// added here if re-emitting it verbatim cannot contradict what the
-/// source expresses (which is why `Inv=`, input inversion, must never
-/// appear here).
+/// GUI-owned attributes on block elements. A rebuild carries them
+/// verbatim, and adoption allows them. They follow `WF=` in element order.
+///
+/// An attribute belongs here only if re-emitting it verbatim cannot
+/// contradict what the source expresses. `Inv=` (input inversion) must
+/// therefore never appear. Each entry needs evidence from a real config or a
+/// Loxone Config save.
 pub const GUI_OWNED_ATTRS: &[&str] = &[
-    "Tp",
-    "Sun",
-    "SpStates",
-    "NDOC",
-    "StatsType",
-    "StatsAutoDel",
-    // PulseAt trigger config (2026-08-25 corpus): `Sec=` fire time in
-    // seconds since midnight — carried until the source claims it with
-    // `At:` (D79, #248) — and `Typ=` the timing mode (`0` a fixed time;
-    // the time functions' codes are unknown). `AutP=` (also on Memory)
-    // is not understood.
+    "Tp",           // Memory subtype
+    "Sun",          // AutoJalousie
+    "SpStates",     // visualization-state UUID lists (PushButton, AutoJalousie)
+    "NDOC",         // block documentation text (PushButton)
+    "StatsType",    // statistics settings (PushButton, Memory)
+    "StatsAutoDel", // statistics settings (PushButton, Memory)
+    // PulseAt fire time in seconds since midnight. Carried until the
+    // source claims it with `At:` (#248).
     "Sec",
-    "Typ",
-    "AutP",
-    // DayTimer schedule config: `Analog=`/`DefValue=`/`On=`/`Off=`
-    // output behavior, `N=` count of `<Entry>` children (carried
-    // together with them), `Modes=`/`UserModes=` operating-mode UUID
-    // gating, `Desc=` description text. Like the `<Entry>` schedule
-    // itself: GUI-authored logic the source cannot express, gating *when*
-    // the block runs — never modifying what a declared wire or param
-    // means.
-    "Analog",
-    "DefValue",
-    "N",
-    "Modes",
-    "On",
-    "Off",
-    "UserModes",
-    "Desc",
-    // The 2026-08-25 admission batch (LightController2, Switch2Button,
-    // CentralShade/CentralLight, Code16). Corpus survey: each name below
-    // appears on exactly one managed type — no cross-type collisions.
-    // LightController2 per-circuit GUI state: `NameAI<n>=`/`CapAI<n>=`
-    // circuit names and capability flags, `PresM<n>=` presence-mode
-    // membership, `COName=` combined-output name, `T5P=` T5 pairing,
-    // `uuidSeqencing=`/`uuidSeqenceIx=` scene-sequencing state. Only the
-    // observed indexes are listed (0–4 / 0–2 / 0–4) — a sixth lighting
-    // circuit would surface `NameAI5` as a refusal and gets added on that
-    // evidence.
-    "NameAI0",
+    "Typ",  // PulseAt timing mode: `0` a fixed time, the other codes unknown
+    "AutP", // PulseAt and Memory, meaning unknown
+    // DayTimer settings. Like the `<Entry>` schedule they gate *when* the
+    // block runs, never what a declared wire or param means.
+    "Analog",    // DayTimer output behavior
+    "DefValue",  // DayTimer output behavior
+    "N",         // DayTimer: count of `<Entry>` children, carried with them
+    "Modes",     // DayTimer: operating-mode UUIDs that gate it
+    "On",        // DayTimer output behavior
+    "Off",       // DayTimer output behavior
+    "UserModes", // DayTimer: user operating-mode UUIDs that gate it
+    "Desc",      // DayTimer description text
+    // LightController2 per-circuit GUI state. Only the indexes seen in real
+    // configs are listed: a sixth circuit surfaces `NameAI5` as a refusal
+    // and gets added on that evidence. Each name in this group and the next
+    // two appears on exactly one managed type.
+    "NameAI0", // circuit names
     "NameAI1",
     "NameAI2",
     "NameAI3",
     "NameAI4",
-    "CapAI0",
+    "CapAI0", // circuit capability flags
     "CapAI1",
     "CapAI2",
-    "PresM0",
+    "PresM0", // presence-mode membership
     "PresM1",
     "PresM2",
     "PresM3",
     "PresM4",
-    "COName",
-    "T5P",
-    "uuidSeqencing",
-    "uuidSeqenceIx",
-    // CentralShade/CentralLight `rec=`: the UUID list of the blocks the
-    // central controls, edited in the GUI's central dialog. Same class as
-    // `Modes=`/`SpStates=` — a UUID-list the source cannot express, gating
-    // *which blocks* the GUI addresses, never what a declared wire or
-    // param means.
+    "COName",        // combined-output name
+    "T5P",           // T5 pairing
+    "uuidSeqencing", // scene-sequencing state
+    "uuidSeqenceIx", // scene-sequencing state
+    // CentralShade/CentralLight: UUIDs of the blocks the central controls,
+    // edited in the GUI's central dialog.
     "rec",
-    // Code16 (the PicoC program block): `Code=` is the program source,
-    // `Task=` its scheduling mode. GUI-authored logic exactly like the
-    // DayTimer `<Entry>` schedule — carried verbatim. `Code` is also an
-    // attribute parameter (D40): a source binding (`Code: file("…")`)
-    // claims it, and only then does the compiler write it.
+    // Code16 (the PicoC program block) program source. A source binding
+    // (`Code: file("…")`) claims it, and only then does the compiler write it.
     "Code",
-    "Task",
+    "Task", // Code16 scheduling mode
 ];
 
-/// GUI-owned child elements of block elements (D19), same contract as
-/// [`GUI_OWNED_ATTRS`]; they follow the `<Co>` children in element order.
-/// `<IoData>` carries the visualization/room/category binding (`Visu=`,
-/// `Pr=` place, `Cr=` category), `<Display>`/`<PSD>` visualization
-/// settings, `<COHist>` AutoJalousie history settings, `<Entry>` the
-/// DayTimer schedule entries (authored in the GUI's schedule editor —
-/// real logic the source cannot express, owned by the GUI like a room
-/// binding). The four LightController2 subtrees are the complete child
-/// inventory of all 45 corpus instances beyond `IoData`/`PSD`/`COHist`,
-/// all GUI-authored — the DayTimer-`<Entry>` precedent exactly:
-/// `<LightscenesC>` holds the lighting-scene definitions (`<LightsceneC>`
-/// moods with per-circuit Q values, authored in the GUI's/app's scene
-/// editor), `<LSConfig>` the scene-behavior settings (`OpM=`/`ScMv=`
-/// reference the scenes' SIDs), `<HCL>` the human-centric-lighting
-/// color-temperature curve, and `<SeqConf>` RGB color sequences (nested
-/// `<seq0>`/`<Sequence>`/`<Col>`, carried wholesale). `<StateTexts>`
-/// holds a State block's per-value status texts, authored in the GUI
-/// (the save adds one to a minted State, oracle session 16).
+/// GUI-owned child elements of block elements, with the same contract as
+/// [`GUI_OWNED_ATTRS`]. They follow the `<Co>` children in element order.
 pub const GUI_OWNED_CHILDREN: &[&str] = &[
-    "IoData",
-    "Display",
-    "PSD",
-    "COHist",
-    "Entry",
-    "LightscenesC",
-    "LSConfig",
-    "HCL",
-    "SeqConf",
-    "StateTexts",
+    "IoData",  // visualization, room and category binding (`Visu=`, `Pr=`, `Cr=`)
+    "Display", // visualization settings
+    "PSD",     // visualization settings
+    "COHist",  // AutoJalousie history settings
+    "Entry",   // DayTimer schedule entries, authored in the schedule editor
+    // LightController2: with `IoData`, `PSD` and `COHist` these are all the
+    // children of its 45 instances in real configs.
+    "LightscenesC", // moods (`<LightsceneC>`) with per-circuit Q values
+    "LSConfig",     // scene behavior (`OpM=`/`ScMv=` reference the scenes' SIDs)
+    "HCL",          // human-centric-lighting color-temperature curve
+    "SeqConf",      // RGB color sequences, carried whole
+    "StateTexts",   // State: per-value status texts (a save adds one to a minted State)
 ];
 
 /// Lookup tables built in one pass over the document.
@@ -245,7 +207,7 @@ impl LoxoneDoc {
     /// The block version (`V=`) of the document's objects, e.g. `"178"`.
     /// Loxone Config writes every object at its release's version on save,
     /// so a GUI-saved file carries one; where objects disagree (blocks
-    /// another writer emitted), the most common wins, a tie the higher.
+    /// another tool wrote), the most common wins, a tie the higher.
     pub fn block_version(&self) -> Option<String> {
         fn count<'a>(el: &'a Element, seen: &mut BTreeMap<&'a str, usize>) {
             for child in el.child_elements() {
@@ -390,7 +352,7 @@ impl LoxoneDoc {
     /// Replace the numeric-character-reference text that
     /// [`Self::char_ref_attrs`] finds with the characters it names, written
     /// the way Loxone writes them: line breaks and every other character
-    /// raw, `& < > " '` as the five named entities (design decision D44).
+    /// raw, `& < > " '` as the five named entities.
     /// Both damaged forms are repaired — `&amp;#xA;` once Loxone Config has
     /// re-escaped the ampersand, `&#xA;` straight from the foreign writer.
     /// Every other byte of the document stays as it was. A reference that
@@ -434,11 +396,8 @@ impl LoxoneDoc {
             return Ok(());
         }
         Err(Error::Structure(format!(
-            "{role} carries {} duplicate UUID(s) ({}{}) — two objects or \
-             connectors share one identity, so wiring to either is \
-             ambiguous. Open and save the config once in Loxone Config \
-             (it keeps the first occurrence and re-mints the rest), then use \
-             that save; docs/loxone-format.md names the known cause",
+            "{role} has {} duplicate UUIDs ({}{}), so wiring to them is ambiguous. \
+             Open and save the config once in Loxone Config, which gives the duplicates new UUIDs, then use that save.",
             dups.len(),
             dups.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
             if dups.len() > 3 { ", …" } else { "" }
