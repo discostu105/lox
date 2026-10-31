@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-10-31
+
+### Added
+- **Example library** of real Loxone Config projects in `crates/loxone-config/examples/library/`: each with its source, license, Lox Logic view and page drawings, so you can see what a config looks like as code
+
+### Fixed
+- **`loxl scan`** (and `lox logic scan`) also finds the project's creator and phone number in the document properties, and `--redact` replaces them; before, a shared copy kept both
+
 ## [0.45.0] — 2026-10-31 — smarter rules, calendar, shareable configs
 
 Automatic Designer rules can watch states and operating modes, combine conditions with `or` and switch modes; the *Betriebszeiten* calendar is managed from source; and `loxl scan --redact` makes a config safe to share.

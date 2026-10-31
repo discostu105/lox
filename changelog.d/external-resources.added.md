@@ -1,1 +1,0 @@
-- **Example library** of real Loxone Config projects in `crates/loxone-config/examples/library/`: each with its source, license, Lox Logic view and page drawings, so you can see what a config looks like as code
