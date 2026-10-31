@@ -126,10 +126,10 @@ lox config diff -o json                              # the last config change
 
 ## Writing logic
 
-Agents can also author Miniserver logic as [lxir](config-as-code) text: `lox ir check --json` returns
+Agents can also author Miniserver logic as [Lox Logic](config-as-code) text: `lox logic check --json` returns
 line-numbered errors, `lox config diff base.Loxone out.Loxone` shows the result by name, and only
 `lox config push --force` (a step for the human) touches the Miniserver. Rules for agents:
-[crates/lxir/docs/agents.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/agents.md).
+[crates/loxone-config/docs/agents.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/agents.md).
 
 ## Conditional logic
 

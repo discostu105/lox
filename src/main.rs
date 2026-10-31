@@ -44,7 +44,7 @@ use util::{json_val_str, now_hms};
 pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
     let data = fs::read(path).with_context(|| format!("Cannot read {}", path))?;
     if path.ends_with(".zip") {
-        Ok(lxir::archive::extract_and_decompress(&data)?)
+        Ok(loxone_config::archive::extract_and_decompress(&data)?)
     } else {
         Ok(data)
     }
@@ -244,7 +244,7 @@ Configuration:
   setup, alias, scene          Connection settings, aliases, scenes
   cache, token                 Cache & auth token management
   config                       Loxone Config files (download/inspect/diff)
-  ir                           Config as code: lxir modules → .Loxone
+  logic                        Config as code: Lox Logic modules → .Loxone
   ctx                          Manage multiple Miniserver contexts
   completions                  Generate shell completions
   schema                       Command schema for AI agent discovery
@@ -768,10 +768,10 @@ Examples:\n  lox tui\n  lox tui --screen events\n  lox tui -r Kitchen\n  lox tui
         #[command(subcommand)]
         action: ConfigCmd,
     },
-    /// Config as code: lxir modules compiled into the .Loxone config (`lox ir help`)
-    #[command(alias = "lxir", disable_help_flag = true)]
-    Ir {
-        /// lxir command and its arguments, passed through as-is: check, fmt,
+    /// Config as code: Lox Logic modules compiled into the .Loxone config (`lox logic help`)
+    #[command(alias = "loxl", disable_help_flag = true)]
+    Logic {
+        /// Lox Logic command and its arguments, passed through as-is: check, fmt,
         /// compile, test, rename, lint, decompile, adopt, diff, drift,
         /// observe, roundtrip
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -1398,7 +1398,7 @@ pub(crate) enum ConfigCmd {
         #[arg(long, value_name = "PATH")]
         save_as: Option<String>,
     },
-    /// Deploy an lxir project: drift check, compile, stage, upload, program
+    /// Deploy a Lox Logic project: drift check, compile, stage, upload, program
     /// restart, verify (requires --force to upload)
     Push {
         /// Project directory (holds lox.toml)
@@ -1416,7 +1416,7 @@ pub(crate) enum ConfigCmd {
         /// config must still be exactly it
         #[arg(long, value_name = "FILE")]
         patched_from: Option<String>,
-        /// Delete managed blocks missing from the module (see `lox ir help`)
+        /// Delete managed blocks missing from the module (see `lox logic help`)
         #[arg(long)]
         allow_removals: bool,
         /// Accept a base saved by a new Loxone Config release (its exact version)
@@ -1468,7 +1468,7 @@ pub(crate) enum ConfigCmd {
         /// Newer config (file or snapshot)
         new: Option<String>,
     },
-    /// List the logic pages, or show a page as lxir source
+    /// List the logic pages, or show a page as Lox Logic source
     Show {
         /// Page to show as source (exact title or a unique part of it)
         #[arg(long, short)]
@@ -1876,11 +1876,11 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Cache { action } => commands::config_cmd::cmd_cache(&ctx, action),
         Cmd::Token { action } => commands::config_cmd::cmd_token(&ctx, action),
         Cmd::Config { action } => commands::config_cmd::cmd_config(&ctx, action),
-        Cmd::Ir { args } => {
-            // lxir exits 1 on findings (check errors, a diff, drift) and 2 on
+        Cmd::Logic { args } => {
+            // Lox Logic exits 1 on findings (check errors, a diff, drift) and 2 on
             // usage errors; scripts rely on both.
             use std::process::ExitCode;
-            let code = lxir::cli::main_with("lox ir", &args);
+            let code = loxone_config::cli::main_with("lox logic", &args);
             if code != ExitCode::SUCCESS {
                 use std::io::Write;
                 let _ = std::io::stdout().flush();

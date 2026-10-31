@@ -2267,7 +2267,7 @@ mod tests {
     fn wiring_fixture_parses() {
         let st = structure();
         let xml = loxone_xml(&st);
-        let doc = lxir::LoxoneDoc::parse(xml.as_bytes()).unwrap();
+        let doc = loxone_config::LoxoneDoc::parse(xml.as_bytes()).unwrap();
         assert!(doc.objects().len() > 15);
         assert!(doc.wires().len() > 10);
     }

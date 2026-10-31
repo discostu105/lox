@@ -18,7 +18,7 @@ use std::process::Command;
 use crate::config::Config;
 use crate::loxone_xml;
 use loxone_client::ftp;
-use lxir::archive;
+use loxone_config::archive;
 
 /// Build a git Command with consistent config for the managed repo.
 /// Disables GPG signing and sets a fallback author if not configured,
@@ -161,7 +161,7 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     // 3. Parse new config summary
     let new_summary = loxone_xml::parse_config_summary(&xml_data)?;
 
-    // 4. Semantic diff against the previous snapshot (lxir, refs folded)
+    // 4. Semantic diff against the previous snapshot (loxone-config, refs folded)
     let xml_path = ms_path.join("config.Loxone");
     let change = if xml_path.exists() {
         let old_xml = std::fs::read(&xml_path)?;
@@ -232,11 +232,11 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
 
 /// What changed since the previous snapshot, for the commit message.
 enum Change {
-    /// The first snapshot: page, block and wire counts (if lxir reads it)
+    /// The first snapshot: page, block and wire counts (if loxone-config reads it)
     Initial(Option<(usize, usize, usize)>),
     /// Semantic diff lines (`logic::diff_lines`)
     Logic(Vec<String>),
-    /// lxir could not read one of the configs
+    /// loxone-config could not read one of the configs
     Unavailable(String),
 }
 

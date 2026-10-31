@@ -1,0 +1,2647 @@
+//! Hand-rolled parser for the Lox Logic text format. Line-oriented; only a block
+//! declaration's `( … )` argument list spans lines.
+
+use super::ast::*;
+use crate::error::{Error, Result};
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Ident(String),
+    Str(String),
+    Num(String),
+    /// A number with a unit suffix (`40s`, `1.5h` — D27).
+    UnitNum(String, Unit),
+    Colon,
+    Dot,
+    Comma,
+    Arrow,
+    LArrow,
+    Eq,
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    /// Comparison operators (expression sugar, D24).
+    Cmp(CmpOp),
+    /// `~=` — approximately-equal, valid only in a test `expect` (D36).
+    Approx,
+    /// Arithmetic operators (formula backend, D24). `-` is only lexed as
+    /// binary minus after a token that can end an operand — everywhere
+    /// else it starts a negative number.
+    Plus,
+    Minus,
+    Star,
+    Slash,
+}
+
+fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let mut toks = Vec::new();
+    let mut comment = None;
+    let mut chars = line.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        match c {
+            '#' => {
+                chars.next();
+                comment = Some(chars.collect::<String>());
+                break;
+            }
+            c if c.is_whitespace() => {
+                chars.next();
+            }
+            ':' => {
+                chars.next();
+                toks.push(Tok::Colon);
+            }
+            '.' => {
+                chars.next();
+                toks.push(Tok::Dot);
+            }
+            ',' => {
+                chars.next();
+                toks.push(Tok::Comma);
+            }
+            '=' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    toks.push(Tok::Cmp(CmpOp::Eq));
+                } else {
+                    toks.push(Tok::Eq);
+                }
+            }
+            '>' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    toks.push(Tok::Cmp(CmpOp::Ge));
+                } else {
+                    toks.push(Tok::Cmp(CmpOp::Gt));
+                }
+            }
+            '!' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    toks.push(Tok::Cmp(CmpOp::Ne));
+                } else {
+                    return Err(err("unexpected `!` (not-equal is `!=`)".into()));
+                }
+            }
+            '~' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    toks.push(Tok::Approx);
+                } else {
+                    return Err(err("unexpected `~` (approximately-equal is `~=`)".into()));
+                }
+            }
+            '+' => {
+                chars.next();
+                toks.push(Tok::Plus);
+            }
+            '*' => {
+                chars.next();
+                toks.push(Tok::Star);
+            }
+            '/' => {
+                chars.next();
+                toks.push(Tok::Slash);
+            }
+            '(' => {
+                chars.next();
+                toks.push(Tok::LParen);
+            }
+            ')' => {
+                chars.next();
+                toks.push(Tok::RParen);
+            }
+            '{' => {
+                chars.next();
+                toks.push(Tok::LBrace);
+            }
+            '}' => {
+                chars.next();
+                toks.push(Tok::RBrace);
+            }
+            '<' => {
+                chars.next();
+                // `<-` wins over `<` followed by a negative number: write
+                // `x < -5` with a space (canonical form) to compare.
+                match chars.peek() {
+                    Some(&'-') => {
+                        chars.next();
+                        toks.push(Tok::LArrow);
+                    }
+                    Some(&'=') => {
+                        chars.next();
+                        toks.push(Tok::Cmp(CmpOp::Le));
+                    }
+                    _ => toks.push(Tok::Cmp(CmpOp::Lt)),
+                }
+            }
+            '-' => {
+                chars.next();
+                if chars.peek() == Some(&'>') {
+                    chars.next();
+                    toks.push(Tok::Arrow);
+                } else if matches!(
+                    toks.last(),
+                    Some(Tok::Ident(_) | Tok::Num(_) | Tok::UnitNum(..) | Tok::RParen)
+                ) {
+                    // Binary minus: only after something that can end an
+                    // operand (`a.AQ - 5`, `(x + 1) - y.AQ`). After `:`,
+                    // `=`, a comparison etc. `-` keeps starting a negative
+                    // number (`SSoff: -30`, `x < -5`).
+                    toks.push(Tok::Minus);
+                } else {
+                    // negative number
+                    let mut s = String::from('-');
+                    while let Some(&d) = chars.peek() {
+                        if d.is_ascii_digit() || d == '.' {
+                            s.push(d);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if s == "-" {
+                        return Err(err("unexpected `-`".into()));
+                    }
+                    toks.push(number(s, &mut chars, lineno)?);
+                }
+            }
+            '"' => {
+                chars.next();
+                let mut s = String::new();
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some('"') => s.push('"'),
+                            Some('\\') => s.push('\\'),
+                            Some('n') => s.push('\n'),
+                            other => {
+                                return Err(err(format!("invalid escape `\\{}`", opt(other))));
+                            }
+                        },
+                        Some(c) => s.push(c),
+                        None => return Err(err("unterminated string".into())),
+                    }
+                }
+                toks.push(Tok::Str(s));
+            }
+            c if c.is_ascii_digit() => {
+                let mut s = String::new();
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() || d == '.' {
+                        s.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                toks.push(number(s, &mut chars, lineno)?);
+            }
+            c if c.is_alphanumeric() || c == '_' => {
+                let mut s = String::new();
+                while let Some(&d) = chars.peek() {
+                    if d.is_alphanumeric() || d == '_' {
+                        s.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                toks.push(Tok::Ident(s));
+            }
+            other => return Err(err(format!("unexpected character `{other}`"))),
+        }
+    }
+    Ok((toks, comment))
+}
+
+/// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
+/// immediately following letter run or `%` is a unit suffix (D27):
+/// `40s`, `1.5h`, `2700K`, `70%`.
+fn number(
+    s: String,
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    lineno: usize,
+) -> Result<Tok> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    if !is_number_literal(&s) {
+        return Err(err(format!(
+            "invalid number literal `{s}` (expected digits with at most one `.`)"
+        )));
+    }
+    let mut suffix = String::new();
+    if chars.peek() == Some(&'%') {
+        chars.next();
+        suffix.push('%');
+    } else {
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_alphabetic() {
+                suffix.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+    if suffix.is_empty() {
+        return Ok(Tok::Num(s));
+    }
+    let Some(unit) = Unit::parse(&suffix) else {
+        return Err(err(format!(
+            "unknown unit `{suffix}` on `{s}{suffix}` (known units: ms, s, min, h, K, %)"
+        )));
+    };
+    if scale_by_unit(&s, unit).is_none() {
+        return Err(err(format!("`{s}{suffix}` is too large to scale exactly")));
+    }
+    Ok(Tok::UnitNum(s, unit))
+}
+
+fn opt(c: Option<char>) -> String {
+    c.map(String::from).unwrap_or_else(|| "<eol>".into())
+}
+
+/// The statement sink: an open `template` body, or the module itself.
+fn sink<'a>(
+    open_template: &'a mut Option<TemplateDecl>,
+    items: &'a mut Vec<Item>,
+) -> &'a mut Vec<Item> {
+    match open_template {
+        Some(t) => &mut t.body,
+        None => items,
+    }
+}
+
+/// A closed `tile <i>(…)` argument list becomes the tile (D41).
+fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
+    if call.title.is_some() {
+        return Err(Error::Parse {
+            line: lineno,
+            msg: format!(
+                "`tile {index}(…)` takes no label string — the status text is \
+                 `text: \"…\"`"
+            ),
+        });
+    }
+    Ok(TileDecl {
+        index,
+        args: call.args,
+        comment: call.comment,
+        close_comment: call.close_comment,
+    })
+}
+
+/// A closed call becomes a block declaration or — lowercase callee — a
+/// template instantiation.
+fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
+    let lower = call
+        .block_type
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase());
+    if !lower {
+        return Ok(Item::Block(call));
+    }
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    if in_template {
+        return Err(err(format!(
+            "`{} = {}(…)` — a template body cannot instantiate another template (v1)",
+            call.slug, call.block_type
+        )));
+    }
+    if call.title.is_some() {
+        return Err(err(format!(
+            "`{} = {}(…)`: an instantiation takes no label string — titles belong \
+             on the template's blocks",
+            call.slug, call.block_type
+        )));
+    }
+    Ok(Item::Instance(call))
+}
+
+pub fn parse(src: &str) -> Result<Module> {
+    let mut items = Vec::new();
+    // A block declaration whose `( … )` argument list is still open.
+    let mut open_call: Option<BlockDecl> = None;
+    // A `template` whose body is still open (until `end`).
+    let mut open_template: Option<TemplateDecl> = None;
+    // A `test` whose body is still open (until `end`) — D36.
+    let mut open_test: Option<TestDecl> = None;
+    // A `tiles` set whose body is still open (until `end`) — D41.
+    let mut open_tiles: Option<TilesDecl> = None;
+    // The index of the `tile` whose argument list `open_call` carries.
+    let mut open_tile: Option<u32> = None;
+    // An `access` declaration whose body is still open (until `end`) — D49.
+    let mut open_access: Option<AccessDecl> = None;
+    // A `schedule` whose body is still open (until `end`) — D53.
+    let mut open_schedule: Option<ScheduleDecl> = None;
+    // A `rule` whose body is still open (until `end`) — D57.
+    let mut open_rule: Option<RuleDecl> = None;
+    // A `moods` set whose body is still open (until `end`) — D58.
+    let mut open_moods: Option<MoodsDecl> = None;
+
+    for (i, raw) in src.lines().enumerate() {
+        let lineno = i + 1;
+        let err = |msg: String| Error::Parse { line: lineno, msg };
+        let (toks, comment) = lex(raw, lineno)?;
+
+        if let Some(call) = open_call.as_mut() {
+            // Inside an open argument list: arguments, comments, or `)`.
+            if toks.is_empty() {
+                if let Some(text) = comment {
+                    call.args.push(ArgItem::Comment(text));
+                }
+                continue;
+            }
+            let outcome = parse_call_args(call, &toks, lineno)?;
+            if outcome.closed {
+                call.close_comment = comment;
+                if let Some(index) = open_tile.take() {
+                    let tile = finish_tile(open_call.take().unwrap(), index, lineno)?;
+                    let tiles = open_tiles.as_mut().expect("a tile is open only in a set");
+                    tiles.body.push(TilesItem::Tile(tile));
+                    continue;
+                }
+                let in_template = open_template.is_some();
+                let item = finish_call(open_call.take().unwrap(), in_template, lineno)?;
+                sink(&mut open_template, &mut items).push(item);
+            } else if let Some(text) = comment {
+                match call.args.last_mut() {
+                    Some(ArgItem::Binding(b)) if outcome.pushed_binding => b.comment = Some(text),
+                    _ => call.args.push(ArgItem::Comment(text)),
+                }
+            }
+            continue;
+        }
+
+        if toks.is_empty() {
+            // Blank line, or a whole-line comment — kept verbatim as an
+            // item so formatting is non-destructive.
+            if let Some(text) = comment {
+                if let Some(t) = open_tiles.as_mut() {
+                    t.body.push(TilesItem::Comment(text));
+                    continue;
+                }
+                if let Some(a) = open_access.as_mut() {
+                    a.body.push(AccessItem::Comment(text));
+                    continue;
+                }
+                if let Some(t) = open_schedule.as_mut() {
+                    t.body.push(ScheduleItem::Comment(text));
+                    continue;
+                }
+                if let Some(r) = open_rule.as_mut() {
+                    r.body.push(RuleItem::Comment(text));
+                    continue;
+                }
+                if let Some(m) = open_moods.as_mut() {
+                    m.body.push(MoodsItem::Comment(text));
+                    continue;
+                }
+                match open_test.as_mut() {
+                    Some(t) => t.body.push(TestItem::Comment(text)),
+                    None => sink(&mut open_template, &mut items).push(Item::Comment(text)),
+                }
+            }
+            continue;
+        }
+
+        // Inside a `schedule` body every line is a schedule line (or `end`).
+        if let Some(t) = open_schedule.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut t = open_schedule.take().unwrap();
+                t.end_comment = comment;
+                items.push(Item::Schedule(t));
+            } else {
+                t.body.push(ScheduleItem::Line(parse_schedule_line(
+                    &toks, comment, lineno,
+                )?));
+            }
+            continue;
+        }
+
+        // Inside a `moods` body every line is a mood (or `end`).
+        if let Some(m) = open_moods.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut m = open_moods.take().unwrap();
+                m.end_comment = comment;
+                items.push(Item::Moods(m));
+            } else {
+                m.body
+                    .push(MoodsItem::Mood(parse_mood_line(&toks, comment, lineno)?));
+            }
+            continue;
+        }
+
+        // Inside a `rule` body every line is a rule statement (or `end`).
+        if let Some(r) = open_rule.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut r = open_rule.take().unwrap();
+                r.end_comment = comment;
+                items.push(Item::Rule(r));
+            } else {
+                r.body
+                    .push(RuleItem::Stmt(parse_rule_stmt(&toks, comment, lineno)?));
+            }
+            continue;
+        }
+
+        // Inside a `tiles` body every line is a `tile` (or `end`).
+        if let Some(t) = open_tiles.as_mut() {
+            match toks.as_slice() {
+                [Tok::Ident(kw)] if kw == "end" => {
+                    let mut t = open_tiles.take().unwrap();
+                    t.end_comment = comment;
+                    items.push(Item::Tiles(t));
+                }
+                [Tok::Ident(kw), Tok::Num(n), Tok::LParen, rest @ ..] if kw == "tile" => {
+                    let index = match n.parse::<u32>() {
+                        Ok(i) if i > 0 => i,
+                        _ => {
+                            return Err(err(format!(
+                                "`tile {n}` — a tile index is a positive whole number \
+                                 (the tile's `i=` in the config)"
+                            )));
+                        }
+                    };
+                    let mut call = BlockDecl {
+                        slug: "tile".into(),
+                        block_type: n.clone(),
+                        title: None,
+                        args: Vec::new(),
+                        comment: None,
+                        close_comment: None,
+                    };
+                    let outcome = parse_call_args(&mut call, rest, lineno)?;
+                    call.comment = comment;
+                    if outcome.closed {
+                        t.body
+                            .push(TilesItem::Tile(finish_tile(call, index, lineno)?));
+                    } else {
+                        open_call = Some(call);
+                        open_tile = Some(index);
+                    }
+                }
+                _ => {
+                    return Err(err(format!(
+                        "expected `tile <i>(click: \"…\", up: \"…\", down: \"…\", \
+                         text: \"…\", to: <slug>, …)` or `end` in `tiles {}`",
+                        t.name
+                    )));
+                }
+            }
+            continue;
+        }
+
+        // Inside an `access` body every line is a grant (or `end`).
+        if let Some(a) = open_access.as_mut() {
+            match toks.as_slice() {
+                [Tok::Ident(kw)] if kw == "end" => {
+                    let mut a = open_access.take().unwrap();
+                    a.end_comment = comment;
+                    items.push(Item::Access(a));
+                }
+                [Tok::Ident(kw), Tok::Str(principal), rest @ ..]
+                    if (kw == "user" || kw == "group")
+                        && matches!(rest, [] | [Tok::Colon, Tok::Str(_)]) =>
+                {
+                    a.body.push(AccessItem::Grant(AccessGrant {
+                        kind: if kw == "user" {
+                            PrincipalKind::User
+                        } else {
+                            PrincipalKind::Group
+                        },
+                        principal: principal.clone(),
+                        schedule: match rest {
+                            [_, Tok::Str(schedule)] => Some(schedule.clone()),
+                            _ => None,
+                        },
+                        comment,
+                    }));
+                }
+                _ => {
+                    return Err(err(match a.right {
+                        RightKind::Access => format!(
+                            "expected `user \"<title>\": \"<schedule>\"`, \
+                             `group \"<title>\": \"<schedule>\"` or `end` in `access {}`",
+                            a.slug
+                        ),
+                        RightKind::Recipients => format!(
+                            "expected `user \"<title>\"`, `group \"<title>\"` or `end` in \
+                             `recipients {}`",
+                            a.slug
+                        ),
+                    }));
+                }
+            }
+            continue;
+        }
+
+        // Inside a `test` body every line is a test statement (or `end`).
+        if let Some(t) = open_test.as_mut() {
+            if let [Tok::Ident(kw)] = toks.as_slice()
+                && kw == "end"
+            {
+                let mut t = open_test.take().unwrap();
+                t.end_comment = comment;
+                items.push(Item::Test(t));
+            } else {
+                t.body.push(parse_test_stmt(&toks, comment, lineno)?);
+            }
+            continue;
+        }
+
+        if open_template.is_some()
+            && let Tok::Ident(kw) = &toks[0]
+            && (matches!(
+                kw.as_str(),
+                "let"
+                    | "extern"
+                    | "removed"
+                    | "moved"
+                    | "page"
+                    | "test"
+                    | "tick"
+                    | "expect"
+                    | "clock"
+                    | "tiles"
+                    | "tile"
+                    | "schedule"
+                    | "moods"
+            ) || (kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_)))))
+        {
+            return Err(err(format!(
+                "`{kw}` is not allowed inside a template body — only block \
+                 declarations, wires, port assignments, and comments (D23)"
+            )));
+        }
+
+        match &toks[0] {
+            Tok::Ident(kw) if kw == "template" => {
+                if open_template.is_some() {
+                    return Err(err(
+                        "nested `template` — close the open one with `end`".into()
+                    ));
+                }
+                let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks.as_slice()
+                else {
+                    return Err(err(
+                        "expected `template <name>(<param>: <Type> | <param> = <literal>, …)`"
+                            .into(),
+                    ));
+                };
+                let mut params = Vec::new();
+                if !rest.is_empty() {
+                    let mut it = rest.iter();
+                    loop {
+                        match (it.next(), it.next(), it.next()) {
+                            (Some(Tok::Ident(n)), Some(Tok::Colon), Some(Tok::Ident(ty))) => {
+                                params.push(TemplateParam::Object {
+                                    name: check_slug(n, lineno)?,
+                                    // `any` takes an object of every type.
+                                    block_type: if ty == "any" {
+                                        ty.clone()
+                                    } else {
+                                        check_type(ty, lineno)?
+                                    },
+                                });
+                            }
+                            (
+                                Some(Tok::Ident(n)),
+                                Some(Tok::Eq),
+                                Some(v @ (Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))),
+                            ) => {
+                                params.push(TemplateParam::Value {
+                                    name: check_slug(n, lineno)?,
+                                    default: value_of(v, lineno)?,
+                                });
+                            }
+                            _ => {
+                                return Err(err(
+                                    "expected `<name>: <Type>` (object parameter) or \
+                                     `<name> = <literal>` (value parameter with default)"
+                                        .into(),
+                                ));
+                            }
+                        }
+                        match it.next() {
+                            None => break,
+                            Some(Tok::Comma) => continue,
+                            Some(_) => {
+                                return Err(err("expected `,` between parameters".into()));
+                            }
+                        }
+                    }
+                }
+                open_template = Some(TemplateDecl {
+                    name: check_slug(name, lineno)?,
+                    params,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "test" => {
+                if open_template.is_some() {
+                    return Err(err(
+                        "`test` inside a template body — close the template with `end` \
+                         first (tests are module-level)"
+                            .into(),
+                    ));
+                }
+                let [_, Tok::Str(name)] = toks.as_slice() else {
+                    return Err(err("expected `test \"<name>\"`".into()));
+                };
+                open_test = Some(TestDecl {
+                    name: name.clone(),
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "tiles" => {
+                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                    return Err(err("expected `tiles <name>`".into()));
+                };
+                open_tiles = Some(TilesDecl {
+                    name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "schedule" => {
+                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                    return Err(err("expected `schedule <name>`".into()));
+                };
+                open_schedule = Some(ScheduleDecl {
+                    name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "moods" => {
+                let [_, Tok::Ident(name)] = toks.as_slice() else {
+                    return Err(err("expected `moods <name>`".into()));
+                };
+                open_moods = Some(MoodsDecl {
+                    name: check_slug(name, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            // `rule` is a keyword only in front of a slug, like `access`.
+            Tok::Ident(kw) if kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
+                let (slug, title) = match toks.as_slice() {
+                    [_, Tok::Ident(slug)] => (slug, None),
+                    [_, Tok::Ident(slug), Tok::Str(title)] => (slug, Some(title.clone())),
+                    _ => {
+                        return Err(err(
+                            "expected `rule <slug>` (the rule's extern) or `rule <slug> \"Name\"`"
+                                .into(),
+                        ));
+                    }
+                };
+                open_rule = Some(RuleDecl {
+                    slug: check_slug(slug, lineno)?,
+                    title,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if kw == "tile" => {
+                return Err(err(
+                    "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
+                ));
+            }
+            // `access` and `recipients` are keywords only in front of a slug:
+            // `access = …` and `access.Port …` stay statements about an
+            // object named `access`.
+            Tok::Ident(kw)
+                if (kw == "access" || kw == "recipients")
+                    && !matches!(toks.get(1), Some(Tok::Eq | Tok::Dot | Tok::LArrow)) =>
+            {
+                let right = if kw == "access" {
+                    RightKind::Access
+                } else {
+                    RightKind::Recipients
+                };
+                let [_, Tok::Ident(slug)] = toks.as_slice() else {
+                    return Err(err(match right {
+                        RightKind::Access => "expected `access <slug>` — the extern NFC Code \
+                                              Touch whose access rights the body lists"
+                            .into(),
+                        RightKind::Recipients => "expected `recipients <slug>` — the extern \
+                                                  push notification whose recipients the body \
+                                                  lists"
+                            .into(),
+                    }));
+                };
+                if open_template.is_some() {
+                    return Err(err(format!(
+                        "`{kw}` is not allowed inside a template body — declare {} at module \
+                         level ({})",
+                        match right {
+                            RightKind::Access => "access rights",
+                            RightKind::Recipients => "recipients",
+                        },
+                        match right {
+                            RightKind::Access => "D49",
+                            RightKind::Recipients => "D51",
+                        }
+                    )));
+                }
+                open_access = Some(AccessDecl {
+                    right,
+                    slug: check_slug(slug, lineno)?,
+                    body: Vec::new(),
+                    comment,
+                    end_comment: None,
+                });
+            }
+            Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
+                return Err(err(format!(
+                    "`{kw}` is only allowed inside a `test \"…\"` … `end` body"
+                )));
+            }
+            Tok::Ident(kw) if kw == "end" => match toks.as_slice() {
+                [_] => {
+                    let Some(mut t) = open_template.take() else {
+                        return Err(err("`end` without an open `template` or `test`".into()));
+                    };
+                    t.end_comment = comment;
+                    items.push(Item::Template(t));
+                }
+                _ => return Err(err("expected `end` on its own line".into())),
+            },
+            Tok::Ident(kw) if kw == "use" => {
+                return Err(err(
+                    "the `use` keyword is v0 syntax — instantiate a template as \
+                     `<slug> = <template_name>(<param>: <arg>, …)`"
+                        .into(),
+                ));
+            }
+            Tok::Ident(kw) if kw == "let" => match toks.as_slice() {
+                [_, Tok::Ident(name), Tok::Eq, val] => {
+                    let value = match value_of(val, lineno)? {
+                        Value::Ref(other) => {
+                            return Err(err(format!(
+                                "`let {name} = {other}` — a constant's value must be a \
+                                 number or a quoted string, not another identifier"
+                            )));
+                        }
+                        literal => literal,
+                    };
+                    items.push(Item::Let(LetDecl {
+                        name: check_slug(name, lineno)?,
+                        value,
+                        comment,
+                    }));
+                }
+                _ => return Err(err("expected `let <name> = <number | \"string\">`".into())),
+            },
+            Tok::Ident(kw) if kw == "extern" => match toks.as_slice() {
+                [
+                    _,
+                    Tok::Ident(slug),
+                    Tok::Eq,
+                    Tok::Ident(ty),
+                    Tok::LParen,
+                    rest @ ..,
+                    Tok::RParen,
+                ] => {
+                    // `kind: "value"` pairs, comma-separated: one primary
+                    // matcher (uuid|iname|title|mirrors) first, then
+                    // optional `room:` / `category:` constraints. Only
+                    // `mirrors:` takes a bare slug; everything else is a
+                    // quoted string.
+                    let mut pairs = Vec::new();
+                    let mut it = rest.iter();
+                    loop {
+                        match (it.next(), it.next(), it.next()) {
+                            (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
+                                pairs.push((k.as_str(), v.clone(), false));
+                            }
+                            (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Ident(v))) => {
+                                pairs.push((k.as_str(), v.clone(), true));
+                            }
+                            _ => {
+                                return Err(err(
+                                    "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
+                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
+                                     [, device: \"…\"])`"
+                                        .into(),
+                                ));
+                            }
+                        }
+                        match it.next() {
+                            None => break,
+                            Some(Tok::Comma) => continue,
+                            Some(_) => {
+                                return Err(err("expected `,` between matchers".into()));
+                            }
+                        }
+                    }
+                    let mut pairs = pairs.into_iter();
+                    let match_spec = match pairs.next() {
+                        Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_slug(&v, lineno)?),
+                        Some(("mirrors", _, false)) => {
+                            return Err(err("`mirrors:` names a slug, not a string — write \
+                                 `mirrors: status_alarm` without quotes"
+                                .into()));
+                        }
+                        Some((k, _, true)) => {
+                            return Err(err(format!("`{k}:` takes a quoted string")));
+                        }
+                        Some(("uuid", v, _)) => MatchSpec::Uuid(v),
+                        Some(("iname", v, _)) => MatchSpec::IName(v),
+                        Some(("title", v, _)) => MatchSpec::Title(v),
+                        Some((other, _, _)) => {
+                            return Err(err(format!(
+                                "unknown matcher `{other}` (expected uuid, iname, title, or \
+                                 mirrors first; room/category/device only narrow it)"
+                            )));
+                        }
+                        None => return Err(err("empty matcher list".into())),
+                    };
+                    let (mut room, mut category, mut device) = (None, None, None);
+                    for (k, v, is_ident) in pairs {
+                        if is_ident {
+                            return Err(err(format!("`{k}:` takes a quoted string")));
+                        }
+                        let slot = match k {
+                            "room" => &mut room,
+                            "category" => &mut category,
+                            "device" => &mut device,
+                            other => {
+                                return Err(err(format!(
+                                    "unknown constraint `{other}` (expected room, category \
+                                     or device)"
+                                )));
+                            }
+                        };
+                        if slot.replace(v).is_some() {
+                            return Err(err(format!("duplicate `{k}:` constraint")));
+                        }
+                    }
+                    let constrained = room.is_some() || category.is_some() || device.is_some();
+                    if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
+                        return Err(err("`uuid:` pins exactly — room/category/device \
+                             constraints are redundant and not allowed with it"
+                            .into()));
+                    }
+                    if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
+                        return Err(err(
+                            "`mirrors:` is narrowed by the file's `page` statement — \
+                             room/category/device constraints are not allowed with it"
+                                .into(),
+                        ));
+                    }
+                    items.push(Item::Extern(ExternDecl {
+                        slug: check_slug(slug, lineno)?,
+                        block_type: check_type(ty, lineno)?,
+                        match_spec,
+                        room,
+                        category,
+                        device,
+                        comment,
+                    }));
+                }
+                _ => {
+                    return Err(err(
+                        "expected `extern <slug> = <Type>(uuid|iname|title: \"…\")`".into(),
+                    ));
+                }
+            },
+            Tok::Ident(kw) if kw == "removed" => match toks.as_slice() {
+                [_, Tok::Ident(slug)] => {
+                    items.push(Item::Removed(RemovedDecl {
+                        slug: check_slug(slug, lineno)?,
+                        comment,
+                    }));
+                }
+                _ => return Err(err("expected `removed <slug>`".into())),
+            },
+            Tok::Ident(kw) if kw == "moved" => match toks.as_slice() {
+                [_, Tok::Ident(from), Tok::Arrow, Tok::Ident(to)] => {
+                    items.push(Item::Moved(MovedDecl {
+                        from: check_slug(from, lineno)?,
+                        to: check_slug(to, lineno)?,
+                        comment,
+                    }));
+                }
+                _ => return Err(err("expected `moved <old_slug> -> <new_slug>`".into())),
+            },
+            Tok::Ident(kw) if kw == "page" => match toks.as_slice() {
+                [_, Tok::Str(title)] => {
+                    items.push(Item::Page(PageDecl {
+                        title: title.clone(),
+                        room: None,
+                        category: None,
+                        comment,
+                    }));
+                }
+                [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
+                    // `page "T" (room: "…"[, category: "…"])` — what a page
+                    // the compiler creates is assigned to (D56).
+                    let (mut room, mut category) = (None, None);
+                    for arg in args.split(|t| matches!(t, Tok::Comma)) {
+                        let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
+                            return Err(err(
+                                "expected `page \"<Title>\" (room: \"…\"[, category: \"…\"])`"
+                                    .into(),
+                            ));
+                        };
+                        let slot = match k.as_str() {
+                            "room" => &mut room,
+                            "category" => &mut category,
+                            other => {
+                                return Err(err(format!(
+                                    "unknown page argument `{other}` (expected room or category)"
+                                )));
+                            }
+                        };
+                        if slot.replace(v.clone()).is_some() {
+                            return Err(err(format!("duplicate `{k}:` page argument")));
+                        }
+                    }
+                    if room.is_none() {
+                        return Err(err(
+                            "a page argument list needs `room:` — the room a created page \
+                             is assigned to (D56)"
+                                .into(),
+                        ));
+                    }
+                    items.push(Item::Page(PageDecl {
+                        title: title.clone(),
+                        room,
+                        category,
+                        comment,
+                    }));
+                }
+                _ => {
+                    return Err(err(
+                        "expected `page \"<Title>\"` — the quoted display title of a \
+                         page in the base config (D28), optionally `(room: \"…\"[, category: \"…\"])` \
+                         to create it (D56)"
+                            .into(),
+                    ));
+                }
+            },
+            // v0 keywords: reserved, with migration guidance.
+            Tok::Ident(kw) if kw == "block" => {
+                return Err(err(
+                    "the `block` keyword is v0 syntax — declare a managed block as \
+                     `<slug> = <Type>(…)` with its inputs and parameters as arguments"
+                        .into(),
+                ));
+            }
+            Tok::Ident(kw) if kw == "wire" => {
+                return Err(err(
+                    "the `wire` keyword is v0 syntax — a wire into a managed block is \
+                     written in its argument list (`<Port>: <source>.<Port>`); a wire \
+                     onto an extern port is `<extern>.<Port> <- <source>.<Port>`"
+                        .into(),
+                ));
+            }
+            Tok::Ident(kw) if kw == "set" => {
+                return Err(err(
+                    "the `set` keyword is v0 syntax — write `<extern>.<Port> = <value>`".into(),
+                ));
+            }
+            Tok::LBrace | Tok::RBrace => {
+                return Err(err(
+                    "v0 `{ … }` block bodies were replaced by argument lists \
+                     (`<slug> = <Type>(…)`)"
+                        .into(),
+                ));
+            }
+            // `(a, b).Setting = value` (#199) shares the claim forms' parser.
+            Tok::Ident(_) | Tok::LParen => {
+                let in_template = open_template.is_some();
+                parse_ident_statement(
+                    &toks,
+                    comment,
+                    lineno,
+                    sink(&mut open_template, &mut items),
+                    &mut open_call,
+                    in_template,
+                )?;
+            }
+            _ => {
+                return Err(err(
+                    "expected a statement: `let`, `extern`, `<slug> = <Type>(…)`, \
+                     `<slug>.<Port> <- <slug>.<Port>`, `<slug>.<Port> = <value>`, \
+                     `removed`, or `moved`"
+                        .into(),
+                ));
+            }
+        }
+    }
+
+    if let Some(call) = open_call {
+        let what = match open_tile {
+            Some(i) => format!("tile {i}(…"),
+            None => format!("{} = {}(…", call.slug, call.block_type),
+        };
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `(` in `{what}`"),
+        });
+    }
+    if let Some(t) = open_tiles {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `tiles {}` — missing `end`", t.name),
+        });
+    }
+    if let Some(a) = open_access {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!(
+                "unclosed `{} {}` — missing `end`",
+                a.right.keyword(),
+                a.slug
+            ),
+        });
+    }
+    if let Some(t) = open_schedule {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `schedule {}` — missing `end`", t.name),
+        });
+    }
+    if let Some(r) = open_rule {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `rule {}` — missing `end`", r.slug),
+        });
+    }
+    if let Some(m) = open_moods {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `moods {}` — missing `end`", m.name),
+        });
+    }
+    if let Some(t) = open_template {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `template {}` — missing `end`", t.name),
+        });
+    }
+    if let Some(t) = open_test {
+        return Err(Error::Parse {
+            line: src.lines().count(),
+            msg: format!("unclosed `test \"{}\"` — missing `end`", t.name),
+        });
+    }
+    Ok(Module { items })
+}
+
+/// One statement of a `rule` body (D57): `active`/`inactive`,
+/// `when time HH:MM`, `when weekday <days>`, or `then <slug> "<command>"`.
+fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let usage = "a rule line is `active`, `inactive`, `when time HH:MM`, \
+                 `when weekday <days>`, `then <slug> \"<command>\"` or `end`";
+    let kind = match toks {
+        [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
+        [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Num(h),
+            Tok::Colon,
+            Tok::Num(m),
+        ] if w == "when" && k == "time" => {
+            let bad = || err(format!("`{h}:{m}` is not a time of day (00:00 … 23:59)"));
+            if m.len() != 2 || h.is_empty() || h.len() > 2 {
+                return Err(bad());
+            }
+            let (h, m): (u16, u16) = (h.parse().map_err(|_| bad())?, m.parse().map_err(|_| bad())?);
+            if h > 23 || m > 59 {
+                return Err(bad());
+            }
+            RuleStmtKind::Time(h * 60 + m)
+        }
+        [Tok::Ident(w), Tok::Ident(k), days @ ..] if w == "when" && k == "weekday" => {
+            let mut words = Vec::new();
+            for d in days {
+                match d {
+                    Tok::Ident(d) => words.push(d.clone()),
+                    Tok::Comma => {}
+                    _ => {
+                        return Err(err(format!(
+                            "expected day keywords after `when weekday`; {usage}"
+                        )));
+                    }
+                }
+            }
+            if words.is_empty() {
+                return Err(err(format!(
+                    "`when weekday` needs at least one day; {usage}"
+                )));
+            }
+            RuleStmtKind::Weekday(words)
+        }
+        [Tok::Ident(w), ..] if w == "when" => {
+            return Err(err(format!(
+                "Lox Logic knows the conditions `when time` and `when weekday`; {usage}"
+            )));
+        }
+        [Tok::Ident(w), Tok::Ident(target), Tok::Str(command)] if w == "then" => {
+            RuleStmtKind::Then {
+                target: check_slug(target, lineno)?,
+                command: command.clone(),
+            }
+        }
+        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+    };
+    Ok(RuleStmt { kind, comment })
+}
+
+/// One statement of a `test` body (D36): a port injection, `tick`,
+/// `expect`, or `clock`.
+/// One line of a `moods` body (D58): `"<name>": <setting>, …`, a
+/// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
+/// `<n>%`, `rgb(<r>, <g>, <b>)` (percent), `temp(<n>%, <k>K)` or a bare
+/// number (the stored value verbatim).
+fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<MoodLine> {
+    use crate::moods::MoodValue;
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let usage = "a mood is `\"<name>\": all <value>, AQ<n> <value>, …` — values are `on`, \
+                 `off`, `<n>%`, `rgb(<r>, <g>, <b>)`, `temp(<n>%, <k>K)`";
+    let [Tok::Str(name), Tok::Colon, rest @ ..] = toks else {
+        return Err(err(format!("expected a mood; {usage}")));
+    };
+    if rest.is_empty() {
+        return Err(err(format!(
+            "mood \"{name}\" sets no circuit — write `all off` for a dark mood; {usage}"
+        )));
+    }
+    let pct = |t: &Tok| -> Result<u8> {
+        let n = match t {
+            Tok::UnitNum(n, Unit::Pct) | Tok::Num(n) => n,
+            _ => return Err(err(format!("expected a percentage (0 … 100); {usage}"))),
+        };
+        n.parse::<u8>()
+            .ok()
+            .filter(|p| *p <= 100)
+            .ok_or_else(|| err(format!("`{n}` is not a whole percentage (0 … 100)")))
+    };
+    // Settings split at top-level commas (`rgb(…)` carries its own).
+    let mut parts: Vec<&[Tok]> = Vec::new();
+    let (mut depth, mut start) = (0usize, 0usize);
+    for (i, t) in rest.iter().enumerate() {
+        match t {
+            Tok::LParen => depth += 1,
+            Tok::RParen => depth = depth.saturating_sub(1),
+            Tok::Comma if depth == 0 => {
+                parts.push(&rest[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&rest[start..]);
+    let mut settings = Vec::new();
+    for part in parts {
+        let (circuit, value) = match part {
+            [Tok::Ident(c), value @ ..] if c == "all" => (None, value),
+            [Tok::Ident(c), value @ ..] if c.starts_with("AQ") => match c[2..].parse::<u8>() {
+                Ok(n) if n >= 1 && !c[2..].starts_with('0') => (Some(n), value),
+                _ => return Err(err(format!("`{c}` is not a circuit (`AQ1`, `AQ2`, …)"))),
+            },
+            [] => return Err(err(format!("empty setting; {usage}"))),
+            _ => return Err(err(format!("expected `all` or a circuit `AQ<n>`; {usage}"))),
+        };
+        let value = match value {
+            [Tok::Ident(v)] if v == "on" => MoodValue::On,
+            [Tok::Ident(v)] if v == "off" => MoodValue::Off,
+            [p @ Tok::UnitNum(_, Unit::Pct)] => MoodValue::Pct(pct(p)?),
+            [Tok::Num(n)] => MoodValue::Raw(n.parse().map_err(|_| {
+                err(format!(
+                    "`{n}` is not a stored mood value (a whole number below 2³²) — a \
+                     percentage takes `%`"
+                ))
+            })?),
+            [
+                Tok::Ident(f),
+                Tok::LParen,
+                r,
+                Tok::Comma,
+                g,
+                Tok::Comma,
+                b,
+                Tok::RParen,
+            ] if f == "rgb" => MoodValue::Rgb(pct(r)?, pct(g)?, pct(b)?),
+            [
+                Tok::Ident(f),
+                Tok::LParen,
+                b,
+                Tok::Comma,
+                Tok::UnitNum(k, Unit::K),
+                Tok::RParen,
+            ] if f == "temp" => {
+                let kelvin = k
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|k| (1000..=9999).contains(k))
+                    .ok_or_else(|| {
+                        err(format!(
+                            "`{k}K` is not a colour temperature (1000K … 9999K)"
+                        ))
+                    })?;
+                MoodValue::Temp(pct(b)?, kelvin)
+            }
+            [Tok::Ident(f), ..] if f == "rgb" => {
+                return Err(err(
+                    "expected `rgb(<r>, <g>, <b>)`, each 0 … 100 percent".into()
+                ));
+            }
+            [Tok::Ident(f), ..] if f == "temp" => {
+                return Err(err(
+                    "expected `temp(<n>%, <k>K)`, e.g. `temp(80%, 2700K)`".into()
+                ));
+            }
+            _ => return Err(err(format!("expected a value; {usage}"))),
+        };
+        settings.push(MoodSetting { circuit, value });
+    }
+    Ok(MoodLine {
+        name: name.clone(),
+        settings,
+        comment,
+    })
+}
+
+/// One line of a `schedule` body (D53): day keywords, then either `off`
+/// or comma-separated intervals `HH:MM-HH:MM [= <number>] [activate]`.
+fn parse_schedule_line(
+    toks: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<ScheduleLine> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let usage = "a schedule line is `<days> HH:MM-HH:MM[ = <value>][ activate], …` or \
+                 `<days> off`";
+    let mut days = Vec::new();
+    let mut i = 0;
+    loop {
+        match toks.get(i) {
+            Some(Tok::Ident(w)) if w == "off" || w == "activate" => break,
+            Some(Tok::Ident(w)) => {
+                if !super::schedule::is_day(w) {
+                    let known: Vec<&str> = super::schedule::day_keywords().collect();
+                    let mut hint = super::validate::suggest(w, known.iter().copied());
+                    if hint.is_empty()
+                        && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
+                    {
+                        hint = format!(" — did you mean `{short}`?");
+                    }
+                    return Err(err(format!(
+                        "unknown day `{w}`{hint} — days are {}, or an operating mode of \
+                         the config by its title (`\"Party\"`)",
+                        known.join(", ")
+                    )));
+                }
+                days.push(Day::Keyword(w.clone()));
+            }
+            Some(Tok::Str(s)) if s.trim().is_empty() => {
+                return Err(err("an operating mode's title cannot be empty".into()));
+            }
+            Some(Tok::Str(s)) => days.push(Day::Mode(s.clone())),
+            _ => break,
+        }
+        i += 1;
+    }
+    if days.is_empty() {
+        return Err(err(format!("expected a day first; {usage}")));
+    }
+    let rest = &toks[i..];
+    if let [Tok::Ident(w)] = rest
+        && w == "off"
+    {
+        return Ok(ScheduleLine {
+            days,
+            intervals: Vec::new(),
+            comment,
+        });
+    }
+    let time = |h: &str, m: &str| -> Result<u16> {
+        let bad = || err(format!("`{h}:{m}` is not a time of day (00:00 … 24:00)"));
+        if m.len() != 2 || h.is_empty() || h.len() > 2 {
+            return Err(bad());
+        }
+        let (h, m): (u16, u16) = (h.parse().map_err(|_| bad())?, m.parse().map_err(|_| bad())?);
+        if m > 59 || h > 24 || (h == 24 && m != 0) {
+            return Err(bad());
+        }
+        Ok(h * 60 + m)
+    };
+    let mut intervals = Vec::new();
+    for part in rest.split(|t| *t == Tok::Comma) {
+        let (from, to, tail) = match part {
+            [
+                Tok::Num(h1),
+                Tok::Colon,
+                Tok::Num(m1),
+                Tok::Minus,
+                Tok::Num(h2),
+                Tok::Colon,
+                Tok::Num(m2),
+                tail @ ..,
+            ] => (time(h1, m1)?, time(h2, m2)?, tail),
+            [] => return Err(err(format!("empty interval; {usage}"))),
+            _ => return Err(err(format!("expected an interval `HH:MM-HH:MM`; {usage}"))),
+        };
+        let (value, tail) = match tail {
+            [Tok::Eq, Tok::Num(v), tail @ ..] => (Some(v.clone()), tail),
+            [Tok::Eq, ..] => {
+                return Err(err(format!(
+                    "expected a number after `=` (the timer's value in the interval); {usage}"
+                )));
+            }
+            _ => (None, tail),
+        };
+        let activate = match tail {
+            [] => false,
+            [Tok::Ident(w)] if w == "activate" => true,
+            _ => return Err(err(format!("unexpected tokens after an interval; {usage}"))),
+        };
+        intervals.push(Interval {
+            from,
+            to,
+            value,
+            activate,
+        });
+    }
+    Ok(ScheduleLine {
+        days,
+        intervals,
+        comment,
+    })
+}
+
+fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<TestItem> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    match toks {
+        [Tok::Ident(kw), rest @ ..] if kw == "tick" => {
+            let (n_tok, dt) = match rest {
+                [n] => (n, None),
+                [n, Tok::Ident(kw), v] if kw == "dt" => {
+                    let dt = match value_of(v, lineno)? {
+                        v @ (Value::Number(_) | Value::Unit { .. }) => v,
+                        other => {
+                            return Err(err(format!(
+                                "`dt {other}` — the tick length is a number of seconds \
+                                 or a unit value (`dt 0.1`, `dt 100ms`)"
+                            )));
+                        }
+                    };
+                    (n, Some(dt))
+                }
+                _ => {
+                    return Err(err("expected `tick <n>` or `tick <n> dt <seconds>`".into()));
+                }
+            };
+            let Tok::Num(n) = n_tok else {
+                return Err(err("expected `tick <n>` with a plain tick count".into()));
+            };
+            let n: u64 = n
+                .parse()
+                .map_err(|_| err(format!("`tick {n}` — the tick count is a positive integer")))?;
+            if n == 0 {
+                return Err(err("`tick 0` advances nothing — use at least 1".into()));
+            }
+            Ok(TestItem::Tick(TickDecl { n, dt, comment }))
+        }
+        [Tok::Ident(kw), rest @ ..] if kw == "expect" => {
+            let [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), cmp_tok, val] = rest else {
+                return Err(err(
+                    "expected `expect <slug>.<Port> <cmp> <value>` with cmp one of \
+                     `==`, `>=`, `>`, `<=`, `<`, `~=`"
+                        .into(),
+                ));
+            };
+            let cmp = match cmp_tok {
+                Tok::Cmp(CmpOp::Eq) => TestCmp::Eq,
+                Tok::Cmp(CmpOp::Ge) => TestCmp::Ge,
+                Tok::Cmp(CmpOp::Gt) => TestCmp::Gt,
+                Tok::Cmp(CmpOp::Le) => TestCmp::Le,
+                Tok::Cmp(CmpOp::Lt) => TestCmp::Lt,
+                Tok::Approx => TestCmp::Approx,
+                Tok::Cmp(CmpOp::Ne) => {
+                    return Err(err(
+                        "the simulator has no `!=` — assert the value you expect instead".into(),
+                    ));
+                }
+                _ => {
+                    return Err(err(
+                        "expected a comparator after the port: `==`, `>=`, `>`, `<=`, \
+                         `<`, or `~=`"
+                            .into(),
+                    ));
+                }
+            };
+            Ok(TestItem::Expect(ExpectDecl {
+                port: PortRef {
+                    slug: slug.clone(),
+                    port: port.clone(),
+                },
+                cmp,
+                value: value_of(val, lineno)?,
+                comment,
+            }))
+        }
+        [Tok::Ident(kw), rest @ ..] if kw == "clock" => {
+            let [Tok::Str(spec)] = rest else {
+                return Err(err(
+                    "expected `clock \"HH:MM\"` or `clock \"YYYY-MM-DD HH:MM\"`".into(),
+                ));
+            };
+            Ok(TestItem::Clock(ClockDecl {
+                spec: spec.clone(),
+                comment,
+            }))
+        }
+        [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), Tok::Eq, val] => {
+            Ok(TestItem::Inject(SetDecl {
+                target: PortRef {
+                    slug: slug.clone(),
+                    port: port.clone(),
+                },
+                value: value_of(val, lineno)?,
+                comment,
+                bulk: None,
+            }))
+        }
+        [
+            Tok::Ident(slug),
+            Tok::Dot,
+            Tok::Ident(port),
+            Tok::LArrow,
+            ..,
+        ] => Err(err(format!(
+            "`{slug}.{port} <- …` — a test body injects values (`{slug}.{port} = 1`), \
+             it draws no wires"
+        ))),
+        _ => Err(err(
+            "expected a test statement: `<slug>.<Port> = <value>`, `tick <n> [dt <s>]`, \
+             `expect <slug>.<Port> <cmp> <value>`, `clock \"…\"`, or `end`"
+                .into(),
+        )),
+    }
+}
+
+/// Statements that start with a plain identifier: block declarations
+/// (`slug = Type(…)`) and extern port statements (`slug.Port <- …` /
+/// `slug.Port = …`).
+fn parse_ident_statement(
+    toks: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+    items: &mut Vec<Item>,
+    open_call: &mut Option<BlockDecl>,
+    in_template: bool,
+) -> Result<()> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    match toks {
+        // slug = Type( … — a block declaration (possibly spanning lines);
+        // a lowercase callee is a template instantiation.
+        [
+            Tok::Ident(slug),
+            Tok::Eq,
+            Tok::Ident(ty),
+            Tok::LParen,
+            rest @ ..,
+        ] => {
+            let callee = if ty.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
+                check_slug(ty, lineno)?
+            } else {
+                check_type(ty, lineno)?
+            };
+            let mut call = BlockDecl {
+                slug: check_slug(slug, lineno)?,
+                block_type: callee,
+                title: None,
+                args: Vec::new(),
+                comment: None,
+                close_comment: None,
+            };
+            let outcome = parse_call_args(&mut call, rest, lineno)?;
+            // The header line's comment stays on the header — for a call
+            // closed on this same line it is the statement comment.
+            call.comment = comment;
+            if outcome.closed {
+                items.push(finish_call(call, in_template, lineno)?);
+            } else {
+                *open_call = Some(call);
+            }
+            Ok(())
+        }
+        [Tok::Ident(slug), Tok::Eq, Tok::Ident(ty)] => Err(err(format!(
+            "expected `(` after the type — a block declaration is `{slug} = {ty}(…)` \
+             (a constant is `let {slug} = …`)"
+        ))),
+        [Tok::Ident(slug), Tok::Eq, Tok::Num(v)] => Err(err(format!(
+            "`{slug} = {v}` — did you mean `let {slug} = {v}`? (a bare name on the \
+             left is a constant or block declaration; an extern port is `{slug}.<Port> = {v}`)"
+        ))),
+        [Tok::Ident(slug), Tok::Eq, Tok::Str(_)] => Err(err(format!(
+            "`{slug} = \"…\"` — did you mean `let {slug} = \"…\"`?"
+        ))),
+        // slug.Port <- … — a plain wire (`slug.Port` RHS) or an
+        // expression that desugars into gate/comparator blocks (D24).
+        [
+            Tok::Ident(ts),
+            Tok::Dot,
+            Tok::Ident(tp),
+            Tok::LArrow,
+            rest @ ..,
+        ] => {
+            if let Some(attr) = Attr::parse(tp) {
+                return Err(err(format!(
+                    "`{ts}.{attr}` is an object attribute, not a port — attributes \
+                     are assigned (`{ts}.{attr} = \"…\"`), never wired"
+                )));
+            }
+            if tp == "tiles" {
+                return Err(err(format!(
+                    "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
+                )));
+            }
+            if tp == "schedule" {
+                return Err(err(format!(
+                    "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
+                )));
+            }
+            if tp == "moods" {
+                return Err(err(format!(
+                    "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
+                )));
+            }
+            let to = PortRef {
+                slug: ts.clone(),
+                port: tp.clone(),
+            };
+            if rest.is_empty() {
+                return Err(err(format!(
+                    "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
+                     expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
+                     value, use `{ts}.{tp} = <value>`"
+                )));
+            }
+            match parse_expr(rest, lineno)? {
+                Expr::Atom(Operand::Port(from)) => {
+                    items.push(Item::Wire(WireDecl { to, from, comment }));
+                }
+                Expr::Atom(Operand::Value(v)) => {
+                    return Err(err(format!(
+                        "`{to} <- {v}` wires a constant — to assign a value, \
+                         use `{to} = {v}`"
+                    )));
+                }
+                expr => items.push(Item::ExprWire(ExprWireDecl { to, expr, comment })),
+            }
+            Ok(())
+        }
+        // slug.Port = value — a Def write on an extern port.
+        [
+            Tok::Ident(ts),
+            Tok::Dot,
+            Tok::Ident(tp),
+            Tok::Eq,
+            Tok::Ident(vs),
+            Tok::Dot,
+            Tok::Ident(vp),
+        ] => Err(err(format!(
+            "`{ts}.{tp} = {vs}.{vp}` — use `<-` to wire a port: `{ts}.{tp} <- {vs}.{vp}`"
+        ))),
+        // slug.tiles = set — a Touch Pure Flex tiles claim (D41).
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "tiles" => {
+            let [Tok::Ident(set)] = rest else {
+                return Err(err(format!(
+                    "expected `{ts}.tiles = <name>` — the name of a `tiles` set"
+                )));
+            };
+            if in_template {
+                return Err(err(
+                    "`.tiles` is not allowed inside a template body — claim tiles at \
+                     module level"
+                        .into(),
+                ));
+            }
+            items.push(Item::TilesClaim(TilesClaim {
+                slug: ts.clone(),
+                tiles: set.clone(),
+                comment,
+            }));
+            Ok(())
+        }
+        // slug.schedule = name — a DayTimer schedule claim (D53).
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "schedule" => {
+            let [Tok::Ident(name)] = rest else {
+                return Err(err(format!(
+                    "expected `{ts}.schedule = <name>` — the name of a `schedule`"
+                )));
+            };
+            if in_template {
+                return Err(err(
+                    "`.schedule` is not allowed inside a template body — claim schedules \
+                     at module level"
+                        .into(),
+                ));
+            }
+            items.push(Item::ScheduleClaim(ScheduleClaim {
+                slug: ts.clone(),
+                schedule: name.clone(),
+                comment,
+            }));
+            Ok(())
+        }
+        // slug.moods = name — a LightController2 mood claim (D58). Unlike
+        // the other claims it may sit in a template body: one mood set for
+        // every room the template stamps out.
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "moods" => {
+            let [Tok::Ident(name)] = rest else {
+                return Err(err(format!(
+                    "expected `{ts}.moods = <name>` — the name of a `moods` set (or, in a \
+                     template body, of the value parameter that passes one)"
+                )));
+            };
+            items.push(Item::MoodsClaim(MoodsClaim {
+                slug: ts.clone(),
+                moods: name.clone(),
+                comment,
+            }));
+            Ok(())
+        }
+        // (a, b, …).Setting = value — one setting or attribute for several
+        // objects (#199): a statement per object, each remembering the line.
+        [
+            Tok::LParen,
+            inner @ ..,
+            Tok::RParen,
+            Tok::Dot,
+            Tok::Ident(tp),
+            Tok::Eq,
+            val,
+        ] => {
+            let mut slugs: Vec<&String> = Vec::new();
+            for (k, t) in inner.iter().enumerate() {
+                match t {
+                    Tok::Ident(s) if k % 2 == 0 => {
+                        if slugs.contains(&s) {
+                            return Err(err(format!("`{s}` is listed twice")));
+                        }
+                        slugs.push(s);
+                    }
+                    Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
+                    _ => {
+                        return Err(err(format!(
+                            "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                        )));
+                    }
+                }
+            }
+            if slugs.is_empty() {
+                return Err(err(format!(
+                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                )));
+            }
+            if matches!(tp.as_str(), "tiles" | "schedule" | "moods") {
+                return Err(err(format!(
+                    "`.{tp}` takes one object; write a statement per object"
+                )));
+            }
+            let value = value_of(val, lineno)?;
+            for (k, s) in slugs.into_iter().enumerate() {
+                let comment = if k == 0 { comment.clone() } else { None };
+                items.push(match Attr::parse(tp) {
+                    Some(attr) => Item::Attr(AttrDecl {
+                        slug: s.clone(),
+                        attr,
+                        value: value.clone(),
+                        comment,
+                        bulk: Some(lineno),
+                    }),
+                    None => Item::Set(SetDecl {
+                        target: PortRef {
+                            slug: s.clone(),
+                            port: tp.clone(),
+                        },
+                        value: value.clone(),
+                        comment,
+                        bulk: Some(lineno),
+                    }),
+                });
+            }
+            Ok(())
+        }
+        // slug.title|room|category = value — an attribute claim (D39).
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
+            items.push(Item::Attr(AttrDecl {
+                slug: ts.clone(),
+                attr: Attr::parse(tp).expect("guarded"),
+                value: value_of(val, lineno)?,
+                comment,
+                bulk: None,
+            }));
+            Ok(())
+        }
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] => {
+            items.push(Item::Set(SetDecl {
+                target: PortRef {
+                    slug: ts.clone(),
+                    port: tp.clone(),
+                },
+                value: value_of(val, lineno)?,
+                comment,
+                bulk: None,
+            }));
+            Ok(())
+        }
+        [Tok::Ident(ts), Tok::Dot, ..] => Err(err(format!(
+            "expected `{ts}.<Port> <- <slug>.<Port>` or `{ts}.<Port> = <value>`"
+        ))),
+        _ => Err(err(
+            "expected a statement: `let`, `extern`, `<slug> = <Type>(…)`, \
+             `<slug>.<Port> <- <slug>.<Port>`, `<slug>.<Port> = <value>`, \
+             `removed`, or `moved`"
+                .into(),
+        )),
+    }
+}
+
+struct ArgOutcome {
+    /// The closing `)` was consumed.
+    closed: bool,
+    /// At least one binding was appended by this line (comment attach).
+    pushed_binding: bool,
+}
+
+/// Parse argument-list tokens (label string, `Port: value` bindings,
+/// commas, closing `)`), appending to `call`.
+fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<ArgOutcome> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let mut i = 0;
+    let mut pushed_binding = false;
+    loop {
+        match toks.get(i) {
+            None => {
+                return Ok(ArgOutcome {
+                    closed: false,
+                    pushed_binding,
+                });
+            }
+            Some(Tok::RParen) => {
+                if i + 1 != toks.len() {
+                    return Err(err("nothing may follow `)` on the line".into()));
+                }
+                return Ok(ArgOutcome {
+                    closed: true,
+                    pushed_binding,
+                });
+            }
+            Some(Tok::Str(s)) => {
+                if call.title.is_some() {
+                    return Err(err(
+                        "duplicate label — a block takes one label string".into()
+                    ));
+                }
+                if !call.args.iter().any(|a| matches!(a, ArgItem::Binding(_))) {
+                    call.title = Some(s.clone());
+                } else {
+                    return Err(err("the label string must be the first argument".into()));
+                }
+                i += 1;
+            }
+            Some(Tok::Ident(port)) => {
+                if toks.get(i + 1) != Some(&Tok::Colon) {
+                    return Err(err(format!(
+                        "expected `:` after argument name `{port}` (`{port}: <value>`)"
+                    )));
+                }
+                // The binding value runs to the next top-level comma or the
+                // call's closing `)` — one value token, a `slug.Port`
+                // source, or an expression (D26).
+                let start = i + 2;
+                let mut end = start;
+                let mut depth = 0usize;
+                while let Some(t) = toks.get(end) {
+                    match t {
+                        Tok::LParen => depth += 1,
+                        Tok::RParen if depth == 0 => break,
+                        Tok::RParen => depth -= 1,
+                        Tok::Comma if depth == 0 => break,
+                        _ => {}
+                    }
+                    end += 1;
+                }
+                let kind = binding_kind(port, &toks[start..end], lineno)?;
+                call.args.push(ArgItem::Binding(Binding {
+                    port: port.clone(),
+                    kind,
+                    comment: None,
+                }));
+                pushed_binding = true;
+                i = end;
+            }
+            Some(_) => {
+                return Err(err(
+                    "expected `Port: value`, a label string, or `)` in the argument list".into(),
+                ));
+            }
+        }
+        // Separator: a comma, or the end of the list / line.
+        match toks.get(i) {
+            Some(Tok::Comma) => i += 1,
+            Some(Tok::RParen) | None => {}
+            Some(_) => return Err(err("expected `,` between arguments".into())),
+        }
+    }
+}
+
+/// Classify one binding's value tokens: a literal or constant is a
+/// parameter, a `slug.Port` a wire, anything longer an expression (D26).
+/// A parenthesized bare port or value canonicalizes to the plain form —
+/// one spelling per fact.
+fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    Ok(match toks {
+        [] => {
+            return Err(err(format!(
+                "expected a value after `{port}:` — a number, quoted string, \
+                 constant name, source port (`<slug>.<Port>`), or an expression \
+                 like `a.Q and b.AQ >= 28`"
+            )));
+        }
+        // A quoted string that reads as a number canonicalizes to the bare
+        // number — one canonical spelling per value.
+        [Tok::Str(s)] => BindingKind::Param(Value::from_literal(s)),
+        [Tok::Num(n)] => BindingKind::Param(Value::Number(n.clone())),
+        [Tok::UnitNum(n, u)] => BindingKind::Param(Value::Unit {
+            number: n.clone(),
+            unit: *u,
+        }),
+        [Tok::Ident(name)] if !matches!(name.as_str(), "and" | "or" | "not") => {
+            BindingKind::Param(Value::Ref(name.clone()))
+        }
+        // `file("hue.c")` — program text from a file (D40); validate
+        // decides which ports may take it.
+        [Tok::Ident(f), Tok::LParen, Tok::Str(path), Tok::RParen] if f == "file" => {
+            if path.is_empty() {
+                return Err(err(format!("`{port}: file(\"\")` names no file")));
+            }
+            BindingKind::Param(Value::File {
+                path: path.clone(),
+                text: None,
+            })
+        }
+        [Tok::Ident(f), Tok::LParen, ..] if f == "file" => {
+            return Err(err(format!(
+                "expected `{port}: file(\"<path>\")` — one quoted path, relative to \
+                 this .loxl file"
+            )));
+        }
+        [Tok::Ident(slug), Tok::Dot, Tok::Ident(src_port)] => BindingKind::Wire(PortRef {
+            slug: slug.clone(),
+            port: src_port.clone(),
+        }),
+        [Tok::Ident(slug), Tok::Dot] => {
+            return Err(err(format!("expected a port after `{slug}.`")));
+        }
+        _ => match parse_expr(toks, lineno)? {
+            Expr::Atom(Operand::Port(p)) => BindingKind::Wire(p),
+            Expr::Atom(Operand::Value(v)) => BindingKind::Param(v),
+            e => BindingKind::Expr(e),
+        },
+    })
+}
+
+fn value_of(tok: &Tok, lineno: usize) -> Result<Value> {
+    match tok {
+        Tok::Num(n) => Ok(Value::Number(n.clone())),
+        Tok::UnitNum(n, u) => Ok(Value::Unit {
+            number: n.clone(),
+            unit: *u,
+        }),
+        // A quoted string that reads as a number canonicalizes to the bare
+        // number — one canonical spelling per value.
+        Tok::Str(s) => Ok(Value::from_literal(s)),
+        Tok::Ident(s) => Ok(Value::Ref(s.clone())),
+        _ => Err(Error::Parse {
+            line: lineno,
+            msg: "expected a number, quoted string, or constant name".into(),
+        }),
+    }
+}
+
+fn check_slug(s: &str, lineno: usize) -> Result<String> {
+    if super::decompile::RESERVED.contains(&s) {
+        return Err(Error::Parse {
+            line: lineno,
+            msg: format!("`{s}` is a reserved word and cannot be used as a name"),
+        });
+    }
+    let ok = s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if ok {
+        Ok(s.to_string())
+    } else {
+        Err(Error::Parse {
+            line: lineno,
+            msg: format!("invalid slug `{s}` (expected [a-z][a-z0-9_]*)"),
+        })
+    }
+}
+
+/// Parse the RHS of `<-` as an expression (D24). Precedence, loosest to
+/// tightest: `or` < `and` < `not` < comparison < `+ -` < `* /`; parens
+/// group; comparisons take plain operands and do not chain. Arithmetic
+/// stands alone — under a gate or a comparison it is deferred (v1) with a
+/// parse error. Must consume every token.
+fn parse_expr(toks: &[Tok], lineno: usize) -> Result<Expr> {
+    let mut p = ExprParser {
+        toks,
+        pos: 0,
+        lineno,
+    };
+    let e = p.or_level()?;
+    if p.pos != toks.len() {
+        return Err(p.err("unexpected trailing tokens after the expression".into()));
+    }
+    Ok(e)
+}
+
+struct ExprParser<'t> {
+    toks: &'t [Tok],
+    pos: usize,
+    lineno: usize,
+}
+
+impl ExprParser<'_> {
+    fn err(&self, msg: String) -> Error {
+        Error::Parse {
+            line: self.lineno,
+            msg,
+        }
+    }
+
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
+
+    fn keyword(&self, kw: &str) -> bool {
+        matches!(self.peek(), Some(Tok::Ident(s)) if s == kw)
+    }
+
+    /// Arithmetic mixed under `or`/`and`/`not` is deferred: the analog
+    /// `AQ` of a `Formula` feeding a boolean gate input is behavior we have
+    /// not verified against the Miniserver.
+    fn no_arith(&self, e: &Expr, kw: &str) -> Result<()> {
+        if matches!(e, Expr::Arith { .. }) {
+            return Err(self.err(format!(
+                "arithmetic under `{kw}` is deferred (v1) — declare an explicit \
+                 `Formula` block and use its `AQ`"
+            )));
+        }
+        Ok(())
+    }
+
+    /// A parenthesized group taking part in arithmetic must itself be
+    /// arithmetic — gates and comparisons produce on/off, not numbers.
+    fn ensure_arith(&self, e: &Expr) -> Result<()> {
+        if !matches!(e, Expr::Atom(_) | Expr::Arith { .. }) {
+            return Err(self.err(
+                "a boolean group cannot take part in arithmetic — gates and \
+                 comparisons produce on/off, not numbers (v1)"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn add_op(&self) -> Option<ArithOp> {
+        match self.peek() {
+            Some(Tok::Plus) => Some(ArithOp::Add),
+            Some(Tok::Minus) => Some(ArithOp::Sub),
+            _ => None,
+        }
+    }
+
+    fn mul_op(&self) -> Option<ArithOp> {
+        match self.peek() {
+            Some(Tok::Star) => Some(ArithOp::Mul),
+            Some(Tok::Slash) => Some(ArithOp::Div),
+            _ => None,
+        }
+    }
+
+    fn arith_op(&self) -> Option<ArithOp> {
+        self.add_op().or_else(|| self.mul_op())
+    }
+
+    fn or_level(&mut self) -> Result<Expr> {
+        let mut e = self.and_level()?;
+        while self.keyword("or") {
+            self.no_arith(&e, "or")?;
+            self.pos += 1;
+            let rhs = self.and_level()?;
+            self.no_arith(&rhs, "or")?;
+            e = Expr::Or(Box::new(e), Box::new(rhs));
+        }
+        Ok(e)
+    }
+
+    fn and_level(&mut self) -> Result<Expr> {
+        let mut e = self.unary()?;
+        while self.keyword("and") {
+            self.no_arith(&e, "and")?;
+            self.pos += 1;
+            let rhs = self.unary()?;
+            self.no_arith(&rhs, "and")?;
+            e = Expr::And(Box::new(e), Box::new(rhs));
+        }
+        Ok(e)
+    }
+
+    fn unary(&mut self) -> Result<Expr> {
+        if self.keyword("not") {
+            self.pos += 1;
+            let x = self.unary()?;
+            self.no_arith(&x, "not")?;
+            return Ok(Expr::Not(Box::new(x)));
+        }
+        self.primary()
+    }
+
+    fn primary(&mut self) -> Result<Expr> {
+        let e = if matches!(self.peek(), Some(Tok::LParen)) {
+            self.pos += 1;
+            let e = self.or_level()?;
+            if !matches!(self.peek(), Some(Tok::RParen)) {
+                return Err(self.err("missing `)` in the expression".into()));
+            }
+            self.pos += 1;
+            if let Some(Tok::Cmp(op)) = self.peek() {
+                return Err(self.err(format!(
+                    "`(…) {}` — comparison operands are plain ports, numbers, or \
+                     constants, not parenthesized expressions (v1)",
+                    op.symbol()
+                )));
+            }
+            if self.arith_op().is_none() {
+                return Ok(e);
+            }
+            // `(…) * x` — the group is the first factor of an arithmetic
+            // expression.
+            self.ensure_arith(&e)?;
+            self.sum_from(e)?
+        } else {
+            self.sum()?
+        };
+        if let Some(Tok::Cmp(op)) = self.peek() {
+            let op = *op;
+            let Expr::Atom(lhs) = e else {
+                return Err(self.err(format!(
+                    "arithmetic under `{}` is deferred (v1) — declare an explicit \
+                     `Formula` block and compare its `AQ`",
+                    op.symbol()
+                )));
+            };
+            self.pos += 1;
+            let rhs = self.operand()?;
+            if self.arith_op().is_some() {
+                return Err(self.err(format!(
+                    "arithmetic under `{}` is deferred (v1) — declare an explicit \
+                     `Formula` block and compare its `AQ`",
+                    op.symbol()
+                )));
+            }
+            if matches!(self.peek(), Some(Tok::Cmp(_))) {
+                return Err(self.err(
+                    "comparisons do not chain (`a < b < c`) — split into two \
+                     comparisons joined with `and`"
+                        .into(),
+                ));
+            }
+            return Ok(Expr::Cmp { op, lhs, rhs });
+        }
+        Ok(e)
+    }
+
+    /// `+`/`-` level; `*`/`/` bind tighter. A single operand comes back as
+    /// a plain `Atom`, so non-arithmetic callers are unaffected.
+    fn sum(&mut self) -> Result<Expr> {
+        let first = self.factor()?;
+        self.sum_from(first)
+    }
+
+    /// Continue a sum whose first factor is already parsed (also the entry
+    /// point after a parenthesized group at primary level).
+    fn sum_from(&mut self, first: Expr) -> Result<Expr> {
+        let mut e = self.mul_rest(first)?;
+        while let Some(op) = self.add_op() {
+            self.pos += 1;
+            let rhs = self.mul()?;
+            e = Expr::Arith {
+                op,
+                lhs: Box::new(e),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(e)
+    }
+
+    fn mul(&mut self) -> Result<Expr> {
+        let first = self.factor()?;
+        self.mul_rest(first)
+    }
+
+    fn mul_rest(&mut self, mut e: Expr) -> Result<Expr> {
+        while let Some(op) = self.mul_op() {
+            self.pos += 1;
+            let rhs = self.factor()?;
+            e = Expr::Arith {
+                op,
+                lhs: Box::new(e),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(e)
+    }
+
+    fn factor(&mut self) -> Result<Expr> {
+        if matches!(self.peek(), Some(Tok::LParen)) {
+            self.pos += 1;
+            let e = self.or_level()?;
+            if !matches!(self.peek(), Some(Tok::RParen)) {
+                return Err(self.err("missing `)` in the expression".into()));
+            }
+            self.pos += 1;
+            self.ensure_arith(&e)?;
+            return Ok(e);
+        }
+        Ok(Expr::Atom(self.operand()?))
+    }
+
+    fn operand(&mut self) -> Result<Operand> {
+        match (
+            self.toks.get(self.pos),
+            self.toks.get(self.pos + 1),
+            self.toks.get(self.pos + 2),
+        ) {
+            (Some(Tok::Ident(kw)), _, _) if matches!(kw.as_str(), "and" | "or" | "not") => {
+                Err(self.err(format!("expected an operand, found `{kw}`")))
+            }
+            (Some(Tok::Ident(s)), Some(Tok::Dot), Some(Tok::Ident(p))) => {
+                let r = Operand::Port(PortRef {
+                    slug: s.clone(),
+                    port: p.clone(),
+                });
+                self.pos += 3;
+                Ok(r)
+            }
+            (Some(Tok::Ident(s)), _, _) => {
+                let r = Operand::Value(Value::Ref(s.clone()));
+                self.pos += 1;
+                Ok(r)
+            }
+            (Some(Tok::Num(n)), _, _) => {
+                let r = Operand::Value(Value::Number(n.clone()));
+                self.pos += 1;
+                Ok(r)
+            }
+            (Some(Tok::UnitNum(n, u)), _, _) => {
+                let r = Operand::Value(Value::Unit {
+                    number: n.clone(),
+                    unit: *u,
+                });
+                self.pos += 1;
+                Ok(r)
+            }
+            (Some(Tok::Str(_)), _, _) => Err(self.err(
+                "strings have no place in an expression — it compares numbers and ports".into(),
+            )),
+            _ => Err(self.err("expected an operand: `slug.Port`, a number, or a constant".into())),
+        }
+    }
+}
+
+fn check_type(s: &str, lineno: usize) -> Result<String> {
+    let ok = s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && s.chars().all(|c| c.is_ascii_alphanumeric());
+    if ok {
+        Ok(s.to_string())
+    } else {
+        Err(Error::Parse {
+            line: lineno,
+            msg: format!("invalid block type `{s}` (expected PascalCase, e.g. GreaterEqual)"),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"
+# Beschattung
+extern sonne = VirtualIn(iname: "VI3")
+extern jal = AutoJalousie(title: "Beschattung Süd")
+
+let schwelle = 28
+
+temp_hoch = GreaterEqual(
+	"Temp über 28",
+	Input1: sonne.Q,
+	Input2: schwelle,
+)
+beschatten = And(I1: temp_hoch.Q, I2: sonne.Q)
+
+jal.AutoShade <- beschatten.Q
+jal.TargetPos = 70
+"#;
+
+    #[test]
+    fn parses_sample() {
+        let m = Module::parse(SAMPLE).unwrap();
+        assert_eq!(m.externs().count(), 2);
+        assert_eq!(m.blocks().count(), 2);
+        assert_eq!(m.extern_wires().count(), 1);
+        assert_eq!(m.wire_pairs().len(), 4);
+        assert_eq!(m.sets().count(), 1);
+        assert_eq!(m.lets().count(), 1);
+        let block = m.blocks().next().unwrap();
+        assert_eq!(block.title.as_deref(), Some("Temp über 28"));
+        let params: Vec<_> = block.params().collect();
+        assert_eq!(params, vec![("Input2", &Value::Ref("schwelle".into()))]);
+        assert_eq!(m.resolve_value(params[0].1).unwrap(), "28");
+        let wires: Vec<_> = block.input_wires().collect();
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].0, "Input1");
+        assert_eq!(wires[0].1.to_string(), "sonne.Q");
+    }
+
+    #[test]
+    fn text_roundtrip() {
+        let m = Module::parse(SAMPLE).unwrap();
+        let text = m.to_text();
+        let again = Module::parse(&text).unwrap();
+        assert_eq!(m, again);
+        assert_eq!(again.to_text(), text, "canonical form is a fixpoint");
+    }
+
+    #[test]
+    fn single_line_calls_canonicalize_to_one_argument_per_line() {
+        let m = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I2: x.Qm)\n")
+            .unwrap();
+        let text = m.to_text();
+        assert!(
+            text.contains("b = And(\n\tI1: x.Q,\n\tI2: x.Qm,\n)"),
+            "{text}"
+        );
+        let again = Module::parse(&text).unwrap();
+        assert_eq!(m, again);
+        assert_eq!(again.to_text(), text);
+        // Argument-free calls stay on one line.
+        let m = Module::parse("b = And()\nc = Or(\"Oder\")\n").unwrap();
+        let text = m.to_text();
+        assert!(text.contains("b = And()\n"), "{text}");
+        assert!(text.contains("c = Or(\"Oder\")\n"), "{text}");
+    }
+
+    #[test]
+    fn comments_are_preserved() {
+        let src = "\
+# header
+extern sonne = VirtualIn(iname: \"VI3\") # the sun
+t = GreaterEqual( # threshold block
+\t# arg note
+\tInput1: sonne.Q, # main wire
+\tInput2: 28, # degrees
+) # done
+
+sonne.Qm = 30 # override
+";
+        let m = Module::parse(src).unwrap();
+        let text = m.to_text();
+        for needle in [
+            "# header",
+            "\"VI3\") # the sun",
+            "GreaterEqual( # threshold block",
+            "\t# arg note",
+            "sonne.Q, # main wire",
+            "28, # degrees",
+            ") # done",
+            "= 30 # override",
+        ] {
+            assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+        }
+        // Canonical form is a fixpoint.
+        let again = Module::parse(&text).unwrap();
+        assert_eq!(m, again);
+        assert_eq!(again.to_text(), text);
+    }
+
+    #[test]
+    fn string_values_never_emit_as_unparsable_bare_tokens() {
+        // Regression: values like "5+" or "1-2" read as bare-number-ish
+        // character runs; a content-sniffing emitter once printed them bare,
+        // breaking `parse(to_text(m)) == m`.
+        for tricky in ["5+", "1-2", "--1", "1.2.3", "+", "."] {
+            let src = format!("extern s = VirtualIn(iname: \"VI1\")\ns.Q = \"{tricky}\"\n");
+            let m = Module::parse(&src).unwrap();
+            let text = m.to_text();
+            let again = Module::parse(&text).unwrap_or_else(|e| {
+                panic!("canonical form for {tricky:?} does not re-parse: {e}\n{text}")
+            });
+            assert_eq!(m, again, "value {tricky:?} must survive the round trip");
+        }
+        // A quoted number canonicalizes to the bare spelling — one canonical
+        // form per value, in port assignments and argument lists alike.
+        let m = Module::parse("extern s = VirtualIn(iname: \"VI1\")\ns.Q = \"28\"\n").unwrap();
+        assert!(m.to_text().contains("s.Q = 28"), "{}", m.to_text());
+        let m = Module::parse("b = GreaterEqual(Input2: \"28\")\n").unwrap();
+        assert!(m.to_text().contains("Input2: 28,"), "{}", m.to_text());
+    }
+
+    #[test]
+    fn unit_values_parse_scale_and_roundtrip() {
+        // Canonical form keeps the unit spelling; resolution scales into
+        // the base unit, exactly.
+        let m = Module::parse(
+            "let nachlauf = 90min\n\
+             t = Monoflop(Time: 1.5h)\n\
+             p = PulseGen(TimeHigh: 250ms, TimeLow: 2s)\n",
+        )
+        .unwrap();
+        let text = m.to_text();
+        for needle in ["nachlauf = 90min", "Time: 1.5h,", "TimeHigh: 250ms,"] {
+            assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+        }
+        assert_eq!(Module::parse(&text).unwrap(), m);
+        assert_eq!(Module::parse(&text).unwrap().to_text(), text, "fixpoint");
+        let resolved: Vec<String> = m
+            .blocks()
+            .flat_map(|b| {
+                b.params()
+                    .map(|(_, v)| m.resolve_value(v).unwrap().into_owned())
+            })
+            .collect();
+        assert_eq!(resolved, ["5400", "0.25", "2"]);
+        let nachlauf = m.lets().next().unwrap();
+        assert_eq!(
+            m.resolve_value(&Value::Ref(nachlauf.name.clone())).unwrap(),
+            "5400"
+        );
+
+        // K and % are annotations with factor 1; negatives keep the sign.
+        for (src, want) in [
+            ("2700K", "2700"),
+            ("70%", "70"),
+            ("-30s", "-30"),
+            ("0.3s", "0.3"),
+            ("1000ms", "1"),
+            ("0ms", "0"),
+        ] {
+            let m = Module::parse(&format!("t = Monoflop(Time: {src})\n")).unwrap();
+            let (_, v) = m.blocks().next().unwrap().params().next().unwrap();
+            assert_eq!(m.resolve_value(v).unwrap(), want, "{src}");
+            assert!(m.to_text().contains(&format!("Time: {src},")), "{src}");
+        }
+
+        // Units work in expressions and template defaults.
+        let m = Module::parse(
+            "extern a = VirtualIn(iname: \"VI1\")\n\
+             extern j = AutoJalousie(title: \"J\")\n\
+             j.AutoShade <- a.AQ >= 1.5h\n",
+        )
+        .unwrap();
+        let (plain, _) = m.desugar().unwrap();
+        let ge = plain.blocks().next().unwrap();
+        assert_eq!(ge.title.as_deref(), Some("a.AQ >= 1.5h"));
+        let (_, v) = ge.params().next().unwrap();
+        assert_eq!(plain.resolve_value(v).unwrap(), "5400");
+        Module::parse("template t(x: VirtualIn, zeit = 5min)\n\ty = Monoflop(Time: zeit)\nend\n")
+            .unwrap();
+
+        // Unknown or malformed units are refused at parse time.
+        let e = Module::parse("t = Monoflop(Time: 5x)\n").unwrap_err();
+        assert!(e.to_string().contains("unknown unit `x`"), "{e}");
+        let e = Module::parse("t = Monoflop(Time: 5sec)\n").unwrap_err();
+        assert!(e.to_string().contains("unknown unit `sec`"), "{e}");
+        // A quoted "40s" is a string, not a unit value — two spellings,
+        // two meanings.
+        let m = Module::parse("t = Monoflop(Time: \"40s\")\n").unwrap();
+        let (_, v) = m.blocks().next().unwrap().params().next().unwrap();
+        assert_eq!(v, &Value::Str("40s".into()));
+    }
+
+    #[test]
+    fn malformed_numbers_are_rejected() {
+        for bad in ["1.2.3", "5.", "-5."] {
+            let src = format!("b = GreaterEqual(Input2: {bad})\n");
+            let e = Module::parse(&src).unwrap_err();
+            assert!(
+                e.to_string().contains("invalid number literal"),
+                "{bad}: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn let_statements_parse_and_resolve() {
+        let m = Module::parse(
+            "let schwelle = 28\nlet gruss = \"hallo\"\nb = GreaterEqual(Input2: schwelle)\n",
+        )
+        .unwrap();
+        assert_eq!(m.lets().count(), 2);
+        let (_, v) = m.blocks().next().unwrap().params().next().unwrap();
+        assert_eq!(m.resolve_value(v).unwrap(), "28");
+
+        // Constants cannot reference constants.
+        let e = Module::parse("let a = 1\nlet b = a\n").unwrap_err();
+        assert!(e.to_string().contains("number or a quoted string"), "{e}");
+
+        // Undeclared references are errors, with a suggestion.
+        let e =
+            Module::parse("let schwelle = 28\nb = GreaterEqual(Input2: schwele)\n").unwrap_err();
+        assert!(
+            e.to_string().contains("undeclared constant `schwele`"),
+            "{e}"
+        );
+        assert!(e.to_string().contains("did you mean `schwelle`?"), "{e}");
+
+        // Constants share the slug namespace and cannot be wired.
+        let e = Module::parse("let x = 1\nx = And()\n").unwrap_err();
+        assert!(e.to_string().contains("duplicate name `x`"), "{e}");
+        let e = Module::parse("let x = 1\nb = And(I1: x.Q)\n").unwrap_err();
+        assert!(e.to_string().contains("not a block or extern"), "{e}");
+    }
+
+    #[test]
+    fn removed_and_moved_parse_and_are_checked() {
+        let m = Module::parse("removed old_block # gone\nmoved a -> b\n").unwrap();
+        assert_eq!(m.removed().count(), 1);
+        assert_eq!(m.moved().count(), 1);
+        let text = m.to_text();
+        assert!(text.contains("removed old_block # gone"), "{text}");
+        assert!(text.contains("moved a -> b"), "{text}");
+        assert_eq!(Module::parse(&text).unwrap(), m);
+
+        let e = Module::parse("a = And()\nremoved a\n").unwrap_err();
+        assert!(e.to_string().contains("contradicts the declaration"), "{e}");
+        let e = Module::parse("removed a\nremoved a\n").unwrap_err();
+        assert!(e.to_string().contains("duplicate `removed a`"), "{e}");
+
+        let e = Module::parse("a = And()\nmoved a -> b\n").unwrap_err();
+        assert!(e.to_string().contains("must no longer be declared"), "{e}");
+        let e = Module::parse("moved a -> a\n").unwrap_err();
+        assert!(e.to_string().contains("to itself"), "{e}");
+        let e = Module::parse("moved a -> b\nmoved b -> c\n").unwrap_err();
+        assert!(e.to_string().contains("chained `moved`"), "{e}");
+        let e = Module::parse("moved a -> b\nremoved a\n").unwrap_err();
+        assert!(e.to_string().contains("conflicts with a `removed`"), "{e}");
+        let e = Module::parse("extern e = VirtualIn(iname: \"VI1\")\nmoved a -> e\n").unwrap_err();
+        assert!(e.to_string().contains("not a managed block"), "{e}");
+
+        let e = Module::parse("removed Bad\n").unwrap_err();
+        assert!(e.to_string().contains("invalid slug"), "{e}");
+        let e = Module::parse("moved a b\n").unwrap_err();
+        assert!(
+            e.to_string().contains("moved <old_slug> -> <new_slug>"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn port_statements_on_managed_blocks_are_rejected() {
+        // `=` on a managed port: parameters belong in the argument list.
+        let e = Module::parse("b = And()\nb.I1 = 3\n").unwrap_err();
+        let msg = e.to_string();
+        assert!(msg.contains("targets managed block `b`"), "{msg}");
+        assert!(msg.contains("argument list"), "{msg}");
+        // `<-` on a managed port: wires belong in the argument list.
+        let e = Module::parse("a = And()\nb = And()\nb.I1 <- a.Q\n").unwrap_err();
+        let msg = e.to_string();
+        assert!(msg.contains("targets managed block `b`"), "{msg}");
+        assert!(msg.contains("I1: a.Q"), "{msg}");
+    }
+
+    #[test]
+    fn duplicate_arguments_are_rejected() {
+        let e = Module::parse("b = GreaterEqual(Input2: 1, Input2: 2)\n").unwrap_err();
+        assert!(
+            e.to_string().contains("duplicate parameter `Input2`"),
+            "{e}"
+        );
+        let e = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I1: x.Q)\n")
+            .unwrap_err();
+        assert!(e.to_string().contains("duplicate wire `I1: x.Q`"), "{e}");
+        // Two different sources into one port (fan-in) are representable.
+        Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I1: x.Qm)\n")
+            .unwrap();
+    }
+
+    #[test]
+    fn label_must_come_first() {
+        let e = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, \"L\")\n")
+            .unwrap_err();
+        assert!(e.to_string().contains("first argument"), "{e}");
+        let e = Module::parse("b = And(\"L\", \"M\")\n").unwrap_err();
+        assert!(e.to_string().contains("one label"), "{e}");
+    }
+
+    #[test]
+    fn v0_keywords_carry_migration_guidance() {
+        let e = Module::parse("block b: And\n").unwrap_err();
+        assert!(e.to_string().contains("v0 syntax"), "{e}");
+        assert!(e.to_string().contains("= <Type>("), "{e}");
+        let e = Module::parse("wire a.Q -> b.I1\n").unwrap_err();
+        assert!(e.to_string().contains("argument list"), "{e}");
+        assert!(e.to_string().contains("<-"), "{e}");
+        let e = Module::parse("set a.B = 3\n").unwrap_err();
+        assert!(e.to_string().contains("<extern>.<Port> = <value>"), "{e}");
+        let e = Module::parse("extern s: VirtualIn match iname \"VI1\"\n").unwrap_err();
+        assert!(e.to_string().contains("uuid|iname|title"), "{e}");
+    }
+
+    #[test]
+    fn wrong_arrow_and_value_forms_are_guided() {
+        let e = Module::parse("extern j = AutoJalousie(title: \"J\")\nj.Pos = j.Q\n").unwrap_err();
+        assert!(e.to_string().contains("use `<-` to wire"), "{e}");
+        let e = Module::parse("extern j = AutoJalousie(title: \"J\")\nj.Pos <- 5\n").unwrap_err();
+        assert!(e.to_string().contains("use `j.Pos = 5`"), "{e}");
+        let e = Module::parse("x = 28\n").unwrap_err();
+        assert!(e.to_string().contains("let x = 28"), "{e}");
+    }
+
+    #[test]
+    fn errors_carry_line_numbers() {
+        let e = Module::parse("t.Q <- \n").unwrap_err();
+        assert!(e.to_string().contains("line 1"), "{e}");
+        let e = Module::parse("Bad = And()\n").unwrap_err();
+        assert!(e.to_string().contains("invalid slug"), "{e}");
+        let e = Module::parse("ok = And(\nI1: x.Q,\n").unwrap_err();
+        assert!(e.to_string().contains("unclosed"), "{e}");
+    }
+
+    #[test]
+    fn undeclared_reference_is_rejected() {
+        let e = Module::parse("a.Q <- b.I\n").unwrap_err();
+        assert!(e.to_string().contains("undeclared slug"), "{e}");
+    }
+
+    #[test]
+    fn page_statements_parse_and_roundtrip() {
+        let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
+                   page \"Beschattung\" # Süd\n\n\
+                   gate = Not(\n\tI: wind.Q,\n)\n\n\
+                   page \"Regeln\"\n\n\
+                   halt = Or(\n\tI1: gate.Q,\n)\n";
+        let m = Module::parse(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        let pages: Vec<_> = m
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Page(p) => Some(p.title.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pages, ["Beschattung", "Regeln"]);
+
+        // The title is a quoted string — a bare identifier is guided.
+        let e = Module::parse("page Regeln\n").unwrap_err();
+        assert!(e.to_string().contains("page \"<Title>\""), "{e}");
+        // Placement is per-module, not per-template.
+        let e = Module::parse("template t(a: VirtualIn)\n\tpage \"X\"\nend\n").unwrap_err();
+        assert!(
+            e.to_string().contains("not allowed inside a template"),
+            "{e}"
+        );
+        // An empty title names no page.
+        let e = Module::parse("page \"\"\n").unwrap_err();
+        assert!(e.to_string().contains("must not be empty"), "{e}");
+    }
+}

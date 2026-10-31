@@ -1,0 +1,87 @@
+{
+  "name": "loxl",
+  "displayName": "Lox Logic",
+  "description": "Syntax highlighting, snippets and the language server for Lox Logic (.loxl) — Loxone config as code",
+  "version": "0.3.0",
+  "publisher": "loxl",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "loxl",
+        "aliases": [
+          "Lox Logic",
+          "loxl"
+        ],
+        "extensions": [
+          ".loxl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "loxl",
+        "scopeName": "source.loxl",
+        "path": "./syntaxes/loxl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "loxl",
+        "path": "./snippets/loxl.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lox Logic",
+      "properties": {
+        "loxl.server.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the Lox Logic language server for .loxl files."
+        },
+        "loxl.server.path": {
+          "type": "string",
+          "default": "loxl",
+          "description": "The program that runs the language server: `loxl`, or `lox` (with the arguments `logic lsp`).",
+          "scope": "machine"
+        },
+        "loxl.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "Its arguments: `[\"lsp\"]` for loxl, `[\"logic\", \"lsp\"]` for lox.",
+          "scope": "machine"
+        }
+      }
+    }
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:loxl"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The language server program comes from user settings only.",
+      "restrictedConfigurations": [
+        "loxl.server.path",
+        "loxl.server.args"
+      ]
+    }
+  }
+}

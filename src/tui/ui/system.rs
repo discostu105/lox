@@ -1190,12 +1190,12 @@ fn config(app: &App, area: Rect, buf: &mut Buffer) {
     let key = config_diff_key(app).unwrap_or_else(|| c.hash.clone());
     let vs = match (key.split_once(".."), commits.get(s + 1)) {
         (Some((a, b)), _) => format!(
-            "lxir diff · {} → {} · ◆ marked (m again: unmark)",
+            "loxl diff · {} → {} · ◆ marked (m again: unmark)",
             short(a),
             short(b)
         ),
         (None, Some(p)) => format!(
-            "lxir diff · commit {} vs {} (the backup before)",
+            "loxl diff · commit {} vs {} (the backup before)",
             short(&c.hash),
             short(&p.hash)
         ),

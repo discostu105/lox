@@ -15,7 +15,7 @@ use crate::{
 };
 use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
 use loxone_client::token;
-use lxir::archive;
+use loxone_config::archive;
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
     match action {

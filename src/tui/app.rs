@@ -542,13 +542,13 @@ pub struct WiringState {
     pub snap: Option<SnapDoc>,
 }
 
-/// The config browser: pages → a page (blocks or lxir source) → wiring.
+/// The config browser: pages → a page (blocks or Lox Logic source) → wiring.
 #[derive(Debug, Clone)]
 pub struct BrowseState {
     pub doc: SnapDoc,
     /// `None`: the page list
     pub page: Option<String>,
-    /// Page view: lxir source instead of the block list
+    /// Page view: Lox Logic source instead of the block list
     pub source: bool,
     pub sel: usize,
     /// Source view scroll

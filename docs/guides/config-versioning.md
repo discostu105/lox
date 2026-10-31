@@ -162,7 +162,7 @@ lox config diff v271                      # from version 271 to the newest confi
 lox config diff 2026-08-25 HEAD           # by save date, commit, version — or two files
 lox config diff a1b2c3d..e4f5a6b          # a range of commits
 lox config show --at v271                 # the logic pages of an old snapshot
-lox config show -p Garage --at v271       # a page as lxir source
+lox config show -p Garage --at v271       # a page as Lox Logic source
 lox config wiring "Garage light" --at v271 --trace up   # its wiring back then
 lox config history "Garage light"         # every snapshot that changed this block
 lox config lint                           # dead blocks, unwired inputs and motors, duplicate names
@@ -178,7 +178,7 @@ lox config wiring "Licht Gang" --trace up --depth 6
 ```
 
 In `lox tui`, *System › Config* lists the snapshots with their diffs: `⏎` browses a snapshot (pages,
-blocks, lxir source, `/` search, `⏎` on a block opens its wiring at that snapshot), `m` marks a commit
+blocks, Lox Logic source, `/` search, `⏎` on a block opens its wiring at that snapshot), `m` marks a commit
 to compare any two, and `w` on a diff line opens that block's wiring.
 
 ## Changing the config from git

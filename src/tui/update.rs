@@ -3247,7 +3247,7 @@ pub fn browse_rows<'a>(b: &'a BrowseState, src: &'a str) -> BrowseRows<'a> {
     }
 }
 
-/// The lxir source of the browser's page (empty unless it shows source).
+/// The Lox Logic source of the browser's page (empty unless it shows source).
 pub fn browse_source(b: &BrowseState) -> String {
     match (&b.page, b.source && b.search.is_none()) {
         (Some(p), true) => b

@@ -1195,7 +1195,7 @@ fn wiring(app: &App, body: Rect, buf: &mut Buffer, w: &WiringState) {
     }));
     nb = nb.hints(hints);
     if let Some(d) = doc.as_ref().filter(|d| d.live) {
-        nb = nb.bottom_right(Notch::new(format!("lxir · {}", clean(&d.label))));
+        nb = nb.bottom_right(Notch::new(format!("loxl · {}", clean(&d.label))));
     }
     let inner = boxed(app, r, buf, nb);
     let Some(doc) = doc else {
@@ -1623,7 +1623,7 @@ fn browse(app: &App, body: Rect, buf: &mut Buffer, b: &BrowseState) {
     let rows = browse_rows(b, &src);
     let crumb = match (&b.search, &b.page) {
         (Some(_), _) => "find".to_string(),
-        (None, Some(p)) if b.source => format!("{} · lxir", clean(p)),
+        (None, Some(p)) if b.source => format!("{} · loxl", clean(p)),
         (None, Some(p)) => clean(p),
         (None, None) => "pages".into(),
     };
@@ -1645,7 +1645,14 @@ fn browse(app: &App, body: Rect, buf: &mut Buffer, b: &BrowseState) {
         (None, Some(_)) => {
             let mut v = vec![
                 Hint::new("⏎", "wiring"),
-                Hint::new("s", if b.source { "blocks" } else { "lxir source" }),
+                Hint::new(
+                    "s",
+                    if b.source {
+                        "blocks"
+                    } else {
+                        "Lox Logic source"
+                    },
+                ),
                 Hint::new("/", "find"),
             ];
             v.extend(common::close_hints(Some(if b.source {

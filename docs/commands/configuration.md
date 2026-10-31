@@ -135,7 +135,7 @@ the device and room they live in:
 lox config diff                           # the last change in the config repo
 lox config diff v271 HEAD                 # two snapshots: commit, version, save date — or two files
 lox config show                           # logic pages with block and wire counts
-lox config show -p Wohnzimmer             # one page as lxir source
+lox config show -p Wohnzimmer             # one page as Lox Logic source
 lox config wiring "Licht" --trace up      # what drives a block, back to the sensors
 lox config find bewegung küche            # search blocks
 lox config lint                           # dead blocks, unwired inputs and motors, duplicate names
@@ -163,12 +163,12 @@ See the [Config Versioning guide](/lox/guides/config-versioning) for the full wo
 ### Config as code
 
 ```bash
-lox ir check                              # validate .lxir modules (in a lox.toml project)
-lox ir compile                            # base + module + lock → out.Loxone
+lox logic check                              # validate .loxl modules (in a lox.toml project)
+lox logic compile                            # base + module + lock → out.Loxone
 lox config diff base.Loxone out.Loxone    # review the change by name
 lox config push                           # drift check, compile, stage (dry run)
 lox config push --force                   # upload, restart the program, verify, move base
-lox ir help                               # every lxir command and flag
+lox logic help                               # every Lox Logic command and flag
 ```
 
 See the [Config as Code guide](/lox/guides/config-as-code).

@@ -51,7 +51,7 @@ import sys
 LEVELS = ["none", "patch", "minor", "major"]
 # Changes to these alone do not change the binary.
 NO_RELEASE_PATHS = re.compile(
-    r"(\.md$|^docs/|^crates/lxir/docs/|^\.github/|^Formula/|^LICENSE|^codecov\.yml$|^k8s/|^scripts/demo-video/)"
+    r"(\.md$|^docs/|^crates/loxone-config/docs/|^\.github/|^Formula/|^LICENSE|^codecov\.yml$|^k8s/|^scripts/demo-video/)"
 )
 # Commits the release flow itself pushes.
 BOT_SUBJECTS = re.compile(r"^(Release v\d|brew: update formula)")

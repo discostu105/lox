@@ -1,4 +1,4 @@
-//! Thin adapter over `lxir` (§12.1): load a `.Loxone` config, index blocks and
+//! Thin adapter over `loxl` (§12.1): load a `.Loxone` config, index blocks and
 //! wires by UUID, and answer "what is wired around this control?".
 //!
 //! Hardware never sits on a logic page directly: Loxone Config places an
@@ -6,7 +6,7 @@
 //! *folded* through those refs, so a light controller's input reads
 //! `Eingang 1 · Relais Wohnzimmer` instead of a ref named like the input.
 //!
-//! Only this file touches the lxir API, so churn in lxir (v0) stays here.
+//! Only this file touches the loxone-config API, so churn in loxone-config (v0) stays here.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
@@ -19,7 +19,7 @@ use serde::Serialize;
 pub struct Param {
     pub key: String,
     pub value: String,
-    /// The value Loxone Config writes when the block is placed (lxir's
+    /// The value Loxone Config writes when the block is placed (Lox Logic's
     /// corpus-observed defaults); views hide these unless asked
     pub default: bool,
 }
@@ -241,7 +241,7 @@ pub struct Logic {
     /// raw wires (source, sink)
     raw_wires: Vec<(String, String)>,
     title_count: HashMap<String, usize>,
-    doc: lxir::LoxoneDoc,
+    doc: loxone_config::LoxoneDoc,
     sources: OnceLock<std::result::Result<Vec<(String, String)>, String>>,
 }
 
@@ -337,7 +337,7 @@ impl Logic {
     }
 
     pub fn parse(bytes: &[u8]) -> Result<Logic> {
-        let doc = lxir::LoxoneDoc::parse(bytes).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let doc = loxone_config::LoxoneDoc::parse(bytes).map_err(|e| anyhow::anyhow!("{}", e))?;
         let objs = doc.objects();
         let by_path: HashMap<&[usize], usize> = objs
             .iter()
@@ -368,7 +368,7 @@ impl Logic {
             let Some(el) = doc.element_at(&obj.path) else {
                 continue;
             };
-            let pv = lxir::doc::ports(el);
+            let pv = loxone_config::doc::ports(el);
             let ports: Vec<(String, String)> =
                 pv.iter().map(|p| (p.key.clone(), p.uuid.clone())).collect();
             for (k, u) in &ports {
@@ -381,8 +381,10 @@ impl Logic {
                 .filter_map(|p| {
                     let v = p.def.clone()?;
                     Some(Param {
-                        default: lxir::observed_defaults::observed_default(&obj.block_type, &p.key)
-                            == Some(v.as_str()),
+                        default: loxone_config::observed_defaults::observed_default(
+                            &obj.block_type,
+                            &p.key,
+                        ) == Some(v.as_str()),
                         key: p.key.clone(),
                         value: v,
                     })
@@ -981,14 +983,14 @@ impl Logic {
             .collect()
     }
 
-    // ── lxir source view ────────────────────────────────────────────────────
+    // ── Lox Logic source view ────────────────────────────────────────────────────
 
     fn sources(&self) -> std::result::Result<&Vec<(String, String)>, String> {
         self.sources
             .get_or_init(|| {
-                let opts = lxir::ir::DecompileOptions::default();
-                let (pages, _) =
-                    lxir::ir::decompile_pages(&self.doc, &opts).map_err(|e| e.to_string())?;
+                let opts = loxone_config::logic::DecompileOptions::default();
+                let (pages, _) = loxone_config::logic::decompile_pages(&self.doc, &opts)
+                    .map_err(|e| e.to_string())?;
                 Ok(pages
                     .into_iter()
                     .map(|mut p| {
@@ -1002,8 +1004,8 @@ impl Logic {
     }
 
     /// Externs name hardware by its title (`i3`): add where it is.
-    fn annotate(&self, m: &mut lxir::ir::Module) {
-        use lxir::ir::{Item, MatchSpec};
+    fn annotate(&self, m: &mut loxone_config::logic::Module) {
+        use loxone_config::logic::{Item, MatchSpec};
         for item in &mut m.items {
             let Item::Extern(e) = item else { continue };
             let room_ok = |b: &Block| e.room.is_none() || b.room == e.room;
@@ -1032,7 +1034,7 @@ impl Logic {
                 continue;
             }
             let ctx = ctx.join(" · ");
-            // lxir writes `#` + comment; its own comments bring the space
+            // Lox Logic writes `#` + comment; its own comments bring the space
             e.comment = Some(match e.comment.take() {
                 Some(c) if !c.trim().is_empty() && c.trim() != "periphery" => {
                     format!(" {} · {}", c.trim(), ctx)
@@ -1042,16 +1044,16 @@ impl Logic {
         }
     }
 
-    /// One page as lxir source text, hardware annotated with device and room.
+    /// One page as Lox Logic source text, hardware annotated with device and room.
     pub fn page_source(&self, page: &str) -> Result<String> {
         let src = self.sources().map_err(|e| anyhow::anyhow!("{}", e))?;
         src.iter()
             .find(|(t, _)| t == page)
             .map(|(_, s)| s.clone())
-            .ok_or_else(|| anyhow::anyhow!("page '{}' has no logic lxir can show", page))
+            .ok_or_else(|| anyhow::anyhow!("page '{}' has no logic that Lox Logic can show", page))
     }
 
-    /// Every page with logic as lxir source text.
+    /// Every page with logic as Lox Logic source text.
     pub fn all_sources(&self) -> Result<Vec<(String, String)>> {
         self.sources()
             .cloned()
@@ -1490,8 +1492,8 @@ const PERIPHERY: &str = "(devices & periphery)";
 const ACCESS: &str = "(users & access)";
 
 /// The word a users/access diff line starts with, after its sign.
-fn access_word(subject: lxir::access::Subject) -> &'static str {
-    use lxir::access::Subject;
+fn access_word(subject: loxone_config::access::Subject) -> &'static str {
+    use loxone_config::access::Subject;
     match subject {
         Subject::User => "user",
         Subject::Group => "group",
@@ -1527,7 +1529,7 @@ pub fn diff_lines(old: &[u8], new: &[u8]) -> Result<Vec<String>> {
 }
 
 pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
-    let d = lxir::diff::diff(&a.doc, &b.doc);
+    let d = loxone_config::diff::diff(&a.doc, &b.doc);
     let blk = |uuid: &str| b.blocks.get(uuid).or_else(|| a.blocks.get(uuid));
     let page = |uuid: &str| -> String {
         blk(uuid)
@@ -1541,7 +1543,7 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
             a.label(uuid)
         }
     };
-    let obj_label = |l: &Logic, o: &lxir::doc::ObjectSummary| -> String {
+    let obj_label = |l: &Logic, o: &loxone_config::doc::ObjectSummary| -> String {
         let x = l.blocks.get(&o.uuid);
         let mut s = format!(
             "{} ({})",
@@ -1650,7 +1652,7 @@ pub fn diff_logic(a: &Logic, b: &Logic) -> Vec<DiffLine> {
             c.title.clone().unwrap_or_else(|| c.uuid.clone())
         );
         let text = match c.change {
-            lxir::access::Change::Added | lxir::access::Change::Removed => who,
+            loxone_config::access::Change::Added | loxone_config::access::Change::Removed => who,
             _ => format!("{who} · {}", c.change.describe()),
         };
         push(ACCESS.into(), text, Some(c.uuid.clone()));

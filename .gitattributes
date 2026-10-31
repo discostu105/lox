@@ -1,4 +1,4 @@
 *.bin filter=lfs diff=lfs merge=lfs -text
-# lxir's fixtures are byte-exact (canonical .lxir text, locks, compiled
+# loxone-config's fixtures are byte-exact (canonical .loxl text, locks, compiled
 # .Loxone output): no line-ending conversion, also on Windows checkouts.
-crates/lxir/** -text
+crates/loxone-config/** -text

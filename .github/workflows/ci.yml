@@ -78,34 +78,34 @@ jobs:
       - name: test
         run: cargo test --release
 
-      # lxir's CI check path (crates/lxir/examples/ci.sh) on the shipped
+      # Lox Logic's CI check path (crates/loxone-config/examples/ci.sh) on the shipped
       # examples: validate, canonical format, lock currency, determinism,
       # byte-identical expected output.
-      - name: lxir check path (example module)
+      - name: loxl check path (example module)
         if: runner.os == 'Linux'
         env:
-          LXIR: target/release/lxir
-          BASE: crates/lxir/examples/configs/haus.Loxone
-          MODULE: crates/lxir/examples/ir/beschattung.lxir
-          LOCK: crates/lxir/examples/out/beschattung.lock.json
-          EXPECTED: crates/lxir/examples/out/haus-compiled.Loxone
-        run: crates/lxir/examples/ci.sh
+          LOXL: target/release/loxl
+          BASE: crates/loxone-config/examples/configs/haus.Loxone
+          MODULE: crates/loxone-config/examples/logic/beschattung.loxl
+          LOCK: crates/loxone-config/examples/out/beschattung.lock.json
+          EXPECTED: crates/loxone-config/examples/out/haus-compiled.Loxone
+        run: crates/loxone-config/examples/ci.sh
 
-      - name: lxir check path (example project)
+      - name: loxl check path (example project)
         if: runner.os == 'Linux'
         env:
-          LXIR: target/release/lxir
-          BASE: crates/lxir/examples/configs/pool.Loxone
-          MODULE: crates/lxir/examples/project/pages
-          LOCK: crates/lxir/examples/project/pool.lock.json
-          EXPECTED: crates/lxir/examples/project/out.Loxone
-        run: crates/lxir/examples/ci.sh
+          LOXL: target/release/loxl
+          BASE: crates/loxone-config/examples/configs/pool.Loxone
+          MODULE: crates/loxone-config/examples/project/pages
+          LOCK: crates/loxone-config/examples/project/pool.lock.json
+          EXPECTED: crates/loxone-config/examples/project/out.Loxone
+        run: crates/loxone-config/examples/ci.sh
 
       # Real Miniserver configs carry personal data; every committed one
-      # must be synthetic (`lxir scan` exits 1 on any finding).
+      # must be synthetic (`loxl scan` exits 1 on any finding).
       - name: no personal data in committed configs
         if: runner.os == 'Linux'
-        run: git ls-files -z '*.Loxone' | xargs -0 -r target/release/lxir scan
+        run: git ls-files -z '*.Loxone' | xargs -0 -r target/release/loxl scan
 
   coverage:
     name: Coverage
@@ -122,8 +122,8 @@ jobs:
       # --engine llvm: the CLI tests (tests/cli_smoke.rs) run the lox binary
       # as a subprocess; without its coverage codecov/patch fails PRs whose
       # code is tested only that way. The llvm engine instruments that binary
-      # too. The ptrace engine's --follow-exec segfaulted in the lxir tests
-      # that spawn lxir.
+      # too. The ptrace engine's --follow-exec segfaulted in the loxone-config tests
+      # that spawn loxl.
       - name: Generate coverage
         run: cargo tarpaulin --engine llvm --out xml --output-dir coverage --root ${{ github.workspace }}
 

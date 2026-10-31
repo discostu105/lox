@@ -320,7 +320,7 @@ lox config compress out.Loxone         # compress .Loxone XML → out.LoxCC (sps
 lox config compress out.Loxone --save-as sps0.LoxCC
 lox config compress out.Loxone --template download.zip  # upload ZIP: download.zip with only sps0.LoxCC replaced → out.zip
 lox config upload config.zip --force   # upload as sps_new.zip, loaded on the next reboot (dangerous)
-lox config push --force                # deploy an lxir project, verified (see Config as Code)
+lox config push --force                # deploy a Lox Logic project, verified (see Config as Code)
 lox config users file.Loxone           # users in a .Loxone file: NFC tags, codes, groups, access rights
 lox config devices file.Loxone         # hardware devices in it (Tree/Air/Network)
 
@@ -343,7 +343,7 @@ To upload, load (a program restart, no reboot) and verify in one go, deploy with
 
 ### Inspecting the logic (read-only)
 
-The program inside a config — blocks, parameters and wires — read with [lxir](crates/lxir).
+The program inside a config — blocks, parameters and wires — read with [loxone-config](crates/loxone-config).
 Hardware references on the pages are folded away: a wire goes from the motion sensor to the light, not to an input ref.
 
 ```bash
@@ -353,7 +353,7 @@ lox config diff 2026-08-25 HEAD        # snapshots by save date, commit, version
 lox config diff a1b2c3d..e4f5a6b       # a range of commits
 lox config diff old.Loxone new.zip     # two files (.Loxone or backup ZIP)
 lox config show                        # the logic pages: blocks and wires per page
-lox config show -p Wohnzimmer          # one page as lxir source (--all: every page)
+lox config show -p Wohnzimmer          # one page as Lox Logic source (--all: every page)
 lox config wiring "Licht Wohnzimmer"   # inputs, outputs and non-default parameters of a block
 lox config wiring Licht -r Küche --trace up      # the whole path up to the sensors (down, both)
 lox config wiring Licht --trace down --depth 6   # hops to follow (default 4)
@@ -388,33 +388,33 @@ All of them take `-o json`.
 
 ---
 
-## Config as Code (lxir)
+## Config as Code (Lox Logic)
 
-`lox ir` runs the [lxir](crates/lxir) toolchain: logic written as `.lxir` text, compiled into the `.Loxone`
-config with a lockfile that pins every UUID. The arguments go to lxir as they are (`lox lxir …` works too),
-so lxir's docs apply word for word — `lxir compile` is `lox ir compile`. Nothing here talks to the Miniserver.
+`lox logic` runs the [Lox Logic](crates/loxone-config) toolchain: logic written as `.loxl` text, compiled into the `.Loxone`
+config with a lockfile that pins every UUID. The arguments go to `loxl` as they are (`lox logic …` works too),
+so the Lox Logic docs apply word for word — `loxl compile` is `lox logic compile`. Nothing here talks to the Miniserver.
 
 ```bash
-lox ir help                            # every command and flag
-lox ir check pages/                    # parse + validate a module (line-numbered errors; --json)
-lox ir fmt --write pages/              # canonical formatting (--check for CI)
-lox ir compile                         # in a lox.toml project: base + module + lock → out.Loxone
-lox ir compile --base current.Loxone --module pages/ --lock haus.lock.json \
+lox logic help                            # every command and flag
+lox logic check pages/                    # parse + validate a module (line-numbered errors; --json)
+lox logic fmt --write pages/              # canonical formatting (--check for CI)
+lox logic compile                         # in a lox.toml project: base + module + lock → out.Loxone
+lox logic compile --base current.Loxone --module pages/ --lock haus.lock.json \
                --out out.Loxone --serial 504F94112233
-lox ir diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
-lox ir diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
-lox ir drift current.Loxone            # did another writer change the config since the last compile?
-lox ir coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched (--json)
-lox ir adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
-lox ir adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
-lox ir decompile current.Loxone        # the IR view of every page (read-only)
-lox ir rename old_name new_name        # rename across sources and lockfile, identities kept
-lox ir lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
-lox ir test                            # `test … end` blocks in lxir's simulator
-lox ir types --search delay            # block types by name or purpose; `lox ir types OnDelay`: its ports
-lox ir templates                       # tested templates (motion light, hysteresis, alarms, …) to copy
-lox ir test --lox ~/lox-cli/lox        # … or in lox-cli's simulator (`lox sim`)
-lox ir lsp                             # language server for editors (stdio): diagnostics, hover, completion, rename
+lox logic diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
+lox logic diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
+lox logic drift current.Loxone            # did another writer change the config since the last compile?
+lox logic coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched (--json)
+lox logic adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
+lox logic adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
+lox logic decompile current.Loxone        # the Lox Logic view of every page (read-only)
+lox logic rename old_name new_name        # rename across sources and lockfile, identities kept
+lox logic lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
+lox logic test                            # `test … end` blocks in the Lox Logic simulator
+lox logic types --search delay            # block types by name or purpose; `lox logic types OnDelay`: its ports
+lox logic templates                       # tested templates (motion light, hysteresis, alarms, …) to copy
+lox logic test --lox ~/lox-cli/lox        # … or in lox-cli's simulator (`lox sim`)
+lox logic lsp                             # language server for editors (stdio): diagnostics, hover, completion, rename
 ```
 
 Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.
@@ -422,7 +422,7 @@ Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a 
 Access rights on an NFC Code Touch can live in the module too: an `access` declaration lists the users and groups
 that may open it, by title, each with its access schedule, and takes the right away from everyone else. Users,
 groups, schedules, tags and codes stay with Loxone Config and the app. `decompile` and `adopt` lift the rights the
-config has. Spec: [lxir ir-spec](crates/lxir/docs/ir-spec.md), decision D49.
+config has. Spec: [Lox Logic language spec](crates/loxone-config/docs/language.md), decision D49.
 
 ```text
 extern haustuer = NfcCodeTouch(uuid: "…")
@@ -450,15 +450,15 @@ use its module and lock. Paths are relative to the file:
 
 ```toml
 base   = "base.Loxone"       # the deployed config (required) — lox config download --extract --save-as base.zip
-module = "pages"             # a .lxir file or a directory of them (required)
-lock   = "lxir.lock.json"    # default
+module = "pages"             # a .loxl file or a directory of them (required)
+lock   = "logic.lock.json"    # default
 out    = "out.Loxone"        # default
 serial = "504F94112233"      # optional; config push refuses a Miniserver with another serial
 ```
 
-Review a compile by name with `lox config diff base.Loxone out.Loxone` (`lox ir diff` lists UUIDs).
+Review a compile by name with `lox config diff base.Loxone out.Loxone` (`lox logic diff` lists UUIDs).
 Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). The language and the lockfile:
-[crates/lxir](crates/lxir/README.md).
+[crates/loxone-config](crates/loxone-config/README.md).
 
 ### Deploying a project: `lox config push`
 
@@ -486,7 +486,7 @@ Each step stops the push when it fails:
    compiled upload deletes (`removed` in the source, a rule deleted in the app say) goes with the object and does
    not stop `--force` (`"removed": true` in the JSON).
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
-   since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
+   since (someone saved from Loxone Config or the app), the push refuses and names the `lox logic diff` to run.
    Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
    (`kept_as_live` in the JSON report) and goes on.
 3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, access
@@ -505,7 +505,7 @@ Each step stops the push when it fails:
    have a room and a category (`app_catalogue_updated` in `-o json`). Its
    `lastModified` becomes the push time, so the app reloads. What it cannot carry over (other block types, a
    room the catalogue does not list, an icon) is named (`app_catalogue_stale`) until a save from Loxone Config. `permissions.bin`, which lists who may use each object, is regenerated for the
-   compiled config when lxir reproduces the live file byte for byte (`permissions` in the JSON report:
+   compiled config when loxone-config reproduces the live file byte for byte (`permissions` in the JSON report:
    `unchanged`, `regenerated`). Otherwise the live file stays (`kept`), and when the compiled config assigns users
    and groups differently the push warns that it is stale (`permissions_stale: true`).
 6. Upload it as `/prog/sps_new.zip` and restart the program (`/jdev/sps/restart`), as Loxone Config's save does:

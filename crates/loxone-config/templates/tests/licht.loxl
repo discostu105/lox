@@ -1,0 +1,73 @@
+# Tests der Lichtvorlagen (templates/licht.loxl) im Simulator.
+
+page "Logik"
+
+bewegung = VirtualIn("Bewegung")
+helligkeit = VirtualIn("Helligkeit")
+taster = VirtualIn("Taster")
+
+nachlauf = bewegungslicht(
+	bewegung: bewegung,
+	nachlauf: 2min,
+)
+
+dunkel = bewegungslicht_dunkel(
+	bewegung: bewegung,
+	helligkeit: helligkeit,
+)
+
+schalter = taster_licht(
+	taster: taster,
+)
+
+treppe = treppenlicht(
+	taster: taster,
+	dauer: 60s,
+)
+
+test "bewegungslicht: Nachlauf nach der letzten Bewegung"
+	bewegung.Q = 1
+	tick 2
+	expect nachlauf_ausgang.Q == 1
+	bewegung.Q = 0
+	tick 110
+	expect nachlauf_ausgang.Q == 1
+	tick 20
+	expect nachlauf_ausgang.Q == 0
+end
+
+test "bewegungslicht_dunkel: nur bei Dunkelheit"
+	helligkeit.Q = 500
+	bewegung.Q = 1
+	tick 2
+	expect dunkel_ausgang.Q == 0
+	helligkeit.Q = 10
+	bewegung.Q = 0
+	tick 1
+	bewegung.Q = 1
+	tick 2
+	expect dunkel_ausgang.Q == 1
+	bewegung.Q = 0
+	tick 170
+	expect dunkel_ausgang.Q == 1
+	tick 20
+	expect dunkel_ausgang.Q == 0
+end
+
+test "taster_licht und treppenlicht"
+	taster.Q = 1
+	tick 1
+	taster.Q = 0
+	tick 2
+	expect schalter_ausgang.Q == 1
+	expect treppe_ausgang.Q == 1
+	tick 70
+	expect schalter_ausgang.Q == 1
+	expect treppe_ausgang.Q == 0
+	taster.Q = 1
+	tick 1
+	taster.Q = 0
+	tick 2
+	expect schalter_ausgang.Q == 0
+	expect treppe_ausgang.Q == 1
+end

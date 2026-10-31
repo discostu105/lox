@@ -21,12 +21,12 @@ cargo clippy
 # Test
 cargo test
 cargo test <test_name>  # run a single test
-cargo test -p lxir      # only the lxir crate
+cargo test -p loxone-config      # only the loxone-config crate
 cargo test -p loxone-client
 ```
 
 The commands above cover the whole workspace (`default-members`): the `lox` package at the root and the
-library crates `crates/lxir` and `crates/loxone-client`. `cargo run` runs `lox` (`default-run`); `cargo run --bin lxir -- help` runs lxir.
+library crates `crates/loxone-config` and `crates/loxone-client`. `cargo run` runs `lox` (`default-run`); `cargo run --bin loxl -- help` runs loxl, the Lox Logic CLI.
 
 ## Pre-push CI Checklist
 
@@ -61,10 +61,10 @@ headings (`--notes vX.Y.Z` shows it). See [changelog.d/README.md](changelog.d/RE
 - Several merges in a row become one release (only the newest green commit of main releases).
 - A Cargo.toml version above the last tag is released as it is. A hand-pushed `vX.Y.Z` tag still releases; a
   failed release reruns with *Actions › Release › Run workflow* and the tag.
-- The library crates keep their own versions (`crates/lxir/Cargo.toml`, `crates/loxone-client/Cargo.toml`):
+- The library crates keep their own versions (`crates/loxone-config/Cargo.toml`, `crates/loxone-client/Cargo.toml`):
   bump one (and its requirement in the root Cargo.toml when the bump leaves the old one) and the next
-  release publishes it to crates.io, lxir first — that needs the `CARGO_REGISTRY_TOKEN` repository secret.
-  Without it, publish by hand: `cargo publish -p lxir`, then `cargo publish -p loxone-client`. A breaking
+  release publishes it to crates.io, loxone-config first — that needs the `CARGO_REGISTRY_TOKEN` repository secret.
+  Without it, publish by hand: `cargo publish -p loxone-config`, then `cargo publish -p loxone-client`. A breaking
   change to a public API is a minor bump while the crate is 0.x.
 - `python3 .github/scripts/prepare_release.py --dry-run` shows what the next release would be, with its notes.
 
@@ -74,7 +74,7 @@ Cargo workspace: the `lox` binary (root package) and two library crates that `lo
 published on crates.io:
 
 - `crates/loxone-client`: talks to the Miniserver (HTTP, token auth, WebSocket stream, FTP, statistics).
-- `crates/lxir`: the program file (`.Loxone`, backup ZIPs, the `.lxir` language). Never touches the network.
+- `crates/loxone-config`: the program file (`.Loxone`, backup ZIPs, the `.loxl` language). Never touches the network.
 
 Policy stays in lox: contexts and config files, aliases, risk levels and confirmations (`actions.rs`), scenes,
 the CLI, TUI and MCP server, output formatting. HTTP is reqwest blocking; the WebSocket parts are tokio.
@@ -91,25 +91,25 @@ global states, operating modes, retries), `connection.rs`, `error.rs`, `ws.rs` (
 `statv2.rs` (Statistics V2), `stats.rs` (statistics and weather files), `sdtest.rs`, `time.rs` (Loxone
 timestamps).
 
-### The lxir crate (`crates/lxir`)
+### The loxone-config crate (`crates/loxone-config`)
 
-Loxone config as code: lossless `.Loxone` XML, the UUID/identity model, the `.lxir` language,
+Loxone config as code: lossless `.Loxone` XML, the UUID/identity model, the `.loxl` language,
 compile/decompile/adopt, the lockfile, semantic diff, and (feature `archive`) backup ZIPs with the LoxCC codec. It
-never touches the network — that is loxone-client's job. Its CLI is `crates/lxir/src/cli.rs`, run by the `lxir` binary and by `lox ir`
-(arguments passed through as-is). Before changing it, read `crates/lxir/AGENTS.md` (format facts are
+never touches the network — that is loxone-client's job. Its CLI is `crates/loxone-config/src/cli.rs`, run by the `loxl` binary and by `lox logic`
+(arguments passed through as-is). Before changing it, read `crates/loxone-config/AGENTS.md` (format facts are
 documented, never guessed; the connector table only takes live-verified entries; never commit real configs).
 `lox` itself is not published (the crate name is taken).
 
-The standalone repo github.com/discostu105/lxir was imported with `git subtree` (history kept). Until it is
+The crate was called lxir until v0.3.0 (the language: "lxir" → Lox Logic, `.lxir` → `.loxl`). The standalone repo github.com/discostu105/lxir was imported with `git subtree` (history kept). Until it is
 archived, work merged there comes over with
-`git subtree pull --prefix=crates/lxir https://github.com/discostu105/lxir.git main` (a moved file such as
+`git subtree pull --prefix=crates/loxone-config https://github.com/discostu105/lxir.git main` (a moved file such as
 `src/bin/lxir.rs` → `src/cli.rs` still merges).
 
 ### Source files
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | All CLI commands (30+), clap argument parsing and dispatch; `lox ir` hands its arguments to `lxir::cli` |
+| `src/main.rs` | All CLI commands (30+), clap argument parsing and dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
 | `src/util.rs` | Small shared helpers: `xml_attr`/`json_val_str`, `http_status`, RGB→HSV, path encoding, terminal formatting |
 | `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
@@ -117,13 +117,13 @@ archived, work merged there comes over with
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/actions.rs` | Shared action layer: per-control-type command mapping and risk levels (used by the CLI and the TUI) |
 | `src/mcp/` | `lox mcp`: MCP server on rmcp (MCP 2026-07-28 + older) — CLI/runtime (`mod.rs`), `#[tool]` definitions, risky-action confirmation via MRTR/elicitation (`server.rs`), blocking Miniserver ops + output schemas (`ops.rs`), rmcp client/server protocol tests (`tests.rs`). Design: `docs/design-mcp.md` |
-| `src/logic.rs` | Adapter over lxir (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
+| `src/logic.rs` | Adapter over loxone-config (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (by hash, `v273`, save date, `<hash>^`), working copy, cache, FTP download, files; block history across commits |
 | `src/commands/config_insight.rs` | Read-only `lox config diff/show/wiring/find/lint/history` |
-| `src/commands/config_push.rs` | `lox config push`: deploy an lxir project — drift check, compile against the live download (lxir library), byte-exact staging, upload as `sps_new.zip`, program restart (`--reboot`: reboot), verify, move `base`; `Miniserver` trait with a fake for tests |
+| `src/commands/config_push.rs` | `lox config push`: deploy a Lox Logic project — drift check, compile against the live download (loxone-config library), byte-exact staging, upload as `sps_new.zip`, program restart (`--reboot`: reboot), verify, move `base`; `Miniserver` trait with a fake for tests |
 | `src/commands/push_users.rs` | The push's user guard: live users (user management API) against the users of the program file — the changes an upload would discard |
 | `crates/loxone-client/` | The Miniserver client (see above) |
-| `crates/lxir/` | The lxir crate (see above): `src/xml.rs`, `uuid.rs`, `doc.rs`, `connectors.rs`, `lock.rs`, `diff.rs`, `project.rs`, `ir/` (parser, compile, decompile, adopt, lint, simtest), `cli.rs`; its own `docs/`, `tests/`, `examples/` (`examples/ci.sh` runs in CI) |
+| `crates/loxone-config/` | The loxone-config crate (see above): `src/xml.rs`, `uuid.rs`, `doc.rs`, `connectors.rs`, `lock.rs`, `diff.rs`, `project.rs`, `logic/` (parser, compile, decompile, adopt, lint, simtest), `cli.rs`; its own `docs/`, `tests/`, `examples/` (`examples/ci.sh` runs in CI) |
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 
 ### Key design points

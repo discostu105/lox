@@ -106,9 +106,9 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:v
 </section>
 
 <section id="wiring">
-  <div class="eyebrow">Overlay · key w · powered by lxir</div>
+  <div class="eyebrow">Overlay · key w · powered by loxone-config</div>
   <h2>Wiring: why is this light on?</h2>
-  <p>The config's logic around a control, read from the <code>.Loxone</code> file with lxir. Live values come from the stream, because the WebSocket state UUIDs are the block output connectors in the config (checked against a real config: 148 of 148 controls, 25 of 25 rooms). Wires from blocks without a visualization have no live value and are drawn dashed.</p>
+  <p>The config's logic around a control, read from the <code>.Loxone</code> file with loxone-config. Live values come from the stream, because the WebSocket state UUIDs are the block output connectors in the config (checked against a real config: 148 of 148 controls, 25 of 25 rooms). Wires from blocks without a visualization have no live value and are drawn dashed.</p>
   <div class="win"><div class="win-bar"><span>lox tui · w</span><span>120×36</span></div><div class="win-body"><pre class="term" id="s-wiring"></pre></div></div>
 </section>
 
@@ -178,7 +178,7 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:v
       <tr><td><kbd>m</kbd></td><td>Mode / mood picker</td><td>moods</td><td>shade</td><td>auto · eco · comfort · manual</td><td>source</td><td>open ⚠</td></tr>
       <tr><td><kbd>a</kbd></td><td>All actions menu</td><td colspan="5">every action for the item, each with its key and its CLI equivalent</td></tr>
       <tr><td><kbd>⏎</kbd></td><td>Inspect / drill in</td><td colspan="5">inspector with states, wiring, history</td></tr>
-      <tr class="new"><td><kbd>w</kbd></td><td>Wiring (“why?”)</td><td colspan="5">logic around the control with live values on wires (lxir); also works on an event</td></tr>
+      <tr class="new"><td><kbd>w</kbd></td><td>Wiring (“why?”)</td><td colspan="5">logic around the control with live values on wires (loxone-config); also works on an event</td></tr>
       <tr><td><kbd>*</kbd> <kbd>e</kbd></td><td>Pin to Home · show events</td><td colspan="5">works on any item, including rooms and meters</td></tr>
       <tr><td><kbd>y</kbd> <kbd>Y</kbd></td><td>Copy command · UUID</td><td colspan="5">copies to the clipboard via OSC 52, which also works over SSH</td></tr>
       <tr><td><kbd>v</kbd> <kbd>V</kbd></td><td>Mark · mark all visible</td><td colspan="5">with a mark set, action keys apply to every marked item</td></tr>
@@ -434,12 +434,12 @@ if(l)s.rich(23,y,[['●','on'],[String(l),'dm']]);if(f)s.put(25,y,f,f==='⚠'?'w
   return s;
 }
 
-/* ── wiring overlay (lxir) ───────────────────────────── */
+/* ── wiring overlay (loxone-config) ───────────────────────────── */
 function scrWiring(frame=0){
   const s=scrRooms(0,false);s.dimAll();
   const X=4,Y=3,W=112,H=30;
   s.box(X,Y,W,H,{fill:true,focus:true,title:[['Hallway Light','ac b']],tabs:[[['wiring','tx b']]],meta:[['why is this on?','dm']],
-    hints:[['⏎','follow wire'],['h l','upstream · downstream'],['e','events'],['Esc','close']],count:'lxir · r50.Loxone'});
+    hints:[['⏎','follow wire'],['h l','upstream · downstream'],['e','events'],['Esc','close']],count:'loxone-config · r50.Loxone'});
   s.rich(X+3,Y+2,[['● ','on'],['Hallway Light','tx b'],['  on 40%','on'],['   since 14:32:05.9 · triggered by ','dm'],['Motion Hallway','ac b'],[' 0 → 1','ac']]);
   const wire=(x1,x2,y,live,cls,label,lcls,pulse)=>{for(let x=x1;x<x2;x++){const m=pulse&&((x-x1-frame)%8+8)%8===0;s.put(x,y,live?(m?'▸':'━'):'┄',live?(m?cls+' b':cls):'fn');}s.put(x2,y,'▶',live?cls+' b':'fn');if(label)s.rich(x1+1,y-1,label.map(p=>[p[0],p[1]||lcls]));};
   const bx=X+44,by=Y+5,bw=26,bh=16;

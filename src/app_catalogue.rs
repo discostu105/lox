@@ -4,14 +4,14 @@
 //! Miniserver does not rebuild it on start (2026-10-29: a push that added
 //! objects left the served catalogue at the `lastModified` of the last save,
 //! #155), so `lox config push` carries the changes to the app's controls
-//! into it ([`lxir::catalogue`]) and names what it cannot.
+//! into it ([`loxone_config::catalogue`]) and names what it cannot.
 
 use anyhow::{Context, Result};
-use lxir::LoxoneDoc;
+use loxone_config::LoxoneDoc;
 use serde::Serialize;
 use serde_json::Value;
 
-pub(crate) const MEMBER: &str = lxir::catalogue::MEMBER;
+pub(crate) const MEMBER: &str = loxone_config::catalogue::MEMBER;
 
 /// A control of the app whose entry the push changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -24,8 +24,8 @@ pub(crate) struct StaleEntry {
     pub change: String,
 }
 
-impl From<lxir::catalogue::Change> for StaleEntry {
-    fn from(c: lxir::catalogue::Change) -> Self {
+impl From<loxone_config::catalogue::Change> for StaleEntry {
+    fn from(c: loxone_config::catalogue::Change) -> Self {
         StaleEntry {
             uuid: c.uuid,
             app_name: c.name,
@@ -54,13 +54,14 @@ pub(crate) fn update(
     live: &LoxoneDoc,
     compiled: &LoxoneDoc,
 ) -> Result<Option<Update>> {
-    let Some(bytes) = lxir::archive::read_entry(live_zip, MEMBER)? else {
+    let Some(bytes) = loxone_config::archive::read_entry(live_zip, MEMBER)? else {
         return Ok(None);
     };
     let parsed = parse(&bytes)?;
     let text = String::from_utf8(bytes).with_context(|| format!("{MEMBER} is not UTF-8"))?;
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let u = lxir::catalogue::update(&text, live, compiled, &now).map_err(anyhow::Error::msg)?;
+    let u = loxone_config::catalogue::update(&text, live, compiled, &now)
+        .map_err(anyhow::Error::msg)?;
     Ok(Some(Update {
         live: parsed,
         content: (u.text != text).then(|| u.text.into_bytes()),

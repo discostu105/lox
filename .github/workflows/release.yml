@@ -1,7 +1,7 @@
 name: Release
 
 # Builds and publishes a tagged version: binaries on the GitHub release,
-# the Docker image, the Homebrew formula, and lxir and loxone-client on
+# the Docker image, the Homebrew formula, and loxone-config and loxone-client on
 # crates.io when their version is new. Runs for a pushed vX.Y.Z tag, when auto-release.yml calls
 # it after tagging, or by hand for an existing tag (to retry a failed run).
 on:
@@ -299,13 +299,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      # lxir and loxone-client keep their own versions (crates/*/Cargo.toml);
-      # bump one there and the next release publishes it. lxir goes first.
+      # loxone-config and loxone-client keep their own versions (crates/*/Cargo.toml);
+      # bump one there and the next release publishes it. loxone-config goes first.
       - name: Publish what crates.io lacks
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for crate in lxir loxone-client; do
+          for crate in loxone-config loxone-client; do
             version=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
             if curl -fsS -o /dev/null -A "lox release (github.com/${GITHUB_REPOSITORY})" \

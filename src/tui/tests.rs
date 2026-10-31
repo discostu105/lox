@@ -981,7 +981,7 @@ fn feed_snapshot(h: &mut H) {
 }
 
 /// C: ⏎ on a commit browses that snapshot — pages, a page's blocks and its
-/// lxir source, `/` search, then a block's wiring at that snapshot with trace
+/// Lox Logic source, `/` search, then a block's wiring at that snapshot with trace
 /// and history.
 #[test]
 fn config_snapshot_browser() {
@@ -996,7 +996,7 @@ fn config_snapshot_browser() {
         "pages: {}",
         s
     );
-    // the Hallway page: its blocks, then its lxir source
+    // the Hallway page: its blocks, then its Lox Logic source
     let Some(Overlay::Browse(b)) = h.app.top_overlay() else {
         unreachable!()
     };
@@ -1022,7 +1022,7 @@ fn config_snapshot_browser() {
     );
     h.keys(&["s"]);
     let s = h.render(140, 36);
-    assert!(s.contains("lxir"), "{}", s);
+    assert!(s.contains("loxl"), "{}", s);
     assert!(s.contains(" = "), "source: {}", s);
     h.keys(&["s"]);
     // search across the snapshot, ⏎ opens the wiring at that snapshot

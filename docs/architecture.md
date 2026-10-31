@@ -25,9 +25,9 @@ nav_order: 5
   (`crates/loxone-client`): everything that talks to a Miniserver — HTTP, token auth, the WebSocket state stream,
   FTP, statistics. It takes a `Connection` (host, credentials, token and cache paths), reads no config files and
   is published on [crates.io](https://crates.io/crates/loxone-client).
-- **[`lxir`](https://github.com/discostu105/lox/tree/main/crates/lxir)** (`crates/lxir`): Loxone config as code — a
-  lossless `.Loxone` XML layer, the UUID model, the `.lxir` language and compiler, lockfile and semantic diff. It
-  never touches the network and is published on [crates.io](https://crates.io/crates/lxir). `lox ir` runs its CLI;
+- **[`loxl`](https://github.com/discostu105/lox/tree/main/crates/loxone-config)** (`crates/loxone-config`): Loxone config as code — a
+  lossless `.Loxone` XML layer, the UUID model, the `.loxl` language and compiler, lockfile and semantic diff. It
+  never touches the network and is published on [crates.io](https://crates.io/crates/loxone-config). `lox logic` runs its CLI;
   the logic diffs, `lox config show/wiring/find/lint/history` and the TUI's wiring view are built on it.
 
 TLS is rustls (no OpenSSL). Certificate verification is off unless `verify_ssl: true` is set, since Miniservers use
@@ -37,14 +37,14 @@ self-signed certificates.
 
 | File | Purpose |
 |:-----|:--------|
-| `src/main.rs` | clap definitions and command dispatch; `lox ir` hands its arguments to `lxir::cli` |
+| `src/main.rs` | clap definitions and command dispatch; `lox logic` hands its arguments to `loxone_config::cli` |
 | `src/commands/` | Command implementations: `control`, `inspect`, `system`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx` |
 | `src/util.rs` | Shared helpers |
 | `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery; `connection()` and `client()` build the loxone-client side |
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
 | `src/otel.rs` | OpenTelemetry metrics, logs and traces |
-| `src/loxone_xml.rs` | Users, devices and a summary of the program file (views over lxir) |
-| `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over lxir |
+| `src/loxone_xml.rs` | Users, devices and a summary of the program file (views over loxone-config) |
+| `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over loxone-config |
 | `src/scene.rs` | Scenes from YAML |
 | `src/mcp/` | `lox mcp`: MCP server on rmcp |
 | `src/tui/` | `lox tui` (cargo feature `tui`, on by default) |

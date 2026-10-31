@@ -82,4 +82,4 @@ lox ls -t Jalousie -r OG -o json | jq -r '.[].uuid' | while read -r b; do lox bl
 | [Controls](controls) | `on`/`off`, lights, blinds, gates, climate, alarm, doors, intercom, charger, inputs, music, `send`, `run` |
 | [Inspection](inspection) | `ls`, `get`, `info`, `watch`, `stream`, `if`, rooms, sensors, energy, weather, history, autopilot |
 | [System](system) | `status`, `log`, `health`, `discover`, firmware, `reboot`, `files`, `tui` |
-| [Configuration](configuration) | `setup`, aliases, cache, token, scenes, `config`, `ir`, contexts, completions, `schema`, `mcp` |
+| [Configuration](configuration) | `setup`, aliases, cache, token, scenes, `config`, `logic`, contexts, completions, `schema`, `mcp` |
