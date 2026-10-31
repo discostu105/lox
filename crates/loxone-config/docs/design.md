@@ -1542,8 +1542,10 @@ Anything unverified is an error, not a heuristic:
     them.
   Validated: oracle session 15 — a house compile with a notification,
   a recipient and an `OutputRefLM` open+saves with an empty semantic
-  diff. Not covered: whether the Miniserver delivers to a recipient
-  that the uploaded `permissions.bin` does not list.
+  diff. Live (2026-10-31, r50 frost warning): a declared recipient
+  gets the push; `permissions.bin` has no entry for notifications. The
+  phone's own push settings (`PCfg`, loxone-format.md *Push
+  notifications*) can still block it.
 - **D52 — documented port facts: units, labels, ranges** (2026-10-29).
   D27 read every time suffix as seconds, which is wrong on the ports
   Loxone keeps in minutes: `AutoJalousie(AutoShadeTime: 2h)` compiled

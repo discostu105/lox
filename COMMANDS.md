@@ -506,6 +506,9 @@ Each step stops the push when it fails:
    A staging run only warns. If `/sys/custom` cannot be listed, `--force` refuses too. A change to an object the
    compiled upload deletes (`removed` in the source, a rule deleted in the app say) goes with the object and does
    not stop `--force` (`"removed": true` in the JSON).
+   The push settings of a registered phone (which notifications it receives, changed in the app's settings) belong
+   to the app, not to the program: the push carries them into the upload and keeps them (`custom_changes_kept`),
+   instead of refusing. Only phones the program already has qualify; a newly registered one still refuses.
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
    since (someone saved from Loxone Config or the app), the push refuses and names the `lox logic diff` to run.
    Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
