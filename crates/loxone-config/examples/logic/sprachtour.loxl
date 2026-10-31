@@ -181,7 +181,7 @@ klimasensor.title = "Raumklima Garten"
 klimasensor.room = "Garten"
 klima_temp.category = "Klima"
 
-# --- test (D36): clock, dt-Schritte, ~= --------------------------------
+# --- test (D36, D80): clock, Dauer, dt-Schritte, ~=, != ----------------
 # `loxl test` kompiliert im Speicher und spielt jedes Szenario im
 # eingebauten Simulator durch; Referenzen zeigen auf das flache Modul
 # (Templates expandiert, Ausdrücke desugart). Injizierte Signale tragen
@@ -189,12 +189,12 @@ klima_temp.category = "Klima"
 # (`--lox`), das per Titel adressiert.
 
 test "Hitzewarnung mit Hysterese"
-	clock "2026-07-15 14:00" # simulierte Uhrzeit, für Zeitlogik
+	clock 2026-07-15 14:00 # simulierte Uhrzeit, für Zeitlogik
 	aussentemp.Q = 35
 	tick 4
 	expect hitze_alarm.Q == 1
 	aussentemp.Q = 29 # unter Ein (30), über Aus (28)
-	tick 4 dt 500ms # feinere Simulationsschritte
+	tick 2s dt 500ms # zwei Sekunden in feineren Schritten (4 Ticks)
 	expect hitze_alarm.Q == 1 # Hysterese hält
 	aussentemp.Q = 20
 	tick 4
@@ -204,9 +204,9 @@ end
 test "Abdeckungswächter schaltet"
 	abdeckung.Q = 90
 	tick 4
-	expect weit_offen.Q == 1
+	expect weit_offen.Q == on # digitale Werte: on/off
 	expect anforderung.Q == 1 # Fan-in: ein I1-Draht genügt
 	abdeckung.Q = 30
 	tick 4
-	expect weit_offen.Q == 0
+	expect weit_offen.Q != on
 end

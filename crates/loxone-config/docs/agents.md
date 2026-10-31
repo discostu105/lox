@@ -161,7 +161,7 @@ rule regel                           # an app rule (D57): active, all
 	active                           # `when`s must hold, `then`s in order
 	when weekday weekdays
 	when time 09:00
-	then pumpe "on"
+	then pumpe on
 end
 
 rule party "Party-Licht"             # D73: a block's state, a mode,
@@ -176,7 +176,7 @@ end
 rule mittag "Pumpe Mittag"           # a named rule (D60): the config's
 	inactive                         # rule of that name, else created
 	when time 12:30
-	then pumpe "on"
+	then pumpe on
 end
 
 moods wohnen                         # light moods (D58), by name; the off
@@ -221,7 +221,11 @@ it only when it matches what you intended.
 | `the timer is analog — … needs a value` / `the timer is digital` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
 | `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or mint the mode (`party = Mode("Party")`) |
 | `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
-| `` `Analog:` is "true" or "false" `` | a VirtualIn's `Analog:` got another value | write `Analog: "true"` (or drop it: digital) |
+| `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
+| `` write `X` instead of `Y` `` | a v1 spelling v2 dropped (D80): `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
+| `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
+| `is no whole number of ticks of` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
+| `` has no `!=` `` (from `test --lox`) | lox-cli's simulator lacks `!=` | run the test in the built-in simulator, or rewrite as `==` |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |

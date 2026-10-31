@@ -82,6 +82,15 @@ pub fn suggestion(message: &str) -> Option<&str> {
     is_name(fix).then_some(fix)
 }
 
+/// The `(new, old)` of a diagnostic's "write `NEW` instead of `OLD`" —
+/// the exact replacement a v1 spelling names (D80).
+pub fn replacement(message: &str) -> Option<(&str, &str)> {
+    let rest = &message[message.find("write `")? + "write `".len()..];
+    let (new, rest) = rest.split_once("` instead of `")?;
+    let old = &rest[..rest.find('`')?];
+    (!old.is_empty()).then_some((new, old))
+}
+
 /// `s` is one identifier.
 pub fn is_name(s: &str) -> bool {
     let mut c = s.chars();

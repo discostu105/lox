@@ -334,6 +334,11 @@ impl Desugar<'_> {
                  compute on plain numbers",
                 self.sink,
             ))),
+            Value::Bool(_) => Err(Error::Compile(format!(
+                "`{v}` in the arithmetic on `{}` is a digital value — formulas \
+                 compute on plain numbers (write `1` or `0`)",
+                self.sink,
+            ))),
         }
     }
 

@@ -111,13 +111,13 @@ const AS_READ: &str = "rule pumpe_ein\n\
                        \tactive\n\
                        \twhen weekday weekdays\n\
                        \twhen time 09:00\n\
-                       \tthen pumpe \"on\"\n\
+                       \tthen pumpe on\n\
                        end\n\
                        \n\
                        rule pumpe_aus\n\
                        \tinactive\n\
                        \twhen time 17:00\n\
-                       \tthen pumpe \"off\"\n\
+                       \tthen pumpe off\n\
                        end\n";
 
 #[test]
@@ -129,7 +129,7 @@ fn rule_declarations_are_canonical() {
          \tactive\n\
          \twhen weekday mon tue wed # three days\n\
          \twhen time 9:05\n\
-         \tthen pumpe \"on\"\n\
+         \tthen pumpe on\n\
          end # pump\n"
     );
     let m = Module::parse(&src).unwrap();
@@ -143,7 +143,7 @@ fn rule_declarations_are_canonical() {
             "active",
             "when weekday mon tue wed",
             "when time 09:05",
-            "then pumpe \"on\""
+            "then pumpe on"
         ]
     );
     // `rule` names a declaration only in front of a slug.
@@ -166,40 +166,37 @@ fn rule_declarations_are_checked() {
         assert!(e.contains(want), "{body:?}: {e}");
     };
     has(
-        "rule pumpe_ein\n\twhen time 9:00\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\twhen time 9:00\n\tthen pumpe on\nend\n",
         "active",
     );
-    has(
-        "rule pumpe_ein\n\tactive\n\tthen pumpe \"on\"\nend\n",
-        "when",
-    );
+    has("rule pumpe_ein\n\tactive\n\tthen pumpe on\nend\n", "when");
     has("rule pumpe_ein\n\tactive\n\twhen time 9:00\nend\n", "then");
     has(
-        "rule pumpe_ein\n\tactive\n\twhen time 24:00\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen time 24:00\n\tthen pumpe on\nend\n",
         "not a time of day",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen weekday monday\n\twhen time 9:00\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen weekday monday\n\twhen time 9:00\n\tthen pumpe on\nend\n",
         "monday",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen weekday mon weekdays\n\twhen time 9:00\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen weekday mon weekdays\n\twhen time 9:00\n\tthen pumpe on\nend\n",
         "mon",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen rain\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen rain\n\tthen pumpe on\nend\n",
         "when time",
     );
     has(
-        "rule pumpe\n\tactive\n\twhen time 9:00\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe\n\tactive\n\twhen time 9:00\n\tthen pumpe on\nend\n",
         "AutopilotRule",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen time 9:00\n\tthen nirgends \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen time 9:00\n\tthen nirgends on\nend\n",
         "nirgends",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen time 9:00\n\tthen pumpe \"on\"\n",
+        "rule pumpe_ein\n\tactive\n\twhen time 9:00\n\tthen pumpe on\n",
         "unclosed `rule pumpe_ein`",
     );
 }
@@ -295,9 +292,9 @@ fn new_conditions_and_actions_are_built_from_evidence() {
     // A weekday condition where there was none, a pulse to a PButtonT
     // (corpus table), and `on` to the pump copied from `Pumpe Ein`.
     let src = AS_READ.replace(
-        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\n",
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe off\n",
         "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\twhen weekday wed\n\
-         \tthen abdeckung \"pulse\"\n\tthen pumpe \"on\"\n",
+         \tthen abdeckung pulse\n\tthen pumpe on\n",
     );
     let out = compile_rules(&base, &src).unwrap();
     let off = tag_of(&out, RULE_OFF);
@@ -325,7 +322,7 @@ fn new_conditions_and_actions_are_built_from_evidence() {
     assert!(
         m.to_text().contains(
             "rule pumpe_aus \"Pumpe Aus\"\n\tinactive\n\twhen time 17:00\n\twhen weekday wed\n\
-             \tthen abdeckung \"pulse\"\n\tthen pumpe \"on\"\nend\n"
+             \tthen abdeckung pulse\n\tthen pumpe on\nend\n"
         ),
         "{}",
         m.to_text()
@@ -336,7 +333,7 @@ fn new_conditions_and_actions_are_built_from_evidence() {
 fn unknown_actions_and_shapes_are_refused() {
     let base = fixture();
     // No action code is known for a Switch.
-    let src = AS_READ.replace("then pumpe \"off\"", "then licht \"on\"");
+    let src = AS_READ.replace("then pumpe off", "then licht on");
     let e = compile_rules(&base, &src).unwrap_err().to_string();
     assert!(e.contains("descID") && e.contains("Switch"), "{e}");
 
@@ -371,7 +368,7 @@ fn placed_fixture() -> String {
 const NEW_RULE: &str = "rule mittag \"Pumpe Mittag\"\n\
                         \tactive\n\
                         \twhen time 12:30\n\
-                        \tthen pumpe \"on\"\n\
+                        \tthen pumpe on\n\
                         end\n";
 
 fn compile_with(base: &str, src: &str, lock: &mut Lockfile) -> loxone_config::Result<String> {
@@ -436,7 +433,7 @@ fn a_named_rule_is_created_next_to_the_others() {
     let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
     assert!(
         m.to_text()
-            .contains("\tactive\n\twhen time 12:30\n\tthen pumpe \"on\"\nend\n"),
+            .contains("\tactive\n\twhen time 12:30\n\tthen pumpe on\nend\n"),
         "{}",
         m.to_text()
     );
@@ -447,7 +444,7 @@ fn a_named_rule_finds_the_base_rule_and_owns_its_name() {
     let base = placed_fixture();
     let mut lock = Lockfile::new();
     let as_read = "rule abend \"Pumpe Aus\"\n\tinactive\n\twhen time 17:00\n\
-                   \tthen pumpe \"off\"\nend\n";
+                   \tthen pumpe off\nend\n";
     // Found by name: nothing written, the UUID pinned.
     assert_eq!(compile_with(&base, as_read, &mut lock).unwrap(), base);
     assert_eq!(lock.rules["abend"], RULE_OFF);
@@ -500,7 +497,7 @@ fn named_rules_are_checked() {
     // An extern and a name for the same rule.
     has(
         &format!(
-            "{}\nrule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+            "{}\nrule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe off\nend\n",
             NEW_RULE.replace("Pumpe Mittag", "Pumpe Aus")
         ),
         "already declares this rule",
@@ -669,14 +666,14 @@ const SHAPES: &str = "rule pumpe_aus\n\
                       \tor\n\
                       \twhen time 17:00\n\
                       \tthen mode \"Party\" off\n\
-                      \tthen abdeckung \"pulse\"\n\
+                      \tthen abdeckung pulse\n\
                       end\n";
 
 #[test]
 fn states_modes_and_groups_compile_and_read_back() {
     let base = mode_fixture();
     let src = AS_READ.replace(
-        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe off\nend\n",
         SHAPES,
     );
     let out = compile_rules(&base, &src).unwrap();
@@ -730,14 +727,14 @@ fn states_and_modes_are_checked() {
     assert!(e.contains("Urlaub") && e.contains("Party"), "{e}");
     // `or` needs conditions before it.
     let e = Module::parse(&format!(
-        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\tor\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n"
+        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\tor\n\twhen time 17:00\n\tthen pumpe off\nend\n"
     ))
     .unwrap_err()
     .to_string();
     assert!(e.contains("`or`"), "{e}");
     // A state of an undeclared slug.
     let e = Module::parse(&format!(
-        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\twhen nope.active == on\n\tthen pumpe \"off\"\nend\n"
+        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\twhen nope.active == on\n\tthen pumpe off\nend\n"
     ))
     .unwrap_err()
     .to_string();
@@ -783,7 +780,7 @@ fn the_container_watches_what_the_rules_watch() {
          \t\t</C>\r\n\t</C>\r\n</ControlList>",
     );
     let src = AS_READ.replace(
-        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe off\nend\n",
         SHAPES,
     );
     let out = compile_rules(&base, &src).unwrap();
@@ -832,12 +829,12 @@ const MORE: &str = "rule pumpe_aus\n\
                     \twhen daylight off\n\
                     \tor\n\
                     \twhen sunset\n\
-                    \twhen date \"2026-07-01\"\n\
+                    \twhen date 2026-07-01\n\
                     \tthen notify \"Pumpe\" \"läuft aus\"\n\
                     \tthen wait 2.5s\n\
                     \tthen mail \"a@example.invalid\" \"Pumpe\" \"aus\"\n\
                     \tthen message warning \"Pumpe\" \"aus\" admins\n\
-                    \tthen pumpe \"off\"\n\
+                    \tthen pumpe off\n\
                     end\n";
 
 #[test]
@@ -847,7 +844,7 @@ fn weather_clock_and_messages_compile_and_read_back() {
         "<C Type=\"Document\" V=\"175\" Timezone=\"Europe/Vienna\"",
     );
     let src = AS_READ.replace(
-        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe off\nend\n",
         MORE,
     );
     let out = compile_rules(&base, &src).unwrap();
@@ -894,12 +891,12 @@ fn weather_clock_and_messages_are_checked() {
         .to_string();
     assert!(e.contains("1 … 31"), "{e}");
     // The fixture states no time zone.
-    let e = compile_rules(&base, &with("\twhen date \"2026-07-01\"\n"))
+    let e = compile_rules(&base, &with("\twhen date 2026-07-01\n"))
         .unwrap_err()
         .to_string();
     assert!(e.contains("not stated"), "{e}");
     let parse_err = |line: &str| Module::parse(&with(line)).unwrap_err().to_string();
-    assert!(parse_err("\twhen date \"2026-02-30\"\n").contains("not a date"));
+    assert!(parse_err("\twhen date 2026-02-30\n").contains("not a date"));
     let then = |line: &str| with(&format!("\twhen time 17:00\n{line}"));
     let parse_then = |line: &str| Module::parse(&then(line)).unwrap_err().to_string();
     assert!(parse_then("\tthen wait 0.05s\n").contains("0.1 s"));
@@ -951,7 +948,7 @@ fn the_container_watches_the_weather_day_and_daylight() {
     };
     let src = with(
         "\twhen time 17:00\n\twhen weather temperature > 0\n\twhen day >= 15\n\
-         \twhen daylight\n\twhen date \"2026-07-01\"\n",
+         \twhen daylight\n\twhen date 2026-07-01\n",
     );
     let out = compile_rules(&base, &src).unwrap();
     let at = out.find("<Co K=\"Input\"").unwrap();

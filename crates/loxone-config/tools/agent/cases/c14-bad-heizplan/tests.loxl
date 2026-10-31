@@ -6,32 +6,32 @@ extern t_heizung = VirtualOutCmd(title: "Heizung Bad")
 
 test "Werktag"
 	t_raumtemp.Q = 20
-	clock "2026-07-15 05:20"
+	clock 2026-07-15 05:20
 	tick 2
 	expect t_heizung.I == 0
-	clock "2026-07-15 06:00"
+	clock 2026-07-15 06:00
 	tick 2
 	expect t_heizung.I == 1
-	clock "2026-07-15 12:00"
+	clock 2026-07-15 12:00
 	tick 2
 	expect t_heizung.I == 0
-	clock "2026-07-15 21:30"
+	clock 2026-07-15 21:30
 	tick 2
 	expect t_heizung.I == 1
 end
 
 test "Wochenende"
 	t_raumtemp.Q = 20
-	clock "2026-07-18 06:00"
+	clock 2026-07-18 06:00
 	tick 2
 	expect t_heizung.I == 0
-	clock "2026-07-19 12:00"
+	clock 2026-07-19 12:00
 	tick 2
 	expect t_heizung.I == 1
 end
 
 test "Frostschutz außerhalb der Heizzeit"
-	clock "2026-07-15 12:00"
+	clock 2026-07-15 12:00
 	t_raumtemp.Q = 8
 	tick 2
 	expect t_heizung.I == 1

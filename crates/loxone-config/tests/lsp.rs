@@ -399,3 +399,37 @@ fn a_did_you_mean_diagnostic_offers_a_quick_fix() {
     assert_eq!(actions[0]["title"], "Change to `Q`");
     assert_eq!(actions[0]["edit"]["changes"][uri(&pool)][0]["newText"], "Q");
 }
+
+#[test]
+fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let v1 = format!("{src}\ntest \"uhr\"\n\tclock \"7:30\"\n\ttick 1\nend\n");
+    let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &v1),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `clock 07:30`");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], "clock 07:30");
+    // Only the old spelling is replaced, not the line's indentation.
+    let (l, c) = pos(&v1, "clock \"7:30\"");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+    assert_eq!(
+        edit["range"]["end"],
+        json!({"line": l, "character": c + 12})
+    );
+}

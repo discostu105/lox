@@ -326,6 +326,17 @@ fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item
     Ok(Item::Instance(call))
 }
 
+/// Every statement kind a line may start with, for the parse error of a
+/// line that starts with none of them.
+const STATEMENTS: &str = "expected a statement: `let <name> = <value>`, \
+     `extern <slug> = <Type>(…)`, `<slug> = <Type>(…)` (a block), \
+     `<slug> = <template>(…)` (an instance), `<slug>.<Port> <- <source>`, \
+     `<slug>.<Port> = <value>`, `<slug>.title|room|category = <value>`, \
+     `(<slug>, …).<Port> = <value>`, `<slug>.tiles|schedule|moods = <name>`, \
+     `page \"<title>\"`, `template <name>(…)`, `test \"<name>\"`, `tiles <name>`, \
+     `schedule <name>`, `moods <name>`, `rule <slug>`, `access <slug>`, \
+     `recipients <slug>`, `removed <slug>`, or `moved <old> -> <new>`";
+
 pub fn parse(src: &str) -> Result<Module> {
     let mut parser = Parser::default();
     for (i, raw) in src.lines().enumerate() {
@@ -825,12 +836,7 @@ impl Parser {
                 )?;
             }
             _ => {
-                return Err(err(
-                    "expected a statement: `let`, `extern`, `<slug> = <Type>(…)`, \
-                     `<slug>.<Port> <- <slug>.<Port>`, `<slug>.<Port> = <value>`, \
-                     `removed`, or `moved`"
-                        .into(),
-                ));
+                return Err(err(STATEMENTS.into()));
             }
         }
         Ok(())
@@ -927,11 +933,10 @@ fn parse_template_head(
                         },
                     });
                 }
-                (
-                    Some(Tok::Ident(n)),
-                    Some(Tok::Eq),
-                    Some(v @ (Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))),
-                ) => {
+                (Some(Tok::Ident(n)), Some(Tok::Eq), Some(v))
+                    if matches!(v, Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))
+                        || matches!(v, Tok::Ident(b) if b == "on" || b == "off") =>
+                {
                     params.push(TemplateParam::Value {
                         name: check_slug(n, lineno)?,
                         default: value_of(v, lineno)?,
@@ -939,7 +944,8 @@ fn parse_template_head(
                 }
                 _ => {
                     return Err(err("expected `<name>: <Type>` (object parameter) or \
-                                     `<name> = <literal>` (value parameter with default)"
+                                     `<name> = <literal>` (value parameter with default: a \
+                                     number, `on`/`off` or a quoted string)"
                         .into()));
                 }
             }
@@ -1041,7 +1047,7 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
                 Value::Ref(other) => {
                     return Err(err(format!(
                         "`let {name} = {other}` — a constant's value must be a \
-                                 number or a quoted string, not another identifier"
+                                 number, `on`/`off` or a quoted string, not another identifier"
                     )));
                 }
                 literal => literal,
@@ -1059,7 +1065,7 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
             comment,
         }),
         _ => Err(err(
-            "expected `let <name> = <number | \"string\" | HH:MM>`".into()
+            "expected `let <name> = <number | on | off | \"string\" | HH:MM>`".into(),
         )),
     }
 }
@@ -1262,7 +1268,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                  `when weekday <days>`, `when mode <mode> [off]`, \
                  `when <slug>.<state> <op> <value>`, `when weather …`, `when day …`, \
                  `when daylight`, `when sunset`, `when date …`, `or`, \
-                 `then <slug> \"<command>\"`, `then mode <mode> on|off`, `then notify …`, \
+                 `then <slug> <command>`, `then mode <mode> on|off`, `then notify …`, \
                  `then mail …`, `then wait <duration>`, `then message …` or `end`";
     let kind = match toks {
         [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
@@ -1402,17 +1408,33 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             RuleStmtKind::Sun(k.clone())
         }
         [Tok::Ident(w), Tok::Ident(k), Tok::Str(d)] if w == "when" && k == "date" => {
-            if crate::logic::rule::parse_date(d).is_none() {
-                return Err(err(format!("`{d}` is not a date (YYYY-MM-DD)")));
+            return Err(err(if is_date(d) {
+                format!(
+                    "a date is written bare — write `when date {d}` instead of \
+                     `when date \"{d}\"`"
+                )
+            } else {
+                format!(
+                    "`{d}` is not a date (YYYY-MM-DD); a date is written bare: `when date 2026-12-24`"
+                )
+            }));
+        }
+        [Tok::Ident(w), Tok::Ident(k), date @ ..] if w == "when" && k == "date" => {
+            match date_toks(date, lineno)? {
+                Some(d) => RuleStmtKind::Date(d),
+                None => {
+                    return Err(err(
+                        "expected `when date YYYY-MM-DD` (`when date 2026-12-24`)".into(),
+                    ));
+                }
             }
-            RuleStmtKind::Date(d.clone())
         }
         _ => {
             return Err(err(format!(
                 "Lox Logic knows the conditions `when time`, `when weekday`, `when mode`, \
                  `when <slug>.<state> <op> <value>`, `when weather <field> <op> <value>`, \
                  `when day <op> <n>`, `when daylight`, `when sunrise|sunset|dawn|dusk` and \
-                 `when date \"YYYY-MM-DD\"`; {usage}"
+                 `when date YYYY-MM-DD`; {usage}"
             )));
         }
     };
@@ -1494,12 +1516,16 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                 on: v == "on",
             }
         }
-        [Tok::Ident(w), Tok::Ident(target), Tok::Str(command)] if w == "then" => {
-            RuleStmtKind::Then {
-                target: check_slug(target, lineno)?,
-                command: command.clone(),
-            }
-        }
+        // `then pumpe on` — a one-word command is bare; `then x "on"`
+        // canonicalizes to it (D80).
+        [
+            Tok::Ident(w),
+            Tok::Ident(target),
+            Tok::Str(command) | Tok::Ident(command),
+        ] if w == "then" => RuleStmtKind::Then {
+            target: check_slug(target, lineno)?,
+            command: command.clone(),
+        },
         _ => return Err(err(format!("unexpected rule line; {usage}"))),
     };
     Ok(kind)
@@ -1747,25 +1773,68 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     (n, Some(dt))
                 }
                 _ => {
-                    return Err(err("expected `tick <n>` or `tick <n> dt <seconds>`".into()));
+                    return Err(err(
+                        "expected `tick <n>`, `tick <duration>` (`tick 5min`) or either \
+                         with `dt <seconds>`"
+                            .into(),
+                    ));
                 }
             };
-            let Tok::Num(n) = n_tok else {
-                return Err(err("expected `tick <n>` with a plain tick count".into()));
+            let (n, duration) = match n_tok {
+                Tok::Num(n) => {
+                    let n: u64 = n.parse().map_err(|_| {
+                        err(format!(
+                            "`tick {n}` — the tick count is a positive integer (or a \
+                             duration: `tick 5min`)"
+                        ))
+                    })?;
+                    (n, None)
+                }
+                // `tick 5min` — that much simulated time at the step's dt
+                // (D80).
+                Tok::UnitNum(number, unit)
+                    if matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H) =>
+                {
+                    let duration = Value::Unit {
+                        number: number.clone(),
+                        unit: *unit,
+                    };
+                    let dt_secs = dt.as_ref().and_then(|v| v.literal());
+                    let total = duration.literal().expect("lexed exactly");
+                    let n = whole_ratio(&total, dt_secs.as_deref().unwrap_or("1")).ok_or_else(
+                        || {
+                            let dt = dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
+                            err(format!(
+                                "`tick {duration}` is no whole number of ticks of `dt {dt}` \
+                                 — make the duration a multiple of dt"
+                            ))
+                        },
+                    )?;
+                    (n, Some(duration))
+                }
+                _ => {
+                    return Err(err(
+                        "expected `tick <n>` with a plain tick count, or `tick <duration>` \
+                         (`tick 90s`, `tick 5min`)"
+                            .into(),
+                    ));
+                }
             };
-            let n: u64 = n
-                .parse()
-                .map_err(|_| err(format!("`tick {n}` — the tick count is a positive integer")))?;
             if n == 0 {
                 return Err(err("`tick 0` advances nothing — use at least 1".into()));
             }
-            Ok(TestItem::Tick(TickDecl { n, dt, comment }))
+            Ok(TestItem::Tick(TickDecl {
+                n,
+                duration,
+                dt,
+                comment,
+            }))
         }
         [Tok::Ident(kw), rest @ ..] if kw == "expect" => {
             let [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), cmp_tok, val] = rest else {
                 return Err(err(
                     "expected `expect <slug>.<Port> <cmp> <value>` with cmp one of \
-                     `==`, `>=`, `>`, `<=`, `<`, `~=`"
+                     `==`, `!=`, `>=`, `>`, `<=`, `<`, `~=`"
                         .into(),
                 ));
             };
@@ -1776,15 +1845,11 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 Tok::Cmp(CmpOp::Le) => TestCmp::Le,
                 Tok::Cmp(CmpOp::Lt) => TestCmp::Lt,
                 Tok::Approx => TestCmp::Approx,
-                Tok::Cmp(CmpOp::Ne) => {
-                    return Err(err(
-                        "the simulator has no `!=` — assert the value you expect instead".into(),
-                    ));
-                }
+                Tok::Cmp(CmpOp::Ne) => TestCmp::Ne,
                 _ => {
                     return Err(err(
-                        "expected a comparator after the port: `==`, `>=`, `>`, `<=`, \
-                         `<`, or `~=`"
+                        "expected a comparator after the port: `==`, `!=`, `>=`, `>`, \
+                         `<=`, `<`, or `~=`"
                             .into(),
                     ));
                 }
@@ -1799,17 +1864,10 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 comment,
             }))
         }
-        [Tok::Ident(kw), rest @ ..] if kw == "clock" => {
-            let [Tok::Str(spec)] = rest else {
-                return Err(err(
-                    "expected `clock \"HH:MM\"` or `clock \"YYYY-MM-DD HH:MM\"`".into(),
-                ));
-            };
-            Ok(TestItem::Clock(ClockDecl {
-                spec: spec.clone(),
-                comment,
-            }))
-        }
+        [Tok::Ident(kw), rest @ ..] if kw == "clock" => Ok(TestItem::Clock(ClockDecl {
+            spec: clock_spec(rest, lineno)?,
+            comment,
+        })),
         [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), Tok::Eq, val] => {
             Ok(TestItem::Inject(SetDecl {
                 target: PortRef {
@@ -1833,7 +1891,8 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
         ))),
         _ => Err(err(
             "expected a test statement: `<slug>.<Port> = <value>`, `tick <n> [dt <s>]`, \
-             `expect <slug>.<Port> <cmp> <value>`, `clock \"…\"`, or `end`"
+             `tick <duration>`, `expect <slug>.<Port> <cmp> <value>`, `clock HH:MM`, \
+             `clock YYYY-MM-DD HH:MM`, or `end`"
                 .into(),
         )),
     }
@@ -2019,12 +2078,7 @@ fn parse_ident_statement(
         [Tok::Ident(ts), Tok::Dot, ..] => Err(err(format!(
             "expected `{ts}.<Port> <- <slug>.<Port>` or `{ts}.<Port> = <value>`"
         ))),
-        _ => Err(err(
-            "expected a statement: `let`, `extern`, `<slug> = <Type>(…)`, \
-             `<slug>.<Port> <- <slug>.<Port>`, `<slug>.<Port> = <value>`, \
-             `removed`, or `moved`"
-                .into(),
-        )),
+        _ => Err(err(STATEMENTS.into())),
     }
 }
 
@@ -2209,6 +2263,12 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                     end += 1;
                 }
                 let kind = binding_kind(port, &toks[start..end], lineno)?;
+                if let BindingKind::Param(Value::Str(text)) = &kind
+                    && (text == "true" || text == "false")
+                    && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
+                {
+                    return Err(err(bool_hint(port, text)));
+                }
                 call.args.push(ArgItem::Binding(Binding {
                     port: port.clone(),
                     kind,
@@ -2254,6 +2314,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             number: n.clone(),
             unit: *u,
         }),
+        [Tok::Ident(b)] if b == "on" || b == "off" => BindingKind::Param(Value::Bool(b == "on")),
         [Tok::Ident(name)] if !matches!(name.as_str(), "and" | "or" | "not") => {
             BindingKind::Param(Value::Ref(name.clone()))
         }
@@ -2291,6 +2352,96 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             e => BindingKind::Expr(e),
         },
     })
+}
+
+/// `a / b` for two exact non-negative decimal literals, when it is a
+/// whole number.
+fn whole_ratio(a: &str, b: &str) -> Option<u64> {
+    let split = |d: &str| -> Option<(u128, u32)> {
+        let (int, frac) = d.split_once('.').unwrap_or((d, ""));
+        Some((format!("{int}{frac}").parse().ok()?, frac.len() as u32))
+    };
+    let ((ma, sa), (mb, sb)) = (split(a)?, split(b)?);
+    let scale = sa.max(sb);
+    let ma = ma.checked_mul(10u128.checked_pow(scale - sa)?)?;
+    let mb = mb.checked_mul(10u128.checked_pow(scale - sb)?)?;
+    if mb == 0 || ma % mb != 0 {
+        return None;
+    }
+    u64::try_from(ma / mb).ok()
+}
+
+/// A `YYYY-MM-DD` token run (`2026`, `-`, `01`, `-`, `03`), validated;
+/// `None` for any other shape, an error for a malformed or impossible
+/// date.
+fn date_toks(toks: &[Tok], lineno: usize) -> Result<Option<String>> {
+    let [
+        Tok::Num(y),
+        Tok::Minus,
+        Tok::Num(m),
+        Tok::Minus,
+        Tok::Num(d),
+    ] = toks
+    else {
+        return Ok(None);
+    };
+    let date = format!("{y}-{m}-{d}");
+    if !is_date(&date) {
+        return Err(Error::Parse {
+            line: lineno,
+            msg: format!("`{date}` is not a date (YYYY-MM-DD)"),
+        });
+    }
+    Ok(Some(date))
+}
+
+/// `YYYY-MM-DD`, exactly, and a day of the calendar.
+fn is_date(d: &str) -> bool {
+    d.len() == 10 && crate::logic::rule::parse_date(d).is_some()
+}
+
+/// The canonical spec of a test's `clock` (D80): `HH:MM[:SS]` or
+/// `YYYY-MM-DD HH:MM[:SS]`, written bare like `At: 19:00`. The v1 quoted
+/// form is refused with its replacement.
+fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let usage = "expected `clock HH:MM[:SS]` or `clock YYYY-MM-DD HH:MM[:SS]`";
+    if let [Tok::Str(old)] = toks {
+        let (date, time) = match old.trim().split_once(' ') {
+            Some((d, t)) => (Some(d), t.trim()),
+            None => (None, old.trim()),
+        };
+        let time = clock_seconds(time).and_then(clock_text);
+        return Err(err(match time {
+            Some(t) if date.is_none_or(is_date) => {
+                let new = date.map_or(t.clone(), |d| format!("{d} {t}"));
+                format!(
+                    "a test clock is written bare — write `clock {new}` instead of \
+                     `clock \"{old}\"`"
+                )
+            }
+            _ => format!("`clock \"{old}\"` — a test clock is written bare; {usage}"),
+        }));
+    }
+    let (date, time) = match date_toks(toks.get(..5).unwrap_or(&[]), lineno)? {
+        Some(d) => (Some(d), &toks[5..]),
+        None => (None, toks),
+    };
+    if clock_toks(time).is_none() {
+        return Err(err(usage.into()));
+    }
+    let t = match clock_value(time, "clock", lineno)? {
+        Value::Clock(t) => t,
+        other => other.to_string(),
+    };
+    Ok(date.map_or(t.clone(), |d| format!("{d} {t}")))
+}
+
+/// The v2 replacement for a quoted boolean on a text-boolean attribute
+/// (`Analog: "true"` → `Analog: on`, D80).
+pub(crate) fn bool_hint(port: &str, text: &str) -> String {
+    let word = if text == "true" { "on" } else { "off" };
+    format!("`{port}:` is on or off — write `{port}: {word}` instead of `{port}: \"{text}\"`")
 }
 
 /// The `HH:MM[:SS]` text of a time-of-day token run (`19`, `:`, `00`),
@@ -2335,10 +2486,11 @@ fn value_of(tok: &Tok, lineno: usize) -> Result<Value> {
         // A quoted string that reads as a number canonicalizes to the bare
         // number — one canonical spelling per value.
         Tok::Str(s) => Ok(Value::from_literal(s)),
+        Tok::Ident(s) if s == "on" || s == "off" => Ok(Value::Bool(s == "on")),
         Tok::Ident(s) => Ok(Value::Ref(s.clone())),
         _ => Err(Error::Parse {
             line: lineno,
-            msg: "expected a number, quoted string, or constant name".into(),
+            msg: "expected a number, `on`/`off`, quoted string, or constant name".into(),
         }),
     }
 }
@@ -2611,7 +2763,11 @@ impl ExprParser<'_> {
                 Ok(r)
             }
             (Some(Tok::Ident(s)), _, _) => {
-                let r = Operand::Value(Value::Ref(s.clone()));
+                let r = Operand::Value(if s == "on" || s == "off" {
+                    Value::Bool(s == "on")
+                } else {
+                    Value::Ref(s.clone())
+                });
                 self.pos += 1;
                 Ok(r)
             }
@@ -2870,7 +3026,7 @@ sonne.Qm = 30 # override
 
         // Constants cannot reference constants.
         let e = Module::parse("let a = 1\nlet b = a\n").unwrap_err();
-        assert!(e.to_string().contains("number or a quoted string"), "{e}");
+        assert!(e.to_string().contains("not another identifier"), "{e}");
 
         // Undeclared references are errors, with a suggestion.
         let e =
@@ -3032,5 +3188,147 @@ sonne.Qm = 30 # override
         // An empty title names no page.
         let e = Module::parse("page \"\"\n").unwrap_err();
         assert!(e.to_string().contains("must not be empty"), "{e}");
+    }
+
+    #[test]
+    fn on_off_are_digital_literals() {
+        let src = "let an = on\n\n\
+                   b = And(\n\tI1: x.Q,\n\tI2: on,\n)\n\n\
+                   c = GreaterEqual(\n\tInput1: x.AQ,\n\tInput2: off,\n)\n\n\
+                   x.Value = an\n";
+        let m = Module::parse_fragment(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        let lets: Vec<_> = m.lets().map(|l| l.value.clone()).collect();
+        assert_eq!(lets, [Value::Bool(true)]);
+        // A connector stores 1/0; a text-boolean attribute true/false.
+        let on = Value::Bool(true);
+        assert_eq!(m.resolve_value(&on).unwrap(), "1");
+        assert_eq!(m.resolve_value(&Value::Bool(false)).unwrap(), "0");
+        assert_eq!(m.resolve_value_for(&on, "And", "b", "I2").unwrap(), "1");
+        assert_eq!(
+            m.resolve_value_for(&on, "VirtualIn", "v", "Analog")
+                .unwrap(),
+            "true"
+        );
+        let via_let = Value::Ref("an".into());
+        assert_eq!(
+            m.resolve_value_for(&via_let, "VirtualUdpInCmd", "v", "Signed")
+                .unwrap(),
+            "true"
+        );
+        // A number stays a number: no 1 -> on canonicalization.
+        let m = Module::parse_fragment("b = And(I2: 1)\n").unwrap();
+        assert!(m.to_text().contains("I2: 1,"));
+        // Reserved: neither can name anything.
+        for src in ["on = And()\n", "let off = 1\n"] {
+            let e = Module::parse_fragment(src).unwrap_err();
+            assert!(e.to_string().contains("reserved word"), "{src}: {e}");
+        }
+        // v1's quoted boolean on a text-boolean attribute names its
+        // replacement; elsewhere a quoted "true" stays a string.
+        let e = Module::parse_fragment("v = VirtualIn(Analog: \"false\")\n").unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("write `Analog: off` instead of `Analog: \"false\"`"),
+            "{e}"
+        );
+        assert!(Module::parse_fragment("f = Formula(Formula: \"true\")\n").is_ok());
+        // Template value parameters take on/off as defaults.
+        let src = "template t(an = on)\n\tg = And(\n\t\tI1: x.Q,\n\t\tI2: an,\n\t)\nend\n";
+        assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
+    }
+
+    #[test]
+    fn test_time_tick_clock_and_not_equal() {
+        let src = "test \"t\"\n\
+                   \tclock 07:30\n\
+                   \tclock 2026-01-03 07:30:15\n\
+                   \tx.Q = on\n\
+                   \ttick 5min\n\
+                   \ttick 2s dt 500ms\n\
+                   \ttick 3 dt 0.5\n\
+                   \texpect x.Q != off\n\
+                   \texpect x.AQ == 1\n\
+                   end\n";
+        let m = Module::parse_fragment(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        let Item::Test(t) = &m.items[0] else {
+            panic!("a test");
+        };
+        let ticks: Vec<u64> = t
+            .body
+            .iter()
+            .filter_map(|i| match i {
+                TestItem::Tick(t) => Some(t.n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ticks, [300, 4, 3]);
+        // A time of day canonicalizes like `At:`.
+        let m = Module::parse_fragment("test \"t\"\n\tclock 7:30:00\n\ttick 1\nend\n").unwrap();
+        assert!(m.to_text().contains("\tclock 07:30\n"), "{}", m.to_text());
+
+        let err = |body: &str| {
+            Module::parse_fragment(&format!("test \"t\"\n{body}\nend\n"))
+                .unwrap_err()
+                .to_string()
+        };
+        // The v1 quoted clock names its replacement.
+        let e = err("\tclock \"2026-01-03 7:30\"");
+        assert!(
+            e.contains("write `clock 2026-01-03 07:30` instead of `clock \"2026-01-03 7:30\"`"),
+            "{e}"
+        );
+        assert!(err("\tclock \"spät\"").contains("written bare"));
+        assert!(err("\tclock 2026-02-30 07:00").contains("not a date"));
+        assert!(err("\tclock 25:00").contains("not a time of day"));
+        // A duration is a whole number of ticks.
+        let e = err("\ttick 1s dt 300ms");
+        assert!(e.contains("no whole number of ticks of `dt 300ms`"), "{e}");
+        assert!(err("\ttick 0s").contains("advances nothing"));
+        assert!(err("\ttick 5%").contains("duration"));
+    }
+
+    #[test]
+    fn rule_one_word_commands_and_dates_are_bare() {
+        let src = "rule r\n\
+                   \twhen date 2026-12-24\n\
+                   \tthen pumpe on\n\
+                   \tthen licht \"Mood 2\"\n\
+                   \tthen x \"+\"\n\
+                   end\n";
+        let m = Module::parse_fragment(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        // A quoted one-word command canonicalizes, like `"28"` → `28`.
+        let quoted = Module::parse_fragment("rule r\n\tthen pumpe \"pulse\"\nend\n").unwrap();
+        assert_eq!(quoted.to_text(), "rule r\n\tthen pumpe pulse\nend\n");
+        let e = Module::parse_fragment("rule r\n\twhen date \"2026-12-24\"\nend\n").unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("write `when date 2026-12-24` instead of `when date \"2026-12-24\"`"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn the_statement_error_lists_every_statement() {
+        let e = Module::parse_fragment("42\n").unwrap_err().to_string();
+        for kind in [
+            "`let",
+            "`extern",
+            "`page",
+            "`template",
+            "`test",
+            "`tiles",
+            "`schedule",
+            "`moods",
+            "`rule",
+            "`access",
+            "`recipients",
+            "`removed",
+            "`moved",
+        ] {
+            assert!(e.contains(kind), "{kind} missing: {e}");
+        }
     }
 }

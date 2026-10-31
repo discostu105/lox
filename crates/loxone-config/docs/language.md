@@ -1,4 +1,4 @@
-# Lox Logic language specification (v1)
+# Lox Logic language specification (v2)
 
 Lox Logic, the text language, for managed Loxone logic. File
 extension: **`.loxl`**. Encoding: UTF-8, no BOM. Line-oriented: one
@@ -11,7 +11,8 @@ This document is normative for what `Module::parse` accepts and what
 v1 (2026-08-25) replaced v0's keyword statements (`block`/`wire`/`set`)
 with constructor syntax — see design decision D16 in
 [design.md](design.md). v0 keywords are reserved and produce migration
-errors.
+errors. v2 (2026-10-31) gives every value one spelling — see
+[Changes from v1](#changes-from-v1) and D80.
 
 ## Grammar
 
@@ -23,7 +24,7 @@ line       = comment | let | extern | block-head | arg-line
            | schedule-claim | rule | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
-let        = "let" slug "=" ( number | string ) [ comment ] ;
+let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
 extern     = "extern" slug "=" type "(" matcher
              { "," constraint ":" string } ")" [ comment ] ;
 matcher    = ( "uuid" | "iname" | "title" ) ":" string
@@ -58,7 +59,7 @@ arith      = term { ("+" | "-") term } ;           (* standalone only (D35):
                                                       a whole RHS or binding *)
 term       = factor { ("*" | "/") factor } ;
 factor     = operand | "(" arith ")" ;
-operand    = slug "." port | number [ unit ] | const-ref ;
+operand    = slug "." port | number [ unit ] | bool | const-ref ;
 removed    = "removed" slug [ comment ] ;
 moved      = "moved" slug "->" slug [ comment ] ;
 page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
@@ -70,19 +71,22 @@ template   = "template" slug "(" [ params ] ")" [ comment ]
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
-           | slug "=" ( number [ unit ] | string ) ;   (* value parameter, default *)
+           | slug "=" ( number [ unit ] | string | bool ) ;  (* value parameter, default *)
 instance   = slug "=" slug "(" [ inst-args ] ")" [ comment ] ;
 inst-args  = param-name ":" ( slug | value ) { "," … } [ "," ] ;
 
 test       = "test" string [ comment ]
-             { comment | inject | tick | expect | clock }
+             { comment | inject | tick | expect | test-clock }
              "end" [ comment ] ;
-test-cmp   = "==" | ">=" | ">" | "<=" | "<" | "~=" ;
-inject     = slug "." port "=" ( number [ unit ] | const-ref ) [ comment ] ;
-tick       = "tick" integer [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
-expect     = "expect" slug "." port test-cmp ( number [ unit ] | const-ref ) [ comment ] ;
-clock      = "clock" string [ comment ] ;          (* "HH:MM[:SS]" or
-                                                      "YYYY-MM-DD HH:MM[:SS]" *)
+test-cmp   = "==" | "!=" | ">=" | ">" | "<=" | "<" | "~=" ;
+inject     = slug "." port "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
+tick       = "tick" ( integer | number time-unit )   (* a count, or a duration:
+                                                      a whole number of dt steps *)
+             [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
+time-unit  = "ms" | "s" | "min" | "h" ;
+expect     = "expect" slug "." port test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
+test-clock = "clock" [ date ] clock [ comment ] ;  (* bare: 07:30, 2026-01-03 07:30:15 *)
+date       = digit digit digit digit "-" digit digit "-" digit digit ;
 
 tiles      = "tiles" slug [ comment ]              (* Touch Pure Flex (D41) *)
              { comment | tile-head | arg-line }
@@ -122,16 +126,21 @@ rule-line  = ( "active" | "inactive"
              | "when" slug "." ident cmp ( number | "on" | "off" )   (* D73 *)
              | "when" "mode" mode-name [ "on" | "off" ]             (* D73 *)
              | "or"                                (* starts another group, D73 *)
-             | "then" slug string
+             | "when" "date" date                  (* D76, bare *)
+             | "then" slug ( command-word | string )
              | "then" "mode" mode-name ( "on" | "off" ) ) [ comment ] ;
 mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
+command-word = letter { letter | digit | "_" } ;  (* one word, bare: `then pumpe on`;
+                                                      anything else stays quoted *)
 rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | "weekdays" | "weekend" | "daily" ;
 
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
-value      = number [ unit ] | string | const-ref | clock ;
+value      = number [ unit ] | string | bool | const-ref | clock ;
+bool       = "on" | "off" ;                        (* digital 1/0; "true"/"false" on a
+                                                      text-boolean attribute (D80) *)
 clock      = digit [ digit ] ":" digit digit [ ":" digit digit ] ;
                                                    (* a time of day, 00:00 … 23:59:59 (#248) *)
 const-ref  = slug ;                                (* names a `let` constant *)
@@ -156,6 +165,16 @@ Notes:
   it must name a `let` in the same module. A dotted identifier
   (`slug.Port`) is always a **port reference**. String values are always
   quoted.
+- **`on` and `off`** (D80) are the boolean literals, in every value
+  position: block and extern parameters, `let`, template defaults,
+  expression operands, test injections and expectations. On a port they
+  compile to `1`/`0` — `I2: on` is byte-identical to `I2: 1` — and on
+  an attribute Loxone Config stores as the text `"true"`/`"false"`
+  (`VirtualIn`'s `Analog:`, `VirtualHttpInCmd`'s `Signed:`/`Analog:`,
+  …) to that text. Such an attribute takes only `on`/`off`: v1's
+  `Analog: "true"` is an error naming `Analog: on`. A number stays a
+  number: `1` is never rewritten to `on`. The formula backend rejects
+  them (write `1`/`0`).
 - A number may carry a **unit suffix** (D27), written immediately
   adjacent: `40s`, `250ms`, `90min`, `1.5h`, `2700K`, `70%`. Time units
   scale exactly into the unit the port is documented in (D52): seconds
@@ -171,7 +190,8 @@ Notes:
   through `fmt`. An unknown suffix is a parse error. A *quoted* `"40s"`
   stays a string — two spellings, two meanings.
 - The keywords `let`, `extern`, `removed`, `moved`, `template`, `end`,
-  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, `schedule`, and the expression
+  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, `schedule`, the boolean
+  literals `on` and `off`, and the expression
   operators `and`, `or`, `not` are reserved, as are v0's `block`,
   `wire`, `set`, and `use` (migration errors) — none can be declared as
   a name. `access` is a keyword only where a line starts with `access
@@ -411,7 +431,7 @@ Rules:
 
 ```text
 party = VirtualIn("Partymodus")
-soll = VirtualIn("Sollwert", Analog: "true", MinVal: 5, MaxVal: 30, DefVal: 21)
+soll = VirtualIn("Sollwert", Analog: on, MinVal: 5, MaxVal: 30, DefVal: 21)
 licht = And(I1: party.Q)
 ```
 
@@ -423,7 +443,7 @@ wire directly into blocks on any page.
 
 - `IName=` (`VI<n>`, the designation the GUI shows) is minted once,
   one past the highest number in use, and kept from then on.
-- `Analog:` (`"true"`/`"false"`, default `"false"`), `MinVal:`,
+- `Analog:` (`on`/`off`, default `off`), `MinVal:`,
   `MaxVal:`, `DefVal:` are attribute parameters. Each is a claim: written
   while bound, the GUI's value otherwise (like `Code:`). Make the range
   cover what the input will receive: a value outside it is reported to
@@ -903,7 +923,10 @@ test "Frostwächter schlägt an"
 	expect frost_alarm.Q == 1
 	wassertemp.Q = 10
 	tick 2 dt 0.5           # per-step dt override, unit values allowed
-	expect frost_alarm.Q == 0
+	expect frost_alarm.Q == off
+	clock 06:30             # the wall clock, bare
+	tick 5min               # a duration: 300 steps of 1s
+	expect frost_alarm.Q != on
 end
 ```
 
@@ -923,18 +946,27 @@ Statements, in file order:
   the test (a persistent override).
   Any declared extern or block port can be driven, including outputs
   (that is the normal case: drive a sensor's `Q`/`AQ`). Values are
-  numbers (with units) or `let` references; strings are rejected.
+  numbers (with units), `on`/`off` or `let` references; strings are
+  rejected.
 - **`tick <n> [dt <v>]`** — advance the simulation `n` program cycles
   of `dt` seconds (default 1). Injections since the previous `tick`
   take effect for these cycles.
+- **`tick <duration> [dt <v>]`** (D80) — advance by a time: `tick 5min`
+  is `tick 300`, `tick 2s dt 500ms` is `tick 4 dt 500ms`. The duration
+  must be a whole number of `dt` steps (`tick 1s dt 300ms` is an
+  error); `fmt` keeps the spelling written.
 - **`expect slug.Port <cmp> <value>`** — assert after the preceding
-  `tick`. Comparators: `==`, `>`, `>=`, `<`, `<=`, and `~=`
-  (approximately, 5 % tolerance); `==` allows the rounding of decimal
-  arithmetic. There is no `!=`. An `expect` before any `tick` is an
-  error, as is a trailing injection no `tick` ever applies.
-- **`clock "HH:MM[:SS]"` / `clock "YYYY-MM-DD HH:MM[:SS]"`** — set the
+  `tick`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and `~=`
+  (approximately, 5 % tolerance); `==` and `!=` allow the rounding of
+  decimal arithmetic. An `expect` before any `tick` is an
+  error, as is a trailing injection no `tick` ever applies. `--lox`
+  (below) has no `!=`.
+- **`clock HH:MM[:SS]` / `clock YYYY-MM-DD HH:MM[:SS]`** — set the
   simulated wall clock before the following `tick`, for time-dependent
   logic: the weekday operating modes and the `DayTimer`s follow it.
+  Written bare (D80); the time canonicalizes like a `clock` value
+  (`7:30:00` → `07:30`). v1's quoted `clock "07:30"` is an error naming
+  `clock 07:30`.
 
 References resolve on the **flattened** module (templates expanded,
 expressions desugared), so tests can name template-produced slugs
@@ -1141,7 +1173,7 @@ rule pumpe_ein                      # weekday mornings
 	active
 	when weekday weekdays
 	when time 09:00
-	then pumpe "on"
+	then pumpe on
 end
 ```
 
@@ -1164,7 +1196,10 @@ created, named and deleted in the app; the declaration edits one.
   (`when mode "Party"`).
 - **`or`** (D73) — the conditions after it form another group: the
   rule fires when all conditions of any one group hold.
-- **`then <slug> "<command>"`** — the app's command text to a block:
+- **`then <slug> <command>`** — the app's command text to a block,
+  bare when it is one word (`then pumpe on`, `then tor pulse`), quoted
+  otherwise (`then licht "Mood 2"`); a quoted one-word command
+  canonicalizes to bare (D80), like `"28"` to `28`:
   any command the capability table offers for the block's app type
   (`on`/`off` to a `PushButton`, `pulse` to a `PButtonT`, `<valN>`
   numbers filled in), or one some rule of the config already sends (the
@@ -1181,7 +1216,7 @@ created, named and deleted in the app; the declaration edits one.
 - **`when daylight [off]`** (D76) — while it is (not) day.
 - **`when sunrise`**, **`sunset`**, **`dawn`**, **`dusk`** (D76) — at
   that moment of the day.
-- **`when date "YYYY-MM-DD"`** (D76) — on that day. The app stores the
+- **`when date YYYY-MM-DD`** (D76, bare since D80) — on that day. The app stores the
   local midnight as a Unix time, so the config must state a Central
   European `Timezone` (`Europe/Vienna`, `Europe/Berlin`, …).
 - **`then notify "<subject>" "<text>"`** (D76) — a push notification
@@ -1216,7 +1251,7 @@ instead of an extern — the slug is the declaration's own:
 rule pumpe_mittag "Pumpe Mittag"     # created if the config lacks it
 	active
 	when time 12:30
-	then pumpe "on"
+	then pumpe on
 end
 ```
 
@@ -1423,10 +1458,11 @@ multi-line block declaration. An argument-free call stays on one line
 each argument on its own tab-indented line with a trailing comma, and the
 `)` on its own line. Values keep their variant: numbers bare, strings
 quoted, constant references bare, port references dotted, unit values
-with their suffix as written. The one value
-canonicalization happens at parse time: a quoted string that reads exactly
-as a number (`"28"`) becomes the bare number, so every value has one
-canonical spelling. A `tile` follows the same rule one level deeper:
+with their suffix as written, `on`/`off` as written. The value
+canonicalizations happen at parse time: a quoted string that reads exactly
+as a number (`"28"`) becomes the bare number, a quoted one-word rule
+command (`then pumpe "on"`) the bare word, and a `clock` time its
+two-digit form, so every value has one canonical spelling. A `tile` follows the same rule one level deeper:
 `tile 2()` on one line, a tile with keys as a two-tab-indented list
 with the `)` on its own tab-indented line. An `access` declaration puts
 each grant on its own tab-indented line. `parse(to_text(m)) == m`, and
@@ -1437,14 +1473,43 @@ each grant on its own tab-indented line. `parse(to_text(m)) == m`, and
 Parse errors carry a 1-based line number. Unknown types, ports, and
 constants suggest the closest known name when one is within a small edit
 distance. v0 statements (`block`, `wire`, `set`, `extern … match …`) get
-migration errors describing the v1 spelling. Compile errors are documented
+migration errors describing the v1 spelling; v1 spellings that v2 dropped
+get errors that name the exact replacement ("write `clock 07:30` instead
+of `clock "07:30"`"), which the language server offers as a quick fix.
+A line that starts no statement lists every statement kind. Compile errors are documented
 with remedies in [agents.md](agents.md#errors-and-remedies).
+
+## Changes from v1
+
+v2 (D80) keeps every v1 file's meaning; what changed is spelling, and
+each dropped spelling is an error that names its replacement. The
+compile output of a migrated file is byte-identical.
+
+- **`on`/`off`** are reserved boolean literals in every value position
+  (`I2: on` = `I2: 1`). Text-boolean attributes (`Analog:`, `Signed:`,
+  `CloseAfterSend:`) take only them: `Analog: "true"` → `Analog: on`.
+  `decompile`/`adopt` write them.
+- **`tick <duration>`**: `tick 5min`, `tick 2s dt 500ms` — a whole
+  number of `dt` steps.
+- **`clock` is bare**: `clock 07:30`, `clock 2026-01-03 07:30:15`
+  (was `clock "07:30"`).
+- **`expect … != …`** joins the test comparators.
+- **Rule actions**: a one-word command is bare (`then pumpe on`; a
+  quoted one is canonicalized, not refused); **`when date`** is bare
+  (`when date 2026-12-24`, was quoted).
+- The "expected a statement" error lists every statement kind.
+
+Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
+→ `on`/`off`, unquote `clock "…"` and `when date "…"`, then `loxl fmt`
+(which also unquotes one-word `then` commands).
 
 ## Versioning
 
-This is v1; there are no v0 files in the wild (pre-release revision).
+This is v2 (see [Changes from v1](#changes-from-v1)); there are no v0
+files in the wild (pre-release revision).
 Anything not specified here (template nesting and template-local
 declarations, the `formula` expression backend)
 is future work —
-see [roadmap.md](roadmap.md). Future versions will keep v1 files parsing
-unchanged or provide a migration tool.
+see [roadmap.md](roadmap.md). A future version keeps v2 files parsing
+unchanged, or every spelling it drops is an error naming the
+replacement.

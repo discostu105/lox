@@ -50,10 +50,22 @@ before anyone pushes.
 extern sonne = VirtualIn(iname: "VI3")            # existing object: reference it
 extern taster = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
 party = VirtualIn("Partymodus")                    # new app switch (Virtual Inputs folder)
+soll = VirtualIn("Sollwert", Analog: on)           # on/off: the boolean literals
 warm = GreaterEqual("Warm", Input1: sonne.Q, Input2: 28)
 licht = And(I1: warm.Q, I2: party.Q)
 extern jal = AutoJalousie(title: "Beschattung Süd")
 jal.AutoShade <- licht.Q                           # wire onto an extern
+
+test "warm und Party"
+	sonne.Q = 30
+	party.Q = on
+	clock 07:30                                    # bare, like every time
+	tick 5min                                      # a duration, or a count
+	expect licht.Q == on
+	party.Q = off
+	tick 1
+	expect licht.Q != on
+end
 ```
 
 - A managed block's argument list is its whole input side: `Port: x.Q`
@@ -84,7 +96,7 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - An Automatic Designer rule is `rule <slug> "Name" … end` (`active`,
   `when time 07:30`, `when weekday mon`, `when <block>.active == on`,
   `when <block>.value >= 65`, `when mode "Party"`, `or` between groups,
-  `then <block> "on"`, `then mode "Party" off`): the
+  `then <block> on`, `then licht "Mood 2"`, `then mode "Party" off`): the
   config's rule of that name, else created; `removed <slug>` deletes it.
   `loxl adopt --uuid <rule> --as <slug>` takes over one made in the app.
 - A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,

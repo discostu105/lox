@@ -107,6 +107,11 @@ pub enum Value {
     /// midnight (`19:00` → `68400`). Binds only time-of-day parameters
     /// (`connectors::clock_params`, `At:` on PulseAt).
     Clock(String),
+    /// `on` / `off` — a digital value (v2). Compiles to what the port
+    /// stores: `1`/`0` on a connector or numeric attribute, `true`/`false`
+    /// on a text-boolean attribute (`connectors::bool_params`, e.g.
+    /// `Analog:` on VirtualIn).
+    Bool(bool),
 }
 
 /// Seconds since midnight of a `HH:MM[:SS]` time of day, `None` unless
@@ -335,7 +340,7 @@ impl Value {
 
     /// The literal content this value resolves to: `Number`/`Str` verbatim,
     /// `Unit` scaled into its base unit, `File` its loaded text, `Clock`
-    /// its seconds since midnight; `None` for
+    /// its seconds since midnight, `Bool` `1`/`0`; `None` for
     /// a `Ref` (resolve it through [`Module::resolve_value`]) and for a
     /// `File` that was never loaded.
     pub fn literal(&self) -> Option<Cow<'_, str>> {
@@ -345,6 +350,7 @@ impl Value {
             Value::Unit { number, unit } => scale_by_unit(number, *unit).map(Cow::Owned),
             Value::File { text, .. } => text.as_deref().map(Cow::Borrowed),
             Value::Clock(t) => clock_seconds(t).map(|s| Cow::Owned(s.to_string())),
+            Value::Bool(b) => Some(Cow::Borrowed(if *b { "1" } else { "0" })),
         }
     }
 }
@@ -358,6 +364,7 @@ impl fmt::Display for Value {
             Value::Unit { number, unit } => write!(f, "{number}{unit}"),
             Value::File { path, .. } => write!(f, "file({})", quote(path)),
             Value::Clock(t) => f.write_str(t),
+            Value::Bool(b) => f.write_str(if *b { "on" } else { "off" }),
         }
     }
 }
@@ -924,12 +931,13 @@ pub enum TestItem {
     Inject(SetDecl),
     /// `tick <n> [dt <seconds>]` — advance the simulation `n` ticks of
     /// `dt` simulated seconds each (default 1s; a unit value like
-    /// `dt 100ms` scales).
+    /// `dt 100ms` scales). `tick <duration>` (`tick 5min`, D80) advances
+    /// that much simulated time, a whole number of ticks.
     Tick(TickDecl),
     /// `expect slug.Port <cmp> <value>` — assert a port's value after the
     /// preceding `tick`.
     Expect(ExpectDecl),
-    /// `clock "HH:MM[:SS]"` or `clock "YYYY-MM-DD HH:MM[:SS]"` — set the
+    /// `clock HH:MM[:SS]` or `clock YYYY-MM-DD HH:MM[:SS]` — set the
     /// simulated wall-clock (drives DayTimer/astro blocks); it advances
     /// by `dt` each tick.
     Clock(ClockDecl),
@@ -939,7 +947,11 @@ pub enum TestItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TickDecl {
+    /// The number of ticks: as written, or the duration divided by dt.
     pub n: u64,
+    /// `tick 5min`: the duration as written (a time `Unit` value); `None`
+    /// for a plain tick count.
+    pub duration: Option<Value>,
     /// Simulated seconds per tick; `None` = the default (1s). Always
     /// `Number` or `Unit`.
     pub dt: Option<Value>,
@@ -951,7 +963,7 @@ pub struct TickDecl {
 pub struct ExpectDecl {
     pub port: PortRef,
     pub cmp: TestCmp,
-    /// Always numeric: `Number`, `Unit`, or a `let` reference.
+    /// Always numeric: `Number`, `Unit`, `Bool`, or a `let` reference.
     pub value: Value,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
@@ -959,17 +971,19 @@ pub struct ExpectDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClockDecl {
-    /// `"HH:MM[:SS]"` or `"YYYY-MM-DD HH:MM[:SS]"`, verbatim.
+    /// `HH:MM[:SS]` or `YYYY-MM-DD HH:MM[:SS]`, canonical (two-digit
+    /// hours, no zero seconds — like a time of day value).
     pub spec: String,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
 }
 
-/// Comparators the simulator supports in `expect` (there is no `!=`).
-/// `~=` passes within 5% of the expected value.
+/// Comparators the simulator supports in `expect`. `~=` passes within
+/// 5% of the expected value; `!=` fails where `==` would pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestCmp {
     Eq,
+    Ne,
     Ge,
     Gt,
     Le,
@@ -981,6 +995,7 @@ impl TestCmp {
     pub fn symbol(self) -> &'static str {
         match self {
             TestCmp::Eq => "==",
+            TestCmp::Ne => "!=",
             TestCmp::Ge => ">=",
             TestCmp::Gt => ">",
             TestCmp::Le => "<=",
@@ -1002,7 +1017,10 @@ impl fmt::Display for TestItem {
         match self {
             TestItem::Inject(s) => write!(f, "{} = {}{}", s.target, s.value, tail(&s.comment)),
             TestItem::Tick(t) => {
-                write!(f, "tick {}", t.n)?;
+                match &t.duration {
+                    Some(d) => write!(f, "tick {d}")?,
+                    None => write!(f, "tick {}", t.n)?,
+                }
                 if let Some(dt) = &t.dt {
                     write!(f, " dt {dt}")?;
                 }
@@ -1016,7 +1034,7 @@ impl fmt::Display for TestItem {
                 e.value,
                 tail(&e.comment)
             ),
-            TestItem::Clock(c) => write!(f, "clock {}{}", quote(&c.spec), tail(&c.comment)),
+            TestItem::Clock(c) => write!(f, "clock {}{}", c.spec, tail(&c.comment)),
             TestItem::Comment(text) => write!(f, "#{text}"),
         }
     }
@@ -1502,7 +1520,7 @@ pub enum RuleStmtKind {
     Daylight(bool),
     /// `when sunrise|sunset|dawn|dusk` — the clock's pulse (D76).
     Sun(String),
-    /// `when date "YYYY-MM-DD"` — that day (D76).
+    /// `when date YYYY-MM-DD` — that day (D76).
     Date(String),
     /// `then notify "<subject>" "<text>"` — a push notification (D76).
     Notify { subject: String, text: String },
@@ -1553,6 +1571,10 @@ impl fmt::Display for RuleStmtKind {
             RuleStmtKind::Active(false) => f.write_str("inactive"),
             RuleStmtKind::Time(m) => write!(f, "when time {:02}:{:02}", m / 60, m % 60),
             RuleStmtKind::Weekday(days) => write!(f, "when weekday {}", days.join(" ")),
+            // A one-word command is written bare (`then pumpe on`, D80).
+            RuleStmtKind::Then { target, command } if is_bare_command(command) => {
+                write!(f, "then {target} {command}")
+            }
             RuleStmtKind::Then { target, command } => {
                 write!(f, "then {target} {}", quote(command))
             }
@@ -1575,7 +1597,7 @@ impl fmt::Display for RuleStmtKind {
             RuleStmtKind::Daylight(true) => f.write_str("when daylight"),
             RuleStmtKind::Daylight(false) => f.write_str("when daylight off"),
             RuleStmtKind::Sun(w) => write!(f, "when {w}"),
-            RuleStmtKind::Date(d) => write!(f, "when date {}", quote(d)),
+            RuleStmtKind::Date(d) => write!(f, "when date {d}"),
             RuleStmtKind::Notify { subject, text } => {
                 write!(f, "then notify {} {}", quote(subject), quote(text))
             }
@@ -1608,6 +1630,15 @@ impl fmt::Display for RuleStmtKind {
             }
         }
     }
+}
+
+/// A rule command that is one word (`on`, `pulse`, `fullup`): written
+/// bare, canonically (D80). Anything with spaces, digits first, or
+/// punctuation stays quoted.
+pub fn is_bare_command(command: &str) -> bool {
+    let mut c = command.chars();
+    c.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && c.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The block type a `rule` declaration applies to (D57).
@@ -1907,7 +1938,8 @@ impl Module {
     /// [`Self::resolve_value`] for a value bound to `port` of a block of
     /// `block_type`: a suffixed value — written inline or through a `let`
     /// — scales into the port's documented unit (D52), and a suffix that
-    /// cannot mean what the port is in is refused. `slug` names the
+    /// cannot mean what the port is in is refused; `on`/`off` becomes
+    /// `true`/`false` on a text-boolean attribute (D80). `slug` names the
     /// binding in the error.
     pub fn resolve_value_for<'m>(
         &'m self,
@@ -1928,6 +1960,24 @@ impl Module {
             }
             _ => None,
         };
+        // `on`/`off` on a text-boolean attribute (`Analog:` on VirtualIn)
+        // is stored as `true`/`false`; everywhere else as `1`/`0`.
+        let boolean = match value {
+            Value::Bool(b) => Some(*b),
+            Value::Ref(name) => self
+                .lets()
+                .find(|l| l.name == *name)
+                .and_then(|l| match l.value {
+                    Value::Bool(b) => Some(b),
+                    _ => None,
+                }),
+            _ => None,
+        };
+        if let Some(b) = boolean
+            && crate::connectors::bool_params(block_type).contains(&port)
+        {
+            return Ok(Cow::Borrowed(if b { "true" } else { "false" }));
+        }
         match suffixed {
             Some((number, unit)) => scale_for_port(number, unit, port_unit(block_type, port))
                 .map(Cow::Owned)

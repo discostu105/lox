@@ -314,7 +314,7 @@ fn run_one(
         if let Some(spec) = &step.clock {
             sim.set_clock(spec).map_err(step_err)?;
             if let Some(t) = tracer.as_deref_mut() {
-                t.note(format!("step {}: clock \"{spec}\"", step_no + 1));
+                t.note(format!("step {}: clock {spec}", step_no + 1));
             }
         }
         for _ in 0..step.ticks {
@@ -461,12 +461,13 @@ impl Tracer {
     }
 }
 
-/// `==` with the slack of decimal arithmetic; `~=` within 5 % of the
-/// expected value.
+/// `==` with the slack of decimal arithmetic, `!=` its negation; `~=`
+/// within 5 % of the expected value.
 fn holds(cmp: TestCmp, actual: f64, expected: f64) -> bool {
     let close = (actual - expected).abs() <= 1e-9 * expected.abs().max(1.0);
     match cmp {
         TestCmp::Eq => close,
+        TestCmp::Ne => !close,
         TestCmp::Ge => actual >= expected || close,
         TestCmp::Gt => actual > expected && !close,
         TestCmp::Le => actual <= expected || close,
@@ -501,6 +502,13 @@ pub fn lox_specs(plan: &TestPlan, compiled: &LoxoneDoc) -> Result<LoxSpecs> {
             let mut expected: Map<String, Json> = Map::new();
             let mut step_keys = Vec::new();
             for e in &step.expects {
+                if e.cmp == TestCmp::Ne {
+                    return Err(Error::Compile(format!(
+                        "test \"{}\": `{}` — lox-cli's `lox sim` has no `!=`; run it in \
+                         the built-in simulator (`loxl test` without `--lox`)",
+                        run.name, e.line
+                    )));
+                }
                 let key = titles.key(&e.signal, &run.name)?;
                 let per_key = expected
                     .entry(key.clone())
@@ -868,6 +876,36 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("asserts nothing"), "{err}");
+    }
+
+    #[test]
+    fn durations_on_off_and_not_equal_plan_as_numbers() {
+        let module = Module::parse(
+            "a = And(\"Gate A\")\n\
+             \n\
+             test \"v2\"\n\
+             \ta.I1 = on\n\
+             \ttick 2min dt 500ms\n\
+             \texpect a.Q != off\n\
+             end\n",
+        )
+        .unwrap();
+        let doc = doc_with(
+            "\t\t\t<C Type=\"And\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Gate A\" Nio=\"3\"/>\r\n",
+        );
+        let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
+        let plan = plan_tests(&module, &lock, &doc, None).unwrap();
+        let step = &plan.runs[0].steps[0];
+        assert_eq!((step.ticks, step.dt), (240, 0.5));
+        assert_eq!(step.sets[0].1, 1.0);
+        assert_eq!(
+            (step.expects[0].cmp, step.expects[0].expected),
+            (TestCmp::Ne, 0.0)
+        );
+        assert!(holds(TestCmp::Ne, 1.0, 0.0) && !holds(TestCmp::Ne, 0.1 + 0.2, 0.3));
+        // lox-cli's scenarios know no `!=`.
+        let err = lox_specs(&plan, &doc).err().unwrap().to_string();
+        assert!(err.contains("has no `!=`"), "{err}");
     }
 
     #[test]

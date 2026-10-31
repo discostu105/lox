@@ -5,7 +5,7 @@ extern t_regen = VirtualIn(title: "Regensensor")
 extern t_bewaesserung = VirtualOutCmd(title: "Bewässerung Garten")
 
 test "Bewässerung an einem Mittwoch"
-	clock "2026-07-15 05:58"
+	clock 2026-07-15 05:58
 	tick 60
 	expect t_bewaesserung.I == 0
 	tick 180
@@ -16,13 +16,13 @@ test "Bewässerung an einem Mittwoch"
 	t_regen.Q = 0
 	tick 2
 	expect t_bewaesserung.I == 1
-	clock "2026-07-15 06:25"
+	clock 2026-07-15 06:25
 	tick 2
 	expect t_bewaesserung.I == 0
 end
 
 test "Bewässerung auch am Samstag"
-	clock "2026-07-18 06:05"
+	clock 2026-07-18 06:05
 	tick 2
 	expect t_bewaesserung.I == 1
 end
