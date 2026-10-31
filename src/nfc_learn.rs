@@ -13,8 +13,8 @@ use serde_json::Value;
 use std::future::Future;
 use std::time::Duration;
 
-use crate::stream::{Incoming, Session, StateEvent};
 use crate::visu::{self, VisuPassword};
+use loxone_client::stream::{Incoming, Session, StateEvent};
 
 /// The two directions of a subscribed session: commands out, state events
 /// and command answers in. The WebSocket in production, a script in tests.
@@ -26,10 +26,10 @@ pub trait LearnIo: Send {
 
 impl LearnIo for Session {
     fn send<'a>(&'a mut self, cmd: &'a str) -> BoxFuture<'a, Result<()>> {
-        Box::pin(Session::send(self, cmd))
+        Box::pin(async move { Ok(Session::send(self, cmd).await?) })
     }
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Incoming>>> {
-        Box::pin(Session::next(self))
+        Box::pin(async move { Ok(Session::next(self).await?) })
     }
 }
 
@@ -92,7 +92,7 @@ impl Target {
 
 /// The Code Touch a query means, with its learn-result state from the
 /// structure file.
-pub fn target(lox: &mut crate::client::LoxClient, query: &str) -> Result<Target> {
+pub fn target(lox: &mut loxone_client::client::LoxClient, query: &str) -> Result<Target> {
     let (uuid, name) = crate::usermgmt::find_code_touch(lox, query, &[])?;
     let ctrl = lox.get_control_json(&uuid)?;
     let result_state = ctrl["states"]["nfcLearnResult"]

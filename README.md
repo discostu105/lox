@@ -369,6 +369,17 @@ TLS uses rustls; the Miniserver's self-signed certificate is accepted unless you
 
 ---
 
+## Rust libraries
+
+The parts of lox that other Rust projects can use are published as crates:
+
+- **[loxone-client](crates/loxone-client)** ([crates.io](https://crates.io/crates/loxone-client)): talks to a
+  Miniserver: the HTTP API, token auth, the WebSocket state stream, FTP backups, statistics.
+- **[lxir](crates/lxir)** ([crates.io](https://crates.io/crates/lxir)): the program file: the lossless `.Loxone`
+  model, backup ZIPs, the `.lxir` language, semantic diff. No network access.
+
+---
+
 ## Related projects
 
 - **[lxir](crates/lxir)**: the config-as-code toolchain behind `lox ir`, the logic diffs and `lox config push`.

@@ -1,9 +1,9 @@
 //! Loxone WebSocket binary protocol parser and real-time state streaming.
 //!
 //! Connects to the Miniserver via WebSocket, subscribes to binary status updates,
-//! and yields structured state-change events. Used by `lox stream` and `lox otel`.
+//! and yields structured state-change events.
 
-use anyhow::{Result, bail};
+use crate::error::{Error, Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -29,7 +29,6 @@ const MSG_WEATHER_STATES: u8 = 0x07;
 
 /// A single state-change event from the Miniserver WebSocket stream.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used by otel exporter
 pub enum StateEvent {
     /// Numeric state update: UUID → f64 value
     ValueState { uuid: String, value: f64 },
@@ -58,7 +57,6 @@ pub enum StateEvent {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used by otel exporter
 pub struct DaytimerEntry {
     pub mode: i32,
     pub from: i32,
@@ -68,7 +66,6 @@ pub struct DaytimerEntry {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used by otel exporter
 pub struct WeatherEntry {
     pub timestamp: i32,
     pub weather_type: i32,
@@ -87,7 +84,6 @@ pub struct WeatherEntry {
 
 /// Metadata for a state UUID, linking it back to its parent control.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used by otel exporter
 pub struct StateUuidInfo {
     pub control_name: String,
     pub control_uuid: String,
@@ -611,7 +607,7 @@ where
         let msg = tokio::select! {
             _ = keepalive.tick() => {
                 if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
-                    bail!("connection timed out");
+                    return Err(Error::Timeout("connection timed out".into()));
                 }
                 ws.send(Message::Text("keepalive".to_string())).await?;
                 continue;
@@ -641,12 +637,18 @@ where
 ///
 /// Runs until the connection is closed or an error occurs; keepalives keep an
 /// otherwise idle socket open.
-pub async fn stream_events<F>(conn: &Connection, mut handler: F) -> Result<()>
+pub async fn stream_events<F, E>(conn: &Connection, mut handler: F) -> Result<()>
 where
-    F: FnMut(Vec<StateEvent>) -> Result<()>,
+    F: FnMut(Vec<StateEvent>) -> std::result::Result<(), E>,
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let mut ws = open_subscribed(conn).await?;
-    pump(&mut ws, |events| handler(events).map(|()| true)).await
+    pump(&mut ws, |events| {
+        handler(events)
+            .map(|()| true)
+            .map_err(|e| Error::Handler(e.into()))
+    })
+    .await
 }
 
 /// One stream session that the caller can end: like [`stream_events`], but
@@ -654,27 +656,30 @@ where
 /// must finish within `connect_timeout`, so an attempt against a Miniserver
 /// that is still starting up cannot hang. Returns `Ok(())` when stopped or
 /// when the server closed the socket; the caller decides whether to reconnect.
-pub async fn stream_events_while<F>(
+pub async fn stream_events_while<F, E>(
     conn: &Connection,
     connect_timeout: Duration,
-    handler: F,
+    mut handler: F,
 ) -> Result<()>
 where
-    F: FnMut(Vec<StateEvent>) -> Result<bool>,
+    F: FnMut(Vec<StateEvent>) -> std::result::Result<bool, E>,
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let mut ws = tokio::time::timeout(connect_timeout, open_subscribed(conn))
         .await
-        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
-    pump(&mut ws, handler).await
+        .map_err(|_| Error::Timeout("connect timeout".into()))??;
+    pump(&mut ws, |events| {
+        handler(events).map_err(|e| Error::Handler(e.into()))
+    })
+    .await
 }
 
-/// A long-lived stream session for interactive use (`lox tui`): like
+/// A long-lived stream session for interactive use (a TUI): like
 /// [`stream_events`] but with a WS keepalive every 30 s (the Miniserver drops
 /// idle sockets after ~5 min), a connect/auth timeout, and a stop signal.
 ///
 /// `on_live` is called once the subscription is active. Returns `Ok(())` when
 /// stopped or when the server closed the socket; the caller reconnects.
-#[cfg(feature = "tui")]
 pub async fn stream_session<F>(
     conn: &Connection,
     mut stop: tokio::sync::watch::Receiver<bool>,
@@ -686,7 +691,7 @@ where
 {
     let mut ws = tokio::time::timeout(Duration::from_secs(20), open_subscribed(conn))
         .await
-        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+        .map_err(|_| Error::Timeout("connect timeout".into()))??;
     on_live();
 
     let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
@@ -699,7 +704,7 @@ where
             _ = keepalive.tick() => {
                 // No traffic at all for 90 s (keepalive answers included): dead socket
                 if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
-                    bail!("connection timed out");
+                    return Err(Error::Timeout("connection timed out".into()));
                 }
                 ws.send(Message::Text("keepalive".to_string())).await?;
                 continue;
@@ -737,7 +742,7 @@ pub enum Incoming {
 }
 
 /// A subscribed session that also sends commands and hands back their
-/// answers (`lox access learn`). Keeps the socket alive like [`pump`].
+/// answers (NFC learn mode, for one). Keeps the socket alive like [`stream_events`].
 pub struct Session {
     ws: WsStream,
     framer: Framer,
@@ -750,7 +755,7 @@ impl Session {
     pub async fn open(conn: &Connection, connect_timeout: Duration) -> Result<Self> {
         let ws = tokio::time::timeout(connect_timeout, open_subscribed(conn))
             .await
-            .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+            .map_err(|_| Error::Timeout("connect timeout".into()))??;
         let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
         keepalive.tick().await;
         Ok(Self {
@@ -773,7 +778,7 @@ impl Session {
             let msg = tokio::select! {
                 _ = self.keepalive.tick() => {
                     if self.last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
-                        bail!("connection timed out");
+                        return Err(Error::Timeout("connection timed out".into()));
                     }
                     self.ws.send(Message::Text("keepalive".to_string())).await?;
                     continue;
@@ -816,7 +821,7 @@ where
         Ok(found.is_none())
     })
     .await?;
-    found.ok_or_else(|| anyhow::anyhow!("WebSocket closed before matching event was found"))
+    found.ok_or_else(|| crate::error::err!("WebSocket closed before matching event was found"))
 }
 
 /// The current values of `uuids` from the initial state dump: numbers for
@@ -834,7 +839,7 @@ pub async fn initial_states(
     }
     let mut ws = tokio::time::timeout(wait, open_subscribed(conn))
         .await
-        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+        .map_err(|_| Error::Timeout("connect timeout".into()))??;
     let collect = pump(&mut ws, |events| {
         for e in events {
             let (uuid, value) = match e {

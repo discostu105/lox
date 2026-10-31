@@ -7,13 +7,13 @@ use serde::Serialize;
 use std::io::{IsTerminal, Write};
 use std::time::Duration;
 
-use crate::client::LoxClient;
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::nfc_learn::{self, LearnedTag};
 use crate::snapshot;
 use crate::usermgmt::{self, AccessReport, UserChange, Verdict};
 use crate::{AccessCmd, AccessConfigSource, UserCmd, UserCodeCmd, UserNfcCmd};
+use loxone_client::client::LoxClient;
 
 fn print_json(v: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(v)?);
@@ -75,7 +75,7 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
             if ctx.json {
                 return print_json(&u);
             }
-            let time = |t: Option<i64>| t.map(crate::util::lox_timestamp_to_string);
+            let time = |t: Option<i64>| t.map(loxone_client::time::lox_timestamp_to_string);
             println!("{}", u.name);
             println!("  {:<13} {}", "UUID", u.uuid);
             if !u.description.is_empty() {
@@ -90,7 +90,10 @@ pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
             }
             println!("  {:<13} {}", "Admin", yes_no(u.is_admin));
             // lastEdit counts from 2009-01-01 UTC, unlike the validity times
-            if let Some(t) = u.last_edit.map(crate::util::lox_utc_timestamp_to_string) {
+            if let Some(t) = u
+                .last_edit
+                .map(loxone_client::time::lox_utc_timestamp_to_string)
+            {
                 println!("  {:<13} {}", "Last edit", t);
             }
             if let Some(t) = &u.trust_member {
@@ -325,7 +328,8 @@ fn cmd_learn(
     let rt = tokio::runtime::Runtime::new()?;
     let learned = rt.block_on(async {
         let mut session =
-            crate::stream::Session::open(&cfg.connection(), Duration::from_secs(20)).await?;
+            loxone_client::stream::Session::open(&cfg.connection(), Duration::from_secs(20))
+                .await?;
         let ctrl_c = async {
             // without a handler, never fire (Ctrl-C then ends the process)
             if tokio::signal::ctrl_c().await.is_err() {

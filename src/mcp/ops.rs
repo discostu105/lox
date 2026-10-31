@@ -11,12 +11,12 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use crate::actions::{self, Action, Risk, RiskTarget};
-use crate::client::{Control, LoxClient};
 use crate::commands::inspect::{is_energy_type, is_sensor_type};
 use crate::config::Config;
 use crate::scene::{Scene, SceneStep};
 use crate::usermgmt;
 use crate::util::json_val_str;
+use loxone_client::client::{Control, LoxClient};
 
 /// The Miniserver client together with the config it was built from: the
 /// tools need both, lox's settings (confirm list, scenes, config repo) and
@@ -483,7 +483,7 @@ pub fn list_controls(lox: &mut LoxClient, f: &ControlFilter) -> Result<ControlLi
 /// Resolve a control name like the CLI does.
 pub fn resolve(lox: &mut LoxClient, name: &str, room: Option<&str>) -> Result<Control> {
     let uuid = lox.resolve_with_room(name, room)?;
-    lox.find_control(&uuid)
+    Ok(lox.find_control(&uuid)?)
 }
 
 pub fn get_control(lox: &mut LoxClient, name: &str, room: Option<&str>) -> Result<ControlState> {

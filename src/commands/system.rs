@@ -1,5 +1,5 @@
-use crate::sdtest::parse_sdtest;
 use anyhow::{Context, Result, bail};
+use loxone_client::sdtest::{SdTestResult, parse_sdtest};
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::net::UdpSocket;
@@ -174,7 +174,7 @@ pub fn cmd_status(
             if let Some(v) = ctx_swi_val {
                 println!("│  Ctx switches (i): {}", v);
             }
-            sd_info.print_table();
+            print_sd_table(&sd_info);
             println!("└─────────────────────────────────────────────────────");
         }
     }
@@ -952,4 +952,40 @@ pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_sd_table(sd: &SdTestResult) {
+    if sd.read_speed_kb.is_some() || sd.write_speed_kb.is_some() {
+        let read = sd
+            .read_speed_kb
+            .map(|v| format!("{:.0} kB/s", v))
+            .unwrap_or_else(|| "?".to_string());
+        let write = sd
+            .write_speed_kb
+            .map(|v| format!("{:.0} kB/s", v))
+            .unwrap_or_else(|| "?".to_string());
+        println!("│  SD read:          {}", read);
+        println!("│  SD write:         {}", write);
+
+        let err_str = match (sd.error_type, sd.error_count) {
+            (Some(0), _) => "✓ No errors".to_string(),
+            (Some(t), Some(c)) => format!("⚠ type {} count {}", t, c),
+            _ => "?".to_string(),
+        };
+        println!("│  SD errors:        {}", err_str);
+
+        if let Some(usage) = sd.usage_pct {
+            let warn = if usage > 60.0 { " ⚠" } else { "" };
+            println!("│  SD usage:         {:.1}%{}", usage, warn);
+        }
+        if let Some(ref date) = sd.date {
+            let mfr = sd
+                .manufacturer_id
+                .map(|id| format!(" (mfr {})", id))
+                .unwrap_or_default();
+            println!("│  SD manufactured:  {}{}", date, mfr);
+        }
+    } else {
+        println!("│  SD card:          {}", sd.raw);
+    }
 }

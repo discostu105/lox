@@ -5,16 +5,17 @@ use std::io::Cursor;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::client::Control;
 use crate::commands::RunContext;
 use crate::config::Config;
-use crate::stats::{
+use crate::util::{now_hms, xml_attr};
+use crate::{AutopilotCmd, eval_op, matches_filters, print_stream_event};
+use loxone_client::client::Control;
+use loxone_client::stats::{
     StatsEntry, find_stats_files, parse_stats_entries, parse_weather_entry, stats_data_offset,
     stats_file_path, stats_period,
 };
-use crate::stream;
-use crate::util::{lox_epoch, now_hms, xml_attr};
-use crate::{AutopilotCmd, eval_op, matches_filters, print_stream_event};
+use loxone_client::stream;
+use loxone_client::time::lox_epoch;
 
 pub fn cmd_ls(
     ctx: &RunContext,
@@ -318,7 +319,7 @@ pub fn cmd_stream(
                         uuid,
                     );
                 }
-                Ok(true)
+                Ok::<_, anyhow::Error>(true)
             },
         ));
 
@@ -333,7 +334,7 @@ pub fn cmd_stream(
                 }
                 return Ok(());
             }
-            return result;
+            return Ok(result?);
         }
 
         let (reason, mut message) = match &result {
@@ -346,7 +347,7 @@ pub fn cmd_stream(
         };
         let since = match offline_since {
             Some(since) => {
-                if crate::client::verbose() >= 1 {
+                if loxone_client::client::verbose() >= 1 {
                     eprintln!("  still offline: {}", message);
                 }
                 since
@@ -381,7 +382,7 @@ pub fn cmd_stream(
                 }
                 Err(e) => {
                     message = format!("{:#}", e);
-                    if crate::client::verbose() >= 1 {
+                    if loxone_client::client::verbose() >= 1 {
                         eprintln!("  still offline: {}", message);
                     }
                 }
@@ -862,7 +863,7 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
         for (uuid, ctrl) in ctrl_map {
             let legacy = ctrl.get("statistic").is_some_and(|s| !s.is_null());
-            if legacy || !crate::statv2::groups(ctrl).is_empty() {
+            if legacy || !loxone_client::statv2::groups(ctrl).is_empty() {
                 let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                 let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
                 let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
@@ -932,16 +933,16 @@ pub fn cmd_history(
 
     let ctrl_json = lox.get_control_json(&ctrl.uuid).ok();
     if let Some(cj) = &ctrl_json
-        && let Some(group) = crate::statv2::groups(cj)
+        && let Some(group) = loxone_client::statv2::groups(cj)
             .into_iter()
             .find(|g| !g.accumulated)
     {
         let (from, to) = stats_v2_range(day.as_deref(), month.as_deref())?;
-        let data = lox.get_bytes(&crate::statv2::raw_path(
+        let data = lox.get_bytes(&loxone_client::statv2::raw_path(
             &ctrl.uuid, from, to, &group.id, None,
         ))?;
         let names: Vec<String> = group.points.iter().map(|(_, t)| t.clone()).collect();
-        let entries: Vec<StatsEntry> = crate::statv2::parse(&data, names.len())
+        let entries: Vec<StatsEntry> = loxone_client::statv2::parse(&data, names.len())
             .into_iter()
             .map(|(t, values)| StatsEntry {
                 timestamp: chrono::DateTime::from_timestamp(t, 0)
@@ -1351,7 +1352,7 @@ fn read_state(cfg: &Config, uuid: &str) -> Result<String> {
     let target = uuid.to_string();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        tokio::time::timeout(
+        let found = tokio::time::timeout(
             Duration::from_secs(10),
             stream::stream_events_until(&cfg.connection(), |ev| match ev {
                 stream::StateEvent::ValueState { uuid, value } if *uuid == target => {
@@ -1364,7 +1365,8 @@ fn read_state(cfg: &Config, uuid: &str) -> Result<String> {
             }),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Timeout waiting for state {} (10 s)", target))?
+        .map_err(|_| anyhow::anyhow!("Timeout waiting for state {} (10 s)", target))??;
+        Ok(found)
     })
 }
 
@@ -1400,7 +1402,7 @@ mod tests {
         AutopilotRun, Backoff, ChangeReport, SnapshotFilter, fmt_offline, parse_autopilot_history,
         parse_changed, rules_table, runs_of, statistic_output_names,
     };
-    use crate::stream::StateEvent;
+    use loxone_client::stream::StateEvent;
     use serde_json::json;
     use std::time::Duration;
 

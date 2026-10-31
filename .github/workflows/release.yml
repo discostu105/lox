@@ -1,8 +1,8 @@
 name: Release
 
 # Builds and publishes a tagged version: binaries on the GitHub release,
-# the Docker image, the Homebrew formula, and lxir on crates.io when its
-# version is new. Runs for a pushed vX.Y.Z tag, when auto-release.yml calls
+# the Docker image, the Homebrew formula, and lxir and loxone-client on
+# crates.io when their version is new. Runs for a pushed vX.Y.Z tag, when auto-release.yml calls
 # it after tagging, or by hand for an existing tag (to retry a failed run).
 on:
   push:
@@ -288,8 +288,8 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-  publish-lxir:
-    name: Publish lxir to crates.io (new versions only)
+  publish-crates:
+    name: Publish the library crates to crates.io (new versions only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -299,19 +299,21 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      # lxir keeps its own version (crates/lxir/Cargo.toml); bump it there
-      # and the next release publishes it.
-      - name: Publish if crates.io lacks this version
+      # lxir and loxone-client keep their own versions (crates/*/Cargo.toml);
+      # bump one there and the next release publishes it. lxir goes first.
+      - name: Publish what crates.io lacks
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "lxir") | .version')
-          if curl -fsS -o /dev/null -A "lox release (github.com/${GITHUB_REPOSITORY})" \
-               "https://crates.io/api/v1/crates/lxir/${version}"; then
-            echo "lxir ${version} is on crates.io already"
-          elif [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::warning::lxir ${version} is not on crates.io, and there is no CARGO_REGISTRY_TOKEN secret to publish it"
-          else
-            cargo publish -p lxir --locked
-          fi
+          for crate in lxir loxone-client; do
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
+            if curl -fsS -o /dev/null -A "lox release (github.com/${GITHUB_REPOSITORY})" \
+                 "https://crates.io/api/v1/crates/${crate}/${version}"; then
+              echo "${crate} ${version} is on crates.io already"
+            elif [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+              echo "::warning::${crate} ${version} is not on crates.io, and there is no CARGO_REGISTRY_TOKEN secret to publish it"
+            else
+              cargo publish -p "$crate" --locked
+            fi
+          done

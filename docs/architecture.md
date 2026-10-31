@@ -19,8 +19,12 @@ nav_order: 5
 
 `lox` is a single static Rust binary (~4MB), built from a Cargo workspace:
 
-- **`lox`** (the root package): the CLI, the TUI, the MCP server and everything that talks to a Miniserver (HTTP,
-  WebSocket, FTP).
+- **`lox`** (the root package): the CLI, the TUI, the MCP server, contexts and config, risk levels and
+  confirmations, scenes, output formatting.
+- **[`loxone-client`](https://github.com/discostu105/lox/tree/main/crates/loxone-client)**
+  (`crates/loxone-client`): everything that talks to a Miniserver — HTTP, token auth, the WebSocket state stream,
+  FTP, statistics. It takes a `Connection` (host, credentials, token and cache paths), reads no config files and
+  is published on [crates.io](https://crates.io/crates/loxone-client).
 - **[`lxir`](https://github.com/discostu105/lox/tree/main/crates/lxir)** (`crates/lxir`): Loxone config as code — a
   lossless `.Loxone` XML layer, the UUID model, the `.lxir` language and compiler, lockfile and semantic diff. It
   never touches the network and is published on [crates.io](https://crates.io/crates/lxir). `lox ir` runs its CLI;
@@ -35,19 +39,16 @@ self-signed certificates.
 |:-----|:--------|
 | `src/main.rs` | clap definitions and command dispatch; `lox ir` hands its arguments to `lxir::cli` |
 | `src/commands/` | Command implementations: `control`, `inspect`, `system`, `config_cmd` (download/extract/compress/upload), `config_insight` (diff/show/wiring/find/lint/history), `config_push`, `ctx` |
-| `src/connection.rs` | `Connection`: host, credentials, TLS and the token/cache paths, built by `Config::connection()`; the transport modules take it instead of `Config` |
-| `src/client.rs` | `LoxClient` (HTTP): control resolution, structure cache |
-| `src/util.rs`, `src/stats.rs`, `src/sdtest.rs` | Shared helpers; statistics and weather files; the SD card test |
-| `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery |
+| `src/util.rs` | Shared helpers |
+| `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery; `connection()` and `client()` build the loxone-client side |
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
-| `src/stream.rs`, `src/ws.rs`, `src/token.rs` | WebSocket state streaming, the connection, token auth |
 | `src/otel.rs` | OpenTelemetry metrics, logs and traces |
-| `src/ftp.rs`, `src/loxone_xml.rs` | Config transfer; users, devices and a summary of the program file (views over lxir) |
+| `src/loxone_xml.rs` | Users, devices and a summary of the program file (views over lxir) |
 | `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over lxir |
-| `src/statv2.rs` | Statistics V2 (energy flow monitor meters) |
 | `src/scene.rs` | Scenes from YAML |
 | `src/mcp/` | `lox mcp`: MCP server on rmcp |
 | `src/tui/` | `lox tui` (cargo feature `tui`, on by default) |
+| `crates/loxone-client/src/` | `client.rs` (`LoxClient`: HTTP, control resolution, structure cache), `connection.rs`, `error.rs`, `ws.rs`, `token.rs`, `stream.rs` (event tables, sessions), `ftp.rs`, `statv2.rs` (Statistics V2), `stats.rs`, `sdtest.rs`, `time.rs` |
 
 ## Control resolution
 

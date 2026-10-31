@@ -1,8 +1,7 @@
-//! What the transport needs to talk to one Miniserver: where it is, who
+//! What the client needs to talk to one Miniserver: where it is, who
 //! connects, and where its state (token, structure cache) is kept. The HTTP
-//! client, the WebSocket session, token auth and FTP take a [`Connection`];
-//! lox's own settings (contexts, aliases, scenes, confirm lists) stay in
-//! `Config`, which builds one with `Config::connection`.
+//! client, the WebSocket session, token auth and FTP all take a
+//! [`Connection`]; the crate reads no config files of its own.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -28,7 +27,6 @@ pub struct Connection {
 
 impl Connection {
     /// A connection without TLS verification, token or structure cache.
-    #[allow(dead_code)] // lox builds its connections from Config; tests use this
     pub fn new(host: impl Into<String>, user: impl Into<String>, pass: impl Into<String>) -> Self {
         Connection {
             host: host.into(),

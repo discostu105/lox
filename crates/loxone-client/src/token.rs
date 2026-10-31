@@ -1,6 +1,6 @@
 //! Loxone token authentication via WS + RSA/AES command encryption
 
-use anyhow::{Result, bail};
+use crate::error::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -83,16 +83,6 @@ impl TokenStore {
     }
 }
 
-#[allow(dead_code)]
-fn recv_text(
-    msg: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
-) -> Option<String> {
-    match msg? {
-        Ok(Message::Text(t)) => Some(t.to_string()),
-        _ => None,
-    }
-}
-
 /// Hash a token using HMAC-SHA256 with the token key, as required by
 /// checktoken/refreshtoken/killtoken endpoints.
 pub fn hash_token(token: &str, key: &str) -> String {
@@ -161,7 +151,7 @@ impl UserSalt {
     fn parse(v: &serde_json::Value) -> Result<Self> {
         let key_hex = v.get("key").and_then(|k| k.as_str()).unwrap_or("");
         Ok(Self {
-            key: hex::decode(key_hex).map_err(|e| anyhow::anyhow!("getkey2 key: {}", e))?,
+            key: hex::decode(key_hex).map_err(|e| crate::error::err!("getkey2 key: {}", e))?,
             salt: v
                 .get("salt")
                 .and_then(|s| s.as_str())
@@ -192,10 +182,10 @@ fn token_auth_hash(token: &str, s: &UserSalt) -> String {
 /// answer to `jdev/sys/getvisusalt/{user}` and the user's visualization
 /// password: `HMAC-alg(key, UPPER(alg(visuPw + ":" + salt)))`, hex. The key
 /// is single-use, so every secured command needs a fresh `getvisusalt`.
-pub(crate) fn visu_hash(visu_password: &str, getvisusalt: &serde_json::Value) -> Result<String> {
+pub fn visu_hash(visu_password: &str, getvisusalt: &serde_json::Value) -> Result<String> {
     let s = UserSalt::parse(getvisusalt)?;
     if s.key.is_empty() {
-        anyhow::bail!("getvisusalt answered without a key");
+        crate::error::bail!("getvisusalt answered without a key");
     }
     let pw_hash = s
         .alg
@@ -221,10 +211,11 @@ async fn fetch_public_key(conn: &Connection) -> Result<RsaPublicKey> {
         Ok(resp
             .pointer("/LL/value")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("no public key"))?
+            .ok_or_else(|| crate::error::err!("no public key"))?
             .to_string())
     })
-    .await??;
+    .await
+    .map_err(|e| crate::error::err!("public key task: {}", e))??;
     parse_public_key(&pem)
 }
 
@@ -245,7 +236,7 @@ fn parse_public_key(pem_in: &str) -> Result<RsaPublicKey> {
         pem.push('\n');
     }
     pem.push_str("-----END PUBLIC KEY-----");
-    RsaPublicKey::from_public_key_pem(&pem).map_err(|e| anyhow::anyhow!("RSA parse: {}", e))
+    RsaPublicKey::from_public_key_pem(&pem).map_err(|e| crate::error::err!("RSA parse: {}", e))
 }
 
 /// Send a random AES-256 session key (RSA-PKCS1v15 encrypted) via `keyexchange`.
@@ -256,11 +247,13 @@ async fn key_exchange(ws: &mut WsStream, pub_key: &RsaPublicKey) -> Result<()> {
     rand::thread_rng().fill_bytes(&mut aes_iv);
     // Loxone expects key:iv as HEX strings (not base64)
     let key_info = format!("{}:{}", hex::encode(aes_key), hex::encode(aes_iv));
-    let enc = pub_key.encrypt(
-        &mut rand::thread_rng(),
-        Pkcs1v15Encrypt,
-        key_info.as_bytes(),
-    )?;
+    let enc = pub_key
+        .encrypt(
+            &mut rand::thread_rng(),
+            Pkcs1v15Encrypt,
+            key_info.as_bytes(),
+        )
+        .map_err(|e| crate::error::err!("RSA encrypt: {}", e))?;
     let encrypted_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc);
     ws.send(Message::Text(format!(
         "jdev/sys/keyexchange/{}",
@@ -301,7 +294,7 @@ async fn request_token(ws: &mut WsStream, conn: &Connection) -> Result<TokenStor
     let token = val
         .get("token")
         .and_then(|t| t.as_str())
-        .ok_or_else(|| anyhow::anyhow!("no token field in gettoken response"))?;
+        .ok_or_else(|| crate::error::err!("no token field in gettoken response"))?;
     Ok(TokenStore {
         token: token.to_string(),
         key: val
@@ -409,7 +402,7 @@ pub async fn acquire_token(conn: &Connection) -> Result<TokenStore> {
             Err(_) => continue,
         }
     }
-    let mut ws = ws.ok_or_else(|| anyhow::anyhow!("WS connect failed after retries"))?;
+    let mut ws = ws.ok_or_else(|| crate::error::err!("WS connect failed after retries"))?;
 
     // 3. Key exchange, then gettoken on the same connection (getkey2 is session-specific)
     key_exchange(&mut ws, &pub_key).await?;
@@ -472,7 +465,7 @@ async fn ws_reply(ws: &mut WsStream, label: &str) -> Result<WsReply> {
 async fn ws_read_value(ws: &mut WsStream, label: &str) -> Result<serde_json::Value> {
     match ws_reply(ws, label).await? {
         WsReply::Ok(v) => Ok(v),
-        WsReply::Rejected(msg) => bail!(msg),
+        WsReply::Rejected(msg) => Err(crate::Error::Protocol(msg)),
     }
 }
 

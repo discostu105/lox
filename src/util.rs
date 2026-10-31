@@ -81,36 +81,6 @@ pub(crate) fn zip_now() -> lxir::archive::ZipTime {
     }
 }
 
-/// Loxone epoch: 2009-01-01 00:00:00 local time.
-/// All Loxone timestamps are seconds since this epoch.
-pub(crate) fn lox_epoch() -> chrono::DateTime<chrono::Local> {
-    chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_local_timezone(chrono::Local)
-        .unwrap()
-}
-
-/// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted string.
-pub(crate) fn lox_timestamp_to_string(ts: i64) -> String {
-    let dt = lox_epoch() + chrono::Duration::seconds(ts);
-    dt.format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// Convert a Loxone timestamp counted from 2009-01-01 **UTC** (a user's
-/// `lastEdit`) to local time.
-pub(crate) fn lox_utc_timestamp_to_string(ts: i64) -> String {
-    let unix = crate::client::LOXONE_EPOCH_SECS as i64 + ts;
-    match chrono::DateTime::from_timestamp(unix, 0) {
-        Some(dt) => dt
-            .with_timezone(&chrono::Local)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string(),
-        None => ts.to_string(),
-    }
-}
-
 /// Normalize a filesystem path for Loxone fsget/fslist API.
 /// Ensures the path starts with '/' so the double-slash URL
 /// (e.g. /dev/fsget//path) is correct.
@@ -163,6 +133,21 @@ pub(crate) fn encode_path_value(s: &str) -> String {
             c => vec![c],
         })
         .collect()
+}
+
+/// The Miniserver's HTTP error status anywhere in `e`'s chain: a
+/// [`loxone_client::Error`] from the client, or an [`HttpStatusError`] that
+/// lox raised itself.
+///
+/// [`HttpStatusError`]: loxone_client::HttpStatusError
+pub(crate) fn http_status(e: &anyhow::Error) -> Option<&loxone_client::HttpStatusError> {
+    e.chain().find_map(|c| {
+        c.downcast_ref::<loxone_client::HttpStatusError>()
+            .or_else(|| {
+                c.downcast_ref::<loxone_client::Error>()
+                    .and_then(loxone_client::Error::http_status)
+            })
+    })
 }
 
 #[cfg(test)]
@@ -451,31 +436,6 @@ mod tests {
     fn test_kb_fmt_boundary() {
         // At exactly 1024, stays in kB
         assert_eq!(kb_fmt(1024.0), "1024 kB");
-    }
-
-    #[test]
-    fn test_lox_epoch_is_2009() {
-        let e = lox_epoch();
-        assert_eq!(e.format("%Y-%m-%d").to_string(), "2009-01-01");
-    }
-
-    #[test]
-    fn test_lox_timestamp_to_string() {
-        // 0 seconds = epoch itself
-        let s = lox_timestamp_to_string(0);
-        assert!(s.starts_with("2009-01-01"));
-    }
-
-    #[test]
-    fn test_lox_utc_timestamp_is_shown_in_local_time() {
-        use chrono::TimeZone;
-        // 2026-10-29 16:22:00 UTC, as a user's lastEdit
-        let ts = 1_793_290_920 - crate::client::LOXONE_EPOCH_SECS as i64;
-        let local = chrono::Local.timestamp_opt(1_793_290_920, 0).unwrap();
-        assert_eq!(
-            lox_utc_timestamp_to_string(ts),
-            local.format("%Y-%m-%d %H:%M:%S").to_string()
-        );
     }
 
     #[test]

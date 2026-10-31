@@ -5,16 +5,16 @@ use reqwest::blocking::Client;
 use std::fs;
 use std::time::Duration;
 
-use crate::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
 use crate::commands::{RunContext, config_insight, config_push};
 use crate::config::Config;
 use crate::scene::Scene;
-use crate::token;
 use crate::util::json_val_str;
 use crate::{
     AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, custom_changes,
     detect_shell, ftp, gitops, install_completions, loxone_xml,
 };
+use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
+use loxone_client::token;
 use lxir::archive;
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {

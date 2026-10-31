@@ -13,8 +13,9 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-use crate::client::{HttpStatusError, LoxClient, is_uuid, validate_uuid};
 use crate::loxone_xml::{AccessModel, Permission};
+use crate::util::http_status;
+use loxone_client::client::{HttpStatusError, LoxClient, is_uuid, validate_uuid};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -495,10 +496,9 @@ pub fn find_user<'a>(users: &'a [UserSummary], query: &str) -> Result<&'a UserSu
 // ── Miniserver calls ──────────────────────────────────────────────────────────
 
 /// Explain a refused user-management call and how to fix it.
-fn needs_user_management(e: anyhow::Error) -> anyhow::Error {
-    let refused = e
-        .downcast_ref::<HttpStatusError>()
-        .is_some_and(|h| matches!(h.status, 401 | 403))
+fn needs_user_management(e: impl Into<anyhow::Error>) -> anyhow::Error {
+    let e = e.into();
+    let refused = http_status(&e).is_some_and(|h| matches!(h.status, 401 | 403))
         || e.downcast_ref::<LlCodeError>()
             .is_some_and(|c| matches!(c.code.as_str(), "401" | "403"));
     if refused {
@@ -545,10 +545,7 @@ pub fn access_log(lox: &LoxClient, uuid: &str) -> Result<Option<String>> {
     validate_uuid(uuid)?;
     let body = match lox.get_text(&format!("/dev/fsget/log/{}.txt", uuid)) {
         Ok(b) => b,
-        Err(e)
-            if e.downcast_ref::<HttpStatusError>()
-                .is_some_and(|h| h.status == 404) =>
-        {
+        Err(e) if e.http_status().is_some_and(|h| h.status == 404) => {
             return Ok(None);
         }
         Err(e) => return Err(needs_user_management(e)),
@@ -557,13 +554,10 @@ pub fn access_log(lox: &LoxClient, uuid: &str) -> Result<Option<String>> {
     if body.trim_start().starts_with('<') && body.contains("<errorcode>") {
         return match crate::util::xml_attr(&body, "errorcode") {
             Some("404") => Ok(None),
-            Some(code @ ("401" | "403")) => Err(needs_user_management(
-                HttpStatusError {
-                    status: code.parse().unwrap_or(403),
-                    path: format!("log/{}.txt", uuid),
-                }
-                .into(),
-            )),
+            Some(code @ ("401" | "403")) => Err(needs_user_management(HttpStatusError {
+                status: code.parse().unwrap_or(403),
+                path: format!("log/{}.txt", uuid),
+            })),
             code => bail!(
                 "the Miniserver answered error code {} for the access log",
                 code.unwrap_or("?")
@@ -702,13 +696,10 @@ pub fn answer_code(status: u16, body: &str) -> u16 {
 
 /// A refused change as an error: 401/403 with the fix, the rest by code.
 fn change_refused(code: u16, shown: &str) -> anyhow::Error {
-    needs_user_management(
-        LlCodeError {
-            code: code.to_string(),
-            control: shown.trim_start_matches('/').to_string(),
-        }
-        .into(),
-    )
+    needs_user_management(LlCodeError {
+        code: code.to_string(),
+        control: shown.trim_start_matches('/').to_string(),
+    })
 }
 
 /// Pair an NFC tag with a user.
@@ -1028,12 +1019,12 @@ pub struct Touch {
 
 /// Loxone time now: seconds since 2009-01-01 local time.
 pub fn lox_now() -> i64 {
-    (chrono::Local::now() - crate::util::lox_epoch()).num_seconds()
+    (chrono::Local::now() - loxone_client::time::lox_epoch()).num_seconds()
 }
 
 /// Why the user cannot use any credential right now, if so.
 fn disabled_reason(user: &User, now: i64) -> Option<String> {
-    let fmt = |t: i64| crate::util::lox_timestamp_to_string(t);
+    let fmt = |t: i64| loxone_client::time::lox_timestamp_to_string(t);
     let expired = |until: Option<i64>| until.filter(|u| now > *u);
     let not_yet = |from: Option<i64>| from.filter(|f| now < *f);
     match user.state {
@@ -1804,7 +1795,7 @@ mod tests {
     }
 
     fn fake(server: &httpmock::MockServer) -> LoxClient {
-        LoxClient::new(crate::connection::Connection::new(
+        LoxClient::new(loxone_client::connection::Connection::new(
             server.base_url(),
             "test",
             "test",

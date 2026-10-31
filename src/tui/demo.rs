@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value, json};
 
 use super::data::{BusLan, Device, Diag, LogLine, MsInfo, Series, SiteStatus};
-use crate::stream::StateEvent;
+use loxone_client::stream::StateEvent;
 
 // ── Structure fixture ────────────────────────────────────────────────────────
 

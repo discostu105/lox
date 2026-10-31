@@ -28,10 +28,10 @@ use std::time::{Duration, Instant};
 use super::ServerOptions;
 use super::ops::{self, ActionResult, ControlFilter, SceneRun, invalid, tool_error};
 use crate::actions::{self, Action};
-use crate::client::{Control, LoxClient};
 use crate::config::Config;
 use crate::nfc_learn::{self, LearnIo, LearnedTag};
 use crate::usermgmt::{self, UserChange};
+use loxone_client::client::{Control, LoxClient};
 
 /// How long a `LoxClient` (and its in-memory structure) is reused before it is
 /// rebuilt from config — picks up `lox cache refresh` and changed credentials.
@@ -534,7 +534,8 @@ fn websocket_learn() -> LearnConnector {
     Arc::new(|cfg| {
         Box::pin(async move {
             let session =
-                crate::stream::Session::open(&cfg.connection(), Duration::from_secs(20)).await?;
+                loxone_client::stream::Session::open(&cfg.connection(), Duration::from_secs(20))
+                    .await?;
             Ok(Box::new(session) as Box<dyn LearnIo>)
         })
     })
@@ -985,9 +986,11 @@ impl LoxMcp {
         };
         if let Some(live) = live {
             let wait = std::time::Duration::from_secs(10);
-            match crate::stream::initial_states(&cfg.connection(), &live.uuids(), wait).await {
+            match loxone_client::stream::initial_states(&cfg.connection(), &live.uuids(), wait)
+                .await
+            {
                 Ok(values) => ops::apply_live_states(&mut state, &live, &values),
-                Err(e) => return fail(e),
+                Err(e) => return fail(e.into()),
             }
         }
         respond(Ok(state))

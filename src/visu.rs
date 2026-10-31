@@ -43,7 +43,7 @@ pub fn salt_cmd(user: &str) -> String {
 /// `cmd` at `uuid` as a secured command, signed with `password` and the
 /// answer to [`salt_cmd`].
 pub fn secured_cmd(password: &VisuPassword, salt: &Value, uuid: &str, cmd: &str) -> Result<String> {
-    let hash = crate::token::visu_hash(&password.0, salt)?;
+    let hash = loxone_client::token::visu_hash(&password.0, salt)?;
     Ok(format!("jdev/sps/ios/{}/{}/{}", hash, uuid, cmd))
 }
 

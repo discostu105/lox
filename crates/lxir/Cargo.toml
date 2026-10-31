@@ -1,6 +1,6 @@
 [package]
 name = "lxir"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Loxone config-as-code: a text language compiled to .Loxone configs — lossless XML core, UUID/identity model, lockfile, compile/decompile/adopt, semantic diff, simulated tests"

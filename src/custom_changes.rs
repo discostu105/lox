@@ -133,7 +133,7 @@ fn page_of(doc: &LoxoneDoc, path: &[usize]) -> Option<String> {
 /// would delete, on stderr. Best effort — a failed check is reported, not
 /// fatal, because these commands already need `--force`.
 pub(crate) fn warn_before_upload(cfg: &crate::config::Config, upload_xml: Option<&[u8]>) {
-    match crate::ftp::download_custom_changes(&cfg.connection()) {
+    match loxone_client::ftp::download_custom_changes(&cfg.connection()) {
         Ok(files) if files.is_empty() => {}
         Ok(files) => {
             let changes = describe(&files, upload_xml);
@@ -152,7 +152,7 @@ pub(crate) fn warn_before_upload(cfg: &crate::config::Config, upload_xml: Option
         }
         Err(e) => eprintln!(
             "⚠  Could not check {} for custom changes an upload would delete: {e:#}",
-            crate::ftp::CUSTOM_CHANGES_DIR
+            loxone_client::ftp::CUSTOM_CHANGES_DIR
         ),
     }
 }

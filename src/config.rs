@@ -191,9 +191,9 @@ impl Config {
     /// What the transport needs: host, credentials, TLS, and where the token
     /// and the structure cache are kept. A Miniserver on localhost (the mock
     /// servers of the tests) gets no structure cache.
-    pub fn connection(&self) -> crate::connection::Connection {
+    pub fn connection(&self) -> loxone_client::connection::Connection {
         let local = self.host.contains("127.0.0.1") || self.host.contains("localhost");
-        crate::connection::Connection {
+        loxone_client::connection::Connection {
             host: self.host.clone(),
             user: self.user.clone(),
             pass: self.pass.clone(),
@@ -204,8 +204,9 @@ impl Config {
     }
 
     /// An HTTP client for this config's Miniserver, with its aliases.
-    pub fn client(&self) -> Result<crate::client::LoxClient> {
-        Ok(crate::client::LoxClient::new(self.connection())?.with_aliases(self.aliases.clone()))
+    pub fn client(&self) -> Result<loxone_client::client::LoxClient> {
+        Ok(loxone_client::client::LoxClient::new(self.connection())?
+            .with_aliases(self.aliases.clone()))
     }
 
     /// Load the effective config, considering context resolution:

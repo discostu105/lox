@@ -13,7 +13,7 @@ use super::model::{Cid, Kind};
 use super::palette;
 use super::vm::{self, Plan, Verb};
 use crate::actions::{Action, AlarmCmd, BlindCmd, Risk, ThermoCmd};
-use crate::stream::StateEvent;
+use loxone_client::stream::StateEvent;
 
 /// Minimum terminal size (§6.4)
 pub const MIN_W: u16 = 80;

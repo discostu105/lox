@@ -13,12 +13,9 @@ macro_rules! println {
 
 mod actions;
 mod app_catalogue;
-mod client;
 mod commands;
 mod config;
-mod connection;
 mod custom_changes;
-mod ftp;
 mod gitops;
 mod logic;
 mod loxone_xml;
@@ -26,24 +23,19 @@ mod mcp;
 mod nfc_learn;
 mod otel;
 mod scene;
-mod sdtest;
 mod snapshot;
-mod stats;
-mod statv2;
-mod stream;
-mod token;
 #[cfg(feature = "tui")]
 mod tui;
 mod usermgmt;
 mod util;
 mod visu;
-mod ws;
 
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
-use client::LoxClient;
 use dirs::home_dir;
+use loxone_client::LoxClient;
+use loxone_client::{client, ftp, stream};
 use serde_json::Value;
 use std::fs;
 use util::{json_val_str, now_hms};
@@ -1615,7 +1607,7 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
         "user_changes_pending"
     } else if lower.contains("requires --yes") {
         "confirmation_required"
-    } else if let Some(http_err) = e.downcast_ref::<client::HttpStatusError>() {
+    } else if let Some(http_err) = util::http_status(e) {
         match http_err.status {
             401 => "unauthorized",
             403 => "forbidden",

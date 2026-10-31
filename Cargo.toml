@@ -1,7 +1,7 @@
 [workspace]
-members = [".", "crates/lxir"]
-# Plain `cargo build/test/clippy` cover both crates.
-default-members = [".", "crates/lxir"]
+members = [".", "crates/lxir", "crates/loxone-client"]
+# Plain `cargo build/test/clippy` cover all crates.
+default-members = [".", "crates/lxir", "crates/loxone-client"]
 
 [package]
 name = "lox"
@@ -34,23 +34,13 @@ serde_yaml = "0.9"
 dirs = "5"
 anyhow = "1"
 
-# WebSocket / token auth deps
+# The Miniserver client (HTTP, token auth, WebSocket, FTP) is crates/loxone-client
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
-hmac = "0.12"
-sha1 = "0.10"
 sha2 = "0.10"
 hex = "0.4"
 futures-util = "0.3"
-rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
-webpki-roots = "0.26"
 base64 = "0.22"
-rsa = { version = "0.9", features = ["sha2"] }
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
-rand = "0.8"
 chrono = { version = "0.4", features = ["clock"] }
-byteorder = "1"
 uuid = { version = "1", features = ["v4"] }
 # hidden prompt for `lox user code set`
 rpassword = "7"
@@ -66,18 +56,20 @@ opentelemetry-http = { version = "0.31", default-features = false, features = ["
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
 
 # Backup deps
-suppaftp = "6"
 quick-xml = "0.37"
 crc32fast = "1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color"], optional = true }
 crossterm = { version = "0.29", features = ["event-stream"], optional = true }
 nucleo-matcher = { version = "0.3", optional = true }
-lxir = { path = "crates/lxir", version = "0.1.0" }
+lxir = { path = "crates/lxir", version = "0.2.0" }
+loxone-client = { path = "crates/loxone-client", version = "0.1.0" }
 unicode-width = { version = "0.2", optional = true }
 unicode-segmentation = { version = "1", optional = true }
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+byteorder = "1"
 # MCP client side for protocol tests of `lox mcp`
 rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io", "elicitation"] }
 assert_cmd = "2"

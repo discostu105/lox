@@ -5,18 +5,18 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 
-use crate::util::lox_timestamp_to_string;
+use crate::time::lox_timestamp_to_string;
 
 /// A single parsed statistics entry.
-pub(crate) struct StatsEntry {
-    pub(crate) timestamp: String,
-    pub(crate) values: Vec<f64>,
+pub struct StatsEntry {
+    pub timestamp: String,
+    pub values: Vec<f64>,
 }
 
 /// Parse binary statistics data (after header has been skipped).
 /// `data` is the raw bytes starting from the first entry.
 /// `num_outputs` is the number of f64 values per entry.
-pub(crate) fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
+pub fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
     let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
     let mut cursor = Cursor::new(data);
     let mut entries = Vec::new();
@@ -38,7 +38,7 @@ pub(crate) fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsE
 /// Skip the binary stats file header and return the offset where entries begin.
 /// Header format: u32 valueCount | u32 controlType | u32 nameLength | name bytes
 /// Returns None if data is too short.
-pub(crate) fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
+pub fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
     if data.len() <= 12 {
         return None;
     }
@@ -51,7 +51,7 @@ pub(crate) fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize>
 }
 
 /// Determine the stats period string from day/month flags.
-pub(crate) fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
+pub fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
     if let Some(d) = day {
         d.replace('-', "")
     } else if let Some(m) = month {
@@ -62,12 +62,12 @@ pub(crate) fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
 }
 
 /// Build the bare fsget path for a stats file.
-pub(crate) fn stats_file_path(uuid: &str, period: &str) -> String {
+pub fn stats_file_path(uuid: &str, period: &str) -> String {
     format!("/dev/fsget//stats/{}.{}", uuid, period)
 }
 
 /// Parse an fslist output to find matching stats files for a UUID and period.
-pub(crate) fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
+pub fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
     let suffix = format!(".{}", period);
     let mut files: Vec<&str> = listing
         .lines()
@@ -78,7 +78,7 @@ pub(crate) fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -
     files
 }
 
-pub(crate) fn parse_weather_entry(
+pub fn parse_weather_entry(
     cursor: &mut Cursor<&[u8]>,
     lox_epoch: &chrono::DateTime<chrono::Local>,
 ) -> Option<serde_json::Value> {
@@ -137,7 +137,7 @@ pub(crate) fn parse_weather_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::lox_epoch;
+    use crate::time::lox_epoch;
 
     #[test]
     fn test_parse_weather_entry() {
