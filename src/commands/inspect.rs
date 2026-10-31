@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::io::Cursor;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -9,8 +10,9 @@ use std::time::{Duration, Instant};
 use crate::commands::RunContext;
 use crate::commands::config_insight::ConfigSource;
 use crate::config::Config;
-use crate::inventory::is_sensor_type;
+use crate::inventory::{LiveControl, is_sensor_type, read_live};
 use crate::util::{now_hms, xml_attr};
+use loxone_client::client::{Control, LoxClient};
 use loxone_client::stats::{
     StatsEntry, find_stats_files, parse_stats_entries, parse_weather_entry, stats_data_offset,
     stats_file_path, stats_period,
@@ -36,56 +38,90 @@ pub fn cmd_ls(
     if ctx.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(
-                &controls
-                    .iter()
-                    .map(|c| serde_json::json!({
-                        "name": c.name, "uuid": c.uuid, "type": c.typ, "room": c.room
-                    }))
-                    .collect::<Vec<_>>()
-            )?
+            serde_json::to_string_pretty(&controls_json(&controls))?
         );
-    } else if values {
-        if !ctx.no_header {
-            println!(
-                "{:<40} {:<24} {:<22} {:<20} UUID",
-                "NAME", "ROOM", "TYPE", "VALUE"
-            );
-            println!("{}", "─".repeat(140));
-        }
-        for c in &controls {
-            let val = lox
-                .get_all(&c.uuid)
-                .ok()
-                .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                .unwrap_or_else(|| "-".to_string());
-            println!(
-                "{:<40} {:<24} {:<22} {:<20} {}",
-                c.name,
-                c.room.as_deref().unwrap_or("─"),
-                c.typ,
-                val,
-                c.uuid
-            );
-        }
-        println!("\n{} controls", controls.len());
-    } else {
-        if !ctx.no_header {
-            println!("{:<40} {:<24} {:<22} UUID", "NAME", "ROOM", "TYPE");
-            println!("{}", "─".repeat(120));
-        }
-        for c in &controls {
-            println!(
-                "{:<40} {:<24} {:<22} {}",
-                c.name,
-                c.room.as_deref().unwrap_or("─"),
-                c.typ,
-                c.uuid
-            );
-        }
-        println!("\n{} controls", controls.len());
+        return Ok(());
     }
+    let values: Option<Vec<String>> = values.then(|| {
+        controls
+            .iter()
+            .map(|c| live_value(&lox, &c.uuid).unwrap_or_else(|| "-".to_string()))
+            .collect()
+    });
+    print!(
+        "{}",
+        controls_table(&controls, values.as_deref(), !ctx.no_header)
+    );
     Ok(())
+}
+
+/// A control's current `value` from its `/all` answer; none when the read
+/// fails or carries no value.
+fn live_value(lox: &LoxClient, uuid: &str) -> Option<String> {
+    lox.get_all(uuid)
+        .ok()
+        .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
+}
+
+fn room_or_dash(room: &Option<String>) -> &str {
+    room.as_deref().unwrap_or("─")
+}
+
+fn controls_json(controls: &[Control]) -> Vec<Value> {
+    controls
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name, "uuid": c.uuid, "type": c.typ, "room": c.room
+            })
+        })
+        .collect()
+}
+
+/// The `lox ls` table; with `values` (one per control) a VALUE column.
+fn controls_table(controls: &[Control], values: Option<&[String]>, header: bool) -> String {
+    let mut out = String::new();
+    match values {
+        Some(values) => {
+            if header {
+                let _ = writeln!(
+                    out,
+                    "{:<40} {:<24} {:<22} {:<20} UUID",
+                    "NAME", "ROOM", "TYPE", "VALUE"
+                );
+                let _ = writeln!(out, "{}", "─".repeat(140));
+            }
+            for (c, val) in controls.iter().zip(values) {
+                let _ = writeln!(
+                    out,
+                    "{:<40} {:<24} {:<22} {:<20} {}",
+                    c.name,
+                    room_or_dash(&c.room),
+                    c.typ,
+                    val,
+                    c.uuid
+                );
+            }
+        }
+        None => {
+            if header {
+                let _ = writeln!(out, "{:<40} {:<24} {:<22} UUID", "NAME", "ROOM", "TYPE");
+                let _ = writeln!(out, "{}", "─".repeat(120));
+            }
+            for c in controls {
+                let _ = writeln!(
+                    out,
+                    "{:<40} {:<24} {:<22} {}",
+                    c.name,
+                    room_or_dash(&c.room),
+                    c.typ,
+                    c.uuid
+                );
+            }
+        }
+    }
+    let _ = writeln!(out, "\n{} controls", controls.len());
+    out
 }
 
 pub fn cmd_get(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
@@ -93,56 +129,69 @@ pub fn cmd_get(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> 
     let uuid_resolved = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid_resolved)?;
     let xml = lox.get_all(&ctrl.uuid)?;
-    let val = xml_attr(&xml, "value").unwrap_or("?");
-    let code = xml_attr(&xml, "Code").unwrap_or("?");
-
     if ctx.json {
-        let mut result = serde_json::json!({
-            "name": ctrl.name, "uuid": ctrl.uuid,
-            "type": ctrl.typ, "room": ctrl.room, "value": val,
-        });
-        for attr in &[
-            "StateUp",
-            "StateDown",
-            "StatePos",
-            "StateShade",
-            "StateAutoShade",
-            "StateSafety",
-        ] {
-            if let Some(v) = xml_attr(&xml, attr) {
-                result[attr] = Value::String(v.to_string());
-            }
-        }
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        println!("{}", serde_json::to_string_pretty(&get_json(&ctrl, &xml))?);
     } else {
-        println!("Control:  {} ({})", ctrl.name, ctrl.uuid);
-        println!(
-            "Type:     {}   Room: {}",
-            ctrl.typ,
-            ctrl.room.as_deref().unwrap_or("─")
-        );
-        println!("Value:    {}  [Code {}]", val, code);
-        for attr in &[
-            "StateUp",
-            "StateDown",
-            "StatePos",
-            "StateShade",
-            "StateAutoShade",
-        ] {
-            if let Some(v) = xml_attr(&xml, attr) {
-                println!("  {:<12} {}", attr.trim_start_matches("State"), v);
-            }
-        }
-        let mut i = 1;
-        while let Some(n) = xml_attr(&xml, &format!("n{}", i)) {
-            let v = xml_attr(&xml, &format!("v{}", i)).unwrap_or("?");
-            if !n.is_empty() {
-                println!("  {:<30} = {}", n, v);
-            }
-            i += 1;
-        }
+        print!("{}", get_text(&ctrl, &xml));
     }
     Ok(())
+}
+
+/// `lox get -o json`: the control, its value and the blind states it has.
+fn get_json(ctrl: &Control, xml: &str) -> Value {
+    let mut result = serde_json::json!({
+        "name": ctrl.name, "uuid": ctrl.uuid,
+        "type": ctrl.typ, "room": ctrl.room, "value": xml_attr(xml, "value").unwrap_or("?"),
+    });
+    for attr in &[
+        "StateUp",
+        "StateDown",
+        "StatePos",
+        "StateShade",
+        "StateAutoShade",
+        "StateSafety",
+    ] {
+        if let Some(v) = xml_attr(xml, attr) {
+            result[attr] = Value::String(v.to_string());
+        }
+    }
+    result
+}
+
+/// `lox get`: the control, its value and code, blind states and the named
+/// outputs (`n1`/`v1`, …) of its `/all` answer.
+fn get_text(ctrl: &Control, xml: &str) -> String {
+    let mut out = String::new();
+    let val = xml_attr(xml, "value").unwrap_or("?");
+    let code = xml_attr(xml, "Code").unwrap_or("?");
+    let _ = writeln!(out, "Control:  {} ({})", ctrl.name, ctrl.uuid);
+    let _ = writeln!(
+        out,
+        "Type:     {}   Room: {}",
+        ctrl.typ,
+        room_or_dash(&ctrl.room)
+    );
+    let _ = writeln!(out, "Value:    {}  [Code {}]", val, code);
+    for attr in &[
+        "StateUp",
+        "StateDown",
+        "StatePos",
+        "StateShade",
+        "StateAutoShade",
+    ] {
+        if let Some(v) = xml_attr(xml, attr) {
+            let _ = writeln!(out, "  {:<12} {}", attr.trim_start_matches("State"), v);
+        }
+    }
+    let mut i = 1;
+    while let Some(n) = xml_attr(xml, &format!("n{}", i)) {
+        let v = xml_attr(xml, &format!("v{}", i)).unwrap_or("?");
+        if !n.is_empty() {
+            let _ = writeln!(out, "  {:<30} = {}", n, v);
+        }
+        i += 1;
+    }
+    out
 }
 
 pub fn cmd_info(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
@@ -151,68 +200,77 @@ pub fn cmd_info(ctx: &RunContext, name_or_uuid: String, room: Option<String>) ->
     let ctrl = lox.find_control(&uuid_resolved)?;
     let ctrl_json = lox.get_control_json(&ctrl.uuid)?;
     let xml = lox.get_all(&ctrl.uuid).unwrap_or_default();
-
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&ctrl_json)?);
     } else {
-        println!("Control:    {} ({})", ctrl.name, ctrl.uuid);
-        println!(
-            "Type:       {}   Room: {}   Cat: {}",
-            ctrl.typ,
-            ctrl.room.as_deref().unwrap_or("─"),
-            ctrl.cat.as_deref().unwrap_or("─"),
-        );
-        println!(
-            "Favorite:   {}   Secured: {}",
-            if ctrl.is_favorite { "yes" } else { "no" },
-            if ctrl.is_secured { "yes" } else { "no" },
-        );
-        let val = xml_attr(&xml, "value").unwrap_or("?");
-        println!("Value:      {}", val);
+        print!("{}", info_text(&ctrl, &ctrl_json, &xml));
+    }
+    Ok(())
+}
 
-        if let Some(subs) = ctrl_json.get("subControls").and_then(|s| s.as_object()) {
-            println!("\nSub-controls:");
-            for (sub_uuid, sub) in subs {
-                let sub_name = sub.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                let sub_type = sub.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                println!("  {:<30} {:<20} {}", sub_name, sub_type, sub_uuid);
-            }
+/// `lox info`: the control with its value, sub-controls, states, moods and
+/// statistic outputs, from its structure entry and its `/all` answer.
+fn info_text(ctrl: &Control, ctrl_json: &Value, xml: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Control:    {} ({})", ctrl.name, ctrl.uuid);
+    let _ = writeln!(
+        out,
+        "Type:       {}   Room: {}   Cat: {}",
+        ctrl.typ,
+        room_or_dash(&ctrl.room),
+        ctrl.cat.as_deref().unwrap_or("─"),
+    );
+    let _ = writeln!(
+        out,
+        "Favorite:   {}   Secured: {}",
+        if ctrl.is_favorite { "yes" } else { "no" },
+        if ctrl.is_secured { "yes" } else { "no" },
+    );
+    let val = xml_attr(xml, "value").unwrap_or("?");
+    let _ = writeln!(out, "Value:      {}", val);
+
+    if let Some(subs) = ctrl_json.get("subControls").and_then(|s| s.as_object()) {
+        let _ = writeln!(out, "\nSub-controls:");
+        for (sub_uuid, sub) in subs {
+            let sub_name = sub.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+            let sub_type = sub.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+            let _ = writeln!(out, "  {:<30} {:<20} {}", sub_name, sub_type, sub_uuid);
         }
+    }
 
-        if let Some(states) = ctrl_json.get("states").and_then(|s| s.as_object()) {
-            println!("\nStates:");
-            let mut state_list: Vec<_> = states.iter().collect();
-            state_list.sort_by_key(|(k, _)| k.as_str());
-            for (state_name, state_uuid) in &state_list {
-                let uuid_str = state_uuid.as_str().unwrap_or("?");
-                println!("  {:<30} {}", state_name, uuid_str);
-            }
+    if let Some(states) = ctrl_json.get("states").and_then(|s| s.as_object()) {
+        let _ = writeln!(out, "\nStates:");
+        let mut state_list: Vec<_> = states.iter().collect();
+        state_list.sort_by_key(|(k, _)| k.as_str());
+        for (state_name, state_uuid) in &state_list {
+            let uuid_str = state_uuid.as_str().unwrap_or("?");
+            let _ = writeln!(out, "  {:<30} {}", state_name, uuid_str);
         }
+    }
 
-        if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object())
-            && let Some(moods) = details.get("moods").and_then(|m| m.as_array())
-        {
-            println!("\nMoods:");
-            for mood in moods {
-                let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-                let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                println!("  {:<6} {}", id, name);
-            }
+    if let Some(details) = ctrl_json.get("details").and_then(|d| d.as_object())
+        && let Some(moods) = details.get("moods").and_then(|m| m.as_array())
+    {
+        let _ = writeln!(out, "\nMoods:");
+        for mood in moods {
+            let id = mood.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+            let name = mood.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+            let _ = writeln!(out, "  {:<6} {}", id, name);
         }
+    }
 
-        if let Some(stat) = ctrl_json.get("statistic")
-            && !stat.is_null()
-        {
-            println!("\nStatistics: enabled");
-            if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
-                for (k, v) in outputs {
-                    let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                    println!("  {:<30} {}", name, k);
-                }
+    if let Some(stat) = ctrl_json.get("statistic")
+        && !stat.is_null()
+    {
+        let _ = writeln!(out, "\nStatistics: enabled");
+        if let Some(outputs) = stat.get("outputs").and_then(|o| o.as_object()) {
+            for (k, v) in outputs {
+                let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                let _ = writeln!(out, "  {:<30} {}", name, k);
             }
         }
     }
-    Ok(())
+    out
 }
 
 pub fn cmd_watch(_ctx: &RunContext, name_or_uuid: String, interval: u64) -> Result<()> {
@@ -676,30 +734,37 @@ pub fn cmd_if(
 
 pub fn cmd_rooms(ctx: &RunContext) -> Result<()> {
     let mut lox = Config::load()?.client()?;
-    let structure = lox.get_structure()?;
-    if let Some(rooms) = structure.get("rooms").and_then(|r| r.as_object()) {
-        let mut entries: Vec<_> = rooms
+    let Some(rooms) = room_names(lox.get_structure()?) else {
+        return Ok(());
+    };
+    if ctx.json {
+        let arr: Vec<_> = rooms
             .iter()
-            .filter_map(|(uuid, r)| {
-                r.get("name")
-                    .and_then(|n| n.as_str())
-                    .map(|name| (uuid.as_str(), name))
-            })
+            .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
             .collect();
-        entries.sort_by_key(|(_, name)| *name);
-        if ctx.json {
-            let arr: Vec<_> = entries
-                .iter()
-                .map(|(uuid, name)| serde_json::json!({"uuid": uuid, "name": name}))
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&arr)?);
-        } else {
-            for (_, name) in entries {
-                println!("{}", name);
-            }
+        println!("{}", serde_json::to_string_pretty(&arr)?);
+    } else {
+        for (_, name) in rooms {
+            println!("{}", name);
         }
     }
     Ok(())
+}
+
+/// The structure's rooms as (uuid, name), by name; none when the structure
+/// has no room table.
+fn room_names(structure: &Value) -> Option<Vec<(&str, &str)>> {
+    let rooms = structure.get("rooms").and_then(|r| r.as_object())?;
+    let mut entries: Vec<_> = rooms
+        .iter()
+        .filter_map(|(uuid, r)| {
+            r.get("name")
+                .and_then(|n| n.as_str())
+                .map(|name| (uuid.as_str(), name))
+        })
+        .collect();
+    entries.sort_by_key(|(_, name)| *name);
+    Some(entries)
 }
 
 pub fn cmd_categories(ctx: &RunContext) -> Result<()> {
@@ -712,189 +777,246 @@ pub fn cmd_categories(ctx: &RunContext) -> Result<()> {
             .collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
     } else {
-        println!("{:<36} NAME", "UUID");
-        println!("{}", "─".repeat(60));
-        for (uuid, name) in &cats {
-            println!("{:<36} {}", uuid, name);
-        }
-        println!("\n{} categories", cats.len());
+        print!("{}", categories_table(&cats));
     }
     Ok(())
 }
 
+fn categories_table(cats: &[(String, String)]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{:<36} NAME", "UUID");
+    let _ = writeln!(out, "{}", "─".repeat(60));
+    for (uuid, name) in cats {
+        let _ = writeln!(out, "{:<36} {}", uuid, name);
+    }
+    let _ = writeln!(out, "\n{} categories", cats.len());
+    out
+}
+
+/// A global state (operating mode, sunrise, …) with its current value.
+struct GlobalState {
+    name: String,
+    uuid: String,
+    /// `?` when it could not be read
+    value: String,
+}
+
 pub fn cmd_globals(ctx: &RunContext) -> Result<()> {
     let mut lox = Config::load()?.client()?;
-    let globals = lox.get_global_states()?;
+    let globals: Vec<GlobalState> = lox
+        .get_global_states()?
+        .into_iter()
+        .map(|(name, uuid)| {
+            let value = live_value(&lox, &uuid).unwrap_or_else(|| "?".to_string());
+            GlobalState { name, uuid, value }
+        })
+        .collect();
     if ctx.json {
-        let mut map = serde_json::Map::new();
-        for (name, uuid) in &globals {
-            let val = lox
-                .get_all(uuid)
-                .ok()
-                .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                .unwrap_or_else(|| "?".to_string());
-            map.insert(
-                name.clone(),
-                serde_json::json!({"uuid": uuid, "value": val}),
-            );
-        }
-        println!("{}", serde_json::to_string_pretty(&Value::Object(map))?);
+        println!("{}", serde_json::to_string_pretty(&globals_json(&globals))?);
     } else {
-        println!("{:<30} {:<36} VALUE", "STATE", "UUID");
-        println!("{}", "─".repeat(90));
-        for (name, uuid) in &globals {
-            let val = lox
-                .get_all(uuid)
-                .ok()
-                .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-                .unwrap_or_else(|| "?".to_string());
-            println!("{:<30} {:<36} {}", name, uuid, val);
-        }
+        print!("{}", globals_table(&globals));
     }
     Ok(())
+}
+
+fn globals_json(globals: &[GlobalState]) -> Value {
+    let mut map = serde_json::Map::new();
+    for g in globals {
+        map.insert(
+            g.name.clone(),
+            serde_json::json!({"uuid": g.uuid, "value": g.value}),
+        );
+    }
+    Value::Object(map)
+}
+
+fn globals_table(globals: &[GlobalState]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{:<30} {:<36} VALUE", "STATE", "UUID");
+    let _ = writeln!(out, "{}", "─".repeat(90));
+    for g in globals {
+        let _ = writeln!(out, "{:<30} {:<36} {}", g.name, g.uuid, g.value);
+    }
+    out
 }
 
 pub fn cmd_modes(ctx: &RunContext) -> Result<()> {
     let mut lox = Config::load()?.client()?;
     let modes = lox.get_operating_modes()?;
     let globals = lox.get_global_states().unwrap_or_default();
-    let current_mode = globals
+    let current = globals
         .iter()
         .find(|(name, _)| name == "operatingMode")
-        .and_then(|(_, uuid)| {
-            lox.get_all(uuid)
-                .ok()
-                .and_then(|xml| xml_attr(&xml, "value").map(|s| s.to_string()))
-        });
+        .and_then(|(_, uuid)| live_value(&lox, uuid));
     if ctx.json {
         let arr: Vec<_> = modes
             .iter()
             .map(|(id, name)| {
-                let active = current_mode.as_deref() == Some(id.as_str());
+                let active = current.as_deref() == Some(id.as_str());
                 serde_json::json!({"id": id, "name": name, "active": active})
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
     } else {
-        println!("{:<6} {:<30} STATUS", "ID", "MODE");
-        println!("{}", "─".repeat(50));
-        for (id, name) in &modes {
-            let active = current_mode.as_deref() == Some(id.as_str());
-            println!(
-                "{:<6} {:<30} {}",
-                id,
-                name,
-                if active { "← active" } else { "" }
-            );
-        }
+        print!("{}", modes_table(&modes, current.as_deref()));
     }
     Ok(())
+}
+
+/// The operating modes as (id, name), the `current` one marked.
+fn modes_table(modes: &[(String, String)], current: Option<&str>) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{:<6} {:<30} STATUS", "ID", "MODE");
+    let _ = writeln!(out, "{}", "─".repeat(50));
+    for (id, name) in modes {
+        let active = current == Some(id.as_str());
+        let _ = writeln!(
+            out,
+            "{:<6} {:<30} {}",
+            id,
+            name,
+            if active { "← active" } else { "" }
+        );
+    }
+    out
 }
 
 pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Result<()> {
     let mut lox = Config::load()?.client()?;
-    let type_lower = r#type.to_lowercase();
-    let type_filter: Option<&str> = match type_lower.as_str() {
-        "temperature" | "temp" => Some("InfoOnlyAnalog"),
-        "door-window" | "doorwindow" => Some("InfoOnlyDigital"),
-        "motion" => None,
-        "smoke" => Some("SmokeAlarm"),
-        _ => None,
-    };
-    let controls = lox.list_controls(type_filter, room.as_deref())?;
-    let filtered: Vec<_> = controls
-        .iter()
-        .filter(|c| is_sensor_type(&type_lower, c))
-        .collect();
+    let kind = r#type.to_lowercase();
+    let sensors = read_live(&mut lox, room.as_deref(), |c| is_sensor_type(&kind, c))?;
     if ctx.json {
-        let mut arr = Vec::new();
-        for c in &filtered {
-            let xml = lox.get_all(&c.uuid).unwrap_or_default();
-            let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-            arr.push(serde_json::json!({
-                "name": c.name, "uuid": c.uuid, "type": c.typ,
-                "room": c.room, "value": val,
-            }));
-        }
+        let arr: Vec<_> = sensors
+            .iter()
+            .map(|s| {
+                let c = &s.control;
+                serde_json::json!({
+                    "name": c.name, "uuid": c.uuid, "type": c.typ,
+                    "room": c.room, "value": xml_attr(&s.all_xml, "value").unwrap_or("?"),
+                })
+            })
+            .collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
-    } else if filtered.is_empty() {
-        println!("No sensors found.");
     } else {
-        if !ctx.no_header {
-            println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-            println!("{}", "─".repeat(96));
-        }
-        for c in &filtered {
-            let xml = lox.get_all(&c.uuid).unwrap_or_default();
-            let val = xml_attr(&xml, "value").unwrap_or("?");
-            println!(
-                "{:<36} {:<20} {:<20} {}",
-                c.name,
-                c.typ,
-                c.room.as_deref().unwrap_or("─"),
-                val
-            );
-        }
-        println!("\n{} sensors", filtered.len());
+        print!("{}", sensors_table(&sensors, !ctx.no_header));
     }
     Ok(())
+}
+
+fn sensors_table(sensors: &[LiveControl], header: bool) -> String {
+    if sensors.is_empty() {
+        return "No sensors found.\n".to_string();
+    }
+    let mut out = String::new();
+    if header {
+        let _ = writeln!(out, "{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
+        let _ = writeln!(out, "{}", "─".repeat(96));
+    }
+    for s in sensors {
+        let c = &s.control;
+        let _ = writeln!(
+            out,
+            "{:<36} {:<20} {:<20} {}",
+            c.name,
+            c.typ,
+            room_or_dash(&c.room),
+            xml_attr(&s.all_xml, "value").unwrap_or("?")
+        );
+    }
+    let _ = writeln!(out, "\n{} sensors", sensors.len());
+    out
 }
 
 pub fn cmd_weather(ctx: &RunContext, forecast: bool) -> Result<()> {
     let lox = Config::load()?.client()?;
-    let data = lox.get_bytes("/data/weatheru.bin")?;
-    if data.is_empty() {
+    let Some(entries) = read_weather(&lox, forecast)? else {
         println!("No weather data available on the Miniserver.");
+        return Ok(());
+    };
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
     } else {
-        let entry_size = 108;
-        let num_entries = data.len() / entry_size;
-        let epoch = lox_epoch();
-
-        let max_display = if forecast {
-            num_entries
-        } else {
-            1.min(num_entries)
-        };
-
-        if ctx.json {
-            let mut arr = Vec::new();
-            for i in 0..max_display {
-                let offset = i * entry_size;
-                let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
-                    arr.push(entry);
-                }
-            }
-            println!("{}", serde_json::to_string_pretty(&arr)?);
-        } else {
-            println!(
-                "{:<20} {:>8} {:>8} {:>8} {:>8} {:>10}",
-                "TIME", "TEMP°C", "HUM%", "WIND", "RAIN", "CLOUDS"
-            );
-            println!("{}", "─".repeat(72));
-            for i in 0..max_display {
-                let offset = i * entry_size;
-                let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
-                if let Some(entry) = parse_weather_entry(&mut cursor, &epoch) {
-                    println!(
-                        "{:<20} {:>8.1} {:>8.0} {:>8.1} {:>8.1} {:>10.0}",
-                        entry["timestamp"].as_str().unwrap_or("?"),
-                        entry["temperature"].as_f64().unwrap_or(0.0),
-                        entry["humidity"].as_f64().unwrap_or(0.0),
-                        entry["wind_speed"].as_f64().unwrap_or(0.0),
-                        entry["rain"].as_f64().unwrap_or(0.0),
-                        entry["clouds"].as_f64().unwrap_or(0.0),
-                    );
-                }
-            }
-        }
+        print!("{}", weather_table(&entries));
     }
     Ok(())
 }
 
+/// The weather entries of `/data/weatheru.bin`: the current one, or with
+/// `forecast` all of them; none when the Miniserver has no weather data.
+fn read_weather(lox: &LoxClient, forecast: bool) -> Result<Option<Vec<Value>>> {
+    let data = lox.get_bytes("/data/weatheru.bin")?;
+    if data.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(parse_weather(&data, forecast)))
+}
+
+fn parse_weather(data: &[u8], forecast: bool) -> Vec<Value> {
+    let entry_size = 108;
+    let num_entries = data.len() / entry_size;
+    let epoch = lox_epoch();
+    let max_display = if forecast {
+        num_entries
+    } else {
+        1.min(num_entries)
+    };
+    (0..max_display)
+        .filter_map(|i| {
+            let offset = i * entry_size;
+            let mut cursor = Cursor::new(&data[offset..offset + entry_size]);
+            parse_weather_entry(&mut cursor, &epoch)
+        })
+        .collect()
+}
+
+fn weather_table(entries: &[Value]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{:<20} {:>8} {:>8} {:>8} {:>8} {:>10}",
+        "TIME", "TEMP°C", "HUM%", "WIND", "RAIN", "CLOUDS"
+    );
+    let _ = writeln!(out, "{}", "─".repeat(72));
+    for entry in entries {
+        let _ = writeln!(
+            out,
+            "{:<20} {:>8.1} {:>8.0} {:>8.1} {:>8.1} {:>10.0}",
+            entry["timestamp"].as_str().unwrap_or("?"),
+            entry["temperature"].as_f64().unwrap_or(0.0),
+            entry["humidity"].as_f64().unwrap_or(0.0),
+            entry["wind_speed"].as_f64().unwrap_or(0.0),
+            entry["rain"].as_f64().unwrap_or(0.0),
+            entry["clouds"].as_f64().unwrap_or(0.0),
+        );
+    }
+    out
+}
+
+/// A control that records statistics (legacy files or Statistics V2).
+struct StatsControl {
+    name: String,
+    uuid: String,
+    typ: String,
+    room: Option<String>,
+}
+
 pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
     let mut lox = Config::load()?.client()?;
-    let structure = lox.get_structure()?.clone();
+    let controls = stats_controls(lox.get_structure()?);
+    if ctx.json {
+        let arr: Vec<_> = controls
+            .iter()
+            .map(|c| serde_json::json!({"name": c.name, "uuid": c.uuid, "type": c.typ, "room": c.room}))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&arr)?);
+    } else {
+        print!("{}", stats_table(&controls, !ctx.no_header));
+    }
+    Ok(())
+}
+
+/// The structure's controls with statistics, by name.
+fn stats_controls(structure: &Value) -> Vec<StatsControl> {
     let mut rooms: HashMap<String, String> = HashMap::new();
     if let Some(map) = structure.get("rooms").and_then(|r| r.as_object()) {
         for (uuid, room) in map {
@@ -903,7 +1025,7 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
             }
         }
     }
-    let mut stats_controls = Vec::new();
+    let mut controls = Vec::new();
     if let Some(ctrl_map) = structure.get("controls").and_then(|c| c.as_object()) {
         for (uuid, ctrl) in ctrl_map {
             let legacy = ctrl.get("statistic").is_some_and(|s| !s.is_null());
@@ -911,35 +1033,37 @@ pub fn cmd_stats(ctx: &RunContext) -> Result<()> {
                 let name = ctrl.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                 let typ = ctrl.get("type").and_then(|t| t.as_str()).unwrap_or("?");
                 let room_uuid = ctrl.get("room").and_then(|r| r.as_str()).unwrap_or("");
-                let room = rooms.get(room_uuid).cloned();
-                stats_controls.push((name.to_string(), uuid.clone(), typ.to_string(), room));
+                controls.push(StatsControl {
+                    name: name.to_string(),
+                    uuid: uuid.clone(),
+                    typ: typ.to_string(),
+                    room: rooms.get(room_uuid).cloned(),
+                });
             }
         }
     }
-    stats_controls.sort_by(|a, b| a.0.cmp(&b.0));
-    if ctx.json {
-        let arr: Vec<_> = stats_controls
-            .iter()
-            .map(|(n, u, t, r)| serde_json::json!({"name": n, "uuid": u, "type": t, "room": r}))
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&arr)?);
-    } else {
-        if !ctx.no_header {
-            println!("{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
-            println!("{}", "─".repeat(120));
-        }
-        for (name, uuid, typ, room) in &stats_controls {
-            println!(
-                "{:<40} {:<22} {:<24} {}",
-                name,
-                typ,
-                room.as_deref().unwrap_or("─"),
-                uuid
-            );
-        }
-        println!("\n{} controls with statistics", stats_controls.len());
+    controls.sort_by(|a, b| a.name.cmp(&b.name));
+    controls
+}
+
+fn stats_table(controls: &[StatsControl], header: bool) -> String {
+    let mut out = String::new();
+    if header {
+        let _ = writeln!(out, "{:<40} {:<22} {:<24} UUID", "NAME", "TYPE", "ROOM");
+        let _ = writeln!(out, "{}", "─".repeat(120));
     }
-    Ok(())
+    for c in controls {
+        let _ = writeln!(
+            out,
+            "{:<40} {:<22} {:<24} {}",
+            c.name,
+            c.typ,
+            room_or_dash(&c.room),
+            c.uuid
+        );
+    }
+    let _ = writeln!(out, "\n{} controls with statistics", controls.len());
+    out
 }
 
 /// Names of a control's statistic outputs. Real structure files use an array of
@@ -964,6 +1088,12 @@ pub(crate) fn statistic_output_names(outputs: &serde_json::Value) -> Vec<String>
     }
 }
 
+/// A control's statistics for a period: the output names and the records.
+struct History {
+    names: Vec<String>,
+    entries: Vec<StatsEntry>,
+}
+
 pub fn cmd_history(
     ctx: &RunContext,
     name_or_uuid: String,
@@ -974,14 +1104,35 @@ pub fn cmd_history(
     let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid)?;
+    let h = read_history(&mut lox, &ctrl, day.as_deref(), month.as_deref())?;
+    if h.entries.is_empty() {
+        println!("No statistics data available for this period.");
+    } else if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&history_json(&h))?);
+    } else if ctx.csv {
+        print!("{}", history_csv(&h));
+    } else {
+        print!("{}", history_table(&h));
+    }
+    Ok(())
+}
 
+/// The statistics of a day or month (default: this month): from Statistics
+/// V2 when the control has a non-accumulated group, else from the legacy
+/// statistics files. No records is an empty `entries`.
+fn read_history(
+    lox: &mut LoxClient,
+    ctrl: &Control,
+    day: Option<&str>,
+    month: Option<&str>,
+) -> Result<History> {
     let ctrl_json = lox.get_control_json(&ctrl.uuid).ok();
     if let Some(cj) = &ctrl_json
         && let Some(group) = loxone_client::statv2::groups(cj)
             .into_iter()
             .find(|g| !g.accumulated)
     {
-        let (from, to) = stats_v2_range(day.as_deref(), month.as_deref())?;
+        let (from, to) = stats_v2_range(day, month)?;
         let data = lox.get_bytes(&loxone_client::statv2::raw_path(
             &ctrl.uuid, from, to, &group.id, None,
         ))?;
@@ -999,18 +1150,18 @@ pub fn cmd_history(
                 values,
             })
             .collect();
-        return print_history(ctx, &names, &entries);
+        return Ok(History { names, entries });
     }
-    let output_names: Vec<String> = ctrl_json
+    let names: Vec<String> = ctrl_json
         .as_ref()
         .and_then(|cj| cj.get("statistic"))
         .and_then(|s| s.get("outputs"))
         .map(statistic_output_names)
         .filter(|names| !names.is_empty())
         .unwrap_or_else(|| vec!["value".to_string()]);
-    let num_outputs = output_names.len();
+    let num_outputs = names.len();
 
-    let period = stats_period(day.as_deref(), month.as_deref());
+    let period = stats_period(day, month);
     let bare = stats_file_path(&ctrl.uuid, &period);
     let data = match lox.get_bytes(&bare) {
         Ok(d) => d,
@@ -1028,15 +1179,16 @@ pub fn cmd_history(
             lox.get_bytes(&path)?
         }
     };
-
     if data.is_empty() {
-        println!("No statistics data available for this period.");
-        return Ok(());
+        return Ok(History {
+            names,
+            entries: Vec::new(),
+        });
     }
     let entry_size = 4 + 4 + num_outputs * 8;
     let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
     let entries = parse_stats_entries(&data[offset..], num_outputs);
-    print_history(ctx, &output_names, &entries)
+    Ok(History { names, entries })
 }
 
 /// Local-time range [from, to] (unix seconds) for Statistics V2: a day, a month,
@@ -1071,53 +1223,50 @@ fn stats_v2_range(day: Option<&str>, month: Option<&str>) -> Result<(i64, i64)> 
     Ok((start(first)?, end.min(Local::now().timestamp())))
 }
 
-fn print_history(ctx: &RunContext, output_names: &[String], entries: &[StatsEntry]) -> Result<()> {
-    let num_outputs = output_names.len();
-    if entries.is_empty() {
-        println!("No statistics data available for this period.");
-        return Ok(());
-    }
-    if ctx.csv {
-        print!("timestamp");
-        for name in output_names {
-            print!(",{}", name);
-        }
-        println!();
-    } else if !ctx.json {
-        print!("{:<20}", "TIMESTAMP");
-        for name in output_names {
-            print!(" {:>15}", name);
-        }
-        println!();
-        println!("{}", "─".repeat(20 + num_outputs * 16));
-    }
-
-    let mut json_arr = Vec::new();
-    for e in entries {
-        if ctx.csv {
-            print!("{}", e.timestamp);
-            for v in &e.values {
-                print!(",{:.4}", v);
-            }
-            println!();
-        } else if ctx.json {
+fn history_json(h: &History) -> Vec<Value> {
+    h.entries
+        .iter()
+        .map(|e| {
             let mut entry = serde_json::json!({"timestamp": e.timestamp});
-            for (i, name) in output_names.iter().enumerate() {
+            for (i, name) in h.names.iter().enumerate() {
                 entry[name] = serde_json::json!(e.values[i]);
             }
-            json_arr.push(entry);
-        } else {
-            print!("{:<20}", e.timestamp);
-            for v in &e.values {
-                print!(" {:>15.4}", v);
-            }
-            println!();
+            entry
+        })
+        .collect()
+}
+
+fn history_csv(h: &History) -> String {
+    let mut out = String::from("timestamp");
+    for name in &h.names {
+        let _ = write!(out, ",{}", name);
+    }
+    out.push('\n');
+    for e in &h.entries {
+        out.push_str(&e.timestamp);
+        for v in &e.values {
+            let _ = write!(out, ",{:.4}", v);
         }
+        out.push('\n');
     }
-    if ctx.json {
-        println!("{}", serde_json::to_string_pretty(&json_arr)?);
+    out
+}
+
+fn history_table(h: &History) -> String {
+    let mut out = format!("{:<20}", "TIMESTAMP");
+    for name in &h.names {
+        let _ = write!(out, " {:>15}", name);
     }
-    Ok(())
+    out.push('\n');
+    let _ = writeln!(out, "{}", "─".repeat(20 + h.names.len() * 16));
+    for e in &h.entries {
+        let _ = write!(out, "{:<20}", e.timestamp);
+        for v in &e.values {
+            let _ = write!(out, " {:>15.4}", v);
+        }
+        out.push('\n');
+    }
+    out
 }
 
 #[derive(Subcommand)]
@@ -1178,35 +1327,10 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
                 .then(|| explain_changes(&cfg, since.as_deref()))
                 .transpose()?;
             if ctx.json {
-                let mut v = serde_json::json!({
-                    "changed": secs,
-                    "changed_at": at.map(|t| t.to_rfc3339()),
-                    "uuid": ap.uuid,
-                });
-                if let Some(w) = &why {
-                    v["program"] = serde_json::json!({
-                        "newest": w.newest,
-                        "compared_with": w.compared_with,
-                        "rules": w.kinds.rules,
-                        "access": w.kinds.access,
-                        "other": w.kinds.other,
-                    });
-                    v["custom_changes"] = serde_json::to_value(&w.custom)?;
-                    v["rules_changed"] = w.rules_changed().into();
-                }
+                let v = changed_json(secs, at, &ap.uuid, why.as_ref())?;
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
-                match at {
-                    Some(t) => println!(
-                        "Rules last changed: {} ({})",
-                        t.format("%Y-%m-%d %H:%M:%S"),
-                        secs
-                    ),
-                    None => println!("Rules last changed: never"),
-                }
-                if let Some(w) = &why {
-                    print!("{}", w.text());
-                }
+                print!("{}", changed_text(secs, at, why.as_ref()));
             }
         }
         AutopilotCmd::State { name_or_uuid } => {
@@ -1214,37 +1338,87 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
             let ap = cfg.client()?.autopilot()?;
             let runs = parse_autopilot_history(&read_state(&cfg, &ap.state_history)?);
             let hits = runs_of(&runs, &name_or_uuid)?;
-            let last = hits.iter().max_by(|a, b| a.time.cmp(&b.time));
+            let last = hits.iter().copied().max_by(|a, b| a.time.cmp(&b.time));
             if ctx.json {
-                let v = serde_json::json!({
-                    "name": last.map_or(name_or_uuid.as_str(), |r| r.name.as_str()),
-                    "uuid": last.map(|r| r.uuid.as_str()),
-                    "last_run": last.map(|r| r.time.as_str()),
-                    "runs_in_history": hits.len(),
-                });
+                let v = last_run_json(last, &name_or_uuid, hits.len());
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
-                match last {
-                    Some(r) => {
-                        println!("Rule:     {}", r.name);
-                        println!("Last run: {}", r.time);
-                    }
-                    None => {
-                        println!("Rule:     {}", name_or_uuid);
-                        println!(
-                            "Last run: not in the Miniserver's rule history (it keeps the recent runs)"
-                        );
-                    }
-                }
+                print!("{}", last_run_text(last, &name_or_uuid));
             }
         }
     }
     Ok(())
 }
 
+/// `lox autopilot changed -o json`; `why` adds what `--explain` found.
+fn changed_json(
+    secs: i64,
+    at: Option<chrono::DateTime<chrono::Local>>,
+    uuid: &str,
+    why: Option<&ChangeReport>,
+) -> Result<Value> {
+    let mut v = serde_json::json!({
+        "changed": secs,
+        "changed_at": at.map(|t| t.to_rfc3339()),
+        "uuid": uuid,
+    });
+    if let Some(w) = why {
+        v["program"] = serde_json::json!({
+            "newest": w.newest,
+            "compared_with": w.compared_with,
+            "rules": w.kinds.rules,
+            "access": w.kinds.access,
+            "other": w.kinds.other,
+        });
+        v["custom_changes"] = serde_json::to_value(&w.custom)?;
+        v["rules_changed"] = w.rules_changed().into();
+    }
+    Ok(v)
+}
+
+fn changed_text(
+    secs: i64,
+    at: Option<chrono::DateTime<chrono::Local>>,
+    why: Option<&ChangeReport>,
+) -> String {
+    let mut out = match at {
+        Some(t) => format!(
+            "Rules last changed: {} ({})\n",
+            t.format("%Y-%m-%d %H:%M:%S"),
+            secs
+        ),
+        None => "Rules last changed: never\n".to_string(),
+    };
+    if let Some(w) = why {
+        out.push_str(&w.text());
+    }
+    out
+}
+
+/// `lox autopilot state -o json`, with the number of the rule's runs in the
+/// history.
+fn last_run_json(last: Option<&AutopilotRun>, name_or_uuid: &str, runs: usize) -> Value {
+    serde_json::json!({
+        "name": last.map_or(name_or_uuid, |r| r.name.as_str()),
+        "uuid": last.map(|r| r.uuid.as_str()),
+        "last_run": last.map(|r| r.time.as_str()),
+        "runs_in_history": runs,
+    })
+}
+
+/// `lox autopilot state`: a rule's last run, or that the history lacks it.
+fn last_run_text(last: Option<&AutopilotRun>, name_or_uuid: &str) -> String {
+    match last {
+        Some(r) => format!("Rule:     {}\nLast run: {}\n", r.name, r.time),
+        None => format!(
+            "Rule:     {}\nLast run: not in the Miniserver's rule history (it keeps the recent runs)\n",
+            name_or_uuid
+        ),
+    }
+}
+
 /// The `lox autopilot ls` table, with a count line and the broken rules.
 fn rules_table(rules: &[crate::logic::AutopilotRuleInfo], label: &str, header: bool) -> String {
-    use std::fmt::Write;
     if rules.is_empty() {
         return format!("No automatic rules in {label}.\n");
     }
@@ -1481,10 +1655,12 @@ fn parse_autopilot_history(text: &str) -> Vec<AutopilotRun> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AutopilotRun, Backoff, ChangeReport, SnapshotFilter, eval_op, fmt_offline, matches_filters,
-        parse_autopilot_history, parse_changed, parse_f, rules_table, runs_of,
-        statistic_output_names,
+        AutopilotRun, Backoff, ChangeReport, History, SnapshotFilter, changed_text, eval_op,
+        fmt_offline, history_csv, history_json, history_table, last_run_json, last_run_text,
+        matches_filters, modes_table, parse_autopilot_history, parse_changed, parse_f, rules_table,
+        runs_of, statistic_output_names, weather_table,
     };
+    use loxone_client::stats::StatsEntry;
     use loxone_client::stream;
     use loxone_client::stream::StateEvent;
     use serde_json::json;
@@ -1862,5 +2038,82 @@ mod tests {
         assert!(!matches_filters(&info, None, Some("kitchen"), None));
         // But no room filter should still pass
         assert!(matches_filters(&info, None, None, None));
+    }
+
+    fn history() -> History {
+        History {
+            names: vec!["Total".into(), "Power".into()],
+            entries: vec![StatsEntry {
+                timestamp: "2026-10-30 12:00:00".into(),
+                values: vec![1.5, -0.25],
+            }],
+        }
+    }
+
+    #[test]
+    fn history_renders_table_csv_and_json() {
+        let h = history();
+        assert_eq!(
+            history_table(&h),
+            format!(
+                "TIMESTAMP                      Total           Power\n{}\n\
+                 2026-10-30 12:00:00           1.5000         -0.2500\n",
+                "─".repeat(52)
+            )
+        );
+        assert_eq!(
+            history_csv(&h),
+            "timestamp,Total,Power\n2026-10-30 12:00:00,1.5000,-0.2500\n"
+        );
+        assert_eq!(
+            history_json(&h),
+            vec![json!({"timestamp": "2026-10-30 12:00:00", "Total": 1.5, "Power": -0.25})]
+        );
+    }
+
+    #[test]
+    fn weather_table_formats_entries() {
+        let rows = [json!({
+            "timestamp": "2026-10-31 10:00", "temperature": 7.25, "humidity": 81.0,
+            "wind_speed": 3.0, "rain": 0.0, "clouds": 40.0,
+        })];
+        assert_eq!(
+            weather_table(&rows),
+            format!(
+                "TIME                   TEMP°C     HUM%     WIND     RAIN     CLOUDS\n{}\n\
+                 2026-10-31 10:00          7.2       81      3.0      0.0         40\n",
+                "─".repeat(72)
+            )
+        );
+    }
+
+    #[test]
+    fn modes_table_marks_the_active_mode() {
+        let modes = vec![
+            ("1".to_string(), "Urlaub".to_string()),
+            ("2".into(), "Party".into()),
+        ];
+        let t = modes_table(&modes, Some("2"));
+        assert!(t.contains("1      Urlaub                         \n"));
+        assert!(t.contains("2      Party                          ← active\n"));
+    }
+
+    #[test]
+    fn changed_and_last_run_text() {
+        assert_eq!(changed_text(0, None, None), "Rules last changed: never\n");
+        let run = AutopilotRun {
+            time: "2026-10-30 07:00:00".into(),
+            uuid: "u1".into(),
+            name: "Morgens".into(),
+        };
+        assert_eq!(
+            last_run_text(Some(&run), "morg"),
+            "Rule:     Morgens\nLast run: 2026-10-30 07:00:00\n"
+        );
+        assert!(last_run_text(None, "zzz").starts_with("Rule:     zzz\nLast run: not in"));
+        assert_eq!(
+            last_run_json(None, "zzz", 0),
+            json!({"name": "zzz", "uuid": null, "last_run": null, "runs_in_history": 0})
+        );
     }
 }

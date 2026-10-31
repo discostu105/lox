@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use reqwest::blocking::Client;
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 use crate::commands::config_insight::{ConfigSource, TraceDir};
@@ -11,6 +14,7 @@ use crate::scene::Scene;
 use crate::util::json_val_str;
 use crate::{custom_changes, ftp, gitops, loxone_xml};
 use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
+use loxone_client::system::check_ll;
 use loxone_client::token;
 use loxone_config::archive;
 
@@ -84,34 +88,42 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
                 println!("✓  Config saved to {:?}", path);
             }
         }
-        SetupCmd::Show => {
-            let cfg = Config::load()?;
-            println!("host:   {}", cfg.host);
-            println!("user:   {}", cfg.user);
-            println!("pass:   {}", "*".repeat(cfg.pass.len()));
-            if !cfg.serial.is_empty() {
-                println!("serial: {}", cfg.serial);
-            }
-            if !cfg.aliases.is_empty() {
-                println!("aliases:");
-                let mut aliases: Vec<_> = cfg.aliases.iter().collect();
-                aliases.sort_by_key(|(k, _)| k.as_str());
-                for (name, uuid) in aliases {
-                    println!("  {}: {}", name, uuid);
-                }
-            }
-            if let Some(f) = &cfg.visu_password_file {
-                println!("visu_password_file: {}", f);
-            }
-            if !cfg.confirm.is_empty() {
-                println!("confirm:");
-                for entry in &cfg.confirm {
-                    println!("  - {}", entry);
-                }
-            }
-        }
+        SetupCmd::Show => print!("{}", setup_text(&Config::load()?)),
     }
     Ok(())
+}
+
+/// `lox setup show`: the connection settings, the password redacted.
+fn setup_text(cfg: &Config) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "host:   {}", cfg.host);
+    let _ = writeln!(out, "user:   {}", cfg.user);
+    let _ = writeln!(out, "pass:   {}", "*".repeat(cfg.pass.len()));
+    if !cfg.serial.is_empty() {
+        let _ = writeln!(out, "serial: {}", cfg.serial);
+    }
+    if !cfg.aliases.is_empty() {
+        let _ = writeln!(out, "aliases:");
+        for (name, uuid) in sorted_aliases(&cfg.aliases) {
+            let _ = writeln!(out, "  {}: {}", name, uuid);
+        }
+    }
+    if let Some(f) = &cfg.visu_password_file {
+        let _ = writeln!(out, "visu_password_file: {}", f);
+    }
+    if !cfg.confirm.is_empty() {
+        let _ = writeln!(out, "confirm:");
+        for entry in &cfg.confirm {
+            let _ = writeln!(out, "  - {}", entry);
+        }
+    }
+    out
+}
+
+fn sorted_aliases(aliases: &HashMap<String, String>) -> Vec<(&String, &String)> {
+    let mut sorted: Vec<_> = aliases.iter().collect();
+    sorted.sort_by_key(|(k, _)| k.as_str());
+    sorted
 }
 
 #[derive(Subcommand)]
@@ -145,23 +157,24 @@ pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
                 println!("No alias named '{}'", name);
             }
         }
-        AliasCmd::Ls => {
-            if cfg.aliases.is_empty() {
-                println!("No aliases. Add with: lox alias add <name> <uuid>");
-            } else {
-                let mut aliases: Vec<_> = cfg.aliases.iter().collect();
-                aliases.sort_by_key(|(k, _)| k.as_str());
-                if !ctx.no_header {
-                    println!("{:<24} UUID", "ALIAS");
-                    println!("{}", "─".repeat(60));
-                }
-                for (name, uuid) in aliases {
-                    println!("{:<24} {}", name, uuid);
-                }
-            }
-        }
+        AliasCmd::Ls => print!("{}", aliases_table(&cfg.aliases, !ctx.no_header)),
     }
     Ok(())
+}
+
+fn aliases_table(aliases: &HashMap<String, String>, header: bool) -> String {
+    if aliases.is_empty() {
+        return "No aliases. Add with: lox alias add <name> <uuid>\n".to_string();
+    }
+    let mut out = String::new();
+    if header {
+        let _ = writeln!(out, "{:<24} UUID", "ALIAS");
+        let _ = writeln!(out, "{}", "─".repeat(60));
+    }
+    for (name, uuid) in sorted_aliases(aliases) {
+        let _ = writeln!(out, "{:<24} {}", name, uuid);
+    }
+    out
 }
 
 #[derive(Subcommand)]
@@ -179,18 +192,17 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
     let cfg = Config::load().unwrap_or_default();
     match action {
         SceneCmd::Ls => {
-            let names = Scene::list_with_config(&cfg)?;
-            if names.is_empty() {
-                println!("No scenes. Create: lox scene new <name>");
-            } else {
-                for name in &names {
-                    let desc = Scene::load_with_config(name, &cfg)
+            let scenes: Vec<(String, String)> = Scene::list_with_config(&cfg)?
+                .into_iter()
+                .map(|name| {
+                    let desc = Scene::load_with_config(&name, &cfg)
                         .ok()
                         .and_then(|s| s.description)
                         .unwrap_or_default();
-                    println!("  {:<20}  {}", name, desc);
-                }
-            }
+                    (name, desc)
+                })
+                .collect();
+            print!("{}", scenes_text(&scenes));
         }
         SceneCmd::Show { name } => {
             println!(
@@ -218,6 +230,18 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
     Ok(())
 }
 
+/// `lox scene ls`: the scenes as (name, description).
+fn scenes_text(scenes: &[(String, String)]) -> String {
+    if scenes.is_empty() {
+        return "No scenes. Create: lox scene new <name>\n".to_string();
+    }
+    let mut out = String::new();
+    for (name, desc) in scenes {
+        let _ = writeln!(out, "  {:<20}  {}", name, desc);
+    }
+    out
+}
+
 #[derive(Subcommand)]
 pub(crate) enum CacheCmd {
     /// Show cache info
@@ -240,18 +264,7 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
                 let age = std::time::SystemTime::now()
                     .duration_since(meta.modified()?)
                     .unwrap_or_default();
-                let size = meta.len();
-                println!("Cache: {:?}", cache);
-                println!("Size:  {:.1} KB", size as f64 / 1024.0);
-                println!("Age:   {}m {}s", age.as_secs() / 60, age.as_secs() % 60);
-                if age.as_secs() < 86400 {
-                    println!("Status: ✓ valid ({} until refresh)", {
-                        let remaining = 86400u64.saturating_sub(age.as_secs());
-                        format!("{}h {}m", remaining / 3600, (remaining % 3600) / 60)
-                    });
-                } else {
-                    println!("Status: ⚠ stale (will refresh on next command)");
-                }
+                print!("{}", cache_info_text(&cache, meta.len(), age));
             } else {
                 println!("No cache. Will be created on first command.");
             }
@@ -272,20 +285,9 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
                 .and_then(json_val_str)
                 .unwrap_or_else(|| "?".to_string());
             if ctx.json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "remote_version": remote_ver,
-                        "cache_exists": cache.exists(),
-                    })
-                );
+                println!("{}", cache_check_json(&remote_ver, cache.exists()));
             } else {
-                println!("Remote structure version: {}", remote_ver);
-                if cache.exists() {
-                    println!("Cache: exists at {:?}", cache);
-                } else {
-                    println!("Cache: not present");
-                }
+                print!("{}", cache_check_text(&remote_ver, &cache));
             }
         }
         CacheCmd::Refresh => {
@@ -303,6 +305,48 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `lox cache info` for a cache file of `size` bytes and `age`; valid for 24 h.
+fn cache_info_text(cache: &Path, size: u64, age: Duration) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Cache: {:?}", cache);
+    let _ = writeln!(out, "Size:  {:.1} KB", size as f64 / 1024.0);
+    let _ = writeln!(
+        out,
+        "Age:   {}m {}s",
+        age.as_secs() / 60,
+        age.as_secs() % 60
+    );
+    if age.as_secs() < 86400 {
+        let remaining = 86400u64.saturating_sub(age.as_secs());
+        let _ = writeln!(
+            out,
+            "Status: ✓ valid ({}h {}m until refresh)",
+            remaining / 3600,
+            (remaining % 3600) / 60
+        );
+    } else {
+        let _ = writeln!(out, "Status: ⚠ stale (will refresh on next command)");
+    }
+    out
+}
+
+fn cache_check_json(remote_ver: &str, cache_exists: bool) -> serde_json::Value {
+    serde_json::json!({
+        "remote_version": remote_ver,
+        "cache_exists": cache_exists,
+    })
+}
+
+fn cache_check_text(remote_ver: &str, cache: &Path) -> String {
+    let mut out = format!("Remote structure version: {}\n", remote_ver);
+    if cache.exists() {
+        let _ = writeln!(out, "Cache: exists at {:?}", cache);
+    } else {
+        out.push_str("Cache: not present\n");
+    }
+    out
 }
 
 #[derive(Subcommand)]
@@ -329,14 +373,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             match rt.block_on(token::acquire_token(&cfg.connection())) {
                 Ok(ts) => {
-                    let _exp =
-                        std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts.valid_until);
-                    let days = ts.valid_until.saturating_sub(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    ) / 86400;
+                    let days = ts.valid_until.saturating_sub(unix_now()) / 86400;
                     println!("✓ Token saved to {:?}", cfg.token_path());
                     println!("  Valid for: {} days", days);
                 }
@@ -344,27 +381,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             }
         }
         TokenCmd::Info => match token::TokenStore::load_for(&cfg.connection()) {
-            Some(ts) => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let days_left = ts.valid_until.saturating_sub(now) / 86400;
-                if ts.token.len() >= 12 {
-                    println!(
-                        "Token: {}...{}",
-                        &ts.token[..8],
-                        &ts.token[ts.token.len() - 4..]
-                    );
-                } else {
-                    println!("Token: {}", ts.token);
-                }
-                if ts.is_valid() {
-                    println!("Status: ✓ valid ({} days remaining)", days_left);
-                } else {
-                    println!("Status: ⚠ expired — run: lox token fetch");
-                }
-            }
+            Some(ts) => print!("{}", token_info_text(&ts, unix_now())),
             None => println!("No token saved. Using Basic Auth. Run: lox token fetch"),
         },
         TokenCmd::Clear => {
@@ -390,10 +407,7 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             if ctx.json {
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "valid": code == "200",
-                        "code": code,
-                    })
+                    serde_json::json!({"valid": code == "200", "code": code})
                 );
             } else if code == "200" {
                 println!("✓ Token is valid on the Miniserver");
@@ -407,40 +421,28 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let lox = cfg.client()?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/refreshtoken/{}/{}", hash, cfg.user))?;
-            let code = resp
-                .pointer("/LL/Code")
-                .and_then(json_val_str)
-                .unwrap_or_else(|| "?".to_string());
-            if code == "200" {
-                // Update the valid_until in our local store
-                let valid_until = resp
-                    .pointer("/LL/value")
-                    .and_then(|v| v.get("validUntil"))
-                    .and_then(|v| v.as_u64());
-                if let Some(vu) = valid_until {
-                    let unix_until = if vu > 1_500_000_000 {
-                        vu
-                    } else {
-                        LOXONE_EPOCH_SECS.saturating_add(vu)
-                    };
-                    let new_ts = token::TokenStore {
-                        token: ts.token,
-                        key: ts.key,
-                        valid_until: unix_until,
-                    };
-                    new_ts.save_for(&cfg.connection())?;
-                    let days = unix_until.saturating_sub(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    ) / 86400;
-                    println!("✓ Token refreshed ({} days remaining)", days);
+            check_ll("refreshtoken", &resp).context("Token refresh failed")?;
+            // Update the valid_until in our local store
+            let valid_until = resp
+                .pointer("/LL/value")
+                .and_then(|v| v.get("validUntil"))
+                .and_then(|v| v.as_u64());
+            if let Some(vu) = valid_until {
+                let unix_until = if vu > 1_500_000_000 {
+                    vu
                 } else {
-                    println!("✓ Token refreshed");
-                }
+                    LOXONE_EPOCH_SECS.saturating_add(vu)
+                };
+                let new_ts = token::TokenStore {
+                    token: ts.token,
+                    key: ts.key,
+                    valid_until: unix_until,
+                };
+                new_ts.save_for(&cfg.connection())?;
+                let days = unix_until.saturating_sub(unix_now()) / 86400;
+                println!("✓ Token refreshed ({} days remaining)", days);
             } else {
-                bail!("Token refresh failed (code {})", code);
+                println!("✓ Token refreshed");
             }
         }
         TokenCmd::Revoke => {
@@ -449,23 +451,46 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let lox = cfg.client()?;
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
-            let code = resp
-                .pointer("/LL/Code")
-                .and_then(json_val_str)
-                .unwrap_or_else(|| "?".to_string());
-            if code == "200" {
-                // Remove local token
-                let path = cfg.token_path();
-                if path.exists() {
-                    fs::remove_file(&path)?;
-                }
-                println!("✓ Token revoked and cleared");
-            } else {
-                bail!("Token revoke failed (code {})", code);
+            check_ll("killtoken", &resp).context("Token revoke failed")?;
+            // Remove local token
+            let path = cfg.token_path();
+            if path.exists() {
+                fs::remove_file(&path)?;
             }
+            println!("✓ Token revoked and cleared");
         }
     }
     Ok(())
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// `lox token info` at unix time `now`: the token shortened, and how long it
+/// stays valid.
+fn token_info_text(ts: &token::TokenStore, now: u64) -> String {
+    let mut out = String::new();
+    let days_left = ts.valid_until.saturating_sub(now) / 86400;
+    if ts.token.len() >= 12 {
+        let _ = writeln!(
+            out,
+            "Token: {}...{}",
+            &ts.token[..8],
+            &ts.token[ts.token.len() - 4..]
+        );
+    } else {
+        let _ = writeln!(out, "Token: {}", ts.token);
+    }
+    if ts.is_valid() {
+        let _ = writeln!(out, "Status: ✓ valid ({} days remaining)", days_left);
+    } else {
+        let _ = writeln!(out, "Status: ⚠ expired — run: lox token fetch");
+    }
+    out
 }
 
 #[derive(Subcommand)]
@@ -661,142 +686,19 @@ pub(crate) enum ConfigCmd {
 
 pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
     match action {
-        ConfigCmd::Ls => {
-            let cfg = Config::load()?;
-            let backups = ftp::list_backups(&cfg.connection())?;
-            if backups.is_empty() {
-                println!("No configs found on the Miniserver.");
-            } else if ctx.json {
-                let arr: Vec<serde_json::Value> = backups
-                    .iter()
-                    .map(|b| {
-                        serde_json::json!({
-                            "filename": b.filename,
-                            "version": b.version,
-                            "date": b.formatted_date(),
-                            "size": b.size,
-                        })
-                    })
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&arr)?);
-            } else {
-                println!("  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
-                for (i, b) in backups.iter().enumerate() {
-                    println!(
-                        "  {:<4} {:<8} {:<22} {} KB{}",
-                        i + 1,
-                        b.version,
-                        b.formatted_date(),
-                        b.size / 1024,
-                        if i == 0 { "  (latest)" } else { "" }
-                    );
-                }
-            }
-        }
-        ConfigCmd::Download { save_as, extract } => {
-            let cfg = Config::load()?;
-            let backups = ftp::list_backups(&cfg.connection())?;
-            if backups.is_empty() {
-                bail!("No configs found on the Miniserver.");
-            }
-            let newest = &backups[0];
-            eprintln!(
-                "Downloading {} ({} KB)...",
-                newest.filename,
-                newest.size / 1024
-            );
-            let data = ftp::download_backup(&cfg.connection(), &newest.filename)?;
-            let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
-            fs::write(&out_path, &data)?;
-            println!("Saved to {}", out_path);
-
-            if extract {
-                eprintln!("Extracting sps0.LoxCC...");
-                let xml = archive::extract_and_decompress(&data)?;
-                let xml_path = out_path
-                    .strip_suffix(".zip")
-                    .unwrap_or(&out_path)
-                    .to_string()
-                    + ".Loxone";
-                fs::write(&xml_path, &xml)?;
-                println!(
-                    "Decompressed {} KB → {} KB → {}",
-                    data.len() / 1024,
-                    xml.len() / 1024,
-                    xml_path
-                );
-            }
-        }
-        ConfigCmd::Extract { file, save_as } => {
-            let zip_data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-            eprintln!("Extracting sps0.LoxCC...");
-            let xml = archive::extract_and_decompress(&zip_data)?;
-            let xml_path = save_as.unwrap_or_else(|| {
-                file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
-            });
-            fs::write(&xml_path, &xml)?;
-            println!(
-                "Decompressed {} KB → {} KB → {}",
-                zip_data.len() / 1024,
-                xml.len() / 1024,
-                xml_path
-            );
-        }
+        ConfigCmd::Ls => config_ls(ctx)?,
+        ConfigCmd::Download { save_as, extract } => config_download(save_as, extract)?,
+        ConfigCmd::Extract { file, save_as } => config_extract(&file, save_as)?,
         ConfigCmd::Compress {
             file,
             template,
             save_as,
         } => {
-            let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-            if xml.starts_with(b"PK\x03\x04")
-                || xml.starts_with(&archive::LOXCC_MAGIC.to_le_bytes())
-            {
-                bail!(
-                    "{} is already compressed. Expected a .Loxone XML file (`lox config extract` makes one).",
-                    file
-                );
-            }
-            let stem = file.strip_suffix(".Loxone").unwrap_or(&file);
-            let (out, out_path) = match &template {
-                // An upload ZIP: the template with only sps0.LoxCC replaced,
-                // verified to extract to exactly `xml`
-                Some(template) => {
-                    let shell =
-                        fs::read(template).with_context(|| format!("Cannot read {}", template))?;
-                    let staged = archive::stage_upload_zip(&shell, &xml, crate::util::zip_now())
-                        .with_context(|| format!("Cannot stage {} into {}", file, template))?;
-                    (staged, save_as.unwrap_or_else(|| format!("{stem}.zip")))
-                }
-                None => (
-                    archive::compress_loxcc(&xml)?,
-                    save_as.unwrap_or_else(|| format!("{stem}.LoxCC")),
-                ),
-            };
-            fs::write(&out_path, &out).with_context(|| format!("Cannot write {}", out_path))?;
+            let report = config_compress(&file, template, save_as)?;
             if ctx.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "input": file,
-                        "template": template,
-                        "output": out_path,
-                        "xml_bytes": xml.len(),
-                        "output_bytes": out.len(),
-                        "crc32": format!("{:08x}", crc32fast::hash(&xml)),
-                    }))?
-                );
+                println!("{}", serde_json::to_string_pretty(&report.json())?);
             } else if !ctx.quiet {
-                println!(
-                    "Compressed {} KB → {} KB → {}{}",
-                    xml.len() / 1024,
-                    out.len() / 1024,
-                    out_path,
-                    if template.is_some() {
-                        " (extracts byte-identically)"
-                    } else {
-                        ""
-                    }
-                );
+                print!("{}", report.text());
             }
         }
         ConfigCmd::Push {
@@ -825,77 +727,13 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
-        ConfigCmd::Upload { file, force } => {
-            let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-            // The Miniserver starts from whatever sps_new.zip holds.
-            let xml = match archive::extract_and_decompress(&data) {
-                Ok(xml) => xml,
-                Err(e) => bail!(
-                    "{} is not a config ZIP ({:#}). A .Loxone file becomes one with \
-                     `lox config compress FILE --template DOWNLOAD.zip`.",
-                    file,
-                    e
-                ),
-            };
-            let cfg = Config::load();
-            if let Ok(cfg) = &cfg {
-                custom_changes::warn_before_upload(cfg, Some(&xml));
-            }
-            if !force {
-                eprintln!(
-                    "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
-                     \x20  programming. A bad configuration can require physical SD card\n\
-                     \x20  access to recover.\n\
-                     \n\
-                     \x20  Config file: {}\n\
-                     \n\
-                     \x20  Use --force to proceed.",
-                    file
-                );
-                std::process::exit(1);
-            }
-            let cfg = cfg?;
-            eprintln!(
-                "Uploading {} as /prog/{} ({} KB)...",
-                file,
-                ftp::CONFIG_UPLOAD_NAME,
-                data.len() / 1024
-            );
-            ftp::upload_config(&cfg.connection(), &data)?;
-            println!("Upload complete.");
-            println!("Reboot the Miniserver to load it: lox reboot");
-        }
+        ConfigCmd::Upload { file, force } => config_upload(&file, force)?,
         ConfigCmd::Users { file } => {
-            let xml = crate::load_config_xml(&file)?;
-            let users = loxone_xml::parse_users(&xml)?;
+            let users = loxone_xml::parse_users(&crate::load_config_xml(&file)?)?;
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&users)?);
             } else {
-                let nfc_count = users.iter().filter(|u| u.nfc).count();
-                if !ctx.no_header {
-                    println!(
-                        "{:<24} {:<4} {:<6} {:<28} {:<28} DESCRIPTION",
-                        "NAME", "NFC", "CODES", "GROUPS", "ACCESS"
-                    );
-                }
-                let count = |n: usize| if n == 0 { "-".into() } else { n.to_string() };
-                for u in &users {
-                    let access: Vec<String> = u
-                        .access
-                        .iter()
-                        .map(|a| format!("{} ({})", a.block, a.schedule))
-                        .collect();
-                    println!(
-                        "{:<24} {:<4} {:<6} {:<28} {:<28} {}",
-                        u.name,
-                        count(u.nfc_tags),
-                        count(u.access_codes),
-                        or_dash(&u.groups.join(", ")),
-                        or_dash(&access.join(", ")),
-                        u.description,
-                    );
-                }
-                println!("\n{} users ({} with NFC)", users.len(), nfc_count);
+                print!("{}", users_table(&users, !ctx.no_header));
             }
         }
         ConfigCmd::Devices { file } => {
@@ -910,57 +748,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&devices)?);
             } else {
-                let tree: Vec<_> = devices
-                    .iter()
-                    .filter(|d| d.bus == loxone_xml::DeviceBus::Tree)
-                    .collect();
-                let air: Vec<_> = devices
-                    .iter()
-                    .filter(|d| d.bus == loxone_xml::DeviceBus::Air)
-                    .collect();
-                let net: Vec<_> = devices
-                    .iter()
-                    .filter(|d| d.bus == loxone_xml::DeviceBus::Network)
-                    .collect();
-
-                if !tree.is_empty() {
-                    println!("  Tree devices ({})", tree.len());
-                    println!("  {:<30} {:<12} Type", "Name", "Serial");
-                    for d in &tree {
-                        println!(
-                            "  {:<30} {:<12} {}",
-                            d.name,
-                            d.serial.as_deref().unwrap_or("-"),
-                            d.type_label
-                        );
-                    }
-                }
-                if !air.is_empty() {
-                    if !tree.is_empty() {
-                        println!();
-                    }
-                    println!("  LoxAIR devices ({})", air.len());
-                    println!("  {:<30} Type", "Name");
-                    for d in &air {
-                        println!("  {:<30} {}", d.name, d.type_label);
-                    }
-                }
-                if !net.is_empty() {
-                    if !tree.is_empty() || !air.is_empty() {
-                        println!();
-                    }
-                    println!("  Network devices ({})", net.len());
-                    println!("  {:<30} {:<18} MAC", "Name", "Address");
-                    for d in &net {
-                        println!(
-                            "  {:<30} {:<18} {}",
-                            d.name,
-                            d.address.as_deref().unwrap_or("-"),
-                            d.mac.as_deref().unwrap_or("-")
-                        );
-                    }
-                }
-                println!("\n{} devices total", devices.len());
+                print!("{}", devices_text(&devices));
             }
         }
         ConfigCmd::Diff { old, new } => config_insight::cmd_diff(ctx, old, new)?,
@@ -978,39 +766,11 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         ConfigCmd::History { name, room, count } => {
             config_insight::cmd_history(ctx, name, room, count)?
         }
-        ConfigCmd::Init { path } => {
-            let cfg = Config::load()?;
-            let abs_path = if path.starts_with('/') || path.starts_with('~') {
-                let expanded = if path.starts_with('~') {
-                    path.replacen(
-                        '~',
-                        &dirs::home_dir().unwrap_or_default().to_string_lossy(),
-                        1,
-                    )
-                } else {
-                    path.clone()
-                };
-                std::path::PathBuf::from(expanded)
-            } else {
-                std::env::current_dir()?.join(&path)
-            };
-            let repo = gitops::init(&abs_path, &cfg)?;
-            // Save the repo path in config
-            let mut cfg = Config::load().unwrap_or_default();
-            cfg.config_repo = Some(repo.to_string_lossy().to_string());
-            let saved = cfg.save()?;
-            println!("Config repo initialized at {}", repo.display());
-            println!("Saved repo path to {}", saved.display());
-            println!("\nNext: run `lox config pull` to download and commit the current config.");
-        }
+        ConfigCmd::Init { path } => config_init(&path)?,
         ConfigCmd::Pull { quiet: pull_quiet } => {
             let cfg = Config::load()?;
-            let repo_path = cfg
-                .config_repo
-                .as_deref()
-                .context("No config repo configured. Run `lox config init <path>` first.")?;
             let q = pull_quiet || ctx.quiet;
-            let committed = gitops::pull(std::path::Path::new(repo_path), &cfg, q)?;
+            let committed = gitops::pull(config_repo(&cfg)?, &cfg, q)?;
             if q && committed {
                 // In quiet/cron mode, just indicate a commit was made
                 println!("committed");
@@ -1018,16 +778,8 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         }
         ConfigCmd::Log { count } => {
             let cfg = Config::load()?;
-            let repo_path = cfg
-                .config_repo
-                .as_deref()
-                .context("No config repo configured. Run `lox config init <path>` first.")?;
-            let ms = if !cfg.serial.is_empty() {
-                Some(cfg.serial.as_str())
-            } else {
-                None
-            };
-            let output = gitops::log(std::path::Path::new(repo_path), ms, count)?;
+            let ms = (!cfg.serial.is_empty()).then_some(cfg.serial.as_str());
+            let output = gitops::log(config_repo(&cfg)?, ms, count)?;
             if output.is_empty() {
                 println!("No config history yet. Run `lox config pull` first.");
             } else {
@@ -1036,16 +788,436 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         }
         ConfigCmd::Restore { commit, force } => {
             let cfg = Config::load()?;
-            let repo_path = cfg
-                .config_repo
-                .as_deref()
-                .context("No config repo configured. Run `lox config init <path>` first.")?;
-            gitops::restore(std::path::Path::new(repo_path), &cfg, &commit, force)?;
+            gitops::restore(config_repo(&cfg)?, &cfg, &commit, force)?;
         }
     }
     Ok(())
 }
 
+/// The config repo of `lox config init`.
+fn config_repo(cfg: &Config) -> Result<&Path> {
+    cfg.config_repo
+        .as_deref()
+        .map(Path::new)
+        .context("No config repo configured. Run `lox config init <path>` first.")
+}
+
+/// `lox config ls`: the program files in /prog, newest first.
+fn config_ls(ctx: &RunContext) -> Result<()> {
+    let cfg = Config::load()?;
+    let backups = ftp::list_backups(&cfg.connection())?;
+    if backups.is_empty() {
+        println!("No configs found on the Miniserver.");
+    } else if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&backups_json(&backups))?);
+    } else {
+        print!("{}", backups_table(&backups));
+    }
+    Ok(())
+}
+
+fn backups_json(backups: &[ftp::BackupInfo]) -> Vec<serde_json::Value> {
+    backups
+        .iter()
+        .map(|b| {
+            serde_json::json!({
+                "filename": b.filename,
+                "version": b.version,
+                "date": b.formatted_date(),
+                "size": b.size,
+            })
+        })
+        .collect()
+}
+
+fn backups_table(backups: &[ftp::BackupInfo]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "  {:<4} {:<8} {:<22} Size", "#", "Version", "Date");
+    for (i, b) in backups.iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "  {:<4} {:<8} {:<22} {} KB{}",
+            i + 1,
+            b.version,
+            b.formatted_date(),
+            b.size / 1024,
+            if i == 0 { "  (latest)" } else { "" }
+        );
+    }
+    out
+}
+
+/// `lox config download`: the newest program file, with `extract` also as
+/// `.Loxone` XML.
+fn config_download(save_as: Option<String>, extract: bool) -> Result<()> {
+    let cfg = Config::load()?;
+    let backups = ftp::list_backups(&cfg.connection())?;
+    if backups.is_empty() {
+        bail!("No configs found on the Miniserver.");
+    }
+    let newest = &backups[0];
+    eprintln!(
+        "Downloading {} ({} KB)...",
+        newest.filename,
+        newest.size / 1024
+    );
+    let data = ftp::download_backup(&cfg.connection(), &newest.filename)?;
+    let out_path = save_as.unwrap_or_else(|| newest.filename.clone());
+    fs::write(&out_path, &data)?;
+    println!("Saved to {}", out_path);
+
+    if extract {
+        eprintln!("Extracting sps0.LoxCC...");
+        let xml = archive::extract_and_decompress(&data)?;
+        let xml_path = out_path
+            .strip_suffix(".zip")
+            .unwrap_or(&out_path)
+            .to_string()
+            + ".Loxone";
+        fs::write(&xml_path, &xml)?;
+        println!("{}", decompressed_line(data.len(), xml.len(), &xml_path));
+    }
+    Ok(())
+}
+
+fn decompressed_line(zip_len: usize, xml_len: usize, xml_path: &str) -> String {
+    format!(
+        "Decompressed {} KB → {} KB → {}",
+        zip_len / 1024,
+        xml_len / 1024,
+        xml_path
+    )
+}
+
+/// `lox config extract`: a config ZIP's `sps0.LoxCC` as `.Loxone` XML.
+fn config_extract(file: &str, save_as: Option<String>) -> Result<()> {
+    let zip_data = fs::read(file).with_context(|| format!("Cannot read {}", file))?;
+    eprintln!("Extracting sps0.LoxCC...");
+    let xml = archive::extract_and_decompress(&zip_data)?;
+    let xml_path = save_as
+        .unwrap_or_else(|| file.strip_suffix(".zip").unwrap_or(file).to_string() + ".Loxone");
+    fs::write(&xml_path, &xml)?;
+    println!(
+        "{}",
+        decompressed_line(zip_data.len(), xml.len(), &xml_path)
+    );
+    Ok(())
+}
+
+/// What `lox config compress` wrote.
+struct CompressReport {
+    input: String,
+    template: Option<String>,
+    output: String,
+    xml_bytes: usize,
+    output_bytes: usize,
+    crc32: u32,
+}
+
+impl CompressReport {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "input": self.input,
+            "template": self.template,
+            "output": self.output,
+            "xml_bytes": self.xml_bytes,
+            "output_bytes": self.output_bytes,
+            "crc32": format!("{:08x}", self.crc32),
+        })
+    }
+
+    fn text(&self) -> String {
+        format!(
+            "Compressed {} KB → {} KB → {}{}\n",
+            self.xml_bytes / 1024,
+            self.output_bytes / 1024,
+            self.output,
+            if self.template.is_some() {
+                " (extracts byte-identically)"
+            } else {
+                ""
+            }
+        )
+    }
+}
+
+/// Compress a `.Loxone` file to `sps0.LoxCC`, or with `template` stage it
+/// into that config ZIP (verified to extract to exactly the file).
+fn config_compress(
+    file: &str,
+    template: Option<String>,
+    save_as: Option<String>,
+) -> Result<CompressReport> {
+    let xml = fs::read(file).with_context(|| format!("Cannot read {}", file))?;
+    if xml.starts_with(b"PK\x03\x04") || xml.starts_with(&archive::LOXCC_MAGIC.to_le_bytes()) {
+        bail!(
+            "{} is already compressed. Expected a .Loxone XML file (`lox config extract` makes one).",
+            file
+        );
+    }
+    let stem = file.strip_suffix(".Loxone").unwrap_or(file);
+    let (out, out_path) = match &template {
+        // An upload ZIP: the template with only sps0.LoxCC replaced,
+        // verified to extract to exactly `xml`
+        Some(template) => {
+            let shell = fs::read(template).with_context(|| format!("Cannot read {}", template))?;
+            let staged = archive::stage_upload_zip(&shell, &xml, crate::util::zip_now())
+                .with_context(|| format!("Cannot stage {} into {}", file, template))?;
+            (staged, save_as.unwrap_or_else(|| format!("{stem}.zip")))
+        }
+        None => (
+            archive::compress_loxcc(&xml)?,
+            save_as.unwrap_or_else(|| format!("{stem}.LoxCC")),
+        ),
+    };
+    fs::write(&out_path, &out).with_context(|| format!("Cannot write {}", out_path))?;
+    Ok(CompressReport {
+        input: file.to_string(),
+        template,
+        output: out_path,
+        xml_bytes: xml.len(),
+        output_bytes: out.len(),
+        crc32: crc32fast::hash(&xml),
+    })
+}
+
+/// `lox config upload`: a config ZIP as /prog/sps_new.zip (only with `force`).
+fn config_upload(file: &str, force: bool) -> Result<()> {
+    let data = fs::read(file).with_context(|| format!("Cannot read {}", file))?;
+    // The Miniserver starts from whatever sps_new.zip holds.
+    let xml = match archive::extract_and_decompress(&data) {
+        Ok(xml) => xml,
+        Err(e) => bail!(
+            "{} is not a config ZIP ({:#}). A .Loxone file becomes one with \
+             `lox config compress FILE --template DOWNLOAD.zip`.",
+            file,
+            e
+        ),
+    };
+    let cfg = Config::load();
+    if let Ok(cfg) = &cfg {
+        custom_changes::warn_before_upload(cfg, Some(&xml));
+    }
+    if !force {
+        eprintln!(
+            "⚠  WARNING: Uploading a config will replace the current Miniserver\n\
+             \x20  programming. A bad configuration can require physical SD card\n\
+             \x20  access to recover.\n\
+             \n\
+             \x20  Config file: {}\n\
+             \n\
+             \x20  Use --force to proceed.",
+            file
+        );
+        std::process::exit(1);
+    }
+    let cfg = cfg?;
+    eprintln!(
+        "Uploading {} as /prog/{} ({} KB)...",
+        file,
+        ftp::CONFIG_UPLOAD_NAME,
+        data.len() / 1024
+    );
+    ftp::upload_config(&cfg.connection(), &data)?;
+    println!("Upload complete.");
+    println!("Reboot the Miniserver to load it: lox reboot");
+    Ok(())
+}
+
+/// The `lox config users` table, with a count line.
+fn users_table(users: &[loxone_xml::LoxUser], header: bool) -> String {
+    let mut out = String::new();
+    let nfc_count = users.iter().filter(|u| u.nfc).count();
+    if header {
+        let _ = writeln!(
+            out,
+            "{:<24} {:<4} {:<6} {:<28} {:<28} DESCRIPTION",
+            "NAME", "NFC", "CODES", "GROUPS", "ACCESS"
+        );
+    }
+    let count = |n: usize| if n == 0 { "-".into() } else { n.to_string() };
+    for u in users {
+        let access: Vec<String> = u
+            .access
+            .iter()
+            .map(|a| format!("{} ({})", a.block, a.schedule))
+            .collect();
+        let _ = writeln!(
+            out,
+            "{:<24} {:<4} {:<6} {:<28} {:<28} {}",
+            u.name,
+            count(u.nfc_tags),
+            count(u.access_codes),
+            or_dash(&u.groups.join(", ")),
+            or_dash(&access.join(", ")),
+            u.description,
+        );
+    }
+    let _ = writeln!(out, "\n{} users ({} with NFC)", users.len(), nfc_count);
+    out
+}
+
+/// `lox config devices`: Tree, LoxAIR and network devices, a section each.
+fn devices_text(devices: &[loxone_xml::LoxDevice]) -> String {
+    let on = |bus: loxone_xml::DeviceBus| -> Vec<&loxone_xml::LoxDevice> {
+        devices.iter().filter(|d| d.bus == bus).collect()
+    };
+    let tree = on(loxone_xml::DeviceBus::Tree);
+    let air = on(loxone_xml::DeviceBus::Air);
+    let net = on(loxone_xml::DeviceBus::Network);
+    let mut out = String::new();
+    if !tree.is_empty() {
+        let _ = writeln!(out, "  Tree devices ({})", tree.len());
+        let _ = writeln!(out, "  {:<30} {:<12} Type", "Name", "Serial");
+        for d in &tree {
+            let _ = writeln!(
+                out,
+                "  {:<30} {:<12} {}",
+                d.name,
+                d.serial.as_deref().unwrap_or("-"),
+                d.type_label
+            );
+        }
+    }
+    if !air.is_empty() {
+        if !tree.is_empty() {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "  LoxAIR devices ({})", air.len());
+        let _ = writeln!(out, "  {:<30} Type", "Name");
+        for d in &air {
+            let _ = writeln!(out, "  {:<30} {}", d.name, d.type_label);
+        }
+    }
+    if !net.is_empty() {
+        if !tree.is_empty() || !air.is_empty() {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "  Network devices ({})", net.len());
+        let _ = writeln!(out, "  {:<30} {:<18} MAC", "Name", "Address");
+        for d in &net {
+            let _ = writeln!(
+                out,
+                "  {:<30} {:<18} {}",
+                d.name,
+                d.address.as_deref().unwrap_or("-"),
+                d.mac.as_deref().unwrap_or("-")
+            );
+        }
+    }
+    let _ = writeln!(out, "\n{} devices total", devices.len());
+    out
+}
+
+/// `lox config init`: a git repo for the config history, its path saved in
+/// the config.
+fn config_init(path: &str) -> Result<()> {
+    let cfg = Config::load()?;
+    let abs_path = if path.starts_with('/') || path.starts_with('~') {
+        let expanded = if path.starts_with('~') {
+            path.replacen(
+                '~',
+                &dirs::home_dir().unwrap_or_default().to_string_lossy(),
+                1,
+            )
+        } else {
+            path.to_string()
+        };
+        std::path::PathBuf::from(expanded)
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let repo = gitops::init(&abs_path, &cfg)?;
+    // Save the repo path in config
+    let mut cfg = Config::load().unwrap_or_default();
+    cfg.config_repo = Some(repo.to_string_lossy().to_string());
+    let saved = cfg.save()?;
+    println!("Config repo initialized at {}", repo.display());
+    println!("Saved repo path to {}", saved.display());
+    println!("\nNext: run `lox config pull` to download and commit the current config.");
+    Ok(())
+}
+
 fn or_dash(s: &str) -> &str {
     if s.is_empty() { "-" } else { s }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CompressReport, aliases_table, backups_table, cache_info_text, token_info_text};
+    use loxone_client::{ftp::BackupInfo, token::TokenStore};
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::time::Duration;
+
+    #[test]
+    fn backups_table_marks_the_latest() {
+        let b = |v: u32, ts: &str| BackupInfo {
+            filename: format!("sps_{v}_{ts}.zip"),
+            version: v,
+            timestamp: ts.into(),
+            size: 4096,
+        };
+        assert_eq!(
+            backups_table(&[b(274, "20261030120000"), b(273, "20261001080000")]),
+            "  #    Version  Date                   Size\n\
+             \x20 1    274      2026-10-30 12:00:00    4 KB  (latest)\n\
+             \x20 2    273      2026-10-01 08:00:00    4 KB\n"
+        );
+    }
+
+    #[test]
+    fn aliases_sorted_or_hint() {
+        assert!(aliases_table(&HashMap::new(), true).starts_with("No aliases."));
+        let a = HashMap::from([
+            ("z".to_string(), "u2".to_string()),
+            ("a".into(), "u1".into()),
+        ]);
+        assert_eq!(
+            aliases_table(&a, false),
+            format!("{:<24} u1\n{:<24} u2\n", "a", "z")
+        );
+    }
+
+    #[test]
+    fn cache_info_valid_and_stale() {
+        let t = cache_info_text(Path::new("/c.json"), 2048, Duration::from_secs(3_725));
+        assert_eq!(
+            t,
+            "Cache: \"/c.json\"\nSize:  2.0 KB\nAge:   62m 5s\nStatus: ✓ valid (22h 57m until refresh)\n"
+        );
+        let t = cache_info_text(Path::new("/c.json"), 0, Duration::from_secs(90_000));
+        assert!(t.ends_with("Status: ⚠ stale (will refresh on next command)\n"));
+    }
+
+    #[test]
+    fn token_info_shortens_the_token() {
+        let ts = TokenStore {
+            token: "0123456789abcdef".into(),
+            key: String::new(),
+            valid_until: u64::MAX / 2,
+        };
+        let t = token_info_text(&ts, u64::MAX / 2 - 3 * 86400);
+        assert_eq!(
+            t,
+            "Token: 01234567...cdef\nStatus: ✓ valid (3 days remaining)\n"
+        );
+    }
+
+    #[test]
+    fn compress_report_text_and_json() {
+        let r = CompressReport {
+            input: "a.Loxone".into(),
+            template: Some("dl.zip".into()),
+            output: "a.zip".into(),
+            xml_bytes: 10_240,
+            output_bytes: 2_048,
+            crc32: 0xab,
+        };
+        assert_eq!(
+            r.text(),
+            "Compressed 10 KB → 2 KB → a.zip (extracts byte-identically)\n"
+        );
+        assert_eq!(r.json()["crc32"], "000000ab");
+    }
 }

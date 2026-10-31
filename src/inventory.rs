@@ -36,6 +36,30 @@ pub fn is_sensor_type(kind: &str, c: &Control) -> bool {
     }
 }
 
+/// A control with its `/all` answer (empty when the read failed).
+pub struct LiveControl {
+    pub control: Control,
+    pub all_xml: String,
+}
+
+/// The controls (in a room) that `keep` selects, each with its `/all` answer:
+/// the live read behind `lox sensors`.
+pub fn read_live(
+    lox: &mut LoxClient,
+    room: Option<&str>,
+    keep: impl Fn(&Control) -> bool,
+) -> Result<Vec<LiveControl>> {
+    let controls = lox.list_controls(None, room)?;
+    Ok(controls
+        .into_iter()
+        .filter(|c| keep(c))
+        .map(|control| {
+            let all_xml = lox.get_all(&control.uuid).unwrap_or_default();
+            LiveControl { control, all_xml }
+        })
+        .collect())
+}
+
 /// Energy meters and managers (`lox energy`, MCP `list_sensors kind=energy`).
 pub fn is_energy_type(typ: &str) -> bool {
     matches!(

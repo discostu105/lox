@@ -115,7 +115,7 @@ standalone repo github.com/discostu105/lxir via `git subtree` (history kept); th
 | `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
 | `src/actions.rs` | Shared action layer: per-control-type command mapping and risk levels (used by the CLI, the TUI and MCP) |
-| `src/inventory.rs` | Shared read layer: which controls are sensors or energy meters, a light controller's moods (used by the CLI and MCP) |
+| `src/inventory.rs` | Shared read layer: which controls are sensors or energy meters, controls with their live `/all` answer (`read_live`), a light controller's moods (used by the CLI and MCP) |
 | `src/mcp/` | `lox mcp`: MCP server on rmcp (MCP 2026-07-28 + older) — CLI/runtime (`mod.rs`), `#[tool]` definitions, risky-action confirmation via MRTR/elicitation (`server.rs`), blocking Miniserver ops + output schemas (`ops.rs`), rmcp client/server protocol tests (`tests.rs`). Design: `docs/design-mcp.md` |
 | `src/energy.rs` | Energy flow shared by `lox energy flow`/`--top` (`src/commands/energy.rs`), MCP `get_energy_flow` and the TUI: EFM node roles (+ `tui.yaml` overrides), flow breakdown, `/all` parsing, meter ranking |
 | `src/logic.rs` | Adapter over loxone-config (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
