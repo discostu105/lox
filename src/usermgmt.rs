@@ -173,7 +173,7 @@ pub fn ll_value(body: &str) -> Result<Value> {
     let code = ll
         .get("Code")
         .or_else(|| ll.get("code"))
-        .and_then(crate::json_val_str)
+        .and_then(crate::util::json_val_str)
         .unwrap_or_default();
     if code != "200" {
         return Err(LlCodeError {
@@ -197,7 +197,7 @@ pub fn ll_value(body: &str) -> Result<Value> {
 
 /// A string field; numbers are accepted and printed.
 fn text(v: &Value, key: &str) -> String {
-    crate::json_val_str(&v[key]).unwrap_or_default()
+    crate::util::json_val_str(&v[key]).unwrap_or_default()
 }
 
 /// An integer field; numeric strings are accepted.
@@ -555,7 +555,7 @@ pub fn access_log(lox: &LoxClient, uuid: &str) -> Result<Option<String>> {
     };
     // the file server answers some errors with an XML body and status 200
     if body.trim_start().starts_with('<') && body.contains("<errorcode>") {
-        return match crate::xml_attr(&body, "errorcode") {
+        return match crate::util::xml_attr(&body, "errorcode") {
             Some("404") => Ok(None),
             Some(code @ ("401" | "403")) => Err(needs_user_management(
                 HttpStatusError {
@@ -694,7 +694,7 @@ pub fn answer_code(status: u16, body: &str) -> u16 {
         .ok()
         .and_then(|v| {
             let ll = v.get("LL")?;
-            crate::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)
+            crate::util::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)
         })
         .and_then(|c| c.trim().parse().ok())
         .unwrap_or(status)
@@ -1028,12 +1028,12 @@ pub struct Touch {
 
 /// Loxone time now: seconds since 2009-01-01 local time.
 pub fn lox_now() -> i64 {
-    (chrono::Local::now() - crate::lox_epoch()).num_seconds()
+    (chrono::Local::now() - crate::util::lox_epoch()).num_seconds()
 }
 
 /// Why the user cannot use any credential right now, if so.
 fn disabled_reason(user: &User, now: i64) -> Option<String> {
-    let fmt = |t: i64| crate::lox_timestamp_to_string(t);
+    let fmt = |t: i64| crate::util::lox_timestamp_to_string(t);
     let expired = |until: Option<i64>| until.filter(|u| now > *u);
     let not_yet = |from: Option<i64>| from.filter(|f| now < *f);
     match user.state {
@@ -1218,10 +1218,8 @@ pub fn find_code_touch(
         }
     }
     let uuid = lox
-        .cfg
-        .aliases
-        .get(query)
-        .cloned()
+        .alias(query)
+        .map(str::to_string)
         .or_else(|| is_uuid(query).then(|| query.to_string()));
     if let Some(uuid) = uuid {
         let name = all
@@ -1806,13 +1804,11 @@ mod tests {
     }
 
     fn fake(server: &httpmock::MockServer) -> LoxClient {
-        LoxClient::new(crate::config::Config {
-            host: server.base_url(),
-            user: "test".into(),
-            pass: "test".into(),
-            verify_ssl: Some(false),
-            ..Default::default()
-        })
+        LoxClient::new(crate::connection::Connection::new(
+            server.base_url(),
+            "test",
+            "test",
+        ))
         .unwrap()
     }
 

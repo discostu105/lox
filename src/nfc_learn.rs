@@ -110,7 +110,7 @@ pub fn target(lox: &mut crate::client::LoxClient, query: &str) -> Result<Target>
         name,
         result_state,
         secured: ctrl["isSecured"].as_bool().unwrap_or(false),
-        user: lox.cfg.user.clone(),
+        user: lox.connection().user.clone(),
         visu_password: None,
     })
 }
@@ -126,7 +126,7 @@ pub struct LearnResult {
 
 /// A field that is "0", 0, "" or missing when unset.
 fn set_field(v: &Value, key: &str) -> Option<String> {
-    let s = crate::json_val_str(&v[key])?;
+    let s = crate::util::json_val_str(&v[key])?;
     let s = s.trim();
     (!s.is_empty() && s != "0").then(|| s.to_string())
 }
@@ -217,7 +217,7 @@ fn reply_code(text: &str, cmd_suffix: &str) -> Option<u16> {
     if !control.ends_with(cmd_suffix) {
         return None;
     }
-    crate::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)?
+    crate::util::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)?
         .trim()
         .parse()
         .ok()

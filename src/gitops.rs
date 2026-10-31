@@ -134,7 +134,7 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     if !quiet {
         eprintln!("Fetching backup list from Miniserver...");
     }
-    let backups = ftp::list_backups(cfg)?;
+    let backups = ftp::list_backups(&cfg.connection())?;
     if backups.is_empty() {
         bail!("No configs found on the Miniserver.");
     }
@@ -146,7 +146,7 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
             newest.size / 1024
         );
     }
-    let zip_data = ftp::download_backup(cfg, &newest.filename)?;
+    let zip_data = ftp::download_backup(&cfg.connection(), &newest.filename)?;
 
     // 2. Decompress LoxCC → XML
     let xml_data = archive::extract_and_decompress(&zip_data)?;
@@ -366,7 +366,7 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
         ftp::CONFIG_UPLOAD_NAME,
         zip_data.len() / 1024
     );
-    ftp::upload_config(cfg, &zip_data)?;
+    ftp::upload_config(&cfg.connection(), &zip_data)?;
     println!("Upload complete.");
     println!("Reboot the Miniserver to load it: lox reboot");
 

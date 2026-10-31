@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::client::LOXONE_EPOCH_SECS;
-use crate::config::Config;
+use crate::connection::Connection;
 use crate::ws::LoxWsClient;
 
 const TOKEN_EXPIRY_MARGIN_SECS: u64 = 300;
@@ -32,21 +32,26 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    /// Token path for a specific config (context-aware).
-    pub fn path_for(cfg: &Config) -> std::path::PathBuf {
-        cfg.token_path()
+    /// The stored token of `conn` (`conn.token_path`), if any.
+    pub fn load_for(conn: &Connection) -> Option<Self> {
+        Self::load(conn.token_path.as_deref()?)
     }
-    /// Load token for a specific config (context-aware).
-    pub fn load_for(cfg: &Config) -> Option<Self> {
-        serde_json::from_str(&std::fs::read_to_string(Self::path_for(cfg)).ok()?).ok()
+    /// Store the token as `conn.token_path`; without one, nothing is stored.
+    pub fn save_for(&self, conn: &Connection) -> Result<()> {
+        match &conn.token_path {
+            Some(path) => self.save(path),
+            None => Ok(()),
+        }
     }
-    /// Save token for a specific config (context-aware).
-    pub fn save_for(&self, cfg: &Config) -> Result<()> {
-        let path = Self::path_for(cfg);
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    }
+    /// Write the token to `path` (mode 0600 on Unix), creating its directory.
+    pub fn save(&self, path: &std::path::Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        self.write_to(&path)
+        self.write_to(path)
     }
     fn write_to(&self, path: &std::path::Path) -> Result<()> {
         // The token grants Miniserver access for weeks: keep it owner-only.
@@ -199,17 +204,17 @@ pub(crate) fn visu_hash(visu_password: &str, getvisusalt: &serde_json::Value) ->
 }
 
 /// Fetch the Miniserver's RSA public key over HTTP (not available on the WS).
-async fn fetch_public_key(cfg: &Config) -> Result<RsaPublicKey> {
-    let cfg2 = cfg.clone();
+async fn fetch_public_key(conn: &Connection) -> Result<RsaPublicKey> {
+    let conn2 = conn.clone();
     let pem: String = tokio::task::spawn_blocking(move || -> Result<String> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(crate::client::USER_AGENT)
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-            .danger_accept_invalid_certs(!cfg2.verify_ssl.unwrap_or(false))
+            .danger_accept_invalid_certs(!conn2.verify_ssl)
             .build()?;
         let resp: serde_json::Value = client
-            .get(format!("{}/jdev/sys/getPublicKey", cfg2.host))
-            .basic_auth(&cfg2.user, Some(&cfg2.pass))
+            .get(conn2.url("/jdev/sys/getPublicKey"))
+            .basic_auth(&conn2.user, Some(&conn2.pass))
             .send()?
             .error_for_status()?
             .json()?;
@@ -283,13 +288,13 @@ fn loxone_to_unix(valid_until: u64) -> u64 {
 
 /// Request a new long-lived (permission 4, "app") token with the password.
 /// On success the WS session is authenticated as well.
-async fn request_token(ws: &mut WsStream, cfg: &Config) -> Result<TokenStore> {
-    let salt = get_user_salt(ws, &cfg.user).await?;
-    let sig = credential_hash(&cfg.user, &cfg.pass, &salt);
+async fn request_token(ws: &mut WsStream, conn: &Connection) -> Result<TokenStore> {
+    let salt = get_user_salt(ws, &conn.user).await?;
+    let sig = credential_hash(&conn.user, &conn.pass, &salt);
     let client_uuid = uuid::Uuid::new_v4().to_string();
     ws.send(Message::Text(format!(
         "jdev/sys/gettoken/{}/{}/{}/{}/{}",
-        sig, cfg.user, TOKEN_PERMISSION_APP, client_uuid, TOKEN_CLIENT_INFO
+        sig, conn.user, TOKEN_PERMISSION_APP, client_uuid, TOKEN_CLIENT_INFO
     )))
     .await?;
     let val = ws_read_value(ws, "gettoken").await?;
@@ -313,14 +318,14 @@ async fn request_token(ws: &mut WsStream, cfg: &Config) -> Result<TokenStore> {
 /// rejected it (revoked, expired, other user).
 async fn auth_with_token(
     ws: &mut WsStream,
-    cfg: &Config,
+    conn: &Connection,
     ts: &TokenStore,
 ) -> Result<Option<TokenStore>> {
-    let salt = get_user_salt(ws, &cfg.user).await?;
+    let salt = get_user_salt(ws, &conn.user).await?;
     let hash = token_auth_hash(&ts.token, &salt);
     ws.send(Message::Text(format!(
         "authwithtoken/{}/{}",
-        hash, cfg.user
+        hash, conn.user
     )))
     .await?;
     match ws_reply(ws, "authwithtoken").await? {
@@ -351,17 +356,17 @@ pub fn token_reuse_rejected() -> bool {
 /// Reuses the stored token via `authwithtoken` when it is still valid, and
 /// only requests a new token (and stores it) otherwise — so repeated stream
 /// sessions don't pile up long-lived tokens on the Miniserver.
-pub async fn authenticate_ws(ws: &mut WsStream, cfg: &Config) -> Result<()> {
-    let pub_key = fetch_public_key(cfg).await?;
+pub async fn authenticate_ws(ws: &mut WsStream, conn: &Connection) -> Result<()> {
+    let pub_key = fetch_public_key(conn).await?;
     key_exchange(ws, &pub_key).await?;
 
     use std::sync::atomic::Ordering;
     if !TOKEN_REUSE_REJECTED.load(Ordering::Relaxed)
-        && let Some(ts) = TokenStore::load_for(cfg).filter(|t| t.is_valid())
+        && let Some(ts) = TokenStore::load_for(conn).filter(|t| t.is_valid())
     {
-        match auth_with_token(ws, cfg, &ts).await {
+        match auth_with_token(ws, conn, &ts).await {
             Ok(Some(refreshed)) => {
-                let _ = refreshed.save_for(cfg);
+                let _ = refreshed.save_for(conn);
                 return Ok(());
             }
             Ok(None) => {
@@ -379,17 +384,17 @@ pub async fn authenticate_ws(ws: &mut WsStream, cfg: &Config) -> Result<()> {
         }
     }
 
-    let ts = request_token(ws, cfg).await?;
-    let _ = ts.save_for(cfg);
+    let ts = request_token(ws, conn).await?;
+    let _ = ts.save_for(conn);
     Ok(())
 }
 
-pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
+pub async fn acquire_token(conn: &Connection) -> Result<TokenStore> {
     // 1. Fetch RSA public key via HTTP
-    let pub_key = fetch_public_key(cfg).await?;
+    let pub_key = fetch_public_key(conn).await?;
 
     // 2. WS connect (retry up to 3 times)
-    let ws_client = LoxWsClient::new(cfg.clone());
+    let ws_client = LoxWsClient::new(conn.clone());
     let mut ws = None;
     for attempt in 0..3 {
         if attempt > 0 {
@@ -408,8 +413,8 @@ pub async fn acquire_token(cfg: &Config) -> Result<TokenStore> {
 
     // 3. Key exchange, then gettoken on the same connection (getkey2 is session-specific)
     key_exchange(&mut ws, &pub_key).await?;
-    let ts = request_token(&mut ws, cfg).await?;
-    ts.save_for(cfg)?;
+    let ts = request_token(&mut ws, conn).await?;
+    ts.save_for(conn)?;
     Ok(ts)
 }
 

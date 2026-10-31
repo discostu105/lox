@@ -88,8 +88,11 @@ archived, work merged there comes over with
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | All CLI commands (30+), clap argument parsing, helper functions (RGB→HSV, weather/stats binary parsing); `lox ir` hands its arguments to `lxir::cli` |
-| `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes |
+| `src/main.rs` | All CLI commands (30+), clap argument parsing and dispatch; `lox ir` hands its arguments to `lxir::cli` |
+| `src/connection.rs` | `Connection`: what the transport needs (host, credentials, `verify_ssl`, token and structure cache paths); `Config::connection()` builds it, so client/ws/token/stream/ftp never see `Config` |
+| `src/client.rs` | `LoxClient` (HTTP) — control resolution, structure cache, categories, global states, operating modes; `Config::client()` builds one with the aliases |
+| `src/util.rs` | Small shared helpers: Loxone timestamps, `xml_attr`/`json_val_str`, RGB→HSV, path encoding, terminal formatting |
+| `src/stats.rs`, `src/sdtest.rs` | Statistics files and `weatheru.bin` (binary parsing); the SD card self-test response |
 | `src/config.rs` | `Config` + `GlobalConfig` — loads/saves config (flat or multi-context), context resolution, project-local `.lox/` discovery |
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
 | `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |

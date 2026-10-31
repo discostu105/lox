@@ -9,10 +9,8 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::stream::{self, StateEvent};
-use crate::{
-    InputCmd, LightCmd, MusicCmd, bar, encode_path_value, json_val_str, print_dry_run, print_resp,
-    send_or_dry_run, xml_attr,
-};
+use crate::util::{bar, encode_path_value, json_val_str, xml_attr};
+use crate::{InputCmd, LightCmd, MusicCmd, print_dry_run, print_resp, send_or_dry_run};
 
 pub fn cmd_on(
     ctx: &RunContext,
@@ -20,7 +18,7 @@ pub fn cmd_on(
     room: Option<String>,
     all_in_room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     if let Some(room_name) = all_in_room {
         let controls = lox.resolve_all_in_room(&room_name, None)?;
         for ctrl in &controls {
@@ -62,7 +60,7 @@ pub fn cmd_off(
     room: Option<String>,
     all_in_room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     if let Some(room_name) = all_in_room {
         let controls = lox.resolve_all_in_room(&room_name, None)?;
         for ctrl in &controls {
@@ -99,7 +97,7 @@ pub fn cmd_off(
 }
 
 pub fn cmd_pulse(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     if ctx.dry_run {
         let ctrl = lox.find_control(&uuid).ok();
@@ -119,7 +117,7 @@ pub fn cmd_blind(
     pos: Option<f64>,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_blind(&action, pos)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     let Some(resp) = resp else { return Ok(()) };
@@ -201,7 +199,7 @@ fn run_action(
 /// The `moodList` state is a TextState sent as JSON during the initial state dump:
 /// `[{"name":"Viel Licht","id":777,"static":false},{"name":"Aus","id":778,"static":true}]`
 pub fn cmd_light_moods(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let (ctrl, moods) = fetch_light_moods(&mut lox, &name_or_uuid, room.as_deref())?;
 
     if ctx.json {
@@ -240,9 +238,9 @@ pub fn fetch_light_moods(
     room: Option<&str>,
 ) -> Result<(crate::client::Control, Vec<actions::MoodEntry>)> {
     let (ctrl, mood_list_uuid) = resolve_mood_list(lox, name_or_uuid, room)?;
-    let cfg = lox.cfg.clone();
+    let conn = lox.connection().clone();
     let rt = tokio::runtime::Runtime::new()?;
-    let moods_json = rt.block_on(fetch_mood_list_json(&cfg, &mood_list_uuid))?;
+    let moods_json = rt.block_on(fetch_mood_list_json(&conn, &mood_list_uuid))?;
     Ok((ctrl, actions::parse_mood_list(&moods_json)?))
 }
 
@@ -283,10 +281,13 @@ pub fn resolve_mood_list(
 }
 
 /// Wait (max 10 s) for the `moodList` text state in the WebSocket state dump.
-pub async fn fetch_mood_list_json(cfg: &Config, mood_list_uuid: &str) -> Result<String> {
+pub async fn fetch_mood_list_json(
+    conn: &crate::connection::Connection,
+    mood_list_uuid: &str,
+) -> Result<String> {
     tokio::time::timeout(
         Duration::from_secs(10),
-        fetch_mood_list_via_ws(cfg, mood_list_uuid),
+        fetch_mood_list_via_ws(conn, mood_list_uuid),
     )
     .await
     .map_err(|_| anyhow::anyhow!("Timeout waiting for moodList state (10s)"))?
@@ -294,9 +295,12 @@ pub async fn fetch_mood_list_json(cfg: &Config, mood_list_uuid: &str) -> Result<
 
 /// Connect to the Miniserver WebSocket, subscribe to binary states,
 /// and return the text content of the moodList state UUID on first receipt.
-async fn fetch_mood_list_via_ws(cfg: &Config, mood_list_uuid: &str) -> Result<String> {
+async fn fetch_mood_list_via_ws(
+    conn: &crate::connection::Connection,
+    mood_list_uuid: &str,
+) -> Result<String> {
     let target = mood_list_uuid.to_string();
-    stream::stream_events_until(cfg, |event| {
+    stream::stream_events_until(conn, |event| {
         if let StateEvent::TextState { uuid, text, .. } = event
             && *uuid == target
         {
@@ -319,7 +323,7 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
             action,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let mut lox = Config::load()?.client()?;
             let act = actions::parse_mood(&action)?;
             let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
             if let Some(resp) = resp {
@@ -351,7 +355,7 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
             value,
             room,
         } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let mut lox = Config::load()?.client()?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             let encoded = encode_path_value(&value);
             if ctx.dry_run {
@@ -376,7 +380,7 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
             }
         }
         InputCmd::Pulse { name_or_uuid, room } => {
-            let mut lox = LoxClient::new(Config::load()?)?;
+            let mut lox = Config::load()?.client()?;
             let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
             if let Some(resp) = send_or_dry_run(
                 &lox,
@@ -401,7 +405,7 @@ pub fn cmd_mood(
     action: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_mood(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -429,7 +433,7 @@ pub fn cmd_dimmer(
     level: f64,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_dim(level)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -450,7 +454,7 @@ pub fn cmd_gate(
     action: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_gate(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -465,7 +469,7 @@ pub fn cmd_color(
     value: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_color(&value)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -482,7 +486,7 @@ pub fn cmd_thermostat(
     duration: Option<u64>,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid)?;
     if !matches!(
@@ -562,7 +566,7 @@ pub fn cmd_alarm(
     code: Option<String>,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_alarm(&action, no_motion, code)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -577,7 +581,7 @@ pub fn cmd_door(
     action: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_door(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -592,7 +596,7 @@ pub fn cmd_intercom(
     action: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_intercom(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -608,7 +612,7 @@ pub fn cmd_charger(
     limit: Option<f64>,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = actions::parse_charger(&action, limit)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -623,7 +627,7 @@ pub fn cmd_lock(
     reason: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let act = Ok::<_, anyhow::Error>(Action::LockControl(reason))?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
@@ -633,7 +637,7 @@ pub fn cmd_lock(
 }
 
 pub fn cmd_unlock(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let ctrl = lox.find_control(&uuid)?;
     if let Some(resp) = send_or_dry_run(
@@ -658,7 +662,7 @@ pub fn cmd_send(
     room: Option<String>,
     secured: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     if ctx.dry_run {
         let ctrl = lox.find_control(&uuid).ok();
@@ -685,7 +689,7 @@ pub fn cmd_set(
     value: String,
     room: Option<String>,
 ) -> Result<()> {
-    let mut lox = LoxClient::new(Config::load()?)?;
+    let mut lox = Config::load()?.client()?;
     let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
     let encoded = encode_path_value(&value);
     if ctx.dry_run {
@@ -714,7 +718,7 @@ pub fn cmd_set(
 pub fn cmd_run(ctx: &RunContext, scene: String, scene_dry_run: bool) -> Result<()> {
     let cfg = Config::load()?;
     let s = Scene::load_with_config(&scene, &cfg)?;
-    let mut lox = LoxClient::new(cfg)?;
+    let mut lox = cfg.client()?;
     if ctx.dry_run || scene_dry_run {
         println!("▶  {} (dry run)", s.name.as_deref().unwrap_or(&scene));
         if let Some(d) = &s.description {

@@ -341,13 +341,13 @@ fn record_network_metrics(
 /// This endpoint performs a live read/write benchmark, so it's heavier than
 /// other diagnostic endpoints. Call it at a lower frequency if needed.
 fn record_sdtest_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) {
-    use crate::commands::system::parse_sdtest;
+    use crate::sdtest::parse_sdtest;
 
     let text = match lox.get_text("/jdev/sys/sdtest") {
         Ok(t) => t,
         Err(_) => return,
     };
-    let val = crate::xml_attr(&text, "value").unwrap_or("");
+    let val = crate::util::xml_attr(&text, "value").unwrap_or("");
     let sd = parse_sdtest(val);
 
     if let Some(v) = sd.read_speed_kb {
@@ -739,7 +739,7 @@ pub fn serve(
     no_traces: bool,
 ) -> Result<()> {
     // Load structure for UUID mapping
-    let mut lox = LoxClient::new(cfg.clone())?;
+    let mut lox = cfg.client()?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
 
@@ -807,7 +807,7 @@ pub fn serve(
     let log_provider_sys = log_provider.clone();
     let quiet_sys = quiet;
     std::thread::spawn(move || {
-        let lox = match LoxClient::new(cfg_sys) {
+        let lox = match cfg_sys.client() {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("failed to create HTTP client: {e}");
@@ -916,12 +916,13 @@ pub fn serve(
 
     // A daemon: reconnect with backoff when the Miniserver drops the socket
     // (reboot, network blip) instead of exiting. Ctrl+C stops it and flushes.
+    let conn = cfg.connection();
     rt.block_on(async {
         let mut backoff = RECONNECT_MIN_SECS;
         loop {
             let started = std::time::Instant::now();
             let result = tokio::select! {
-                r = stream::stream_events(cfg, &mut handler) => r,
+                r = stream::stream_events(&conn, &mut handler) => r,
                 _ = tokio::signal::ctrl_c() => return,
             };
             if started.elapsed() > Duration::from_secs(60) {
@@ -978,7 +979,7 @@ pub fn push(
     check_endpoint(endpoint, headers)?;
 
     // Load structure for UUID mapping
-    let mut lox = LoxClient::new(cfg.clone())?;
+    let mut lox = cfg.client()?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
 
@@ -1013,7 +1014,7 @@ pub fn push(
     let collect_result = rt.block_on(async {
         tokio::time::timeout(
             Duration::from_secs(10),
-            stream::stream_events(cfg, |events| {
+            stream::stream_events(&cfg.connection(), |events| {
                 let mut state = store_ws.lock().unwrap();
                 let mut collected = false;
                 for event in &events {
@@ -1069,7 +1070,7 @@ pub fn push(
         let cfg_sys = cfg.clone();
         let meter_sys = meter.clone();
         std::thread::spawn(move || {
-            let lox_sys = match LoxClient::new(cfg_sys) {
+            let lox_sys = match cfg_sys.client() {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("failed to create HTTP client: {e}");

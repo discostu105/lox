@@ -197,11 +197,11 @@ impl Action {
             Action::LockControl(reason) => {
                 vec![format!(
                     "lockcontrol/1/{}",
-                    crate::encode_path_value(reason)
+                    crate::util::encode_path_value(reason)
                 )]
             }
             Action::UnlockControl => one("unlockcontrol"),
-            Action::Value(v) => vec![crate::encode_path_value(v)],
+            Action::Value(v) => vec![crate::util::encode_path_value(v)],
             Action::Raw(c) => vec![c.clone()],
         }
     }
@@ -576,7 +576,7 @@ pub fn parse_color(value: &str) -> Result<Action> {
         let r = u8::from_str_radix(&hex[0..2], 16).context("Invalid red component")?;
         let g = u8::from_str_radix(&hex[2..4], 16).context("Invalid green component")?;
         let b = u8::from_str_radix(&hex[4..6], 16).context("Invalid blue component")?;
-        let (h, s, v) = crate::rgb_to_hsv(r, g, b);
+        let (h, s, v) = crate::util::rgb_to_hsv(r, g, b);
         Ok(Action::Color(format!("hsv({},{},{})", h, s, v)))
     } else {
         Ok(Action::Color(value.to_string()))

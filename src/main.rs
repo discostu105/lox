@@ -16,6 +16,7 @@ mod app_catalogue;
 mod client;
 mod commands;
 mod config;
+mod connection;
 mod custom_changes;
 mod ftp;
 mod gitops;
@@ -25,13 +26,16 @@ mod mcp;
 mod nfc_learn;
 mod otel;
 mod scene;
+mod sdtest;
 mod snapshot;
+mod stats;
 mod statv2;
 mod stream;
 mod token;
 #[cfg(feature = "tui")]
 mod tui;
 mod usermgmt;
+mod util;
 mod visu;
 mod ws;
 
@@ -42,9 +46,7 @@ use client::LoxClient;
 use dirs::home_dir;
 use serde_json::Value;
 use std::fs;
-use std::io::Cursor;
-
-use byteorder::{LittleEndian, ReadBytesExt};
+use util::{json_val_str, now_hms};
 
 /// Load config XML from a .Loxone file or extract from a .zip backup.
 pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
@@ -54,51 +56,6 @@ pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
     } else {
         Ok(data)
     }
-}
-
-pub(crate) fn xml_attr<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
-    // XML format: attr="value"
-    let xml_key = format!("{}=\"", attr);
-    let mut search_from = 0;
-    while let Some(pos) = xml[search_from..].find(&xml_key) {
-        let abs_pos = search_from + pos;
-        if abs_pos == 0 || matches!(xml.as_bytes()[abs_pos - 1], b' ' | b'<' | b'\t' | b'\n') {
-            let start = abs_pos + xml_key.len();
-            let end = xml[start..].find('"')? + start;
-            return Some(&xml[start..end]);
-        }
-        search_from = abs_pos + 1;
-    }
-
-    // JSON format: "attr": value  (handles /jdev/ responses)
-    let json_key = format!("\"{}\": ", attr);
-    if let Some(pos) = xml.find(&json_key) {
-        let start = pos + json_key.len();
-        let rest = &xml[start..];
-        if let Some(stripped) = rest.strip_prefix('"') {
-            // String value: extract between quotes
-            let end = stripped.find('"')?;
-            return Some(&stripped[..end]);
-        }
-        // Numeric/other value: read until delimiter
-        let end = rest.find([',', '}', ']']).unwrap_or(rest.len());
-        let val = rest[..end].trim();
-        if !val.is_empty() {
-            return Some(val);
-        }
-    }
-
-    None
-}
-
-/// Extract a JSON value as a display string, handling both string and numeric types.
-/// Gen2 Miniservers return numeric values (e.g. `"Code": 200`) instead of strings
-/// (`"Code": "200"`), so `.as_str()` alone is insufficient.
-pub(crate) fn json_val_str(v: &Value) -> Option<String> {
-    v.as_str()
-        .map(|s| s.to_string())
-        .or_else(|| v.as_i64().map(|n| n.to_string()))
-        .or_else(|| v.as_f64().map(|n| n.to_string()))
 }
 
 pub(crate) fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
@@ -169,157 +126,6 @@ pub(crate) fn send_or_dry_run(
     } else {
         Ok(Some(lox.send_cmd(uuid, cmd)?))
     }
-}
-
-pub(crate) fn bar(v: f64, max: f64) -> String {
-    let n = ((v / max * 20.0) as usize).min(20);
-    format!(
-        "[{}{}] {:.0}%",
-        "█".repeat(n),
-        "░".repeat(20 - n),
-        v / max * 100.0
-    )
-}
-
-pub(crate) fn kb_fmt(kb: f64) -> String {
-    if kb > 1024.0 {
-        format!("{:.0} MB", kb / 1024.0)
-    } else {
-        format!("{:.0} kB", kb)
-    }
-}
-
-/// The current local time as a ZIP timestamp, for entries staged new
-/// (ZIP times are local).
-pub(crate) fn zip_now() -> lxir::archive::ZipTime {
-    use chrono::{Datelike, Timelike};
-    let now = chrono::Local::now().naive_local();
-    lxir::archive::ZipTime {
-        year: u16::try_from(now.year()).unwrap_or(1980),
-        month: now.month() as u8,
-        day: now.day() as u8,
-        hour: now.hour() as u8,
-        minute: now.minute() as u8,
-        second: now.second() as u8,
-    }
-}
-
-/// Loxone epoch: 2009-01-01 00:00:00 local time.
-/// All Loxone timestamps are seconds since this epoch.
-pub(crate) fn lox_epoch() -> chrono::DateTime<chrono::Local> {
-    chrono::NaiveDate::from_ymd_opt(2009, 1, 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_local_timezone(chrono::Local)
-        .unwrap()
-}
-
-/// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted string.
-pub(crate) fn lox_timestamp_to_string(ts: i64) -> String {
-    let dt = lox_epoch() + chrono::Duration::seconds(ts);
-    dt.format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// Convert a Loxone timestamp counted from 2009-01-01 **UTC** (a user's
-/// `lastEdit`) to local time.
-pub(crate) fn lox_utc_timestamp_to_string(ts: i64) -> String {
-    let unix = client::LOXONE_EPOCH_SECS as i64 + ts;
-    match chrono::DateTime::from_timestamp(unix, 0) {
-        Some(dt) => dt
-            .with_timezone(&chrono::Local)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string(),
-        None => ts.to_string(),
-    }
-}
-
-/// A single parsed statistics entry.
-pub(crate) struct StatsEntry {
-    pub(crate) timestamp: String,
-    pub(crate) values: Vec<f64>,
-}
-
-/// Parse binary statistics data (after header has been skipped).
-/// `data` is the raw bytes starting from the first entry.
-/// `num_outputs` is the number of f64 values per entry.
-pub(crate) fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
-    let entry_size = 4 + 4 + num_outputs * 8; // UUID(4) + ts(4) + values
-    let mut cursor = Cursor::new(data);
-    let mut entries = Vec::new();
-    while cursor.position() as usize + entry_size <= data.len() {
-        let _uuid_part = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-        let ts = cursor.read_u32::<LittleEndian>().unwrap_or(0);
-        let mut values = Vec::new();
-        for _ in 0..num_outputs {
-            values.push(cursor.read_f64::<LittleEndian>().unwrap_or(0.0));
-        }
-        entries.push(StatsEntry {
-            timestamp: lox_timestamp_to_string(ts as i64),
-            values,
-        });
-    }
-    entries
-}
-
-/// Skip the binary stats file header and return the offset where entries begin.
-/// Header format: u32 valueCount | u32 controlType | u32 nameLength | name bytes
-/// Returns None if data is too short.
-pub(crate) fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
-    if data.len() <= 12 {
-        return None;
-    }
-    let mut cursor = Cursor::new(data);
-    let _value_count = cursor.read_u32::<LittleEndian>().ok()?;
-    let _control_type = cursor.read_u32::<LittleEndian>().ok()?;
-    let name_length = cursor.read_u32::<LittleEndian>().ok()?;
-    let header_end = 12 + name_length as usize;
-    Some(header_end.div_ceil(entry_size) * entry_size)
-}
-
-/// Determine the stats period string from day/month flags.
-pub(crate) fn stats_period(day: Option<&str>, month: Option<&str>) -> String {
-    if let Some(d) = day {
-        d.replace('-', "")
-    } else if let Some(m) = month {
-        m.replace('-', "")
-    } else {
-        chrono::Local::now().format("%Y%m").to_string()
-    }
-}
-
-/// Build the bare fsget path for a stats file.
-pub(crate) fn stats_file_path(uuid: &str, period: &str) -> String {
-    format!("/dev/fsget//stats/{}.{}", uuid, period)
-}
-
-/// Parse an fslist output to find matching stats files for a UUID and period.
-pub(crate) fn find_stats_files<'a>(listing: &'a str, uuid: &str, period: &str) -> Vec<&'a str> {
-    let suffix = format!(".{}", period);
-    let mut files: Vec<&str> = listing
-        .lines()
-        .filter_map(|line| line.rsplit_once(' ').map(|(_, name)| name))
-        .filter(|name| name.starts_with(uuid) && name.ends_with(suffix.as_str()))
-        .collect();
-    files.sort();
-    files
-}
-
-/// Normalize a filesystem path for Loxone fsget/fslist API.
-/// Ensures the path starts with '/' so the double-slash URL
-/// (e.g. /dev/fsget//path) is correct.
-pub(crate) fn abs_path(p: &str) -> String {
-    if p.starts_with('/') {
-        p.to_string()
-    } else {
-        format!("/{p}")
-    }
-}
-
-pub(crate) fn now_hms() -> String {
-    use chrono::Timelike;
-    let now = chrono::Local::now();
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
 pub(crate) fn detect_shell() -> Option<Shell> {
@@ -2320,84 +2126,6 @@ pub(crate) fn print_stream_event(
     }
 }
 
-pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
-    let rf = r as f64 / 255.0;
-    let gf = g as f64 / 255.0;
-    let bf = b as f64 / 255.0;
-    let max = rf.max(gf).max(bf);
-    let min = rf.min(gf).min(bf);
-    let delta = max - min;
-    let h = if delta == 0.0 {
-        0.0
-    } else if max == rf {
-        60.0 * (((gf - bf) / delta) % 6.0)
-    } else if max == gf {
-        60.0 * (((bf - rf) / delta) + 2.0)
-    } else {
-        60.0 * (((rf - gf) / delta) + 4.0)
-    };
-    let h = if h < 0.0 { h + 360.0 } else { h };
-    let s = if max == 0.0 { 0.0 } else { delta / max * 100.0 };
-    let v = max * 100.0;
-    (h.round() as u16, s.round() as u16, v.round() as u16)
-}
-
-pub(crate) fn parse_weather_entry(
-    cursor: &mut Cursor<&[u8]>,
-    lox_epoch: &chrono::DateTime<chrono::Local>,
-) -> Option<serde_json::Value> {
-    // Weather entry: 108 bytes total (mixed i32 + f64 fields)
-    // Offset  0: u32 timestamp (seconds since Loxone epoch 2009-01-01)
-    let ts = cursor.read_u32::<LittleEndian>().ok()?;
-    // Offset  4: i32 weather type (picto-code)
-    let _weather_type = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset  8: i32 wind direction (degrees)
-    let wind_dir = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 12: i32 solar radiation (UV index)
-    let _radiation = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 16: i32 relative humidity (%)
-    let humidity = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 20: f64 temperature (°C)
-    let temperature = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 28: f64 felt temperature (°C)
-    let _felt_temp = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 36: f64 dewpoint (°C)
-    let _dewpoint = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 44: f64 precipitation (mm)
-    let rain = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 52: f64 wind speed (m/s)
-    let wind_speed = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 60: f64 barometric pressure (hPa)
-    let pressure = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 68: i32 low clouds (%)
-    let low_clouds = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 72: i32 medium clouds (%)
-    let med_clouds = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 76: i32 high clouds (%)
-    let high_clouds = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 80: i32 precipitation probability
-    let _precip_prob = cursor.read_i32::<LittleEndian>().ok()?;
-    // Offset 84: f64 absolute radiation
-    let _abs_radiation = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 92: f64 snow fraction
-    let _snow_fraction = cursor.read_f64::<LittleEndian>().ok()?;
-    // Offset 100: f64 CAPE
-    let _cape = cursor.read_f64::<LittleEndian>().ok()?;
-
-    let clouds = ((low_clouds + med_clouds + high_clouds) as f64 / 3.0).round();
-    let dt = *lox_epoch + chrono::Duration::seconds(ts as i64);
-    Some(serde_json::json!({
-        "timestamp": dt.format("%Y-%m-%d %H:%M").to_string(),
-        "temperature": temperature,
-        "humidity": humidity as f64,
-        "wind_speed": wind_speed,
-        "wind_direction": wind_dir as f64,
-        "rain": rain,
-        "pressure": pressure,
-        "clouds": clouds,
-    }))
-}
-
 pub(crate) fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
     Ok(match op {
         "eq" | "==" => {
@@ -2430,51 +2158,12 @@ pub(crate) fn parse_f(s: &str) -> Result<f64> {
     })
 }
 
-/// Percent-encode characters that would corrupt an HTTP path segment.
-/// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/50") pass through.
-pub(crate) fn encode_path_value(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            '%' => vec!['%', '2', '5'],
-            ' ' => vec!['%', '2', '0'],
-            '#' => vec!['%', '2', '3'],
-            '?' => vec!['%', '3', 'F'],
-            '+' => vec!['%', '2', 'B'],
-            c => vec![c],
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use client::is_uuid;
 
     // ── json_val_str (Gen2 numeric value handling) ─────────────────────────
-
-    #[test]
-    fn test_json_val_str_string() {
-        let v = serde_json::json!("200");
-        assert_eq!(json_val_str(&v), Some("200".to_string()));
-    }
-
-    #[test]
-    fn test_json_val_str_integer() {
-        let v = serde_json::json!(200);
-        assert_eq!(json_val_str(&v), Some("200".to_string()));
-    }
-
-    #[test]
-    fn test_json_val_str_float() {
-        let v = serde_json::json!(21.5);
-        assert_eq!(json_val_str(&v), Some("21.5".to_string()));
-    }
-
-    #[test]
-    fn test_json_val_str_null() {
-        let v = serde_json::json!(null);
-        assert_eq!(json_val_str(&v), None);
-    }
 
     #[test]
     fn test_print_resp_numeric_code() {
@@ -2525,27 +2214,6 @@ mod tests {
 
     // ── encode_path_value ────────────────────────────────────────────────────
 
-    #[test]
-    fn test_encode_path_value_plain() {
-        assert_eq!(encode_path_value("on"), "on");
-        assert_eq!(encode_path_value("manualPosition/50"), "manualPosition/50");
-    }
-
-    #[test]
-    fn test_encode_path_value_space() {
-        assert_eq!(encode_path_value("hello world"), "hello%20world");
-    }
-
-    #[test]
-    fn test_encode_path_value_percent() {
-        assert_eq!(encode_path_value("50%"), "50%25");
-    }
-
-    #[test]
-    fn test_encode_path_value_plus() {
-        assert_eq!(encode_path_value("a+b"), "a%2Bb");
-    }
-
     // ── parse_f (unit suffix stripping) ─────────────────────────────────────
 
     #[test]
@@ -2563,83 +2231,7 @@ mod tests {
 
     // ── rgb_to_hsv ────────────────────────────────────────────────────────────
 
-    #[test]
-    fn test_rgb_to_hsv_red() {
-        let (h, s, v) = rgb_to_hsv(255, 0, 0);
-        assert_eq!(h, 0);
-        assert_eq!(s, 100);
-        assert_eq!(v, 100);
-    }
-
-    #[test]
-    fn test_rgb_to_hsv_green() {
-        let (h, s, v) = rgb_to_hsv(0, 255, 0);
-        assert_eq!(h, 120);
-        assert_eq!(s, 100);
-        assert_eq!(v, 100);
-    }
-
-    #[test]
-    fn test_rgb_to_hsv_blue() {
-        let (h, s, v) = rgb_to_hsv(0, 0, 255);
-        assert_eq!(h, 240);
-        assert_eq!(s, 100);
-        assert_eq!(v, 100);
-    }
-
-    #[test]
-    fn test_rgb_to_hsv_white() {
-        let (h, s, v) = rgb_to_hsv(255, 255, 255);
-        assert_eq!(h, 0);
-        assert_eq!(s, 0);
-        assert_eq!(v, 100);
-    }
-
-    #[test]
-    fn test_rgb_to_hsv_black() {
-        let (h, s, v) = rgb_to_hsv(0, 0, 0);
-        assert_eq!(h, 0);
-        assert_eq!(s, 0);
-        assert_eq!(v, 0);
-    }
-
     // ── weather parsing ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_parse_weather_entry() {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        let epoch = lox_epoch();
-        let mut data = Vec::new();
-        // 108-byte weather entry: u32 ts + 4×i32 + 6×f64 + 4×i32 + 3×f64
-        data.write_u32::<LittleEndian>(3600).unwrap(); // timestamp
-        data.write_i32::<LittleEndian>(1).unwrap(); // weather type
-        data.write_i32::<LittleEndian>(180).unwrap(); // wind direction
-        data.write_i32::<LittleEndian>(5).unwrap(); // radiation
-        data.write_i32::<LittleEndian>(65).unwrap(); // humidity
-        data.write_f64::<LittleEndian>(21.5).unwrap(); // temperature
-        data.write_f64::<LittleEndian>(19.0).unwrap(); // felt temp
-        data.write_f64::<LittleEndian>(15.0).unwrap(); // dewpoint
-        data.write_f64::<LittleEndian>(0.5).unwrap(); // precipitation
-        data.write_f64::<LittleEndian>(10.0).unwrap(); // wind speed
-        data.write_f64::<LittleEndian>(1013.0).unwrap(); // pressure
-        data.write_i32::<LittleEndian>(30).unwrap(); // low clouds
-        data.write_i32::<LittleEndian>(60).unwrap(); // med clouds
-        data.write_i32::<LittleEndian>(90).unwrap(); // high clouds
-        data.write_i32::<LittleEndian>(40).unwrap(); // precip probability
-        data.write_f64::<LittleEndian>(500.0).unwrap(); // abs radiation
-        data.write_f64::<LittleEndian>(0.0).unwrap(); // snow fraction
-        data.write_f64::<LittleEndian>(100.0).unwrap(); // CAPE
-        assert_eq!(data.len(), 108);
-        let mut cursor = Cursor::new(data.as_slice());
-        let entry = parse_weather_entry(&mut cursor, &epoch).unwrap();
-        assert_eq!(entry["temperature"].as_f64().unwrap(), 21.5);
-        assert_eq!(entry["humidity"].as_f64().unwrap(), 65.0);
-        assert_eq!(entry["wind_speed"].as_f64().unwrap(), 10.0);
-        assert_eq!(entry["wind_direction"].as_f64().unwrap(), 180.0);
-        assert_eq!(entry["rain"].as_f64().unwrap(), 0.5);
-        assert_eq!(entry["pressure"].as_f64().unwrap(), 1013.0);
-        assert_eq!(entry["clouds"].as_f64().unwrap(), 60.0); // avg(30,60,90)
-    }
 
     // ── is_uuid ──────────────────────────────────────────────────────────────
 
@@ -2654,7 +2246,8 @@ mod tests {
 
     #[test]
     fn test_parse_binary_stats_data() {
-        use byteorder::{LittleEndian, WriteBytesExt};
+        use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+        use std::io::Cursor;
         // Build a small binary stats payload: 2 entries, 1 output each
         let mut data = Vec::new();
         // Entry 1: ts=1000, value=23.5
@@ -2680,7 +2273,8 @@ mod tests {
 
     #[test]
     fn test_parse_binary_stats_multi_output() {
-        use byteorder::{LittleEndian, WriteBytesExt};
+        use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+        use std::io::Cursor;
         // 1 entry with 3 outputs
         let mut data = Vec::new();
         data.write_u32::<LittleEndian>(5000).unwrap();
@@ -2749,204 +2343,7 @@ mod tests {
         assert_eq!(aligned, 32);
     }
 
-    /// Full round-trip: build a binary stats file with header + aligned
-    /// entries and verify we parse the correct timestamps and values
-    /// using the extracted helper functions.
-    #[test]
-    fn test_stats_file_parse_with_header() {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        let mut data = Vec::new();
-        // Header: valueCount=1 (with version flag), controlType=0, nameLength=3
-        data.write_u32::<LittleEndian>(0x8000_0001).unwrap();
-        data.write_u32::<LittleEndian>(0).unwrap();
-        data.write_u32::<LittleEndian>(3).unwrap(); // "CO2"
-        data.extend_from_slice(b"CO2");
-        // Pad to 16 bytes (entry_size alignment)
-        data.push(0); // null terminator / padding to reach 16
-        assert_eq!(data.len(), 16);
-        // Entry 1: uuid_prefix(4) + ts(4) + value(8) = 16 bytes
-        data.write_u32::<LittleEndian>(0x03b498a5).unwrap(); // uuid prefix
-        data.write_u32::<LittleEndian>(541_293_056).unwrap(); // ~2026-03-01
-        data.write_f64::<LittleEndian>(985.2).unwrap();
-        // Entry 2
-        data.write_u32::<LittleEndian>(0x03b498a5).unwrap();
-        data.write_u32::<LittleEndian>(541_296_656).unwrap(); // +1 hour
-        data.write_f64::<LittleEndian>(1215.1).unwrap();
-
-        let num_outputs = 1;
-        let entry_size = 4 + 4 + num_outputs * 8;
-        let offset = stats_data_offset(&data, entry_size).unwrap();
-        assert_eq!(offset, 16);
-        let entries = parse_stats_entries(&data[offset..], num_outputs);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].values[0], 985.2);
-        assert_eq!(entries[1].values[0], 1215.1);
-    }
-
     // ── xml_attr ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_xml_attr_basic() {
-        let xml = r#"<LL control="test" value="42" Code="200"/>"#;
-        assert_eq!(xml_attr(xml, "value"), Some("42"));
-        assert_eq!(xml_attr(xml, "Code"), Some("200"));
-        assert_eq!(xml_attr(xml, "control"), Some("test"));
-    }
-
-    #[test]
-    fn test_xml_attr_missing() {
-        let xml = r#"<LL control="test" value="42"/>"#;
-        assert_eq!(xml_attr(xml, "missing"), None);
-    }
-
-    #[test]
-    fn test_xml_attr_empty_value() {
-        let xml = r#"<LL value=""/>"#;
-        assert_eq!(xml_attr(xml, "value"), Some(""));
-    }
-
-    #[test]
-    fn test_xml_attr_spaces_in_value() {
-        let xml = r#"<LL value="hello world"/>"#;
-        assert_eq!(xml_attr(xml, "value"), Some("hello world"));
-    }
-
-    #[test]
-    fn test_xml_attr_no_partial_name_match() {
-        // "value" must NOT match "value2" — word boundary check
-        let xml = r#"<LL value2="wrong" value="right"/>"#;
-        assert_eq!(xml_attr(xml, "value"), Some("right"));
-    }
-
-    #[test]
-    fn test_xml_attr_partial_name_only_match() {
-        // When only value2 exists, looking for "value" returns None
-        let xml = r#"<LL value2="wrong"/>"#;
-        assert_eq!(xml_attr(xml, "value"), None);
-    }
-
-    #[test]
-    fn test_xml_attr_json_format() {
-        // /jdev/ endpoints return JSON instead of XML
-        let json =
-            r#"{"LL": { "control": "dev/sys/lastcpu", "value": "CPU:12 SPS:26", "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("CPU:12 SPS:26"));
-        assert_eq!(xml_attr(json, "Code"), Some("200"));
-        assert_eq!(xml_attr(json, "control"), Some("dev/sys/lastcpu"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_empty_value() {
-        let json = r#"{"LL": { "control": "dev/sys/ints", "value": "", "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some(""));
-    }
-
-    #[test]
-    fn test_xml_attr_json_numeric_value() {
-        // Gen2 Miniservers return numeric values without quotes for counters
-        let json =
-            r#"{"LL": { "control": "dev/sys/contextswitches", "value": 123456789, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("123456789"));
-        assert_eq!(xml_attr(json, "Code"), Some("200"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_numeric_last_field() {
-        // Numeric value as the last field before closing brace
-        let json = r#"{"LL": { "value": 42}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("42"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_float_value() {
-        let json = r#"{"LL": { "value": 3.14, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("3.14"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_negative_value() {
-        let json = r#"{"LL": { "value": -1, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("-1"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_zero_value() {
-        let json = r#"{"LL": { "value": 0, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("0"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_bool_value() {
-        // Unlikely from Miniserver but should not panic
-        let json = r#"{"LL": { "value": true, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("true"));
-    }
-
-    #[test]
-    fn test_xml_attr_json_null_value() {
-        let json = r#"{"LL": { "value": null, "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("null"));
-    }
-
-    /// Exercises xml_attr against every response format the Miniserver uses
-    /// for the diagnostic endpoints exposed by `lox status --diag/--net/--bus/--lan`.
-    /// This is a regression test: Gen2 Miniservers return numeric JSON values
-    /// for counters, which the original string-only parser missed.
-    #[test]
-    fn test_xml_attr_all_diagnostic_response_formats() {
-        // Gen1 XML format (most endpoints)
-        let xml = r#"<LL control="dev/sys/heap" value="352880/1016404kB" Code="200"/>"#;
-        assert_eq!(xml_attr(xml, "value"), Some("352880/1016404kB"));
-
-        // Gen2 JSON with string value (lastcpu, numtasks, sdtest)
-        let json = r#"{"LL": { "control": "dev/sys/lastcpu", "value": "CPU:11 SPS:24 Cycles:99", "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("CPU:11 SPS:24 Cycles:99"));
-
-        // Gen2 JSON with numeric value (ints, comints, contextswitches, contextswitchesi)
-        for endpoint in [
-            "dev/sys/contextswitches",
-            "dev/sys/ints",
-            "dev/sys/comints",
-            "dev/sys/contextswitchesi",
-        ] {
-            let json = format!(
-                r#"{{"LL": {{ "control": "{}", "value": 987654, "Code": "200"}}}}"#,
-                endpoint
-            );
-            assert_eq!(
-                xml_attr(&json, "value"),
-                Some("987654"),
-                "failed for endpoint {}",
-                endpoint
-            );
-        }
-
-        // Gen2 JSON with numeric value for bus/lan counters
-        for endpoint in [
-            "bus/packetssent",
-            "bus/packetsreceived",
-            "bus/parityerrors",
-            "lan/txp",
-            "lan/txu",
-            "lan/exh",
-            "lan/nob",
-        ] {
-            let json = format!(
-                r#"{{"LL": {{ "control": "{}", "value": 42, "Code": "200"}}}}"#,
-                endpoint
-            );
-            assert_eq!(
-                xml_attr(&json, "value"),
-                Some("42"),
-                "failed for endpoint {}",
-                endpoint
-            );
-        }
-
-        // Gen2 JSON with string value for network config
-        let json = r#"{"LL": { "control": "cfg/dns2", "value": "8.8.4.4", "Code": "200"}}"#;
-        assert_eq!(xml_attr(json, "value"), Some("8.8.4.4"));
-    }
 
     // ── matches_filters ───────────────────────────────────────────────────────
 
@@ -3028,181 +2425,15 @@ mod tests {
 
     // ── bar ───────────────────────────────────────────────────────────────────
 
-    #[test]
-    fn test_bar_zero() {
-        let s = bar(0.0, 100.0);
-        assert!(s.starts_with("[░"));
-        assert!(s.ends_with("0%"));
-    }
-
-    #[test]
-    fn test_bar_full() {
-        let s = bar(100.0, 100.0);
-        assert!(s.starts_with("[████████████████████]"));
-        assert!(s.ends_with("100%"));
-    }
-
-    #[test]
-    fn test_bar_half() {
-        let s = bar(50.0, 100.0);
-        assert!(s.contains("50%"));
-    }
-
     // ── kb_fmt ────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_kb_fmt_kb() {
-        assert_eq!(kb_fmt(512.0), "512 kB");
-    }
-
-    #[test]
-    fn test_kb_fmt_mb() {
-        assert_eq!(kb_fmt(2048.0), "2 MB");
-    }
-
-    #[test]
-    fn test_kb_fmt_boundary() {
-        // At exactly 1024, stays in kB
-        assert_eq!(kb_fmt(1024.0), "1024 kB");
-    }
 
     // ── lox_epoch / lox_timestamp_to_string ───────────────────────────────────
 
-    #[test]
-    fn test_lox_epoch_is_2009() {
-        let e = lox_epoch();
-        assert_eq!(e.format("%Y-%m-%d").to_string(), "2009-01-01");
-    }
-
-    #[test]
-    fn test_lox_timestamp_to_string() {
-        // 0 seconds = epoch itself
-        let s = lox_timestamp_to_string(0);
-        assert!(s.starts_with("2009-01-01"));
-    }
-
-    #[test]
-    fn test_lox_utc_timestamp_is_shown_in_local_time() {
-        use chrono::TimeZone;
-        // 2026-10-29 16:22:00 UTC, as a user's lastEdit
-        let ts = 1_793_290_920 - client::LOXONE_EPOCH_SECS as i64;
-        let local = chrono::Local.timestamp_opt(1_793_290_920, 0).unwrap();
-        assert_eq!(
-            lox_utc_timestamp_to_string(ts),
-            local.format("%Y-%m-%d %H:%M:%S").to_string()
-        );
-    }
-
     // ── stats helpers ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_stats_period_day() {
-        assert_eq!(stats_period(Some("2026-03-15"), None), "20260315");
-    }
-
-    #[test]
-    fn test_stats_period_month() {
-        assert_eq!(stats_period(None, Some("2026-03")), "202603");
-    }
-
-    #[test]
-    fn test_stats_period_default() {
-        // Default returns current month in YYYYMM format
-        let p = stats_period(None, None);
-        assert_eq!(p.len(), 6);
-        assert!(p.chars().all(|c| c.is_ascii_digit()));
-    }
-
-    #[test]
-    fn test_stats_file_path() {
-        assert_eq!(
-            stats_file_path("abc-123", "202603"),
-            "/dev/fsget//stats/abc-123.202603"
-        );
-    }
-
-    #[test]
-    fn test_find_stats_files_basic() {
-        let listing = "123456 abc-123.202603\n789012 abc-123_1.202603\n345678 other.202603";
-        let files = find_stats_files(listing, "abc-123", "202603");
-        assert_eq!(files, vec!["abc-123.202603", "abc-123_1.202603"]);
-    }
-
-    #[test]
-    fn test_find_stats_files_no_match() {
-        let listing = "123456 other.202603";
-        let files = find_stats_files(listing, "abc-123", "202603");
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn test_stats_data_offset_short_name() {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        let mut data = Vec::new();
-        data.write_u32::<LittleEndian>(0x8000_0001).unwrap();
-        data.write_u32::<LittleEndian>(0).unwrap();
-        data.write_u32::<LittleEndian>(3).unwrap(); // name_length=3
-        data.extend_from_slice(b"CO2\0"); // pad to 16
-        let entry_size = 4 + 4 + 8;
-        assert_eq!(stats_data_offset(&data, entry_size), Some(16));
-    }
-
-    #[test]
-    fn test_stats_data_offset_too_short() {
-        let data = vec![0u8; 10]; // Less than 12 bytes
-        assert_eq!(stats_data_offset(&data, 16), None);
-    }
 
     // ── parse_stats_entries ───────────────────────────────────────────────────
 
-    #[test]
-    fn test_parse_stats_entries_empty() {
-        let entries = parse_stats_entries(&[], 1);
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn test_parse_stats_entries_single_output() {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        let mut data = Vec::new();
-        data.write_u32::<LittleEndian>(0xAABBCCDD).unwrap(); // uuid prefix
-        data.write_u32::<LittleEndian>(1000).unwrap();
-        data.write_f64::<LittleEndian>(23.5).unwrap();
-        let entries = parse_stats_entries(&data, 1);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].values, vec![23.5]);
-    }
-
-    #[test]
-    fn test_parse_stats_entries_multi_output() {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        let mut data = Vec::new();
-        data.write_u32::<LittleEndian>(0xAABBCCDD).unwrap();
-        data.write_u32::<LittleEndian>(5000).unwrap();
-        data.write_f64::<LittleEndian>(100.0).unwrap();
-        data.write_f64::<LittleEndian>(200.0).unwrap();
-        data.write_f64::<LittleEndian>(300.0).unwrap();
-        let entries = parse_stats_entries(&data, 3);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].values, vec![100.0, 200.0, 300.0]);
-    }
-
     // ── abs_path ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_abs_path_with_leading_slash() {
-        assert_eq!(abs_path("/temp/file.img"), "/temp/file.img");
-    }
-
-    #[test]
-    fn test_abs_path_without_leading_slash() {
-        assert_eq!(abs_path("temp/file.img"), "/temp/file.img");
-    }
-
-    #[test]
-    fn test_abs_path_root() {
-        assert_eq!(abs_path("/"), "/");
-    }
 
     // ── completions ─────────────────────────────────────────────────────────
 

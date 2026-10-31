@@ -120,7 +120,7 @@ pub fn parse_salt_reply(text: &str) -> Option<Result<Value>> {
     let code = ll
         .get("Code")
         .or_else(|| ll.get("code"))
-        .and_then(crate::json_val_str)
+        .and_then(crate::util::json_val_str)
         .unwrap_or_default();
     if code.trim() != "200" {
         return Some(Err(anyhow::anyhow!(

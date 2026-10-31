@@ -14,9 +14,39 @@ use crate::actions::{self, Action, Risk, RiskTarget};
 use crate::client::{Control, LoxClient};
 use crate::commands::inspect::{is_energy_type, is_sensor_type};
 use crate::config::Config;
-use crate::json_val_str;
 use crate::scene::{Scene, SceneStep};
 use crate::usermgmt;
+use crate::util::json_val_str;
+
+/// The Miniserver client together with the config it was built from: the
+/// tools need both, lox's settings (confirm list, scenes, config repo) and
+/// the client. Derefs to the client.
+pub struct Lox {
+    pub cfg: Config,
+    pub client: LoxClient,
+}
+
+impl Lox {
+    pub fn new(cfg: Config) -> Result<Self> {
+        Ok(Lox {
+            client: cfg.client()?,
+            cfg,
+        })
+    }
+}
+
+impl std::ops::Deref for Lox {
+    type Target = LoxClient;
+    fn deref(&self) -> &LoxClient {
+        &self.client
+    }
+}
+
+impl std::ops::DerefMut for Lox {
+    fn deref_mut(&mut self) -> &mut LoxClient {
+        &mut self.client
+    }
+}
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -632,7 +662,7 @@ pub struct Wiring {
 /// or the whole path up to the sensors / down to the actuators. Read-only:
 /// it reads the `.Loxone` config (repo, cache, or an FTP download).
 pub fn get_wiring(
-    lox: &mut LoxClient,
+    lox: &mut Lox,
     name: &str,
     room: Option<&str>,
     trace: Option<Trace>,
@@ -707,7 +737,7 @@ pub fn get_user(lox: &mut LoxClient, name: &str) -> Result<usermgmt::User> {
 /// Join the live user with the access rights of the program file: a fresh
 /// FTP download (read-only), or the cached config with `cached`.
 pub fn access_check(
-    lox: &mut LoxClient,
+    lox: &mut Lox,
     user: &str,
     code_touch: Option<&str>,
     cached: bool,
@@ -738,7 +768,9 @@ pub fn access_check(
 pub fn system_status(lox: &mut LoxClient) -> Result<SystemStatus> {
     let read = |path: &str| -> Result<String> {
         let text = lox.get_text(path)?;
-        Ok(crate::xml_attr(&text, "value").unwrap_or("").to_string())
+        Ok(crate::util::xml_attr(&text, "value")
+            .unwrap_or("")
+            .to_string())
     };
     let firmware = read("/dev/cfg/version")?;
     let plc = read("/dev/sps/state")?;
