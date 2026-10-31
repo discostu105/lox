@@ -286,8 +286,9 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
             value,
             room,
         } => {
-            let mut lox = Config::load()?.client()?;
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let cfg = Config::load()?;
+            let mut lox = cfg.client()?;
+            let uuid = resolve_input(&cfg, &mut lox, &name_or_uuid, room.as_deref(), ctx.quiet)?;
             let encoded = encode_path_value(&value);
             if ctx.dry_run {
                 print_dry_run(ctx.json, ctx.quiet, &uuid, &encoded, &name_or_uuid, None);
@@ -311,8 +312,9 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
             }
         }
         InputCmd::Pulse { name_or_uuid, room } => {
-            let mut lox = Config::load()?.client()?;
-            let uuid = lox.resolve_with_room(&name_or_uuid, room.as_deref())?;
+            let cfg = Config::load()?;
+            let mut lox = cfg.client()?;
+            let uuid = resolve_input(&cfg, &mut lox, &name_or_uuid, room.as_deref(), ctx.quiet)?;
             if let Some(resp) = send_or_dry_run(
                 &lox,
                 &uuid,
@@ -328,6 +330,42 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// An input by name: a control of the structure, else a virtual input of the
+/// config. Virtual inputs not shown in the app are missing from `LoxApp3.json`
+/// but take commands all the same (by UUID), so their names come from the
+/// newest config available offline (config repo or cached download).
+fn resolve_input(
+    cfg: &Config,
+    lox: &mut LoxClient,
+    name: &str,
+    room: Option<&str>,
+    quiet: bool,
+) -> Result<String> {
+    let err = match lox.resolve_with_room(name, room) {
+        Ok(uuid) => return Ok(uuid),
+        Err(e) => anyhow::Error::from(e),
+    };
+    if room.is_some() || !format!("{err:#}").contains("No control matching") {
+        return Err(err);
+    }
+    let Ok(snap) = crate::snapshot::current(cfg) else {
+        return Err(err);
+    };
+    let logic = crate::logic::Logic::parse(&snap.bytes)?;
+    match logic.virtual_input(name)? {
+        Some(b) => {
+            if !quiet {
+                eprintln!(
+                    "{} is a virtual input not shown in the app ({}, from the config: {})",
+                    b.title, b.uuid, snap.label
+                );
+            }
+            Ok(b.uuid.clone())
+        }
+        None => Err(err),
+    }
 }
 
 pub fn cmd_mood(
