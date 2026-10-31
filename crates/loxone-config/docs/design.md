@@ -2414,3 +2414,40 @@ Anything unverified is an error, not a heuristic:
     so v1 files still parse, and `fmt` migrates them. Multi-word or
     non-identifier commands (`"Mood 2"`, `"+"`) stay quoted.
   - The "expected a statement" error lists every statement kind.
+- **D81 — named signals** (2026-10-31). An inline expression's blocks
+  are named after their sink (`wp_freigabe_on__and2`), so a test, a
+  second consumer or a tile had to spell a synthetic slug that moves
+  whenever the expression is edited. `<slug> = <expr>` names the
+  result: it desugars exactly like an inline expression (same blocks,
+  labels, errors), with the prefix `<slug>__` for the sub-blocks and the
+  top block called `<slug>` itself — so `<slug>.Q` (gate, comparator)
+  or `<slug>.AQ` (Formula) is the signal, and no wire or alias block is
+  added: the compile output is the inline expression's, under other
+  slugs. A statement of its own (`Item::Signal`) rather than a block
+  form, because its inputs are its expression: `<-`, port-`=` and
+  attributes on a signal are refused, and a body's only signal takes
+  no template forwards.
+  - **Ownership.** The top slug was written by hand, so it is
+    hand-owned like a declared block: dropping the statement needs
+    `removed`, renaming needs `moved` (or `loxl rename`), and it keeps
+    its UUID while the expression below it changes. The sub-blocks stay
+    expression-owned and auto-removed — their names are derived, as
+    inline. The alternative (the whole signal expression-owned) would
+    let a typo in the slug silently re-mint a block that tests, tiles
+    and rules reference by name; the lifecycle statements exist to
+    catch exactly that. `moved old -> new` on a signal also moves the
+    expression-owned `old__*` entries to `new__*`, so a rename keeps
+    every UUID. A changed top operator changes the top block's type,
+    which a pinned block never does; the compile refuses with the
+    signal-specific remedy (a new slug and `removed <old>`) instead of
+    re-minting behind the user's back.
+  - **No bare operands.** `x = a.Q` would be an alias, which Loxone has
+    no block for (a pass-through gate would add a block and a cycle of
+    latency) — refused with "an alias is not a block"; `x = 5` is a
+    `let`. The label stays the expression text: a leading string
+    (`x = "Label" a.Q and …`) reads poorly on one line, and a block
+    that needs a title of its own can be declared by hand.
+  - In template bodies a signal is body-local like a block
+    (`<instance>_<slug>`, `<instance>_<slug>__<op><n>`). The language
+    server lists signals as declarations (kind `signal`) typed by their
+    top block, so port completion and hover work on `<slug>.`.

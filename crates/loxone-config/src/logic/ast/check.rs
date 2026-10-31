@@ -32,6 +32,19 @@ fn compile_err<T>(msg: String) -> Result<T> {
     Err(Error::Compile(msg))
 }
 
+/// A named signal's inputs are its expression: no wire, expression or
+/// value statement targets one of its ports.
+fn not_a_signal(names: &Names, target: &PortRef, what: &str) -> Result<()> {
+    if names.get(target.slug.as_str()) == Some(&NameKind::Signal) {
+        return compile_err(format!(
+            "`{target} {what}` targets named signal `{}`, whose inputs are its \
+             expression. Change the expression instead.",
+            target.slug,
+        ));
+    }
+    Ok(())
+}
+
 /// A reference to an object: the slug must name an extern or a block.
 fn object_ref(names: &Names, r: &PortRef) -> Result<()> {
     match names.get(r.slug.as_str()) {
@@ -82,7 +95,7 @@ impl Module {
         // into plain blocks. Test bodies may reference the slugs those
         // lowerings mint, so their references only resolve on this form.
         let flattened = !self.items.iter().any(|i| match i {
-            Item::Template(_) | Item::Instance(_) | Item::ExprWire(_) => true,
+            Item::Template(_) | Item::Instance(_) | Item::ExprWire(_) | Item::Signal(_) => true,
             Item::Block(b) => b.bindings().any(|x| matches!(x.kind, BindingKind::Expr(_))),
             _ => false,
         });
@@ -102,6 +115,7 @@ impl Module {
             let (name, kind) = match item {
                 Item::Extern(e) => (e.slug.as_str(), NameKind::Extern),
                 Item::Block(b) => (b.slug.as_str(), NameKind::Block),
+                Item::Signal(x) => (x.slug.as_str(), NameKind::Signal),
                 Item::Let(l) => (l.name.as_str(), NameKind::Let),
                 Item::Template(t) => (t.name.as_str(), NameKind::Template),
                 Item::Instance(b) => (b.slug.as_str(), NameKind::Instance),
@@ -174,6 +188,7 @@ impl Module {
             Item::Block(b) => self.check_block(names, b)?,
             Item::Wire(w) => self.check_wire(names, w)?,
             Item::ExprWire(w) => self.check_expr_wire(names, w)?,
+            Item::Signal(x) => self.check_expr_operands(names, &x.expr, &x.slug)?,
             Item::Set(s) => self.check_set(names, s)?,
             Item::Attr(a) => self.check_attr(names, a, seen)?,
             Item::Test(t) => self.check_test(sc, t)?,
@@ -296,6 +311,7 @@ impl Module {
     fn check_wire(&self, names: &Names, w: &WireDecl) -> Result<()> {
         object_ref(names, &w.to)?;
         object_ref(names, &w.from)?;
+        not_a_signal(names, &w.to, "<- …")?;
         if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
                 "`{to} <- {from}` targets managed block `{slug}` — wire it \
@@ -314,6 +330,7 @@ impl Module {
     /// `to <- expression` drives an extern port.
     fn check_expr_wire(&self, names: &Names, w: &ExprWireDecl) -> Result<()> {
         object_ref(names, &w.to)?;
+        not_a_signal(names, &w.to, "<- …")?;
         if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
                 "`{to} <- …` targets managed block `{slug}` — wire the \
@@ -330,6 +347,7 @@ impl Module {
     /// `target.Port = value` sets an extern port.
     fn check_set(&self, names: &Names, s: &SetDecl) -> Result<()> {
         object_ref(names, &s.target)?;
+        not_a_signal(names, &s.target, "= …")?;
         if names.get(s.target.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
                 "`{target} = …` targets managed block `{slug}` — bind the \
@@ -355,6 +373,13 @@ impl Module {
             // source's when it states them (D63); its title
             // is its label.
             Some(NameKind::Block) if a.attr != Attr::Title => {}
+            Some(NameKind::Signal) => {
+                return compile_err(format!(
+                    "`{target} = …` targets named signal `{}`, which takes no \
+                     attributes. Declare the blocks by hand to set one.",
+                    a.slug
+                ));
+            }
             Some(NameKind::Block) => {
                 return compile_err(format!(
                     "`{target} = …` targets managed block `{}` — give it a \
@@ -472,7 +497,7 @@ impl Module {
         let body_blocks = t
             .body
             .iter()
-            .filter(|i| matches!(i, Item::Block(_)))
+            .filter(|i| matches!(i, Item::Block(_) | Item::Signal(_)))
             .count();
         for binding in call.bindings() {
             let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
@@ -560,7 +585,7 @@ impl Module {
                 .map_err(|m| Error::Compile(format!("{ctx}: {m}")))?;
             for slug in program.targets() {
                 match names.get(slug) {
-                    Some(NameKind::Extern | NameKind::Block) => {}
+                    Some(NameKind::Extern | NameKind::Block | NameKind::Signal) => {}
                     None if !flattened => {}
                     None => {
                         let hint = crate::logic::validate::suggest(
@@ -1005,7 +1030,7 @@ impl Module {
         // declared, and an object (an extern or a managed one).
         let object = |slug: &str, line: &RuleStmtKind, what: &str| -> Result<()> {
             match names.get(slug) {
-                Some(NameKind::Extern | NameKind::Block) => Ok(()),
+                Some(NameKind::Extern | NameKind::Block | NameKind::Signal) => Ok(()),
                 None if !flattened => Ok(()),
                 Some(kind) => compile_err(format!(
                     "{ctx}: `{line}` — `{slug}` is {}; {what}",
@@ -1077,7 +1102,7 @@ impl Module {
                         ));
                     }
                     match names.get(target.as_str()) {
-                        Some(NameKind::Extern | NameKind::Block) => {}
+                        Some(NameKind::Extern | NameKind::Block | NameKind::Signal) => {}
                         None if !flattened => {}
                         Some(kind) => {
                             return compile_err(format!(
@@ -1217,6 +1242,14 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
                     }
                 }
             }
+            Item::Signal(x) => {
+                if !local.insert(&x.slug) {
+                    return compile_err(format!(
+                        "template `{}`: duplicate name `{}` in the body",
+                        t.name, x.slug
+                    ));
+                }
+            }
             Item::Wire(_)
             | Item::ExprWire(_)
             | Item::Set(_)
@@ -1224,8 +1257,8 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::Comment(_) => {}
             _ => {
                 return compile_err(format!(
-                    "template `{}`: only block declarations, wires, port \
-                                     assignments, and comments are allowed in a body \
+                    "template `{}`: only block declarations, named signals, wires, \
+                                     port assignments, and comments are allowed in a body \
                                      (attribute assignments like `x.room = …` are \
                                      top-level statements, D39)",
                     t.name

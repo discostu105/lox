@@ -296,6 +296,12 @@ types) contradict each other. Results and methodology:
       discrete backend (readable on the canvas); a per-expression
       backend switch is rejected. The full Formula grammar (`IF`,
       functions) stays on the explicit block. Rationale: design.md D35.
+- [x] Named signals 2026-10-31 (D81): `wp_bedarf = a.Q and b.AQ >= 5`
+      desugars like an inline expression with the top block named
+      `wp_bedarf` (hand-owned: `removed`/`moved` apply) and sub-blocks
+      `wp_bedarf__<op><n>` (expression-owned); also in template bodies.
+      Spells arithmetic under a comparison as two signals. Open: a
+      custom label for the top block (today the expression text).
 
 ## Stufe 3 — Verification loop
 

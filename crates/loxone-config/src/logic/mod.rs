@@ -13,6 +13,10 @@
 //! <slug>.<Port> <- <expr>                      (expression sugar, D24:
 //!                                               `or`/`and`/`not`/comparisons
 //!                                               desugar into gate blocks)
+//! <slug>  = <expr>                             (named signal, D81: the
+//!                                               expression's top block is
+//!                                               `<slug>`, sub-blocks
+//!                                               `<slug>__<op><n>`)
 //! <slug>.<Port> = <value>                      (Def write on an extern port)
 //! removed <slug>                               (authorize deleting a managed block)
 //! moved   <old_slug> -> <new_slug>             (rename keeping identity)
@@ -82,8 +86,9 @@ pub use ast::{
     Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl,
     MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind,
     RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem,
-    ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
+    ScheduleLine, SetDecl, SignalDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem,
+    TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds,
+    clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{
