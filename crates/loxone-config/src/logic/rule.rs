@@ -328,7 +328,7 @@ impl Context {
                 .map(|o| (o.uuid.clone(), o.block_type.clone()))
                 .collect(),
             app: crate::catalogue::app_controls(doc),
-            modes: super::schedule::config_modes(doc),
+            modes: crate::doc::config_modes(doc),
             seen: doc
                 .objects()
                 .iter()
