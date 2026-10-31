@@ -9,7 +9,7 @@ use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, TestPlan,
     TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile, decompile_pages,
     lint_access, lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests,
-    read_results, rename_slug, run_tests, slugify, valid_slug, validate_ports,
+    read_results, rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -70,14 +70,17 @@ USAGE:
         (repeatable) places that page's managed blocks afresh — except
         those wired to refs another writer owns, which stay with them.
 
-  loxl test [<project-dir>] [--filter <substr>] [--lox <path>] [--show-spec]
-            [--base <cfg.Loxone>] [--module <m.loxl | module-dir>]
+  loxl test [<project-dir>] [--filter <substr>] [--trace] [--lox <path>]
+            [--show-spec] [--base <cfg.Loxone>] [--module <m.loxl | module-dir>]
             [--lock <lock.json>] [--serial <12-hex>] [--page <title>]
         Run the module's `test \"…\"` … `end` scenarios (D36, D68):
         compile in memory (the lockfile is never written) and run each
         test in Lox Logic's simulator. A test depending on a block the
         simulator does not model reports ERROR and names it. --filter
-        selects tests whose name contains the substring. --lox runs them
+        selects tests whose name contains the substring. --trace prints
+        each test cycle by cycle: what it sets, every change of the ports
+        its expectations depend on (by slug), and each expectation's
+        outcome. --lox runs them
         in lox-cli's `lox sim` instead; --show-spec (with --lox) prints
         its scenario JSON. Exit 1 when a test fails.
 
@@ -745,6 +748,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
     let mut filter: Option<String> = None;
     let mut lox_flag: Option<String> = None;
     let mut show_spec = false;
+    let mut trace = false;
 
     let mut it = args.iter();
     while let Some(&flag) = it.next() {
@@ -762,6 +766,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
             "--filter" => filter = Some(value()?.to_string()),
             "--lox" => lox_flag = Some(value()?.to_string()),
             "--show-spec" => show_spec = true,
+            "--trace" => trace = true,
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
@@ -834,7 +839,12 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
     if show_spec && lox_flag.is_none() {
         return Err("--show-spec prints the lox-cli scenario JSON; it needs --lox".into());
     }
+    if trace && lox_flag.is_some() {
+        return Err("--trace traces the built-in simulator; it does not work with --lox".into());
+    }
+    let lox_used = lox_flag.is_some();
     let results = match lox_flag {
+        None if trace => trace_tests(&plan, &compiled, &lock_copy),
         None => run_tests(&plan, &compiled),
         Some(lox) => run_lox_sim(&lox, &plan, &compiled, show_spec)?,
     };
@@ -856,12 +866,21 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
                 println!("    {line}");
             }
         }
+        if !r.trace.is_empty() {
+            println!("    trace:");
+            for line in &r.trace {
+                println!("      {line}");
+            }
+        }
     }
     println!(
         "{} tests: {} passed, {failed} failed",
         results.len(),
         results.len() - failed
     );
+    if failed > 0 && !trace && !lox_used {
+        println!("(--trace shows each test cycle by cycle)");
+    }
     Ok(if failed == 0 {
         ExitCode::SUCCESS
     } else {

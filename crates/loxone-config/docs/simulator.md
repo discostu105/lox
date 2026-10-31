@@ -44,6 +44,10 @@ of a guessed value.
   The error names the object. Setting a port between it and the
   expectation (often the block's own output) makes the test independent
   of it. A failure in a block the test does not depend on is ignored.
+- `loxl test --trace` prints each test as it runs: what a step sets,
+  every change of the ports an expectation depends on (the first cycle
+  lists them all), named by slug, and each `expect` with its actual
+  value. The trace keeps 500 cycles with changes.
 - Sources read 0 until the test sets them: virtual inputs (`VirtualIn`,
   HTTP/UDP inputs and their commands, `VirtualTextIn`), digital and
   analog inputs, Tree, Air, 1-Wire, RS485, KNX and Modbus sensors.

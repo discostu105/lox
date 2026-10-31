@@ -293,8 +293,9 @@ Comparators: `== > >= < <= ~=` (approximately); `clock "06:30"` sets the
 simulated time for `DayTimer`-style logic. The simulator models the
 blocks Loxone documents ([docs/simulator.md](docs/simulator.md)); a test
 that depends on any other block reports an error naming it, never a
-guessed value. `--lox <path>` runs the scenarios in lox-cli's `lox sim`
-instead.
+guessed value. `--trace` prints each test cycle by cycle: what it sets,
+every change of the ports its expectations depend on, and each outcome.
+`--lox <path>` runs the scenarios in lox-cli's `lox sim` instead.
 
 ## Scope
 

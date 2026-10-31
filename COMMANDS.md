@@ -438,6 +438,7 @@ lox logic decompile current.Loxone        # the Lox Logic view of every page (re
 lox logic rename old_name new_name        # rename across sources and lockfile, identities kept
 lox logic lint                            # unused names, blocks whose outputs feed nothing, tags that open nothing
 lox logic test                            # `test … end` blocks in the Lox Logic simulator
+lox logic test --filter nacht --trace     # … cycle by cycle: what a test sets, every value change, each expect
 lox logic types --search delay            # block types by name or purpose; `lox logic types OnDelay`: its ports
 lox logic templates                       # tested templates (motion light, hysteresis, alarms, …) to copy
 lox logic test --lox ~/lox-cli/lox        # … or in lox-cli's simulator (`lox sim`)
