@@ -69,31 +69,135 @@ fn walk(el: &Element, out: &mut Vec<Finding>, users: &mut usize) {
         for a in &child.attrs {
             let value = unescape(&a.value);
             let v = value.trim();
-            if is_unset(v) {
-                continue;
-            }
-            let name = a.name.as_str();
-            let rule = match (ty, name) {
-                ("Document", n) if LOCATION.contains(&n) => Some("location"),
-                ("User", "Title") => Some("person"),
-                ("User", n) if PERSON.contains(&n) => Some("person"),
-                ("User", n) if ACCESS.contains(&n) => Some("access-code"),
-                (_, "ExtAddr") => Some("remote-access"),
-                (_, "MAC") => Some("network"),
-                (_, "Serial") => Some("hardware-serial"),
-                // An Air device's id: its `IP=` is not an IP address.
-                ("LoxAIRDevice", "IP") => Some("hardware-serial"),
-                (_, n) if is_credential(n) => Some("credential"),
-                _ if is_mail(v) => Some("mail"),
-                _ if is_public_ipv4(v) => Some("network"),
-                _ => None,
-            };
-            if let Some(rule) = rule {
-                hit(rule, name, v.chars().count());
+            if let Some(rule) = rule_of(ty, &a.name, v) {
+                hit(rule, &a.name, v.chars().count());
             }
         }
         walk(child, out, users);
     }
+}
+
+/// The rule an attribute value falls under, if any.
+fn rule_of(ty: &str, name: &str, v: &str) -> Option<&'static str> {
+    if is_unset(v) || is_redacted(v) {
+        return None;
+    }
+    match (ty, name) {
+        ("Document", n) if LOCATION.contains(&n) => Some("location"),
+        ("User", "Title") => Some("person"),
+        ("User", n) if PERSON.contains(&n) => Some("person"),
+        ("User", n) if ACCESS.contains(&n) => Some("access-code"),
+        (_, "ExtAddr") => Some("remote-access"),
+        (_, "MAC") => Some("network"),
+        (_, "Serial") => Some("hardware-serial"),
+        // An Air device's id: its `IP=` is not an IP address.
+        ("LoxAIRDevice", "IP") => Some("hardware-serial"),
+        (_, n) if is_credential(n) => Some("credential"),
+        _ if is_mail(v) => Some("mail"),
+        _ if is_public_ipv4(v) => Some("network"),
+        _ => None,
+    }
+}
+
+/// Replace every finding of [`scan`] with a placeholder of its kind, in
+/// place: names become `redacted`, mail addresses
+/// `redacted@example.invalid`, public addresses `192.0.2.1`, codes and
+/// credentials empty, coordinates `0`, MAC addresses zeros. A hardware
+/// serial becomes a counter of its length (`000000000001`), and so does
+/// every occurrence of it elsewhere — the Miniserver's serial ends every
+/// UUID it minted, so the copy keeps its identities apart. Returns the
+/// number of values replaced; [`scan`] of the result finds nothing.
+pub fn redact(doc: &mut LoxoneDoc) -> usize {
+    let mut serials: Vec<(String, String)> = Vec::new();
+    let mut n = 0;
+    redact_walk(&mut doc.xml.root, &mut serials, &mut n);
+    if !serials.is_empty() {
+        serials.sort_by_key(|(s, _)| std::cmp::Reverse(s.len()));
+        rename_serials(&mut doc.xml.root, &serials);
+    }
+    n
+}
+
+fn redact_walk(el: &mut Element, serials: &mut Vec<(String, String)>, n: &mut usize) {
+    for child in el.children.iter_mut() {
+        let crate::xml::Node::Element(child) = child else {
+            continue;
+        };
+        let ty = child.attr("Type").unwrap_or(&child.name).to_string();
+        for a in child.attrs.iter_mut() {
+            let value = unescape(&a.value).trim().to_string();
+            let Some(rule) = rule_of(&ty, &a.name, &value) else {
+                continue;
+            };
+            *n += 1;
+            a.value = match (rule, a.name.as_str()) {
+                ("location", "Latitude" | "Longitude") => "0".into(),
+                ("location" | "person", _) => "redacted".into(),
+                ("network", "MAC") => value
+                    .chars()
+                    .map(|c| if c.is_ascii_hexdigit() { '0' } else { c })
+                    .collect(),
+                ("network", _) => "192.0.2.1".into(),
+                ("mail", _) => value
+                    .split(' ')
+                    .map(|w| {
+                        if is_mail(w) {
+                            "redacted@example.invalid"
+                        } else {
+                            w
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                ("hardware-serial", _) => {
+                    let known = serials.iter().find(|(s, _)| s.eq_ignore_ascii_case(&value));
+                    match known {
+                        Some((_, r)) => r.clone(),
+                        None => {
+                            let r = format!("{:0>w$}", serials.len() + 1, w = value.len());
+                            serials.push((value.to_ascii_uppercase(), r.clone()));
+                            r
+                        }
+                    }
+                }
+                _ => String::new(),
+            };
+        }
+        redact_walk(child, serials, n);
+    }
+}
+
+/// Replace the serials wherever else they occur (UUIDs, references), in
+/// the case they are written in.
+fn rename_serials(el: &mut Element, serials: &[(String, String)]) {
+    for a in el.attrs.iter_mut() {
+        for (s, r) in serials {
+            if s.len() < 8 {
+                continue;
+            }
+            for form in [s.clone(), s.to_ascii_lowercase()] {
+                if a.value.contains(&form) {
+                    a.value = a.value.replace(&form, r);
+                }
+            }
+        }
+    }
+    for child in el.children.iter_mut() {
+        if let crate::xml::Node::Element(child) = child {
+            rename_serials(child, serials);
+        }
+    }
+}
+
+/// A placeholder [`redact`] writes.
+fn is_redacted(v: &str) -> bool {
+    v == "redacted"
+        || v.split(' ').all(|w| w == "redacted@example.invalid")
+        || v == "192.0.2.1"
+        || v.chars().all(|c| matches!(c, '0' | ':' | '-' | '.'))
+        || (v.len() >= 8
+            && v.trim_start_matches('0').len() <= 4
+            && v.chars().all(|c| c.is_ascii_digit()))
 }
 
 fn is_unset(v: &str) -> bool {
@@ -179,6 +283,38 @@ mod tests {
         assert_eq!(got, want);
         let text = format!("{:?}", scan(&d));
         assert!(!text.contains("Hauptstraße") && !text.contains("geheim"));
+    }
+
+    #[test]
+    fn a_redacted_copy_has_nothing_left() {
+        let mut d = doc(concat!(
+            r#"<C Type="Document" Title="Haus" Street="Hauptstraße 1" Latitude="48.3"/>"#,
+            r#"<C Type="UserCaption"><C Type="User" Title="anna" Ema="a@example.org" NFCArr="x"/></C>"#,
+            r#"<C Type="LoxLIVE" Title="MS" Serial="504F94A1B2C3" MAC="50:4F:94:A1:B2:C3"/>"#,
+            r#"<C Type="Page" U="20975331-01c6-a67e-ffff504f94a1b2c3" Title="a"><IoData Pwd="geheim"/></C>"#,
+            r#"<C Type="NetworkDevice" Title="TV" Addr="8.8.4.4"/>"#,
+        ));
+        let before = scan(&d).len();
+        assert_eq!(redact(&mut d), before);
+        assert_eq!(scan(&d), []);
+        let text = String::from_utf8(d.to_bytes()).unwrap();
+        for gone in [
+            "Hauptstraße",
+            "anna",
+            "a@example.org",
+            "504f94a1b2c3",
+            "504F94A1B2C3",
+            "geheim",
+            "8.8.4.4",
+        ] {
+            assert!(!text.contains(gone), "{gone}: {text}");
+        }
+        assert!(
+            text.contains(r#"U="20975331-01c6-a67e-ffff000000000001""#),
+            "{text}"
+        );
+        assert!(text.contains(r#"Serial="000000000001""#), "{text}");
+        assert!(text.contains(r#"Title="redacted""#) && text.contains(r#"Latitude="0""#));
     }
 
     #[test]

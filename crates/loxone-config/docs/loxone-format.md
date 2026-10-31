@@ -305,7 +305,13 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   zero rules, 100+ corpus configs): locale-volatile title
   ("Automatik-Regeln"/"Automatic rules"/…), `Nio="2"` (`Input`,
   `output`), `SpStates=`, sitting among the system objects. Each rule's
-  `ref=` attribute names this container's UUID.
+  `ref=` attribute names this container's UUID. Its `Input` lists, as
+  `<In Input=… FLG="1"/>`, every source a rule watches: the `DayOfWeek`
+  block's `Q` for a weekday condition, the state UUID for a state
+  condition, the mode's `Q` for a mode condition; a time condition adds
+  none. A save writes them in reverse document order of the rules'
+  conditions, each once (oracle session 31). Older corpus files mark
+  them `Hidden="true"`.
 - **Rule element**: `Nio="7"` with connectors in index order
   `InputTrigger, Reset, On, run, Q, A, OutputAPI` (matching the app's
   documented Tr/R/O inputs and status outputs), an `<IoData>` child,
@@ -577,11 +583,31 @@ Config 17.2) and the default template:
 - A fresh mode saved by Loxone Config: `Nio="2" WF="147456"`,
   `<IoData></IoData>`. Modes made in the GUI earlier carry
   `WF="16384"` and an `<IoData Cr=…>` category.
-- Calendar entries (*Betriebszeiten*): `CalendarEntry` under
-  `CalendarCaption`, with `I`/`Q`. Both observed entries are date
-  ranges, `Mode="4"` with `Month`/`Day` to `Month2`/`Day2`,
-  `WeekDayInMonth="1"`, and `CalType` = the `Mode=` number of the mode
-  they switch. Other kinds are unobserved (#211).
+- Calendar entries (*Betriebszeiten*): see below.
+
+### Calendar entries
+
+The *Betriebszeiten* folder is a `CalendarCaption` holding one
+`CalendarEntry` per entry, `Nio="2" WF="16384"`, with an `I` (`-00ff`)
+and a `Q` (`-01ff`) connector that none of the corpus's 397 entries
+wires. Attributes, in the save's order:
+
+- `CalType` — the `Mode=` number of the operating mode the entry
+  switches on; absent for 0, the holiday mode. User modes are negative.
+- `Mode` — the kind of date: absent, a fixed date every year (`Month`,
+  `Day`); `1`, relative to Easter Sunday (`EasterOffset` in days, which
+  may be negative); `3`, one period (`From`, `To`: days since
+  2009-01-01 — `2375` is 4 July 2015); `4`, a yearly range (`Month`,
+  `Day` to `Month2`, `Day2`). No other value occurs.
+- `Month`, `Day`, `Month2`, `Day2` — always present; `1` where the kind
+  does not use them. Some Easter entries carry a date there (the day
+  of some year the offset gave); it is carried as written.
+- `From`, `To`, `EasterOffset` — only with their kind.
+- `WeekDayInMonth` — always `1`.
+
+A save of fresh period, Easter and yearly-range entries changed nothing
+(oracle session 31); a fixed-date entry for the day switched its mode on
+on the house (firmware 17.2.8.28).
 
 ## Users, groups and access rights
 

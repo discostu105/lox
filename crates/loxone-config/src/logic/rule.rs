@@ -534,7 +534,89 @@ pub(crate) fn apply(
             _ => {}
         }
     }
+    watch_inputs(doc);
     Ok(())
+}
+
+/// The AutoPilot container's `Input` wires: Loxone Config wires every
+/// source a rule watches into it (`FLG="1"`) — a weekday condition the
+/// `DayOfWeek` block's `Q`, a state condition the state, a mode
+/// condition the mode's `Q` (oracle session 31; a time condition none).
+/// A save lists them in reverse document order. Left alone when a rule
+/// has a condition whose source is not known, or when the set is right.
+fn watch_inputs(doc: &mut LoxoneDoc) {
+    let objects = doc.objects();
+    let q_of = |pred: &dyn Fn(&crate::xml::Element) -> bool| -> Option<String> {
+        objects.iter().find_map(|o| {
+            let el = doc.element_at(&o.path)?;
+            pred(el).then_some(())?;
+            el.child_elements()
+                .find(|c| c.name == "Co" && c.attr("K") == Some("Q"))
+                .and_then(|c| c.attr("U"))
+                .map(str::to_string)
+        })
+    };
+    let mut sources: Vec<String> = Vec::new();
+    for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
+        let Some(rule) = doc
+            .element_at(&o.path)
+            .and_then(|el| el.attr_decoded("APC"))
+            .and_then(|apc| autopilot::parse(&apc))
+        else {
+            return;
+        };
+        let events = rule["eventGroups"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|g| g["events"].as_array().into_iter().flatten());
+        for e in events {
+            let source = match e["type"].as_i64() {
+                Some(5) => continue,
+                Some(3) => q_of(&|el| el.attr("Type") == Some("DayOfWeek")),
+                Some(0) => e["id"].as_str().map(str::to_string),
+                Some(1) => e["id"].as_i64().and_then(|n| {
+                    q_of(&|el| {
+                        el.attr("Type") == Some("Mode")
+                            && el.attr("Mode").and_then(|m| m.parse().ok()).unwrap_or(0) == n
+                    })
+                }),
+                _ => None,
+            };
+            let Some(source) = source else { return };
+            if !sources.contains(&source) {
+                sources.push(source);
+            }
+        }
+    }
+    sources.reverse();
+    let Some(container) = objects.iter().find(|o| o.block_type == "AutoPilot") else {
+        return;
+    };
+    let path = container.path.clone();
+    let Some(co) = doc.element_at_mut(&path).and_then(|el| {
+        el.child_elements_mut()
+            .find(|c| c.name == "Co" && c.attr("K") == Some("Input"))
+    }) else {
+        return;
+    };
+    let have: std::collections::BTreeSet<&str> = co
+        .child_elements()
+        .filter(|c| c.name == "In")
+        .filter_map(|c| c.attr("Input"))
+        .collect();
+    if have == sources.iter().map(String::as_str).collect() {
+        return;
+    }
+    co.children
+        .retain(|n| !matches!(n, crate::xml::Node::Element(e) if e.name == "In"));
+    for s in &sources {
+        let mut input = crate::xml::Element::new("In");
+        input.set_attr("Input", s);
+        input.set_attr("FLG", "1");
+        co.push_child(input);
+    }
+    super::compile::sync_nc(co);
 }
 
 /// The app's operator code of a comparison.

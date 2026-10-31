@@ -12,7 +12,7 @@
 //! documentation, an app-visible state block), which is why lint reports
 //! and never blocks a compile.
 
-use super::ast::{BindingKind, Item, MatchSpec, ModeName, Module, RuleStmtKind, TestItem, Value};
+use super::ast::{BindingKind, Item, MatchSpec, Module, TestItem, Value};
 use crate::doc::{LoxoneDoc, ports};
 use crate::error::Result;
 use crate::lock::Lockfile;
@@ -162,23 +162,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             // its conditions watch and the modes it names (D57, D73).
             Item::Rule(r) => {
                 object_refs.insert(&r.slug);
-                for st in r.stmts() {
-                    match &st.kind {
-                        RuleStmtKind::Then { target, .. }
-                        | RuleStmtKind::State { target, .. }
-                        | RuleStmtKind::Mode {
-                            mode: ModeName::Slug(target),
-                            ..
-                        }
-                        | RuleStmtKind::ThenMode {
-                            mode: ModeName::Slug(target),
-                            ..
-                        } => {
-                            object_refs.insert(target);
-                        }
-                        _ => {}
-                    }
-                }
+                object_refs.extend(r.slugs());
             }
             // A test driving or asserting a port is a use (D36).
             Item::Test(t) => {

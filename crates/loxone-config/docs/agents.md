@@ -40,6 +40,7 @@ keeps its example module valid.
 7. **Keep real configs out of repositories.** A house config carries the
    owner's address, users, access codes and serials. `loxl scan <file or
    dir>` lists where (never what); exit 1 means it must not be committed.
+   `loxl scan --redact <cfg> --out <copy>` writes a shareable copy.
    Synthetic fixtures scan clean.
 
 ## The loop

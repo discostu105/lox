@@ -455,8 +455,35 @@ virtual input: no position, no `page`. A fresh one gets the next
 can be named in schedules by its title. Existing modes — the built-in
 ones and those made in Loxone Config — are referenced by title in a
 schedule or as an extern (`extern montag = Mode(title: "Montag")`);
-`adopt` does not take them over. Which dates switch a mode on (the
-*Betriebszeiten* calendar) stays with Loxone Config (#211).
+`adopt` does not take them over.
+
+### Calendar entries — the *Betriebszeiten* that switch a mode on (D74)
+
+```text
+ferien = CalendarEntry("Sommerferien", CalType: 2, Mode: 3, From: 6393, To: 6456)
+ostern = CalendarEntry("Ostermontag", Mode: 1, EasterOffset: 1)
+silvester = CalendarEntry("Silvester", CalType: -8, Month: 12, Day: 31)
+```
+
+An entry of the *Betriebszeiten* calendar is an object of the object
+tree, minted into the `CalendarCaption` folder. `CalType` is the
+`Mode=` number of the mode it switches on (absent: 0, the holiday
+mode); `Mode` says what kind of date it is:
+
+| `Mode` | Kind | Attributes |
+|---|---|---|
+| absent | a fixed date, every year | `Month`, `Day` |
+| `1` | relative to Easter Sunday | `EasterOffset` (days) |
+| `3` | one period | `From`, `To` (days since 2009-01-01) |
+| `4` | a yearly range | `Month`, `Day` to `Month2`, `Day2` |
+
+Other kinds do not occur among the corpus's 397 entries; the attributes
+are written as stated. A fresh entry carries the attributes Loxone
+Config writes for an unset date (`Month`/`Day`/`Month2`/`Day2` 1,
+`WeekDayInMonth="1"`). The entries Loxone Config made are taken over
+with `adopt --uuid`; edits change only the attributes the source
+states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
+is the output to use.
 
 ### `<-` — wire onto an extern port
 

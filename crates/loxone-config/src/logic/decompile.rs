@@ -1135,6 +1135,12 @@ impl Lift {
                     reference(&w.from.slug);
                     reference(&w.to.slug);
                 }
+                // A rule's targets may live on another page.
+                for i in &b.externs {
+                    if let Some(decl) = self.rule_decls.get(i) {
+                        decl.slugs().for_each(&mut reference);
+                    }
+                }
             }
             let mut seen: BTreeSet<usize> = BTreeSet::new();
             for i in foreign {

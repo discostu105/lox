@@ -1,0 +1,2 @@
+- **lox logic decompile --out-dir**: a page whose rules drive blocks on other pages declares them as externs instead of failing with "undeclared slug".
+- **lox config push**: operating modes made in source appear in the app (`operatingModes`), and renamed or deleted ones follow.

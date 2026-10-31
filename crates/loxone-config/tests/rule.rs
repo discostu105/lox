@@ -743,3 +743,66 @@ fn states_and_modes_are_checked() {
     .to_string();
     assert!(e.contains("nope"), "{e}");
 }
+
+#[test]
+fn a_page_module_declares_the_rule_targets_of_other_pages() {
+    // The rules on a page of their own, the blocks they drive elsewhere:
+    // the rules' module names those blocks as externs.
+    let split = fixture().replace(
+        "\t\t\t<C Type=\"AutopilotRule\" V=\"175\" U=\"40000002",
+        "\t\t</C>\r\n\
+         \t\t<C Type=\"Page\" V=\"175\" U=\"40000000-0000-0005-ffff504f94112233\" Title=\"Regeln\" SpNo=\"2\">\r\n\
+         \t\t\t<C Type=\"AutopilotRule\" V=\"175\" U=\"40000002",
+    );
+    let (pages, _) =
+        loxone_config::logic::decompile_pages(&parse(&split), &DecompileOptions::default())
+            .unwrap();
+    let rules = pages.iter().find(|p| p.title == "Regeln").unwrap();
+    let text = rules.module.to_text();
+    assert!(
+        text.contains("extern pumpe = PushButton(title: \"Pumpe\") # page: Automatik-Regeln"),
+        "{text}"
+    );
+    assert_eq!(rules.module.rule_decls().count(), 2, "{text}");
+}
+
+#[test]
+fn the_container_watches_what_the_rules_watch() {
+    // Loxone Config wires every source a rule watches into the AutoPilot
+    // container's `Input` (oracle session 31): the state, the mode's `Q`;
+    // a weekday the `DayOfWeek` block's `Q`; a time condition none. In
+    // reverse document order.
+    let base = mode_fixture().replace(
+        "\t\t</C>\r\n\t</C>\r\n</ControlList>",
+        "\t\t\t<C Type=\"DayOfWeek\" V=\"175\" U=\"40000008-0000-0080-ffff504f94112233\">\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000008-0000-0081-01ffaaaaaaaa0008\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"AutoPilot\" V=\"175\" U=\"40000007-0000-0070-ffff504f94112233\">\r\n\
+         \t\t\t\t<Co K=\"Input\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\t</C>\r\n</ControlList>",
+    );
+    let src = AS_READ.replace(
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        SHAPES,
+    );
+    let out = compile_rules(&base, &src).unwrap();
+    let at = out.find("<Co K=\"Input\"").unwrap();
+    let co = &out[at..at + out[at..].find("</Co>").unwrap()];
+    assert!(co.contains("Nc=\"3\""), "{co}");
+    let mode_q = co.find("40000006-0000-0062-01ffaaaaaaaa0006").unwrap();
+    let state = co.find("Input=\"40000001-").unwrap();
+    let weekday = co.find("40000008-0000-0081-01ffaaaaaaaa0008").unwrap();
+    assert!(mode_q < state && state < weekday, "{co}");
+    assert!(co.contains("FLG=\"1\""), "{co}");
+    // Stable; back to the old rules, only the weekday stays watched.
+    assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    let back = compile_rules(&out, AS_READ).unwrap();
+    assert!(
+        back.contains(
+            "<Co K=\"Input\" Nc=\"1\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\">\r\n\
+             \t\t\t\t\t<In Input=\"40000008-0000-0081-01ffaaaaaaaa0008\" FLG=\"1\"/>"
+        ),
+        "{back}"
+    );
+}

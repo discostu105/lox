@@ -1426,6 +1426,24 @@ impl RuleDecl {
             RuleItem::Comment(_) => None,
         })
     }
+
+    /// The objects the body names: action targets, the blocks its
+    /// conditions watch and the modes it names by slug (D57, D73).
+    pub fn slugs(&self) -> impl Iterator<Item = &str> {
+        self.stmts().filter_map(|st| match &st.kind {
+            RuleStmtKind::Then { target, .. }
+            | RuleStmtKind::State { target, .. }
+            | RuleStmtKind::Mode {
+                mode: ModeName::Slug(target),
+                ..
+            }
+            | RuleStmtKind::ThenMode {
+                mode: ModeName::Slug(target),
+                ..
+            } => Some(target.as_str()),
+            _ => None,
+        })
+    }
 }
 
 /// One line of a `rule` body.
@@ -1644,7 +1662,8 @@ impl Module {
             Item::Wire(w) => w.to.slug != slug,
             Item::ExprWire(w) => w.to.slug != slug,
             Item::Set(s) => s.target.slug != slug,
-            Item::Attr(a) => a.slug != slug,
+            // `.room`/`.category` hold on a managed block (D63).
+            Item::Attr(a) => a.slug != slug || a.attr != Attr::Title,
             // An extern rule's edits (D57): a promoted rule is declared
             // by name, with its whole payload.
             Item::Rule(r) => r.title.is_some() || r.slug != slug,

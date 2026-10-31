@@ -67,7 +67,7 @@ mod moods;
 mod parser;
 mod rename;
 mod rule;
-mod schedule;
+pub(crate) mod schedule;
 mod simtest;
 mod template;
 mod tiles;

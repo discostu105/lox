@@ -68,7 +68,10 @@ types) contradict each other. Results and methodology:
 - [x] Operating modes from source (2026-10-31, D69): schedule lines
       name any mode by title, `heating`/`cooling`; user-defined modes
       minted with `Mode("…")` (oracle session 29, byte-identical).
-      Open: calendar entries (#211); adopting existing user modes.
+      Open: adopting existing user modes.
+- [x] Calendar entries 2026-10-31 (D74, #211): `CalendarEntry(…)`
+      minted, adopted and edited; the four kinds of the corpus (oracle
+      session 31, live on the house).
 - [x] Users stay the Miniserver's (2026-10-31, D70): referenced by name
       (access, notifications), never declared — the push guard owns
       the live/program-file split.
@@ -86,6 +89,7 @@ types) contradict each other. Results and methodology:
       scenarios so solutions carry their own checks.
 - [x] `loxl scan` (2026-10-29): personal data in a config, located but
       never quoted; CI fails on any finding in a committed `.Loxone`.
+      `--redact` (2026-10-31, D75, #205) writes a copy with nothing left.
 - [x] Agent skill (2026-10-29, `skills/lox-logic/SKILL.md`): agents.md
       condensed for Claude Code; its example module is under test.
 - [x] Agent cases of our own (2026-10-31, `tools/agent/`, #204): 16
@@ -512,7 +516,8 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       (`when <slug>.<state> <op> <value>`), operating modes (`when mode`,
       `then mode`), OR groups (`or`); conditions and actions on any
       block the app offers, from the Miniserver's own capability table.
-      All corpus rules are byte fixpoints.
+      All corpus rules are byte fixpoints. The AutoPilot container's
+      inputs follow the rules (oracle session 31).
 - [ ] Rule conditions on weather, dates and text values; notification,
       mailer, caller and pause actions.
 - [x] Creating rules from source 2026-10-30 (D60): `rule <slug>

@@ -2807,7 +2807,7 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
 /// in Loxone's canonical position: after `Def`, before `U` (oracle save
 /// 2026-08-25 rewrote a compiler-emitted `K,Nc,Def,U` to `K,Def,Nc,U`).
-fn sync_nc(co: &mut Element) {
+pub(super) fn sync_nc(co: &mut Element) {
     let n = co.child_elements().filter(|c| c.name == "In").count();
     if n == 0 {
         co.remove_attr("Nc");
