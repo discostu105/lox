@@ -18,6 +18,7 @@ mod config;
 mod custom_changes;
 mod energy;
 mod gitops;
+mod inventory;
 mod logic;
 mod loxone_xml;
 mod mcp;

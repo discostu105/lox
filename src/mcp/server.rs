@@ -1039,7 +1039,7 @@ impl LoxMcp {
         let resolved = self
             .blocking(move |lox| {
                 let (ctrl, mood_list) =
-                    crate::commands::control::resolve_mood_list(lox, &q.name, q.room.as_deref())?;
+                    crate::inventory::resolve_mood_list(lox, &q.name, q.room.as_deref())?;
                 Ok((ctrl, mood_list, lox.cfg.clone()))
             })
             .await;
@@ -1047,7 +1047,7 @@ impl LoxMcp {
             Ok(r) => r,
             Err(e) => return fail(e),
         };
-        let moods = crate::commands::control::fetch_mood_list_json(&cfg.connection(), &mood_list)
+        let moods = crate::inventory::fetch_mood_list_json(&cfg.connection(), &mood_list)
             .await
             .and_then(|json| actions::parse_mood_list(&json));
         respond(moods.map(|moods| {

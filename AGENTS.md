@@ -113,7 +113,8 @@ standalone repo github.com/discostu105/lxir via `git subtree` (history kept); th
 | `src/commands/ctx.rs` | `lox ctx` commands — add/use/list/remove/rename/init/migrate contexts |
 | `src/gitops.rs` | Git-based config versioning — init, pull (FTP→LoxCC→diff→commit), log, restore workflows |
 | `src/scene.rs` | Scene loading/listing from `~/.lox/scenes/*.yaml` |
-| `src/actions.rs` | Shared action layer: per-control-type command mapping and risk levels (used by the CLI and the TUI) |
+| `src/actions.rs` | Shared action layer: per-control-type command mapping and risk levels (used by the CLI, the TUI and MCP) |
+| `src/inventory.rs` | Shared read layer: which controls are sensors or energy meters, a light controller's moods (used by the CLI and MCP) |
 | `src/mcp/` | `lox mcp`: MCP server on rmcp (MCP 2026-07-28 + older) — CLI/runtime (`mod.rs`), `#[tool]` definitions, risky-action confirmation via MRTR/elicitation (`server.rs`), blocking Miniserver ops + output schemas (`ops.rs`), rmcp client/server protocol tests (`tests.rs`). Design: `docs/design-mcp.md` |
 | `src/energy.rs` | Energy flow shared by `lox energy flow`/`--top` (`src/commands/energy.rs`), MCP `get_energy_flow` and the TUI: EFM node roles (+ `tui.yaml` overrides), flow breakdown, `/all` parsing, meter ranking |
 | `src/logic.rs` | Adapter over loxone-config (always built): config program blocks, wires with hardware refs folded, neighborhood/trace (`WiringView`), lint, block history, the logic diff used by `config diff`, pull commit messages and the TUI |
@@ -126,6 +127,12 @@ standalone repo github.com/discostu105/lxir via `git subtree` (history kept); th
 | `src/tui/` | `lox tui` (feature `tui`): Elm-style `update()` over `App`, pure rendering (`ui/`, `widgets/`), live/demo backends (`exec.rs`), terminal runtime (`run.rs`), journey tests (`tests.rs`). Design: `docs/design-tui.md` |
 
 ### Key design points
+
+**Front-ends share layers, never each other**: the CLI (`commands/`), the TUI (`tui/`), the MCP server (`mcp/`) and
+the OTel exporter (`otel.rs`) each call the shared layers — loxone-client for anything about the Miniserver's API
+(e.g. `system_status()`, `diagnostics()`), `actions.rs` for writes, `inventory.rs`, `logic.rs`, `energy.rs` for lox's
+reads — and never import one another's modules. Fetch, then format: a read that a second front-end could use returns
+data from a shared layer, and the front-end does the printing. When a command needs such a read, move it there first.
 
 **Control resolution** (`LoxClient::resolve_with_room`): Names are matched against the structure cache using fuzzy substring matching. Resolution order: alias → exact UUID → bracket room qualifier (`"Name [Room]"`) → `--room` flag → fuzzy substring; among several matches a single exact (case-insensitive) name wins. Ambiguous matches are an error.
 
