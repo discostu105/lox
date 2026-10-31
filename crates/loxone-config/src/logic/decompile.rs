@@ -247,460 +247,29 @@ impl Lift {
             .enumerate()
             .map(|(i, o)| (o.uuid.as_str(), i))
             .collect();
-
-        // Pages in document order; an object belongs to its deepest
-        // ancestor page (by element-path prefix).
-        let mut page_paths: Vec<&[usize]> = Vec::new();
-        let mut page_titles: Vec<String> = Vec::new();
-        let mut page_uuids: Vec<String> = Vec::new();
-        for o in &objects {
-            if o.block_type == "Page" {
-                page_paths.push(&o.path);
-                page_titles.push(o.title.clone().unwrap_or_else(|| "Page".into()));
-                page_uuids.push(o.uuid.clone());
-            }
-        }
-        let mut page_of: BTreeMap<String, usize> = BTreeMap::new();
-        for o in &objects {
-            if matches!(o.block_type.as_str(), "Document" | "Page") {
-                continue;
-            }
-            let mut best: Option<usize> = None;
-            for (p, pp) in page_paths.iter().enumerate() {
-                if pp.len() < o.path.len()
-                    && o.path[..pp.len()] == **pp
-                    && best.is_none_or(|b| page_paths[b].len() < pp.len())
-                {
-                    best = Some(p);
-                }
-            }
-            if let Some(p) = best {
-                page_of.insert(o.uuid.clone(), p);
-            }
-        }
-
-        // Ref plumbing (D29, full view only): an `InputRef`/`OutputRef`
-        // carries a `Ref=` attribute naming the object it mirrors, and the
-        // wires between the two are GUI routing, not logic. They are
-        // folded out of the view — the ref's extern declaration carries a
-        // `# mirrors …` note instead — and a periphery object whose only
-        // connection was such plumbing is never pulled in as an extern.
-        let mirror_target: BTreeMap<usize, &str> = objects
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| matches!(o.block_type.as_str(), "InputRef" | "OutputRef"))
-            .filter_map(|(i, o)| {
-                doc.element_at(&o.path)
-                    .and_then(|el| el.attr("Ref"))
-                    .map(|r| (i, r))
-            })
-            .collect();
-        // D34 inversion (both scopes): a consumer wire on a ref is emitted
-        // against the mirrored object itself — compile routes it back
-        // through the very same ref (same-page reuse, pinned by the base
-        // wire). Maps a ref's consumer-facing port uuid to the target
-        // (uuid, key) it stands for, plus the ref uuids carrying that
-        // port (one in a sound config; several only where a push tool
-        // gave mirrors shared ports, D38); a wire folds only when its
-        // consumer shares a carrying ref's page.
-        type Fold = (String, String, Vec<String>);
-        let mut ref_fold: BTreeMap<String, Fold> = BTreeMap::new();
-        for (&ri, &tgt) in &mirror_target {
-            let Some(&mi) = obj_index.get(tgt) else {
-                continue;
-            };
-            // A mirror of a mirror is not resolvable, and only a nameable
-            // target type can appear in source.
-            if mirror_target.contains_key(&mi) || !is_ident(&objects[mi].block_type) {
-                continue;
-            }
-            let tel = doc
-                .element_at(&objects[mi].path)
-                .expect("path from objects()");
-            let tps = ports(tel);
-            let rel = doc
-                .element_at(&objects[ri].path)
-                .expect("path from objects()");
-            let rps = ports(rel);
-            let rp = |k: &str| rps.iter().find(|p| p.key == k);
-            let mut fold = |port_uuid: &str, tkey: &str| {
-                let e = ref_fold
-                    .entry(port_uuid.to_string())
-                    .or_insert_with(|| (tgt.to_string(), tkey.to_string(), Vec::new()));
-                if e.0 == tgt && e.1 == tkey {
-                    e.2.push(objects[ri].uuid.clone());
-                }
-            };
-            if objects[ri].block_type == "InputRef" {
-                // A fed input serves its output: target idx0 → AI serves
-                // AQ, idx1 → I serves Q (the GUI's own feed convention —
-                // anything else stays an explicit ref).
-                for (fed, serves, tidx) in [("AI", "AQ", 0usize), ("I", "Q", 1)] {
-                    if let (Some(f), Some(s), Some(tp)) = (rp(fed), rp(serves), tps.get(tidx))
-                        && f.inputs.as_slice() == std::slice::from_ref(&tp.uuid)
-                        && is_ident(&tp.key)
-                    {
-                        fold(&s.uuid, &tp.key);
-                    }
-                }
-            } else if let (Some(ai), Some(aq)) = (rp("AI"), rp("AQ")) {
-                // OutputRef: its AQ must feed exactly one port of the
-                // target — a write into the ref's AI stands for a write
-                // into that port.
-                let sinks: BTreeSet<String> = doc
-                    .wires()
-                    .iter()
-                    .filter(|w| w.from_port == aq.uuid)
-                    .map(|w| w.to_port.clone())
-                    .collect();
-                if sinks.len() == 1
-                    && let Some(one) = sinks.iter().next()
-                    && let Some((so, sk)) = idx.port_owner.get(one)
-                    && so == tgt
-                    && is_ident(sk)
-                {
-                    fold(&ai.uuid, sk);
-                }
-            }
-        }
-        // A fold applies when the consumer's page carries one of the refs.
-        let page_serves = |f: &Fold, consumer_uuid: &str| -> bool {
-            let cp = page_of.get(consumer_uuid);
-            cp.is_some() && f.2.iter().any(|r| page_of.get(r.as_str()) == cp)
+        let (page_titles, page_uuids, page_of) = page_tables(&objects);
+        let mut cx = Scan {
+            doc,
+            opts,
+            objects: &objects,
+            idx: &idx,
+            obj_index,
+            page_of: &page_of,
+            mirror_target: mirror_targets(doc, &objects),
+            ref_fold: BTreeMap::new(),
         };
-
-        // Seed: managed-type objects; in the full view also every page
-        // object with connectors and a language-writable type.
-        let mut lifted = vec![false; objects.len()];
-        let mut managed = Vec::new();
-        for (i, o) in objects.iter().enumerate() {
-            if opts.managed_types.contains(&o.block_type)
-                && !opts.exclude.contains(&o.uuid)
-                && !owned_by_block(doc, o)
-            {
-                lifted[i] = true;
-                managed.push(i);
-            }
-        }
-        let mut externs = Vec::new();
-        if opts.scope == DecompileScope::Full {
-            for (i, o) in objects.iter().enumerate() {
-                if !lifted[i]
-                    && !matches!(o.block_type.as_str(), "Document" | "Page")
-                    // Refs are page visuals, not logic (D34): one appears
-                    // in the view only when an unfoldable wire names it.
-                    && !mirror_target.contains_key(&i)
-                    && !owned_by_block(doc, o)
-                    && page_of.contains_key(&o.uuid)
-                    && is_ident(&o.block_type)
-                    && !ports(doc.element_at(&o.path).expect("path from objects()")).is_empty()
-                {
-                    lifted[i] = true;
-                    externs.push(i);
-                }
-            }
-        }
-
-        let mut ref_wires_folded = 0usize;
-
-        // Wires touching the seed pull their other endpoint in as an
-        // extern. Depth 1 on purpose: an extern lifted here does not pull
-        // in *its* other wires, so periphery-to-periphery wiring stays out.
-        let seed = lifted.clone();
-        let mut seen = BTreeSet::new();
-        let mut touched: Vec<(usize, String, usize, String)> = Vec::new();
-        for w in doc.wires() {
-            let (Some((fo, fk)), Some((to, tk))) = (
-                idx.port_owner.get(&w.from_port),
-                idx.port_owner.get(&w.to_port),
-            ) else {
-                continue; // dangling <In> — not representable, stays raw
-            };
-            let (mut fi, mut ti) = (obj_index[fo.as_str()], obj_index[to.as_str()]);
-            let (mut fk, mut tk) = (fk.clone(), tk.clone());
-            // D34 inversion: a ref endpoint is rewritten to its target
-            // when the consumer sits on the ref's page — compile routes
-            // the wire back through that very ref.
-            if let Some(f) = ref_fold.get(&w.from_port)
-                && page_serves(f, &objects[ti].uuid)
-            {
-                fi = obj_index[f.0.as_str()];
-                fk = f.1.clone();
-            } else if let Some(f) = ref_fold.get(&w.to_port)
-                && page_serves(f, &objects[fi].uuid)
-            {
-                ti = obj_index[f.0.as_str()];
-                tk = f.1.clone();
-            }
-            // A page-placed ref an unfoldable wire still names re-enters
-            // the view here (it is no longer a seed by itself): plumbing
-            // below still folds its feeds, but a real wire lifts it.
-            let page_ref = |i: usize| {
-                opts.scope == DecompileScope::Full
-                    && mirror_target.contains_key(&i)
-                    && page_of.contains_key(&objects[i].uuid)
-            };
-            if !(seed[fi] || seed[ti] || page_ref(fi) || page_ref(ti)) {
-                continue;
-            }
-            if !is_ident(&fk)
-                || !is_ident(&tk)
-                || !is_ident(&objects[fi].block_type)
-                || !is_ident(&objects[ti].block_type)
-            {
-                continue; // not representable, stays raw
-            }
-            if idx.inv_ports.contains(&w.to_port) {
-                // Wire into a GUI-owned (`Inv=`) connector: the inversion
-                // would silently negate a lifted statement, so the wire is
-                // GUI content — carried verbatim by the rebuild (managed
-                // sink) or left untouched in the base (extern sink), and
-                // its source is not pulled in as an extern.
-                continue;
-            }
-            let plumbing = |ri: usize, oi: usize| {
-                mirror_target
-                    .get(&ri)
-                    .is_some_and(|t| *t == objects[oi].uuid)
-            };
-            if opts.scope == DecompileScope::Full && (plumbing(ti, fi) || plumbing(fi, ti)) {
-                ref_wires_folded += 1;
-                continue;
-            }
-            if !seen.insert((w.from_port.clone(), w.to_port.clone())) {
-                continue;
-            }
-            for i in [fi, ti] {
-                if !lifted[i] {
-                    lifted[i] = true;
-                    externs.push(i);
-                }
-            }
-            touched.push((fi, fk, ti, tk));
-        }
-
-        // NFC Code Touch blocks with access rights (D49), in both scopes:
-        // the `access` declaration needs the block lifted — as an extern,
-        // unless it is lifted as a managed block already.
+        cx.ref_fold = cx.ref_folds();
+        let (mut lifted, managed, mut externs) = cx.seed();
+        let (touched, ref_wires_folded) = cx.touched_wires(&mut lifted, &mut externs);
         let access = crate::access::AccessModel::read(doc);
         let rights = access.access_rights();
-        let mut with_rights: Vec<usize> = Vec::new();
-        for (i, o) in objects.iter().enumerate() {
-            if o.block_type == ACCESS_BLOCK_TYPE && rights.iter().any(|r| r.target == o.uuid) {
-                with_rights.push(i);
-                if !lifted[i] {
-                    lifted[i] = true;
-                    externs.push(i);
-                }
-            }
-        }
-
-        // Automatic Designer rules whose payload reads as the documented
-        // shapes (D57), in both scopes: the `rule` declaration needs the
-        // rule and its action targets as externs.
-        let uuid_index: BTreeMap<&str, usize> = objects
-            .iter()
-            .enumerate()
-            .map(|(i, o)| (o.uuid.as_str(), i))
-            .collect();
-        let mut liftable_rules: Vec<(usize, String)> = Vec::new();
-        for (i, o) in objects.iter().enumerate() {
-            if o.block_type != RULE_BLOCK_TYPE || opts.exclude.contains(&o.uuid) {
-                continue;
-            }
-            let Some(apc) = doc
-                .element_at(&o.path)
-                .and_then(|el| el.attr_decoded("APC"))
-                .map(|a| a.into_owned())
-            else {
-                continue;
-            };
-            let Some(rule) =
-                crate::autopilot::parse(&apc).and_then(|v| crate::autopilot::interpret(&v).ok())
-            else {
-                continue;
-            };
-            let targets: Option<Vec<usize>> = rule
-                .blocks()
-                .into_iter()
-                .map(|u| uuid_index.get(u).copied())
-                .collect();
-            let Some(targets) = targets else { continue };
-            if rule.groups.iter().any(Vec::is_empty) || rule.actions.is_empty() {
-                continue;
-            }
-            for j in std::iter::once(i).chain(targets) {
-                if !lifted[j] {
-                    lifted[j] = true;
-                    externs.push(j);
-                }
-            }
-            liftable_rules.push((i, apc));
-        }
-
-        // LightController2s with moods of their own (D58), in both scopes:
-        // the claim needs the controller as an extern — also one excluded
-        // from management, whose moods a claim owns all the same.
-        type Lines = std::result::Result<Vec<MoodLine>, String>;
-        let mut mood_lines: Vec<(usize, Lines)> = Vec::new();
-        for (i, o) in objects.iter().enumerate() {
-            if o.block_type != "LightController2" {
-                continue;
-            }
-            let Some(lines) = doc.element_at(&o.path).and_then(super::moods::lift) else {
-                continue;
-            };
-            if !lifted[i] {
-                lifted[i] = true;
-                externs.push(i);
-            }
-            mood_lines.push((i, lines));
-        }
-
-        // Slug assignment: managed first (document order), then externs
-        // (seed order, then order of first wire reference), all in one
-        // namespace.
-        let mut slugs = SlugTable::default();
-        let mut slug_of: BTreeMap<String, String> = BTreeMap::new();
-        let mut obj_of_slug: BTreeMap<String, usize> = BTreeMap::new();
-        for &i in managed.iter().chain(&externs) {
-            let o = &objects[i];
-            let base = o.title.as_deref().or(o.iname.as_deref());
-            let slug = slugs.assign(base.unwrap_or(&o.block_type));
-            obj_of_slug.insert(slug.clone(), i);
-            slug_of.insert(o.uuid.clone(), slug);
-        }
-        // One set per distinct list of moods, named after the first
-        // controller that has it.
-        let mut mood_sets: Vec<(MoodsDecl, Option<usize>)> = Vec::new();
-        let mut mood_claims: BTreeMap<usize, std::result::Result<usize, String>> = BTreeMap::new();
-        for (i, lines) in mood_lines {
-            let page = page_of.get(&objects[i].uuid).copied();
-            let claim = lines.map(|lines| {
-                if let Some(k) = mood_sets
-                    .iter()
-                    .position(|(set, _)| set.moods().eq(lines.iter()))
-                {
-                    mood_sets[k].1 = mood_sets[k].1.min(page);
-                    return k;
-                }
-                let name = slugs.assign(&format!("{}_moods", slug_of[&objects[i].uuid]));
-                let body = lines.into_iter().map(MoodsItem::Mood).collect();
-                let set = MoodsDecl {
-                    name,
-                    body,
-                    comment: None,
-                    end_comment: None,
-                };
-                mood_sets.push((set, page));
-                mood_sets.len() - 1
-            });
-            mood_claims.insert(i, claim);
-        }
-
-        // Match specs for every lifted object (managed ones may be needed
-        // as foreign externs in the per-page view). A ref whose `Ref=`
-        // target has a slug in this module says so semantically (D32,
-        // `mirrors:`) — but only when it is the sole ref of its type on
-        // that target, so resolution cannot need more than the slug.
-        // A title that repeats across identical devices, but not within
-        // its own: `title:` narrowed by the device's serial (D55).
-        let device_unique = |i: usize| -> Option<std::borrow::Cow<'_, str>> {
-            let obj = &objects[i];
-            let title = obj.title.as_deref()?;
-            let serial = doc.device_serial(&obj.path)?;
-            (objects
-                .iter()
-                .filter(|o| {
-                    o.block_type == obj.block_type
-                        && o.title.as_deref() == Some(title)
-                        && doc
-                            .device_serial(&o.path)
-                            .is_some_and(|s| crate::doc::same_serial(&s, &serial))
-                })
-                .count()
-                == 1)
-                .then_some(serial)
-        };
-        let match_spec = |i: usize| -> (MatchSpec, Option<String>) {
-            let obj = &objects[i];
-            if let Some(&target) = mirror_target.get(&i)
-                && let Some(slug) = slug_of.get(target)
-                // …and the target is not itself a ref: a mirror of a
-                // mirror is not resolvable (compile refuses it).
-                && obj_index
-                    .get(target)
-                    .is_some_and(|mi| !mirror_target.contains_key(mi))
-                && mirror_target
-                    .iter()
-                    .filter(|(j, t)| **t == target && objects[**j].block_type == obj.block_type)
-                    .count()
-                    == 1
-            {
-                return (MatchSpec::Mirrors(slug.clone()), None);
-            }
-            let unique = |get: fn(&ObjectSummary) -> Option<&str>| {
-                get(obj).filter(|v| {
-                    objects
-                        .iter()
-                        .filter(|o| o.block_type == obj.block_type && get(o) == Some(v))
-                        .count()
-                        == 1
-                })
-            };
-            if let Some(iname) = unique(|o| o.iname.as_deref()) {
-                (MatchSpec::IName(iname.to_string()), None)
-            } else if let Some(title) = unique(|o| o.title.as_deref()) {
-                (MatchSpec::Title(title.to_string()), None)
-            } else if let Some(title) = obj.title.as_deref()
-                && let Some(serial) = device_unique(i)
-            {
-                let device = Some(serial.into_owned());
-                (MatchSpec::Title(title.to_string()), device)
-            } else {
-                (MatchSpec::Uuid(obj.uuid.clone()), None)
-            }
-        };
-        let mut devices: BTreeMap<usize, String> = BTreeMap::new();
-        let match_specs: BTreeMap<usize, MatchSpec> = managed
-            .iter()
-            .chain(&externs)
-            .map(|&i| {
-                let (spec, device) = match_spec(i);
-                devices.extend(device.map(|d| (i, d)));
-                (i, spec)
-            })
-            .collect();
-        // A ref extern says what it mirrors (D29) — the plumbing wires
-        // that carried that fact were folded above.
-        let mirror_note = |i: usize| -> Option<String> {
-            let &mi = obj_index.get(*mirror_target.get(&i)?)?;
-            let m = &objects[mi];
-            let name = m.title.as_deref().or(m.iname.as_deref()).unwrap_or(&m.uuid);
-            Some(format!(" mirrors {} \"{name}\"", m.block_type))
-        };
-        let extern_decls: BTreeMap<usize, ExternDecl> = externs
-            .iter()
-            .map(|&i| {
-                (
-                    i,
-                    ExternDecl {
-                        room: None,
-                        category: None,
-                        device: devices.get(&i).cloned(),
-                        slug: slug_of[&objects[i].uuid].clone(),
-                        block_type: objects[i].block_type.clone(),
-                        match_spec: match_specs[&i].clone(),
-                        // A `mirrors:` matcher already says what the ref
-                        // mirrors — the note is for the other match kinds.
-                        comment: match &match_specs[&i] {
-                            MatchSpec::Mirrors(_) => None,
-                            _ => mirror_note(i),
-                        },
-                    },
-                )
-            })
-            .collect();
+        let with_rights = cx.access_blocks(&rights, &mut lifted, &mut externs);
+        let liftable_rules = cx.liftable_rules(&mut lifted, &mut externs);
+        let mood_lines = cx.mood_controllers(&mut lifted, &mut externs);
+        let (mut slugs, slug_of, obj_of_slug) = cx.assign_slugs(&managed, &externs);
+        let (mood_sets, mood_claims) = cx.mood_sets(&mut slugs, &slug_of, mood_lines);
+        let (match_specs, devices) = cx.match_specs(&slug_of, &managed, &externs);
+        let extern_decls = cx.extern_decls(&slug_of, &externs, &match_specs, &devices);
 
         let access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>> = with_rights
             .iter()
@@ -709,213 +278,10 @@ impl Lift {
                 (i, access_decl(&access, &rights, &objects[i].uuid, slug))
             })
             .collect();
-
-        let mut rule_names: BTreeMap<&str, usize> = BTreeMap::new();
-        for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
-            if let Some(t) = &o.title {
-                *rule_names.entry(t.as_str()).or_default() += 1;
-            }
-        }
-        let rule_decls: BTreeMap<usize, RuleDecl> = liftable_rules
-            .iter()
-            .filter_map(|(i, apc)| {
-                let slug = &slug_of[&objects[*i].uuid];
-                let mut decl =
-                    super::rule::lift(slug, apc, doc, &|u| slug_of.get(u).cloned()).ok()?;
-                // A rule with a name no other rule has is declared by it
-                // (D60, #192): the source owns it whole, no extern.
-                decl.title = objects[*i]
-                    .title
-                    .clone()
-                    .filter(|t| !t.is_empty() && rule_names.get(t.as_str()) == Some(&1));
-                Some((*i, decl))
-            })
-            .collect();
-
-        // Blocks: per port in connector order, the `Def=` value becomes a
-        // parameter binding, then each incoming wire a wire binding.
-        let mut block_decls: BTreeMap<usize, BlockDecl> = BTreeMap::new();
-        let mut default_params_elided = 0usize;
-        for &i in &managed {
-            let o = &objects[i];
-            let el = doc.element_at(&o.path).expect("path from objects()");
-            let mut args = Vec::new();
-            // Attribute parameters (block logic stored as an element
-            // attribute, e.g. `Formula=`) lead the argument list. A
-            // GUI-owned one (`Code=`, D40) stays unclaimed: the compile
-            // carries it, and claiming it is a source decision.
-            for name in attr_params(&o.block_type) {
-                if GUI_OWNED_ATTRS.contains(name) {
-                    continue;
-                }
-                if let Some(v) = el.attr_decoded(name) {
-                    args.push(ArgItem::Binding(Binding {
-                        port: (*name).to_string(),
-                        kind: BindingKind::Param(Value::from_literal(&v)),
-                        comment: None,
-                    }));
-                }
-            }
-            for p in ports(el) {
-                if !is_ident(&p.key) {
-                    continue; // not representable, stays raw
-                }
-                if p.inv {
-                    // GUI-owned connector (D20): its Def and wires are
-                    // carried verbatim by the rebuild, never restated in
-                    // source — the Inv flag would silently invert them.
-                    continue;
-                }
-                let mut wires = Vec::new();
-                for input in &p.inputs {
-                    let Some((src_obj, src_key)) = idx.port_owner.get(input) else {
-                        continue; // dangling <In> — not representable, stays raw
-                    };
-                    // D34 inversion, argument-list side: this block is the
-                    // consumer — a ref source on its page names the target.
-                    let (src_obj, src_key) = match ref_fold.get(input) {
-                        Some(f) if page_serves(f, &o.uuid) => (&f.0, &f.1),
-                        _ => (src_obj, src_key),
-                    };
-                    let Some(src_slug) = slug_of.get(src_obj) else {
-                        continue;
-                    };
-                    if !is_ident(src_key) {
-                        continue;
-                    }
-                    wires.push(Binding {
-                        port: p.key.clone(),
-                        kind: BindingKind::Wire(PortRef {
-                            slug: src_slug.clone(),
-                            port: src_key.clone(),
-                        }),
-                        comment: None,
-                    });
-                }
-                if let Some(def) = &p.def {
-                    // A value at the corpus-observed GUI default is noise
-                    // to a reader — elided from the full view (D30,
-                    // `--all-params` shows it). The adoptable view keeps
-                    // every parameter: rebuilding writes `Def=` back.
-                    if opts.scope == DecompileScope::Full
-                        && !opts.all_params
-                        && crate::observed_defaults::observed_default(&o.block_type, &p.key)
-                            == Some(def.as_str())
-                    {
-                        default_params_elided += 1;
-                    } else if let Some(first) = wires.first_mut() {
-                        // A `Def=` under a wire is a stale constant (D77):
-                        // inert while the wire exists, kept by Loxone
-                        // Config so it returns when the wire is removed.
-                        // Never a second argument for the same port — the
-                        // compile carries it from the base.
-                        first.comment = Some(format!(
-                            " stale constant {} kept under the wire",
-                            Value::from_literal(def)
-                        ));
-                    } else {
-                        args.push(ArgItem::Binding(Binding {
-                            port: p.key.clone(),
-                            kind: BindingKind::Param(Value::from_literal(def)),
-                            comment: None,
-                        }));
-                    }
-                }
-                args.extend(wires.into_iter().map(ArgItem::Binding));
-            }
-            let slug = slug_of[&o.uuid].clone();
-            block_decls.insert(
-                i,
-                BlockDecl {
-                    block_type: o.block_type.clone(),
-                    // A title identical to the slug is what `compile`
-                    // defaults to — dropping it keeps the view minimal.
-                    // The read-only full view also drops a title the slug
-                    // already encodes (`slugify(title) == slug`, D29); the
-                    // adoptable view keeps it, because rebuilding must
-                    // write the exact `Title=` back.
-                    title: o.title.clone().filter(|t| {
-                        t != &slug && (opts.scope != DecompileScope::Full || slugify(t) != slug)
-                    }),
-                    slug,
-                    args,
-                    comment: None,
-                    close_comment: None,
-                },
-            );
-        }
-
-        // `<-` statements: wires with an extern sink. Wires into managed
-        // blocks were lifted into the blocks' argument lists above. The
-        // check is per *instance*, not per type: an excluded managed-type
-        // object (adopt refusal) is an extern here, and its incoming wires
-        // must appear as `<-` statements, not vanish.
-        let is_managed: BTreeSet<usize> = managed.iter().copied().collect();
-        let mut wires = Vec::new();
-        for (fi, fk, ti, tk) in touched {
-            if is_managed.contains(&ti) {
-                continue;
-            }
-            wires.push((
-                WireDecl {
-                    to: PortRef {
-                        slug: slug_of[&objects[ti].uuid].clone(),
-                        port: tk,
-                    },
-                    from: PortRef {
-                        slug: slug_of[&objects[fi].uuid].clone(),
-                        port: fk,
-                    },
-                    comment: None,
-                },
-                ti,
-                fi,
-            ));
-        }
-        if opts.scope == DecompileScope::Full {
-            // Big fan-ins pile up dozens of `<-` lines; sorted by sink,
-            // then source, they read as a table (D29). View-only: the
-            // adoptable view keeps document order, because the relative
-            // `<In>` order within a sink is part of the compiled bytes.
-            wires.sort_by(|a, b| {
-                (&a.0.to.slug, &a.0.to.port, &a.0.from.slug, &a.0.from.port).cmp(&(
-                    &b.0.to.slug,
-                    &b.0.to.port,
-                    &b.0.from.slug,
-                    &b.0.from.port,
-                ))
-            });
-        }
-
-        // An `AutopilotRule` extern's whole rule lives in its `APC=`
-        // JSON — invisible as a bare declaration. The full view renders
-        // it as comment lines above the extern (view-only liberty, D29;
-        // the payload stays app-owned and is never language surface).
-        let mut rule_notes: BTreeMap<usize, Vec<String>> = BTreeMap::new();
-        if opts.scope == DecompileScope::Full {
-            let resolve = |uuid: &str| -> Option<String> {
-                let &i = obj_index.get(uuid)?;
-                let o = &objects[i];
-                o.title.clone().or_else(|| o.iname.clone())
-            };
-            for &i in &externs {
-                let o = &objects[i];
-                if o.block_type != "AutopilotRule" {
-                    continue;
-                }
-                let Some(rule) = doc
-                    .element_at(&o.path)
-                    .and_then(|el| el.attr_decoded("APC"))
-                    .and_then(|apc| crate::autopilot::parse(&apc))
-                else {
-                    continue; // no or unreadable payload — bare extern
-                };
-                let lines = crate::autopilot::summary(&rule, &resolve);
-                if !lines.is_empty() {
-                    rule_notes.insert(i, lines);
-                }
-            }
-        }
+        let rule_decls = cx.rule_decls(&slug_of, &liftable_rules);
+        let (block_decls, default_params_elided) = cx.block_decls(&slug_of, &managed);
+        let wires = cx.extern_wires(&slug_of, &managed, touched);
+        let rule_notes = cx.rule_notes(&externs);
 
         Lift {
             objects,
@@ -1238,6 +604,866 @@ impl Lift {
             ref_wires_folded: self.ref_wires_folded,
             default_params_elided: self.default_params_elided,
         }
+    }
+}
+
+/// Pages in document order (titles, uuids) and the page each object
+/// belongs to: its deepest ancestor page (by element-path prefix).
+fn page_tables(objects: &[ObjectSummary]) -> (Vec<String>, Vec<String>, BTreeMap<String, usize>) {
+    let mut page_paths: Vec<&[usize]> = Vec::new();
+    let mut page_titles: Vec<String> = Vec::new();
+    let mut page_uuids: Vec<String> = Vec::new();
+    for o in objects {
+        if o.block_type == "Page" {
+            page_paths.push(&o.path);
+            page_titles.push(o.title.clone().unwrap_or_else(|| "Page".into()));
+            page_uuids.push(o.uuid.clone());
+        }
+    }
+    let mut page_of: BTreeMap<String, usize> = BTreeMap::new();
+    for o in objects {
+        if matches!(o.block_type.as_str(), "Document" | "Page") {
+            continue;
+        }
+        let mut best: Option<usize> = None;
+        for (p, pp) in page_paths.iter().enumerate() {
+            if pp.len() < o.path.len()
+                && o.path[..pp.len()] == **pp
+                && best.is_none_or(|b| page_paths[b].len() < pp.len())
+            {
+                best = Some(p);
+            }
+        }
+        if let Some(p) = best {
+            page_of.insert(o.uuid.clone(), p);
+        }
+    }
+    (page_titles, page_uuids, page_of)
+}
+
+/// Ref plumbing (D29, full view only): an `InputRef`/`OutputRef`
+/// carries a `Ref=` attribute naming the object it mirrors, and the
+/// wires between the two are GUI routing, not logic. They are
+/// folded out of the view — the ref's extern declaration carries a
+/// `# mirrors …` note instead — and a periphery object whose only
+/// connection was such plumbing is never pulled in as an extern.
+fn mirror_targets<'a>(doc: &'a LoxoneDoc, objects: &[ObjectSummary]) -> BTreeMap<usize, &'a str> {
+    objects
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| matches!(o.block_type.as_str(), "InputRef" | "OutputRef"))
+        .filter_map(|(i, o)| {
+            doc.element_at(&o.path)
+                .and_then(|el| el.attr("Ref"))
+                .map(|r| (i, r))
+        })
+        .collect()
+}
+
+/// D34 inversion (both scopes): a consumer wire on a ref is emitted
+/// against the mirrored object itself — compile routes it back
+/// through the very same ref (same-page reuse, pinned by the base
+/// wire). Maps a ref's consumer-facing port uuid to the target
+/// (uuid, key) it stands for, plus the ref uuids carrying that
+/// port (one in a sound config; several only where a push tool
+/// gave mirrors shared ports, D38); a wire folds only when its
+/// consumer shares a carrying ref's page.
+type Fold = (String, String, Vec<String>);
+
+/// A LightController2's own moods, or why they cannot be written as a set.
+type Lines = std::result::Result<Vec<MoodLine>, String>;
+
+/// What every phase of [`Lift::build`] reads: the document, its objects
+/// and the page and ref tables built up front.
+struct Scan<'a> {
+    doc: &'a LoxoneDoc,
+    opts: &'a DecompileOptions,
+    objects: &'a [ObjectSummary],
+    idx: &'a crate::doc::DocIndex,
+    /// Object index by uuid.
+    obj_index: BTreeMap<&'a str, usize>,
+    /// The page each page-placed object belongs to.
+    page_of: &'a BTreeMap<String, usize>,
+    /// Each `InputRef`/`OutputRef` (by object index) and the uuid of the object it mirrors.
+    mirror_target: BTreeMap<usize, &'a str>,
+    /// Consumer-facing ref port uuid → the target port it stands for ([`Fold`]).
+    ref_fold: BTreeMap<String, Fold>,
+}
+
+impl Scan<'_> {
+    /// The D34 fold table: which ref ports stand for a target port.
+    fn ref_folds(&self) -> BTreeMap<String, Fold> {
+        let Scan {
+            doc,
+            objects,
+            idx,
+            ref obj_index,
+            ref mirror_target,
+            ..
+        } = *self;
+        let mut ref_fold: BTreeMap<String, Fold> = BTreeMap::new();
+        for (&ri, &tgt) in mirror_target {
+            let Some(&mi) = obj_index.get(tgt) else {
+                continue;
+            };
+            // A mirror of a mirror is not resolvable, and only a nameable
+            // target type can appear in source.
+            if mirror_target.contains_key(&mi) || !is_ident(&objects[mi].block_type) {
+                continue;
+            }
+            let tel = doc
+                .element_at(&objects[mi].path)
+                .expect("path from objects()");
+            let tps = ports(tel);
+            let rel = doc
+                .element_at(&objects[ri].path)
+                .expect("path from objects()");
+            let rps = ports(rel);
+            let rp = |k: &str| rps.iter().find(|p| p.key == k);
+            let mut fold = |port_uuid: &str, tkey: &str| {
+                let e = ref_fold
+                    .entry(port_uuid.to_string())
+                    .or_insert_with(|| (tgt.to_string(), tkey.to_string(), Vec::new()));
+                if e.0 == tgt && e.1 == tkey {
+                    e.2.push(objects[ri].uuid.clone());
+                }
+            };
+            if objects[ri].block_type == "InputRef" {
+                // A fed input serves its output: target idx0 → AI serves
+                // AQ, idx1 → I serves Q (the GUI's own feed convention —
+                // anything else stays an explicit ref).
+                for (fed, serves, tidx) in [("AI", "AQ", 0usize), ("I", "Q", 1)] {
+                    if let (Some(f), Some(s), Some(tp)) = (rp(fed), rp(serves), tps.get(tidx))
+                        && f.inputs.as_slice() == std::slice::from_ref(&tp.uuid)
+                        && is_ident(&tp.key)
+                    {
+                        fold(&s.uuid, &tp.key);
+                    }
+                }
+            } else if let (Some(ai), Some(aq)) = (rp("AI"), rp("AQ")) {
+                // OutputRef: its AQ must feed exactly one port of the
+                // target — a write into the ref's AI stands for a write
+                // into that port.
+                let sinks: BTreeSet<String> = doc
+                    .wires()
+                    .iter()
+                    .filter(|w| w.from_port == aq.uuid)
+                    .map(|w| w.to_port.clone())
+                    .collect();
+                if sinks.len() == 1
+                    && let Some(one) = sinks.iter().next()
+                    && let Some((so, sk)) = idx.port_owner.get(one)
+                    && so == tgt
+                    && is_ident(sk)
+                {
+                    fold(&ai.uuid, sk);
+                }
+            }
+        }
+        ref_fold
+    }
+
+    /// A fold applies when the consumer's page carries one of the refs.
+    fn page_serves(&self, f: &Fold, consumer_uuid: &str) -> bool {
+        let cp = self.page_of.get(consumer_uuid);
+        cp.is_some() && f.2.iter().any(|r| self.page_of.get(r.as_str()) == cp)
+    }
+
+    /// Seed: managed-type objects; in the full view also every page
+    /// object with connectors and a language-writable type.
+    /// Returns the lifted flags, the managed and the extern object indexes.
+    fn seed(&self) -> (Vec<bool>, Vec<usize>, Vec<usize>) {
+        let Scan {
+            doc,
+            opts,
+            objects,
+            page_of,
+            ref mirror_target,
+            ..
+        } = *self;
+        let mut lifted = vec![false; objects.len()];
+        let mut managed = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if opts.managed_types.contains(&o.block_type)
+                && !opts.exclude.contains(&o.uuid)
+                && !owned_by_block(doc, o)
+            {
+                lifted[i] = true;
+                managed.push(i);
+            }
+        }
+        let mut externs = Vec::new();
+        if opts.scope == DecompileScope::Full {
+            for (i, o) in objects.iter().enumerate() {
+                if !lifted[i]
+                    && !matches!(o.block_type.as_str(), "Document" | "Page")
+                    // Refs are page visuals, not logic (D34): one appears
+                    // in the view only when an unfoldable wire names it.
+                    && !mirror_target.contains_key(&i)
+                    && !owned_by_block(doc, o)
+                    && page_of.contains_key(&o.uuid)
+                    && is_ident(&o.block_type)
+                    && !ports(doc.element_at(&o.path).expect("path from objects()")).is_empty()
+                {
+                    lifted[i] = true;
+                    externs.push(i);
+                }
+            }
+        }
+        (lifted, managed, externs)
+    }
+
+    /// Wires touching the seed pull their other endpoint in as an
+    /// extern. Depth 1 on purpose: an extern lifted here does not pull
+    /// in *its* other wires, so periphery-to-periphery wiring stays out.
+    /// Returns the touched wires (ref endpoints folded) and the count of
+    /// folded ref plumbing wires.
+    fn touched_wires(
+        &self,
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> (Vec<(usize, String, usize, String)>, usize) {
+        let Scan {
+            doc,
+            opts,
+            objects,
+            idx,
+            page_of,
+            ref obj_index,
+            ref mirror_target,
+            ref ref_fold,
+            ..
+        } = *self;
+        let mut ref_wires_folded = 0usize;
+        let seed = lifted.to_vec();
+        let mut seen = BTreeSet::new();
+        let mut touched: Vec<(usize, String, usize, String)> = Vec::new();
+        for w in doc.wires() {
+            let (Some((fo, fk)), Some((to, tk))) = (
+                idx.port_owner.get(&w.from_port),
+                idx.port_owner.get(&w.to_port),
+            ) else {
+                continue; // dangling <In> — not representable, stays raw
+            };
+            let (mut fi, mut ti) = (obj_index[fo.as_str()], obj_index[to.as_str()]);
+            let (mut fk, mut tk) = (fk.clone(), tk.clone());
+            // D34 inversion: a ref endpoint is rewritten to its target
+            // when the consumer sits on the ref's page — compile routes
+            // the wire back through that very ref.
+            if let Some(f) = ref_fold.get(&w.from_port)
+                && self.page_serves(f, &objects[ti].uuid)
+            {
+                fi = obj_index[f.0.as_str()];
+                fk = f.1.clone();
+            } else if let Some(f) = ref_fold.get(&w.to_port)
+                && self.page_serves(f, &objects[fi].uuid)
+            {
+                ti = obj_index[f.0.as_str()];
+                tk = f.1.clone();
+            }
+            // A page-placed ref an unfoldable wire still names re-enters
+            // the view here (it is no longer a seed by itself): plumbing
+            // below still folds its feeds, but a real wire lifts it.
+            let page_ref = |i: usize| {
+                opts.scope == DecompileScope::Full
+                    && mirror_target.contains_key(&i)
+                    && page_of.contains_key(&objects[i].uuid)
+            };
+            if !(seed[fi] || seed[ti] || page_ref(fi) || page_ref(ti)) {
+                continue;
+            }
+            if !is_ident(&fk)
+                || !is_ident(&tk)
+                || !is_ident(&objects[fi].block_type)
+                || !is_ident(&objects[ti].block_type)
+            {
+                continue; // not representable, stays raw
+            }
+            if idx.inv_ports.contains(&w.to_port) {
+                // Wire into a GUI-owned (`Inv=`) connector: the inversion
+                // would silently negate a lifted statement, so the wire is
+                // GUI content — carried verbatim by the rebuild (managed
+                // sink) or left untouched in the base (extern sink), and
+                // its source is not pulled in as an extern.
+                continue;
+            }
+            let plumbing = |ri: usize, oi: usize| {
+                mirror_target
+                    .get(&ri)
+                    .is_some_and(|t| *t == objects[oi].uuid)
+            };
+            if opts.scope == DecompileScope::Full && (plumbing(ti, fi) || plumbing(fi, ti)) {
+                ref_wires_folded += 1;
+                continue;
+            }
+            if !seen.insert((w.from_port.clone(), w.to_port.clone())) {
+                continue;
+            }
+            for i in [fi, ti] {
+                if !lifted[i] {
+                    lifted[i] = true;
+                    externs.push(i);
+                }
+            }
+            touched.push((fi, fk, ti, tk));
+        }
+        (touched, ref_wires_folded)
+    }
+
+    /// NFC Code Touch blocks with access rights (D49), in both scopes:
+    /// the `access` declaration needs the block lifted — as an extern,
+    /// unless it is lifted as a managed block already.
+    fn access_blocks(
+        &self,
+        rights: &[crate::access::AccessRight<'_>],
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> Vec<usize> {
+        let Scan { objects, .. } = *self;
+        let mut with_rights: Vec<usize> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type == ACCESS_BLOCK_TYPE && rights.iter().any(|r| r.target == o.uuid) {
+                with_rights.push(i);
+                if !lifted[i] {
+                    lifted[i] = true;
+                    externs.push(i);
+                }
+            }
+        }
+        with_rights
+    }
+
+    /// Automatic Designer rules whose payload reads as the documented
+    /// shapes (D57), in both scopes: the `rule` declaration needs the
+    /// rule and its action targets as externs.
+    fn liftable_rules(
+        &self,
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> Vec<(usize, String)> {
+        let Scan {
+            doc, opts, objects, ..
+        } = *self;
+        let uuid_index: BTreeMap<&str, usize> = objects
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (o.uuid.as_str(), i))
+            .collect();
+        let mut liftable_rules: Vec<(usize, String)> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type != RULE_BLOCK_TYPE || opts.exclude.contains(&o.uuid) {
+                continue;
+            }
+            let Some(apc) = doc
+                .element_at(&o.path)
+                .and_then(|el| el.attr_decoded("APC"))
+                .map(|a| a.into_owned())
+            else {
+                continue;
+            };
+            let Some(rule) =
+                crate::autopilot::parse(&apc).and_then(|v| crate::autopilot::interpret(&v).ok())
+            else {
+                continue;
+            };
+            let targets: Option<Vec<usize>> = rule
+                .blocks()
+                .into_iter()
+                .map(|u| uuid_index.get(u).copied())
+                .collect();
+            let Some(targets) = targets else { continue };
+            if rule.groups.iter().any(Vec::is_empty) || rule.actions.is_empty() {
+                continue;
+            }
+            for j in std::iter::once(i).chain(targets) {
+                if !lifted[j] {
+                    lifted[j] = true;
+                    externs.push(j);
+                }
+            }
+            liftable_rules.push((i, apc));
+        }
+        liftable_rules
+    }
+
+    /// LightController2s with moods of their own (D58), in both scopes:
+    /// the claim needs the controller as an extern — also one excluded
+    /// from management, whose moods a claim owns all the same.
+    fn mood_controllers(
+        &self,
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> Vec<(usize, Lines)> {
+        let Scan { doc, objects, .. } = *self;
+        let mut mood_lines: Vec<(usize, Lines)> = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type != "LightController2" {
+                continue;
+            }
+            let Some(lines) = doc.element_at(&o.path).and_then(super::moods::lift) else {
+                continue;
+            };
+            if !lifted[i] {
+                lifted[i] = true;
+                externs.push(i);
+            }
+            mood_lines.push((i, lines));
+        }
+        mood_lines
+    }
+
+    /// Slug assignment: managed first (document order), then externs
+    /// (seed order, then order of first wire reference), all in one
+    /// namespace.
+    /// Returns the slug table and slug ↔ object maps.
+    fn assign_slugs(
+        &self,
+        managed: &[usize],
+        externs: &[usize],
+    ) -> (SlugTable, BTreeMap<String, String>, BTreeMap<String, usize>) {
+        let Scan { objects, .. } = *self;
+        let mut slugs = SlugTable::default();
+        let mut slug_of: BTreeMap<String, String> = BTreeMap::new();
+        let mut obj_of_slug: BTreeMap<String, usize> = BTreeMap::new();
+        for &i in managed.iter().chain(externs) {
+            let o = &objects[i];
+            let base = o.title.as_deref().or(o.iname.as_deref());
+            let slug = slugs.assign(base.unwrap_or(&o.block_type));
+            obj_of_slug.insert(slug.clone(), i);
+            slug_of.insert(o.uuid.clone(), slug);
+        }
+        (slugs, slug_of, obj_of_slug)
+    }
+
+    /// One set per distinct list of moods, named after the first
+    /// controller that has it.
+    #[allow(clippy::type_complexity)]
+    fn mood_sets(
+        &self,
+        slugs: &mut SlugTable,
+        slug_of: &BTreeMap<String, String>,
+        mood_lines: Vec<(usize, Lines)>,
+    ) -> (
+        Vec<(MoodsDecl, Option<usize>)>,
+        BTreeMap<usize, std::result::Result<usize, String>>,
+    ) {
+        let Scan {
+            objects, page_of, ..
+        } = *self;
+        let mut mood_sets: Vec<(MoodsDecl, Option<usize>)> = Vec::new();
+        let mut mood_claims: BTreeMap<usize, std::result::Result<usize, String>> = BTreeMap::new();
+        for (i, lines) in mood_lines {
+            let page = page_of.get(&objects[i].uuid).copied();
+            let claim = lines.map(|lines| {
+                if let Some(k) = mood_sets
+                    .iter()
+                    .position(|(set, _)| set.moods().eq(lines.iter()))
+                {
+                    mood_sets[k].1 = mood_sets[k].1.min(page);
+                    return k;
+                }
+                let name = slugs.assign(&format!("{}_moods", slug_of[&objects[i].uuid]));
+                let body = lines.into_iter().map(MoodsItem::Mood).collect();
+                let set = MoodsDecl {
+                    name,
+                    body,
+                    comment: None,
+                    end_comment: None,
+                };
+                mood_sets.push((set, page));
+                mood_sets.len() - 1
+            });
+            mood_claims.insert(i, claim);
+        }
+        (mood_sets, mood_claims)
+    }
+
+    /// Match specs for every lifted object (managed ones may be needed
+    /// as foreign externs in the per-page view). A ref whose `Ref=`
+    /// target has a slug in this module says so semantically (D32,
+    /// `mirrors:`) — but only when it is the sole ref of its type on
+    /// that target, so resolution cannot need more than the slug.
+    /// A title that repeats across identical devices, but not within
+    /// its own: `title:` narrowed by the device's serial (D55).
+    /// Returns the specs and the serial each device-narrowed one carries.
+    fn match_specs(
+        &self,
+        slug_of: &BTreeMap<String, String>,
+        managed: &[usize],
+        externs: &[usize],
+    ) -> (BTreeMap<usize, MatchSpec>, BTreeMap<usize, String>) {
+        let Scan {
+            doc,
+            objects,
+            ref obj_index,
+            ref mirror_target,
+            ..
+        } = *self;
+        let device_unique = |i: usize| -> Option<std::borrow::Cow<'_, str>> {
+            let obj = &objects[i];
+            let title = obj.title.as_deref()?;
+            let serial = doc.device_serial(&obj.path)?;
+            (objects
+                .iter()
+                .filter(|o| {
+                    o.block_type == obj.block_type
+                        && o.title.as_deref() == Some(title)
+                        && doc
+                            .device_serial(&o.path)
+                            .is_some_and(|s| crate::doc::same_serial(&s, &serial))
+                })
+                .count()
+                == 1)
+                .then_some(serial)
+        };
+        let match_spec = |i: usize| -> (MatchSpec, Option<String>) {
+            let obj = &objects[i];
+            if let Some(&target) = mirror_target.get(&i)
+                && let Some(slug) = slug_of.get(target)
+                // …and the target is not itself a ref: a mirror of a
+                // mirror is not resolvable (compile refuses it).
+                && obj_index
+                    .get(target)
+                    .is_some_and(|mi| !mirror_target.contains_key(mi))
+                && mirror_target
+                    .iter()
+                    .filter(|(j, t)| **t == target && objects[**j].block_type == obj.block_type)
+                    .count()
+                    == 1
+            {
+                return (MatchSpec::Mirrors(slug.clone()), None);
+            }
+            let unique = |get: fn(&ObjectSummary) -> Option<&str>| {
+                get(obj).filter(|v| {
+                    objects
+                        .iter()
+                        .filter(|o| o.block_type == obj.block_type && get(o) == Some(v))
+                        .count()
+                        == 1
+                })
+            };
+            if let Some(iname) = unique(|o| o.iname.as_deref()) {
+                (MatchSpec::IName(iname.to_string()), None)
+            } else if let Some(title) = unique(|o| o.title.as_deref()) {
+                (MatchSpec::Title(title.to_string()), None)
+            } else if let Some(title) = obj.title.as_deref()
+                && let Some(serial) = device_unique(i)
+            {
+                let device = Some(serial.into_owned());
+                (MatchSpec::Title(title.to_string()), device)
+            } else {
+                (MatchSpec::Uuid(obj.uuid.clone()), None)
+            }
+        };
+        let mut devices: BTreeMap<usize, String> = BTreeMap::new();
+        let match_specs: BTreeMap<usize, MatchSpec> = managed
+            .iter()
+            .chain(externs)
+            .map(|&i| {
+                let (spec, device) = match_spec(i);
+                devices.extend(device.map(|d| (i, d)));
+                (i, spec)
+            })
+            .collect();
+        (match_specs, devices)
+    }
+
+    /// Extern declarations for every extern object.
+    /// A ref extern says what it mirrors (D29) — the plumbing wires
+    /// that carried that fact were folded above.
+    fn extern_decls(
+        &self,
+        slug_of: &BTreeMap<String, String>,
+        externs: &[usize],
+        match_specs: &BTreeMap<usize, MatchSpec>,
+        devices: &BTreeMap<usize, String>,
+    ) -> BTreeMap<usize, ExternDecl> {
+        let Scan {
+            objects,
+            ref obj_index,
+            ref mirror_target,
+            ..
+        } = *self;
+        let mirror_note = |i: usize| -> Option<String> {
+            let &mi = obj_index.get(*mirror_target.get(&i)?)?;
+            let m = &objects[mi];
+            let name = m.title.as_deref().or(m.iname.as_deref()).unwrap_or(&m.uuid);
+            Some(format!(" mirrors {} \"{name}\"", m.block_type))
+        };
+        let extern_decls: BTreeMap<usize, ExternDecl> = externs
+            .iter()
+            .map(|&i| {
+                (
+                    i,
+                    ExternDecl {
+                        room: None,
+                        category: None,
+                        device: devices.get(&i).cloned(),
+                        slug: slug_of[&objects[i].uuid].clone(),
+                        block_type: objects[i].block_type.clone(),
+                        match_spec: match_specs[&i].clone(),
+                        // A `mirrors:` matcher already says what the ref
+                        // mirrors — the note is for the other match kinds.
+                        comment: match &match_specs[&i] {
+                            MatchSpec::Mirrors(_) => None,
+                            _ => mirror_note(i),
+                        },
+                    },
+                )
+            })
+            .collect();
+        extern_decls
+    }
+
+    /// Rule declarations for the liftable Automatic Designer rules (D57).
+    fn rule_decls(
+        &self,
+        slug_of: &BTreeMap<String, String>,
+        liftable_rules: &[(usize, String)],
+    ) -> BTreeMap<usize, RuleDecl> {
+        let Scan { doc, objects, .. } = *self;
+        let mut rule_names: BTreeMap<&str, usize> = BTreeMap::new();
+        for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
+            if let Some(t) = &o.title {
+                *rule_names.entry(t.as_str()).or_default() += 1;
+            }
+        }
+        let rule_decls: BTreeMap<usize, RuleDecl> = liftable_rules
+            .iter()
+            .filter_map(|(i, apc)| {
+                let slug = &slug_of[&objects[*i].uuid];
+                let mut decl =
+                    super::rule::lift(slug, apc, doc, &|u| slug_of.get(u).cloned()).ok()?;
+                // A rule with a name no other rule has is declared by it
+                // (D60, #192): the source owns it whole, no extern.
+                decl.title = objects[*i]
+                    .title
+                    .clone()
+                    .filter(|t| !t.is_empty() && rule_names.get(t.as_str()) == Some(&1));
+                Some((*i, decl))
+            })
+            .collect();
+        rule_decls
+    }
+
+    /// Blocks: per port in connector order, the `Def=` value becomes a
+    /// parameter binding, then each incoming wire a wire binding.
+    /// Returns the declarations and the count of elided default parameters.
+    fn block_decls(
+        &self,
+        slug_of: &BTreeMap<String, String>,
+        managed: &[usize],
+    ) -> (BTreeMap<usize, BlockDecl>, usize) {
+        let Scan {
+            doc,
+            opts,
+            objects,
+            idx,
+            ref ref_fold,
+            ..
+        } = *self;
+        let mut block_decls: BTreeMap<usize, BlockDecl> = BTreeMap::new();
+        let mut default_params_elided = 0usize;
+        for &i in managed {
+            let o = &objects[i];
+            let el = doc.element_at(&o.path).expect("path from objects()");
+            let mut args = Vec::new();
+            // Attribute parameters (block logic stored as an element
+            // attribute, e.g. `Formula=`) lead the argument list. A
+            // GUI-owned one (`Code=`, D40) stays unclaimed: the compile
+            // carries it, and claiming it is a source decision.
+            for name in attr_params(&o.block_type) {
+                if GUI_OWNED_ATTRS.contains(name) {
+                    continue;
+                }
+                if let Some(v) = el.attr_decoded(name) {
+                    args.push(ArgItem::Binding(Binding {
+                        port: (*name).to_string(),
+                        kind: BindingKind::Param(Value::from_literal(&v)),
+                        comment: None,
+                    }));
+                }
+            }
+            for p in ports(el) {
+                if !is_ident(&p.key) {
+                    continue; // not representable, stays raw
+                }
+                if p.inv {
+                    // GUI-owned connector (D20): its Def and wires are
+                    // carried verbatim by the rebuild, never restated in
+                    // source — the Inv flag would silently invert them.
+                    continue;
+                }
+                let mut wires = Vec::new();
+                for input in &p.inputs {
+                    let Some((src_obj, src_key)) = idx.port_owner.get(input) else {
+                        continue; // dangling <In> — not representable, stays raw
+                    };
+                    // D34 inversion, argument-list side: this block is the
+                    // consumer — a ref source on its page names the target.
+                    let (src_obj, src_key) = match ref_fold.get(input) {
+                        Some(f) if self.page_serves(f, &o.uuid) => (&f.0, &f.1),
+                        _ => (src_obj, src_key),
+                    };
+                    let Some(src_slug) = slug_of.get(src_obj) else {
+                        continue;
+                    };
+                    if !is_ident(src_key) {
+                        continue;
+                    }
+                    wires.push(Binding {
+                        port: p.key.clone(),
+                        kind: BindingKind::Wire(PortRef {
+                            slug: src_slug.clone(),
+                            port: src_key.clone(),
+                        }),
+                        comment: None,
+                    });
+                }
+                if let Some(def) = &p.def {
+                    // A value at the corpus-observed GUI default is noise
+                    // to a reader — elided from the full view (D30,
+                    // `--all-params` shows it). The adoptable view keeps
+                    // every parameter: rebuilding writes `Def=` back.
+                    if opts.scope == DecompileScope::Full
+                        && !opts.all_params
+                        && crate::observed_defaults::observed_default(&o.block_type, &p.key)
+                            == Some(def.as_str())
+                    {
+                        default_params_elided += 1;
+                    } else if let Some(first) = wires.first_mut() {
+                        // A `Def=` under a wire is a stale constant (D77):
+                        // inert while the wire exists, kept by Loxone
+                        // Config so it returns when the wire is removed.
+                        // Never a second argument for the same port — the
+                        // compile carries it from the base.
+                        first.comment = Some(format!(
+                            " stale constant {} kept under the wire",
+                            Value::from_literal(def)
+                        ));
+                    } else {
+                        args.push(ArgItem::Binding(Binding {
+                            port: p.key.clone(),
+                            kind: BindingKind::Param(Value::from_literal(def)),
+                            comment: None,
+                        }));
+                    }
+                }
+                args.extend(wires.into_iter().map(ArgItem::Binding));
+            }
+            let slug = slug_of[&o.uuid].clone();
+            block_decls.insert(
+                i,
+                BlockDecl {
+                    block_type: o.block_type.clone(),
+                    // A title identical to the slug is what `compile`
+                    // defaults to — dropping it keeps the view minimal.
+                    // The read-only full view also drops a title the slug
+                    // already encodes (`slugify(title) == slug`, D29); the
+                    // adoptable view keeps it, because rebuilding must
+                    // write the exact `Title=` back.
+                    title: o.title.clone().filter(|t| {
+                        t != &slug && (opts.scope != DecompileScope::Full || slugify(t) != slug)
+                    }),
+                    slug,
+                    args,
+                    comment: None,
+                    close_comment: None,
+                },
+            );
+        }
+        (block_decls, default_params_elided)
+    }
+
+    /// `<-` statements: wires with an extern sink. Wires into managed
+    /// blocks were lifted into the blocks' argument lists above. The
+    /// check is per *instance*, not per type: an excluded managed-type
+    /// object (adopt refusal) is an extern here, and its incoming wires
+    /// must appear as `<-` statements, not vanish.
+    fn extern_wires(
+        &self,
+        slug_of: &BTreeMap<String, String>,
+        managed: &[usize],
+        touched: Vec<(usize, String, usize, String)>,
+    ) -> Vec<(WireDecl, usize, usize)> {
+        let Scan { opts, objects, .. } = *self;
+        let is_managed: BTreeSet<usize> = managed.iter().copied().collect();
+        let mut wires = Vec::new();
+        for (fi, fk, ti, tk) in touched {
+            if is_managed.contains(&ti) {
+                continue;
+            }
+            wires.push((
+                WireDecl {
+                    to: PortRef {
+                        slug: slug_of[&objects[ti].uuid].clone(),
+                        port: tk,
+                    },
+                    from: PortRef {
+                        slug: slug_of[&objects[fi].uuid].clone(),
+                        port: fk,
+                    },
+                    comment: None,
+                },
+                ti,
+                fi,
+            ));
+        }
+        if opts.scope == DecompileScope::Full {
+            // Big fan-ins pile up dozens of `<-` lines; sorted by sink,
+            // then source, they read as a table (D29). View-only: the
+            // adoptable view keeps document order, because the relative
+            // `<In>` order within a sink is part of the compiled bytes.
+            wires.sort_by(|a, b| {
+                (&a.0.to.slug, &a.0.to.port, &a.0.from.slug, &a.0.from.port).cmp(&(
+                    &b.0.to.slug,
+                    &b.0.to.port,
+                    &b.0.from.slug,
+                    &b.0.from.port,
+                ))
+            });
+        }
+        wires
+    }
+
+    /// An `AutopilotRule` extern's whole rule lives in its `APC=`
+    /// JSON — invisible as a bare declaration. The full view renders
+    /// it as comment lines above the extern (view-only liberty, D29;
+    /// the payload stays app-owned and is never language surface).
+    fn rule_notes(&self, externs: &[usize]) -> BTreeMap<usize, Vec<String>> {
+        let Scan {
+            doc,
+            opts,
+            objects,
+            ref obj_index,
+            ..
+        } = *self;
+        let mut rule_notes: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+        if opts.scope == DecompileScope::Full {
+            let resolve = |uuid: &str| -> Option<String> {
+                let &i = obj_index.get(uuid)?;
+                let o = &objects[i];
+                o.title.clone().or_else(|| o.iname.clone())
+            };
+            for &i in externs {
+                let o = &objects[i];
+                if o.block_type != "AutopilotRule" {
+                    continue;
+                }
+                let Some(rule) = doc
+                    .element_at(&o.path)
+                    .and_then(|el| el.attr_decoded("APC"))
+                    .and_then(|apc| crate::autopilot::parse(&apc))
+                else {
+                    continue; // no or unreadable payload — bare extern
+                };
+                let lines = crate::autopilot::summary(&rule, &resolve);
+                if !lines.is_empty() {
+                    rule_notes.insert(i, lines);
+                }
+            }
+        }
+        rule_notes
     }
 }
 
