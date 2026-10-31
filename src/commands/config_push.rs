@@ -230,6 +230,11 @@ pub(crate) struct PushReport {
     pub changes: Vec<String>,
     /// Custom changes on the Miniserver that loading the upload deletes
     pub custom_changes_pending: Vec<CustomChange>,
+    /// Custom changes that belong to the app (the push settings of
+    /// registered phones), carried into the upload so that loading it keeps
+    /// them
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub custom_changes_kept: Vec<CustomChange>,
     /// Controls of the app whose entries the uploaded app catalogue gets:
     /// renamed, moved, deleted, hidden or new
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -360,11 +365,11 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     } else {
         Lockfile::new()
     };
-    let compiled = compile_project(&project, &compile_base, &mut lock, opts)?.to_bytes();
+    let mut compiled = compile_project(&project, &compile_base, &mut lock, opts)?.to_bytes();
     lock.save(&scratch_lock)?;
+    let (pending, kept_custom) = check_custom_changes(ms, opts, &live_xml, &mut compiled, &say)?;
     let compiled_path = file("push.Loxone");
     fs::write(&compiled_path, &compiled)?;
-    let pending = check_custom_changes(ms, opts, &live_xml, &compiled, &say)?;
 
     // 4. What the push changes.
     let mut report = PushReport {
@@ -374,6 +379,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         kept_as_live,
         changes: Vec::new(),
         custom_changes_pending: pending,
+        custom_changes_kept: kept_custom,
         app_catalogue_updated: Vec::new(),
         app_catalogue_stale: Vec::new(),
         app_catalogue_rebuilt: None,
@@ -548,8 +554,11 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     Ok(report)
 }
 
-/// The custom changes an upload would delete. With `--force` any present
-/// stop the push, unless `--discard-custom-changes`; a staging run only warns.
+/// The custom changes an upload would delete. Those that belong to the app
+/// (`custom_changes::fold_app_owned`: the push settings of registered phones)
+/// are carried into `compiled` and returned second, as kept. With `--force`
+/// any others stop the push, unless `--discard-custom-changes`; a staging run
+/// only warns.
 /// A failed check counts as changes present: it stops `--force` too. A change
 /// to an object the upload deletes (`removed` in the source: a rule deleted
 /// in the app, say) goes with the object and stops nothing.
@@ -557,9 +566,9 @@ fn check_custom_changes(
     ms: &dyn Miniserver,
     opts: &PushOptions,
     live_xml: &[u8],
-    compiled: &[u8],
+    compiled: &mut Vec<u8>,
     say: &dyn Fn(&str),
-) -> Result<Vec<CustomChange>> {
+) -> Result<(Vec<CustomChange>, Vec<CustomChange>)> {
     let refuse = opts.force && !opts.discard_custom_changes;
     let files = match ms.custom_changes() {
         Ok(files) => files,
@@ -575,12 +584,36 @@ fn check_custom_changes(
                 "Warning: cannot check {} for custom changes: {e:#}",
                 ftp::CUSTOM_CHANGES_DIR
             ));
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
     };
     let mut pending = custom_changes::describe(&files, Some(live_xml));
     if pending.is_empty() {
-        return Ok(pending);
+        return Ok((pending, Vec::new()));
+    }
+    let mut kept_custom = Vec::new();
+    if !opts.discard_custom_changes {
+        let mut doc = parse(compiled)?;
+        let folded = custom_changes::fold_app_owned(&mut doc, &files);
+        if !folded.is_empty() {
+            *compiled = doc.to_bytes();
+            let (k, rest): (Vec<_>, Vec<_>) = pending
+                .into_iter()
+                .partition(|c| folded.iter().any(|u| u.eq_ignore_ascii_case(&c.uuid)));
+            kept_custom = k;
+            pending = rest;
+            let list: String = kept_custom
+                .iter()
+                .map(|c| format!("\n  {}", c.label()))
+                .collect();
+            say(&format!(
+                "Kept: custom changes that belong to the app (push settings of registered \
+                 phones), carried into the upload:{list}"
+            ));
+        }
+    }
+    if pending.is_empty() {
+        return Ok((pending, kept_custom));
     }
     let kept: std::collections::HashSet<String> = parse(compiled)?
         .objects()
@@ -599,7 +632,7 @@ fn check_custom_changes(
         ));
     }
     if pending.is_empty() {
-        return Ok(gone);
+        return Ok((gone, kept_custom));
     }
     let list: String = pending
         .iter()
@@ -626,7 +659,7 @@ fn check_custom_changes(
              --discard-custom-changes)."
         ));
     }
-    Ok(gone.into_iter().chain(pending).collect())
+    Ok((gone.into_iter().chain(pending).collect(), kept_custom))
 }
 
 /// After a push that changed controls of the app: does the Miniserver serve
@@ -1364,6 +1397,66 @@ mod tests {
         assert!(msg.contains("--discard-custom-changes"), "{msg}");
         assert!(ms.uploaded.borrow().is_none());
         assert_eq!(ms.applies(), 0);
+    }
+
+    #[test]
+    fn push_keeps_the_push_settings_of_registered_phones() {
+        // Base and live hold a registered phone; the app changed its push
+        // settings (one /sys/custom file for the phone, one for its caption),
+        // and another block's change is pending too.
+        let dir = project();
+        let phones = concat!(
+            r#"<C Type="LoxCaption" V="178" U="0f000000-0000-0010-ffff000000000000" Title="Registrierte Geräte" Cl="0,0,0" WF="16384" CaptionType="28" SubType="28">"#,
+            r#"<C Type="PuDe" V="178" U="0f000000-0000-0011-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="4210688" pTkn="t1" PCfg="-388" Usr="0f000000-0000-0020-ffff000000000000" DevT="Phone" DevOs="android"/>"#,
+            "</C>"
+        );
+        let base_xml = String::from_utf8(base(dir.path())).unwrap();
+        let at = base_xml.rfind("</C>").unwrap();
+        let with_phone = format!("{}{phones}{}", &base_xml[..at], &base_xml[at..]);
+        fs::write(dir.path().join("pool.Loxone"), &with_phone).unwrap();
+        let phone = r#"<C Type="PuDe" V="178" U="0f000000-0000-0011-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="20987904" pTkn="t1" PCfg="-385" Usr="0f000000-0000-0020-ffff000000000000" DevT="Phone" DevOs="android"/>"#;
+        let caption = format!(
+            r#"<C Type="LoxCaption" V="178" U="0f000000-0000-0010-ffff000000000000" Title="Registrierte Geräte" Cl="0,0,0" WF="16793600" CaptionType="28" SubType="28">{phone}</C>"#
+        );
+        let lcc = |uuid: &str, xml: &str| {
+            (
+                format!("{uuid}.LoxCC"),
+                archive::compress_loxcc(xml.as_bytes()).unwrap(),
+            )
+        };
+        let mut ms = FakeMiniserver::new(config_zip(with_phone.as_bytes()));
+        ms.custom = Some(vec![
+            lcc("0f000000-0000-0011-ffff000000000000", phone),
+            lcc("0f000000-0000-0010-ffff000000000000", &caption),
+        ]);
+
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert!(report.custom_changes_pending.is_empty());
+        assert_eq!(report.custom_changes_kept.len(), 2);
+        let compiled = String::from_utf8(fs::read(report.compiled.unwrap()).unwrap()).unwrap();
+        assert!(
+            compiled.contains(r#"WF="4210688" pTkn="t1" PCfg="-385""#),
+            "{compiled}"
+        );
+        assert!(compiled.contains(r#"WF="16384" CaptionType="28""#));
+
+        // Next to a change the program owns, the push still refuses, naming
+        // only that one.
+        let dir = project();
+        fs::write(dir.path().join("pool.Loxone"), &with_phone).unwrap();
+        let (other, title) = with_custom_change(dir.path());
+        let mut files = other.custom.clone().unwrap();
+        files.extend(ms.custom.clone().unwrap());
+        let mut ms = FakeMiniserver::new(config_zip(with_phone.as_bytes()));
+        ms.custom = Some(files);
+        let err = push(&ms, &options(dir.path(), true), true)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("1 custom change(s)"), "{err}");
+        assert!(err.contains(&format!("\"{title}\"")), "{err}");
+        assert!(ms.uploaded.borrow().is_none());
     }
 
     #[test]

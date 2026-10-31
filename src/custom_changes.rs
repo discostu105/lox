@@ -5,11 +5,13 @@
 //! download of the program file does not contain them, and loading an
 //! uploaded `sps_new.zip` deletes them (def.log: `Loading sps_new.zip - Remove
 //! old custom changes`). Loxone Config merges them in first ("Load from
-//! Miniserver"); lox can only name them and refuse.
+//! Miniserver"). lox names them and refuses, except for the ones that belong
+//! to the app rather than the program, which [`fold_app_owned`] carries into
+//! the upload: the push settings of registered phones.
 
 use loxone_config::LoxoneDoc;
 use loxone_config::archive;
-use loxone_config::xml::XmlDocument;
+use loxone_config::xml::{Element, XmlDocument};
 use serde::Serialize;
 
 /// One pending custom change.
@@ -110,6 +112,118 @@ pub(crate) fn describe(files: &[(String, Vec<u8>)], live_xml: Option<&[u8]>) -> 
         .collect()
 }
 
+/// The `WF=` bit the Miniserver adds to an object the app changed (live,
+/// 2026-10-31: a registered phone and its caption, each the program's `WF`
+/// plus `0x1000000`; an app-deleted rule carries `0x2000000` instead).
+const WF_CHANGED: i64 = 0x0100_0000;
+
+/// The caption that holds the registered phones (`CaptionType="28"`,
+/// "Push-Benachrichtigungen: Registrierte Geräte").
+const CAPTION_PUSH_DEVICES: &str = "28";
+
+/// Carry the custom changes that belong to the app into `doc` (the compiled
+/// program), so that loading the upload keeps them instead of deleting them.
+/// Returns the UUIDs of the files it took over.
+///
+/// These are the push settings of a registered phone (`PuDe`: `PCfg=`, the
+/// notification categories it receives, and `pTkn=`). The app writes them,
+/// no source owns them, and losing them silently stops a phone's
+/// notifications. A `PuDe` change is folded when the program has the phone:
+/// its attributes are copied over, all but `WF=`, which keeps the program's
+/// value (the Miniserver marks the change with [`WF_CHANGED`]). The caption
+/// around the phones is taken over when it differs from the program only by
+/// that mark and every phone in it is folded. Anything else, a newly
+/// registered phone among it, stays a custom change for the caller to report.
+pub(crate) fn fold_app_owned(doc: &mut LoxoneDoc, files: &[(String, Vec<u8>)]) -> Vec<String> {
+    let fragments: Vec<Element> = files
+        .iter()
+        .filter_map(|(_, data)| {
+            let xml = archive::decompress_loxcc(data).ok()?;
+            let root = XmlDocument::parse(&xml).ok()?.root;
+            (root.name == "C").then_some(root)
+        })
+        .collect();
+    let mut folded = Vec::new();
+    for frag in &fragments {
+        let Some(uuid) = frag.attr("U").map(str::to_string) else {
+            continue;
+        };
+        let ok = match frag.attr("Type") {
+            Some("PuDe") => fold_device(doc, frag),
+            Some("LoxCaption") if frag.attr("CaptionType") == Some(CAPTION_PUSH_DEVICES) => {
+                fold_device_caption(doc, frag)
+            }
+            _ => false,
+        };
+        if ok {
+            folded.push(uuid);
+        }
+    }
+    folded
+}
+
+/// The program's element with the UUID of `frag`, if it has the same type.
+fn counterpart<'a>(doc: &'a mut LoxoneDoc, frag: &Element) -> Option<&'a mut Element> {
+    let uuid = frag.attr("U")?;
+    let obj = doc
+        .objects()
+        .into_iter()
+        .find(|o| o.uuid.eq_ignore_ascii_case(uuid))?;
+    let el = doc.element_at_mut(&obj.path)?;
+    (el.attr("Type") == frag.attr("Type")).then_some(el)
+}
+
+/// The app's mark: the fragment's `WF=` is the program's plus [`WF_CHANGED`].
+fn marked_changed(program: &Element, frag: &Element) -> bool {
+    let wf = |e: &Element| e.attr("WF").map_or(Some(0), |v| v.parse::<i64>().ok());
+    matches!((wf(program), wf(frag)), (Some(p), Some(f)) if p & WF_CHANGED == 0 && f == p | WF_CHANGED)
+}
+
+fn fold_device(doc: &mut LoxoneDoc, frag: &Element) -> bool {
+    if frag.child_elements().next().is_some() {
+        return false;
+    }
+    let Some(el) = counterpart(doc, frag) else {
+        return false;
+    };
+    if el.child_elements().next().is_some() || !marked_changed(el, frag) {
+        return false;
+    }
+    let wf = el.attr("WF").map(str::to_string);
+    el.attrs = frag.attrs.clone();
+    match wf {
+        Some(wf) => el.set_attr_raw("WF", &wf),
+        None => {
+            el.remove_attr("WF");
+        }
+    }
+    true
+}
+
+fn fold_device_caption(doc: &mut LoxoneDoc, frag: &Element) -> bool {
+    {
+        let Some(el) = counterpart(doc, frag) else {
+            return false;
+        };
+        let rest = |e: &Element| -> Vec<(String, String)> {
+            e.attrs
+                .iter()
+                .filter(|a| a.name != "WF")
+                .map(|a| (a.name.clone(), a.value.clone()))
+                .collect()
+        };
+        if rest(el) != rest(frag) || !marked_changed(el, frag) {
+            return false;
+        }
+    }
+    // Every phone in it must fold; the caption itself stays as programmed.
+    let mut all = true;
+    for dev in frag.child_elements() {
+        all &= dev.attr("Type") == Some("PuDe") && fold_device(doc, dev);
+    }
+    all
+}
+
 /// `/sys/custom/<UUID>.LoxCC` → `<UUID>`.
 fn uuid_from_name(name: &str) -> String {
     let base = name.rsplit('/').next().unwrap_or(name);
@@ -176,6 +290,79 @@ mod tests {
             format!("{uuid}.LoxCC"),
             archive::compress_loxcc(xml.as_bytes()).unwrap(),
         )
+    }
+
+    /// A program with a phone registered for push, inside its caption.
+    const WITH_PHONE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<ControlList>
+	<C Type="Document" V="178" U="0f000000-0000-0000-ffff000000000000">
+		<C Type="LoxCaption" V="178" U="0f000000-0000-0010-ffff000000000000" Title="Push-Benachrichtigungen: Registrierte Geräte" Cl="0,0,0" WF="16384" CaptionType="28" SubType="28">
+			<C Type="PuDe" V="178" U="0f000000-0000-0011-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="4210688" pTkn="t1" PCfg="-388" Usr="0f000000-0000-0020-ffff000000000000" DevT="samsung SM-S911B" DevOs="android"/>
+			<C Type="PuDe" V="178" U="0f000000-0000-0012-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="4210688" pTkn="t2" PCfg="-129" Usr="0f000000-0000-0021-ffff000000000000" DevT="Google Pixel 7 Pro" DevOs="android"/>
+		</C>
+	</C>
+</ControlList>
+"#;
+
+    /// The phone's custom change as the Miniserver wrote it (live,
+    /// 2026-10-31): new `PCfg=`, `WF=` with the app's mark.
+    const PHONE_CHANGED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<C Type="PuDe" V="178" U="0f000000-0000-0011-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="20987904" pTkn="t1" PCfg="-385" Usr="0f000000-0000-0020-ffff000000000000" DevT="samsung SM-S911B" DevOs="android"/>
+"#;
+
+    /// The caption's custom change: only the changed phone inside.
+    const CAPTION_CHANGED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<C Type="LoxCaption" V="178" U="0f000000-0000-0010-ffff000000000000" Title="Push-Benachrichtigungen: Registrierte Geräte" Cl="0,0,0" WF="16793600" CaptionType="28" SubType="28">
+	<C Type="PuDe" V="178" U="0f000000-0000-0011-ffff000000000000" Title="Registriertes Gerät" Cl="0,0,0" WF="20987904" pTkn="t1" PCfg="-385" Usr="0f000000-0000-0020-ffff000000000000" DevT="samsung SM-S911B" DevOs="android"/>
+</C>
+"#;
+
+    fn fold(xml: &str, files: &[(String, Vec<u8>)]) -> (Vec<String>, String) {
+        let mut doc = LoxoneDoc::parse(xml.as_bytes()).unwrap();
+        let folded = fold_app_owned(&mut doc, files);
+        (folded, String::from_utf8(doc.to_bytes()).unwrap())
+    }
+
+    #[test]
+    fn a_phones_push_settings_are_folded_into_the_program() {
+        let files = [
+            file("0f000000-0000-0011-ffff000000000000", PHONE_CHANGED),
+            file("0f000000-0000-0010-ffff000000000000", CAPTION_CHANGED),
+        ];
+        let (folded, out) = fold(WITH_PHONE, &files);
+        assert_eq!(
+            folded,
+            [
+                "0f000000-0000-0011-ffff000000000000",
+                "0f000000-0000-0010-ffff000000000000"
+            ]
+        );
+        // Exactly the PCfg changed; WF stays the program's, the caption and
+        // the other phone stay as they were.
+        assert_eq!(
+            out,
+            WITH_PHONE.replacen(r#"PCfg="-388""#, r#"PCfg="-385""#, 1)
+        );
+    }
+
+    #[test]
+    fn only_app_owned_changes_known_to_the_program_are_folded() {
+        // A newly registered phone: the program has no place for it yet.
+        let new_phone = PHONE_CHANGED.replace("0000-0011", "0000-0013");
+        // A phone change without the app's mark.
+        let unmarked = PHONE_CHANGED.replace(r#"WF="20987904""#, r#"WF="4210688""#);
+        // Something the program owns.
+        let timer = r#"<C Type="DayTimer" U="0f000000-0000-0002-ffff000000000000" WF="16793600"/>"#;
+        for xml in [new_phone.as_str(), unmarked.as_str(), timer] {
+            let files = [file("x", xml)];
+            let (folded, out) = fold(WITH_PHONE, &files);
+            assert!(folded.is_empty(), "{xml}");
+            assert_eq!(out, WITH_PHONE);
+        }
+        // A caption holding a phone the program lacks is not taken over.
+        let caption = CAPTION_CHANGED.replace("0000-0011", "0000-0013");
+        let (folded, _) = fold(WITH_PHONE, &[file("c", &caption)]);
+        assert!(folded.is_empty());
     }
 
     #[test]

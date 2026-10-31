@@ -290,8 +290,24 @@ configs (113 with at least one `Notification`).
   hold `ACT="1"` on notifications (5 entries in 4 configs), two of them
   together with a `TIM=`. Members of the *Full access* group show as
   inherited recipients that cannot be unticked, and get no `<PRM>`.
-  **Unverified:** whether the Miniserver delivers to a recipient that
-  `permissions.bin` does not list; Config writes both.
+  It does (live, 2026-10-31): a recipient by `ACT=` alone, with
+  `permissions.bin` not listing the notification at all (neither it nor
+  `LoxAPP3.json` has an entry for notifications), got the push once
+  their phone accepted it (below).
+- **Registered phones** are `<C Type="PuDe" Title="Registriertes Gerät">`
+  in a `LoxCaption` with `CaptionType="28"`/`SubType="28"` ("Push-
+  Benachrichtigungen: Registrierte Geräte"); the Miniserver writes them
+  (UUID tail = its serial). Attributes: `pTkn=` (push token), `PCfg=`
+  (the phone's push settings, a signed 32-bit mask), `Usr=` (the user),
+  `DevT=`/`DevOs=` (model, OS). **`PCfg` bits 0 and 1 gate program
+  notifications** (live, 2026-10-31, one phone): with `-388`
+  (`0x…FE7C`) a declared recipient got nothing while full-access users
+  got the push; after the user changed the app's notification settings,
+  `-385` (`0x…FE7F`), it arrived. Observed elsewhere: `-129`, `-130`.
+  The other bits are not known. The change is a custom change
+  (`/sys/custom/<PuDe>.LoxCC`, and one for the caption holding just that
+  phone), each `WF=` the program's plus `0x1000000`; `lox config push`
+  folds it into the upload (#242).
 
 ## Automatic Designer rules: `<C Type="AutopilotRule" APC=…>`
 
