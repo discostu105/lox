@@ -1,4 +1,4 @@
-//! Meter — gradient bar with an eighth-block tip (§6.3).
+//! Meter — gradient bar with an eighth-block tip.
 //!
 //! Each filled cell takes the gradient color of *its position*, so a bar at 30 % is
 //! all green and one at 95 % runs green → yellow → red (btop's trick).

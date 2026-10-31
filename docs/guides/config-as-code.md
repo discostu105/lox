@@ -29,11 +29,11 @@ infrastructure:
 |:--|:--|
 | **Module** (`*.loxl`) | Your source: the blocks, wires and parameters you manage |
 | **Base** (`.Loxone`) | The config the Miniserver runs now (a download) |
-| **Lockfile** (`*.lock.json`) | Pins every UUID the compiler minted, so the next compile changes only what you changed |
+| **Lockfile** (`*.lock.json`) | Pins every UUID the compiler created, so the next compile changes only what you changed |
 | **Out** (`.Loxone`) | Base + module, written exactly as Loxone Config would have drawn it |
 
 You manage only the logic you choose. Hardware, rooms, visualization, users and everyone else's logic pass through
-byte for byte. Nothing in `lox logic` talks to the Miniserver; `lox config push` does the transport.
+byte for byte. Nothing in `lox logic` talks to the Miniserver. `lox config push` does the transport.
 
 {: .note }
 `lox logic …` and the standalone `loxl …` binary are the same CLI, so Lox Logic's docs apply word for word.
@@ -56,7 +56,7 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q        # a wire; the `and` becomes
 jal_sued.TargetPos = 70                              # a parameter
 ```
 
-- `extern` names an object Loxone Config owns (matched by `uuid`, `iname` or `title`); you can wire to it, not
+- `extern` names an object Loxone Config owns, matched by `uuid`, `iname` or `title`. You can wire to it, not
   create it. A title that repeats can be narrowed by `room:`, `category:` or `device:` (the hardware serial of the
   Extension or Tree device it hangs off).
 - A plain declaration (`temp_hoch = GreaterEqual(…)`) is a block the compiler owns.
@@ -80,13 +80,13 @@ end
 ```
 
 The declaration owns that Code Touch's access: whoever it leaves out loses the right on the next push. Users, groups,
-schedules, NFC tags and codes are still created in Loxone Config or the app; a title the config doesn't have stops
+schedules, NFC tags and codes are still created in Loxone Config or the app. A title the config doesn't have stops
 the compile. `lox logic adopt` and `lox logic decompile` write the declarations for the rights the config has, and
 `lox logic lint` names users whose tag or code opens no Code Touch.
 
 ### Switching times and app switches
 
-A `schedule` is a DayTimer's week in source; a claim writes it onto a timer, extern or managed:
+A `schedule` is a DayTimer's week in source. A claim writes it onto a timer, extern or managed:
 
 ```text
 schedule abendlicht
@@ -100,12 +100,12 @@ schaltuhr.schedule = abendlicht
 party = VirtualIn("Partymodus")          # a new switch in the app, in the Virtual Inputs folder
 ```
 
-The claim replaces the timer's switching times and nothing else; edits made in the app are overwritten on the next
+The claim replaces the timer's switching times and nothing else. Edits made in the app are overwritten on the next
 push, and removing the claim hands the times back to the app. A new `VirtualIn` gets the next free `VI<n>`.
 
 ### Push notifications
 
-A push notification is created in Loxone Config (*Messages*); the module names it and says when it fires, what it
+A push notification is created in Loxone Config (*Messages*). The module names it and says when it fires, what it
 says and who gets it:
 
 ```text
@@ -141,7 +141,7 @@ base   = "base.Loxone"       # the deployed config (required)
 module = "pages"             # a .loxl file or a directory of them (required)
 lock   = "logic.lock.json"    # default: logic.lock.json
 out    = "out.Loxone"        # default: out.Loxone
-serial = "504F94112233"      # in minted UUIDs; push checks it
+serial = "504F94112233"      # goes into created UUIDs, and push checks it
 ```
 
 Then start in one of two ways:
@@ -204,30 +204,21 @@ git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 
 Each step stops the push when it fails:
 
-1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`). **Custom changes:** if the app, the web
-   UI or the API changed something Loxone Config hasn't saved yet (light moods, timers, autopilot rules), the
-   Miniserver holds it in `/sys/custom/`. The download doesn't contain it and the upload would delete it, so
-   `--force` refuses and names what is there.
-2. **Drift check:** the live logic must still be your `base`. If someone saved from Loxone Config or the app since,
-   the push refuses and names the `lox logic diff` to run. Changed users, groups, tags, codes or access rights don't
-   stop it: the push lists them as kept as live.
+1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`) and list its custom changes.
+2. Drift check: the live logic must still be your `base`.
 3. Compile against the live download, so users, passwords, access rights and layout stay as they are live.
-4. Show the changes and check the users: users, groups, NFC tags and codes changed in the app after the program file
-   was saved exist only on the Miniserver, and loading the upload would delete them. The push compares the live
-   users with the program file and lists what differs (needs an admin connection).
-5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
-   file. The app's catalogue in it (`LoxAPP3.json`) gets the push's changes to the app's controls: names, rooms,
-   categories, deleted controls, new push buttons, switches, memory flags, timers and sensor displays. What it cannot carry over is named; the app shows
-   those as before until Loxone Config saves. If your module grants or
-   revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided Lox Logic
-   reproduces the live one exactly; otherwise the push warns that it stays stale. Without `--force` the push ends
-   here.
-6. Upload as `/prog/sps_new.zip` and restart the program, as Loxone Config's save does: the Miniserver runs the
-   new program within seconds, remanent values kept (`--reboot` reboots it instead, about a minute). Users changed live
-   stop the upload: load and save the program in Loxone Config first, or pass `--discard-custom-changes`.
-7. Download again: the Miniserver must run exactly the compiled file, or the push fails and the project stays as it
-   was.
+4. Show the changes and compare the live users with the program file.
+5. Stage the upload and check that it extracts to exactly the compiled file. Without `--force`, the push ends here.
+6. Upload as `/prog/sps_new.zip` and restart the program, as a save from Loxone Config does.
+7. Download again: the Miniserver must run exactly the compiled file, or the project stays as it was.
 8. Update the lock, `out`, and `base` in `lox.toml`. Commit them.
+
+Custom changes are what the app, the web UI or the API changed and Loxone Config hasn't saved yet: light moods,
+timers, automatic rules, users, NFC tags and codes. The download doesn't contain them and the upload would delete
+them, so `--force` refuses and names them. If your module grants or revokes access
+([above](#who-may-open-a-door)), the push also updates `permissions.bin`. Details, including the app catalogue and
+the JSON report:
+[COMMANDS.md › config push](https://github.com/discostu105/lox/blob/main/COMMANDS.md#deploying-a-project-lox-config-push).
 
 | Flag | When |
 |:-----|:-----|
@@ -268,14 +259,14 @@ touched a managed block, bring the module up to date first (or `lox logic adopt 
   other block a test depends on
   ([simulator.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/simulator.md)).
 - **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/loxone-config/examples/ci.sh) checks
-  parsing, formatting, lock currency and byte-determinism; `--sync` also requires the sources to match the deployed
+  parsing, formatting, lock currency and byte-determinism. `--sync` also requires the sources to match the deployed
   config.
 - **No personal data in git:** a real config carries the address, users, codes and serials. `lox logic scan <file|dir>`
   lists where (element and attribute, never the value) and exits 1, so a CI step or pre-commit hook can refuse it.
 - **Rename safely:** `lox logic rename old_slug new_slug` renames across all files and the lock, identities kept.
 - **VS Code:** syntax highlighting and snippets in
   [editor/vscode](https://github.com/discostu105/lox/tree/main/crates/loxone-config/editor/vscode).
-- **AI agents:** `lox logic check --json` gives machine-readable errors; the
+- **AI agents:** `lox logic check --json` gives machine-readable errors. The
   [agent guide](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/agents.md) has the rules.
 
 ## Reference

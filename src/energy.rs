@@ -541,9 +541,9 @@ pub fn report(
     });
     if layout.nodes.is_empty() {
         anyhow::bail!(
-            "no energy flow found: the structure has no Energy Flow Monitor and no meter \
-             named like PV, grid or battery. Assign roles in ~/.lox/tui.yaml (roles: meter name → \
-             grid|pv|battery|load) or list the meters with `lox energy`."
+            "no energy flow found: no Energy Flow Monitor and no meter named like PV, grid or \
+             battery. Assign meter roles under `roles:` in ~/.lox/tui.yaml, or list the meters \
+             with `lox energy`."
         );
     }
     let efm_all = layout.efm.as_deref().map(&mut fetch).unwrap_or_default();

@@ -20,15 +20,10 @@ footer_content: "Apache-2.0 license. <a href=\"https://github.com/discostu105/lo
 color_scheme: lox
 
 exclude:
-  - api-research.md
-  - autopilot-design.md
-  - design-backup.md
-  - design-backup-inspect.md
   - design-mcp.md
   - design-tui.md
   - design-tui-mockups.html
-  - loxone-config-research.md
-  - plan.md
+  - research/
 
 callouts:
   warning:

@@ -121,19 +121,17 @@ const WF_CHANGED: i64 = 0x0100_0000;
 /// "Push-Benachrichtigungen: Registrierte Geräte").
 const CAPTION_PUSH_DEVICES: &str = "28";
 
-/// Carry the custom changes that belong to the app into `doc` (the compiled
-/// program), so that loading the upload keeps them instead of deleting them.
-/// Returns the UUIDs of the files it took over.
+/// Carry the app-owned custom changes into `doc` (the compiled program), so
+/// loading the upload keeps them. Returns the UUIDs of the files it took over.
 ///
-/// These are the push settings of a registered phone (`PuDe`: `PCfg=`, the
-/// notification categories it receives, and `pTkn=`). The app writes them,
-/// no source owns them, and losing them silently stops a phone's
-/// notifications. A `PuDe` change is folded when the program has the phone:
-/// its attributes are copied over, all but `WF=`, which keeps the program's
-/// value (the Miniserver marks the change with [`WF_CHANGED`]). The caption
-/// around the phones is taken over when it differs from the program only by
-/// that mark and every phone in it is folded. Anything else, a newly
-/// registered phone among it, stays a custom change for the caller to report.
+/// These are a registered phone's push settings (`PuDe`: `PCfg=`, `pTkn=`).
+/// The app writes them, and losing them silently stops the phone's notifications.
+///
+/// - A `PuDe` change is folded when the program has the phone: all attributes
+///   but `WF=` are copied over.
+/// - The phones' caption is folded when it differs only by [`WF_CHANGED`] and
+///   all its phones are folded.
+/// - Anything else, a newly registered phone too, stays a custom change.
 pub(crate) fn fold_app_owned(doc: &mut LoxoneDoc, files: &[(String, Vec<u8>)]) -> Vec<String> {
     let fragments: Vec<Element> = files
         .iter()

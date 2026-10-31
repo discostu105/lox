@@ -183,9 +183,8 @@ fn entry_without_id(text: &str) -> Option<bool> {
 /// What to say about a tag that was not learned because it is known.
 fn known_tag_hint(touch: &str) -> String {
     format!(
-        "the tag is probably known already: {} opened the door instead of learning it (it \
-         then reports no ID) — only tags that no user has are learned; `lox user show` \
-         lists a user's tags",
+        "the tag is probably paired already, so {} opened the door instead of reading it. \
+         Only unpaired tags can be learned. `lox user show` lists a user's tags",
         touch
     )
 }
@@ -198,11 +197,11 @@ pub fn learn_error(id: &str) -> Option<String> {
         return None;
     }
     Some(match last.to_ascii_uppercase().as_str() {
-        "E8" => "the Code Touch could not read the tag (read error) — hold it still against \
+        "E8" => "the Code Touch could not read the tag (read error). Hold it still against \
                  the reader and try again"
             .to_string(),
-        "EE" => "the tag refused authentication (authentication error) — a phone must be \
-                 unlocked; other tags may be of a type the Code Touch does not support"
+        "EE" => "the tag refused authentication (authentication error). Unlock the phone, \
+                 or use a tag type the Code Touch supports"
             .to_string(),
         "EF" | "00" => "the Code Touch's NFC reader failed to start (init error)".to_string(),
         code => format!("the Code Touch could not read the tag (error {})", code),
@@ -231,16 +230,14 @@ fn start_refused(code: u16, target: &Target) -> anyhow::Error {
         ),
         500 if target.secured => anyhow::anyhow!(
             "the Miniserver refused the secured learn command at {} (code 500): wrong \
-             visualization password, or the user {} has none — check the password in \
-             LOX_VISU_PASSWORD or the visualization password file; set one for the user in \
-             Loxone Config or the app",
+             visualization password, or the user {} has none. Check LOX_VISU_PASSWORD or the \
+             password file, or set a password for the user in Loxone Config or the app",
             touch,
             target.user
         ),
         401 | 403 | 500 => anyhow::anyhow!(
-            "the Miniserver refused to start learning at {} (code {}) — the user lox \
-             connects with must be an admin with a visualization password; change it with \
-             `lox setup set --user <admin>`",
+            "the Miniserver refused to start learning at {} (code {}). Connect as an admin \
+             with a visualization password: `lox setup set --user <admin>`",
             touch,
             code
         ),
@@ -424,7 +421,7 @@ where
                 );
                 // the state may not change when the same tag is learned again
                 if no_id {
-                    msg.push_str(&format!("; {}", known_tag_hint(&touch.name)));
+                    msg.push_str(&format!(": {}", known_tag_hint(&touch.name)));
                 } else if let Some(Ok(Some(last))) = before.as_deref().map(parse_learn_result) {
                     msg.push_str(&format!(
                         " (if it was the tag learned last, {}, the Miniserver may not \
@@ -833,7 +830,7 @@ pub mod tests {
             .await
             .unwrap_err();
         let msg = format!("{:#}", err);
-        assert!(msg.contains("known already"), "{}", msg);
+        assert!(msg.contains("paired already"), "{}", msg);
         assert!(!msg.contains("within"), "no timeout: {}", msg);
         assert_eq!(sent(&io).last(), Some(&t.plain_cmd(STOP)));
     }
@@ -848,7 +845,7 @@ pub mod tests {
             .unwrap_err();
         let msg = format!("{:#}", err);
         assert!(msg.contains("within 5 s"), "{}", msg);
-        assert!(msg.contains("known already"), "{}", msg);
+        assert!(msg.contains("paired already"), "{}", msg);
     }
 
     #[tokio::test(start_paused = true)]

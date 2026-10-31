@@ -51,7 +51,7 @@ cargo build --release
 
 The binary is at `target/release/lox` (or `lox.exe` on Windows). Copy it somewhere on your PATH.
 
-**Build requirements:** Rust 1.91+. No OpenSSL. No runtime dependencies.
+**Build requirements:** Rust 1.91+. No OpenSSL needed.
 
 ---
 
@@ -131,7 +131,7 @@ lox --ctx office status       # one-off command against a different context
 
 Existing single-Miniserver configs continue to work. Use `lox ctx migrate` to convert a flat config to a named context when you're ready.
 
-See the [Context Management](/lox/commands/configuration#context-management) reference for all options.
+See the [Context Management](https://github.com/discostu105/lox/blob/main/COMMANDS.md#context-management) reference for all options.
 
 ---
 
@@ -216,7 +216,7 @@ lox token info     # check token status
 lox token refresh  # extend validity
 ```
 
-Plain HTTP commands keep using Basic Auth. See [Token auth](/lox/commands/configuration#token-auth) for all token
+Plain HTTP commands keep using Basic Auth. See [Token auth](https://github.com/discostu105/lox/blob/main/COMMANDS.md#token-auth) for all token
 commands.
 
 ---

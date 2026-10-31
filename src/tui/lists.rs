@@ -468,7 +468,7 @@ pub fn event_rows(app: &App) -> Vec<usize> {
         .collect()
 }
 
-// ── Facets (§4.5a) ──────────────────────────────────────────────────────────
+// ── Facets ──────────────────────────────────────────────────────────
 
 /// Seconds a change counts as "recent".
 const RECENT_SECS: f64 = 600.0;

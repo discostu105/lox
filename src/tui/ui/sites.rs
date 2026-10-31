@@ -1,4 +1,4 @@
-//! ⁶ Sites — every configured context at a glance (§5.7).
+//! ⁶ Sites — every configured context at a glance.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
