@@ -208,6 +208,12 @@ USAGE:
         and default, plus the corpus-observed GUI default (D30) and the
         attribute parameters. Without a type: one line per type.
 
+  lxir templates [<file | template>]
+        The template library: per template its parameters and what it
+        does (lights, climate, safety, shading; each tested in the
+        simulator). With a name: the library file's source, to copy into
+        the module directory and call with one line.
+
   lxir roundtrip <cfg.Loxone>
         Verify the file re-serializes byte-identically (exit 1 if not).
   lxir render <cfg.Loxone> --page <title> [--lock <lock.json>] [--out <page.svg>]
@@ -282,6 +288,8 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["scan", rest @ ..] => cmd_scan(rest),
         ["observe", rest @ ..] => cmd_observe(rest),
         ["types", rest @ ..] => cmd_types(rest),
+        ["templates"] => cmd_templates(None),
+        ["templates", name] => cmd_templates(Some(name)),
         ["roundtrip", path] => cmd_roundtrip(path),
         ["render", rest @ ..] => cmd_render(rest),
         ["lsp"] | ["lsp", "--stdio"] => {
@@ -1950,6 +1958,33 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
 
 /// `lxir types`: the builtin table with its documented port facts — the
 /// reference an author (or agent) writes a block against.
+fn cmd_templates(name: Option<&str>) -> Result<ExitCode, AnyError> {
+    use lxir::library;
+    let Some(name) = name else {
+        let mut file = "";
+        for e in library::entries() {
+            if e.file != file {
+                println!("{}{}.lxir", if file.is_empty() { "" } else { "\n" }, e.file);
+                file = e.file;
+            }
+            println!("  {}({})", e.name, e.params);
+            println!("      {}", e.description);
+        }
+        println!("\n`lxir templates <file | template>` prints a file to copy into the module.");
+        return Ok(ExitCode::SUCCESS);
+    };
+    let Some((_, source)) = library::source(name) else {
+        let names: Vec<String> = library::FILES
+            .iter()
+            .map(|(f, _)| f.to_string())
+            .chain(library::entries().into_iter().map(|e| e.name))
+            .collect();
+        return Err(format!("no template or file `{name}` (known: {})", names.join(", ")).into());
+    };
+    print!("{source}");
+    Ok(ExitCode::SUCCESS)
+}
+
 fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
     use lxir::connectors;
     let json = args.contains(&"--json");

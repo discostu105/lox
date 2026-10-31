@@ -50,6 +50,7 @@ pub mod doc;
 pub mod error;
 pub mod ir;
 pub mod layout;
+pub mod library;
 pub mod lock;
 pub mod lsp;
 pub mod moods;

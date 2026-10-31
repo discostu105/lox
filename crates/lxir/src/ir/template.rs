@@ -143,7 +143,7 @@ impl Module {
             match (p, &binding.kind) {
                 (TemplateParam::Object { name, block_type }, BindingKind::Param(Value::Ref(s))) => {
                     if let Some(declared) = self.declared_type(s) {
-                        if declared != block_type {
+                        if block_type != "any" && declared != block_type {
                             return Err(fail(format!(
                                 "`{s}` is a {declared}, but parameter `{name}` \
                                  expects a {block_type}"

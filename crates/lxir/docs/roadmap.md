@@ -93,6 +93,11 @@ types) contradict each other. Results and methodology:
       blocks graded in lxir's simulator, a reference solution each
       (`cargo test` checks them); `run.py` runs Claude Code on them.
       Inputs of blocks without a simulator model now follow their wires.
+- [x] Template library (2026-10-31, `templates/`, `lxir templates`,
+      #203): 13 templates for light, climate, safety and shading, each
+      tested in the simulator; object parameters typed `any`. Open:
+      room templates over LightController2, jalousies and the room
+      controller once the simulator models them.
 - [x] `lxir diff --summary` (2026-10-29): the semantic diff as a commit
       message — subject counting the changes per page, body by title and
       port name.

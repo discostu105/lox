@@ -69,7 +69,7 @@ template   = "template" slug "(" [ params ] ")" [ comment ]
              { comment | block-head | arg-line | wire | set }
              "end" [ comment ] ;
 params     = param { "," param } ;
-param      = slug ":" type                         (* object parameter *)
+param      = slug ":" ( type | "any" )             (* object parameter *)
            | slug "=" ( number [ unit ] | string ) ;   (* value parameter, default *)
 instance   = slug "=" slug "(" [ inst-args ] ")" [ comment ] ;
 inst-args  = param-name ":" ( slug | value ) { "," … } [ "," ] ;
@@ -680,7 +680,10 @@ declares a `GreaterEqual` block (block types are PascalCase).
 Parameters come in two forms. An **object parameter** (`jalousie:
 AutoJalousie`) is required at every call site and passes a slug; the
 annotation is checked against the argument's declared type when it is
-known. A **value parameter** (`pos = 70`) carries a default and may be
+known. `any` (`bewegung: any`) takes an object of every type — a
+template over a sensor that may be a virtual input or a physical one;
+the ports the body uses are checked after expansion, against the type
+passed. A **value parameter** (`pos = 70`) carries a default and may be
 overridden with a literal or a `let` reference. Free identifiers in the
 body that are not parameters capture the module's surrounding names
 (externs, lets, blocks), like any other reference.
@@ -721,6 +724,10 @@ name a value parameter whose value is a string (a `let` reference to a
 string constant also works); a brace-wrapped slug naming no value
 parameter is an error (typo guard), and braces around anything not
 slug-shaped pass through verbatim.
+
+The template library (`templates/`, listed by `lxir templates`, D23)
+ships tested templates for common automations; copy a file into the
+module directory to call them.
 
 The body may contain only block declarations, wires, sets and comments —
 no nesting, no template-local `let`/`extern` (deferred, D23). `template`

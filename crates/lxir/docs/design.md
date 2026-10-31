@@ -462,6 +462,20 @@ Anything unverified is an error, not a heuristic:
     parameter is an error (typo guard) while non-slug braces pass
     verbatim. Rejected: a `Value`-typed label position in the grammar
     (ripples through parser/fmt/decompile for no added power).
+  - `any` and the library (2026-10-31, #203): an object parameter typed
+    `any` takes every type. A library template over "the motion sensor"
+    cannot know whether the house has a virtual input or a physical
+    one; the ports the body uses are still checked, after expansion,
+    against the type passed. The library (`templates/`, `lxir
+    templates`) is plain `.lxir`: a project copies a file into its
+    module directory, so an instance's identity is the project's like
+    any other source, and a later library change reaches a project only
+    when someone copies it again. Every library template is tested in
+    the simulator against `examples/configs/rohbau.Loxone`, so it uses
+    only simulated block types. Results are a block named `ausgang`,
+    wired by the caller to the actuator, whatever its type. Rejected: an
+    `import` of the library by name (a library update would change
+    every project's compile without a diff in its source).
 
 - **D24 — Expressions are sugar over the discrete blocks, owned by their
   statement** (2026-08-25). The sketch's

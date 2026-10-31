@@ -1,0 +1,62 @@
+# Sicherheit — Vorlagen für Türhinweis, Wasser- und Einbruchalarm.
+#
+# Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
+# Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
+# gelesen; das Ergebnis jeder Vorlage ist der Block `ausgang` der Instanz:
+#
+#   haustuer = tuer_offen_hinweis(kontakt: haustuer_offen, nach: 3min)
+#   hinweis.I <- haustuer_ausgang.Q
+
+template tuer_offen_hinweis(kontakt: any, nach = 3min, titel = "Tür offen")
+	# Hinweis, wenn die Tür länger als `nach` offen steht.
+
+	ausgang = OnDelay(
+		"{titel}",
+		InputTrigger: kontakt.Q,
+		Time: nach,
+	)
+end
+
+template wasseralarm(melder: any, dauer = 60s, titel = "Wasseralarm")
+	# Wasseralarm: der Melder löst die Sirene für `dauer` aus.
+
+	ausgang = Monoflop(
+		"{titel}",
+		InputTrigger: melder.Q,
+		Time: dauer,
+	)
+end
+
+template alarm_abwesend(kontakt: any, abwesend: any, frist = 30s, dauer = 3min, titel = "Einbruch")
+	# Einbruchalarm: Kontakt bei aktivem `abwesend` → nach `frist` die
+	# Sirene, höchstens `dauer` lang. Ausschalten von `abwesend` beendet den
+	# Alarm und entschärft innerhalb der Frist.
+
+	einbruch = And(
+		I1: kontakt.Q,
+		I2: abwesend.Q,
+	)
+
+	zuhause = Not(
+		I: abwesend.Q,
+	)
+
+	erkannt = SRFlipFlop(
+		"{titel} erkannt",
+		InputS: einbruch.Q,
+		InputR: zuhause.Q,
+	)
+
+	verzoegert = OnDelay(
+		"{titel} Entschärfzeit",
+		InputTrigger: erkannt.Q,
+		Time: frist,
+	)
+
+	ausgang = Monoflop(
+		"{titel} Sirene",
+		InputTrigger: verzoegert.Q,
+		Reset: zuhause.Q,
+		Time: dauer,
+	)
+end
