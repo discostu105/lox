@@ -952,22 +952,185 @@ fn lights_off_resets_locks_and_holds_the_automatic_back() {
 
 #[test]
 fn lights_refuse_ambiguous_moods_and_unmodelled_inputs() {
-    let d = doc(&(vin(5) + &lights(4, 1, &["Sel1<p5-AQ"])));
+    // A switch circuit's `on` (stored 1) reads 1.
+    let d = doc(&lights(4, 1, &[]));
     let mut sim = Simulator::new(&d);
-    sim.set("p1-AQ", 1.0);
-    sim.tick(1.0);
-    let err = sim.check("p4-AQ1").unwrap_err();
-    assert!(err.contains("sets AQ1 to `on`"), "{err}");
-    let d = doc(&(vin(5) + &lights(4, 100, &["Sel1<p5-AQ"])));
+    pulse(&mut sim, "p1-AQ");
+    assert_eq!(sim.read("p4-AQ1"), 1.0);
+    let d = doc(&(vin(5) + &lights(4, 100, &["I1<p5-AQ"])));
     let mut sim = Simulator::new(&d);
     sim.set("p5-AQ", 1.0);
     sim.tick(1.0);
     let err = sim.check("p4-AQ1").unwrap_err();
     assert!(
-        err.contains("its input T5/1 (`Sel1`) is not simulated"),
+        err.contains("its input Lc1 (`I1`) is not simulated"),
         "{err}"
     );
     let d = doc(&obj(4, "LightController2", &["AQ1"]));
     let err = Simulator::new(&d).check("p4-AQ1").unwrap_err();
     assert!(err.contains("no moods yet"), "{err}");
+}
+
+/// A `LightController2` `o20` with the moods "Viel Licht" (777, motion),
+/// A (1, AQ1 20 %), B (2, 40 %), C (3, 60 %) and off, in that order — the
+/// probe of oracle session 35 — and M+ (p11), M− (p12), T5/1 (p13),
+/// T5/2 (p14), On (p15), Buzzer (p16), Off (p17), Mo (p18) wired.
+fn mood_lights(extra: &[&str]) -> String {
+    let mut ports = vec![
+        "InputTriggerUp<p11-AQ",
+        "InputTriggerDown<p12-AQ",
+        "Sel1<p13-AQ",
+        "Sel2<p14-AQ",
+        "On<p15-AQ",
+        "AlarmClock<p16-AQ",
+        "Reset<p17-AQ",
+        "Move<p18-AQ",
+        "MoveOn=60",
+        "MoveTimeout=3600",
+        "MoveIgnore=300",
+        "AQ1",
+        "Scene",
+    ];
+    ports.extend_from_slice(extra);
+    let block = obj(20, "LightController2", &ports);
+    let mood = |name: &str, sid: &str, q1: u32, flag: &str| {
+        format!(
+            "<LightsceneC Name=\"{name}\" UUID=\"m{sid}\"{flag} Outputs=\"18\" SID=\"{sid}\" \
+             CID=\"1\" Q1=\"{q1}\"/>\r\n"
+        )
+    };
+    let moods = format!(
+        "<LightscenesC FC=\"0\" Outputs=\"18\" Num=\"5\">\r\n{}{}{}{}{}</LightscenesC>\r\n\
+         <LSConfig OpM=\"778\" ScMv=\"777\" ScAc=\"1\"/>\r\n</C>\r\n",
+        mood("Viel Licht", "777", 100, " Move=\"true\""),
+        mood("A", "1", 20, ""),
+        mood("B", "2", 40, ""),
+        mood("C", "3", 60, ""),
+        mood("Aus", "778", 0, " ReadOnly=\"true\""),
+    );
+    (11..=18).map(vin).collect::<String>() + &block.replace("</C>\r\n", &moods)
+}
+
+/// A click on `port`, then a second of quiet.
+fn click(sim: &mut Simulator, port: &str) -> (f64, f64) {
+    pulse(sim, port);
+    sim.tick(1.0);
+    (sim.read("p20-Scene"), sim.read("p20-AQ1"))
+}
+
+#[test]
+fn lights_step_through_the_mood_list_with_m_plus_and_m_minus() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let ups: Vec<_> = (0..6).map(|_| click(&mut sim, "p11-AQ")).collect();
+    assert_eq!(
+        ups,
+        [
+            (99.0, 100.0),
+            (1.0, 20.0),
+            (2.0, 40.0),
+            (3.0, 60.0),
+            (0.0, 0.0),
+            (99.0, 100.0)
+        ],
+        "list order, the off mood a step, around the end"
+    );
+    let downs: Vec<_> = (0..5).map(|_| click(&mut sim, "p12-AQ").0).collect();
+    assert_eq!(downs, [0.0, 3.0, 2.0, 1.0, 99.0]);
+    // After Off, M+ goes on from the off mood's place.
+    click(&mut sim, "p11-AQ");
+    click(&mut sim, "p17-AQ");
+    assert_eq!(click(&mut sim, "p11-AQ").0, 99.0);
+}
+
+#[test]
+fn lights_t5_selects_its_mood_then_steps_on() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    let t1: Vec<_> = (0..5).map(|_| click(&mut sim, "p13-AQ").0).collect();
+    assert_eq!(t1, [1.0, 2.0, 3.0, 0.0, 99.0]);
+    // Another input made the last change: T5/2 selects its mood …
+    assert_eq!(click(&mut sim, "p14-AQ").0, 2.0);
+    assert_eq!(click(&mut sim, "p14-AQ").0, 3.0);
+    // … T5/1 after M+ selects its own …
+    click(&mut sim, "p11-AQ");
+    assert_eq!(click(&mut sim, "p13-AQ").0, 1.0);
+    // … and T5/2 while its mood shows steps on.
+    assert_eq!(click(&mut sim, "p13-AQ").0, 2.0);
+    assert_eq!(click(&mut sim, "p14-AQ").0, 3.0);
+}
+
+#[test]
+fn lights_on_and_buzzer_select_the_bright_mood() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    click(&mut sim, "p14-AQ");
+    assert_eq!(click(&mut sim, "p15-AQ").0, 99.0);
+    click(&mut sim, "p17-AQ");
+    // Buzzer without an alarm-clock mood: ID 99, off Met after it falls.
+    assert_eq!(click(&mut sim, "p16-AQ").0, 99.0);
+    sim.tick(3000.0);
+    sim.tick(598.0);
+    assert_eq!(sim.read("p20-Scene"), 99.0);
+    sim.tick(2.0);
+    assert_eq!((sim.read("p20-Scene"), sim.read("p20-AQ1")), (0.0, 0.0));
+    // DisPc disables the pulse inputs.
+    let d = doc(&(vin(19) + &mood_lights(&["InputDisable<p19-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    sim.set("p19-AQ", 1.0);
+    assert_eq!(click(&mut sim, "p11-AQ").0, 0.0);
+}
+
+#[test]
+fn lights_refuse_unverified_manual_operation() {
+    let refused = |steps: &dyn Fn(&mut Simulator)| {
+        let d = doc(&mood_lights(&[]));
+        let mut sim = Simulator::new(&d);
+        sim.check("p20-Scene").unwrap();
+        steps(&mut sim);
+        sim.check("p20-Scene").unwrap_err()
+    };
+    let err = refused(&|sim| {
+        pulse(sim, "p11-AQ");
+        sim.tick(0.1);
+        pulse(sim, "p11-AQ");
+    });
+    assert!(err.contains("a double click on M+"), "{err}");
+    let err = refused(&|sim| {
+        sim.set("p13-AQ", 1.0);
+        sim.tick(0.1);
+        sim.tick(1.0);
+    });
+    assert!(err.contains("T5/1 held for 1 s"), "{err}");
+    let err = refused(&|sim| {
+        click(sim, "p13-AQ");
+        sim.tick(31.0);
+        click(sim, "p13-AQ");
+    });
+    assert!(err.contains("more than 30 s"), "{err}");
+    let err = refused(&|sim| {
+        click(sim, "p13-AQ");
+        click(sim, "p18-AQ");
+    });
+    assert!(err.contains("Mo or P after a manual mood change"), "{err}");
+    let err = refused(&|sim| {
+        click(sim, "p18-AQ");
+        click(sim, "p11-AQ");
+    });
+    assert!(err.contains("while the motion automatic"), "{err}");
+    let err = refused(&|sim| {
+        click(sim, "p11-AQ");
+        sim.tick(3600.0);
+    });
+    assert!(err.contains("after Met = 3600 s"), "{err}");
+    let err = refused(&|sim| {
+        sim.set("p15-AQ", 1.0);
+        sim.tick(1.0);
+        click(sim, "p11-AQ");
+    });
+    assert!(err.contains("while On or Buzzer is held"), "{err}");
 }

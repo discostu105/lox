@@ -1276,9 +1276,10 @@ built-in "Viel Licht" (the motion mood) and any mood the controller's
 motion settings name, which must stay in the set (with values of your
 choice). A claim whose moods already match changes nothing, byte for
 byte. Wiring a switch's buttons to the controller's T5 inputs (`Sel1`…`Sel8`)
-is ordinary source; which mood each input selects is assigned in Loxone
-Config's mood dialog, and where that assignment is stored is not yet a
-format fact.
+is ordinary source; T5/n selects the mood with scene id n — the n-th
+mood made, whatever its place in the list — so the assignment is stored
+nowhere but in the moods' `SID`s ([loxone-format.md](loxone-format.md),
+*LightController2 moods*).
 
 A controller minted from source has no moods until Loxone Config saves
 it; a claim on it first writes what that save would — the stock "Viel
