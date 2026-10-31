@@ -2,12 +2,19 @@
 //! meters ranked by current power (`lox energy --top`).
 
 use anyhow::Result;
+use clap::Subcommand;
 
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::energy::{self, FlowReport, MeterPower, Role};
 use crate::inventory::is_energy_type;
 use crate::util::xml_attr;
+
+#[derive(Subcommand)]
+pub(crate) enum EnergyCmd {
+    /// Energy flow now: production, consumption, grid import/export, battery
+    Flow,
+}
 
 pub fn cmd_energy(ctx: &RunContext, room: Option<String>, top: Option<usize>) -> Result<()> {
     if let Some(n) = top {

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use clap::Subcommand;
 use loxone_client::sdtest::{SdTestResult, parse_sdtest};
 use loxone_client::system::PlcState;
 use std::fs;
@@ -11,7 +12,6 @@ use crate::commands::RunContext;
 use crate::config::Config;
 use crate::otel;
 use crate::util::{abs_path, bar, kb_fmt, xml_attr};
-use crate::{FilesCmd, OtelCmd, UpdateCmd};
 
 pub fn cmd_status(
     ctx: &RunContext,
@@ -675,6 +675,18 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub(crate) enum UpdateCmd {
+    /// Check for available firmware updates
+    Check,
+    /// Install firmware update (requires --yes to confirm)
+    Install {
+        /// Skip confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+}
+
 pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
     match action {
         UpdateCmd::Check => {
@@ -755,6 +767,24 @@ pub fn cmd_reboot(_ctx: &RunContext, yes: bool) -> Result<()> {
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub(crate) enum FilesCmd {
+    /// List files at a path
+    Ls {
+        /// Path on the Miniserver filesystem
+        #[arg(default_value = "/")]
+        path: String,
+    },
+    /// Download a file (into the current directory unless --save-as is given)
+    Get {
+        /// Path on the Miniserver filesystem
+        path: String,
+        /// Local output path, `-` for stdout [default: the file's name, in the current directory]
+        #[arg(long, value_name = "PATH")]
+        save_as: Option<String>,
+    },
+}
+
 pub fn cmd_files(ctx: &RunContext, action: FilesCmd) -> Result<()> {
     let lox = Config::load()?.client()?;
     match action {
@@ -814,6 +844,58 @@ fn write_stdout(data: &[u8]) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         r => r.context("Cannot write to stdout"),
     }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum OtelCmd {
+    /// Continuously push metrics, logs & traces to an OTLP endpoint
+    Serve {
+        /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
+        #[arg(long, default_value = "http://localhost:4318")]
+        endpoint: String,
+        /// Push interval (e.g. 30s, 1m, 5m)
+        #[arg(long, short = 'i', default_value = "30s")]
+        interval: String,
+        /// Filter by control type
+        #[arg(long, short = 't')]
+        r#type: Option<String>,
+        /// Filter by room
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Additional header for auth (e.g. "Authorization=Bearer xxx")
+        #[arg(long)]
+        header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
+        /// Disable log export (metrics and traces only)
+        #[arg(long)]
+        no_logs: bool,
+        /// Disable trace export (metrics and logs only)
+        #[arg(long)]
+        no_traces: bool,
+    },
+    /// One-shot: push current state and exit
+    Push {
+        /// OTLP HTTP endpoint URL
+        #[arg(long, default_value = "http://localhost:4318")]
+        endpoint: String,
+        /// Filter by control type
+        #[arg(long, short = 't')]
+        r#type: Option<String>,
+        /// Filter by room
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Additional header for auth
+        #[arg(long)]
+        header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
+        /// Disable log export (metrics only)
+        #[arg(long)]
+        no_logs: bool,
+    },
 }
 
 pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {

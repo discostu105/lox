@@ -3,6 +3,7 @@
 //! access codes. The user lox connects with needs the right to manage users.
 
 use anyhow::{Result, bail};
+use clap::Subcommand;
 use serde::Serialize;
 use std::io::{IsTerminal, Write};
 use std::time::Duration;
@@ -12,7 +13,6 @@ use crate::config::Config;
 use crate::nfc_learn::{self, LearnedTag};
 use crate::snapshot;
 use crate::usermgmt::{self, AccessReport, UserChange, Verdict};
-use crate::{AccessCmd, AccessConfigSource, UserCmd, UserCodeCmd, UserNfcCmd};
 use loxone_client::client::LoxClient;
 
 fn print_json(v: &impl serde::Serialize) -> Result<()> {
@@ -22,6 +22,70 @@ fn print_json(v: &impl serde::Serialize) -> Result<()> {
 
 fn yes_no(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum UserCmd {
+    /// List the users with state and admin flag
+    #[command(alias = "list")]
+    Ls,
+    /// Show a user: state, validity, groups, NFC tags, number of access codes
+    Show {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+    },
+    /// List the user groups with their type (normal, full access, …)
+    Groups,
+    /// Pair NFC tags with a user or remove them
+    #[command(subcommand)]
+    Nfc(UserNfcCmd),
+    /// Set a user's access code for NFC Code Touch keypads
+    #[command(subcommand)]
+    Code(UserCodeCmd),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum UserNfcCmd {
+    /// Pair an NFC tag with a user (read the ID with `lox access learn`)
+    Add {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// Tag ID: hex bytes, with or without spaces ("04 A1 B2 C3 D4 E5 F6")
+        id: String,
+        /// Name for the tag, e.g. "alice phone"
+        name: String,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// Remove an NFC tag from a user
+    #[command(alias = "remove")]
+    Rm {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// The tag: its ID (any form) or its name
+        tag: String,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum UserCodeCmd {
+    /// Set a user's access code (2-8 digits), replacing the current one
+    ///
+    /// The code is read from a hidden prompt (asked twice), or from the first
+    /// line of stdin when stdin is not a terminal — never from the command
+    /// line, where it would end up in the shell history.
+    #[command(verbatim_doc_comment)]
+    Set {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// Skip the confirmation prompt (required when the code comes from stdin)
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 pub fn cmd_user(ctx: &RunContext, action: UserCmd) -> Result<()> {
@@ -392,6 +456,85 @@ fn pair_learned(
     confirm(ctx, yes, &change.question())?;
     usermgmt::apply(lox, &mut change, None)?;
     Ok(Some(change))
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AccessCmd {
+    /// Access log of an NFC Code Touch: who opened when, denied attempts
+    Log {
+        /// NFC Code Touch: name (or a unique part of it), alias or UUID
+        code_touch: String,
+        /// Number of entries to show, newest last (0: all)
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
+    /// Why may (or may not) a user open an NFC Code Touch?
+    ///
+    /// Joins the live user (state, groups, NFC tags, access codes) with the
+    /// access rights in the program file, which is downloaded fresh from the
+    /// Miniserver (read-only FTP) unless --file, --at or --cached says
+    /// otherwise. Verdicts: granted, no-access-right, no-credential,
+    /// user-disabled, unknown-full-access.
+    #[command(verbatim_doc_comment)]
+    Check {
+        /// User name (exact, or a unique part of it) or UUID
+        user: String,
+        /// NFC Code Touch (default: every Code Touch in the program file)
+        code_touch: Option<String>,
+        #[command(flatten)]
+        src: AccessConfigSource,
+    },
+    /// Users and groups the Miniserver lists as assigned to a control (live)
+    Perms {
+        /// Control name, `Name [room]`, alias or UUID
+        control: String,
+    },
+    /// Read an NFC tag's ID at a Code Touch, and optionally pair it with a user
+    ///
+    /// Starts the Code Touch's learn mode (it shows a cyan running light);
+    /// hold the tag, or the unlocked phone, to the reader. Prints the ID and
+    /// whether the tag is known already. Learn mode always ends again, also
+    /// on timeout and Ctrl-C. With --user (and --name) the tag is then paired
+    /// with that user, after a confirmation.
+    ///
+    /// A secured Code Touch takes learn mode only as a secured command, signed
+    /// with the visualization password of the user lox connects with: from
+    /// --visu-password-file, LOX_VISU_PASSWORD, `visu_password_file:` in the
+    /// config, or a hidden prompt.
+    #[command(verbatim_doc_comment)]
+    Learn {
+        /// NFC Code Touch: name (or a unique part of it), alias or UUID
+        code_touch: String,
+        /// Pair the tag with this user (name or UUID)
+        #[arg(long, requires = "name")]
+        user: Option<String>,
+        /// Name for the tag when pairing, e.g. "alice phone"
+        #[arg(long, requires = "user")]
+        name: Option<String>,
+        /// How long to wait for a tag (e.g. 60s, 2m; at most 5m)
+        #[arg(long, default_value = "60s")]
+        timeout: String,
+        /// Pair without asking
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// File holding the visualization password (first line), for a secured Code Touch
+        #[arg(long, value_name = "PATH")]
+        visu_password_file: Option<std::path::PathBuf>,
+    },
+}
+
+/// Where `lox access check` reads the access rights from.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub(crate) struct AccessConfigSource {
+    /// A config file (ZIP or .Loxone) instead of a fresh download
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<String>,
+    /// A snapshot of the config repo: commit, version (v273) or date (2026-08-25)
+    #[arg(long, value_name = "SNAPSHOT", conflicts_with = "file")]
+    pub at: Option<String>,
+    /// The config repo's working copy or the cached download (no FTP; may be stale)
+    #[arg(long, conflicts_with_all = ["file", "at"])]
+    pub cached: bool,
 }
 
 pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {

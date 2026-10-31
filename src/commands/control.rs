@@ -1,5 +1,7 @@
 use anyhow::{Result, bail};
+use clap::Subcommand;
 use reqwest::blocking::Client;
+use serde_json::Value;
 use std::thread;
 use std::time::Duration;
 
@@ -9,8 +11,77 @@ use crate::config::Config;
 use crate::inventory::{fetch_mood_list_json, resolve_mood_list};
 use crate::scene::Scene;
 use crate::util::{bar, encode_path_value, json_val_str, xml_attr};
-use crate::{InputCmd, LightCmd, MusicCmd, print_dry_run, print_resp, send_or_dry_run};
 use loxone_client::client::{LoxClient, USER_AGENT};
+
+fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp).unwrap());
+    } else if !quiet {
+        let val = resp
+            .pointer("/LL/value")
+            .and_then(json_val_str)
+            .unwrap_or_else(|| "?".to_string());
+        let code = resp
+            .pointer("/LL/Code")
+            .and_then(json_val_str)
+            .unwrap_or_else(|| "?".to_string());
+        println!(
+            "{}  {} → {} = {}",
+            if code == "200" { "✓" } else { "✗" },
+            name,
+            cmd,
+            val
+        );
+    }
+}
+
+/// Print a dry-run envelope showing what would be executed.
+fn print_dry_run(
+    json: bool,
+    quiet: bool,
+    uuid: &str,
+    command: &str,
+    control_name: &str,
+    room: Option<&str>,
+) {
+    if json {
+        let mut obj = serde_json::json!({
+            "ok": true,
+            "dry_run": true,
+            "would_execute": {
+                "uuid": uuid,
+                "command": command,
+                "control": control_name,
+            }
+        });
+        if let Some(r) = room {
+            obj["would_execute"]["room"] = serde_json::Value::String(r.to_string());
+        }
+        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+    } else if !quiet {
+        println!("[dry-run] {} → {} (uuid: {})", control_name, command, uuid);
+    }
+}
+
+/// Execute a command or print dry-run info. Returns the response (or None for dry-run).
+#[allow(clippy::too_many_arguments)]
+fn send_or_dry_run(
+    lox: &LoxClient,
+    uuid: &str,
+    cmd: &str,
+    control_name: &str,
+    room: Option<&str>,
+    dry_run: bool,
+    json: bool,
+    quiet: bool,
+) -> Result<Option<Value>> {
+    if dry_run {
+        print_dry_run(json, quiet, uuid, cmd, control_name, room);
+        Ok(None)
+    } else {
+        Ok(Some(lox.send_cmd(uuid, cmd)?))
+    }
+}
 
 pub fn cmd_on(
     ctx: &RunContext,
@@ -244,6 +315,42 @@ pub fn fetch_light_moods(
     Ok((ctrl, actions::parse_mood_list(&moods_json)?))
 }
 
+#[derive(Subcommand)]
+pub(crate) enum LightCmd {
+    /// List available moods for a LightControllerV2
+    #[command(alias = "list-moods")]
+    Moods {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Set light mood: plus | minus | off | <mood-id>
+    Mood {
+        name_or_uuid: String,
+        /// Mood action: plus, minus, off, or numeric mood ID
+        action: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Set dimmer level (0-100)
+    #[command(alias = "dimmer")]
+    Dim {
+        name_or_uuid: String,
+        /// Brightness level 0-100
+        level: f64,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Set color (hex RGB e.g. #FF0000 or hsv(h,s,v))
+    Color {
+        name_or_uuid: String,
+        /// Color value: hex RGB (#FF0000) or hsv(h,s,v)
+        value: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+}
+
 pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
     match action {
         LightCmd::Moods { name_or_uuid, room } => {
@@ -277,6 +384,25 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
         } => cmd_color(ctx, name_or_uuid, value, room)?,
     }
     Ok(())
+}
+
+#[derive(Subcommand)]
+pub(crate) enum InputCmd {
+    /// Set analog/virtual input value
+    Set {
+        /// Control name or UUID
+        name_or_uuid: String,
+        /// Value to send (numeric or text)
+        value: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
+    /// Momentary pulse
+    Pulse {
+        name_or_uuid: String,
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+    },
 }
 
 pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
@@ -751,6 +877,60 @@ pub fn cmd_run(ctx: &RunContext, scene: String, scene_dry_run: bool) -> Result<(
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub(crate) enum MusicCmd {
+    /// Play in a zone
+    Play {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Pause in a zone
+    Pause {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Stop in a zone
+    Stop {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Set volume in a zone
+    Volume {
+        /// Volume level 0-100
+        level: u32,
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Skip to next track
+    Next {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Go to previous track
+    Prev {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Mute a zone
+    Mute {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+    /// Unmute a zone
+    Unmute {
+        /// Zone number
+        #[arg(default_value = "1")]
+        zone: u32,
+    },
+}
+
 pub fn cmd_music(ctx: &RunContext, action: MusicCmd) -> Result<()> {
     let cfg = Config::load()?;
     let music_base = format!(
@@ -795,4 +975,19 @@ pub fn cmd_music(ctx: &RunContext, action: MusicCmd) -> Result<()> {
         Err(e) => bail!("Music server error: {}", e),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── json_val_str (Gen2 numeric value handling) ─────────────────────────
+
+    #[test]
+    fn test_print_resp_numeric_code() {
+        // Gen2 Miniservers return numeric Code values
+        let resp = serde_json::json!({"LL": {"Code": 200, "value": 1}});
+        // Should not panic and should show ✓ (code 200)
+        print_resp(&resp, false, false, "test", "on");
+    }
 }

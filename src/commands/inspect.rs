@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use clap::Subcommand;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -6,10 +7,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::commands::RunContext;
+use crate::commands::config_insight::ConfigSource;
 use crate::config::Config;
 use crate::inventory::is_sensor_type;
 use crate::util::{now_hms, xml_attr};
-use crate::{AutopilotCmd, eval_op, matches_filters, print_stream_event};
 use loxone_client::stats::{
     StatsEntry, find_stats_files, parse_stats_entries, parse_weather_entry, stats_data_offset,
     stats_file_path, stats_period,
@@ -244,6 +245,88 @@ const RECONNECT_AFTER_OUT_OF_SERVICE_SECS: u64 = 5;
 const RECONNECT_GIVE_UP_SECS: u64 = 30 * 60;
 /// Connecting and authenticating one stream session.
 const STREAM_CONNECT_TIMEOUT_SECS: u64 = 20;
+
+fn matches_filters(
+    info: &stream::StateUuidInfo,
+    type_filter: Option<&str>,
+    room_filter: Option<&str>,
+    control_filter: Option<&str>,
+) -> bool {
+    if let Some(tf) = type_filter
+        && !info
+            .control_type
+            .to_lowercase()
+            .contains(&tf.to_lowercase())
+    {
+        return false;
+    }
+    if let Some(rf) = room_filter
+        && !info
+            .room
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains(&rf.to_lowercase())
+    {
+        return false;
+    }
+    if let Some(cf) = control_filter
+        && !info
+            .control_name
+            .to_lowercase()
+            .contains(&cf.to_lowercase())
+    {
+        return false;
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn print_stream_event(
+    json: bool,
+    csv: bool,
+    control: &str,
+    state: &str,
+    value: &str,
+    room: Option<&str>,
+    control_type: &str,
+    uuid: &str,
+) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "control": control,
+                "state": state,
+                "value": value,
+                "room": room,
+                "type": control_type,
+                "uuid": uuid,
+            })
+        );
+    } else if csv {
+        println!(
+            "{},{},{},{},{},{},{}",
+            chrono::Local::now().to_rfc3339(),
+            control,
+            state,
+            value,
+            room.unwrap_or(""),
+            control_type,
+            uuid,
+        );
+    } else {
+        println!(
+            "[{}]  {} ({}) = {}  [{}]",
+            now_hms(),
+            control,
+            state,
+            value,
+            room.unwrap_or("-"),
+        );
+    }
+}
 
 pub fn cmd_stream(
     ctx: &RunContext,
@@ -522,6 +605,38 @@ impl SnapshotFilter {
         }
         self.reconnected && previous.as_deref() != Some(value)
     }
+}
+
+fn eval_op(current: &str, op: &str, target: &str) -> Result<bool> {
+    Ok(match op {
+        "eq" | "==" => {
+            // Try numeric comparison first; fall back to string
+            match (current.parse::<f64>(), target.parse::<f64>()) {
+                (Ok(a), Ok(b)) => (a - b).abs() < f64::EPSILON * a.abs().max(b.abs()).max(1.0),
+                _ => current == target,
+            }
+        }
+        "ne" | "!=" => match (current.parse::<f64>(), target.parse::<f64>()) {
+            (Ok(a), Ok(b)) => (a - b).abs() >= f64::EPSILON * a.abs().max(b.abs()).max(1.0),
+            _ => current != target,
+        },
+        "contains" => current.contains(target),
+        "gt" | ">" => parse_f(current)? > parse_f(target)?,
+        "lt" | "<" => parse_f(current)? < parse_f(target)?,
+        "ge" | ">=" => parse_f(current)? >= parse_f(target)?,
+        "le" | "<=" => parse_f(current)? <= parse_f(target)?,
+        _ => bail!("Unknown op '{}'", op),
+    })
+}
+
+fn parse_f(s: &str) -> Result<f64> {
+    // Try direct parse first, then strip non-numeric suffix (e.g. "21.5°", "100%")
+    s.parse::<f64>().or_else(|_| {
+        let stripped = s.trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.' && c != '-');
+        stripped
+            .parse::<f64>()
+            .with_context(|| format!("Not a number: '{}'", s))
+    })
 }
 
 pub fn cmd_if(
@@ -1005,6 +1120,44 @@ fn print_history(ctx: &RunContext, output_names: &[String], entries: &[StatsEntr
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub(crate) enum AutopilotCmd {
+    /// List the rules in the program file: active, and whether their JSON is valid
+    ///
+    /// Reads the config like `lox config` does (config repo or cached download;
+    /// `--at`, `--file`, `--download`). Rules edited in the app since the last
+    /// upload may differ: see `lox autopilot changed`.
+    #[command(alias = "list")]
+    Ls {
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Show when a rule last ran (the Miniserver's rule history)
+    State { name_or_uuid: String },
+    /// When the rules were last changed on the Miniserver (e.g. edited in the app)
+    ///
+    /// Reads the live `changed` state of the structure's autopilot entry (unix
+    /// seconds; 0 = never). `-o json` gives `{"changed": <unix>, "changed_at":
+    /// <RFC 3339 or null>, "uuid": ...}` for scripts.
+    ///
+    /// The state also moves when the Miniserver writes its program for other
+    /// reasons (a password changed in the app, say). `--explain` says what
+    /// changed (read-only, FTP): the newest program file in /prog compared with
+    /// the one before it (or with `--since FILE`), sorted into rules, users &
+    /// access and other changes, plus the rules pending in /sys/custom, which
+    /// an upload would delete. JSON adds `program`, `custom_changes` and
+    /// `rules_changed` (true when either holds a rule change).
+    Changed {
+        /// Say what the newest program write and the pending custom changes hold
+        #[arg(long)]
+        explain: bool,
+        /// Compare the newest program file with this config (.Loxone or ZIP,
+        /// e.g. the download after the last push) instead of the one before it
+        #[arg(long, requires = "explain", value_name = "FILE")]
+        since: Option<String>,
+    },
+}
+
 pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
     match action {
         AutopilotCmd::Ls { src } => {
@@ -1328,9 +1481,11 @@ fn parse_autopilot_history(text: &str) -> Vec<AutopilotRun> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AutopilotRun, Backoff, ChangeReport, SnapshotFilter, fmt_offline, parse_autopilot_history,
-        parse_changed, rules_table, runs_of, statistic_output_names,
+        AutopilotRun, Backoff, ChangeReport, SnapshotFilter, eval_op, fmt_offline, matches_filters,
+        parse_autopilot_history, parse_changed, parse_f, rules_table, runs_of,
+        statistic_output_names,
     };
+    use loxone_client::stream;
     use loxone_client::stream::StateEvent;
     use serde_json::json;
     use std::time::Duration;
@@ -1575,5 +1730,137 @@ mod tests {
         let obj = json!({"10": {"name": "B"}, "2": {"name": "A"}});
         assert_eq!(statistic_output_names(&obj), ["A", "B"]);
         assert!(statistic_output_names(&json!(null)).is_empty());
+    }
+
+    // ── eval_op ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_eval_op_eq() {
+        assert!(eval_op("1", "eq", "1").unwrap());
+        assert!(!eval_op("1", "eq", "2").unwrap());
+        assert!(eval_op("hello", "==", "hello").unwrap());
+        // Numeric string formatting differences (Loxone API returns trailing zeros)
+        assert!(eval_op("200002700", "==", "200002700.000").unwrap());
+        assert!(eval_op("21.5", "==", "21.500000").unwrap());
+        assert!(!eval_op("21.5", "==", "21.6").unwrap());
+    }
+
+    #[test]
+    fn test_eval_op_ne() {
+        assert!(eval_op("1", "ne", "2").unwrap());
+        assert!(!eval_op("1", "!=", "1").unwrap());
+    }
+
+    #[test]
+    fn test_eval_op_numeric_comparisons() {
+        assert!(eval_op("10", "gt", "5").unwrap());
+        assert!(eval_op("5", "lt", "10").unwrap());
+        assert!(eval_op("5", "ge", "5").unwrap());
+        assert!(eval_op("5", "le", "5").unwrap());
+        assert!(!eval_op("4", ">", "5").unwrap());
+    }
+
+    #[test]
+    fn test_eval_op_contains() {
+        assert!(eval_op("hello world", "contains", "world").unwrap());
+        assert!(!eval_op("hello", "contains", "world").unwrap());
+    }
+
+    #[test]
+    fn test_eval_op_unknown_returns_err() {
+        assert!(eval_op("1", "bogus", "1").is_err());
+    }
+
+    // ── encode_path_value ────────────────────────────────────────────────────
+
+    // ── parse_f (unit suffix stripping) ─────────────────────────────────────
+
+    #[test]
+    fn test_parse_f_plain() {
+        assert_eq!(parse_f("21.5").unwrap(), 21.5);
+        assert_eq!(parse_f("-3.0").unwrap(), -3.0);
+    }
+
+    #[test]
+    fn test_parse_f_with_unit_suffix() {
+        assert_eq!(parse_f("21.5°").unwrap(), 21.5);
+        assert_eq!(parse_f("100%").unwrap(), 100.0);
+        assert_eq!(parse_f("15.3°C").unwrap(), 15.3);
+    }
+
+    #[test]
+    fn test_matches_filters_no_filters() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, None, None));
+    }
+
+    #[test]
+    fn test_matches_filters_type_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, Some("switch"), None, None));
+        assert!(!matches_filters(&info, Some("dimmer"), None, None));
+    }
+
+    #[test]
+    fn test_matches_filters_room_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, Some("kitchen"), None));
+        assert!(!matches_filters(&info, None, Some("bedroom"), None));
+    }
+
+    #[test]
+    fn test_matches_filters_control_filter() {
+        let info = stream::StateUuidInfo {
+            control_name: "Main Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: Some("Kitchen".to_string()),
+            category: None,
+            unit: None,
+        };
+        assert!(matches_filters(&info, None, None, Some("main")));
+        assert!(!matches_filters(&info, None, None, Some("side")));
+    }
+
+    #[test]
+    fn test_matches_filters_missing_room() {
+        let info = stream::StateUuidInfo {
+            control_name: "Light".to_string(),
+            control_uuid: "uuid".to_string(),
+            state_name: "active".to_string(),
+            control_type: "Switch".to_string(),
+            room: None,
+            category: None,
+            unit: None,
+        };
+        // Room filter should not match when room is None
+        assert!(!matches_filters(&info, None, Some("kitchen"), None));
+        // But no room filter should still pass
+        assert!(matches_filters(&info, None, None, None));
     }
 }

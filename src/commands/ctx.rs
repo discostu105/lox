@@ -1,11 +1,74 @@
 use anyhow::{Context, Result, bail};
+use clap::Subcommand;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::CtxCmd;
 use crate::commands::RunContext;
 use crate::config::{Config, ContextEntry, GlobalConfig, validate_context_name};
+
+#[derive(Subcommand)]
+pub(crate) enum CtxCmd {
+    /// Add a new context
+    Add {
+        /// Context name
+        name: String,
+        /// Miniserver host URL
+        #[arg(long)]
+        host: String,
+        /// Username
+        #[arg(long)]
+        user: String,
+        /// Password
+        #[arg(long)]
+        pass: String,
+        /// Miniserver serial number (names its config repo folder, OTel device.id)
+        #[arg(long)]
+        serial: Option<String>,
+    },
+    /// Switch the active context
+    Use {
+        /// Context name to activate
+        name: String,
+    },
+    /// List all contexts (* = active)
+    #[command(alias = "ls")]
+    List,
+    /// Show the current active context
+    Current,
+    /// Remove a context
+    Remove {
+        /// Context name to remove
+        name: String,
+    },
+    /// Rename a context
+    Rename {
+        /// Current name
+        old: String,
+        /// New name
+        new: String,
+    },
+    /// Initialize a project-local .lox/ directory
+    Init {
+        /// Miniserver host URL
+        #[arg(long)]
+        host: Option<String>,
+        /// Username
+        #[arg(long)]
+        user: Option<String>,
+        /// Password
+        #[arg(long)]
+        pass: Option<String>,
+        /// Miniserver serial number
+        #[arg(long)]
+        serial: Option<String>,
+    },
+    /// Migrate flat config to a 'default' context
+    Migrate,
+    /// Shortcut: `lox ctx <name>` = `lox ctx use <name>`
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
 
 pub fn cmd_ctx(ctx: &RunContext, action: CtxCmd) -> Result<()> {
     match action {

@@ -1,21 +1,46 @@
 use anyhow::{Context, Result, bail};
-use clap::CommandFactory;
-use clap_complete::generate;
+use clap::Subcommand;
 use reqwest::blocking::Client;
 use std::fs;
 use std::time::Duration;
 
+use crate::commands::config_insight::{ConfigSource, TraceDir};
 use crate::commands::{RunContext, config_insight, config_push};
 use crate::config::Config;
 use crate::scene::Scene;
 use crate::util::json_val_str;
-use crate::{
-    AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, custom_changes,
-    detect_shell, ftp, gitops, install_completions, loxone_xml,
-};
+use crate::{custom_changes, ftp, gitops, loxone_xml};
 use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
 use loxone_client::token;
 use loxone_config::archive;
+
+#[derive(Subcommand)]
+pub(crate) enum SetupCmd {
+    /// Set one or more config fields (omitted fields are preserved)
+    Set {
+        #[arg(long, env = "LOX_HOST")]
+        host: Option<String>,
+        #[arg(long, env = "LOX_USER")]
+        user: Option<String>,
+        /// Password (or set LOX_PASS env var to avoid it appearing in the process table)
+        #[arg(long, env = "LOX_PASS")]
+        pass: Option<String>,
+        #[arg(long, env = "LOX_SERIAL")]
+        serial: Option<String>,
+        /// Enable SSL certificate verification (for valid certs)
+        #[arg(long)]
+        verify_ssl: bool,
+        /// Disable SSL certificate verification (default, for self-signed Miniserver certs)
+        #[arg(long, conflicts_with = "verify_ssl")]
+        no_verify_ssl: bool,
+        /// File holding the visualization password for secured controls
+        /// (e.g. ~/.lox/visu-password; stores the path, not the password; "" removes it)
+        #[arg(long, value_name = "PATH")]
+        visu_password_file: Option<String>,
+    },
+    /// Show current config (password redacted)
+    Show,
+}
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
     match action {
@@ -89,6 +114,17 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub(crate) enum AliasCmd {
+    /// Add or update an alias
+    Add { name: String, uuid: String },
+    /// Remove an alias
+    Remove { name: String },
+    /// List all aliases
+    #[command(alias = "list")]
+    Ls,
+}
+
 pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
     let mut cfg = Config::load()?;
     match action {
@@ -126,6 +162,17 @@ pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SceneCmd {
+    /// List all saved scenes
+    #[command(alias = "list")]
+    Ls,
+    /// Print a scene's YAML definition
+    Show { name: String },
+    /// Create a new empty scene file
+    New { name: String },
 }
 
 pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
@@ -169,6 +216,18 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Subcommand)]
+pub(crate) enum CacheCmd {
+    /// Show cache info
+    Info,
+    /// Clear structure cache (forces fresh fetch)
+    Clear,
+    /// Refresh structure cache now
+    Refresh,
+    /// Check if cache is current (without full download)
+    Check,
 }
 
 pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
@@ -244,6 +303,22 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TokenCmd {
+    /// Fetch and save a new token (valid 20 days)
+    Fetch,
+    /// Show current token status
+    Info,
+    /// Delete saved token (revert to Basic Auth)
+    Clear,
+    /// Check if token is still valid on the Miniserver
+    Check,
+    /// Refresh token to extend validity
+    Refresh,
+    /// Revoke token on the Miniserver
+    Revoke,
 }
 
 pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
@@ -391,6 +466,197 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ConfigCmd {
+    /// Download the latest Loxone Config from the Miniserver via FTP
+    Download {
+        /// Custom output filename
+        #[arg(long, value_name = "PATH")]
+        save_as: Option<String>,
+        /// Also decompress LoxCC to XML
+        #[arg(long)]
+        extract: bool,
+    },
+    /// List available configs on the Miniserver
+    #[command(alias = "list")]
+    Ls,
+    /// Decompress a local config ZIP to .Loxone XML
+    Extract {
+        /// Path to a config ZIP file
+        file: String,
+        /// Custom output filename
+        #[arg(long, value_name = "PATH")]
+        save_as: Option<String>,
+    },
+    /// Compress a .Loxone XML file to sps0.LoxCC (the config inside a config ZIP)
+    Compress {
+        /// Path to a .Loxone XML file
+        file: String,
+        /// Write an upload ZIP instead: this downloaded config ZIP with only
+        /// sps0.LoxCC replaced, verified to extract byte-identically to FILE
+        #[arg(long, value_name = "ZIP")]
+        template: Option<String>,
+        /// Custom output filename (default: FILE with .LoxCC, or .zip with --template)
+        #[arg(long, value_name = "PATH")]
+        save_as: Option<String>,
+    },
+    /// Deploy a Lox Logic project: drift check, compile, stage, upload, program
+    /// restart, verify (requires --force to upload)
+    Push {
+        /// Project directory (holds lox.toml)
+        #[arg(default_value = ".")]
+        project: String,
+        /// Upload the staged config and restart the program, which loads it
+        /// within seconds (as Loxone Config's save does)
+        #[arg(long)]
+        force: bool,
+        /// Load the upload by rebooting the Miniserver instead (about a
+        /// minute) — for changes the running system only takes on start
+        #[arg(long)]
+        reboot: bool,
+        /// The base is a byte patch of this download (.Loxone); the live
+        /// config must still be exactly it
+        #[arg(long, value_name = "FILE")]
+        patched_from: Option<String>,
+        /// Delete managed blocks missing from the module (see `lox logic help`)
+        #[arg(long)]
+        allow_removals: bool,
+        /// Accept a base saved by a new Loxone Config release (its exact version)
+        #[arg(long, value_name = "VERSION")]
+        accept_version: Option<String>,
+        /// Where downloads and push artifacts go (default: PROJECT/backups)
+        #[arg(long, value_name = "DIR")]
+        backup_dir: Option<String>,
+        /// Push even though the Miniserver holds custom changes (made in the
+        /// app, the web UI or through the API, not saved by Loxone Config);
+        /// loading the upload deletes them
+        #[arg(long)]
+        discard_custom_changes: bool,
+    },
+    /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
+    ///
+    /// The ZIP goes to /prog/sps_new.zip, which the Miniserver loads on its
+    /// next start (`lox reboot`). It then deletes its custom changes: what the
+    /// app, the web UI or the API changed and Loxone Config has not saved (light
+    /// moods, timers, rules). The upload lists them first.
+    Upload {
+        /// Path to a config ZIP file
+        file: String,
+        /// Confirm the upload
+        #[arg(long)]
+        force: bool,
+    },
+    /// List the users of a config file: NFC tags, access codes, groups and
+    /// access rights (live users: `lox user ls`)
+    Users {
+        /// Path to a .Loxone XML file (from `lox config extract`) or a backup ZIP
+        file: String,
+    },
+    /// List hardware devices from a .Loxone config file
+    Devices {
+        /// Path to a .Loxone XML file (from `lox config extract`)
+        file: String,
+    },
+    /// What changed in the logic: blocks, parameters and wires, page by page
+    ///
+    /// OLD and NEW are config files (ZIP or .Loxone) or snapshots of the config
+    /// repo: a commit (`abc1234`, `HEAD~1`), a version (`v273`) or a save date
+    /// (`2026-08-25`). No arguments: the last change. One: from OLD to the
+    /// newest config. `OLD..NEW` works too.
+    #[command(verbatim_doc_comment)]
+    Diff {
+        /// Older config (file or snapshot)
+        old: Option<String>,
+        /// Newer config (file or snapshot)
+        new: Option<String>,
+    },
+    /// List the logic pages, or show a page as Lox Logic source
+    Show {
+        /// Page to show as source (exact title or a unique part of it)
+        #[arg(long, short)]
+        page: Option<String>,
+        /// Show every page as source
+        #[arg(long, conflicts_with = "page")]
+        all: bool,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// What is wired to a block: inputs, outputs and parameters, with
+    /// hardware shown as the device and room it lives in
+    #[command(verbatim_doc_comment)]
+    Wiring {
+        /// Block name, `Name [room]` or UUID
+        name: String,
+        /// Room, page or device to disambiguate the name
+        #[arg(short, long)]
+        room: Option<String>,
+        /// Follow the wires up to the sensors, down to the actuators, or both
+        #[arg(long, value_enum)]
+        trace: Option<TraceDir>,
+        /// How many hops to follow with --trace
+        #[arg(long, default_value = "4")]
+        depth: usize,
+        /// Show parameters that still have their default value too
+        #[arg(long)]
+        all_params: bool,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Search the config's blocks by name, type, device, room or page
+    Find {
+        /// Words to search for (all must match)
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// Check the logic for dead blocks, unused inputs, broken references and
+    /// blinds or gates whose motor outputs are wired to nothing
+    Lint {
+        #[command(flatten)]
+        src: ConfigSource,
+    },
+    /// How a block changed across the snapshots of the config repo
+    History {
+        /// Block name, `Name [room]` or UUID
+        name: String,
+        /// Room, page or device to disambiguate the name
+        #[arg(short, long)]
+        room: Option<String>,
+        /// Number of snapshots to look back
+        #[arg(short = 'n', long, default_value = "50")]
+        count: usize,
+    },
+    /// Initialize a git repository for config version tracking
+    Init {
+        /// Path for the config git repository
+        path: String,
+    },
+    /// Download the latest config from the Miniserver and commit to git
+    Pull {
+        /// Suppress output (for cron usage)
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Show config change history from the git repository
+    Log {
+        /// Number of entries to show
+        #[arg(short, long, default_value = "20")]
+        count: usize,
+    },
+    /// Restore a previous config version from git and upload to Miniserver
+    ///
+    /// Uploaded as /prog/sps_new.zip, which the Miniserver loads on its next
+    /// start (`lox reboot`).
+    Restore {
+        /// Git commit hash to restore from
+        commit: String,
+        /// Confirm the upload (required — dangerous operation)
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
@@ -782,31 +1048,4 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
 
 fn or_dash(s: &str) -> &str {
     if s.is_empty() { "-" } else { s }
-}
-
-pub fn cmd_completions(
-    _ctx: &RunContext,
-    shell: Option<clap_complete::Shell>,
-    install: bool,
-) -> Result<()> {
-    let detected = shell.or_else(detect_shell);
-    let Some(sh) = detected else {
-        bail!("Could not detect shell. Specify one: lox completions bash|zsh|fish");
-    };
-    let mut cmd = Cli::command();
-    if install {
-        install_completions(sh, &mut cmd)?;
-    } else {
-        // Through `print!`, so `lox completions bash | head` exits quietly.
-        let mut buf = Vec::new();
-        generate(sh, &mut cmd, "lox", &mut buf);
-        print!("{}", String::from_utf8_lossy(&buf));
-    }
-    Ok(())
-}
-
-pub fn cmd_schema(_ctx: &RunContext, command: Option<String>) -> Result<()> {
-    let schema = build_schema(command.as_deref())?;
-    println!("{}", serde_json::to_string_pretty(&schema)?);
-    Ok(())
 }

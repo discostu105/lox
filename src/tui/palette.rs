@@ -8,7 +8,8 @@ use super::lists::fuzzy;
 use super::model::Cid;
 use super::vm::{self, Plan};
 use crate::actions::{self, Action};
-use crate::{Cli, Cmd, InputCmd, LightCmd};
+use crate::commands::control::{InputCmd, LightCmd};
+use crate::{Cli, Cmd};
 
 /// Control verbs the palette runs in-process. Everything else prints output
 /// and belongs to a screen.
