@@ -27,14 +27,14 @@ pub enum LintKind {
     UnusedTemplate,
     DeadOutputs,
     /// A Touch Pure Flex command that names no target while several
-    /// API-linked blocks answer to its abbreviation (D41).
+    /// API-linked blocks answer to its abbreviation.
     TileBroadcast,
-    /// A Touch Pure Flex command no API-linked block receives (D41).
+    /// A Touch Pure Flex command no API-linked block receives.
     TileDeadCommand,
     /// A user with an NFC tag or access code and no access right on any
-    /// NFC Code Touch (D49).
+    /// NFC Code Touch.
     NoAccessRight,
-    /// A parameter value outside the port's documented range (D52).
+    /// A parameter value outside the port's documented range.
     OutOfRange,
 }
 
@@ -102,7 +102,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                 }
                 for (k, v) in b.params() {
                     if let Value::Ref(name) = v {
-                        // `mirrors:` on a minted ref names an object (D33);
+                        // `mirrors:` on a minted ref names an object;
                         // every other `Ref` value is a `let` reference.
                         if (k == "mirrors"
                             && matches!(
@@ -135,7 +135,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                     object_refs.insert(target);
                 }
             }
-            // A tile target and a tiles claim use their slugs (D41).
+            // A tile target and a tiles claim use their slugs.
             Item::Tiles(t) => {
                 for tile in t.tiles() {
                     for b in tile.bindings() {
@@ -148,7 +148,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             Item::TilesClaim(c) => {
                 object_refs.insert(&c.slug);
             }
-            // Access rights use the Code Touch they are on (D49).
+            // Access rights use the Code Touch they are on.
             Item::Access(a) => {
                 object_refs.insert(&a.slug);
             }
@@ -159,12 +159,12 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                 object_refs.insert(&c.slug);
             }
             // A rule uses its own block, its action targets, the blocks
-            // its conditions watch and the modes it names (D57, D73).
+            // its conditions watch and the modes it names.
             Item::Rule(r) => {
                 object_refs.insert(&r.slug);
                 object_refs.extend(r.slugs());
             }
-            // A test driving or asserting a port is a use (D36).
+            // A test driving or asserting a port is a use.
             Item::Test(t) => {
                 for stmt in &t.body {
                     let (port, value) = match stmt {
@@ -202,7 +202,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
         }
     }
 
-    // Documented ranges (D52): advisory, because the documentation is the
+    // Documented ranges: advisory, because the documentation is the
     // weakest evidence tier — Loxone Config itself clamps or accepts.
     let extern_types: BTreeMap<&str, &str> = flat
         .externs()
@@ -260,7 +260,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
 /// flagged when nothing draws from any of its ports, or when everything
 /// reachable from them is `InputRef`/`OutputRef` plumbing that itself
 /// feeds nothing (a mirror of a dead signal is still dead). Expression
-/// blocks (D24) are skipped — they feed their sink by construction.
+/// blocks are skipped — they feed their sink by construction.
 pub fn lint_dead_outputs(
     module: &Module,
     lock: &Lockfile,

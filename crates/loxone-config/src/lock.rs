@@ -17,7 +17,7 @@
 //!    [`Lockfile::remove_object`] (the `terraform state rm` analogue) /
 //!    [`Lockfile::rename_object`].
 //! 4. Counters never decrease.
-//! 5. An authorized removal leaves a tombstone (D31) until a compile sees
+//! 5. An authorized removal leaves a tombstone until a compile sees
 //!    a base without the object — so recompiles against a base from before
 //!    the removal was deployed still delete it instead of passing it
 //!    through as an unmanaged orphan, and the compile stays a lock
@@ -30,15 +30,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
-/// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
-/// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
-/// (D42); v5 the pages the compiler created (`pages`, D56); v6 the light
-/// moods it minted (`moods`, D58); v7 the named rules (`rules`, D60); v8
-/// the special states of a minted block (`states`, D66). Older locks
-/// load fine (the maps default to empty); saving always
-/// writes the current version, so an old binary — whose version check
-/// refuses the newer number — can never silently drop state it does not
-/// know about.
+/// The lockfile format version that [`Lockfile::save`] writes.
+///
+/// Older lockfiles load, with the newer maps empty. Saving always writes
+/// this version, so an older binary refuses the file instead of silently
+/// dropping state it does not know. The versions are listed in the crate's
+/// `docs/lockfile-spec.md`.
 pub const LOCKFILE_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +61,7 @@ pub struct Lockfile {
     /// was absent). Restored when the assignment disappears from source.
     #[serde(default)]
     pub set_originals: BTreeMap<String, Option<String>>,
-    /// Removal tombstones (D31), keyed by object UUID. A block whose
+    /// Removal tombstones, keyed by object UUID. A block whose
     /// removal was authorized (`removed <slug>`, `allow_removals`, or an
     /// expression-owned block vanishing) moves here instead of being
     /// forgotten: every compile deletes the object from the base if it is
@@ -73,41 +70,41 @@ pub struct Lockfile {
     /// slug can be reused while its old removal is still pending.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub removed: BTreeMap<String, Tombstone>,
-    /// Extern wires the compiler withdrew (D31): a wire that vanished from
+    /// Extern wires the compiler withdrew: a wire that vanished from
     /// source stays here so compiles against bases that still carry it
     /// keep deleting it; a base without the wire retires the entry.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub removed_wires: BTreeSet<LockedWire>,
-    /// Withdrawn `Def=` writes on extern ports (D31), keyed by port UUID.
+    /// Withdrawn `Def=` writes on extern ports, keyed by port UUID.
     /// A base whose port still carries the written value predates the
     /// deployment — the original is restored again; a base already showing
-    /// the original (or a third writer's value) retires the entry.
+    /// the original (or someone else's value) retires the entry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub removed_sets: BTreeMap<String, RetiredSet>,
-    /// Attribute claims on extern objects (D39: `x.title|room|category =
+    /// Attribute claims on extern objects (`x.title|room|category =
     /// …`), keyed by object UUID, then attribute. Each records what the
     /// claim wrote over, so the statement's removal restores it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attr_claims: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
-    /// Withdrawn attribute claims (D31 lifecycle): restored again while a
+    /// Withdrawn attribute claims (tombstone lifecycle): restored again while a
     /// base still shows the written value on the object; retired once a
     /// base shows anything else.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub removed_attrs: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
-    /// Pages the compiler created (D56: `page "T" (room: …)`), title →
+    /// Pages the compiler created (`page "T" (room: …)`), title →
     /// page UUID. A base without the page gets it again under the same
     /// UUID; one that titles the UUID differently (renamed in Loxone
     /// Config) is refused. An entry lives as long as its statement.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pages: BTreeMap<String, String>,
-    /// Light moods the compiler minted (D58), controller UUID → mood name
+    /// Light moods the compiler minted, controller UUID → mood name
     /// → mood UUID: a recompile against a base from before the
     /// deployment mints the same moods again. An entry lives until a base
     /// carries the mood — from then on the controller's own `UUID=` is
     /// its identity.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moods: BTreeMap<String, BTreeMap<String, String>>,
-    /// Named Automatic Designer rules (D60: `rule <slug> "Name"`), slug →
+    /// Named Automatic Designer rules (`rule <slug> "Name"`), slug →
     /// rule UUID — found by name in the base or created by the compiler.
     /// A base without the rule gets it again under the same UUID; the
     /// source owns its name. An entry lives as long as its declaration.
@@ -115,7 +112,7 @@ pub struct Lockfile {
     pub rules: BTreeMap<String, String>,
 }
 
-/// One attribute claim (D39). Values are decoded: a title as text, a room
+/// One attribute claim. Values are decoded: a title as text, a room
 /// or category as its `Place`/`Category` UUID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttrClaim {
@@ -128,7 +125,7 @@ pub struct AttrClaim {
     /// Descendant objects (UUIDs, document order) that shared the original
     /// room/category and were rewritten with the object — a device's
     /// inputs and outputs. Restored with it while they still carry
-    /// `written`; one another writer moved since is left alone.
+    /// `written`. One moved since by someone else is left alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub followers: Vec<String>,
 }
@@ -173,7 +170,7 @@ pub struct LockedObject {
     pub block_type: String,
     /// Port key → port UUID. Every port gets its own pinned UUID.
     pub ports: BTreeMap<String, String>,
-    /// Drawing rectangle the compiler writes (D42). Placed once, then
+    /// Drawing rectangle the compiler writes. Placed once, then
     /// kept — except that a move made in Loxone Config is taken over
     /// from the base, and a relayout places the block afresh.
     pub layout: Option<Layout>,
@@ -190,14 +187,14 @@ pub struct LockedObject {
     /// fills it with the options' page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_uuid: Option<String>,
-    /// The block was generated by expression desugaring (D24). When its
+    /// The block was generated by expression desugaring. When its
     /// slug vanishes from the (desugared) source — the expression was
     /// edited or deleted — the compiler removes it without a `removed`
     /// statement: no hand ever wrote it, the expression is the sole owner.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expr_owned: bool,
     /// The special states (`SpStates=`) the compiler minted for a block
-    /// whose app entry names them (D66): what a Loxone Config save would
+    /// whose app entry names them: what a Loxone Config save would
     /// give the new block. A recompile against a base from before the
     /// deployment writes the same UUIDs; once the base carries the block,
     /// its own `SpStates=` is the GUI's.
@@ -214,7 +211,7 @@ pub struct Tombstone {
     pub block_type: String,
 }
 
-/// A withdrawn `Def=` write (D31): what to restore, and what the compiler
+/// A withdrawn `Def=` write: what to restore, and what the compiler
 /// had written — the marker by which a pre-deployment base is recognized.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetiredSet {
@@ -319,7 +316,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     out
 }
 
-/// An object attribute an extern assignment can claim (D39). Lowercase
+/// An object attribute an extern assignment can claim. Lowercase
 /// names after the dot: no connector in the corpus carries these keys, and
 /// a port of that name could not be wired or set anyway (`=`/`<-` on it
 /// always mean the attribute).

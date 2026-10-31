@@ -1,4 +1,4 @@
-//! `loxl test` (D36, D68): plan the `test` bodies against the compiled
+//! `loxl test`: plan the `test` bodies against the compiled
 //! config, run them in the built-in simulator ([`crate::sim`]), and map
 //! the outcome back onto the source `expect` statements.
 //!
@@ -245,7 +245,7 @@ fn plan_one(
 }
 
 /// Run every planned test in the built-in simulator, each from a fresh
-/// start (D68).
+/// start.
 pub fn run_tests(plan: &TestPlan, compiled: &LoxoneDoc) -> Vec<TestResult> {
     run_all(plan, compiled, None)
 }
@@ -952,7 +952,7 @@ mod tests {
         )
         .unwrap();
         // A source block sharing its title with InputRefs whose Ref=
-        // points back at it (r50's AI-fed mirror pattern): injecting the
+        // points back at it (an AI-fed mirror pattern from a real config): injecting the
         // plain title drives the source and its mirrors — one signal.
         let doc = doc_with(
             "\t\t\t<C Type=\"Memory\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Sig\" Nio=\"3\"/>\r\n\

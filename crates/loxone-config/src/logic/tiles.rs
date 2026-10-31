@@ -1,4 +1,4 @@
-//! Touch Pure Flex tile programs (D41).
+//! Touch Pure Flex tile programs.
 //!
 //! A Touch Pure Flex is a `TreeDevice` whose `<btns>` child lists its
 //! tiles: `<btn i="…">` with three function elements — `f1` (click),
@@ -52,8 +52,8 @@ pub const FUNCTIONS: [FunctionSlot; 3] = [
     },
 ];
 
-/// Command abbreviations whose block type configs back (docs/design.md
-/// D41): a `to:` target of another type is refused.
+/// Command abbreviations whose block type real configs back. A `to:`
+/// target of another type is refused.
 const KNOWN: &[(&str, &[&str])] = &[("As", &["AutoJalousie"]), ("Lico", &["LightController2"])];
 
 fn known_types(abbr: &str) -> Option<&'static [&'static str]> {

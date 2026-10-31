@@ -1,7 +1,7 @@
 //! The Automatic Designer's codes for conditions and actions on blocks,
 //! as the Miniserver serves them to the app (`jdev/sps/io/<AutoPilot
-//! container>/capabilities/getraw`, version 20260521DEU, read from the
-//! house's Miniserver, firmware 17.2, 2026-10-31). The app builds every
+//! container>/capabilities/getraw`, version 20260521DEU, read from a
+//! Miniserver with firmware 17.2). The app builds every
 //! rule from this table: a condition on a block carries the `descID` of
 //! one of its `events`, the block's `uuidAction` as `controlUUID` and the
 //! UUID of the state named by `sourceState` as `id`; an action carries the

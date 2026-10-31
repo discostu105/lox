@@ -1,4 +1,4 @@
-//! LightController2 moods (*Stimmungen*, D58): the read model and the
+//! LightController2 moods (*Stimmungen*): the read model and the
 //! value codec shared by `moods` claims (`logic::moods`) and the semantic
 //! diff.
 //!
@@ -7,7 +7,7 @@
 //! per mood ([loxone-format.md](../docs/loxone-format.md)). `Q<n>` is the
 //! value of lighting circuit `n` — the circuit behind output `AQ<n>`.
 //! Its top four bits are a property of the *circuit*, not of the mood:
-//! across the 132-file corpus and the house config (648 circuit columns)
+//! across 133 real configs (648 circuit columns)
 //! no circuit carries two different prefixes. The low 28 bits are the
 //! value, in a decimal packing that follows the prefix:
 //!

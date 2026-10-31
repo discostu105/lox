@@ -66,7 +66,7 @@ impl TokenStore {
                 .truncate(true)
                 .mode(0o600)
                 .open(path)?;
-            // mode() only applies on create; tighten files written by older versions
+            // mode() only applies on create, so an existing file is tightened here
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             f.write_all(json.as_bytes())?;
         }

@@ -16,14 +16,14 @@
 //! rebuilds managed blocks from scratch, so anything on the original
 //! element that the rebuild does not reproduce would be silently lost on
 //! the first compile. [`verify_rebuildable`] whitelists exactly what the
-//! rebuild emits — which since D19 includes the GUI-owned residue
+//! rebuild emits, including the GUI-owned residue
 //! (`Cl`/`LtE`/`WF`, [`crate::doc::GUI_OWNED_ATTRS`], and
 //! [`crate::doc::GUI_OWNED_CHILDREN`]) carried forward verbatim from the
 //! base on every compile. A block that fails verification is *skipped, not
 //! translated*: it stays unmanaged (appearing as a pinned extern where
 //! adopted logic wires to it) and the reason lands in
-//! [`AdoptReport::refused`] — one bespoke GUI flag never blocks adopting
-//! the rest of the house.
+//! [`AdoptReport::refused`]. One bespoke GUI flag never blocks adopting
+//! the rest of the config.
 
 use crate::connectors::{
     VERIFIED_BLOCK_VERSIONS, attr_param, builtin, carried_attrs, carried_children, container_type,
@@ -107,10 +107,10 @@ pub struct AdoptedBlock {
     /// statement on it (its `extern` line, `<-` wires, port assignments,
     /// `.title` claim) moved into the declaration — strip them from the
     /// source with [`Module::strip_extern`]. Its `.room`, `.category` and
-    /// `schedule` claims stay: they hold on the managed block (D63).
+    /// `schedule` claims stay: they hold on the managed block.
     pub promoted: Vec<String>,
     /// The block sits on a logic page (`page_title` names it); a virtual
-    /// or Modbus device (D64) sits in the periphery tree instead, and
+    /// or Modbus device sits in the periphery tree instead, and
     /// `page_title` names its folder.
     pub on_page: bool,
 }
@@ -136,7 +136,7 @@ pub fn adopt_one(
 ) -> Result<AdoptedBlock> {
     doc.require_unique_uuids("config")?;
     let fail = |m: String| Error::Compile(m);
-    // Templates (D23) and expressions (D24): the checks below — slug
+    // Templates and expressions: the checks below — slug
     // freshness, wires already declared on managed sinks — must see the
     // expanded and desugared module, where an instance's blocks and an
     // expression's synthetic blocks exist under their lock-key names.
@@ -235,7 +235,7 @@ pub fn adopt_one(
         )));
     }
     taken.insert(slug.to_string());
-    // An object of the object tree (D54, D64): a virtual input, a device
+    // An object of the object tree: a virtual input, a device
     // with what hangs below it.
     if container_type(&o.block_type).is_some() || periphery(&o.block_type).is_some() {
         return super::adopt_tree::adopt_device(doc, o, slug, raw, module, lock, taken);
@@ -297,7 +297,7 @@ pub fn adopt_one(
                     .find(|(_, le)| &le.uuid == u)
                     .map(|(s, _)| s.clone())
             })
-            // A rule (D60) the source declares already has its slug.
+            // A rule the source declares already has its slug.
             .or_else(|| {
                 lock.rules
                     .iter()
@@ -540,7 +540,7 @@ pub(super) fn check_promotable(
              template first, then promote it"
         ));
     }
-    // `.room`/`.category` (D63) and a DayTimer's `schedule` claim hold on
+    // `.room`/`.category` and a DayTimer's `schedule` claim hold on
     // a managed block as on an extern, and stay as they are; tiles belong
     // to a Touch Pure Flex, a device — never a page block.
     if raw
@@ -664,7 +664,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
 }
 
 /// Element attributes the compiler's rebuild emits. `Cl`/`LtE`/`WF` are
-/// carried forward verbatim from the base element (D19), as are the
+/// carried forward verbatim from the base element, as are the
 /// [`GUI_OWNED_ATTRS`] checked alongside this list.
 const KNOWN_ATTRS: &[&str] = &[
     "Type", "V", "U", "Title", "Px", "Py", "Px2", "Py2", "Cl", "Nio", "WF", "LtE",
@@ -706,7 +706,7 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
     for child in &el.children {
         let co = match child {
             Node::Element(c) if c.name == "Co" => c,
-            // GUI-owned subtrees are carried forward wholesale (D19) —
+            // GUI-owned subtrees are carried forward wholesale —
             // their content needs no inspection.
             Node::Element(c)
                 if GUI_OWNED_CHILDREN.contains(&c.name.as_str())
@@ -724,7 +724,7 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             Node::Text(_) => return Err("unexpected text content".to_string()),
         };
         let key = co.attr_decoded("K").unwrap_or_default().into_owned();
-        // An `Inv=`-carrying connector is GUI-owned (D20): the rebuild
+        // An `Inv=`-carrying connector is GUI-owned: the rebuild
         // re-emits the whole `<Co>` verbatim and the lift keeps its Def
         // and wires out of the source, so anything inside it is faithful
         // by construction.
@@ -740,10 +740,10 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
         for child in &co.children {
             match child {
                 Node::Element(i) if i.name == "In" => {
-                    // `FLG=` is Miniserver/app-created wire metadata; the
-                    // oracle probe showed Loxone Config round-trips it
-                    // verbatim and accepts its absence, so the rebuild
-                    // carries it per (sink, source) pair (D19 residue).
+                    // `FLG=` is wire metadata the Miniserver or app creates.
+                    // Loxone Config round-trips it verbatim and accepts its
+                    // absence (verified), so the rebuild carries it per
+                    // (sink, source) pair, as GUI-owned residue.
                     if let Some(a) = i
                         .attrs
                         .iter()
@@ -802,8 +802,8 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
 }
 
 /// [`adopt_one`] for an Automatic Designer rule (#192): the rule becomes
-/// `rule <slug> "Name"` (D60), pinned in the lock's `rules`, its payload
-/// lifted as the documented shapes (D57). An extern rule of the module is
+/// `rule <slug> "Name"`, pinned in the lock's `rules`, its payload
+/// lifted as the documented shapes. An extern rule of the module is
 /// promoted: its `extern` line and its unnamed `rule` leave the source.
 /// The rule's action targets must already be in the lock.
 fn adopt_rule(

@@ -1,4 +1,4 @@
-//! LightController2 moods from source (D58).
+//! LightController2 moods from source.
 //!
 //! A `<controller>.moods = <set>` claim makes the controller's mood list
 //! exactly the set's moods, in order, plus the built-in off mood
@@ -103,8 +103,8 @@ pub(crate) fn apply(
     Ok(minted)
 }
 
-/// What Loxone Config writes into a LightController2 on its first save
-/// (oracle session 21, 2026-10-30, Loxone Config 17.2.8.28): the stock
+/// What Loxone Config 17.2.8.28 writes into a LightController2 on its
+/// first save: the stock
 /// moods "Viel Licht" (every circuit on, the motion mood) and "Aus", the
 /// mood behaviour, presence and HCL defaults. A controller minted from
 /// source has none of it until then; seeding it here lets a claim give

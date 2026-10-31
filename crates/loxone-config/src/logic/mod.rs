@@ -1,59 +1,29 @@
-//! Lox Logic, the text language,.
+//! Lox Logic, the text language: parse, decompile, compile.
 //!
-//! v1 grammar (constructor style; one statement per line, `#` starts a
-//! comment; only a block's `( … )` argument list spans lines):
+//! One statement per line; `#` starts a comment. The main forms:
 //!
 //! ```text
 //! let     <name> = <value>                     (named constant)
-//! extern  <slug> = <Type>(uuid|iname|title: "<value>"[, room|category: "<title>"])
-//! <slug>  = <Type>(["Label",] <Port>: <value | slug.Port>, …)
-//!                                              (managed block: params and
-//!                                               input wires in one place)
-//! <slug>.<Port> <- <slug>.<Port>               (wire onto an extern port)
-//! <slug>.<Port> <- <expr>                      (expression sugar, D24:
-//!                                               `or`/`and`/`not`/comparisons
-//!                                               desugar into gate blocks)
+//! extern  <slug> = <Type>(iname: "<value>")    (an object of the base config)
+//! <slug>  = <Type>(["Label",] <Port>: <value | slug.Port>, …)   (managed block)
+//! <slug>.<Port> <- <slug.Port | expr>          (wire onto an extern port)
 //! <slug>.<Port> = <value>                      (Def write on an extern port)
-//! removed <slug>                               (authorize deleting a managed block)
-//! moved   <old_slug> -> <new_slug>             (rename keeping identity)
-//! page    "<Title>"                            (D28: place the following blocks
-//!                                               on that base-config page)
-//! template <name>(<param>: <Type> | <param> = <default>, …)
-//!     …blocks, wires, sets…                    (reusable body; D23)
-//! end
-//! <slug>  = <name>(<param>: <arg>, …)          (instantiate: lowercase callee
-//!                                               = template, body slug `b`
-//!                                               expands to `<slug>_b`)
-//! tiles   <name>                               (D41: Touch Pure Flex tile
-//!     tile <i>(click|up|down: "<command>",      programs; `text:`, `to: <slug>`
-//!              text: "…", to: <slug>, …)        apply to every command)
-//! end
-//! <slug>.tiles = <name>                        (write the set onto an extern
-//!                                               TreeDevice)
-//! access  <slug>                               (D49: the access rights on an
-//!     user "<title>": "<schedule>"              extern NfcCodeTouch — every
-//!     group "<title>": "<schedule>"             right on it; titles name the
-//! end                                           base's users and schedules)
-//! recipients <slug>                            (D51: who gets an extern
-//!     user "<title>"                            Notification — `ACT=` on it;
-//!     group "<title>"                           its messages come from
-//! end                                           `OutputRefLM` blocks)
-//! moods   <name>                               (D58: LightController2 moods;
-//!     "<mood>": all on, AQ<n> <value>, …        values on|off|40%|rgb(r,g,b)|
-//! end                                           temp(80%, 2700K))
-//! <slug>.moods = <name>                        (write the set onto a
-//!                                               LightController2; also in a
-//!                                               template body)
+//! removed <slug>                               (delete a managed block)
+//! moved   <old_slug> -> <new_slug>             (rename, keeping identity)
+//! page    "<Title>"                            (place the following blocks there)
 //! ```
 //!
-//! In a block's argument list, the value decides the meaning: a literal or
-//! constant binds the port's `Def=` parameter, a `slug.Port` reference
-//! wires that source into the port, and an expression (D26) desugars into
-//! gate blocks wired into the port. Slugs are `[a-z][a-z0-9_]*` and
-//! project-unique. References are always slugs — never UUIDs, never
-//! titles. `iname:` is preferred over `title:` for built-in objects
-//! because display titles are locale-volatile (a config save can rename
-//! all built-ins to the writing system's language); `uuid:` pins exactly.
+//! Bodies closed by `end`: `template`, `test`, `tiles`, `access`,
+//! `recipients`, `schedule`, `rule` and `moods`. The full grammar is in
+//! `docs/language.md` of the crate's repository.
+//!
+//! In a block's argument list, the value decides the meaning. A literal or
+//! constant binds the port's `Def=` parameter. A `slug.Port` reference wires
+//! that source into the port. An expression desugars into gate blocks wired
+//! into the port. Slugs are `[a-z][a-z0-9_]*`, unique in the project, and
+//! references are always slugs. Prefer `iname:` over `title:` for built-in
+//! objects: a config save can translate their titles into the writing
+//! system's language. `uuid:` pins exactly.
 
 mod access;
 mod adopt;
