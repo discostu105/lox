@@ -10,6 +10,12 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-10-31
+
+### Added
+- **lox mcp serve**: `get_wiring` takes `live: true` and fills in the current value on every wire whose source the app streams, plus the control's own value in its app format (`22000lx`), so an assistant answers "why is this light on?" in one call
+  - One WebSocket state read for all wires; a wire without a streamed source gets no value, and a failed read leaves the config wiring with a `live_error`
+
 ## [0.48.1] — 2026-10-31
 
 ### Fixed
