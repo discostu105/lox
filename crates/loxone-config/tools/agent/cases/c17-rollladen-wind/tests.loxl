@@ -1,0 +1,55 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_auf = VirtualIn(title: "Taster Rollladen auf")
+extern t_ab = VirtualIn(title: "Taster Rollladen ab")
+extern t_wind = VirtualIn(title: "Windgeschwindigkeit")
+extern t_motor_auf = VirtualOutCmd(title: "Rollladen Wohnzimmer auf")
+extern t_motor_ab = VirtualOutCmd(title: "Rollladen Wohnzimmer ab")
+
+test "Ganz schließen und ganz öffnen"
+	t_ab.Q = 1
+	tick 1
+	expect t_motor_ab.I == 1
+	expect t_motor_auf.I == 0
+	t_ab.Q = 0
+	tick 32
+	expect t_motor_ab.I == 1
+	tick 5
+	expect t_motor_ab.I == 0
+	t_auf.Q = 1
+	tick 1
+	expect t_motor_auf.I == 1
+	t_auf.Q = 0
+	tick 37
+	expect t_motor_auf.I == 1
+	tick 5
+	expect t_motor_auf.I == 0
+	expect t_motor_ab.I == 0
+end
+
+test "Ein Druck während der Fahrt hält an"
+	t_ab.Q = 1
+	tick 1
+	t_ab.Q = 0
+	tick 10
+	expect t_motor_ab.I == 1
+	t_ab.Q = 1
+	tick 1
+	t_ab.Q = 0
+	tick 1
+	expect t_motor_ab.I == 0
+	expect t_motor_auf.I == 0
+end
+
+test "Wind fährt auf und sperrt die Taster"
+	t_wind.Q = 60
+	tick 1
+	expect t_motor_auf.I == 1
+	tick 45
+	t_ab.Q = 1
+	tick 1
+	t_ab.Q = 0
+	tick 1
+	expect t_motor_ab.I == 0
+end

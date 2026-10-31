@@ -1,0 +1,23 @@
+extern bewegung = VirtualIn(title: "Bewegung Diele")
+extern helligkeit = VirtualIn(title: "Helligkeit Diele")
+extern taster_aus = VirtualIn(title: "Taster Diele aus")
+extern licht = VirtualOutCmd(title: "Licht Diele")
+
+page "Logik"
+
+lichtsteuerung = LightController2(
+	"Lichtsteuerung Diele",
+	Move: bewegung.Q,
+	Brightness: helligkeit.Q,
+	Reset: taster_aus.Q,
+	BrightnessLimit: 50,
+	MoveOn: 120,
+)
+
+licht.I <- lichtsteuerung.AQ1
+
+moods diele
+	"Viel Licht": AQ1 80%
+end
+
+lichtsteuerung.moods = diele

@@ -52,6 +52,7 @@ pub(crate) mod autopilot;
 #[rustfmt::skip]
 pub(crate) mod autopilot_caps;
 pub(crate) mod blockdoc;
+pub(crate) mod canvas_labels;
 pub mod catalogue;
 #[doc(hidden)]
 pub mod cli;

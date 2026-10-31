@@ -51,6 +51,19 @@ feuchte_keller = VirtualIn(
 	MaxVal: 100,
 )
 
+taster_rollladen_auf = VirtualIn("Taster Rollladen auf")
+taster_rollladen_ab = VirtualIn("Taster Rollladen ab")
+bewegung_diele = VirtualIn("Bewegung Diele")
+helligkeit_diele = VirtualIn(
+	"Helligkeit Diele",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 2000,
+)
+
+taster_diele_aus = VirtualIn("Taster Diele aus")
+heizstab_an = VirtualIn("Heizstab an")
+
 aktoren = VirtualOut(
 	"Aktoren",
 	Address: "http://192.0.2.20",
@@ -110,4 +123,32 @@ hinweis_tuer = VirtualOutCmd(
 	device: aktoren,
 	CmdOn: "/hinweis/1",
 	CmdOff: "/hinweis/0",
+)
+
+rollladen_auf = VirtualOutCmd(
+	"Rollladen Wohnzimmer auf",
+	device: aktoren,
+	CmdOn: "/rollladen/auf/1",
+	CmdOff: "/rollladen/auf/0",
+)
+
+rollladen_ab = VirtualOutCmd(
+	"Rollladen Wohnzimmer ab",
+	device: aktoren,
+	CmdOn: "/rollladen/ab/1",
+	CmdOff: "/rollladen/ab/0",
+)
+
+licht_diele = VirtualOutCmd(
+	"Licht Diele",
+	device: aktoren,
+	CmdOn: "/licht_diele/<v>",
+	Analog: "true",
+)
+
+hinweis_energie = VirtualOutCmd(
+	"Hinweis Energie Heizstab",
+	device: aktoren,
+	CmdOn: "/hinweis_energie/1",
+	CmdOff: "/hinweis_energie/0",
 )
