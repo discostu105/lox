@@ -187,7 +187,7 @@ fn rule_declarations_are_checked() {
         "mon",
     );
     has(
-        "rule pumpe_ein\n\tactive\n\twhen sunset\n\tthen pumpe \"on\"\nend\n",
+        "rule pumpe_ein\n\tactive\n\twhen rain\n\tthen pumpe \"on\"\nend\n",
         "when time",
     );
     has(
@@ -805,4 +805,155 @@ fn the_container_watches_what_the_rules_watch() {
         ),
         "{back}"
     );
+}
+
+// --- Weather, clock and date conditions; notification, mail, pause and
+// system message actions (D76).
+
+const MORE: &str = "rule pumpe_aus\n\
+                    \tinactive\n\
+                    \twhen weather temperature > -2.5\n\
+                    \twhen weather sunshine == on\n\
+                    \twhen day >= 15\n\
+                    \twhen daylight off\n\
+                    \tor\n\
+                    \twhen sunset\n\
+                    \twhen date \"2026-07-01\"\n\
+                    \tthen notify \"Pumpe\" \"läuft aus\"\n\
+                    \tthen wait 2.5s\n\
+                    \tthen mail \"a@example.invalid\" \"Pumpe\" \"aus\"\n\
+                    \tthen message warning \"Pumpe\" \"aus\" admins\n\
+                    \tthen pumpe \"off\"\n\
+                    end\n";
+
+#[test]
+fn weather_clock_and_messages_compile_and_read_back() {
+    let base = fixture().replace(
+        "<C Type=\"Document\" V=\"175\"",
+        "<C Type=\"Document\" V=\"175\" Timezone=\"Europe/Vienna\"",
+    );
+    let src = AS_READ.replace(
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        MORE,
+    );
+    let out = compile_rules(&base, &src).unwrap();
+    let off = tag_of(&out, RULE_OFF);
+    for part in [
+        r#"{"type":2,"descID":37001,"id":1,"value":-2.5,"operator":3,"forceEdge":false}"#,
+        r#"{"type":2,"descID":37003,"id":34,"value":1,"operator":1,"forceEdge":false}"#,
+        r#"{"type":3,"descID":269001,"id":269,"value":15,"operator":5,"forceEdge":false}"#,
+        r#"{"type":3,"descID":281001,"id":281,"value":0,"operator":1,"forceEdge":false}"#,
+        r#"{"type":3,"descID":295001,"id":295,"value":1,"operator":1,"forceEdge":false}"#,
+        // 2026-07-01 00:00 CEST.
+        r#"{"type":4,"descID":233001,"id":233,"value":1782856800,"operator":1,"forceEdge":false}"#,
+        r#"{"type":4,"descID":96001,"arrValues":["Pumpe","läuft aus"]}"#,
+        r#"{"type":5,"descID":341801,"command":"2500","arrValues":[2500]}"#,
+        r#"{"type":2,"descID":92001,"arrValues":["a@example.invalid","Pumpe","aus"]}"#,
+        r#"{"type":7,"descID":98101,"command":"autopilotMessage/2/Pumpe/aus","arrValues":[2,"Pumpe","aus",4]}"#,
+    ] {
+        assert!(off.contains(&esc(part)), "{part}\n{off}");
+    }
+    let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    let lifted = MORE
+        .replace("rule pumpe_aus\n", "rule pumpe_aus \"Pumpe Aus\"\n")
+        .replace("2.5s", "2500ms");
+    assert!(text.contains(&lifted), "{text}");
+    assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    assert_eq!(compile_rules(&out, AS_READ).unwrap(), base);
+}
+
+#[test]
+fn weather_clock_and_messages_are_checked() {
+    let base = fixture();
+    let with = |rule: &str| AS_READ.replace("\twhen time 17:00\n", rule);
+    let e = compile_rules(&base, &with("\twhen weather humidity > 80\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("temperature"), "{e}");
+    let e = compile_rules(&base, &with("\twhen weather sunshine > 1\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("== on"), "{e}");
+    let e = compile_rules(&base, &with("\twhen day > 32\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("1 … 31"), "{e}");
+    // The fixture states no time zone.
+    let e = compile_rules(&base, &with("\twhen date \"2026-07-01\"\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not stated"), "{e}");
+    let parse_err = |line: &str| Module::parse(&with(line)).unwrap_err().to_string();
+    assert!(parse_err("\twhen date \"2026-02-30\"\n").contains("not a date"));
+    let then = |line: &str| with(&format!("\twhen time 17:00\n{line}"));
+    let parse_then = |line: &str| Module::parse(&then(line)).unwrap_err().to_string();
+    assert!(parse_then("\tthen wait 0.05s\n").contains("0.1 s"));
+    assert!(parse_then("\tthen message loud \"a\" \"b\"\n").contains("severity"));
+    let e = compile_rules(&base, &then("\tthen message info \"a/b\" \"c\"\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("`/`"), "{e}");
+}
+
+#[test]
+fn the_container_watches_the_weather_day_and_daylight() {
+    // Oracle session 32: a weather condition wires the `AQ` of its
+    // field's `WeatherData` block, a day of month or daylight condition
+    // the `Day` or `Daylight` block's `Q`, a date none. A sun time is not
+    // observed: the wires stay as they are.
+    let base = fixture()
+        .replace(
+            "<C Type=\"Document\" V=\"175\"",
+            "<C Type=\"Document\" V=\"175\" Timezone=\"Europe/Vienna\"",
+        )
+        .replace(
+            "\t\t</C>\r\n\t</C>\r\n</ControlList>",
+            "\t\t\t<C Type=\"DayOfWeek\" V=\"175\" U=\"4000000c-0000-00c0-ffff504f94112233\">\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"4000000c-0000-00c1-01ffaaaaaaaa000c\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"Day\" V=\"175\" U=\"40000008-0000-0080-ffff504f94112233\">\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"40000008-0000-0081-01ffaaaaaaaa0008\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"Daylight\" V=\"175\" U=\"40000009-0000-0090-ffff504f94112233\">\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"40000009-0000-0091-01ffaaaaaaaa0009\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"WeatherData\" V=\"175\" U=\"4000000a-0000-00a0-ffff504f94112233\" WType=\"2\">\r\n\
+             \t\t\t\t<Co K=\"AQ\" U=\"4000000a-0000-00a1-01ffaaaaaaaa000a\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"WeatherData\" V=\"175\" U=\"4000000b-0000-00b0-ffff504f94112233\" WType=\"1\">\r\n\
+             \t\t\t\t<Co K=\"AQ\" U=\"4000000b-0000-00b1-01ffaaaaaaaa000b\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t\t<C Type=\"AutoPilot\" V=\"175\" U=\"40000007-0000-0070-ffff504f94112233\">\r\n\
+             \t\t\t\t<Co K=\"Input\" U=\"40000007-0000-0071-00ffaaaaaaaa0007\"/>\r\n\
+             \t\t\t</C>\r\n\
+             \t\t</C>\r\n\t</C>\r\n</ControlList>",
+        );
+    let with = |conds: &str| {
+        AS_READ.replace(
+            "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n",
+            &format!("rule pumpe_aus\n\tinactive\n{conds}"),
+        )
+    };
+    let src = with(
+        "\twhen time 17:00\n\twhen weather temperature > 0\n\twhen day >= 15\n\
+         \twhen daylight\n\twhen date \"2026-07-01\"\n",
+    );
+    let out = compile_rules(&base, &src).unwrap();
+    let at = out.find("<Co K=\"Input\"").unwrap();
+    let co = &out[at..at + out[at..].find("</Co>").unwrap()];
+    assert!(co.contains("Nc=\"4\""), "{co}");
+    let daylight = co.find("40000009-0000-0091-").unwrap();
+    let day = co.find("40000008-0000-0081-").unwrap();
+    let weather = co.find("4000000b-0000-00b1-").unwrap();
+    let weekday = co.find("4000000c-0000-00c1-").unwrap();
+    assert!(daylight < day && day < weather && weather < weekday, "{co}");
+    assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    // A sun time leaves the wires alone.
+    let sun = compile_rules(&out, &with("\twhen sunset\n\twhen day >= 15\n")).unwrap();
+    let input = |xml: &str| {
+        let at = xml.find("<Co K=\"Input\"").unwrap();
+        xml[at..at + xml[at..].find("</Co>").unwrap()].to_string()
+    };
+    assert_eq!(input(&sun), input(&out));
 }

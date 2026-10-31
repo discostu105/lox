@@ -364,6 +364,24 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   `Mode=` attribute: 0 … 11 built in, negatives user modes); a mode
   action `{"type": 1, "descID": 21101, "id": <number>, "command":
   "1"|"0", "arrValues": [1|0]}`.
+- **Weather, clock, date and message shapes** (2026-10-31, D76; from
+  the capability table's `sections` and the web app's
+  `_applyEventToRule`/`_applyActionToRule`): a weather condition
+  `{"type": 2, "descID": 37001…37010, "id": <weatherFieldTypes id>,
+  "value", "operator"}` (1 temperature, 2 dewpoint, 4 wind, 5 wind
+  direction, 6 gusts, 7 irradiance, 8 relative irradiance, 9
+  precipitation, 10 weather type, 11 pressure, 26 felt temperature, 27
+  solar irradiance, 34 sunshine — digital); clock conditions `type` 3
+  with `id` = `descID / 1000`: 269001 day of month (analog), 281001
+  daylight (digital), 294001 sunrise, 295001 sunset, 298001 dawn,
+  299001 dusk (moments, `value` 1); a date `{"type": 4, "descID":
+  233001, "id": 233, "value": <Unix time of the local midnight>}`.
+  Actions carry `arrValues` and the command the table's `action`
+  template gives: 2 mailer (92001, `[to, subject, text]`), 3 caller
+  (93001), 4 notification (96001, `[subject, text]`), 5 pause (341801,
+  milliseconds, `command` the number), 6 speech output (223101), 7
+  message center (98101, `autopilotMessage/<severity>/<subject>/<text>`,
+  `arrValues` `[severity, subject, text, 2 everyone | 4 admins]`).
 - The raw payload text is **not writer-stable**: two of the house
   rules carry a raw CRLF *inside* the JSON (between tokens — the
   parsed value is unaffected), the other eight are single-line. Any

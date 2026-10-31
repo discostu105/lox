@@ -711,13 +711,16 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         compiled.counters().next_obj,
         lock_path.display()
     );
-    // Placement keeps to the sheet where it can (D50); say what is past it.
+    // Placement keeps to the sheet where it can (D50); say what it put
+    // past it. An object that keeps its place in the base was put there in
+    // Loxone Config, so it is not the compile's to report.
     let slug_of: std::collections::BTreeMap<&str, &str> = lock
         .objects
         .iter()
         .map(|(slug, o)| (o.uuid.as_str(), slug.as_str()))
         .collect();
     let managed = slug_of.keys().copied().collect();
+    let managed = loxone_config::layout::placed(&base_doc, &compiled, &managed);
     for (page, uuids) in loxone_config::layout::off_sheet(&compiled, &managed) {
         let slugs: Vec<&str> = uuids.iter().map(|u| slug_of[u.as_str()]).collect();
         eprintln!(

@@ -65,6 +65,178 @@ fn day_words(days: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// The clock pulses a rule can wait for: keyword, code, `id`.
+const SUN: &[(&str, i64, i64)] = &[
+    ("sunrise", 294_001, 294),
+    ("sunset", 295_001, 295),
+    ("dawn", 298_001, 298),
+    ("dusk", 299_001, 299),
+];
+const DAY: (i64, i64) = (269_001, 269);
+const DAYLIGHT: (i64, i64) = (281_001, 281);
+const SEVERITIES: &[(&str, u8)] = &[
+    ("info", 1),
+    ("warning", 2),
+    ("important", 3),
+    ("critical", 4),
+];
+
+/// A `then message` severity's code.
+pub(crate) fn severity(word: &str) -> Option<u8> {
+    SEVERITIES.iter().find(|(w, _)| *w == word).map(|(_, c)| *c)
+}
+
+/// `YYYY-MM-DD` as year, month, day.
+pub(crate) fn parse_date(text: &str) -> Option<(i64, i64, i64)> {
+    let mut it = text.split('-');
+    let (y, m, d) = (it.next()?, it.next()?, it.next()?);
+    if it.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    let days_in = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+        2 => 28,
+        _ => return None,
+    };
+    (1..=days_in).contains(&d).then_some((y, m, d))
+}
+
+/// A `then wait` duration in milliseconds, within the table's 0.1 s …
+/// 86400 s.
+pub(crate) fn wait_ms(text: &str) -> Option<i64> {
+    let split = text.find(|c: char| c.is_ascii_alphabetic())?;
+    let (n, unit) = text.split_at(split);
+    let unit = super::ast::Unit::parse(unit)?;
+    let secs = super::ast::scale_by_unit(n, unit)?;
+    let (int, frac) = secs.split_once('.').unwrap_or((&secs, ""));
+    if frac.len() > 3 {
+        return None;
+    }
+    let ms: i64 = format!("{int}{frac:0<3}").parse().ok()?;
+    (100..=86_400_000).contains(&ms).then_some(ms)
+}
+
+/// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The date of a day number (Hinnant's `civil_from_days`).
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (
+        if m <= 2 {
+            yoe + era * 400 + 1
+        } else {
+            yoe + era * 400
+        },
+        m,
+        d,
+    )
+}
+
+/// The time zones on Central European Time (UTC+1, summer time UTC+2
+/// from the last Sunday of March to the last Sunday of October) — the
+/// ones Lox Logic converts dates in.
+const CET_ZONES: &[&str] = &[
+    "Europe/Amsterdam",
+    "Europe/Andorra",
+    "Europe/Belgrade",
+    "Europe/Berlin",
+    "Europe/Bratislava",
+    "Europe/Brussels",
+    "Europe/Budapest",
+    "Europe/Busingen",
+    "Europe/Copenhagen",
+    "Europe/Gibraltar",
+    "Europe/Ljubljana",
+    "Europe/Luxembourg",
+    "Europe/Madrid",
+    "Europe/Malta",
+    "Europe/Monaco",
+    "Europe/Oslo",
+    "Europe/Paris",
+    "Europe/Podgorica",
+    "Europe/Prague",
+    "Europe/Rome",
+    "Europe/San_Marino",
+    "Europe/Sarajevo",
+    "Europe/Skopje",
+    "Europe/Stockholm",
+    "Europe/Tirane",
+    "Europe/Vaduz",
+    "Europe/Vatican",
+    "Europe/Vienna",
+    "Europe/Warsaw",
+    "Europe/Zagreb",
+    "Europe/Zurich",
+];
+
+/// The UTC offset in hours of local midnight on a day, in a CET zone.
+fn cet_offset(y: i64, m: i64, d: i64) -> i64 {
+    // The last Sunday of a month (1970-01-01 was a Thursday).
+    let last_sunday = |m: i64| {
+        let last = days_from_civil(y, m, 31);
+        last - (last + 4).rem_euclid(7)
+    };
+    let day = days_from_civil(y, m, d);
+    // Midnight is before the 01:00 UTC switch on both switching days.
+    if day > last_sunday(3) && day <= last_sunday(10) {
+        2
+    } else {
+        1
+    }
+}
+
+/// The Unix time of a date's local midnight in the config's zone.
+fn date_value(tz: &str, date: &str) -> Option<i64> {
+    let (y, m, d) = parse_date(date)?;
+    CET_ZONES.contains(&tz).then_some(())?;
+    Some(days_from_civil(y, m, d) * 86_400 - cet_offset(y, m, d) * 3600)
+}
+
+/// The date whose local midnight a Unix time is, in the config's zone.
+fn date_text(tz: &str, t: i64) -> Option<String> {
+    CET_ZONES.contains(&tz).then_some(())?;
+    // The day of the local time, then check it is that day's midnight.
+    let (y, m, d) = civil_from_days((t + 7200).div_euclid(86_400));
+    let text = format!("{y:04}-{m:02}-{d:02}");
+    (date_value(tz, &text) == Some(t)).then_some(text)
+}
+
+/// A `then wait` duration as source text: whole seconds, else ms.
+fn wait_text(ms: i64) -> String {
+    if ms % 1000 == 0 {
+        format!("{}s", ms / 1000)
+    } else {
+        format!("{ms}ms")
+    }
+}
+
+/// The config's time zone (`Timezone=` on the Miniserver).
+fn timezone(el: &Element) -> Option<String> {
+    if let Some(tz) = el.attr("Timezone") {
+        return Some(tz.to_string());
+    }
+    el.child_elements().find_map(timezone)
+}
+
 /// The connectors of an `AutopilotRule`, in index order (10/10 corpus
 /// rules).
 const RULE_PORTS: [&str; 7] = ["InputTrigger", "Reset", "On", "run", "Q", "A", "OutputAPI"];
@@ -317,6 +489,8 @@ struct Context {
     /// code, state UUID — evidence for a block whose app view Lox Logic does
     /// not derive.
     seen: Vec<(String, i64, String)>,
+    /// The Miniserver's time zone, for dates.
+    timezone: Option<String>,
 }
 
 impl Context {
@@ -350,6 +524,7 @@ impl Context {
                     _ => None,
                 })
                 .collect(),
+            timezone: timezone(&doc.xml.root),
         }
     }
 
@@ -541,21 +716,27 @@ pub(crate) fn apply(
 /// The AutoPilot container's `Input` wires: Loxone Config wires every
 /// source a rule watches into it (`FLG="1"`) — a weekday condition the
 /// `DayOfWeek` block's `Q`, a state condition the state, a mode
-/// condition the mode's `Q` (oracle session 31; a time condition none).
-/// A save lists them in reverse document order. Left alone when a rule
-/// has a condition whose source is not known, or when the set is right.
+/// condition the mode's `Q` (oracle session 31; a time condition none);
+/// a weather condition the `AQ` of the `WeatherData` block of its field
+/// (`WType=`), a day-of-month or daylight condition the `Day` or
+/// `Daylight` block's `Q`, a date none (session 32). A save lists them
+/// in reverse document order. Left alone when a rule has a condition
+/// whose wiring is not observed (sun times) or whose block the config
+/// lacks, or when the set is right.
 fn watch_inputs(doc: &mut LoxoneDoc) {
     let objects = doc.objects();
-    let q_of = |pred: &dyn Fn(&crate::xml::Element) -> bool| -> Option<String> {
+    let output_of = |key: &str, pred: &dyn Fn(&crate::xml::Element) -> bool| -> Option<String> {
         objects.iter().find_map(|o| {
             let el = doc.element_at(&o.path)?;
             pred(el).then_some(())?;
             el.child_elements()
-                .find(|c| c.name == "Co" && c.attr("K") == Some("Q"))
+                .find(|c| c.name == "Co" && c.attr("K") == Some(key))
                 .and_then(|c| c.attr("U"))
                 .map(str::to_string)
         })
     };
+    let q_of = |pred: &dyn Fn(&crate::xml::Element) -> bool| output_of("Q", pred);
+    let of_type = |ty: &'static str| move |el: &crate::xml::Element| el.attr("Type") == Some(ty);
     let mut sources: Vec<String> = Vec::new();
     for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
         let Some(rule) = doc
@@ -572,8 +753,19 @@ fn watch_inputs(doc: &mut LoxoneDoc) {
             .flat_map(|g| g["events"].as_array().into_iter().flatten());
         for e in events {
             let source = match e["type"].as_i64() {
-                Some(5) => continue,
-                Some(3) => q_of(&|el| el.attr("Type") == Some("DayOfWeek")),
+                Some(4 | 5) => continue,
+                Some(2) => e["id"].as_i64().and_then(|n| {
+                    output_of("AQ", &|el| {
+                        el.attr("Type") == Some("WeatherData")
+                            && el.attr("WType").and_then(|w| w.parse().ok()) == Some(n)
+                    })
+                }),
+                Some(3) => match e["descID"].as_i64() {
+                    Some(270_001) => q_of(&of_type("DayOfWeek")),
+                    Some(269_001) => q_of(&of_type("Day")),
+                    Some(281_001) => q_of(&of_type("Daylight")),
+                    _ => None,
+                },
                 Some(0) => e["id"].as_str().map(str::to_string),
                 Some(1) => e["id"].as_i64().and_then(|n| {
                     q_of(&|el| {
@@ -796,6 +988,111 @@ fn wanted(
                 mode: cx.mode(ctx, mode, uuid_of)?,
                 on: *on,
             }),
+            RuleStmtKind::Weather { field, op, value } => {
+                let fail = |why: String| Error::Compile(format!("{ctx}: `{}`: {why}", st.kind));
+                let Some(&(id, _, desc, digital)) =
+                    autopilot::WEATHER_FIELDS.iter().find(|f| f.1 == field)
+                else {
+                    let names: Vec<&str> = autopilot::WEATHER_FIELDS.iter().map(|f| f.1).collect();
+                    return Err(fail(format!(
+                        "the app offers the weather fields {}",
+                        names.join(", ")
+                    )));
+                };
+                let value = match (digital, value.as_str()) {
+                    (true, "on") if *op == CmpOp::Eq => "1".to_string(),
+                    (true, "off") if *op == CmpOp::Eq => "0".to_string(),
+                    (true, _) => return Err(fail(format!("`{field}` is `== on` or `== off`"))),
+                    (false, "on" | "off") => {
+                        return Err(fail(format!("`{field}` compares with a number")));
+                    }
+                    (false, v) => v.to_string(),
+                };
+                group.push(Event::Weather {
+                    field: id,
+                    desc,
+                    op: op_code(*op),
+                    value,
+                });
+            }
+            RuleStmtKind::Day { op, value } => {
+                let day = value.parse::<i64>().ok().filter(|d| (1..=31).contains(d));
+                let Some(day) = day else {
+                    return Err(Error::Compile(format!(
+                        "{ctx}: `{}`: a day of the month is 1 … 31",
+                        st.kind
+                    )));
+                };
+                group.push(Event::Clock {
+                    desc: DAY.0,
+                    id: DAY.1,
+                    op: op_code(*op),
+                    value: day,
+                });
+            }
+            RuleStmtKind::Daylight(on) => group.push(Event::Clock {
+                desc: DAYLIGHT.0,
+                id: DAYLIGHT.1,
+                op: 1,
+                value: i64::from(*on),
+            }),
+            RuleStmtKind::Sun(w) => {
+                let &(_, desc, id) = SUN
+                    .iter()
+                    .find(|s| s.0 == w)
+                    .expect("checked by the parser");
+                group.push(Event::Clock {
+                    desc,
+                    id,
+                    op: 1,
+                    value: 1,
+                });
+            }
+            RuleStmtKind::Date(d) => {
+                let tz = cx.timezone.as_deref().unwrap_or("");
+                let Some(t) = date_value(tz, d) else {
+                    return Err(Error::Compile(format!(
+                        "{ctx}: `{}`: Lox Logic converts dates only in the Central European \
+                         time zones, the config's is {}",
+                        st.kind,
+                        if tz.is_empty() { "not stated" } else { tz }
+                    )));
+                };
+                group.push(Event::Date(t));
+            }
+            RuleStmtKind::Notify { subject, text } => rule.actions.push(Action::Notify {
+                subject: subject.clone(),
+                text: text.clone(),
+            }),
+            RuleStmtKind::Mail { to, subject, text } => rule.actions.push(Action::Mail {
+                to: to.clone(),
+                subject: subject.clone(),
+                text: text.clone(),
+            }),
+            RuleStmtKind::Wait(d) => {
+                rule.actions
+                    .push(Action::Pause(wait_ms(d).expect("checked by the parser")));
+            }
+            RuleStmtKind::Message {
+                severity: sev,
+                subject,
+                text,
+                admins,
+            } => {
+                if subject.contains('/') || text.contains('/') {
+                    return Err(Error::Compile(format!(
+                        "{ctx}: `{}`: a system message's subject and text go into a command \
+                         path, so they cannot contain `/`",
+                        st.kind
+                    )));
+                }
+                rule.actions.push(Action::Message {
+                    severity: severity(sev).expect("checked by the parser"),
+                    subject: subject.clone(),
+                    text: text.clone(),
+                    visibility: if *admins { 4 } else { 2 },
+                });
+            }
         }
     }
     Ok(rule)
@@ -932,7 +1229,6 @@ fn rewrite(
             continue;
         }
         let action = match a {
-            Action::Mode { mode, on } => autopilot::mode_action(*mode, *on),
             Action::Control { target, command } => {
                 let ty = cx.types.get(target.as_str()).map_or("", String::as_str);
                 let found = templates
@@ -962,6 +1258,7 @@ fn rewrite(
                 action["id"] = Value::String(target.clone());
                 action
             }
+            other => autopilot::new_action(other).expect("an action without a block"),
         };
         actions.push(action);
     }
@@ -1032,6 +1329,48 @@ pub(crate) fn lift(
                         value,
                     }
                 }
+                Event::Weather {
+                    field, op, value, ..
+                } => {
+                    let &(_, name, _, digital) = autopilot::WEATHER_FIELDS
+                        .iter()
+                        .find(|f| f.0 == *field)
+                        .expect("interpret checked the field");
+                    let value = match (digital, value.as_str()) {
+                        (true, "1") => "on".to_string(),
+                        (true, "0") => "off".to_string(),
+                        (true, v) => return Err(format!("weather `{name}` with value {v}")),
+                        (false, v) => v.to_string(),
+                    };
+                    RuleStmtKind::Weather {
+                        field: name.to_string(),
+                        op: op_of(*op).expect("interpret checked the operator"),
+                        value,
+                    }
+                }
+                Event::Clock {
+                    desc, op, value, ..
+                } => match (*desc, *value) {
+                    (d, v) if d == DAY.0 => RuleStmtKind::Day {
+                        op: op_of(*op).expect("interpret checked the operator"),
+                        value: v.to_string(),
+                    },
+                    (d, v @ (0 | 1)) if d == DAYLIGHT.0 => RuleStmtKind::Daylight(v == 1),
+                    (d, 1) if SUN.iter().any(|s| s.1 == d) => RuleStmtKind::Sun(
+                        SUN.iter()
+                            .find(|s| s.1 == d)
+                            .expect("just found")
+                            .0
+                            .to_string(),
+                    ),
+                    (d, v) => return Err(format!("clock condition {d} with value {v}")),
+                },
+                Event::Date(t) => {
+                    let tz = cx.timezone.as_deref().unwrap_or("");
+                    RuleStmtKind::Date(date_text(tz, *t).ok_or_else(|| {
+                        format!("its date {t} is no midnight Lox Logic can convert in `{tz}`")
+                    })?)
+                }
             }));
         }
     }
@@ -1044,6 +1383,32 @@ pub(crate) fn lift(
             Action::Mode { mode: n, on } => RuleStmtKind::ThenMode {
                 mode: mode(*n)?,
                 on: *on,
+            },
+            Action::Notify { subject, text } => RuleStmtKind::Notify {
+                subject: subject.clone(),
+                text: text.clone(),
+            },
+            Action::Mail { to, subject, text } => RuleStmtKind::Mail {
+                to: to.clone(),
+                subject: subject.clone(),
+                text: text.clone(),
+            },
+            Action::Pause(ms) => RuleStmtKind::Wait(wait_text(*ms)),
+            Action::Message {
+                severity: sev,
+                subject,
+                text,
+                visibility,
+            } => RuleStmtKind::Message {
+                severity: SEVERITIES
+                    .iter()
+                    .find(|s| s.1 == *sev)
+                    .expect("interpret checked the severity")
+                    .0
+                    .to_string(),
+                subject: subject.clone(),
+                text: text.clone(),
+                admins: *visibility == 4,
             },
         }));
     }
@@ -1067,5 +1432,28 @@ mod tests {
         assert_eq!(day_words(&[0, 6]), ["mon", "sun"]);
         assert_eq!(weekdays("weekend"), Some(&[5u8, 6][..]));
         assert_eq!(weekdays("monday"), None);
+    }
+
+    #[test]
+    fn dates_are_local_midnights() {
+        // Python's zoneinfo, Europe/Vienna: the summer-time switches.
+        for (d, t) in [
+            ("2026-01-01", 1_767_222_000),
+            ("2026-03-29", 1_774_738_800),
+            ("2026-03-30", 1_774_821_600),
+            ("2026-07-01", 1_782_856_800),
+            ("2026-10-25", 1_792_879_200),
+            ("2026-10-26", 1_792_969_200),
+        ] {
+            assert_eq!(date_value("Europe/Vienna", d), Some(t), "{d}");
+            assert_eq!(date_text("Europe/Vienna", t).as_deref(), Some(d));
+        }
+        assert_eq!(date_value("America/New_York", "2026-01-01"), None);
+        assert_eq!(date_text("Europe/Vienna", 1_767_222_001), None);
+        assert_eq!(wait_ms("2.5s"), Some(2500));
+        assert_eq!(wait_ms("2min"), Some(120_000));
+        assert_eq!(wait_ms("100ms"), Some(100));
+        assert_eq!(wait_ms("99ms"), None);
+        assert_eq!(wait_ms("25h"), None);
     }
 }

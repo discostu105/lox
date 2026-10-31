@@ -1,0 +1,1 @@
+- **lox logic compile**: the "past the edge of the A3 sheet" warning lists only objects the compile placed, not ones laid out that way in Loxone Config (whose `--relayout` would rearrange the page).

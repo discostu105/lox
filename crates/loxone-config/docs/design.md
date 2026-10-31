@@ -2294,3 +2294,21 @@ Anything unverified is an error, not a heuristic:
   the UUIDs that embed them. It exits 1 when a finding is left, so a
   copy that passes can be shared (an issue, a test fixture). The copy is
   for reading, never for uploading.
+- **D76 — Weather, dates and messages in rules** (2026-10-31; #208).
+  `rule` takes `when weather <field> <op> <v>`, `when day`, `when
+  daylight`, `when sunrise|sunset|dawn|dusk`, `when date "Y-M-D"` and
+  `then notify`, `then mail`, `then wait`, `then message`. The codes
+  are the Miniserver's own (capability `sections`, the web app's rule
+  builder; loxone-format.md), not guessed. A date is the Unix time of
+  the local midnight: the compile computes it for the Central European
+  zones only (the config's `Timezone`, EU summer-time rule) and refuses
+  a config in another zone or none, rather than guessing an offset. A
+  pause is stored in milliseconds; it reads back as `5s` when whole,
+  else `2500ms`. A message's subject and text travel `/`-separated in
+  its command, so a `/` in them is refused. Text conditions, the
+  weather type (a multi-select), the caller and speech output are not
+  covered: no rule of the corpus uses them and the house has no caller
+  service. Such a rule stays a comment. Oracle session 32: the save keeps
+  the payload and wires the weather field's `WeatherData` block, the
+  `Day` and the `Daylight` block into the AutoPilot container; the
+  compile does the same.

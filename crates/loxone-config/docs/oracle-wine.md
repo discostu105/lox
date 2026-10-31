@@ -702,6 +702,21 @@ range, a period, an Easter entry — next to the two existing ones.
   list from the rules (D73); a recompile against the saved file is
   byte-identical.
 
+## Weather, day, daylight and date conditions (session 32, D76) — passed, one finding
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28): a probe rule with a time, a weather (temperature), a
+day-of-month and a daylight condition, an `or` group with a date and a
+time, and the actions message center, pause and notification.
+
+- **Pass:** the rule's `APC=` came back unchanged.
+- **Finding:** the save wired three sources into the AutoPilot
+  container's `Input`: the `Daylight` block's `Q`, the `Day` block's
+  `Q` and the `AQ` of the `WeatherData` block with `WType="1"`
+  (temperature), before the inputs already there; the date and the
+  times wire nothing. Compiles now set these too (D76); a recompile
+  against the saved file is byte-identical.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

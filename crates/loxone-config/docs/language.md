@@ -454,8 +454,10 @@ virtual input: no position, no `page`. A fresh one gets the next
 `Mode=` number below the lowest in use (`-1`, `-2`, …) and keeps it. It
 can be named in schedules by its title. Existing modes — the built-in
 ones and those made in Loxone Config — are referenced by title in a
-schedule or as an extern (`extern montag = Mode(title: "Montag")`);
-`adopt` does not take them over.
+schedule or as an extern (`extern montag = Mode(title: "Montag")`).
+`adopt --uuid <mode> --as <slug>` takes over a user mode made in Loxone
+Config: it keeps its uuid and `Mode=` number, and a new title is a
+rename. A built-in mode (`Mode=` ≥ 0) stays an extern.
 
 ### Calendar entries — the *Betriebszeiten* that switch a mode on (D74)
 
@@ -1139,6 +1141,28 @@ created, named and deleted in the app; the declaration edits one.
   the commands the block offers.
 - **`then mode <mode> on|off`** (D73) — activates or deactivates an
   operating mode.
+- **`when weather <field> <op> <value>`** (D76) — a value of the
+  weather service: `temperature`, `dewpoint`, `felt_temperature`,
+  `wind`, `gusts`, `wind_direction`, `irradiance`,
+  `relative_irradiance`, `solar_irradiance`, `precipitation`,
+  `pressure` with the operators of a state, `sunshine == on|off`.
+- **`when day <op> <1…31>`** (D76) — the day of the month.
+- **`when daylight [off]`** (D76) — while it is (not) day.
+- **`when sunrise`**, **`sunset`**, **`dawn`**, **`dusk`** (D76) — at
+  that moment of the day.
+- **`when date "YYYY-MM-DD"`** (D76) — on that day. The app stores the
+  local midnight as a Unix time, so the config must state a Central
+  European `Timezone` (`Europe/Vienna`, `Europe/Berlin`, …).
+- **`then notify "<subject>" "<text>"`** (D76) — a push notification
+  to the app's users.
+- **`then mail "<to>" "<subject>" "<text>"`** (D76) — a mail through
+  the Loxone Cloud Mailer.
+- **`then wait <duration>`** (D76) — a pause before the next action:
+  `500ms`, `2.5s`, `5min`, `1h` (0.1 s … 24 h).
+- **`then message <severity> "<subject>" "<text>" [admins]`** (D76) —
+  an entry in the message center (`info`, `warning`, `error`; `admins`:
+  only administrators see it). A `/` in subject or text is refused: the
+  command carries them `/`-separated.
 
 Compiling writes the rule's `APC=` payload only when the declaration
 differs from the rule as read, and then as the app's edit: unchanged
@@ -1146,8 +1170,8 @@ conditions and actions keep their JSON, `STA` follows `active`.
 `decompile`/`adopt` lift every rule of these shapes into a declaration,
 by its name (below) when no other rule has that name, else on an extern;
 the blocks it watches or drives become externs. A rule with other
-conditions (weather, a date, notifications, text values) stays a comment
-and must not be declared. `loxl adopt --uuid
+conditions or actions (text values, the weather type, calls, speech
+output) stays a comment and must not be declared. `loxl adopt --uuid
 <rule> --as <slug>` takes one rule into an existing project the same
 way: an extern rule of the module (`--as` its slug) loses its `extern`
 line and unnamed `rule`, and the named declaration takes their place;

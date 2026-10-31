@@ -1,0 +1,1 @@
+- **lox logic adopt --uuid**: documented for user operating modes made in Loxone Config: the mode keeps its uuid and `Mode=` number, a new title renames it.
