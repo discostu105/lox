@@ -4,9 +4,9 @@
 use anyhow::Result;
 
 use crate::commands::RunContext;
-use crate::commands::inspect::is_energy_type;
 use crate::config::Config;
 use crate::energy::{self, FlowReport, MeterPower, Role};
+use crate::inventory::is_energy_type;
 use crate::util::xml_attr;
 
 pub fn cmd_energy(ctx: &RunContext, room: Option<String>, top: Option<usize>) -> Result<()> {

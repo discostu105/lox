@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use reqwest::blocking::Client;
 use std::thread;
 use std::time::Duration;
@@ -6,11 +6,11 @@ use std::time::Duration;
 use crate::actions::{self, Action, ThermoCmd};
 use crate::commands::RunContext;
 use crate::config::Config;
+use crate::inventory::{fetch_mood_list_json, resolve_mood_list};
 use crate::scene::Scene;
 use crate::util::{bar, encode_path_value, json_val_str, xml_attr};
 use crate::{InputCmd, LightCmd, MusicCmd, print_dry_run, print_resp, send_or_dry_run};
 use loxone_client::client::{LoxClient, USER_AGENT};
-use loxone_client::stream::{self, StateEvent};
 
 pub fn cmd_on(
     ctx: &RunContext,
@@ -242,75 +242,6 @@ pub fn fetch_light_moods(
     let rt = tokio::runtime::Runtime::new()?;
     let moods_json = rt.block_on(fetch_mood_list_json(&conn, &mood_list_uuid))?;
     Ok((ctrl, actions::parse_mood_list(&moods_json)?))
-}
-
-/// Resolve a lighting controller and the UUID of its `moodList` text state.
-///
-/// Shared by `lox light moods` and the MCP `list_light_moods` tool.
-pub fn resolve_mood_list(
-    lox: &mut LoxClient,
-    name_or_uuid: &str,
-    room: Option<&str>,
-) -> Result<(loxone_client::client::Control, String)> {
-    let uuid = lox.resolve_with_room(name_or_uuid, room)?;
-    let ctrl = lox.find_control(&uuid)?;
-    if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
-        bail!(
-            "'{}' is type '{}', not a LightController",
-            ctrl.name,
-            ctrl.typ
-        );
-    }
-    let mood_list_uuid = lox
-        .get_structure()?
-        .get("controls")
-        .and_then(|c| c.as_object())
-        .and_then(|m| m.get(&uuid))
-        .and_then(|c| c.get("states"))
-        .and_then(|s| s.as_object())
-        .and_then(|s| s.get("moodList"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "'{}' has no moodList state — is it a LightControllerV2?",
-                ctrl.name
-            )
-        })?
-        .to_string();
-    Ok((ctrl, mood_list_uuid))
-}
-
-/// Wait (max 10 s) for the `moodList` text state in the WebSocket state dump.
-pub async fn fetch_mood_list_json(
-    conn: &loxone_client::connection::Connection,
-    mood_list_uuid: &str,
-) -> Result<String> {
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        fetch_mood_list_via_ws(conn, mood_list_uuid),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Timeout waiting for moodList state (10s)"))?
-}
-
-/// Connect to the Miniserver WebSocket, subscribe to binary states,
-/// and return the text content of the moodList state UUID on first receipt.
-async fn fetch_mood_list_via_ws(
-    conn: &loxone_client::connection::Connection,
-    mood_list_uuid: &str,
-) -> Result<String> {
-    let target = mood_list_uuid.to_string();
-    stream::stream_events_until(conn, |event| {
-        if let StateEvent::TextState { uuid, text, .. } = event
-            && *uuid == target
-        {
-            Some(text.clone())
-        } else {
-            None
-        }
-    })
-    .await
-    .context("moodList state not received in initial state dump")
 }
 
 pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {

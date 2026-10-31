@@ -8,6 +8,7 @@ pub mod sdtest;
 pub mod stats;
 pub mod statv2;
 pub mod stream;
+pub mod system;
 pub mod time;
 pub mod token;
 pub mod ws;
