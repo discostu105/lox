@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use crate::actions::{self, Action, Risk, RiskTarget};
-use crate::commands::inspect::{is_energy_type, is_sensor_type};
 use crate::config::Config;
+use crate::inventory::{is_energy_type, is_sensor_type};
 use crate::scene::{Scene, SceneStep};
 use crate::usermgmt;
 use crate::util::json_val_str;

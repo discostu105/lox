@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use crate::commands::RunContext;
 use crate::config::Config;
+use crate::inventory::is_sensor_type;
 use crate::util::{now_hms, xml_attr};
 use crate::{AutopilotCmd, eval_op, matches_filters, print_stream_event};
-use loxone_client::client::Control;
 use loxone_client::stats::{
     StatsEntry, find_stats_files, parse_stats_entries, parse_weather_entry, stats_data_offset,
     stats_file_path, stats_period,
@@ -674,40 +674,6 @@ pub fn cmd_modes(ctx: &RunContext) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Does a control belong to a sensor kind (`temperature`, `door-window`,
-/// `motion`, `smoke`; anything else means all sensor types)?
-/// Shared by `lox sensors` and the MCP `list_sensors` tool.
-pub fn is_sensor_type(kind: &str, c: &Control) -> bool {
-    let typ = c.typ.as_str();
-    match kind {
-        // InfoOnlyAnalog also carries CO2 (ppm), humidity (%), …: go by the unit
-        "temperature" | "temp" => {
-            typ == "InfoOnlyAnalog" && c.format.as_deref().is_none_or(|f| f.contains('°'))
-        }
-        "door-window" | "doorwindow" => typ == "InfoOnlyDigital",
-        "motion" => matches!(typ, "PresenceDetector" | "MotionSensor"),
-        "smoke" => typ == "SmokeAlarm",
-        _ => matches!(
-            typ,
-            "InfoOnlyAnalog"
-                | "InfoOnlyDigital"
-                | "PresenceDetector"
-                | "MotionSensor"
-                | "SmokeAlarm"
-                | "Meter"
-        ),
-    }
-}
-
-/// Energy meters and managers (`lox energy`, MCP `list_sensors kind=energy`).
-pub fn is_energy_type(typ: &str) -> bool {
-    matches!(
-        typ,
-        "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
-    ) || typ.contains("Energy")
-        || crate::energy::is_flow_monitor(typ)
 }
 
 pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Result<()> {

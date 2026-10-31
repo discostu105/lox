@@ -42,6 +42,7 @@ self-signed certificates.
 | `src/util.rs` | Shared helpers |
 | `src/config.rs` | `Config` / `GlobalConfig`: flat or multi-context config, project-local `.lox/` discovery; `connection()` and `client()` build the loxone-client side |
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
+| `src/inventory.rs` | Shared reads: sensor and energy-meter controls, a light controller's moods |
 | `src/otel.rs` | OpenTelemetry metrics, logs and traces |
 | `src/loxone_xml.rs` | Users, devices and a summary of the program file (views over loxone-config) |
 | `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over loxone-config |
