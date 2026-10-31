@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.42.1] — 2026-10-31
+
+### Changed
+- lxir: highlight extern mirrors:, no dead-outputs warning for family parents (#217)
+
 ## [0.42.0] — 2026-10-31 — device settings, bulk statements, light controllers in the app
 
 Air and Tree devices get their own settings from source, one statement can set many objects, and light controllers shown from source appear in the app with their circuits.
