@@ -36,7 +36,9 @@ cargo run --bin lxir -- help     # the CLI (also: lox ir help)
 - Apache-2.0 (see [LICENSE](LICENSE)), same as lox. Published on crates.io as `lxir`; lox itself uses
   it by path.
 - This crate lives in the lox workspace (`crates/lxir`). It stays
-  network-free: transport, LoxCC and credentials belong to lox (`src/`).
+  network-free: transport and credentials belong to lox (`src/`). Backup
+  ZIPs and the LoxCC codec are file formats and live here (`src/archive.rs`,
+  feature `archive`).
   The CLI is `src/cli.rs`, run by the `lxir` binary and by `lox ir`.
 
 ## Doc map

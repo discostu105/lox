@@ -50,6 +50,10 @@ pub enum Error {
     #[error("lockfile error: {0}")]
     Lock(String),
 
+    /// A backup ZIP or `sps0.LoxCC` that cannot be read or staged.
+    #[error("{0}")]
+    Archive(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

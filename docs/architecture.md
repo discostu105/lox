@@ -40,7 +40,7 @@ self-signed certificates.
 | `src/actions.rs` | Per-control-type command mapping and risk levels, shared by the CLI, TUI and MCP server |
 | `src/stream.rs`, `src/ws.rs`, `src/token.rs` | WebSocket state streaming, the connection, token auth |
 | `src/otel.rs` | OpenTelemetry metrics, logs and traces |
-| `src/ftp.rs`, `src/loxcc.rs`, `src/loxone_xml.rs` | Config transfer, LoxCC (de)compression, users/devices in the XML |
+| `src/ftp.rs`, `src/loxone_xml.rs` | Config transfer; users, devices and a summary of the program file (views over lxir) |
 | `src/gitops.rs`, `src/snapshot.rs`, `src/logic.rs` | Config repo (init/pull/log/restore), snapshot resolution, the logic views over lxir |
 | `src/statv2.rs` | Statistics V2 (energy flow monitor meters) |
 | `src/scene.rs` | Scenes from YAML |

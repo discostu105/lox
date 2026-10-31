@@ -49,8 +49,9 @@ use crate::app_catalogue::{self, StaleEntry};
 use crate::client::LoxClient;
 use crate::config::Config;
 use crate::custom_changes::{self, CustomChange};
-use crate::{ftp, logic, loxcc};
+use crate::{ftp, logic};
 use anyhow::{Context, Result, anyhow, bail};
+use lxir::archive;
 use lxir::ir::{CompileOptions, compile};
 use lxir::{Lockfile, LoxoneDoc, Project};
 use serde::Serialize;
@@ -295,7 +296,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     // 1. What the Miniserver runs now.
     say("Downloading the live config...");
     let (name, live_zip) = ms.download_newest()?;
-    let live_xml = loxcc::extract_and_decompress(&live_zip)
+    let live_xml = archive::extract_and_decompress(&live_zip)
         .with_context(|| format!("Cannot extract the live config {name}"))?;
     let live_path = file("pre-push.Loxone");
     fs::write(file("pre-push.zip"), &live_zip)?;
@@ -454,11 +455,12 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let replace: Vec<(&str, &[u8])> = permissions
         .content
         .as_deref()
-        .map(|c| (loxcc::PERMISSIONS_ENTRY, c))
+        .map(|c| (archive::PERMISSIONS_ENTRY, c))
         .into_iter()
         .chain(new_catalogue.map(|c| (app_catalogue::MEMBER, c)))
         .collect();
-    let staged = loxcc::stage_upload_zip_replacing(&live_zip, &compiled, &replace)?;
+    let staged =
+        archive::stage_upload_zip_replacing(&live_zip, &compiled, &replace, crate::zip_now())?;
     let staged_path = file("push.zip");
     fs::write(&staged_path, &staged)?;
     report.staged = Some(staged_path.clone());
@@ -491,7 +493,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     // 7. Verify what it runs now.
     say("Downloading the config again to verify...");
     let (post_name, post_zip) = ms.download_newest()?;
-    let post_xml = loxcc::extract_and_decompress(&post_zip)
+    let post_xml = archive::extract_and_decompress(&post_zip)
         .with_context(|| format!("Cannot extract the config after the push ({post_name})"))?;
     let post_path = file("post-push.Loxone");
     fs::write(file("post-push.zip"), &post_zip)?;
@@ -723,7 +725,7 @@ fn permissions_for(
     compiled_catalogue: Option<&[u8]>,
 ) -> Result<Permissions> {
     use lxir::permissions::{assignments, encode, generate};
-    let Some(bin) = loxcc::read_entry(live_zip, loxcc::PERMISSIONS_ENTRY)? else {
+    let Some(bin) = archive::read_entry(live_zip, archive::PERMISSIONS_ENTRY)? else {
         return Ok(Permissions {
             status: "absent",
             content: None,
@@ -731,7 +733,7 @@ fn permissions_for(
             stale: false,
         });
     };
-    let app = loxcc::read_entry(live_zip, app_catalogue::MEMBER)?
+    let app = archive::read_entry(live_zip, app_catalogue::MEMBER)?
         .map(|a| String::from_utf8(a).map_err(|_| "LoxAPP3.json is not UTF-8".to_string()))
         .unwrap_or_else(|| Err("the download has no LoxAPP3.json".to_string()));
     let regenerated = app.and_then(|app| {
@@ -1009,7 +1011,7 @@ mod tests {
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default();
         w.start_file("sps0.LoxCC", opts).unwrap();
-        w.write_all(&loxcc::compress_loxcc(xml).unwrap()).unwrap();
+        w.write_all(&archive::compress_loxcc(xml).unwrap()).unwrap();
         w.start_file("sps0.LoxPLAN", opts).unwrap();
         w.write_all(b"plan").unwrap();
         w.finish().unwrap().into_inner()
@@ -1080,7 +1082,7 @@ mod tests {
         // The Miniserver runs exactly the compiled file, side files untouched.
         let compiled = fs::read(report.compiled.unwrap()).unwrap();
         let live = ms.current.borrow().clone();
-        assert_eq!(loxcc::extract_and_decompress(&live).unwrap(), compiled);
+        assert_eq!(archive::extract_and_decompress(&live).unwrap(), compiled);
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(live)).unwrap();
         assert!(archive.by_name("sps0.LoxPLAN").is_ok());
         // The project moved forward: out, lock, base.
@@ -1123,7 +1125,7 @@ mod tests {
         assert_eq!(*ms.restarts.borrow(), 0);
         let compiled = fs::read(report.compiled.unwrap()).unwrap();
         let live = ms.current.borrow().clone();
-        assert_eq!(loxcc::extract_and_decompress(&live).unwrap(), compiled);
+        assert_eq!(archive::extract_and_decompress(&live).unwrap(), compiled);
     }
 
     #[test]
@@ -1140,7 +1142,7 @@ mod tests {
         assert_eq!(ms.applies(), 0);
         let staged = fs::read(report.staged.unwrap()).unwrap();
         let compiled = fs::read(report.compiled.unwrap()).unwrap();
-        assert_eq!(loxcc::extract_and_decompress(&staged).unwrap(), compiled);
+        assert_eq!(archive::extract_and_decompress(&staged).unwrap(), compiled);
         assert_eq!(
             fs::read_to_string(dir.path().join("lox.toml")).unwrap(),
             toml
@@ -1341,7 +1343,7 @@ mod tests {
         let mut ms = FakeMiniserver::new(config_zip(&xml));
         ms.custom = Some(vec![(
             format!("{}.LoxCC", obj.uuid),
-            loxcc::compress_loxcc(fragment.as_bytes()).unwrap(),
+            archive::compress_loxcc(fragment.as_bytes()).unwrap(),
         )]);
         (ms, obj.title.unwrap())
     }
@@ -1391,7 +1393,7 @@ mod tests {
         let mut ms = FakeMiniserver::new(config_zip(&deployed));
         ms.custom = Some(vec![(
             format!("{netz_warnung}.LoxCC"),
-            loxcc::compress_loxcc(fragment.as_bytes()).unwrap(),
+            archive::compress_loxcc(fragment.as_bytes()).unwrap(),
         )]);
         fs::write(
             dir.path().join("pages/technik.lxir"),
@@ -1501,7 +1503,7 @@ mod tests {
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default();
         w.start_file("sps0.LoxCC", opts).unwrap();
-        w.write_all(&loxcc::compress_loxcc(&base(dir.path())).unwrap())
+        w.write_all(&archive::compress_loxcc(&base(dir.path())).unwrap())
             .unwrap();
         w.start_file(app_catalogue::MEMBER, opts).unwrap();
         w.write_all(catalogue.as_bytes()).unwrap();
@@ -1519,7 +1521,7 @@ mod tests {
         assert!(report.app_catalogue_stale.is_empty());
         let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
         let uploaded = app_catalogue::parse(
-            &loxcc::read_entry(&staged, app_catalogue::MEMBER)
+            &archive::read_entry(&staged, app_catalogue::MEMBER)
                 .unwrap()
                 .unwrap(),
         )
@@ -1659,7 +1661,7 @@ mod tests {
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default();
         w.start_file("sps0.LoxCC", opts).unwrap();
-        w.write_all(&loxcc::compress_loxcc(xml).unwrap()).unwrap();
+        w.write_all(&archive::compress_loxcc(xml).unwrap()).unwrap();
         w.start_file("LoxAPP3.json", opts).unwrap();
         w.write_all(loxapp3().as_bytes()).unwrap();
         w.start_file("permissions.bin", opts).unwrap();
@@ -1698,13 +1700,13 @@ mod tests {
         assert!(!report.permissions_stale);
         let compiled = fs::read(report.compiled.as_ref().unwrap()).unwrap();
         let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
-        let staged_bin = loxcc::read_entry(&staged, loxcc::PERMISSIONS_ENTRY)
+        let staged_bin = archive::read_entry(&staged, archive::PERMISSIONS_ENTRY)
             .unwrap()
             .unwrap();
         assert_eq!(staged_bin, generated(&compiled));
         assert_ne!(staged_bin, live_bin, "bob now opens the door");
         assert_eq!(
-            loxcc::read_entry(&staged, app_catalogue::MEMBER).unwrap(),
+            archive::read_entry(&staged, app_catalogue::MEMBER).unwrap(),
             Some(loxapp3().into_bytes()),
             "LoxAPP3.json stays as downloaded"
         );
@@ -1729,7 +1731,7 @@ mod tests {
         assert!(report.permissions_stale);
         let staged = fs::read(report.staged.as_ref().unwrap()).unwrap();
         assert_eq!(
-            loxcc::read_entry(&staged, loxcc::PERMISSIONS_ENTRY).unwrap(),
+            archive::read_entry(&staged, archive::PERMISSIONS_ENTRY).unwrap(),
             Some(foreign)
         );
         let json = serde_json::to_value(&report).unwrap();

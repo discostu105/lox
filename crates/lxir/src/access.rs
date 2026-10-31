@@ -54,13 +54,15 @@ impl fmt::Debug for Secret {
 }
 
 /// One `<PRM>` of a `<PH>` list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Permission {
     /// `REF=`: the object the right is on.
     pub target: String,
     /// `TIM=`: the access schedule (a `SwitchingTimer`) of an access right.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
     /// `ACT=`: the UI right (observed: `3`, rarely `1`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ui: Option<String>,
 }
 

@@ -126,7 +126,8 @@ rule today; the rest of the config never notices. See
 ## Try it on your own config
 
 lxir never talks to a Miniserver — it only reads and writes `.Loxone`
-files. Transport is [`lox`](https://github.com/discostu105/lox)'s job,
+files (and the backup ZIPs a Miniserver serves: every command that reads
+a config also takes a backup ZIP). Transport is [`lox`](https://github.com/discostu105/lox)'s job,
 the CLI this crate lives in: every `lxir` command below also runs as
 `lox ir …`. A careful first loop:
 
@@ -308,9 +309,10 @@ instead.
 | `ir` | The text language: constructor-style block declarations with inline wires/parameters, `extern`, `let`, `page` placement, templates with instances, boolean/comparison/arithmetic expressions (as arguments and on wires; arithmetic folds into `Formula` blocks), unit-suffixed values, lifecycle statements, `test … end` scenarios; parser, canonical printer, `compile` (base + module + lockfile → config), `decompile` (config → IR view), `adopt` (existing blocks → module + identity-pinning lockfile), `test` (compile in memory → `lox sim` → per-expect results). |
 | `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals, attribute claims. |
 | `diff` | Semantic diff between two configs, with locale-rename noise flagged. |
+| `archive` | Backup ZIPs (feature `archive`, default): the LoxCC codec of `sps0.LoxCC`, extracting the program file, staging an upload ZIP that copies every other entry raw. |
 
-**Out of scope** — deliberately: transport (FTP/HTTP to the Miniserver),
-LoxCC compression, credentials. Those live in
+**Out of scope** — deliberately: transport (FTP/HTTP to the Miniserver)
+and credentials. Those live in
 [`lox`](https://github.com/discostu105/lox), the CLI that builds on this
 crate.
 
@@ -394,7 +396,7 @@ lxir lives in the [`lox`](https://github.com/discostu105/lox) repository
 as `crates/lxir`. It started as the standalone repository
 [discostu105/lxir](https://github.com/discostu105/lxir), was merged here
 with its history, and is developed only here now: the standalone repository
-receives no further changes. lox (server API, transport, LoxCC) depends on
+receives no further changes. lox (server API, transport) depends on
 it for everything config-model-related: `lox config diff/show/wiring/lint`,
 `lox config push`, and the whole toolchain as `lox ir`. The crate stays a
 separate, network-free library, published on crates.io for anyone else to

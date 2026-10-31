@@ -432,8 +432,11 @@ fn read_module_lenient(path: &str) -> Result<Module, AnyError> {
     Ok(Module { items })
 }
 
+/// A `.Loxone` file, or (feature `archive`) a backup ZIP holding one.
 fn read_doc(path: &str) -> Result<LoxoneDoc, AnyError> {
     let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    #[cfg(feature = "archive")]
+    let bytes = lxir::archive::program_xml(&bytes).map_err(|e| format!("{path}: {e}"))?;
     Ok(LoxoneDoc::parse(&bytes).map_err(|e| format!("{path}: {e}"))?)
 }
 

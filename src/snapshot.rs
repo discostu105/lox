@@ -262,7 +262,7 @@ pub fn download(cfg: &Config, version: Option<&str>) -> Result<Snapshot> {
         .first()
         .context("no config backups on the Miniserver")?;
     let zip = crate::ftp::download_backup(cfg, &newest.filename)?;
-    let xml = crate::loxcc::extract_and_decompress(&zip)?;
+    let xml = lxir::archive::extract_and_decompress(&zip)?;
     let cache = cache_path(cfg);
     if let Some(p) = cache.parent() {
         let _ = std::fs::create_dir_all(p);

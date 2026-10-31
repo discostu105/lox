@@ -7,8 +7,8 @@
 //! old custom changes`). Loxone Config merges them in first ("Load from
 //! Miniserver"); lox can only name them and refuse.
 
-use crate::loxcc;
 use lxir::LoxoneDoc;
+use lxir::archive;
 use lxir::xml::XmlDocument;
 use serde::Serialize;
 
@@ -70,7 +70,7 @@ pub(crate) fn describe(files: &[(String, Vec<u8>)], live_xml: Option<&[u8]>) -> 
     files
         .iter()
         .map(|(name, data)| {
-            let fragment = loxcc::decompress_loxcc(data)
+            let fragment = archive::decompress_loxcc(data)
                 .ok()
                 .and_then(|xml| XmlDocument::parse(&xml).ok())
                 .map(|doc| doc.root)
@@ -174,7 +174,7 @@ mod tests {
     fn file(uuid: &str, xml: &str) -> (String, Vec<u8>) {
         (
             format!("{uuid}.LoxCC"),
-            loxcc::compress_loxcc(xml.as_bytes()).unwrap(),
+            archive::compress_loxcc(xml.as_bytes()).unwrap(),
         )
     }
 

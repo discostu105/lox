@@ -1,6 +1,10 @@
+//! Users, access rights, devices and a summary of a program file
+//! (`.Loxone` XML), shaped the way `lox` lists and checks them. The parsing
+//! is lxir's ([`lxir::LoxoneDoc`], [`lxir::access`]); this module only maps
+//! its model onto these views.
+
 use anyhow::{Context, Result};
-use quick_xml::Reader;
-use quick_xml::events::{BytesStart, Event};
+use lxir::LoxoneDoc;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -46,18 +50,7 @@ pub struct AccessGrant {
 // The full-access group has UgType="4", the nobody group UgType="3".
 // Seen in configs saved by Loxone Config 16.
 
-/// One `<PRM>` entry of a user or group.
-#[derive(Debug, Clone, Serialize)]
-pub struct Permission {
-    /// The block the right is on
-    pub target: String,
-    /// Access right: the schedule (UUID) that limits it
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub schedule: Option<String>,
-    /// UI right: the `ACT` bits
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ui: Option<String>,
-}
+pub use lxir::access::Permission;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigUser {
@@ -196,71 +189,6 @@ pub struct ControlEntry {
 
 // ── Helpers ──
 
-fn attr_value(e: &BytesStart, name: &[u8]) -> Option<String> {
-    for attr in e.attributes().flatten() {
-        if attr.key.as_ref() == name {
-            return String::from_utf8(attr.value.to_vec()).ok();
-        }
-    }
-    None
-}
-
-fn attr_value_or(e: &BytesStart, name: &[u8], default: &str) -> String {
-    attr_value(e, name).unwrap_or_else(|| default.to_string())
-}
-
-/// An attribute with XML escapes resolved (`&amp;` → `&`, `&#xA;` → newline).
-fn attr_text(e: &BytesStart, name: &[u8]) -> Option<String> {
-    let attr = e.attributes().flatten().find(|a| a.key.as_ref() == name)?;
-    match attr.unescape_value() {
-        Ok(v) => Some(v.into_owned()),
-        Err(_) => String::from_utf8(attr.value.to_vec()).ok(),
-    }
-}
-
-/// Number of tag hashes in `NFCArr`: 64 hex digits each. How several tags
-/// are separated is not documented and no sample had two, so any non-hex
-/// separator, or none, is accepted.
-fn count_tag_hashes(arr: &str) -> usize {
-    arr.split(|c: char| !c.is_ascii_hexdigit())
-        .filter(|chunk| !chunk.is_empty())
-        .map(|chunk| chunk.len().div_ceil(64))
-        .sum()
-}
-
-/// Tag names from `NFCNArr`. With one tag the attribute is its name; for
-/// several the separator is not documented, so the common ones are tried
-/// and the first that yields one name per tag wins.
-fn split_tag_names(names: &str, tags: usize) -> Vec<String> {
-    if names.is_empty() {
-        return Vec::new();
-    }
-    if tags > 1 {
-        for sep in ['|', ';', '\n', '\t', ','] {
-            let parts: Vec<&str> = names.split(sep).collect();
-            if parts.len() == tags {
-                return parts.iter().map(|p| p.trim().to_string()).collect();
-            }
-        }
-    }
-    vec![names.to_string()]
-}
-
-/// Number of access codes in `CodeArr` (hashed; separator undocumented).
-fn count_codes(arr: &str) -> usize {
-    arr.split([',', ';', '|', '\n', '\t'])
-        .filter(|chunk| !chunk.trim().is_empty())
-        .count()
-}
-
-fn split_list(s: &str) -> Vec<String> {
-    s.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 pub fn subtype_label(sub_type: u32) -> &'static str {
     match sub_type {
         7 => "Nano IO Air",
@@ -331,6 +259,17 @@ fn is_control_type(type_attr: &str) -> bool {
     )
 }
 
+fn parse_doc(xml: &[u8]) -> Result<LoxoneDoc> {
+    LoxoneDoc::parse(xml).context("Failed to parse XML")
+}
+
+/// An attribute of the object at `path`, XML escapes resolved.
+fn attr_at(doc: &LoxoneDoc, path: &[usize], name: &str) -> Option<String> {
+    doc.element_at(path)?
+        .attr_decoded(name)
+        .map(|v| v.into_owned())
+}
+
 // ── Parsing ──
 
 pub fn parse_users(xml: &[u8]) -> Result<Vec<LoxUser>> {
@@ -363,248 +302,144 @@ pub fn parse_users(xml: &[u8]) -> Result<Vec<LoxUser>> {
         .collect())
 }
 
-/// Users, groups, their rights, the schedules and the NFC Code Touches of a
-/// program file.
 pub fn parse_access_model(xml: &[u8]) -> Result<AccessModel> {
-    enum Owner {
-        User(usize),
-        Group(usize),
-        Other,
-    }
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
+    let doc = parse_doc(xml)?;
+    let access = lxir::access::AccessModel::read(&doc);
     let mut model = AccessModel::default();
-    // the open <C> elements; PRMs belong to the innermost one
-    let mut open: Vec<Owner> = Vec::new();
-
-    loop {
-        let (e, empty) = match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => (e, false),
-            Ok(Event::Empty(e)) => (e, true),
-            Ok(Event::End(e)) => {
-                if e.name().as_ref() == b"C" {
-                    open.pop();
-                }
-                buf.clear();
-                continue;
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(e).context("Failed to parse XML"),
-            _ => {
-                buf.clear();
-                continue;
-            }
-        };
-        match e.name().as_ref() {
-            b"C" => {
-                let uuid = attr_value_or(&e, b"U", "");
-                let title = attr_text(&e, b"Title");
-                if let Some(t) = &title
-                    && !uuid.is_empty()
-                {
-                    model.titles.insert(uuid.clone(), t.clone());
-                }
-                let owner = match attr_value(&e, b"Type").as_deref() {
-                    Some("User") => {
-                        let nfc_tags = count_tag_hashes(&attr_value_or(&e, b"NFCArr", ""));
-                        model.users.push(ConfigUser {
-                            uuid,
-                            name: title.unwrap_or_default(),
-                            description: attr_text(&e, b"Desc")
-                                .unwrap_or_default()
-                                .replace('_', " "),
-                            last_edit: attr_value(&e, b"LastEdit").and_then(|v| v.parse().ok()),
-                            nfc_tags,
-                            nfc_names: split_tag_names(
-                                &attr_text(&e, b"NFCNArr").unwrap_or_default(),
-                                nfc_tags,
-                            ),
-                            access_codes: count_codes(&attr_value_or(&e, b"CodeArr", "")),
-                            permissions: Vec::new(),
-                        });
-                        Owner::User(model.users.len() - 1)
-                    }
-                    Some("UserGroup") => {
-                        model.groups.push(ConfigGroup {
-                            uuid,
-                            name: title.unwrap_or_default(),
-                            ug_type: attr_value(&e, b"UgType").and_then(|v| v.parse().ok()),
-                            members: split_list(&attr_value_or(&e, b"User", "")),
-                            permissions: Vec::new(),
-                        });
-                        Owner::Group(model.groups.len() - 1)
-                    }
-                    Some("NfcCodeTouch") => {
-                        model.code_touches.push((uuid, title.unwrap_or_default()));
-                        Owner::Other
-                    }
-                    _ => {
-                        if let Some(fix) = attr_value(&e, b"FIX") {
-                            model.fixed.insert(uuid, fix);
-                        }
-                        Owner::Other
-                    }
-                };
-                if !empty {
-                    open.push(owner);
-                }
-            }
-            b"PRM" => {
-                let p = Permission {
-                    target: attr_value_or(&e, b"REF", ""),
-                    schedule: attr_value(&e, b"TIM").filter(|t| !t.is_empty()),
-                    ui: attr_value(&e, b"ACT"),
-                };
-                match open.last() {
-                    Some(Owner::User(i)) => model.users[*i].permissions.push(p),
-                    Some(Owner::Group(i)) => model.groups[*i].permissions.push(p),
-                    _ => {}
-                }
-            }
-            _ => {}
+    for o in doc.objects() {
+        if let Some(t) = &o.title {
+            model.titles.insert(o.uuid.clone(), t.clone());
         }
-        buf.clear();
+        if o.block_type == "NfcCodeTouch" {
+            model
+                .code_touches
+                .push((o.uuid.clone(), o.title.clone().unwrap_or_default()));
+        }
+        if let Some(fix) = attr_at(&doc, &o.path, "FIX") {
+            model.fixed.insert(o.uuid.clone(), fix);
+        }
     }
+    model.users = access
+        .users
+        .into_iter()
+        .map(|u| ConfigUser {
+            description: attr_at(&doc, &u.path, "Desc")
+                .unwrap_or_default()
+                .replace('_', " "),
+            last_edit: u.last_edit.and_then(|v| v.parse().ok()),
+            nfc_tags: u.nfc_tags.len(),
+            nfc_names: u.nfc_tags.iter().filter_map(|t| t.name.clone()).collect(),
+            access_codes: u.codes.len(),
+            name: u.title.unwrap_or_default(),
+            uuid: u.uuid,
+            permissions: u.permissions,
+        })
+        .collect();
+    model.groups = access
+        .groups
+        .into_iter()
+        .map(|g| ConfigGroup {
+            name: g.title.unwrap_or_default(),
+            ug_type: g.kind.and_then(|v| v.parse().ok()),
+            uuid: g.uuid,
+            members: g.members,
+            permissions: g.permissions,
+        })
+        .collect();
     Ok(model)
 }
 
 pub fn parse_devices(xml: &[u8]) -> Result<Vec<LoxDevice>> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
+    let doc = parse_doc(xml)?;
     let mut devices = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e) | Event::Empty(ref e)) if e.name().as_ref() == b"C" => {
-                let type_val = attr_value(e, b"Type");
-                match type_val.as_deref() {
-                    Some("TreeDevice") => {
-                        let sub = attr_value(e, b"SubType").and_then(|s| s.parse::<u32>().ok());
-                        devices.push(LoxDevice {
-                            name: attr_value_or(e, b"Title", ""),
-                            bus: DeviceBus::Tree,
-                            serial: attr_value(e, b"Serial"),
-                            sub_type: sub,
-                            type_label: device_type_label(sub),
-                            mac: None,
-                            address: None,
-                        });
-                    }
-                    Some("LoxAIRDevice") => {
-                        let sub = attr_value(e, b"SubType").and_then(|s| s.parse::<u32>().ok());
-                        devices.push(LoxDevice {
-                            name: attr_value_or(e, b"Title", ""),
-                            bus: DeviceBus::Air,
-                            serial: None,
-                            sub_type: sub,
-                            type_label: device_type_label(sub),
-                            mac: None,
-                            address: None,
-                        });
-                    }
-                    Some("NetworkDevice") => {
-                        devices.push(LoxDevice {
-                            name: attr_value_or(e, b"Title", ""),
-                            bus: DeviceBus::Network,
-                            serial: None,
-                            sub_type: attr_value(e, b"SubType").and_then(|s| s.parse::<u32>().ok()),
-                            type_label: "Network device".to_string(),
-                            mac: attr_value(e, b"MAC"),
-                            address: attr_value(e, b"Addr"),
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(e).context("Failed to parse XML"),
-            _ => {}
-        }
-        buf.clear();
+    for o in doc.objects() {
+        let attr = |name: &str| attr_at(&doc, &o.path, name);
+        let sub_type = attr("SubType").and_then(|s| s.parse::<u32>().ok());
+        let name = o.title.clone().unwrap_or_default();
+        let device = match o.block_type.as_str() {
+            "TreeDevice" => LoxDevice {
+                name,
+                bus: DeviceBus::Tree,
+                serial: attr("Serial"),
+                sub_type,
+                type_label: device_type_label(sub_type),
+                mac: None,
+                address: None,
+            },
+            "LoxAIRDevice" => LoxDevice {
+                name,
+                bus: DeviceBus::Air,
+                serial: None,
+                sub_type,
+                type_label: device_type_label(sub_type),
+                mac: None,
+                address: None,
+            },
+            "NetworkDevice" => LoxDevice {
+                name,
+                bus: DeviceBus::Network,
+                serial: None,
+                sub_type,
+                type_label: "Network device".to_string(),
+                mac: attr("MAC"),
+                address: attr("Addr"),
+            },
+            _ => continue,
+        };
+        devices.push(device);
     }
     Ok(devices)
 }
 
 pub fn parse_config_summary(xml: &[u8]) -> Result<ConfigSummary> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-
-    let mut version = String::new();
-    let mut date = String::new();
-    let mut controls: HashMap<String, ControlEntry> = HashMap::new();
-    let mut rooms: HashMap<String, String> = HashMap::new();
-    let mut categories: HashMap<String, String> = HashMap::new();
-    let mut users: Vec<String> = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
-                let tag = e.name();
-                if tag.as_ref() == b"ControlList" {
-                    version = attr_value_or(e, b"Version", "");
-                } else if tag.as_ref() == b"C" {
-                    let type_val = attr_value(e, b"Type");
-                    match type_val.as_deref() {
-                        Some("Document") => {
-                            date = attr_value_or(e, b"Date", "");
-                        }
-                        Some("Place") => {
-                            if let (Some(u), Some(t)) =
-                                (attr_value(e, b"U"), attr_value(e, b"Title"))
-                            {
-                                rooms.insert(u, t);
-                            }
-                        }
-                        Some("Category") => {
-                            if let (Some(u), Some(t)) =
-                                (attr_value(e, b"U"), attr_value(e, b"Title"))
-                            {
-                                categories.insert(u, t);
-                            }
-                        }
-                        Some("User") => {
-                            if let Some(t) = attr_value(e, b"Title") {
-                                users.push(t);
-                            }
-                        }
-                        Some(typ) if is_control_type(typ) => {
-                            if let (Some(u), Some(t)) =
-                                (attr_value(e, b"U"), attr_value(e, b"Title"))
-                            {
-                                // Only include elements with a Title (real controls)
-                                if !t.is_empty() {
-                                    controls.insert(
-                                        u,
-                                        ControlEntry {
-                                            name: t,
-                                            control_type: typ.to_string(),
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+    let doc = parse_doc(xml)?;
+    let mut summary = ConfigSummary {
+        version: doc
+            .xml
+            .root
+            .attr_decoded("Version")
+            .map(|v| v.into_owned())
+            .unwrap_or_default(),
+        date: doc
+            .document()
+            .and_then(|d| d.attr_decoded("Date"))
+            .map(|v| v.into_owned())
+            .unwrap_or_default(),
+        controls: HashMap::new(),
+        rooms: HashMap::new(),
+        categories: HashMap::new(),
+        users: Vec::new(),
+    };
+    for o in doc.objects() {
+        let title = o.title.clone();
+        match o.block_type.as_str() {
+            "Place" => {
+                if let Some(t) = title {
+                    summary.rooms.insert(o.uuid, t);
                 }
             }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(e).context("Failed to parse XML"),
+            "Category" => {
+                if let Some(t) = title {
+                    summary.categories.insert(o.uuid, t);
+                }
+            }
+            "User" => summary.users.extend(title),
+            // only elements with a title are real controls
+            ty if is_control_type(ty) => {
+                if let Some(name) = title.filter(|t| !t.is_empty()) {
+                    summary.controls.insert(
+                        o.uuid.clone(),
+                        ControlEntry {
+                            name,
+                            control_type: o.block_type.clone(),
+                        },
+                    );
+                }
+            }
             _ => {}
         }
-        buf.clear();
     }
-
-    Ok(ConfigSummary {
-        version,
-        date,
-        controls,
-        rooms,
-        categories,
-        users,
-    })
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -617,8 +452,8 @@ mod tests {
         <ControlList Version="1">
           <C Type="Document" Date="2026-01-01">
             <C Type="UserCaption">
-              <C Type="User" Title="admin" NFCArr="" Desc=""/>
-              <C Type="User" Title="chris" NFCArr="AABB" Desc="Main_user"/>
+              <C Type="User" U="1a2b3c4d-0001-0001-ffff00000000000a" Title="admin" NFCArr="" Desc=""/>
+              <C Type="User" U="1a2b3c4d-0001-0001-ffff00000000000b" Title="chris" NFCArr="AABB" Desc="Main_user"/>
             </C>
           </C>
         </ControlList>"#;
@@ -650,7 +485,7 @@ mod tests {
 <HP H="" Sc="-1" S=""/>
 <PH NUM="2"><PRM REF="{ALWAYS}" ACT="3"/><PRM REF="{TOUCH}" TIM="{ALWAYS}"/></PH>
 </C>
-<C Type="User" U="{BOB}" Title="bob" NFCArr="{tag}{tag}" NFCNArr="bob card|bob watch" CodeArr="{tag}" Desc="the_kid"/>
+<C Type="User" U="{BOB}" Title="bob" NFCArr="{tag};{tag}" NFCNArr="bob card;bob watch" CodeArr="{tag}" Desc="the_kid"/>
 </C>
 <C Type="UserGroupCaption" Title="Groups">
 <C Type="UserGroup" U="{KIDS}" Title="Kids" Rights="1281" User="{BOB},{ALICE}" UserGroups="">
@@ -712,26 +547,12 @@ mod tests {
     }
 
     #[test]
-    fn tag_hashes_and_names_tolerate_unknown_separators() {
-        let tag = "a".repeat(64);
-        assert_eq!(count_tag_hashes(""), 0);
-        assert_eq!(count_tag_hashes(&tag), 1);
-        assert_eq!(count_tag_hashes(&format!("{tag},{tag}")), 2);
-        assert_eq!(count_tag_hashes(&format!("{tag}{tag}{tag}")), 3);
-        assert_eq!(split_tag_names("a;b", 2), ["a", "b"]);
-        assert_eq!(split_tag_names("one name", 2), ["one name"]);
-        assert!(split_tag_names("", 0).is_empty());
-        assert_eq!(count_codes("x|y"), 2);
-        assert_eq!(count_codes(""), 0);
-    }
-
-    #[test]
     fn test_parse_devices() {
         let xml = br#"<?xml version="1.0"?>
         <ControlList Version="1">
-          <C Type="TreeDevice" Title="Raumklima" Serial="B03C7ED6" SubType="32784"/>
-          <C Type="LoxAIRDevice" Title="Rauchmelder" SubType="19"/>
-          <C Type="NetworkDevice" Title="Intercom" Addr="ice:7091" MAC="504F94E0F182" SubType="2"/>
+          <C Type="TreeDevice" U="dev-1" Title="Raumklima" Serial="B03C7ED6" SubType="32784"/>
+          <C Type="LoxAIRDevice" U="dev-2" Title="Rauchmelder" SubType="19"/>
+          <C Type="NetworkDevice" U="dev-3" Title="Intercom" Addr="ice:7091" MAC="504F94E0F182" SubType="2"/>
         </ControlList>"#;
         let devices = parse_devices(xml).unwrap();
         assert_eq!(devices.len(), 3);
@@ -774,7 +595,7 @@ mod tests {
           <C Type="Document" Date="2026-03-01 02:12:26" U="doc-1" Title="Test"/>
           <C Type="Category" U="cat-1" Title="Lighting"/>
           <C Type="Place" U="room-1" Title="Kitchen"/>
-          <C Type="User" Title="admin"/>
+          <C Type="User" U="user-1" Title="admin"/>
           <C Type="Switch" U="sw-1" Title="Light Kitchen"/>
         </ControlList>"#;
         let s = parse_config_summary(xml).unwrap();

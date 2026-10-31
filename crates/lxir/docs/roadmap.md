@@ -620,6 +620,6 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
 
 ## Explicit non-goals (unchanged)
 
-Transport, LoxCC, credentials (stay in `lox`/`lox-cli`); simulating block
+Transport and credentials (stay in `lox`/`lox-cli`); simulating block
 semantics Loxone does not document (D68: refused, never guessed);
 replacing Loxone Config for hardware/visualization authoring.
