@@ -123,3 +123,59 @@ macro_rules! err {
     };
 }
 pub(crate) use err;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    fn status(code: u16) -> Error {
+        HttpStatusError {
+            status: code,
+            path: "/jdev/sps/io/x".into(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn http_status_is_found_under_context() {
+        let e = Err::<(), _>(status(404))
+            .context("loading the structure")
+            .context("listing controls")
+            .unwrap_err();
+        assert_eq!(e.http_status().map(|s| s.status), Some(404));
+        assert_eq!(e.to_string(), "listing controls");
+        assert_eq!(e.source().unwrap().to_string(), "loading the structure");
+        assert!(err!("x").http_status().is_none());
+    }
+
+    #[test]
+    fn option_context_is_a_protocol_error() {
+        let e = None::<u8>
+            .with_context(|| format!("no {}", "token"))
+            .unwrap_err();
+        assert!(matches!(e, Error::Protocol(ref m) if m == "no token"));
+        assert_eq!(Some(1).context("unused").unwrap(), 1);
+    }
+
+    #[test]
+    fn bail_returns_a_protocol_error() {
+        fn f(n: u8) -> Result<()> {
+            bail!("bad {}", n)
+        }
+        assert_eq!(f(3).unwrap_err().to_string(), "bad 3");
+    }
+
+    #[test]
+    fn handler_errors_show_through() {
+        let inner: Box<dyn std::error::Error + Send + Sync> = "stop here".into();
+        assert_eq!(Error::Handler(inner).to_string(), "stop here");
+    }
+
+    #[test]
+    fn websocket_errors_convert() {
+        let e: Error = tokio_tungstenite::tungstenite::Error::ConnectionClosed.into();
+        assert!(matches!(e, Error::WebSocket(_)));
+        assert_eq!(status(401).to_string(), "HTTP 401: /jdev/sps/io/x");
+    }
+}
