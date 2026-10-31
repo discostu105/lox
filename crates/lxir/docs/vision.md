@@ -75,8 +75,7 @@ big-bang.
   blocks and their wiring* — the part that benefits from being code — plus
   the *assignment* of existing objects: an extern's title, room and
   category are plain facts a source file can hold (D39).
-- Transport. Talking to the Miniserver (FTP/HTTP, LoxCC compression,
-  credentials) belongs to the `lox` / `lox-cli` CLIs, which consume this
+- Transport. Talking to the Miniserver (FTP/HTTP, credentials) belongs to the `lox` / `lox-cli` CLIs, which consume this
   crate. The library stays pure: bytes in, bytes out.
 - Simulating what Loxone does not document. `lxir test` simulates the
   blocks whose behavior Loxone documents (D68, [simulator.md](simulator.md))

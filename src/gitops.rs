@@ -17,8 +17,8 @@ use std::process::Command;
 
 use crate::config::Config;
 use crate::ftp;
-use crate::loxcc;
 use crate::loxone_xml;
+use lxir::archive;
 
 /// Build a git Command with consistent config for the managed repo.
 /// Disables GPG signing and sets a fallback author if not configured,
@@ -149,7 +149,7 @@ pub fn pull(repo: &Path, cfg: &Config, quiet: bool) -> Result<bool> {
     let zip_data = ftp::download_backup(cfg, &newest.filename)?;
 
     // 2. Decompress LoxCC → XML
-    let xml_data = loxcc::extract_and_decompress(&zip_data)?;
+    let xml_data = archive::extract_and_decompress(&zip_data)?;
     if !quiet {
         eprintln!(
             "Decompressed {} KB → {} KB",
@@ -357,7 +357,7 @@ pub fn restore(repo: &Path, cfg: &Config, commit: &str, force: bool) -> Result<(
     let zip_data = show_output.stdout;
     // The Miniserver starts from whatever sps_new.zip holds (a Git LFS
     // pointer, say, would be fatal).
-    let xml = loxcc::extract_and_decompress(&zip_data)
+    let xml = archive::extract_and_decompress(&zip_data)
         .with_context(|| format!("{} at {} is not a config ZIP", zip_rel, commit))?;
     crate::custom_changes::warn_before_upload(cfg, Some(&xml));
 

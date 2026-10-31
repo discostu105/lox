@@ -29,10 +29,12 @@
 //!   written from Loxone's documentation, run cycle by cycle.
 //! - [`project`] — `lox.toml` project files: one directory, one deployment
 //!   target, zero flags.
+//! - [`archive`] (feature `archive`, default) — Miniserver backup ZIPs and
+//!   the LoxCC codec of the `sps0.LoxCC` inside them.
 //!
 //! - [`cli`] — the toolchain's command line (the `lxir` binary, `lox ir`).
 //!
-//! Transport (FTP, LoxCC compression, push) is deliberately **out of scope**:
+//! Transport (FTP, HTTP, WebSocket, push) is deliberately **out of scope**:
 //! it lives in the `lox` CLI (same repository), which consumes this crate.
 
 // `cli` was the `lxir` binary's main file and still names the crate as
@@ -40,6 +42,8 @@
 extern crate self as lxir;
 
 pub mod access;
+#[cfg(feature = "archive")]
+pub mod archive;
 pub mod autopilot;
 pub mod blockdoc;
 pub mod catalogue;

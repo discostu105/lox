@@ -12,8 +12,9 @@ use crate::scene::Scene;
 use crate::token;
 use crate::{
     AliasCmd, CacheCmd, Cli, ConfigCmd, SceneCmd, SetupCmd, TokenCmd, build_schema, custom_changes,
-    detect_shell, ftp, gitops, install_completions, json_val_str, loxcc, loxone_xml,
+    detect_shell, ftp, gitops, install_completions, json_val_str, loxone_xml,
 };
+use lxir::archive;
 
 pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
     match action {
@@ -444,7 +445,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
 
             if extract {
                 eprintln!("Extracting sps0.LoxCC...");
-                let xml = loxcc::extract_and_decompress(&data)?;
+                let xml = archive::extract_and_decompress(&data)?;
                 let xml_path = out_path
                     .strip_suffix(".zip")
                     .unwrap_or(&out_path)
@@ -462,7 +463,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         ConfigCmd::Extract { file, save_as } => {
             let zip_data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
             eprintln!("Extracting sps0.LoxCC...");
-            let xml = loxcc::extract_and_decompress(&zip_data)?;
+            let xml = archive::extract_and_decompress(&zip_data)?;
             let xml_path = save_as.unwrap_or_else(|| {
                 file.strip_suffix(".zip").unwrap_or(&file).to_string() + ".Loxone"
             });
@@ -480,7 +481,8 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             save_as,
         } => {
             let xml = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
-            if xml.starts_with(b"PK\x03\x04") || xml.starts_with(&loxcc::LOXCC_MAGIC.to_le_bytes())
+            if xml.starts_with(b"PK\x03\x04")
+                || xml.starts_with(&archive::LOXCC_MAGIC.to_le_bytes())
             {
                 bail!(
                     "{} is already compressed. Expected a .Loxone XML file (`lox config extract` makes one).",
@@ -494,12 +496,12 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 Some(template) => {
                     let shell =
                         fs::read(template).with_context(|| format!("Cannot read {}", template))?;
-                    let staged = loxcc::stage_upload_zip(&shell, &xml)
+                    let staged = archive::stage_upload_zip(&shell, &xml, crate::zip_now())
                         .with_context(|| format!("Cannot stage {} into {}", file, template))?;
                     (staged, save_as.unwrap_or_else(|| format!("{stem}.zip")))
                 }
                 None => (
-                    loxcc::compress_loxcc(&xml)?,
+                    archive::compress_loxcc(&xml)?,
                     save_as.unwrap_or_else(|| format!("{stem}.LoxCC")),
                 ),
             };
@@ -559,7 +561,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
         ConfigCmd::Upload { file, force } => {
             let data = fs::read(&file).with_context(|| format!("Cannot read {}", file))?;
             // The Miniserver starts from whatever sps_new.zip holds.
-            let xml = match loxcc::extract_and_decompress(&data) {
+            let xml = match archive::extract_and_decompress(&data) {
                 Ok(xml) => xml,
                 Err(e) => bail!(
                     "{} is not a config ZIP ({:#}). A .Loxone file becomes one with \

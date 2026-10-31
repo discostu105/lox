@@ -20,7 +20,6 @@ mod custom_changes;
 mod ftp;
 mod gitops;
 mod logic;
-mod loxcc;
 mod loxone_xml;
 mod mcp;
 mod nfc_learn;
@@ -51,7 +50,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
     let data = fs::read(path).with_context(|| format!("Cannot read {}", path))?;
     if path.ends_with(".zip") {
-        loxcc::extract_and_decompress(&data)
+        Ok(lxir::archive::extract_and_decompress(&data)?)
     } else {
         Ok(data)
     }
@@ -187,6 +186,21 @@ pub(crate) fn kb_fmt(kb: f64) -> String {
         format!("{:.0} MB", kb / 1024.0)
     } else {
         format!("{:.0} kB", kb)
+    }
+}
+
+/// The current local time as a ZIP timestamp, for entries staged new
+/// (ZIP times are local).
+pub(crate) fn zip_now() -> lxir::archive::ZipTime {
+    use chrono::{Datelike, Timelike};
+    let now = chrono::Local::now().naive_local();
+    lxir::archive::ZipTime {
+        year: u16::try_from(now.year()).unwrap_or(1980),
+        month: now.month() as u8,
+        day: now.day() as u8,
+        hour: now.hour() as u8,
+        minute: now.minute() as u8,
+        second: now.second() as u8,
     }
 }
 

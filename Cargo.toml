@@ -67,9 +67,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 
 # Backup deps
 suppaftp = "6"
-zip = "2"
 quick-xml = "0.37"
-lz4_flex = { version = "0.13", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
 crc32fast = "1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color"], optional = true }
 crossterm = { version = "0.29", features = ["event-stream"], optional = true }
@@ -90,6 +88,8 @@ tokio-test = "0.4"
 # paused clock for the timeouts of `lox access learn`
 tokio = { version = "1", features = ["test-util"] }
 insta = "1"
+# building backup ZIPs in tests (lxir::archive reads and stages them)
+zip = "2"
 portable-pty = "0.9"
 
 [features]

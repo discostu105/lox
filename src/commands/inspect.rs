@@ -1267,17 +1267,18 @@ impl ChangeReport {
 /// Read-only: the two newest program files of /prog (or the newest and
 /// `since`) and the files of /sys/custom.
 fn explain_changes(cfg: &Config, since: Option<&str>) -> Result<ChangeReport> {
-    use crate::{ftp, logic::Logic, loxcc, snapshot};
+    use crate::{ftp, logic::Logic, snapshot};
+    use lxir::archive;
     let backups = ftp::list_backups(cfg)?;
     let newest = backups
         .first()
         .context("no program files in /prog on the Miniserver")?;
-    let new_xml = loxcc::extract_and_decompress(&ftp::download_backup(cfg, &newest.filename)?)?;
+    let new_xml = archive::extract_and_decompress(&ftp::download_backup(cfg, &newest.filename)?)?;
     let base = match since {
         Some(f) => Some(snapshot::file(f)?),
         None => match backups.get(1) {
             Some(b) => Some(snapshot::Snapshot {
-                bytes: loxcc::extract_and_decompress(&ftp::download_backup(cfg, &b.filename)?)?,
+                bytes: archive::extract_and_decompress(&ftp::download_backup(cfg, &b.filename)?)?,
                 label: b.filename.clone(),
             }),
             None => None,

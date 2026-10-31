@@ -54,7 +54,7 @@ pub(crate) fn update(
     live: &LoxoneDoc,
     compiled: &LoxoneDoc,
 ) -> Result<Option<Update>> {
-    let Some(bytes) = crate::loxcc::read_entry(live_zip, MEMBER)? else {
+    let Some(bytes) = lxir::archive::read_entry(live_zip, MEMBER)? else {
         return Ok(None);
     };
     let parsed = parse(&bytes)?;

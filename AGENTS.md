@@ -73,8 +73,8 @@ by path. CLI commands use reqwest blocking; token auth uses tokio + WebSocket fo
 ### The lxir crate (`crates/lxir`)
 
 Loxone config as code: lossless `.Loxone` XML, the UUID/identity model, the `.lxir` language,
-compile/decompile/adopt, the lockfile, semantic diff. It never touches the network — transport, LoxCC and
-credentials stay in `src/`. Its CLI is `crates/lxir/src/cli.rs`, run by the `lxir` binary and by `lox ir`
+compile/decompile/adopt, the lockfile, semantic diff, and (feature `archive`) backup ZIPs with the LoxCC codec. It
+never touches the network — transport and credentials stay in `src/`. Its CLI is `crates/lxir/src/cli.rs`, run by the `lxir` binary and by `lox ir`
 (arguments passed through as-is). Before changing it, read `crates/lxir/AGENTS.md` (format facts are
 documented, never guessed; the connector table only takes live-verified entries; never commit real configs).
 lxir is published to crates.io on its own version; `lox` is not published (the crate name is taken).
