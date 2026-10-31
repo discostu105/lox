@@ -10,6 +10,25 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.50.1] — 2026-10-31
+
+### Added
+- **loxone-client 0.1.1** (on crates.io): typed reads of the system state — `LoxClient::system_status()` (firmware,
+  PLC state, heap), `heap()`, `diagnostics()` (CPU and PLC load, tasks, interrupts, context switches) and
+  `value(path)` for any `LL` value, with the parsers public in `loxone_client::system`.
+
+### Changed
+- **loxone-config 0.5.0** (on crates.io): the D76 rule conditions and actions (weather, day, daylight, sun, date;
+  notify, mail, wait, message) and D77 (a stale constant under a wire) for library users. The rule enums in
+  `logic` gained variants, so exhaustive matches need new arms.
+- **lox status --diag**: shows the PLC's CPU share next to the CPU load; the JSON reports `cpu`, `sps`, `tasks` and
+  the counters as numbers (`null` when the Miniserver leaves them empty). `lox status`, the TUI, `lox otel` and the
+  MCP `system_status` tool now read the system state through the same loxone-client calls.
+
+### Fixed
+- **loxl decompile/adopt**: the *Rest* meter an energy flow monitor creates for itself is part of the monitor, no longer a top-level `rest = MeterAbsBi()` block; adopting it alone is refused (D78, #236).
+- **lox otel**: `loxone.system.cpu` is recorded again on current firmware (`CPU:12 SPS:26` read as no value).
+
 ## [0.50.0] — 2026-10-31
 
 ### Added
