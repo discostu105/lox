@@ -26,6 +26,7 @@ use crate::config::{Config, GlobalConfig};
 use crate::logic::{DiffLine, Logic};
 use loxone_client::client::LoxClient;
 use loxone_client::stream::StateEvent;
+use loxone_client::system::{parse_counter, parse_cpu};
 
 static EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -785,18 +786,17 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
 
 fn diag(client: &LoxClient) -> Result<Diag> {
     // CPU + heap are required; the rest is best effort (Gen 2 leaves some empty)
-    let (cpu, sps) = data::parse_lastcpu(&jdev(client, "/jdev/sys/lastcpu")?);
-    let (used, total) = data::parse_heap(&jdev(client, "/jdev/sys/heap")?);
-    let opt = |p: &str| jdev(client, p).ok().and_then(|v| data::parse_num(&v));
+    let d = client.diagnostics()?;
+    let heap = client.heap()?;
     Ok(Diag {
-        cpu,
-        sps,
-        heap_used_kb: used,
-        heap_total_kb: total,
-        tasks: opt("/jdev/sys/numtasks"),
-        ctx_switches: opt("/jdev/sys/contextswitches"),
-        ints: opt("/jdev/sys/ints"),
-        comints: opt("/jdev/sys/comints"),
+        cpu: d.cpu,
+        sps: d.sps,
+        heap_used_kb: heap.map(|h| h.used_kb),
+        heap_total_kb: heap.map(|h| h.total_kb),
+        tasks: d.tasks,
+        ctx_switches: d.context_switches,
+        ints: d.interrupts,
+        comints: d.comm_interrupts,
         sd: sd_test(client),
         plc: jdev(client, "/jdev/sps/status")
             .ok()
@@ -905,7 +905,7 @@ fn buslan(client: &LoxClient) -> Result<BusLan> {
     for (name, path) in BUS.iter().chain(LAN.iter()) {
         let v = jdev(client, path)
             .ok()
-            .and_then(|v| data::parse_num(&v))
+            .and_then(|v| parse_counter(&v))
             .map(|f| f as u64);
         ok += v.is_some() as usize;
         counters.push((name.to_string(), v));
@@ -945,13 +945,11 @@ fn sites(ctx: &PollCtx) -> Vec<SiteStatus> {
                                 s.latency_ms = Some(t0.elapsed().as_millis() as u64);
                                 s.online = true;
                                 s.firmware = Some(fw);
-                                s.cpu = jdev(&c, "/jdev/sys/lastcpu")
+                                s.cpu = c
+                                    .value("/jdev/sys/lastcpu")
                                     .ok()
-                                    .and_then(|v| data::parse_lastcpu(&v).0);
-                                s.heap_pct = jdev(&c, "/jdev/sys/heap").ok().and_then(|v| {
-                                    let (u, t) = data::parse_heap(&v);
-                                    Some(u? / t? * 100.0)
-                                });
+                                    .and_then(|v| parse_cpu(&v).0);
+                                s.heap_pct = c.heap().ok().flatten().and_then(|h| h.used_pct());
                             }
                             Err(e) => s.error = Some(short_err(&e)),
                         }
