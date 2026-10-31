@@ -55,6 +55,17 @@ cargo build --release
 cargo test
 ```
 
+## External references
+
+The official Loxone API documents and the community sources are listed in
+[references.json](references.json) (links only; the PDFs are Loxone's). Download them
+for local reading with `tools/fetch-refs.py` (into `refs/`, gitignored); `--check`
+reports any document Loxone has changed since it was pinned.
+
+Real configs for testing: `crates/loxone-config/tools/fetch-corpus.py` downloads the
+public corpus (~150 configs) as pinned in its manifest; the redistributable ones are
+in the [example library](https://github.com/discostu105/lox/tree/main/crates/loxone-config/examples/library).
+
 ## Manual testing
 
 To test against a real Miniserver:

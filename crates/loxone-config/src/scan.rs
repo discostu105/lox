@@ -1,7 +1,7 @@
 //! Personal-data scan of a `.Loxone` config (`loxl scan`).
 //!
-//! A real config identifies a household: the installation address and
-//! coordinates on the Document, the users' names, mail addresses, phone
+//! A real config identifies a household: the installation address,
+//! coordinates, creator and phone number on the Document, the users' names, mail addresses, phone
 //! numbers and access codes, credentials, the remote-access address,
 //! hardware serial numbers. None of that may reach a repository (the
 //! corpus stays untracked, fixtures are synthetic). The scan lists where
@@ -33,6 +33,9 @@ pub struct Finding {
 /// Installation address and position (Document). The country alone
 /// identifies nobody.
 const LOCATION: &[&str] = &["Street", "Town", "PostCode", "Latitude", "Longitude", "Geo"];
+/// Who made the project and how to reach them (Document): the
+/// "created by" name and the phone number of the project properties.
+const CONTACT: &[&str] = &["Creator", "Tel"];
 /// A user's name, mail address, phone number (User).
 const PERSON: &[&str] = &["FiN", "LaN", "Ema", "Phn"];
 /// A user's keypad codes, NFC tags, iButtons (User).
@@ -84,6 +87,7 @@ fn rule_of(ty: &str, name: &str, v: &str) -> Option<&'static str> {
     }
     match (ty, name) {
         ("Document", n) if LOCATION.contains(&n) => Some("location"),
+        ("Document", n) if CONTACT.contains(&n) => Some("person"),
         ("User", "Title") => Some("person"),
         ("User", n) if PERSON.contains(&n) => Some("person"),
         ("User", n) if ACCESS.contains(&n) => Some("access-code"),
@@ -252,7 +256,7 @@ mod tests {
     #[test]
     fn personal_data_is_located_never_quoted() {
         let d = doc(concat!(
-            r#"<C Type="Document" Title="Haus" Street="Hauptstraße 1" Latitude="0" Geo=""/>"#,
+            r#"<C Type="Document" Title="Haus" Street="Hauptstraße 1" Latitude="0" Geo="" Creator="Anna Muster" Tel="+43 1 234"/>"#,
             r#"<C Type="UserCaption"><C Type="User" Title="anna" FiN="Anna" Ema="" CodeArr="x"/></C>"#,
             r#"<C Type="LoxLIVE" Title="MS" ExtAddr="dyn.example.org" Serial="504F94A1B2C3"/>"#,
             r#"<C Type="Mailer" Title="Mail" SmtpReceiver="a@example.org" Cloud="true"/>"#,
@@ -266,6 +270,8 @@ mod tests {
             .collect();
         let want = [
             ("location", "Document \"Haus\"", "Street"),
+            ("person", "Document \"Haus\"", "Creator"),
+            ("person", "Document \"Haus\"", "Tel"),
             ("person", "User #1", "Title"),
             ("person", "User #1", "FiN"),
             ("access-code", "User #1", "CodeArr"),
@@ -282,7 +288,7 @@ mod tests {
             .collect();
         assert_eq!(got, want);
         let text = format!("{:?}", scan(&d));
-        assert!(!text.contains("Hauptstraße") && !text.contains("geheim"));
+        assert!(!text.contains("Hauptstraße") && !text.contains("geheim") && !text.contains("+43"));
     }
 
     #[test]

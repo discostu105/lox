@@ -1,0 +1,243 @@
+{
+  "about": "External references for lox and loxone-config. Links only: the documents stay with their publishers (Loxone's PDFs carry no license to redistribute). tools/fetch-refs.py downloads them into refs/ (gitignored) and checks the pinned sha256 of every 'pinned' entry; a mismatch means the publisher changed the file: re-read it, then update the pin (--update). Facts taken from a reference go into our docs in our own words, citing the entry's id and section.",
+  "references": [
+    {
+      "id": "communicating-1700",
+      "title": "Communicating with the Miniserver (17.0)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/1700_Communicating-with-the-Miniserver.pdf",
+      "pinned": true,
+      "covers": "WebSocket protocol, commands, encryption, hashing, token auth, event tables, file access",
+      "used_by": [
+        "crates/loxone-client",
+        "docs/api-research.md"
+      ],
+      "sha256": "da209f7b810604d98acc74401b9f701302caf34c93815fe30aeb2a865c943b44",
+      "bytes": 583060,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "communicating-1600",
+      "title": "Communicating with the Miniserver (16.0, 2025-06-03; the /datasheets/ alias)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/wp-content/uploads/datasheets/CommunicatingWithMiniserver.pdf",
+      "pinned": true,
+      "covers": "Older edition still served under the stable /datasheets/ URL that older links point to; the KB API page links the newer 17.0 edition above. A hash change means Loxone moved the alias.",
+      "used_by": [
+        "crates/loxone-client"
+      ],
+      "sha256": "883f2882d87ec6a909f4d1e5a8f85034bddeac87f7a44b7187eee5a805aedbe3",
+      "bytes": 929722,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "structure-file-1700",
+      "title": "Structure File (17.0)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/1700_Structure-File.pdf",
+      "pinned": true,
+      "covers": "LoxApp3.json: controls, control types and their commands and states, rooms, categories, global states",
+      "used_by": [
+        "crates/loxone-client",
+        "src/actions.rs",
+        "src/mcp"
+      ],
+      "sha256": "a33118b0bcbdd27806f7407164318b5bff6753d0e7e7d0b29c2687987b35308a",
+      "bytes": 1114660,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "structure-file-1600",
+      "title": "Structure File (16.0, 2025-06-03; the /datasheets/ alias)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/wp-content/uploads/datasheets/StructureFile.pdf",
+      "pinned": true,
+      "covers": "Older edition still served under the stable /datasheets/ URL that older links point to; the KB API page links the newer 17.0 edition above. A hash change means Loxone moved the alias.",
+      "used_by": [
+        "crates/loxone-client"
+      ],
+      "sha256": "c9cfbb191bc38e76d541133c1e7838232962ed7b42cb1bc995c0187b2d649545",
+      "bytes": 2320421,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "usermanagement-1700",
+      "title": "User Management (17.0)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/1700_Usermanagement.pdf",
+      "pinned": true,
+      "covers": "User management API: users, groups, NFC tags, access codes",
+      "used_by": [
+        "src/commands/push_users.rs",
+        "src/mcp"
+      ],
+      "sha256": "a4bfb2e5dd69257f7b31a00a2a139b80ba673688e9740a99657e76e2adec7865",
+      "bytes": 505295,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "operating-mode-schedule",
+      "title": "Operating Mode Schedule",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/wp-content/uploads/datasheets/OperatingModeSchedule.pdf",
+      "pinned": true,
+      "covers": "Operating modes and the calendar/schedule API",
+      "used_by": [
+        "crates/loxone-client",
+        "crates/loxone-config"
+      ],
+      "sha256": "4358e38a88d967853678f0730e481d6c1bdd311836bf70d9d365797c3083163b",
+      "bytes": 3260459,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "api-commands-2016",
+      "title": "API Commands (2016)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/10/API_Commands.pdf",
+      "pinned": true,
+      "covers": "Legacy /jdev and /dev command list (diagnostics, bus and LAN stats)",
+      "used_by": [
+        "docs/api-research.md"
+      ],
+      "sha256": "1b444c29a697b8ccfe48081711aad1eaf3e018c544bed827ce07e7b76893abbc",
+      "bytes": 292100,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "pms-access-api",
+      "title": "PMS & Access API",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/dede/wp-content/uploads/sites/2/2025/04/pms-access-api.zip",
+      "pinned": true,
+      "covers": "Hotel PMS and access integration API",
+      "used_by": [],
+      "sha256": "7436d3b7a46f5c719458ffb4dfdf78f6913390fb6d9660931d423cca7208f26d",
+      "bytes": 462269,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "ports-and-domains",
+      "title": "Required Ports and Domains",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/Required-Ports-and-Domains.pdf",
+      "pinned": true,
+      "covers": "Ports and cloud domains the Miniserver uses (discovery, remote connect, updates)",
+      "used_by": [
+        "docs/api-research.md"
+      ],
+      "sha256": "08dcb16051abfc44839a356f490af923aad167bb8c7bdbf134f857b5766ace40",
+      "bytes": 393208,
+      "checked": "2026-10-31"
+    },
+    {
+      "id": "kb-api",
+      "title": "Knowledge Base: API (index of the official API documents)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/kb/api/",
+      "pinned": false,
+      "covers": "Where new editions of the documents above appear first",
+      "used_by": []
+    },
+    {
+      "id": "kb-web-services",
+      "title": "Knowledge Base: Web Services",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/kb/web-services/",
+      "pinned": false,
+      "covers": "HTTP /dev and /jdev commands",
+      "used_by": [
+        "docs/api-research.md"
+      ]
+    },
+    {
+      "id": "kb-sample-files",
+      "title": "Knowledge Base: Videos & Sample Files",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/kb/videos-sample-files/",
+      "pinned": false,
+      "covers": "Official example .Loxone projects (part of the test corpus, see crates/loxone-config/tools/corpus-manifest.json)",
+      "used_by": [
+        "crates/loxone-config/tools/fetch-corpus.py"
+      ]
+    },
+    {
+      "id": "kb-block-pages",
+      "title": "Knowledge Base: one page per function block (https://www.loxone.com/enen/kb/<block>/)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/kb/",
+      "pinned": false,
+      "covers": "Block inputs, outputs, parameters, units, ranges and defaults; the weakest tier of the connector table",
+      "used_by": [
+        "crates/loxone-config/docs/connector-db.md",
+        "crates/loxone-config/docs/simulator.md"
+      ]
+    },
+    {
+      "id": "exosphere-program-files",
+      "title": "Exosphere: Program Files",
+      "publisher": "Loxone",
+      "url": "https://exo.loxone.com/docs/miniserver/program-files",
+      "pinned": false,
+      "covers": "How Loxone itself stores and versions program files",
+      "used_by": []
+    },
+    {
+      "id": "sarnau-inside",
+      "title": "Inside the Loxone Miniserver (reverse engineering)",
+      "publisher": "Markus Fritze (sarnau)",
+      "url": "https://github.com/sarnau/Inside-The-Loxone-Miniserver",
+      "pinned": false,
+      "covers": "Miniserver internals, the LoxCC format, the file system",
+      "used_by": [
+        "crates/loxone-config/src/archive.rs",
+        "docs/loxone-config-research.md"
+      ]
+    },
+    {
+      "id": "sarnau-loxcc-gist",
+      "title": "Downloading and decompressing sps0.LoxCC",
+      "publisher": "Markus Fritze (sarnau)",
+      "url": "https://gist.github.com/sarnau/e14ff9fe081611782a3f3cb2e2c2bacd",
+      "pinned": false,
+      "covers": "Reference implementation of the LoxCC codec",
+      "used_by": [
+        "crates/loxone-config/src/archive.rs"
+      ]
+    },
+    {
+      "id": "lox-cli-block-types",
+      "title": "lox-cli: Loxone block types scraped from the TechDoc",
+      "publisher": "eisber/lox-cli (AGPL-3.0)",
+      "url": "https://github.com/eisber/lox-cli/tree/main/docs/schemas",
+      "pinned": false,
+      "covers": "Per block type: connectors, units, labels, ranges, defaults (loxone-block-types-full.json)",
+      "used_by": [
+        "crates/loxone-config/tools/extract-port-meta.py"
+      ]
+    },
+    {
+      "id": "loxwiki",
+      "title": "LoxWiki (community wiki)",
+      "publisher": "LoxWiki community",
+      "url": "https://loxwiki.atlassian.net/wiki/spaces/LOX/overview",
+      "pinned": false,
+      "covers": "Community knowledge, REST web service notes, example configs (part of the test corpus)",
+      "used_by": [
+        "docs/api-research.md",
+        "crates/loxone-config/tools/fetch-corpus.py"
+      ]
+    },
+    {
+      "id": "iobroker-loxone",
+      "title": "ioBroker.loxone adapter",
+      "publisher": "UncleSamSwiss",
+      "url": "https://github.com/UncleSamSwiss/ioBroker.loxone",
+      "pinned": false,
+      "covers": "Second opinion on control types: states and commands per type",
+      "used_by": [
+        "docs/api-research.md"
+      ]
+    }
+  ]
+}

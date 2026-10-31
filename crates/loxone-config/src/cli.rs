@@ -183,11 +183,12 @@ USAGE:
 
   loxl scan [--json] <cfg.Loxone | dir>...
         List the personal data in configs (directories are searched for
-        *.Loxone): installation address and coordinates, users' names,
-        mail addresses, phone numbers and access codes, credentials, the
-        remote-access address, MAC and public IP addresses, hardware
-        serials. Shows where each sits, never the value. Exits 1 when it
-        finds any: a guard against committing a real config.
+        *.Loxone): installation address and coordinates, the project's
+        creator and phone number, users' names, mail addresses, phone
+        numbers and access codes, credentials, the remote-access address,
+        MAC and public IP addresses, hardware serials. Shows where each
+        sits, never the value. Exits 1 when it finds any: a guard against
+        committing a real config.
 
   loxl scan --redact <cfg.Loxone> --out <copy.Loxone>
         Write a copy with every finding replaced by a placeholder of its

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">_LoxCall</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 2 · long 2 · crossings 0 · length 37344</text>
+<polyline points="5184,4032 5664,4032 5664,4032 6144,4032" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="5184,5952 5664,5952 5664,5952 6144,5952" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="5184,6720 5664,6720 5664,6720 6144,6720" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11904,4608 12144,4608 12144,5280 2832,5280 2832,5952 3072,5952" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="11904,4608 12144,4608 12144,5664 2832,5664 2832,6720 3072,6720" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="8832,4608 9312,4608 9312,4608 9792,4608" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8832,4032 9312,4032 9312,4032 9792,4032" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8832,4224 9312,4224 9312,4224 9792,4224" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8832,4416 9312,4416 9312,4416 9792,4416" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="13344,6240 13872,6240 13872,6240 14400,6240" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="13344,6048 13872,6048 13872,6048 14400,6048" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="13344,5856 13872,5856 13872,5856 14400,5856" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="7488,5952 8016,5952 8016,6240 8544,6240" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="7488,6720 8016,6720 8016,6432 8544,6432" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="9888,6240 10272,6240 10272,6048 10656,6048" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="9888,6240 10272,6240 10272,6240 10656,6240" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="6144" y="3456" width="2688" height="1440" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Program (Code16)</title></rect>
+<text x="6240" y="3636" font-size="140" fill="#0f172a">Program</text>
+<circle cx="6144" cy="4032" r="36" fill="#64748b"/><text x="6216" y="4066" font-size="100" text-anchor="start" fill="#334155">TI1</text>
+<circle cx="8832" cy="4032" r="36" fill="#64748b"/><text x="8760" y="4066" font-size="100" text-anchor="end" fill="#334155">TQ1</text>
+<circle cx="8832" cy="4224" r="36" fill="#64748b"/><text x="8760" y="4258" font-size="100" text-anchor="end" fill="#334155">TQ2</text>
+<circle cx="8832" cy="4416" r="36" fill="#64748b"/><text x="8760" y="4450" font-size="100" text-anchor="end" fill="#334155">TQ3</text>
+<circle cx="8832" cy="4608" r="36" fill="#64748b"/><text x="8760" y="4642" font-size="100" text-anchor="end" fill="#334155">AQ1</text>
+<rect x="6144" y="5568" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>START (Equal)</title></rect>
+<text x="6240" y="5748" font-size="140" fill="#0f172a">START</text>
+<circle cx="6144" cy="5952" r="36" fill="#64748b"/><text x="6216" y="5986" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="6144" cy="6144" r="36" fill="#64748b"/><text x="6216" y="6178" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="7488" cy="5952" r="36" fill="#64748b"/><text x="7416" y="5986" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="6144" y="6336" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>RINGING (Equal)</title></rect>
+<text x="6240" y="6516" font-size="140" fill="#0f172a">RINGING</text>
+<circle cx="6144" cy="6720" r="36" fill="#64748b"/><text x="6216" y="6754" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="6144" cy="6912" r="36" fill="#64748b"/><text x="6216" y="6946" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="7488" cy="6720" r="36" fill="#64748b"/><text x="7416" y="6754" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="3072" y="5856" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateOutput (InputRef)</title></rect>
+<text x="3168" y="5996" font-size="120" fill="#0f172a">_CallStateOutput</text>
+<rect x="3072" y="6624" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateOutput (InputRef)</title></rect>
+<text x="3168" y="6764" font-size="120" fill="#0f172a">_CallStateOutput</text>
+<rect x="3072" y="3936" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallState (InputRef)</title></rect>
+<text x="3168" y="4076" font-size="120" fill="#0f172a">_CallState</text>
+<rect x="9792" y="4512" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateOutput (Memory)</title></rect>
+<text x="9888" y="4652" font-size="120" fill="#0f172a">_CallStateOutput</text>
+<rect x="9792" y="3936" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateUser (Memory)</title></rect>
+<text x="9888" y="4076" font-size="120" fill="#0f172a">_CallStateUser</text>
+<rect x="9792" y="4128" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateDevice (Memory)</title></rect>
+<text x="9888" y="4268" font-size="120" fill="#0f172a">_CallStateDevice</text>
+<rect x="9792" y="4320" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallStateNumber (Memory)</title></rect>
+<text x="9888" y="4460" font-size="120" fill="#0f172a">_CallStateNumber</text>
+<rect x="14400" y="6144" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallOnImpuls (Memory)</title></rect>
+<text x="14496" y="6284" font-size="120" fill="#0f172a">_CallOnImpuls</text>
+<rect x="14400" y="5952" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallOffImpuls (Memory)</title></rect>
+<text x="14496" y="6092" font-size="120" fill="#0f172a">_CallOffImpuls</text>
+<rect x="14400" y="5760" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>_CallActive (Memory)</title></rect>
+<text x="14496" y="5900" font-size="120" fill="#0f172a">_CallActive</text>
+<rect x="8544" y="5856" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>CALL (Or)</title></rect>
+<text x="8640" y="6036" font-size="140" fill="#0f172a">CALL</text>
+<circle cx="8544" cy="6240" r="36" fill="#64748b"/><text x="8616" y="6274" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="8544" cy="6432" r="36" fill="#64748b"/><text x="8616" y="6466" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="9888" cy="6240" r="36" fill="#64748b"/><text x="9816" y="6274" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="10656" y="5280" width="2688" height="1272" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>CALL (PushButton)</title></rect>
+<text x="10752" y="5460" font-size="140" fill="#0f172a">CALL</text>
+<circle cx="10656" cy="5856" r="36" fill="#64748b"/><text x="10728" y="5890" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="10656" cy="6048" r="36" fill="#64748b"/><text x="10728" y="6082" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="10656" cy="6240" r="36" fill="#64748b"/><text x="10728" y="6274" font-size="100" text-anchor="start" fill="#334155">On</text>
+<circle cx="10656" cy="6432" r="36" fill="#64748b"/><text x="10728" y="6466" font-size="100" text-anchor="start" fill="#334155">InputDisable</text>
+<circle cx="13344" cy="5856" r="36" fill="#64748b"/><text x="13272" y="5890" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<circle cx="13344" cy="6048" r="36" fill="#64748b"/><text x="13272" y="6082" font-size="100" text-anchor="end" fill="#334155">Qoff</text>
+<circle cx="13344" cy="6240" r="36" fill="#64748b"/><text x="13272" y="6274" font-size="100" text-anchor="end" fill="#334155">Qon</text>
+</svg>

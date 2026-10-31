@@ -1,0 +1,1 @@
+- **`loxl scan`** (and `lox logic scan`) also finds the project's creator and phone number in the document properties, and `--redact` replaces them; before, a shared copy kept both
