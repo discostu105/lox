@@ -10,6 +10,12 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.56.1] — 2026-10-31
+
+### Fixed
+- **`lox setup set`, `lox alias add/remove`** (anything that saves the config): with `LOX_CONFIG` set, the config is
+  saved to that file. It used to overwrite `~/.lox/config.yaml`.
+
 ## [0.56.0] — 2026-10-31
 
 ### Added
