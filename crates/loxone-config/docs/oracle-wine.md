@@ -794,6 +794,56 @@ label without ambiguity. The labels are recorded in
 - `AutoJalousie.WP` has no canvas row. `CentralShade`'s outputs are
   counts (No, Nc), not wires to its shades.
 
+## LightController2 manual inputs in the simulation (session 35, #250) — passed, three findings
+
+Ran 2026-10-31 with Loxone Config 17.2.8.28 under Wine, offline: no
+Miniserver, never the connect action. Unlike sessions 1–34 this used
+Config's own **simulation** (*Testen* › *Simulation starten*) as a
+behavior oracle. It is Loxone's model of the blocks, not a Miniserver:
+the docs cite it as such. Method:
+
+- A probe compiled onto `examples/library/lighting` puts a
+  LightController2 on a page with the moods "Viel Licht" (777), A (1,
+  AQ1 20 %), B (2, 40 %), C (3, 60 %) and off, in that order, and
+  virtual inputs on M+, M−, T5/1, T5/2, On, Off, Alarm, Buzzer and Mood.
+- The compiler mints no InputRef boxes, so the virtual inputs were
+  dragged from the periphery tree onto the canvas and the file saved by
+  Config. In the simulation a digital input toggles with the switch icon
+  on its box, and every connector shows its live value; hidden outputs
+  (M, 2C, 3C) are shown with the block's ⊕ dialog before starting.
+- Pulses were two toggles; readings were screenshots of the block.
+
+Results (M is output `Scene`):
+
+- **M**: 0 off, 99 for "Viel Licht" (`SID="777"`), the SID for a user
+  mood (1, 2, 3).
+- **M+** from off: 99, 1, 2, 3, 0, 99 — list order, the off mood a
+  step, around the end. **M−** from 99: 0, 3, 2, 1, 99. After Off, M+
+  goes to 99.
+- **T5/n** selects the mood `SID="n"`; a further pulse steps on like M+
+  while that input made the last change or its mood shows: T5/1 from
+  off gives 1, 2, 3, 0, 99; T5/2 after T5/1 gives 2; T5/1 after M+
+  gives 1; T5/2 while mood 2 shows (chosen by T5/1) gives 3. The
+  canvas labels T5/n with the name of the mood `SID="n"`.
+- **On**: its rising edge selects 99, from off and from mood 2; while
+  held, M+ did nothing; on release the mood stays.
+- **Buzzer** without an alarm-clock mood selects 99, as the KB says.
+- **Alarm** held: Lc1 and M flash between on/99 and off/0 with a period
+  of about 1.2 s; when it ends the previous mood returns.
+- **Finding — no 30 s reset.** The KB says T5 selects its mood again
+  after 30 s without a pulse; T5/1 still stepped on after 32 s and 65 s.
+  The simulator refuses that case.
+- **Finding — no double click.** Two pulses 0.15–0.2 s apart (Tdc
+  0.35 s) acted as two single clicks, not off + 2C. The simulator
+  refuses a second click within Tdc.
+- **Finding — Alarm flashes at about 1.2 s**, not at Afi (4 s); still
+  refused.
+- A constant on Mood (`Select:` 2, 777, 99, 0, 5, 778, 1, one controller
+  each) left M at 0 on all of them: a constant selects nothing. The
+  analog virtual input could not be set from the GUI, so Mood stays
+  refused. A T5 hold ended with nothing on the falling edge; mixing (Mmd)
+  stays unverified.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

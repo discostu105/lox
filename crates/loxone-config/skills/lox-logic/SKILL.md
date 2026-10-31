@@ -105,8 +105,8 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   AQ3 temp(60%, 2700K)`; values `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`
   per circuit kind), `<controller>.moods = <set>` writes them onto a
   LightController2. Claim it in a room template to give every room the
-  same moods; switch buttons go to `Sel1`…`Sel8` (T5 inputs; which mood
-  each selects is set in Loxone Config's mood dialog). The off mood "Aus"
+  same moods; switch buttons go to `Sel1`…`Sel8` (T5 inputs: `Sel<n>`
+  selects the mood with scene id n, i.e. the n-th mood created). The off mood "Aus"
   is implicit. `loxl adopt` lifts existing moods into
   sets (`<slug>_moods`), so start from those rather than retyping them.
 - Ports are XML keys, not the KB's labels: on an `AutoJalousie`
@@ -115,9 +115,10 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   `LightController2` `Move` is motion (Mo), `Reset` Off, `MoveOn` the
   motion extend time. `loxl types <T>` shows the labels.
 - `loxl test` simulates only documented behavior
-  (`docs/simulator.md`) and names any block or input in the way. A mood
-  circuit at `on` cannot be simulated (does it read 1 or 100?): give
-  dimmers a percentage.
+  (`docs/simulator.md`) and names any block or input in the way. A
+  lighting controller simulates motion, Off, M+/M−, single clicks on
+  T5, On and Buzzer, and output M; double clicks, long clicks, Mood,
+  Alarm and motion after a manual mood change are refused.
 - To take over logic someone drew in the GUI, use `loxl adopt`, then
   confirm with `loxl diff --exit-code` that the takeover changed nothing.
   `loxl coverage` lists what is not managed yet, including the

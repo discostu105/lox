@@ -224,8 +224,8 @@ pub enum Model {
     /// (kb/automatic-blinds): complete open/close, safety and lock.
     Blind(Box<Blind>),
     /// `LightController2` is Loxone's *Lighting Controller*
-    /// (kb/lighting-controller): its motion mood from all off, Off and
-    /// DisPc.
+    /// (kb/lighting-controller): its motion mood from all off, Off,
+    /// DisPc, M+/M−, T5/1–8, On, Buzzer and output M.
     Lights(Box<Lights>),
     Threshold {
         q: bool,
@@ -382,11 +382,8 @@ impl Model {
                 delivery: Reading::default(),
             },
             "AutoJalousie" => Model::Blind(Box::default()),
-            "LightController2" => match motion_mood(el) {
-                Ok(mood) => Model::Lights(Box::new(Lights {
-                    mood,
-                    ..Lights::default()
-                })),
+            "LightController2" => match Lights::new(el) {
+                Ok(l) => Model::Lights(Box::new(l)),
                 Err(e) => return Support::Unsupported(e),
             },
             "AnalogThresholdTrigger" => Model::Threshold {
@@ -1238,17 +1235,9 @@ const LIGHTS_READS: &[&str] = &[
     "MoveTimeout",
     "MoveIgnore",
     "MoveScene",
-    "I1",
-    "I2",
-    "I3",
-    "I4",
-    "I5",
-    "I6",
-    "I7",
-    "I8",
+    // The pulse inputs of `LIGHTS_KEYS`, in its order.
     "InputTriggerUp",
     "InputTriggerDown",
-    "Select",
     "Sel1",
     "Sel2",
     "Sel3",
@@ -1257,14 +1246,32 @@ const LIGHTS_READS: &[&str] = &[
     "Sel6",
     "Sel7",
     "Sel8",
-    "EnMove",
     "On",
-    "Alarm",
     "AlarmClock",
+    "MaxP",
+    "SceneMixTime",
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "Select",
+    "EnMove",
+    "Alarm",
     "RtD",
     "MasterBr",
 ];
-const LIGHTS_MODELLED: usize = 10;
+const LIGHTS_MODELLED: usize = 24;
+/// Where the pulse inputs start in [`LIGHTS_READS`]: M+, M−, T5/1 … T5/8,
+/// On, Buzzer.
+const LIGHTS_KEYS: usize = 10;
+const KEY_UP: usize = 0;
+const KEY_DOWN: usize = 1;
+const KEY_ON: usize = 10;
+const KEY_BUZZER: usize = 11;
 const LIGHTS_WRITES: &[&str] = &[
     "AQ1",
     "AQ2",
@@ -1285,15 +1292,40 @@ const LIGHTS_WRITES: &[&str] = &[
     "AQ17",
     "AQ18",
     "OutputReset",
+    "Scene",
 ];
 
-/// A `LightController2`'s state: off, or showing its motion mood.
+/// A pulse input of a `LightController2`: its edge and when it last rose.
+#[derive(Debug, Clone, Copy, Default)]
+struct Key {
+    edge: Edge,
+    rose: Option<f64>,
+}
+
+/// A `LightController2`'s state: which of its moods shows, and who chose
+/// it.
+///
+/// The manual inputs follow Loxone Config 17.2.8.28's simulation (oracle
+/// session 35, not a Miniserver): M+/M− step through the mood list in
+/// `<LightscenesC>` order, the off mood included, cyclically; T5/n selects
+/// the mood `SID="n"`, and steps on like M+ while it made the last mood
+/// change or that mood shows; On selects `SID="777"`.
 #[derive(Debug, Clone, Default)]
 pub struct Lights {
-    /// The motion mood: its name and `Q1` … `Q18`.
-    mood: (String, Vec<u32>),
-    lit: bool,
-    /// When the lights go off after motion ended.
+    moods: Vec<crate::moods::Mood>,
+    /// The index of the motion mood, and of the built-in off mood.
+    motion: usize,
+    off: usize,
+    /// The mood that shows.
+    cur: usize,
+    /// The motion automatic switched the current mood on.
+    auto: bool,
+    /// When a manual input last changed the mood (cleared by Off and the
+    /// automatic switch-off).
+    manual_at: Option<f64>,
+    /// The T5 input that made the last mood change, and when.
+    chain: Option<(usize, f64)>,
+    /// When the lights go off: after motion ended, or after the Buzzer.
     off_at: Option<f64>,
     /// Set by a manual off: the automatic stays disabled until this
     /// time, which motion pushes back by Pto.
@@ -1302,9 +1334,47 @@ pub struct Lights {
     presence_edge: Edge,
     reset_edge: Edge,
     reset_pulse: bool,
+    keys: [Key; 12],
 }
 
 impl Lights {
+    fn new(el: &Element) -> Result<Lights, String> {
+        let (moods, motion) = lights_moods(el)?;
+        let off = moods
+            .iter()
+            .position(crate::moods::Mood::is_off)
+            .ok_or("it has no off mood (`SID=\"778\"`)")?;
+        Ok(Lights {
+            moods,
+            motion,
+            off,
+            cur: off,
+            ..Lights::default()
+        })
+    }
+
+    /// The index of the mood `SID="sid"`.
+    fn by_sid(&self, sid: &str) -> Option<usize> {
+        self.moods
+            .iter()
+            .position(|m| m.sid.as_deref() == Some(sid))
+    }
+
+    /// The mood `by` steps from the current one: M+/M− and T5's "next",
+    /// through the list in order and around its ends.
+    fn step_mood(&self, by: isize) -> Result<usize, String> {
+        let n = self.moods.len() as isize;
+        let next = (self.cur as isize + by).rem_euclid(n) as usize;
+        if self.moods[next].sid.as_deref() == Some("776") {
+            return Err(
+                "stepping onto the alarm-clock mood (`SID=\"776\"`) is not simulated: \
+                 whether M+/M−/T5 skip it is unverified"
+                    .into(),
+            );
+        }
+        Ok(next)
+    }
+
     fn step(&mut self, io: &mut Io) -> Result<(), String> {
         let now = io.now;
         let v = |k: usize| io.i(k);
@@ -1319,6 +1389,7 @@ impl Lights {
         let (motion, presence, br) = (v(0), v(1), v(2).v);
         let (reset, disabled) = (v(3).on(), v(4).on());
         let (brt, moet, met, pto, pm) = (v(5).v, v(6).v, v(7).v, v(8).v, v(9).v);
+        let (tdc, mmd) = (v(22).v, v(23).v);
         if pm != 0.0 {
             return Err(format!(
                 "presence mood Pm = {pm}: how its ID names a mood is undocumented"
@@ -1333,20 +1404,90 @@ impl Lights {
         let wants = motion.on() || presence.on();
         let timeout = if presence.connected { 0.01 } else { pto };
 
+        // The pulse inputs; DisPc disables them all ("Lc1-4, M+, M-,
+        // Mood, Off, T5/1-8, On, Buzzer, MBr").
+        let mut rose = None;
+        let mut buzzer_fell = false;
+        let held = |k: &Key| k.edge.0;
+        let locked = held(&self.keys[KEY_ON]) || held(&self.keys[KEY_BUZZER]);
+        for (i, key) in self.keys.iter_mut().enumerate() {
+            let name = LIGHTS_READS[LIGHTS_KEYS + i];
+            let on = v(LIGHTS_KEYS + i).on() && !disabled;
+            let (r, f) = key.edge.update(on);
+            if r {
+                // Config's simulation took two pulses 0.15 s apart for two
+                // single clicks, the KB a double click (off and 2C).
+                if i < KEY_ON && key.rose.is_some_and(|t| now - t + EPS < tdc) {
+                    return Err(format!(
+                        "a double click on {}: two pulses within Tdc = {tdc} s are not simulated",
+                        crate::canvas_labels::label("LightController2", name).unwrap_or(name)
+                    ));
+                }
+                key.rose = Some(now);
+                if rose.replace(i).is_some() {
+                    return Err("two of M+, M−, T5, On and Buzzer at once is not simulated".into());
+                }
+            }
+            // A long click on T5 mixes in its mood (Mmd) or steps on.
+            let limit = if mmd > 0.0 { mmd } else { tdc };
+            if on
+                && (KEY_DOWN + 1..KEY_ON).contains(&i)
+                && key.rose.is_some_and(|t| now - t + EPS >= limit)
+            {
+                return Err(format!(
+                    "T5/{} held for {limit} s: a long click (mixing in a mood, Mmd) is \
+                     not simulated",
+                    i - 1
+                ));
+            }
+            buzzer_fell |= f && i == KEY_BUZZER;
+        }
+        if let Some(i) = rose
+            && locked
+            && i != KEY_ON
+            && i != KEY_BUZZER
+        {
+            return Err("a mood change while On or Buzzer is held is not simulated".into());
+        }
+        if locked && reset && !disabled {
+            return Err("Off while On or Buzzer is held is not simulated".into());
+        }
+
         // Off: "Pulse (< 1 s): Outputs are reset / switched off. Constant
         // 1 (> 1 s): Block is locked. Dominating input"; 2C pulses on it
         // (one cycle, like the other pulse outputs). DisPc disables it.
         self.reset_pulse = reset_rose;
+        let lit = self.cur != self.off;
         if reset && !disabled {
             // Switching the lights off by hand disables the automatic for
             // Pto, restarted by motion; with P wired Pto is 0.01 s, so the
             // automatic returns once presence has ended (parameter Pto).
-            if self.lit && pto > 0.0 {
+            if lit && pto > 0.0 {
                 self.suppressed_until = Some(now + timeout);
             }
-            self.lit = false;
-            self.off_at = None;
+            self.switch_off();
         } else {
+            if wants && (self.manual_at.is_some() || (lit && !self.auto)) {
+                return Err(
+                    "Mo or P after a manual mood change is not simulated: how Met \
+                            and Pto apply then is undocumented"
+                        .into(),
+                );
+            }
+            if let Some(i) = rose {
+                if wants || (lit && self.auto) || self.off_at.is_some() {
+                    return Err("a manual mood change while the motion automatic or the \
+                                Buzzer's Met runs is not simulated"
+                        .into());
+                }
+                self.manual(i, now)?;
+            }
+            // Buzzer: "Lighting is switched off after the time set in
+            // parameter (Met) has expired"; Met "starts … with a falling
+            // edge at the input (Buzzer)", 0 never switches off.
+            if buzzer_fell && met > 0.0 && self.cur != self.off {
+                self.off_at = Some(now + met);
+            }
             if let Some(t) = self.suppressed_until {
                 if wants {
                     self.suppressed_until = Some(now + timeout);
@@ -1357,19 +1498,22 @@ impl Lights {
             // Mo and P activate the motion mood "when 1"; the brightness
             // counts only while every light is off, and above Brt motion
             // and presence are ignored.
-            if wants && !self.lit && br <= brt && self.suppressed_until.is_none() {
-                self.lit = true;
+            if wants && self.cur == self.off && br <= brt && self.suppressed_until.is_none() {
+                self.cur = self.motion;
+                self.auto = true;
+                self.chain = None;
             }
+            let lit = self.cur != self.off;
             if wants {
                 self.off_at = None;
             }
             // P: the mood "remains active as long as (P) is ON".
-            if presence_fell && self.lit && !motion.on() {
-                self.lit = false;
+            if presence_fell && lit && !motion.on() {
+                self.switch_off();
             }
             // Mo: off Moet after the falling edge, or Met when that is
             // shorter; Moet 0 never switches off.
-            if move_fell && self.lit {
+            if move_fell && lit {
                 if met <= 0.0 {
                     return Err("Met = 0 with motion: which timeout applies is \
                                 undocumented"
@@ -1382,22 +1526,86 @@ impl Lights {
             if let Some(t) = self.off_at
                 && now + EPS >= t
             {
-                self.lit = false;
-                self.off_at = None;
+                self.switch_off();
+            }
+            // Met: "Lights will automatically switch off after this time,
+            // even if manually operated", but its timer starts with the end
+            // of motion or the Buzzer — neither ran.
+            if let Some(t) = self.manual_at
+                && self.cur != self.off
+                && self.off_at.is_none()
+                && met > 0.0
+                && now + EPS >= t + met
+            {
+                return Err(format!(
+                    "a manually selected mood after Met = {met} s: whether it switches off \
+                     without motion is undocumented"
+                ));
             }
         }
-        let (name, qs) = &self.mood;
+        let mood = &self.moods[self.cur];
         for (n, key) in LIGHTS_WRITES[..18].iter().enumerate() {
-            let q = qs.get(n).copied().unwrap_or(0);
-            let value = if self.lit {
-                mood_output(name, n, q)?
-            } else {
-                0.0
-            };
+            let q = mood.qs.get(n).copied().unwrap_or(0);
+            let value = mood_output(&mood.name, n, q)?;
             io.set(key, value);
         }
         let pulse = self.reset_pulse;
         io.set_bool("OutputReset", pulse);
+        io.set("Scene", scene_id(mood)?);
+        Ok(())
+    }
+
+    fn switch_off(&mut self) {
+        self.cur = self.off;
+        self.auto = false;
+        self.manual_at = None;
+        self.chain = None;
+        self.off_at = None;
+    }
+
+    /// A pulse on pulse input `i` (of [`LIGHTS_KEYS`]).
+    fn manual(&mut self, i: usize, now: f64) -> Result<(), String> {
+        let mut chain = None;
+        self.cur = match i {
+            KEY_UP => self.step_mood(1)?,
+            KEY_DOWN => self.step_mood(-1)?,
+            KEY_ON => self
+                .by_sid("777")
+                .ok_or("On without a mood `SID=\"777\"` (ID 99): which outputs it sets to MaxAbr is undocumented")?,
+            // "Activates alarm clock mood (ID 98) … If no alarm clock mood
+            // is configured, the mood with ID 99 is used instead."
+            KEY_BUZZER => self
+                .by_sid("776")
+                .or_else(|| self.by_sid("777"))
+                .ok_or("Buzzer without an alarm-clock or `SID=\"777\"` mood is undocumented")?,
+            _ => {
+                let n = i - 1;
+                let assigned = self.by_sid(&n.to_string());
+                let continues = self.chain.is_some_and(|(k, _)| k == i);
+                chain = Some((i, now));
+                if continues || assigned == Some(self.cur) {
+                    // The KB: "If there is no additional pulse for 30
+                    // seconds, a pulse selects the assigned mood again";
+                    // Config's simulation still stepped on after 65 s.
+                    if let Some((_, t)) = self.chain.filter(|_| continues)
+                        && now - t > 30.0
+                    {
+                        return Err(format!(
+                            "T5/{n} more than 30 s after its last pulse: the KB selects the \
+                             assigned mood again, Loxone Config's simulation steps on"
+                        ));
+                    }
+                    self.step_mood(1)?
+                } else {
+                    assigned.ok_or_else(|| {
+                        format!("T5/{n} without a mood `SID=\"{n}\"`: what it selects is undocumented")
+                    })?
+                }
+            }
+        };
+        self.chain = chain;
+        self.auto = false;
+        self.manual_at = Some(now);
         Ok(())
     }
 }
@@ -1411,14 +1619,15 @@ fn not_simulated(block_type: &str, key: &str) -> String {
     }
 }
 
-/// The output value of a mood's circuit: off is 0 and a percentage is
-/// that value (on a switch or dimmer circuit); a switch circuit's `on`
-/// (stored 1) could read 1 or 100, and colour values have no documented
-/// output encoding.
+/// The output value of a mood's circuit: off is 0, a percentage that
+/// value (on a switch or dimmer circuit), and a switch circuit's `on`
+/// (stored 1) reads 1 (live Miniserver read); colour values have no
+/// documented output encoding.
 fn mood_output(mood: &str, n: usize, q: u32) -> Result<f64, String> {
     use crate::moods::MoodValue;
     match crate::moods::decode(q) {
         MoodValue::Off => Ok(0.0),
+        MoodValue::On => Ok(1.0),
         MoodValue::Pct(p) if q >> 28 <= 1 => Ok(f64::from(p)),
         v => Err(format!(
             "mood \"{mood}\" sets AQ{} to `{v}`: what the output reads for it is \
@@ -1428,9 +1637,28 @@ fn mood_output(mood: &str, n: usize, q: u32) -> Result<f64, String> {
     }
 }
 
-/// The controller's motion mood: the mood flagged `Move="true"`, which
-/// `<LSConfig ScMv=>` names (loxone-format.md, *LightController2 moods*).
-fn motion_mood(el: &Element) -> Result<(String, Vec<u32>), String> {
+/// What output M (`Scene`) shows for a mood: 0 off, 99 for `SID="777"`,
+/// 98 for the alarm clock `SID="776"`, else the SID (Loxone Config's
+/// simulation: a user mood `SID="n"` shows n).
+fn scene_id(mood: &crate::moods::Mood) -> Result<f64, String> {
+    match mood.sid.as_deref() {
+        Some(crate::moods::OFF_SID) => Ok(0.0),
+        Some("777") => Ok(99.0),
+        Some("776") => Ok(98.0),
+        Some(s) => s
+            .parse::<u8>()
+            .ok()
+            .filter(|n| (1..=89).contains(n))
+            .map(f64::from)
+            .ok_or_else(|| format!("mood \"{}\" has `SID=\"{s}\"`, not a mood ID", mood.name)),
+        None => Err(format!("mood \"{}\" has no `SID=`", mood.name)),
+    }
+}
+
+/// The controller's moods and the index of its motion mood: the mood
+/// flagged `Move="true"`, which `<LSConfig ScMv=>` names (loxone-format.md,
+/// *LightController2 moods*).
+fn lights_moods(el: &Element) -> Result<(Vec<crate::moods::Mood>, usize), String> {
     let moods = crate::moods::Moods::read(el)
         .ok_or("it has no moods yet (Loxone Config writes them on its first save)")?;
     let scenes = el
@@ -1447,19 +1675,18 @@ fn motion_mood(el: &Element) -> Result<(String, Vec<u32>), String> {
     let [ix] = flagged[..] else {
         return Err(format!("{} moods flagged for motion", flagged.len()));
     };
-    let mood = &moods.moods[ix];
     let named = el
         .child_elements()
         .find(|c| c.name == "LSConfig")
         .and_then(|c| c.attr("ScMv"));
-    if named != mood.sid.as_deref() {
+    if named != moods.moods[ix].sid.as_deref() {
         return Err(
             "its motion settings name another mood than the one flagged \
                     for motion"
                 .into(),
         );
     }
-    Ok((mood.name.clone(), mood.qs.clone()))
+    Ok((moods.moods, ix))
 }
 
 /// The time of day of a `PulseAt` (`Sec=`), for the fixed-time kind

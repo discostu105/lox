@@ -1135,6 +1135,20 @@ its own evidence; these are leads, marked by how far they hold.
     - `SID="777"` is the motion mood ("Viel Licht"/"Bright", `Move`,
       `CID` 22).
     - `SID="776"` is the alarm-clock mood.
+  - **T5/n is the mood `SID="n"`.** The canvas labels T5/n with the name of
+    the mood `SID="n"` (the lighting example's T5/1 "Lesen" is SID 1; a
+    probe's T5/1 "A" and T5/2 "B" are SID 1 and 2), the Structure File says
+    "moodIds < 8 are linked to the appropriate T5 Input", and the live
+    `moodList` sets `used` bit 2 on mood 1 exactly where `Sel1` is wired.
+    No other attribute stores the assignment.
+  - **Mood IDs are SIDs.** The live `moodList` `id` of every mood is its
+    `SID` (3 controllers read); output M shows 0 for the off mood, 99 for
+    `SID="777"` and n for a user mood `SID="n"` (Loxone Config's
+    simulation, [oracle-wine.md](oracle-wine.md) session 35). `used` bit 1
+    is set exactly on the motion mood where Mo is wired (3/3), and
+    `favoriteMoods` follows list order.
+  - **A switch circuit's `on` reads 1.** With a mood `Q=1` active, plain
+    switch circuits report `active: 1` (live, 3 controllers).
   - **New moods.** The house's GUI-made moods take `SID` 1, 2, 3… and
     `CID` 12, 13…, i.e. the lowest free above the off mood's. lox-cli's
     "from `SID` 2 / `CID` 9" does not match that; the corpus also has
