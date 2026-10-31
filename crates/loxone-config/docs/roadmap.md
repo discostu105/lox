@@ -41,6 +41,12 @@ types) contradict each other. Results and methodology:
       managed-type blocks adopt; all 8 refusals are `Inv=`.
       Remaining leads: loxforum.com and the Loxone Library (both need
       free-account logins).
+- [x] Corpus pinned (2026-10-31): `tools/corpus-manifest.json` records every
+      file's source (GitHub at a commit), sha256 and license, so
+      `tools/fetch-corpus.py` reproduces the corpus exactly (149 files);
+      the weekly *Corpus* workflow runs the corpus tests on it. The
+      redistributable configs (MIT, BSD-3) form the browsable
+      [example library](../examples/library/README.md).
 - [x] Second 2026-08-25 batch: `LightController2` (75 connectors, the
       house's flagship type), `Switch2Button`, `CentralShade`,
       `CentralLight`, `Code16` — modern house-V273 element orders, zero

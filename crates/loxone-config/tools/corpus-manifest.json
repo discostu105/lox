@@ -1,0 +1,1729 @@
+{
+  "about": "The public Loxone config corpus (tools/fetch-corpus.py). Files are downloaded, never committed: most carry no license to redistribute them.",
+  "files": [
+    {
+      "file": "gh_5iggi_vlx2mqtt_StatusBausteine_VLX2MQTT.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "5iggi/vlx2mqtt",
+        "commit": "9f1d6baf596f4e422de7a5f1bc3b7c6d10dc38ab",
+        "path": "LoxoneStatusTemplates/StatusBausteine_VLX2MQTT.Loxone"
+      },
+      "license": "none",
+      "sha256": "710fcbc9ee2ce2cd60fb68dbead6b06872c7e914db0aa6250dbcb9bc369ec7c1",
+      "bytes": 104483
+    },
+    {
+      "file": "gh_DerFlash_Loxone-Nibe-Gateway_Nibe.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "DerFlash/Loxone-Nibe-Gateway",
+        "commit": "bccfc358dec210033be1026c6fa916ffaf0d4b6a",
+        "path": "Loxone Vorlagen/Nibe.Loxone"
+      },
+      "license": "MIT",
+      "sha256": "749b8269e3742401a156171a795a69329634084ba6fe548a1a6a1fc71d0b556d",
+      "bytes": 131442
+    },
+    {
+      "file": "gh_Jhonnay_Qt_MiniserverUpdater_EmptyProject.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "Jhonnay/Qt_MiniserverUpdater",
+        "commit": "de65dfa693b6685edcf50c84dbf67b25fdd7e402",
+        "path": "EmptyProject.Loxone"
+      },
+      "license": "none",
+      "sha256": "b7639ba1b142b9c5c83fa6443f4a4972f9492831e8662412548547cc99e5291f",
+      "bytes": 108374
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-AUX-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/AUX-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-AUX-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "c189bf3e35e19000c8a1be8def9edaf5ce04b2e07b75fa6d291047d015b9a731",
+      "bytes": 185679
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-AUX-VRF-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/AUX-VRF-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-AUX-VRF-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "bfeda86a701aa168251ea18bca6e3937cc968c69872c1fb3f7e32728f5f48cad",
+      "bytes": 176055
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-CG-VRF-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/CG-VRF-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-CG-VRF-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "18880954542a0062ecc0ebe571b5f16d146c7e904120094794a4c98878496ab6",
+      "bytes": 175887
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-DK-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/DK-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-DK-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "ab097bc46950addece3a68845b07cbad3131dc714cd30e579e75924d25b7eb48",
+      "bytes": 186858
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-DK-5-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/DK-5-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-DK-5-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "201a35eaedccfef993d6f25d252251b9374b5e89fa42018895f3015564ddf5ff",
+      "bytes": 167259
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-GR-1-MB-B Example.Loxone.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/GR-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-GR-1-MB-B Example.Loxone.Loxone"
+      },
+      "license": "none",
+      "sha256": "ded768f39ae8a8b6f43f054149ed96c8c4845d1eadfa991cc68d93645dce04ff",
+      "bytes": 196184
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-GR-3-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/GR-3-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-GR-3-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "8eac993c81e77e4fc99c799d620f7ef92076178e95b583116d6ba370fd94a660",
+      "bytes": 190874
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-GR-5-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/GR-5-MB-B/LX-MODBUS-ONOKOM-AIR-GR-5-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "9654d1446bc24a450aa941a68e8bda7146a03f2bd65fe92972d2a700588029a8",
+      "bytes": 176294
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-GR-VRF-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/GR-VRF-MB-B/LX-MODBUS-ONOKOM-AIR-GR-VRF-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "b818b75a4c57a83c7a2883eb477728904be54dcc660593c4b6fe411e4474d70a",
+      "bytes": 175493
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HR-1-MB-B-V1 Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HR-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-HR-1-MB-B-V1 Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "025944c11acf146933f4d2bd2ed45aacaf644261946b03cce93cf258c8da545c",
+      "bytes": 190045
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HR-1-MB-B-V2 Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HR-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-HR-1-MB-B-V2 Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "edbd7d5bd1ec991ae2ee176ac89132cd057130b18d63951f90873c040efb2086",
+      "bytes": 190185
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HS-3-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HS-3-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-HS-3-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "289c419b6be3b441673137f847584e5fd7207e33fbf6f80421193ce7997c2d7e",
+      "bytes": 184583
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HS-5-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HS-5-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-HS-5-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "866119117a43f53d0149d21bf933164e8114eaf750befeaf2b9fd2f8e7d4f009",
+      "bytes": 177741
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HS-6-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HS-6-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-HS-6-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "e58cadf55427acb2c047b3ffa495bab0ab5a129f9fc6fb546ab4b3b49a2edfa3",
+      "bytes": 168659
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HS-VRF-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HS-VRF-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-HS-VRF-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "a539f31510d2eb0eb30d4594ccc8a5f2c1e2bdfd4095f93b024d025184af4f38",
+      "bytes": 168294
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-HT-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/HT-1-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-HT-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "abd20b9e4564746bf5dcd725cfa59bc2066c7e7b97db65e36b6bd3ff5e47cfe4",
+      "bytes": 160387
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-MD-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/MD-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-MD-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "ecb501e00fdf14f19b27e1d6072334c6cc64386113c281c10f0f9bb17684583c",
+      "bytes": 170549
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-MD-3-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/MD-3-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-MD-3-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "e00d6e828a3d6e6a7466223f36264d8a6b1b1397a55391008b3c366614a5bbdf",
+      "bytes": 171214
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-MD-VRF-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/MD-VRF-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-MD-VRF-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "38dbd8a85a31acfa86813f4e72cc27310eb8bf981bd9e00b0c5e2d42ac95d774",
+      "bytes": 173979
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-ME-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/ME-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-ME-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "86db0cc378b20a6a3e9627a743d785f95e3e18213a8c9a7aa8d70a122bba0774",
+      "bytes": 171468
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-MH-2-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/MH-2-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-MH-2-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "d5f96936425f67dd8603f35b3c14e0739a0551b246a6da2bd84d6ab65cde60f6",
+      "bytes": 177170
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-TB-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/TB-1-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-TB-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "37b1f0635bdbecc983571d3e1d8b03ac60d30846520b758447ba578c8a47046d",
+      "bytes": 179739
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-TCL-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/TCL-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-TCL-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "3d59369a14763106bbd691d0f2955ba60ae002196b1857e4fd9d0ccfe3725d55",
+      "bytes": 212500
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-TCL-3-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/TCL-3-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-TCL-3-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "9a6143acb5ce4f9143b52d99b79faa10c5485af231c8122863e943a8b25948ba",
+      "bytes": 186110
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-TCL-6-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/TCL-6-MB-B/Example project/LX-MODBUS-ONOKOM-AIR-TCL-6-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "2bfccced33ef4a63ba090e61372d2f8eece3849975aae1d20984021dc7e37a9a",
+      "bytes": 186352
+    },
+    {
+      "file": "gh_ONOKOM_Templates_LX-MODBUS-ONOKOM-AIR-TN-1-MB-B Example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ONOKOM/Templates",
+        "commit": "7a0e0c5f52cfbf117aeca7b00e8a9310c603aaae",
+        "path": "Loxone/TN-1-MB-B/Example Project/LX-MODBUS-ONOKOM-AIR-TN-1-MB-B Example.Loxone"
+      },
+      "license": "none",
+      "sha256": "887ebaece9378b178df8cc7f9105bceb8814875310a3847fa6e6ff23780a38d7",
+      "bytes": 192118
+    },
+    {
+      "file": "gh_PXLDigital_Loxone-Mini-Server_LoxoneBoys House.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "PXLDigital/Loxone-Mini-Server",
+        "commit": "da8ae68c2892ed6c907daa7c513327166ba21df8",
+        "path": "Src/Loxone/LoxoneBoys House.Loxone"
+      },
+      "license": "none",
+      "sha256": "91faad4836b27235b1a5073654127c7b266dd98dbceb9cc866366bb65c67cebb",
+      "bytes": 198980
+    },
+    {
+      "file": "gh_Project51At_PluggitAP190_PluggitAP190.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "Project51At/PluggitAP190",
+        "commit": "1eccb6cc0040d7611b7d7e0456156e5857d03d91",
+        "path": "PHP/Loxone/PluggitAP190.Loxone"
+      },
+      "license": "none",
+      "sha256": "d7b480ae7f4edf7e034cccc1022a691f55351077296ef1cfd588b47fd8237967",
+      "bytes": 336900
+    },
+    {
+      "file": "gh_benjaminellmer_mc-hba_HB_SS23.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "benjaminellmer/mc-hba",
+        "commit": "0d09bc13655fb1d452f41db26e5ff535e36e5e29",
+        "path": "KNX/HB_SS23.Loxone"
+      },
+      "license": "none",
+      "sha256": "cb9a5f7bfa2cb22b316cb6fad85ef4c3e938e553d3d352ef8b0509eccb56351b",
+      "bytes": 193232
+    },
+    {
+      "file": "gh_benjaminellmer_mc-hba_Hotel Room.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "benjaminellmer/mc-hba",
+        "commit": "0d09bc13655fb1d452f41db26e5ff535e36e5e29",
+        "path": "Loxone/Hotel Room.Loxone"
+      },
+      "license": "none",
+      "sha256": "6d0f125201aa5ae61ce9ae72f6e920e2d4c147bd17cf13175deeb5ed17f00343",
+      "bytes": 190890
+    },
+    {
+      "file": "gh_benjaminellmer_mc-hba_Loxone_HB_SS23.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "benjaminellmer/mc-hba",
+        "commit": "0d09bc13655fb1d452f41db26e5ff535e36e5e29",
+        "path": "Loxone/HB_SS23.Loxone"
+      },
+      "license": "none",
+      "sha256": "dc48883a1abd2872192c2f7ea586b3f3af01e97abb89df013f50b4dad31ce5d6",
+      "bytes": 343334
+    },
+    {
+      "file": "gh_dec112_sensors_iot_DEC4IoT-Demo.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "dec112/sensors_iot",
+        "commit": "17d53e056b60f907235c1213b046026640220486",
+        "path": "loxone/DEC4IoT-Demo.Loxone"
+      },
+      "license": "none",
+      "sha256": "2c340b0e421a4956713ed5916b88f0957568fb37a8c27dcaffcf8fdf9c28fd61",
+      "bytes": 131557
+    },
+    {
+      "file": "gh_dusanmsk_railduino-udp_Railduino-v1.3-UDP-485.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "dusanmsk/railduino-udp",
+        "commit": "b803ec0c2e7197a821c9a8c71ff2d687bc06c77b",
+        "path": "loxone_example/Railduino-v1.3-UDP-485.Loxone"
+      },
+      "license": "none",
+      "sha256": "5ff53f77ccdef0ae4af0dd26b17fa1f45581cbd4c2bffeccedd6aad9f389261b",
+      "bytes": 94862
+    },
+    {
+      "file": "gh_eisber_lox-cli_Cleaning Mode Activated by NFC.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Cleaning Mode Activated by NFC.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "583cdea748494392eb15f5b364efb272c8bf25b10fb118bd7ca52f81d863d1b8",
+      "bytes": 124089
+    },
+    {
+      "file": "gh_eisber_lox-cli_Cold Storage Monitoring.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Cold Storage Monitoring.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "3339fb9e65596fb52cbeba4af2a8f446d6eeb07c0c93ab04a152a666009f456c",
+      "bytes": 1826127
+    },
+    {
+      "file": "gh_eisber_lox-cli_Fan_Control_-_Presence_and_Temperature_Support.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Fan_Control_-_Presence_and_Temperature_Support.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "ddac383496c579e9cda4691ce69aa0ddc76fcd155c6bb0da533db72c85eadf9b",
+      "bytes": 141325
+    },
+    {
+      "file": "gh_eisber_lox-cli_Guest Room Door.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Guest Room Door.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "39203383169043dda88974a2e683ff55a5d08c26df94711db93907c87a1dec38",
+      "bytes": 122063
+    },
+    {
+      "file": "gh_eisber_lox-cli_Hotel Room Status Monitor.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Hotel Room Status Monitor.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "f641fce3948d1f2cdedd3374e4a13af499cf43f719f257f463b99d3086446d50",
+      "bytes": 111581
+    },
+    {
+      "file": "gh_eisber_lox-cli_Hotwater_Heating_Rod.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Hotwater_Heating_Rod.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "01bdfd27e0d1cf526e1c5bd49784750df22f639f513ae809e8c5c6511b4bac94",
+      "bytes": 173970
+    },
+    {
+      "file": "gh_eisber_lox-cli_Multi-Zone Audio with Individual Volume Control.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Multi-Zone Audio with Individual Volume Control.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "c2748dfdbe72e5b04c8b28fe9f7d282f937df55e74bea7e4e61a852e5b316f30",
+      "bytes": 197610
+    },
+    {
+      "file": "gh_eisber_lox-cli_Network Monitoring.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Network Monitoring.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "8dda752cb5f9cbeb6ef31b061d3d69e95747e58fde3562bc7103268eeef6292f",
+      "bytes": 80729
+    },
+    {
+      "file": "gh_eisber_lox-cli_Netzgebühr reduziert.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Netzgebühr reduziert.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "03341421380509d56e0cd441b3bc112103cfaf622bab5db50a24ab6974f53842",
+      "bytes": 96257
+    },
+    {
+      "file": "gh_eisber_lox-cli_Patio_Door_Shading.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Patio_Door_Shading.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "895622e3c587147392fab31408cfa67f0bfca8bb541f4e2da6ec6369474915ac",
+      "bytes": 161038
+    },
+    {
+      "file": "gh_eisber_lox-cli_Patio_Speaker.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Patio_Speaker.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "309927d21d4d116514d4823132c7df7143b5c32d8332b595c62c5d593b1d58a3",
+      "bytes": 123447
+    },
+    {
+      "file": "gh_eisber_lox-cli_SG_Ready_Use_Case.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/SG_Ready_Use_Case.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "81bea940c4a620b3bc9dbc1e179e4671c6b83695d78dfb1e59b725bbe24242c8",
+      "bytes": 247745
+    },
+    {
+      "file": "gh_eisber_lox-cli_Schedule & Presence & Windows AC Control.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Schedule & Presence & Windows AC Control.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "f2855ee26522b9c86ec44e8a7f18332735530627a6a2d6851b833cabcb2913c1",
+      "bytes": 124348
+    },
+    {
+      "file": "gh_eisber_lox-cli_Schedule-Based AC Control.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Schedule-Based AC Control.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "0f96b2714176a0c21b3661f2ddf345885be4e0cd84cc0997ee2b64e91e969669",
+      "bytes": 113626
+    },
+    {
+      "file": "gh_eisber_lox-cli_Service Request.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Service Request.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "28e41af011a1973acc0c725bd82728618e0429ffa75c03eec3a4b8c2b07a9c65",
+      "bytes": 175055
+    },
+    {
+      "file": "gh_eisber_lox-cli_Spot Price Optimizer AC Control.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Spot Price Optimizer AC Control.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "8cd67978a68478a2413b238fcd64ce299c3940dda5f6943cf1e540bc2bfcd97c",
+      "bytes": 125804
+    },
+    {
+      "file": "gh_eisber_lox-cli_Storm_Protection_Sample.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Storm_Protection_Sample.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "1f8fdcabce4202785979cf60d721b3f28d5566ea3630367ab1390d744dee23ec",
+      "bytes": 110581
+    },
+    {
+      "file": "gh_eisber_lox-cli_Touch Surface.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Touch Surface.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "7ecfb305ac85fc1bea65bafda22b68b1a4d233eb289d4eec8827c5669f975daf",
+      "bytes": 151906
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use Case - Retrofit Burglar Alarm.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use Case - Retrofit Burglar Alarm.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "79b40af0df8be8b523833dd23c17247d0ebab783aea104adeaa36689daab71b1",
+      "bytes": 259907
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use Case – Automatic Arm.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use Case – Automatic Arm.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "d1eca28abf74b76ea42fe0bd077aa07d87641e8e368742bd7495191eb07b37dd",
+      "bytes": 200321
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase - Automated NFC Light.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase - Automated NFC Light.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "6a9d9dc4dbcec1df944f7796a10762ce276eae298ce4223c3fc808c02ab2db0e",
+      "bytes": 130354
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-AC-ChildMode.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-AC-ChildMode.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "6b51a76f3c9a43a96c3d8caaf28411b110898b884010b75586cbc5d504dd3724",
+      "bytes": 113207
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-AC-NightMode.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-AC-NightMode.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "9d9a52cf271f6020362b5a53df5332cb05a4f30ccb51cb8678003878987aa0f7",
+      "bytes": 117499
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-AC-TouchPureFlex.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-AC-TouchPureFlex.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "c8e0573866642b69f61aa40af4c2c747b170c3e240856aae6cded128aaa8d246",
+      "bytes": 145302
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-flood-warning.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-flood-warning.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "2bee5307ddfbdba33686915623b900e523dbb3798ca8823af04f2e9b12ff3c9e",
+      "bytes": 111958
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-integrating-air-conditioning.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-integrating-air-conditioning.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "8d3feff8d1dd0382ee3874dfde9dd93af51fb4e10228c0a06472ef9251015de7",
+      "bytes": 147639
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-ocpp-integration.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-ocpp-integration.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "351726f44d633c31de75e776ceba93b10183761e0f421fea81a7d6ed476467e8",
+      "bytes": 153348
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-optimized-battery-usage-spot-price.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-optimized-battery-usage-spot-price.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "080daeb600203d1631de71d98fb1bf5cb4b4175080fb4f281ebe2a1725b27bc4",
+      "bytes": 125359
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-silent-light-doorbell.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-silent-light-doorbell.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "8e4fddd6e43d1c4bdd65a8962ce0cbb246381b08dcdc65ed34cd1785a951496a",
+      "bytes": 210786
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-wallbox-charging-modes-spotprice.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-wallbox-charging-modes-spotprice.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "983e76f87b5a721ce9f9ad20c708257bc06004160312b40273a60a1df143c9ee",
+      "bytes": 169049
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase-wallbox-charging-modes.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase-wallbox-charging-modes.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "ba56de978e739b97d9e9bfad005bc76c3d82f6454f24e0c972687de42672eb0b",
+      "bytes": 183429
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase_Wallbox-Billing-Exosphere-Database-Connector.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase_Wallbox-Billing-Exosphere-Database-Connector.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "63dc79d4619cb4649b200d1cf60d71173aac33b848c39c1be2392673545676ea",
+      "bytes": 211027
+    },
+    {
+      "file": "gh_eisber_lox-cli_UseCase_espresso-machine-preheat-alarm.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/UseCase_espresso-machine-preheat-alarm.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "04a5239d2ad073685f22c4a01d9a66d35b73f671e8790a60ca594b7d0555dd94",
+      "bytes": 82860
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use_Case_Audible_fire_and_water_alarm.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use_Case_Audible_fire_and_water_alarm.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "a62e583a23a55f27e2307589207fcd4aa68687a9a54e9ac35c5df1c0377ebcf2",
+      "bytes": 201319
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use_Case_Audio_Custom_Event.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use_Case_Audio_Custom_Event.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "8ff0495f55409d650579344b18a6ab2c1670d4a15cee675df33a6b49bf5af248",
+      "bytes": 123452
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use_Case_Doorbell_with_custom_sounds.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use_Case_Doorbell_with_custom_sounds.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "ca0ca563d86d2578a6eb4667d2e3d9abb655b8a5b61c223bdd47ab32459e2ed1",
+      "bytes": 181870
+    },
+    {
+      "file": "gh_eisber_lox-cli_Use_Case__Audible_burglar_alarm.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/Use_Case__Audible_burglar_alarm.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "0f3df4b4ed09e3737c1d396716b8c0d4d5e2b3d71136d5d08776d161084aee37",
+      "bytes": 288587
+    },
+    {
+      "file": "gh_eisber_lox-cli_no-cleaning-room-email.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/no-cleaning-room-email.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "995b01f96250b853b2a13b226e790aaaa1620fccfcea9ba076c50b6bd595ecd5",
+      "bytes": 146730
+    },
+    {
+      "file": "gh_eisber_lox-cli_usecase-keyless-locker-management.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/usecase-keyless-locker-management.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "a20abd1182d5488e6b875917602cdcab3c4115f444b4588b1b7dae07831e0d95",
+      "bytes": 149242
+    },
+    {
+      "file": "gh_eisber_lox-cli_usecase-pv-surplus-heating.loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/usecase-pv-surplus-heating.loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "985ae2ac4bc80318c0281db30c3667db65f92cf27e1b0a41c19741fa51d76401",
+      "bytes": 112017
+    },
+    {
+      "file": "gh_eisber_lox-cli_usecase-shorter-night-lighting.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "eisber/lox-cli",
+        "commit": "c43240124b62ff96f1f22df9504a9925ebc4225c",
+        "path": "tests/eval/golden/configs/usecase-shorter-night-lighting.Loxone"
+      },
+      "license": "AGPL-3.0-only OR commercial (dual-licensed, see LICENSE)",
+      "sha256": "3422971cf4f02536917672121c151531dc72ed237160f022df71ed9e617259dc",
+      "bytes": 250794
+    },
+    {
+      "file": "gh_marcelzoller_loxberry-plugin-sureflap_SureFlap.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "marcelzoller/loxberry-plugin-sureflap",
+        "commit": "db5dd7ab3688fdb34f8afddbe8679d8795266492",
+        "path": "SureFlap.Loxone"
+      },
+      "license": "none",
+      "sha256": "87664dd051d4624d2af497e408c93441c6cd4e50ce4f2bc363b6c86a7c4e3071",
+      "bytes": 137493
+    },
+    {
+      "file": "gh_netdata-be_loxone_applamp-mighlight-example.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "netdata-be/loxone",
+        "commit": "f5c2bea334f20500301f695eaba99700a02a1e78",
+        "path": "applamp/applamp-mighlight-example.Loxone"
+      },
+      "license": "none",
+      "sha256": "dad8ad9153c84687b3d0d9fe0f27e756567c70c62c8a0c34392d186f720eb16b",
+      "bytes": 72665
+    },
+    {
+      "file": "gh_ogglobi_FreeAir2Lox_Vorlage FreeAir2Lox Steuerung und Statusanzeige.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "ogglobi/FreeAir2Lox",
+        "commit": "039ba78692685134794d2a7a7a379420de328e5b",
+        "path": "Vorlage FreeAir2Lox Steuerung und Statusanzeige.Loxone"
+      },
+      "license": "none",
+      "sha256": "321955fe35b20229a4f97105c7acdbd7272d16fc1cdfc58a2b1411cb667a6f24",
+      "bytes": 121149
+    },
+    {
+      "file": "gh_sevelm_InnoTune_InnoTune.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "sevelm/InnoTune",
+        "commit": "f9273f283d33e3fe7f3a6c761786623a00d52df7",
+        "path": "webif/InnoControl/download/InnoTune.Loxone"
+      },
+      "license": "none",
+      "sha256": "9eef901330114fb267cbe7bcc425ee8dff42200593c730a63c46b54b3e5c7ff2",
+      "bytes": 295661
+    },
+    {
+      "file": "gh_stefanpenzinger_hba-project_HBA-Hotel.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "stefanpenzinger/hba-project",
+        "commit": "f0e9d08b3fdc7ee232a4c85b1789277c6fc667e4",
+        "path": "loxone/HBA-Hotel.Loxone"
+      },
+      "license": "none",
+      "sha256": "c2ffd66203cd26f5897d717fc05ac68f526410df67926cc08799597c963b5841",
+      "bytes": 193170
+    },
+    {
+      "file": "gh_tobsch_lox-config_minimal.Loxone",
+      "source": {
+        "kind": "github",
+        "repo": "tobsch/lox-config",
+        "commit": "714e70470f87fee9069110797cd89015ad1adb4a",
+        "path": "examples/minimal.Loxone"
+      },
+      "license": "MIT",
+      "sha256": "b0bcd882e9e9ae36e4a59b8b16dabacd5475faf26a7422b2f1def083531cf850",
+      "bytes": 1512
+    },
+    {
+      "file": "kb_Alarm and lighting.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Alarm-and-lighting.Loxone.zip",
+        "member": "Alarm and lighting.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "490d378eb604fa3f1c89608277a7429efc65bcb0dca78bfc2333442ddb509793",
+      "bytes": 87576
+    },
+    {
+      "file": "kb_Alarm zoning.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Alarm-zoning.Loxone.zip",
+        "member": "Alarm zoning.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "657393a9d559a7b80202976a03845f5746886df259aa0eab7f3080480ab776fc",
+      "bytes": 94376
+    },
+    {
+      "file": "kb_Automatic blind control.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Automatic-Blinds.LoxPLAN.zip",
+        "member": "Automatic blind control.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "b946987f0b97a9e6c902835f9da6c9267409e2702b8fc244d0480274bd2bcef5",
+      "bytes": 84228
+    },
+    {
+      "file": "kb_Communication between Miniservers.Loxone.doc1.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Communication-between-Miniservers.Loxone.zip",
+        "member": "Communication between Miniservers.Loxone",
+        "part": 0
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "debb5bd9573931d04409630511a9b4c32ebbfe9586bfb71c3913243af17a83e2",
+      "bytes": 92844
+    },
+    {
+      "file": "kb_Communication between Miniservers.Loxone.doc2.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Communication-between-Miniservers.Loxone.zip",
+        "member": "Communication between Miniservers.Loxone",
+        "part": 1
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "7bffd7b380053457f291a5439f057b5d07deaba3de281e0adf9e7595ec0a91d1",
+      "bytes": 82238
+    },
+    {
+      "file": "kb_Demo Case Config UK.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/Demo-Case-Config-UK.Loxone.zip",
+        "member": "Demo Case Config UK.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "7e4600563fa68b6ddab9f7dcb13f1ec24e6f790356ac718f7eaf45ca8bc21dff",
+      "bytes": 110961
+    },
+    {
+      "file": "kb_EIB KNX - Miniserver as user interface.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_EIB-KNX-Miniserver-as-user-interface.Loxone.zip",
+        "member": "EIB KNX - Miniserver as user interface.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "0d81ca827748de7cb3aa2976d81306128bd2d96954c43045d8295d9b960c4cfe",
+      "bytes": 63418
+    },
+    {
+      "file": "kb_EIB KNX - Miniserver for logic.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_EIB-KNX-Miniserver-for-logic.Loxone.zip",
+        "member": "EIB KNX - Miniserver for logic.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "4c684c6f344abf7bd30ae05d123d1fb9b35bb6eaf37cdf0aca2af66fb22547d2",
+      "bytes": 60609
+    },
+    {
+      "file": "kb_Gate control.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Gate-control.LoxPLAN.zip",
+        "member": "Gate control.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "4c31e5f0c1b1fd6098fd307caca9c3d2da1679d18ceeb1d3af7259d298336c9e",
+      "bytes": 79672
+    },
+    {
+      "file": "kb_Grouped blind control.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Shutter-blind-control-with-groups.LoxPLAN.zip",
+        "member": "Grouped blind control.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "2c175c8ebe8d1316195c84dc56fec082186219b6b6c6611393cc1bc64286f1d6",
+      "bytes": 71627
+    },
+    {
+      "file": "kb_Heating control.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Heating-control-and-room-management.LoxPLAN.zip",
+        "member": "Heating control.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "789758cce98825e66a3923ac407ea779e887dedd9134aeb6314b31a04c604f94",
+      "bytes": 89228
+    },
+    {
+      "file": "kb_Heating with a thermal store.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Heating-with-a-thermal-store.Loxone.zip",
+        "member": "Heating with a thermal store.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "c1fa3bf3454cf8e58ff8d3b425d6f44d5f9c67600b56812131ce2b91d8d50807",
+      "bytes": 162755
+    },
+    {
+      "file": "kb_Home cinema.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Home-cinema.LoxPLAN.zip",
+        "member": "Home cinema.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "449aea9699a7ea72bc4ca2b5aec54ad9e27bbcaf749e62037bb2586fd752a3f4",
+      "bytes": 256785
+    },
+    {
+      "file": "kb_Integrating Sonos with Loxone.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Integrating-Sonos-with-Loxone.LoxPLAN.zip",
+        "member": "Integrating Sonos with Loxone.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "5553cd423e7087b47fc7c17a5b2acbfff752415565ad6fb11f381c275463cf31",
+      "bytes": 92005
+    },
+    {
+      "file": "kb_Lighting control with scenes.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Lighting-Control-with-Scenes.LoxPLAN.zip",
+        "member": "Lighting control with scenes.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "70125a69012b2f87c2d49c88f38a8edb362b81477c581b1367a0e2709844222b",
+      "bytes": 73385
+    },
+    {
+      "file": "kb_Lighting control with switches.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Lighting-control-with-switches.LoxPLAN.zip",
+        "member": "Lighting control with switches.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "9dc1dc43b51eba82f84d61287afbcc5066c5a7955798433d763bda84321da2c2",
+      "bytes": 55215
+    },
+    {
+      "file": "kb_Loxone Music Server.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Loxone-Music-Server.Loxone.zip",
+        "member": "Loxone Music Server.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "ec71d3900c625649007d55f0b7bc9efb1c677f5690fa5c50278bed0d554ceba4",
+      "bytes": 179494
+    },
+    {
+      "file": "kb_Outdoor lighting.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Outdoor-lighting.Loxone.zip",
+        "member": "Outdoor lighting.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "5ce3fb374a755e9de10e0624f934a6e2e73672f819ff1150348c2d0ea1992412",
+      "bytes": 85111
+    },
+    {
+      "file": "kb_Shading and heating.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Shading-and-heating.Loxone.zip",
+        "member": "Shading and heating.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "100a8ff65d980b5427b6e46417fee55ac87d0a9a3af361475f833138961a67db",
+      "bytes": 72831
+    },
+    {
+      "file": "kb_Simple blind control.LoxPLAN",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Shutter-control-blind-control.LoxPLAN.zip",
+        "member": "Simple blind control.LoxPLAN"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "f4f61709b4575bd7700f1ff2dddd34eca6981d7100b6d4396d34947a8ab3ee49",
+      "bytes": 64476
+    },
+    {
+      "file": "kb_Smart Home UK.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Smart-Home-UK.Loxone.zip",
+        "member": "Smart Home UK.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "6b50716c49b49a35816c87a58e0d8ffb09de29a7bdcbb28e4df223653782ff42",
+      "bytes": 294217
+    },
+    {
+      "file": "kb_Smart water harvesting.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Smart-water-harvesting.Loxone.zip",
+        "member": "Smart water harvesting.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "27c6cb77df666a6cef463af81bbc7ae9866c383c295f2f5044cc2780fd5b2193",
+      "bytes": 105051
+    },
+    {
+      "file": "kb_Using the timer block.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Timer-Switch.LoxPLAN.zip",
+        "member": "Using the timer block.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "9b7f113240231434f5411ceb2e12aa2e2f203aed7a7452bbc700c756f92a1c1d",
+      "bytes": 85069
+    },
+    {
+      "file": "kb_Wake On LAN.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_Wake-on-LAN.Loxone.zip",
+        "member": "Wake On LAN.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "6573c7e273b631d138dc1600fc081800553bdc3165acd5b5a610ed1cb2278aa6",
+      "bytes": 52467
+    },
+    {
+      "file": "kb_iButton_Access_Control.Loxone",
+      "source": {
+        "kind": "kb",
+        "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/09/EN_KB_Sample_File_iButton_Access_Control.Loxone.zip",
+        "member": "iButton_Access_Control.Loxone"
+      },
+      "license": "© Loxone (no redistribution license)",
+      "sha256": "ea4462444fea623358f441fcc0ec9e0fd59027057a44e82165af46470f2d8eda",
+      "bytes": 77641
+    },
+    {
+      "file": "wiki_15-10-02_Kombi-Taster Langzeit + Mehrfachklick .Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355186,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355186/child/attachment/att1517355187/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "6fd0c54a8d66c3a79de9ed52ce63935d835a5aead5f8e2e6ae0c575d267380ee",
+      "bytes": 76091
+    },
+    {
+      "file": "wiki_16-02-15_KNV Greenline LWSE-F .Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520763536,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520763536/child/attachment/att1521483795/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "58cb4c8141a48dabd5b26d2ff5a5732bf358da2d328f0154600d272ce52f6710",
+      "bytes": 354778
+    },
+    {
+      "file": "wiki_16-12-26 Rolladen Ein Tester Loesung II.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1521975986,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1521975986/child/attachment/att1529023010/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "1c9152ec8943d480de18d6b88c5a4b056614791f79cbde3482fe4c5e573317ee",
+      "bytes": 90058
+    },
+    {
+      "file": "wiki_2015-10-03_Philips Hue_7.1.9.30.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355333,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355333/child/attachment/att1517355354/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "690308be42cee97bde0e7b260732056deef89c42328eca9b597bd0c01ed4e089",
+      "bytes": 92599
+    },
+    {
+      "file": "wiki_Beispiel Loxone Geofency.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355031,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355031/child/attachment/att1532461228/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "79aaaa1d8300895eabd92c1d8a409712a0f534844137400dc5563d14768cfee1",
+      "bytes": 55813
+    },
+    {
+      "file": "wiki_Bewa?sserung.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1590002741/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "48b06da590390a210d51cdeb86e3a6c80e0072f991bd00e67456e87efb66055a",
+      "bytes": 262861
+    },
+    {
+      "file": "wiki_Bewaesserung1.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1574568168/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "a7035e332c3fe92e4bd53d666ffc5ef97eb50fa0f7eb75fb30699e7a0843ac93",
+      "bytes": 319222
+    },
+    {
+      "file": "wiki_Bewässerung Stand Juli 21.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1605274409/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "d0561e22ff27c3afaa9e09e289691ed75de43e18d02ffdebd02bc712fc12ce26",
+      "bytes": 228490
+    },
+    {
+      "file": "wiki_Bewässerung.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1605273679/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "5dda4621fcee9fd2570836c26b9e61d40079d5eff8df4806deaeecc20f58bce3",
+      "bytes": 206245
+    },
+    {
+      "file": "wiki_Eintastenbedienung Var 1.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1521975986,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1521975986/child/attachment/att1521975983/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "2de9cb6e1aa130237806febabcb25245e7fbf481c8228a5789ef57b8e1aa800e",
+      "bytes": 71544
+    },
+    {
+      "file": "wiki_Eintastenbedienung Var 2.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1521975986,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1521975986/child/attachment/att1521975985/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "c41b785f0806e8bb1e6d80d3ad1ecb6cc450053d825b8a9e0bb350a9b0bbf527",
+      "bytes": 65351
+    },
+    {
+      "file": "wiki_Foos-Baby.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520140305,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520140305/child/attachment/att1566737814/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "023fa858f6b287dfa31a0190a66f831e7ed5b6e002a647fbf834c3185a5de404",
+      "bytes": 135611
+    },
+    {
+      "file": "wiki_Fronius Modbus Wiki.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1358594423/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "a7694d1c9f5d4994258767dfb1a68f10132f55a56c2167f8ff115bb92feb9722",
+      "bytes": 192299
+    },
+    {
+      "file": "wiki_Intelligente Heizkurve V2-0.loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1522696540,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1522696540/child/attachment/att1527808443/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "3e1afb17147d3c49928f049fdf2443db6b712518c8c650777f02fc79eabb19f5",
+      "bytes": 70853
+    },
+    {
+      "file": "wiki_Intelligente Heizkurve V2-1.loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1522696540,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1522696540/child/attachment/att1529020552/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "0d7f5fb5ce01f7e5c015544f697adb9cc8e500e5786b6bfa6c0ba2c1a833c947",
+      "bytes": 87379
+    },
+    {
+      "file": "wiki_Lichtsteuerung Gen1.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1529021083,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1529021083/child/attachment/att1600454659/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "e3195d13273856a10e14a7e192c4d2db6df545d14a0c67eb8c42779c61f88584",
+      "bytes": 99085
+    },
+    {
+      "file": "wiki_Medion-TV.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520140305,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520140305/child/attachment/att1566737811/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "9fee9220adba3166265814c654968f69153bf5834b72f39a2a83568b7b2c1173",
+      "bytes": 236768
+    },
+    {
+      "file": "wiki_Mehrfach-Langzeitklick.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355186,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355186/child/attachment/att1525056036/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "f1382bf40bea7f605be37becf37a708bb74b17e50e9e47d461753ae72d8dad0f",
+      "bytes": 69779
+    },
+    {
+      "file": "wiki_Modbus Wiki Part 1 (v2).Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1356891593/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "5f270019d7a66c6fa4870daec27ed9d0867515d87e9b7fd105480148165c98bf",
+      "bytes": 129296
+    },
+    {
+      "file": "wiki_Modbus Wiki Part 2 (v2).Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1356891597/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "e353612ae2dbce7d20a68382da9beedfd87f66e22c8758fc03d5868810ca3e8c",
+      "bytes": 141851
+    },
+    {
+      "file": "wiki_Modbus Wiki Part 2.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1316062245/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "c21c3d86dbcafb215374847ee2f801f64bc9c1b3373d166bf1c01571840d1e1a",
+      "bytes": 121595
+    },
+    {
+      "file": "wiki_Modbus Wiki.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1316061921/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "cbbb25f7859f49fd07dacd27aaa6038ee4605ccbeec9d2d7d3ac81baf1e6a80d",
+      "bytes": 108927
+    },
+    {
+      "file": "wiki_Modbus Wiki_v2.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1316061809,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1316061809/child/attachment/att1356891592/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "79f9970003f9e77a2ba0bbea76eb4ec4a78fd679b9ca848043dfa60782826c70",
+      "bytes": 129968
+    },
+    {
+      "file": "wiki_Musterconfig Helios-modbusTCP v5.1.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355637,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355637/child/attachment/att1526628502/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "da3d3fcc60f00c4efce726ffa9fed16080405644e44f28762d40033ce3bfcaed",
+      "bytes": 135046
+    },
+    {
+      "file": "wiki_Musterconfig Helios-modbusTCP v5.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1517355637,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1517355637/child/attachment/att1525055909/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "767b977bf173a66e5b431ac66cda73e391b28e366c045f236798b683da4b6d5d",
+      "bytes": 128382
+    },
+    {
+      "file": "wiki_OR-WE-516.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1755021316,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1755021316/child/attachment/att1755185157/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "8d9bb92394d992b5cc54d890d040db6a65a9182406547f4427e7f4b6650aa8d6",
+      "bytes": 348500
+    },
+    {
+      "file": "wiki_Pioneer-VSX.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520140305,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520140305/child/attachment/att1566737812/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "5dabebbccf9b221a41adae64f37d418b9fe886cbfa2a9086d444afaa9042784c",
+      "bytes": 227527
+    },
+    {
+      "file": "wiki_RGB-Farbdurchlauf 1.01.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520763236,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520763236/child/attachment/att1520763291/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "0b334964730191d4cb49ba6d429166ffe3fc7a3601ad1649c79f6b2c7256771e",
+      "bytes": 94503
+    },
+    {
+      "file": "wiki_RGB-Farbdurchlauf 1.1.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520763236,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520763236/child/attachment/att1520763450/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "f3a1b61fe2922a4b2384ef9ef64ef3857e41fdf28b6d1d3caff3864827aa3700",
+      "bytes": 102767
+    },
+    {
+      "file": "wiki_RGB-Farbdurchlauf.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520763236,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520763236/child/attachment/att1520763231/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "7a7d433ca58b7cd4fa03146736d20737eb1dc5aa3891cff6128bff1e38affa3e",
+      "bytes": 95319
+    },
+    {
+      "file": "wiki_Rolladen Ein Taster Loesung.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1521975986,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1521975986/child/attachment/att1521976017/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "be6acc01c933e1158781bdab639581d55756bb99f9b41570ca8a047b03dd7458",
+      "bytes": 85677
+    },
+    {
+      "file": "wiki_Schopmann_Basic.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1590002567/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "5ff3cb56d3ab9d316b1249ab1389d130c40d6b4624fd60f299e644373d839433",
+      "bytes": 478124
+    },
+    {
+      "file": "wiki_Sonos-4-Wiki 160122.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1650327637,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1650327637/child/attachment/att1655668743/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "d554ff6057d7b7c5fe8717c4048684bf90b1db45815bc242d971055df4d59469",
+      "bytes": 337415
+    },
+    {
+      "file": "wiki_Sonos-Bell 040122.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1650327637,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1650327637/child/attachment/att1650327701/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "17ba7385e885cd6f095fadcbe2db8db8f3ee806e29c0deec133f920a0076e450",
+      "bytes": 406847
+    },
+    {
+      "file": "wiki_Sonos.LoxPLAN",
+      "source": {
+        "kind": "wiki",
+        "page": 1520140305,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520140305/child/attachment/att1566737813/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "8455b750c82e9724f4705a0127195b35e7fe2879f8600c28d25fd9d1444546d2",
+      "bytes": 163823
+    },
+    {
+      "file": "wiki_Sony-TV.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1520140305,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1520140305/child/attachment/att1566737810/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "4b2f27f4d2036fd4763fcc2896d0216744118f43e9ea0ad75c27e48bf4b4bfce",
+      "bytes": 171256
+    },
+    {
+      "file": "wiki_WHA2600.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1536591392,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1536591392/child/attachment/att1555072311/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "2064bbc67bd317e5fdd09edd94ba8de4b5c12c9f8a74a776c35c5455ab87f2af",
+      "bytes": 286663
+    },
+    {
+      "file": "wiki_Wetter WHA2600 und Netatmo und Loxberry WU.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1536591392,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1536591392/child/attachment/att1555072313/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "8b873276f80fab24250a59861a9b5f8450bdba83bde2acc3bd52987857e18924",
+      "bytes": 286831
+    },
+    {
+      "file": "wiki_Windrichtung3.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1536591392,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1536591392/child/attachment/att1536591389/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "8eb227b84083ae5f80b45fd3b4cb30ef86212c694f4d6f3b8dcd5b0b8530c120",
+      "bytes": 70786
+    },
+    {
+      "file": "wiki_aWATTar_1.01.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1522696264,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1522696264/child/attachment/att1522696262/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "abaa414cf0765b6f0306bfd1323b360359dcce611b8653b6a7f46b0529af0282",
+      "bytes": 516174
+    },
+    {
+      "file": "wiki_bewaesserung.Loxone",
+      "source": {
+        "kind": "wiki",
+        "page": 1516634217,
+        "url": "https://loxwiki.atlassian.net/wiki/rest/api/content/1516634217/child/attachment/att1516634215/download"
+      },
+      "license": "unknown (LoxWiki upload)",
+      "sha256": "972615aec6be45f0aca591b603163709ce60012df024391d6180ca84c0bfeee0",
+      "bytes": 248110
+    }
+  ]
+}

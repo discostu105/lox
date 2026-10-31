@@ -19,7 +19,7 @@ fn scan(args: &[&str]) -> (i32, String) {
 fn shipped_configs_are_clean() {
     let (code, out) = scan(&["examples"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.ends_with("0 finding(s) in 5 config(s)\n"), "{out}");
+    assert!(out.ends_with("0 finding(s) in 7 config(s)\n"), "{out}");
 }
 
 #[test]

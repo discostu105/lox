@@ -1,0 +1,58 @@
+page "_LoxCall"
+
+extern callstateoutput_2 = InputRef(uuid: "1713f389-0398-feb1-ffff4268f6c1aee9") # mirrors Memory "_CallStateOutput"
+extern callstateoutput_3 = InputRef(uuid: "1713f389-0398-fec1-ffff4268f6c1aee9") # mirrors Memory "_CallStateOutput"
+extern callstate = VirtualTextIn(iname: "VTI1") # periphery
+
+program = Code16(
+	TI1: callstate.TQ,
+)
+
+start = Equal(
+	Input1: 2,
+	Input1: callstateoutput_2.AQ,
+	Input2: 2,
+)
+
+ringing = Equal(
+	Input1: callstateoutput_3.AQ,
+	Input2: 1,
+)
+
+callstateoutput = Memory(
+	Input: program.AQ1,
+)
+
+callstateuser = Memory(
+	Input: program.TQ1,
+)
+
+callstatedevice = Memory(
+	Input: program.TQ2,
+)
+
+callstatenumber = Memory(
+	Input: program.TQ3,
+)
+
+callonimpuls = Memory(
+	Input: call_2.Qon,
+)
+
+calloffimpuls = Memory(
+	Input: call_2.Qoff,
+)
+
+callactive = Memory(
+	Input: call_2.Q,
+)
+
+call = Or(
+	I1: start.Q,
+	I2: ringing.Q,
+)
+
+call_2 = PushButton(
+	"CALL",
+	On: call.Q,
+)
