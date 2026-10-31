@@ -258,7 +258,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
     Ok(findings)
 }
 
-/// Blocks whose outputs feed nothing — checked against the *compiled*
+/// Blocks whose outputs feed nothing (family parents excepted) — checked against the *compiled*
 /// config, so wires drawn in Loxone Config count as consumers. A block is
 /// flagged when nothing draws from any of its ports, or when everything
 /// reachable from them is `InputRef`/`OutputRef` plumbing that itself
@@ -325,6 +325,15 @@ pub fn lint_dead_outputs(
             .element_at(&objects[start].path)
             .expect("path from objects()");
         if el.attr("rec").is_some_and(|v| !v.is_empty()) || objects[start].block_type == "Code16" {
+            continue;
+        }
+        // Parents of a family (the Modbus server and device, the virtual
+        // HTTP/UDP input) have no ports of their own: their children
+        // carry the signals, so nothing is ever wired to them.
+        if matches!(
+            objects[start].block_type.as_str(),
+            "ModbusServer" | "ModbusDev" | "VirtualHttpIn" | "VirtualUdpIn"
+        ) {
             continue;
         }
         // Forward reachability; dead when it never leaves ref plumbing.

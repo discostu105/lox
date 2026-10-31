@@ -293,7 +293,7 @@
       }
     },
     "extern": {
-      "match": "^\\s*(extern)\\s+([a-z][a-z0-9_]*)\\s*(=)\\s*([A-Z][A-Za-z0-9]*)\\s*(\\()\\s*(uuid|iname|title)\\s*(:)",
+      "match": "^\\s*(extern)\\s+([a-z][a-z0-9_]*)\\s*(=)\\s*([A-Z][A-Za-z0-9]*)\\s*(\\()\\s*(uuid|iname|title|mirrors)\\s*(:)",
       "captures": {
         "1": { "name": "keyword.control.extern.lxir" },
         "2": { "name": "entity.name.function.lxir" },
