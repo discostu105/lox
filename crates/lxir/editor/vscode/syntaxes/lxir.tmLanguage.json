@@ -9,6 +9,8 @@
     { "include": "#tiles" },
     { "include": "#access" },
     { "include": "#moods" },
+    { "include": "#rule" },
+    { "include": "#schedule" },
     { "include": "#end" },
     { "include": "#page" },
     { "include": "#extern" },
@@ -143,6 +145,69 @@
         }
       ]
     },
+    "rule": {
+      "comment": "rule <slug> [\"Name\"] \u2026 end with active/inactive, when time HH:MM, when weekday <days>, then <slug> \"<command>\" lines (D57)",
+      "begin": "^\\s*(rule)\\s+([a-z][a-z0-9_]*)(?:\\s+(?=\"))?",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.rule.lxir" },
+        "2": { "name": "entity.name.function.lxir" }
+      },
+      "end": "^\\s*(end)\\s*$",
+      "endCaptures": { "1": { "name": "keyword.control.end.lxir" } },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        {
+          "match": "^\\s*(active|inactive)\\s*(?=$|#)",
+          "captures": { "1": { "name": "constant.language.lxir" } }
+        },
+        {
+          "match": "^\\s*(when)\\s+(time)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.when.lxir" },
+            "2": { "name": "keyword.other.rule.lxir" }
+          }
+        },
+        {
+          "begin": "^\\s*(when)\\s+(weekday)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.when.lxir" },
+            "2": { "name": "keyword.other.rule.lxir" }
+          },
+          "end": "(?=$|#)",
+          "patterns": [{ "include": "#day" }]
+        },
+        {
+          "match": "^\\s*(then)\\s+([a-z][a-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.then.lxir" },
+            "2": { "name": "variable.other.lxir" }
+          }
+        },
+        { "include": "#number" }
+      ]
+    },
+    "schedule": {
+      "comment": "schedule <name> \u2026 end with <days> HH:MM-HH:MM[ = <value>][ activate], \u2026 or <days> off lines (D53)",
+      "begin": "^\\s*(schedule)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.schedule.lxir" },
+        "2": { "name": "entity.name.function.lxir" }
+      },
+      "end": "^\\s*(end)\\s*$",
+      "endCaptures": { "1": { "name": "keyword.control.end.lxir" } },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#day" },
+        { "match": "\\b(off|activate)\\b", "name": "constant.language.lxir" },
+        { "include": "#number" }
+      ]
+    },
+    "day": {
+      "name": "constant.language.day.lxir",
+      "match": "\\b(mon|tue|wed|thu|fri|sat|sun|weekdays|weekend|daily|holiday|vacation|dayoff|heating|cooling)\\b"
+    },
     "moods": {
       "comment": "moods <name> … end with \"<title>\": all on, AQ1 temp(80%, 4700K) lines (D58)",
       "patterns": [
@@ -159,6 +224,10 @@
             "1": { "name": "keyword.other.moods.lxir" },
             "2": { "name": "constant.language.lxir" }
           }
+        },
+        {
+          "match": "\\b(rgb|temp)(?=\\()",
+          "name": "support.function.builtin.lxir"
         },
         {
           "match": "\\b(AQ[0-9]+)\\s+(temp|rgb|on|off)\\b",
