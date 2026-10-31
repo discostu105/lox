@@ -19,6 +19,7 @@
     { "include": "#moved" },
     { "include": "#block" },
     { "include": "#instance" },
+    { "include": "#signal" },
     { "include": "#wire" },
     { "include": "#attr" },
     { "include": "#set" },
@@ -340,6 +341,14 @@
         { "include": "#portref" },
         { "include": "#number" }
       ]
+    },
+    "signal": {
+      "comment": "a named signal (D81): name = <expression>, after block and instance",
+      "match": "^\\s*([a-z][a-z0-9_]*)\\s*(=)(?!=)",
+      "captures": {
+        "1": { "name": "entity.name.function.loxl" },
+        "2": { "name": "keyword.operator.assignment.loxl" }
+      }
     },
     "instance": {
       "begin": "^\\s*([a-z][a-z0-9_]*)\\s*(=)\\s*([a-z][a-z0-9_]*)\\s*(\\()",

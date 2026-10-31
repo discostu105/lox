@@ -22,7 +22,9 @@ fine too).
 
 **Style** (the GitHub release shows the entries as they are, under `## ✨ New`, `## 🚀 Improvements`,
 `## 🐛 Bug Fixes`, …; wrapped lines are joined): lead with the command or feature in bold, then say in a sentence
-or two what users get. Sub-bullets and a short code block of example commands are welcome for a bigger feature.
+or two what users get. Keep a bullet under about 300 characters and leave out internal IDs (`D42`, oracle
+sessions); see [WRITING_GUIDELINES.md](../WRITING_GUIDELINES.md). Sub-bullets and a short code block of example
+commands are welcome for a bigger feature.
 
 ```markdown
 - **`lox stream --reconnect`** keeps streaming across Miniserver reboots and dropped connections

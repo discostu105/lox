@@ -18,7 +18,7 @@ errors. v2 (2026-10-31) gives every value one spelling — see
 
 ```ebnf
 module     = { line } ;
-line       = comment | let | extern | block-head | arg-line
+line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
            | page | test | tiles | tiles-claim | access | schedule
            | schedule-claim | rule | blank ;
@@ -41,6 +41,9 @@ binding    = value                                 (* Def= parameter *)
            | expr ;                                (* expression sugar (D26):
                                                       desugars into gate blocks *)
 
+signal     = slug "=" expr [ comment ] ;            (* named signal (D81): not a
+                                                      bare operand; the top
+                                                      block is `slug` *)
 wire       = slug "." port "<-" ( slug "." port | expr ) [ comment ] ;
                                     (* extern target; an expression RHS
                                        desugars into gate blocks (D24) *)
@@ -67,7 +70,7 @@ page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
 page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
 template   = "template" slug "(" [ params ] ")" [ comment ]
-             { comment | block-head | arg-line | wire | set }
+             { comment | block-head | arg-line | signal | wire | set }
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
@@ -840,7 +843,8 @@ The template library (`templates/`, listed by `loxl templates`, D23)
 ships tested templates for common automations; copy a file into the
 module directory to call them.
 
-The body may contain only block declarations, wires, sets and comments —
+The body may contain only block declarations, named signals, wires,
+sets and comments —
 no nesting, no template-local `let`/`extern` (deferred, D23). `template`
 and `end` are reserved words; `use` is reserved for the v0 migration
 error.
@@ -913,6 +917,49 @@ statement needed: the expression is the blocks' single source of
 truth. Declaring a slug that collides with an expression's synthetic
 namespace is an error. Inside a template body, desugaring runs after
 expansion, so the synthetic prefix uses the instance's actual sink.
+
+### Named signals — `slug = <expr>` (D81)
+
+```text
+let wunschtemp = 26
+
+wp_bedarf = wasser.Q < wunschtemp and pv.Q >= 1500 and not abdeckung.Q
+wp.On <- wp_bedarf.Q
+
+pv_kw = pv.Q / 1000                  # arithmetic: one Formula, read at AQ
+pv_hoch = pv_kw.AQ >= 1.5
+```
+
+A line `<slug> = <expression>` names an expression's result. It desugars
+exactly like an inline expression — same blocks, same labels (the
+expression text), same rules — except for the names: the **top block is
+`<slug>` itself**, and the sub-blocks are `<slug>__<op><n>`. The
+signal's output is the top block's: `<slug>.Q` for a gate or comparator,
+`<slug>.AQ` for the `Formula` of an arithmetic signal (`<slug>.Q` on a
+Formula is an unknown-port error). Reference it like any block — from
+arguments, `<-`, tests, tile `to:`, rules. A signal also spells what is
+deferred inline: arithmetic under a comparison is two signals
+(`pv_kw = pv.Q / 1000`, then `pv_hoch = pv_kw.AQ >= 1.5`).
+
+The right side must be an expression. A bare port (`x = a.Q`) is an
+error — an alias is not a block, so write `a.Q` where `x.Q` would go; a
+bare value (`x = 5`, `x = on`) is a constant (`let x = 5`). A signal's
+inputs are its expression: `<-`, port-`=` and attribute statements on a
+signal are errors, and a template body's only signal takes no
+call-site port forwards.
+
+**Identity.** The top slug is written by hand, so it is **hand-owned**:
+it keeps its UUID while the expression changes below it, deleting the
+statement needs `removed <slug>` like any block, and a rename is
+`moved <old> -> <new>` (which takes the expression-owned sub-blocks
+along, `old__ge1` → `new__ge1`) or `loxl rename`. Changing the top
+operator (`and` → `or`) changes the top block's type, which a pinned
+block never does: the compile refuses and names the way out (a new slug
+plus `removed <old>`). The sub-blocks are **expression-owned**, exactly
+as inline: re-derived from the text, orphans auto-removed. A declared
+name colliding with the `<slug>__` namespace is an error. In a template
+body the signal is a body-local name like a block: instance `sued` of
+`warm = …` gives `sued_warm` and `sued_warm__ge1`.
 
 ### `test` — a simulated scenario (D36, D68)
 
@@ -1397,8 +1444,8 @@ recipients, and leaves `OutputRefLM` blocks with the GUI.
 
 ## Name resolution and validation
 
-- Externs, blocks, `let` constants, templates, `tiles` sets and
-  schedules share one namespace per module; duplicates are an error. An
+- Externs, blocks, named signals, `let` constants, templates, `tiles`
+  sets and schedules share one namespace per module; duplicates are an error. An
   `access` or `recipients` declaration names an extern and declares
   nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
@@ -1502,6 +1549,9 @@ compile output of a migrated file is byte-identical.
   quoted one is canonicalized, not refused); **`when date`** is bare
   (`when date 2026-12-24`, was quoted).
 - The "expected a statement" error lists every statement kind.
+- **Named signals** (D81): `wp_bedarf = a.Q and b.AQ >= 5` names an
+  expression's result; its top block is `wp_bedarf` (hand-owned), its
+  sub-blocks `wp_bedarf__<op><n>`. New syntax only — no v1 file changes.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, then `loxl fmt`
