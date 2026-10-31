@@ -1,4 +1,4 @@
-//! End-to-end tests of the TUI core: the user journeys J1–J12 driven
+//! End-to-end tests of the TUI core: user journeys driven
 //! through `update()` with the demo house, rendering at several sizes and
 //! themes, scale, hostile text and the robustness rules.
 
@@ -242,7 +242,7 @@ fn render(app: &App, w: u16, h: u16) -> String {
 
 // ── Journeys ────────────────────────────────────────────────────────────────
 
-/// J1: Office lights off before leaving — `2 /off⏎ l ␣`.
+/// Office lights off before leaving — `2 /off⏎ l ␣`.
 #[test]
 fn j1_office_light_off() {
     let mut h = H::new();
@@ -269,7 +269,7 @@ fn j1_office_light_off() {
     assert_eq!(h.app.store.num(&u), Some(0.0));
 }
 
-/// J2: living room blind to 30 % — `: living south⏎ =30⏎`.
+/// Living room blind to 30 % — `: living south⏎ =30⏎`.
 #[test]
 fn j2_blind_to_30() {
     let mut h = H::new();
@@ -283,7 +283,7 @@ fn j2_blind_to_30() {
     assert!(sends[0].1.iter().any(|c| c.contains("30")), "{:?}", sends);
 }
 
-/// J3: why did the hallway light turn on — events, filter, detail, wiring.
+/// Why did the hallway light turn on — events, filter, detail, wiring.
 #[test]
 fn j3_events_filter_detail_wiring() {
     let mut h = H::new();
@@ -456,7 +456,7 @@ fn q_closes_popups_and_quits_from_a_screen() {
     assert!(h.app.quit);
 }
 
-/// J4: is the Miniserver OK — System overview and sub-views poll what they show.
+/// Is the Miniserver OK — System overview and sub-views poll what they show.
 #[test]
 fn j4_system_views_poll() {
     let mut h = H::new();
@@ -484,7 +484,7 @@ fn j4_system_views_poll() {
     )));
 }
 
-/// J5: which sensor needs a battery — Home's attention panel, no keys needed.
+/// Which sensor needs a battery — Home's attention panel, no keys needed.
 #[test]
 fn j5_battery_in_attention() {
     let mut h = H::new();
@@ -493,7 +493,7 @@ fn j5_battery_in_attention() {
     assert!(s.contains("battery 8"), "{}", s);
 }
 
-/// J6: PV now and where it goes — Energy flow and range switching.
+/// PV now and where it goes — Energy flow and range switching.
 #[test]
 fn j6_energy() {
     let mut h = H::new();
@@ -541,7 +541,7 @@ fn energy_battery_discharging_feeds_home() {
     assert!(s.contains("1.5 kW discharging"), "{}", s);
 }
 
-/// J7: sites — switch the whole TUI to another context.
+/// Sites — switch the whole TUI to another context.
 #[test]
 fn j7_switch_site() {
     let mut h = H::new();
@@ -554,7 +554,7 @@ fn j7_switch_site() {
     );
 }
 
-/// J8: copy the CLI command / UUID.
+/// Copy the CLI command / UUID.
 #[test]
 fn j8_copy_cli_and_uuid() {
     let mut h = H::new();
@@ -574,7 +574,7 @@ fn j8_copy_cli_and_uuid() {
     );
 }
 
-/// J9: arm the alarm — picker, then a confirmation before anything is sent.
+/// Arm the alarm — picker, then a confirmation before anything is sent.
 #[test]
 fn j9_alarm_needs_confirmation() {
     let mut h = H::new();
@@ -720,7 +720,7 @@ fn confirm_list_covers_sub_controls() {
     );
 }
 
-/// J10: run a scene from the palette.
+/// Run a scene from the palette.
 #[test]
 fn j10_scene_from_palette() {
     let mut h = H::new();
@@ -733,7 +733,7 @@ fn j10_scene_from_palette() {
     );
 }
 
-/// J11: config history — log, then a commit's diff.
+/// Config history — log, then a commit's diff.
 #[test]
 fn j11_config_history() {
     let mut h = H::new();
@@ -1189,7 +1189,7 @@ fn system_overview_details() {
     assert!(h.render(160, 44).contains("⚠ 95 s slow"));
 }
 
-/// J12: wall display — read-only never sends, and says so.
+/// Wall display — read-only never sends, and says so.
 #[test]
 fn j12_read_only() {
     let mut h = H::with(Opts {
