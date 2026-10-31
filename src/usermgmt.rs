@@ -171,14 +171,10 @@ impl std::error::Error for LlCodeError {}
 pub fn ll_value(body: &str) -> Result<Value> {
     let v: Value = serde_json::from_str(body.trim()).context("the answer is not JSON")?;
     let ll = v.get("LL").context("the answer has no LL envelope")?;
-    let code = ll
-        .get("Code")
-        .or_else(|| ll.get("code"))
-        .and_then(crate::util::json_val_str)
-        .unwrap_or_default();
-    if code != "200" {
+    let code = loxone_client::system::code_of(&v);
+    if code != Some(200) {
         return Err(LlCodeError {
-            code,
+            code: code.map(|c| c.to_string()).unwrap_or_default(),
             control: ll
                 .get("control")
                 .and_then(Value::as_str)
@@ -686,11 +682,7 @@ pub fn answer_code(status: u16, body: &str) -> u16 {
     }
     serde_json::from_str::<Value>(body.trim())
         .ok()
-        .and_then(|v| {
-            let ll = v.get("LL")?;
-            crate::util::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)
-        })
-        .and_then(|c| c.trim().parse().ok())
+        .and_then(|v| loxone_client::system::code_of(&v))
         .unwrap_or(status)
 }
 
