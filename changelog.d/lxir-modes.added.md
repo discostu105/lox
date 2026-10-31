@@ -1,2 +1,0 @@
-- **`lxir` operating modes from source** (D69): a schedule line names any mode of the config by its title (`"Party" 18:00-24:00`), `heating` and `cooling` name the heating and cooling periods, and `party = Mode("Party")` creates a user-defined mode in the "Betriebsmodi" folder
-  - Checked in Loxone Config: a save leaves the new mode and the schedule unchanged. Calendar entries stay with Loxone Config (#211); users stay with the Miniserver (D70)
