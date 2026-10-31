@@ -162,12 +162,13 @@ byte-for-byte, so lockfile diffs in review always mean something.
    port* UUIDs are emitted exactly.
 2. A new slug mints UUIDs and appends them here before the output is
    produced.
-3. A slug in `objects` but missing from source aborts the compile unless
-   removal is explicit (see the removal trichotomy in
-   [design.md](design.md)) — or the entry is `expr_owned`, where editing
-   the owning expression *is* the authorization.
-4. `counters` never decrease; they absorb the base document's counters
-   (max) and advance by one per minted object.
+3. A slug in `objects` but missing from source aborts the compile, unless the removal is explicit:
+   a `removed <slug>` statement, `allow_removals`, or `Lockfile::remove_object`, which forgets the
+   block and leaves it unmanaged
+   ([decision 0006](decisions/0006-removal-trichotomy.md)). An `expr_owned` entry needs none of
+   these, since editing the owning expression is the authorization.
+4. `counters` never decrease. They take the maximum of the base document's counters and advance by
+   one per created object.
 5. `externals` entries are dropped when the extern leaves the source,
    and replaced when its `uuid:` matcher names a different object than
    the pin — a title/iname pin survives renames of its object;

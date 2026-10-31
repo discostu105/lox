@@ -255,56 +255,56 @@ it only when it matches what you intended.
 | Error contains | Meaning | Remedy |
 |---|---|---|
 | `line N` (from `check`) | syntax/reference error in the module | fix that line; `loxl fmt` shows canonical form |
-| `no match for extern` | spec matched nothing of that type | check type + spelling; `loxl decompile` the base to see candidates |
-| `ambiguous` + candidate UUIDs | several objects match | switch to `uuid: "<one of the candidates>"` — ask if unclear |
+| `no object matches` | the extern's spec matches nothing of that type | check type and spelling; `loxl decompile` the base to see candidates |
+| `matches N objects` + candidate UUIDs | several objects match | pin one with `uuid: "<one of the candidates>"`; ask if unclear |
 | `not in the verified builtin table` | the compiler cannot create this type | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
-| `is the label Loxone Config shows on the canvas` | a canvas label (`Tr`, `D`) used as a port name | use the key the error names (`InputTrigger`, `Time`) |
-| `does not fit — the port is documented in …` | unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`loxl types <Type>`) |
-| `is no exact decimal number of minutes` | time value on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a representable value |
+| `is the canvas label of port` | a canvas label (`Tr`, `D`) used as a port name | use the port the error names (`InputTrigger`, `Time`) |
+| `does not fit. The port is documented in …` | a unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`loxl types <Type>`) |
+| `is not an exact number of minutes` | a time on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a value that fits |
 | `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |
-| `the timer is analog — … needs a value` / `the timer is digital` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
-| `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or mint the mode (`party = Mode("Party")`) |
-| `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
+| `the timer is analog, so … needs a value` / `the timer is digital, so` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
+| `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or create the mode (`party = Mode("Party")`) |
+| `no <C Type="VirtualInCaption"> to hold a new VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then compile again |
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
-| `` write `X` instead of `Y` `` | a v1 spelling v2 dropped: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
+| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
 | `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
-| `is no whole number of ticks of` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
-| `` has no `!=` `` (from `test --lox`) | lox-cli's simulator lacks `!=` | run the test in the built-in simulator, or rewrite as `==` |
+| `is not a whole number of … ticks` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
+| `` uses `!=`, which lox-cli's `lox sim` lacks `` (from `test --lox`) | lox-cli's simulator has no `!=` | run the test in the built-in simulator, or rewrite as `==` |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
-| `has no port … present ports: …` | extern port's `<Co>` missing from base | use a listed port, or have the port wired/set once in Loxone Config so it exists |
+| `has no port … in the base config (ports: …)` | the extern port's `<Co>` is missing from the base | use a listed port, or wire or set the port once in Loxone Config so it exists |
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
 | `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
-| `is v0 syntax` | `block`/`wire`/`set`/`match` keyword from the old grammar | the error shows the v1 spelling — rewrite the line |
+| `is old syntax` | a `block`/`wire`/`set`/`match`/`use` keyword from the old grammar | rewrite the line in the spelling the error shows |
 | `duplicate parameter` / `duplicate wire` | same argument twice in one argument list | delete one (fan-in with *different* sources is allowed) |
-| `takes both a value … and a wire` | a port bound to a constant and to a wire in one argument list | keep one: a wired input ignores its value. A stale constant under a wire in the base stays there without a binding |
+| `has both a value … and a wire` | a port bound to a constant and to a wire in one argument list | keep one, since a wired input ignores its value |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
 | `is an attribute parameter, not a connector` | wire aimed at e.g. `Formula:` | pass a value instead: `Formula: "I1+I2"` |
-| `warning: cannot adopt` (from `adopt`) | that block's rebuild would lose something (e.g. GUI input inversion `Inv=`) | leave it unmanaged, or remove the offending state in Loxone Config and re-adopt |
-| `base carries N duplicate UUID(s)` | two objects/connectors in the base share one identity (a push tool re-keyed refs) | open and save the config once in Loxone Config — it re-mints the later twins — then use that save as the base; never hand-edit UUIDs |
-| `output would carry duplicate UUID(s)` | this compile would emit a repeat: a fresh mint hit a base UUID minted in the same second, or the lock maps two identities onto one UUID | compile again (or another `--time`); if it persists, inspect the lock entries carrying the named UUIDs |
-| `targets managed block` + `give it a label` | `.title`/`.room`/`.category` on a block you declared | title → the block's label; room/category stay with Loxone Config |
-| `rewrites what extern … is matched by` | the extern is matched by the attribute it claims | pin it by `uuid:` (or `iname:`) |
-| `no room titled` / `no category titled` | `.room`/`.category` names no `Place`/`Category` in the base | use a listed title, or create the room/category in Loxone Config first |
-| `carries no room binding` / `carries no category binding` | the object has no `<IoData Pr=/Cr=>` to rewrite | assign a room/category once in Loxone Config, then claim it from source |
+| `warning: cannot adopt` (from `adopt`) | rebuilding that block would lose something (e.g. an input inversion `Inv=`); it stays unmanaged | leave it unmanaged, or remove that setting in Loxone Config and adopt again |
+| `base has N duplicate UUIDs` | two objects or connectors in the base share one UUID (another push tool re-keyed refs) | open and save the config once in Loxone Config, which gives the duplicates new UUIDs, then use that save as the base. Never edit UUIDs by hand |
+| `Output would contain duplicate UUIDs` | a new UUID hit one the base created in the same second, or the lock maps two blocks onto one UUID | compile again or pass another `--time`; if it persists, inspect the lock entries with the named UUIDs |
+| `targets managed block` + `Give it a label` | `.title` on a block you declared | write the title as the block's label: `x = Type("…", …)` |
+| `changes what extern … is matched by` | the extern is matched by the attribute it claims | pin it by `uuid:` or `iname:` |
+| `no room titled` / `no category titled` | `.room`/`.category` names no room or category in the base | use a listed title, or create the room or category in Loxone Config first |
+| `has no room binding` / `has no category binding` | the object has no `<IoData Pr=/Cr=>` to change | assign a room or category once in Loxone Config, then claim it from source |
 | `claim the … of the same object` | two externs resolve to one object and claim the same attribute | keep one assignment |
 | `numeric character references as literal text` (from `drift`) | a foreign XML writer left `&#xA;` text in programs, rules or descriptions; Loxone reads it verbatim | `loxl repair <cfg> --out <fixed>`, then compile against `<fixed>` as the base |
 | `no user titled` / `no group titled` / `no access schedule titled` | an `access` grant names nothing in the base | use the title as Loxone Config or the app shows it; create the user, group or schedule there first |
 | `users are titled` / `groups are titled` / `schedules are titled` | several objects share the title an `access` grant names | give them distinct titles in Loxone Config or the app |
 | `not an NFC Code Touch` | `access` on an extern of another type | declare `access` only on an `NfcCodeTouch` extern |
-| `but the base config has no <C Type="Page"> titled` | no page carries the title | fix the title, or create the page: `page "…" (room: "…")` |
-| `a page needs a real room` | `page … (room: "Nicht zugeordnet")` | name the room the page belongs to |
-| `was created by the compiler as … the base titles it` | a page Lox Logic created was renamed in Loxone Config | write the new title in the source (without the arguments the page is Loxone Config's), or rename it back |
+| `which the base config does not have` (page) | no page has the title | fix the title, or create the page: `page "…" (room: "…")` |
+| `needs a real room for a page` | `page … (room: "Nicht zugeordnet")` | name the room the page belongs to |
+| `page "…" (…) is titled "…" in the base config` | a page Lox Logic created was renamed in Loxone Config | write the new title in the source (without arguments the page belongs to Loxone Config), or rename it back |
 | `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
 | `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
 | `a rule belongs to an Automatic Designer rule` / `not an Automatic Designer rule` | `rule` on a block of another type | declare `rule` only on an `AutopilotRule` extern |
-| `loxl writes only the documented shapes` | the rule has conditions or actions Lox Logic cannot write (text values, the weather type, calls, speech output) | drop the declaration; edit that rule in the app |
-| `knows no action code (descID)` | a `then` to a block type/command no rule of the config uses yet | create one rule action of that kind in the app once; the compile copies its code |
+| `which Lox Logic cannot write` (rule) | the rule has conditions or actions Lox Logic cannot write (text values, the weather type, calls, speech output) | remove the declaration; edit that rule in the app |
+| `` knows no action code (`descID`) `` | a `then` to a block type/command no rule of the config uses yet | create one rule action of that kind in the app once; the compile copies its code |
 | `does not fit a switch or dimmer circuit` (and the other kinds) | a mood value of the wrong kind for that circuit (`rgb()` on a relay, `on` on a colour circuit) | use what the message says the circuit takes; `off` fits everywhere |
-| `is the controller's built-in off mood` | the set lists "Aus" (SID 778) | leave it out — every controller keeps it, always off |
+| `is the controller's built-in off mood` | the set lists "Aus" (SID 778) | leave it out; every controller keeps it, always off |
 | `cannot be dropped` (moods) | the set leaves out "Viel Licht" (the motion mood) or a mood the motion settings name | keep it in the set; its values are yours to set |
 | `the controller has N circuits` | `AQ<n>` above the controller's circuit count | name an existing circuit |
 | `recorded for block … no longer exists` | the pinned page was deleted from the base | re-pin: edit the lock entry's `page_uuid`, or `remove_object` the block to place it afresh |
