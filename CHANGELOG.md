@@ -10,6 +10,22 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-10-31 — lox as libraries
+
+The Miniserver client and the config toolchain are now two crates on crates.io, loxone-client and lxir 0.2.0, so other Rust projects can talk to a Miniserver and read its program file the way lox does.
+
+### Added
+- **lxir 0.2.0** (on crates.io): every command that reads a config (`lxir check`, `compile`, `diff`, `decompile`, …) also takes a
+  Miniserver backup ZIP; the library gains `lxir::archive` (feature `archive`, on by default): the LoxCC codec,
+  extracting the program file and staging an upload ZIP, moved over from lox
+- **loxone-client**: lox's Miniserver client is a library crate of its own on crates.io: the HTTP API with
+  control resolution and the structure cache, token auth, the WebSocket state stream, FTP backups, Statistics V2
+  and the statistics files. It takes a `Connection` and reads no config files, so any Rust project can use it.
+
+### Changed
+- **lox config users/devices**, the push's user guard and `lox access check` read the program file through lxir's
+  model instead of a parser of their own (same output; one parser less to keep in step)
+
 ## [0.42.1] — 2026-10-31
 
 ### Changed
