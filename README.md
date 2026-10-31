@@ -26,7 +26,7 @@ lox tui                                          # live terminal UI
 | | |
 |---|---|
 | **Control** | Lights, moods, dimmers, colors, blinds, gates, thermostats, alarms, door locks, intercoms, wallboxes, virtual inputs, scenes. Controls are found by name, no UUIDs. |
-| **Monitor** | Sensors, energy meters, statistics, device health (batteries, signal, offline devices), a real-time state stream, OpenTelemetry export. |
+| **Monitor** | Sensors, energy meters and the energy flow (PV, grid, battery), statistics, device health (batteries, signal, offline devices), a real-time state stream, OpenTelemetry export. |
 | **Terminal UI** | `lox tui`: a full-screen live view of the house, with rooms, events, energy flow, system stats and the config wiring behind each control. |
 | **AI agents** | JSON output and exit codes on every command, `--dry-run`, a command schema, and an MCP server (`lox mcp serve`) for Claude, ChatGPT, Cursor and others. |
 | **Config versioning** | Download the Miniserver config into git on a schedule, with commit messages that list the logic that changed. Diff, inspect and restore any version. |
@@ -94,6 +94,8 @@ lox thermostat "Heizung" temp 22.5         # set the temperature
 lox alarm "Alarmanlage" arm                # arm the alarm
 lox sensors --type door-window             # open windows and doors
 lox energy                                 # energy meters
+lox energy flow                            # PV, consumption, grid import/export, battery
+lox energy --top 5                         # the meters drawing the most power
 lox health --problems                      # low batteries, weak signal, offline devices
 lox run abend                              # run a scene
 lox stream --room "Kitchen" -o json        # state changes as they happen

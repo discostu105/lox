@@ -707,6 +707,7 @@ pub fn is_energy_type(typ: &str) -> bool {
         typ,
         "Meter" | "EnergyManager" | "EnergyMonitor" | "EnergyFlowMonitor"
     ) || typ.contains("Energy")
+        || crate::energy::is_flow_monitor(typ)
 }
 
 pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Result<()> {
@@ -754,44 +755,6 @@ pub fn cmd_sensors(ctx: &RunContext, r#type: String, room: Option<String>) -> Re
             );
         }
         println!("\n{} sensors", filtered.len());
-    }
-    Ok(())
-}
-
-pub fn cmd_energy(ctx: &RunContext, room: Option<String>) -> Result<()> {
-    let mut lox = Config::load()?.client()?;
-    let controls = lox.list_controls(None, room.as_deref())?;
-    let energy: Vec<_> = controls.iter().filter(|c| is_energy_type(&c.typ)).collect();
-    if ctx.json {
-        let mut arr = Vec::new();
-        for c in &energy {
-            let xml = lox.get_all(&c.uuid).unwrap_or_default();
-            let val = xml_attr(&xml, "value").unwrap_or("?").to_string();
-            arr.push(serde_json::json!({
-                "name": c.name, "uuid": c.uuid, "type": c.typ,
-                "room": c.room, "value": val,
-            }));
-        }
-        println!("{}", serde_json::to_string_pretty(&arr)?);
-    } else if energy.is_empty() {
-        println!("No energy meters found.");
-    } else {
-        if !ctx.no_header {
-            println!("{:<36} {:<20} {:<20} VALUE", "NAME", "TYPE", "ROOM");
-            println!("{}", "─".repeat(96));
-        }
-        for c in &energy {
-            let xml = lox.get_all(&c.uuid).unwrap_or_default();
-            let val = xml_attr(&xml, "value").unwrap_or("?");
-            println!(
-                "{:<36} {:<20} {:<20} {}",
-                c.name,
-                c.typ,
-                c.room.as_deref().unwrap_or("─"),
-                val
-            );
-        }
-        println!("\n{} energy meters", energy.len());
     }
     Ok(())
 }

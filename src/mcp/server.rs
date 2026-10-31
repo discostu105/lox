@@ -52,7 +52,7 @@ Discover first: list_rooms, then list_controls (filter by room, type or name). \
 Each control in list_controls names the tool that operates it.
 Address controls by name: a case-insensitive substring match. If a name is ambiguous, \
 pass `room` or write it as 'Name [Room]'. UUIDs work too.
-Read live values with get_control or list_sensors. To explain why something happened \
+Read live values with get_control or list_sensors; get_energy_flow for PV, grid, battery and consumption. To explain why something happened \
 (what drives a light, which sensors feed a block), use get_wiring. \
 For door access at NFC Code Touches: access_check says why a user may or may not open, \
 access_log shows who opened when. \
@@ -176,6 +176,13 @@ pub struct SensorQuery {
     /// Filter by room (substring)
     #[serde(default)]
     pub room: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct EnergyQuery {
+    /// Also rank this many meters by current power, highest first
+    #[serde(default)]
+    pub top: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -1007,6 +1014,16 @@ impl LoxMcp {
             self.blocking(move |lox| ops::list_sensors(lox, q.kind.as_str(), q.room.as_deref()))
                 .await,
         )
+    }
+
+    #[tool(
+        title = "Energy flow",
+        description = "The house's energy flow now: production (PV), consumption, grid import/export, battery charge/discharge and state of charge, per energy flow monitor node. With `top`, also the meters ranked by current power.",
+        output_schema = schema_for_output::<ops::EnergyFlow>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn get_energy_flow(&self, Parameters(q): Parameters<EnergyQuery>) -> ToolResponse {
+        respond(self.blocking(move |lox| ops::energy_flow(lox, q.top)).await)
     }
 
     #[tool(

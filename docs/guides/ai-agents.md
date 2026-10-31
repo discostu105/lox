@@ -194,6 +194,7 @@ Miniserver context.
 | `list_controls` | read | Controls filtered by name, room, type, category; each names the tool that operates it |
 | `get_control` | read | Live value, state attributes and named outputs of one control |
 | `list_sensors` | read | Temperature, door/window, motion, smoke or energy readings |
+| `get_energy_flow` | read | PV production, consumption, grid import/export, battery; optionally the top meters by power |
 | `list_light_moods` | read | Mood IDs of a lighting controller |
 | `list_scenes` | read | Your `lox` scenes |
 | `system_status` | read | Firmware, PLC state, memory |
