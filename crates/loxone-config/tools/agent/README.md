@@ -75,6 +75,9 @@ names and wrote tests of their own before finishing. Findings:
   right inputs (`EndUp`/`EndDown` for complete open/close, `Safety`,
   `Move`, `A`/`Ppwr`) from the skill and `loxl types`, and gave the
   motion mood a percentage.
+  c18 asked for a dimmer at 80 % then; a Miniserver showed that a
+  minted controller's circuits read 1 for any percentage (#261), so c18
+  now switches the light on.
 - The simulator used to refuse expectations on an actuator's command
   input (a block without a model); an input now reads what its wires
   carry on any block.

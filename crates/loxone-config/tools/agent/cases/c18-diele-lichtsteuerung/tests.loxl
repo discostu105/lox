@@ -6,16 +6,16 @@ extern t_helligkeit = VirtualIn(title: "Helligkeit Diele")
 extern t_aus = VirtualIn(title: "Taster Diele aus")
 extern t_licht = VirtualOutCmd(title: "Licht Diele")
 
-test "Bewegung im Dunkeln: 80 %, aus 2 Minuten danach"
+test "Bewegung im Dunkeln: an, aus 2 Minuten danach"
 	t_helligkeit.Q = 20
 	t_bewegung.Q = 1
 	tick 2
-	expect t_licht.I == 80
+	expect t_licht.I == 1
 	tick 300
-	expect t_licht.I == 80 # solange Bewegung anhält
+	expect t_licht.I == 1 # solange Bewegung anhält
 	t_bewegung.Q = 0
 	tick 110
-	expect t_licht.I == 80
+	expect t_licht.I == 1
 	tick 15
 	expect t_licht.I == 0
 end
@@ -33,7 +33,7 @@ test "Taster schaltet sofort aus"
 	tick 1
 	t_bewegung.Q = 0
 	tick 10
-	expect t_licht.I == 80
+	expect t_licht.I == 1
 	t_aus.Q = 1
 	tick 1
 	t_aus.Q = 0

@@ -128,10 +128,12 @@ end
   motion extend time. `loxl types <T>` shows the labels.
 - `loxl test` simulates only documented behavior
   (`docs/simulator.md`) and names any block or input in the way. A
-  lighting controller simulates motion, Off, M+/M−, single clicks on
-  T5, Mood, On, Buzzer, Alarm (set Afi and MaxAbr) and output M; double
-  clicks, long clicks, Lc1–8 and motion after a manual step to off are
-  refused.
+  lighting controller simulates motion, DisP, Off, M+/M−, T5 (single,
+  double and triple clicks, long clicks and mixing, the 30 s rule),
+  Mood, On, Buzzer, Lc1–8, MBr, Alarm (set Afi and MaxAbr) and output
+  M, as a Miniserver did in a live test. A circuit without an actuator
+  (a controller minted from source has none) reads 1 for any
+  percentage.
 - To take over logic someone drew in the GUI, use `loxl adopt`, then
   confirm with `loxl diff --exit-code` that the takeover changed nothing.
   `loxl coverage` lists what is not managed yet, including the

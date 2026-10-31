@@ -17,7 +17,7 @@ lichtsteuerung = LightController2(
 licht.I <- lichtsteuerung.AQ1
 
 moods diele
-	"Viel Licht": AQ1 80%
+	"Viel Licht": AQ1 on
 end
 
 lichtsteuerung.moods = diele
