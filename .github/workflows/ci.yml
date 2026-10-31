@@ -35,6 +35,9 @@ jobs:
       - name: fmt
         run: cargo fmt --check
 
+      - name: no decision IDs in user-facing text
+        run: python3 .github/scripts/check_writing.py
+
       - name: clippy
         run: cargo clippy -- -D warnings
 

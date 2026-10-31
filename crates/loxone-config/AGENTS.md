@@ -1,63 +1,62 @@
 # Agent notes for the loxone-config crate
 
-`loxl` is a Rust library + CLI that treats Loxone Miniserver configs
-(`.Loxone` XML) as source code: a text language, Lox Logic (`.loxl` files) compiles against a
-base config with a lockfile pinning all UUIDs. Start with
-[docs/agents.md](docs/agents.md) — it is the operational guide for using the
-toolchain (the loop, hard rules, error remedies). Write help, errors and comments by
-[WRITING_GUIDELINES.md](../../WRITING_GUIDELINES.md): no decision IDs (`D42`) in user-facing text.
+This crate reads and writes Loxone Miniserver configs (`.Loxone` XML, backup ZIPs) and compiles Lox
+Logic (`.loxl`) against a base config, with a lockfile that pins every UUID. The CLI is `loxl`, also
+run as `lox logic`.
 
-## Build & test
+- To use the toolchain, read [docs/agents.md](docs/agents.md): the loop, hard rules, error remedies.
+- To change the crate, read [docs/implementation.md](docs/implementation.md): module map, tests, how
+  to add a block type.
+- Write help, errors, comments and docs by [WRITING_GUIDELINES.md](../../WRITING_GUIDELINES.md).
+
+## Build and test
 
 ```sh
-cargo test -p loxone-config               # unit, pipeline, roundtrip
-cargo clippy -p loxone-config --all-targets   # must be warning-free
+cargo test -p loxone-config                    # unit, pipeline, roundtrip
+cargo clippy -p loxone-config --all-targets    # must be warning-free
 cargo fmt --check
+cargo run --bin loxl -- help                   # the CLI
 tools/fetch-corpus.py && LOXL_CORPUS=corpus/web cargo test --release -p loxone-config --test corpus --test roundtrip   # opt-in: the public corpus
-cargo run --bin loxl -- help     # the CLI (also: lox logic help)
 ```
 
-## Rules that matter here
+## Rules
 
-- **Never edit `.Loxone` files by hand** — only through `loxl compile`.
-  Never hand-edit `*.lock.json` beyond the documented operations.
-- **Never commit real Miniserver configs** (personal data). Synthetic
-  fixtures live in `examples/configs/`; real ones go in an untracked corpus
-  dir referenced via `LOXL_CORPUS` (the public one: `tools/fetch-corpus.py`,
-  pinned by `tools/corpus-manifest.json`). The only real configs in the
-  repository are the redistributable, redacted ones of `examples/library/`,
-  each with its `SOURCE.md` and `LICENSE`.
-- The builtin connector table (`src/connectors.rs`) only accepts
-  **live-verified** entries — the growth workflow is in
-  [docs/implementation.md](docs/implementation.md).
-- Format knowledge is documented, not guessed: check
-  [docs/loxone-format.md](docs/loxone-format.md) before assuming anything
-  about the XML.
-- Keep `cargo test`, clippy, and fmt clean; when compiler output changes,
-  regenerate `examples/out/` via `cargo run --example compile` and the
-  project artifacts via `loxl compile --time 1767225600` inside
-  `examples/project/` ([examples/README.md](examples/README.md)).
-- Apache-2.0 (see [LICENSE](LICENSE)), same as lox. Published on crates.io as `loxone-config`; lox itself uses
-  it by path.
-- This crate lives in the lox workspace (`crates/loxone-config`). It stays
-  network-free: transport and credentials belong to lox (`src/`). Backup
-  ZIPs and the LoxCC codec are file formats and live here (`src/archive.rs`,
-  feature `archive`).
-  The CLI is `src/cli.rs`, run by the `loxl` binary and by `lox logic`.
+- **Never edit `.Loxone` files by hand.** Only `loxl compile` writes them. Edit `*.lock.json` only
+  through the documented operations.
+- **Never commit real Miniserver configs.** They hold personal data. Synthetic fixtures live in
+  `examples/configs/`. Real ones go in an untracked directory named by `LOXL_CORPUS`
+  (`tools/fetch-corpus.py` fetches the public corpus pinned in `tools/corpus-manifest.json`). The only
+  real configs in the repo are the redacted, redistributable ones in `examples/library/`, each with its
+  `SOURCE.md` and `LICENSE`.
+- **Format facts are documented, never guessed.** Check [docs/loxone-format.md](docs/loxone-format.md)
+  before assuming anything about the XML.
+- **The builtin connector table** (`src/connectors.rs`) takes only live-verified entries. The
+  workflow is in [docs/implementation.md](docs/implementation.md), the admission rules in
+  [docs/connector-db.md](docs/connector-db.md).
+- **No decision IDs** (`D42`) in help, errors, `///` docs or the changelog. Name the rule instead.
+- **Network-free.** Transport and credentials belong to lox (`src/` at the repo root). Backup ZIPs and
+  the LoxCC codec are file formats and live here (`src/archive.rs`, feature `archive`).
+- When compiler output changes, regenerate `examples/out/` with `cargo run --example compile`, and the
+  project artifacts with `loxl compile --time 1767225600` in `examples/project/`
+  ([examples/README.md](examples/README.md)).
+- Apache-2.0, published on crates.io as `loxone-config`; lox uses it by path.
 
-## Doc map
+## Docs
 
 | File | Purpose |
 |---|---|
-| [README.md](README.md) | overview, quickstart |
+| [README.md](README.md) | overview and quickstart (the crates.io page) |
+| [docs/agents.md](docs/agents.md) | how agents use the toolchain; the one full guide |
+| [skills/lox-logic/SKILL.md](skills/lox-logic/SKILL.md) | the hard rules as a Claude Code skill, linking to agents.md |
+| [docs/language.md](docs/language.md) | the `.loxl` language spec |
+| [docs/lockfile-spec.md](docs/lockfile-spec.md) | the lockfile format |
+| [docs/loxone-format.md](docs/loxone-format.md) | verified `.Loxone` format facts |
+| [docs/design.md](docs/design.md) | architecture and the index of decisions |
+| [docs/decisions/](docs/decisions/) | one file per design decision: context, choice, rejected alternatives |
+| [docs/implementation.md](docs/implementation.md) | module map, tests, gotchas |
+| [docs/connector-db.md](docs/connector-db.md) | connector table: evidence and admission rules |
+| [docs/simulator.md](docs/simulator.md) | what `loxl test` simulates |
+| [docs/oracle-wine.md](docs/oracle-wine.md) | running Loxone Config under Wine |
+| [docs/oracle-sessions.md](docs/oracle-sessions.md) | historical log of the Loxone Config save checks |
 | [docs/vision.md](docs/vision.md) | why this exists |
-| [docs/design.md](docs/design.md) | architecture, decisions |
-| [docs/language.md](docs/language.md) | normative `.loxl` language spec |
-| [docs/lockfile-spec.md](docs/lockfile-spec.md) | lockfile spec |
-| [docs/loxone-format.md](docs/loxone-format.md) | validated `.Loxone` format facts |
-| [docs/implementation.md](docs/implementation.md) | module map, testing, gotchas |
-| [docs/connector-db.md](docs/connector-db.md) | connector database: evidence, admission rules |
-| [docs/oracle-wine.md](docs/oracle-wine.md) | save oracle via Loxone Config under Wine: rig + findings |
-| [docs/agents.md](docs/agents.md) | **how agents use the toolchain** |
-| [skills/lox-logic/SKILL.md](skills/lox-logic/SKILL.md) | condensed agents.md as a Claude Code skill; keep in sync |
-| [docs/roadmap.md](docs/roadmap.md) | Stufen, open questions |
+| [docs/roadmap.md](docs/roadmap.md) | direction; open work is in GitHub issues |

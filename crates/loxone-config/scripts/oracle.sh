@@ -2,7 +2,7 @@
 # The save oracle, one command: open a compiled .Loxone in Loxone Config
 # under Wine on a headless Xvfb display, save it, and semantically diff
 # the result. Every divergence is either a compiler bug or a new fact
-# about the format (see docs/oracle-wine.md for everything learned so
+# about the format (see docs/oracle-sessions.md for everything learned so
 # far, including the save fingerprint that is NOT a divergence).
 #
 #   oracle.sh run <file.Loxone> [--out <saved>] [--keep]   full cycle
@@ -147,7 +147,7 @@ check_crash() {
     WINEPREFIX=$prefix wineserver -k 2>/dev/null || true
     die "Loxone Config crashed while opening the file ($(basename "$dump")).
 A synthetic config (like examples/out) crashes it on load: compile onto a
-real base config instead (docs/oracle-wine.md, \"The first real-world change\")."
+real base config instead (docs/oracle-sessions.md, \"The first real-world change\")."
 }
 
 # The auto-backup recovery dialog's caption is "LoxoneConfig" (no

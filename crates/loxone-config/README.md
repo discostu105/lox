@@ -1,14 +1,13 @@
-# loxone-config — the Loxone Config program file, and Lox Logic
+# loxone-config: the Loxone Config program file, and Lox Logic
 
-**Lox Logic** (`.loxl`) is **a git-friendly and AI-friendly source
-language for Loxone config**. Miniserver logic — blocks, wires,
-parameters — becomes plain text that humans can review in a pull request
-and agents can safely write, and a deterministic compiler applies it to
-the real `.Loxone` config without disturbing anything else in the file.
+This crate reads and writes the program file of a Loxone Miniserver (`.Loxone` XML and backup ZIPs).
+It also compiles **Lox Logic** (`.loxl`), a text language for Miniserver logic: blocks, wires and
+parameters. You review a change as a diff in a pull request, an agent can write it, and the compiler
+applies it to the `.Loxone` file without touching anything else.
 
 ```text
-# Beschattung Süd — Beispielmodul.
-# Externe Objekte gehören Loxone Config; Blöcke gehören dem Compiler.
+# Beschattung Süd: Beispielmodul.
+# Externe Objekte gehören Loxone Config, Blöcke gehören dem Compiler.
 
 page "Beschattung"
 
@@ -20,14 +19,14 @@ extern sonne = VirtualIn(iname: "VI3")
 extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 
 temp_hoch = GreaterEqual(
-	"Temp über 28",
-	Input1: aussentemp.Q,
-	Input2: temp_schwelle,
+    "Temp über 28",
+    Input1: aussentemp.Q,
+    Input2: temp_schwelle,
 )
 
 beschatten = And(
-	I1: temp_hoch.Q,
-	I2: sonne.Q,
+    I1: temp_hoch.Q,
+    I2: sonne.Q,
 )
 
 jal_sued.AutoShade <- beschatten.Q
@@ -36,204 +35,135 @@ jal_sued.Safety <- wind_alarm.Q
 jal_sued.TargetPos = 70
 ```
 
-`loxl compile` turns this into exactly the XML Loxone Config would have
-drawn — UUIDs, counters, per-port connectors, canvas layout — and records
-every identity it minted in a lockfile, so the next compile changes only
+`loxl compile` turns this into the XML Loxone Config would have written: UUIDs, counters, connectors
+and canvas layout. A lockfile records every UUID the compiler creates, so the next compile changes only
 what you changed.
 
-Rules you repeat become templates: `template fassade(jalousie:
-AutoJalousie, pos = 70) … end` declares the body once, `sued =
-fassade(jalousie: jal_sued)` stamps it out per facade. Each instance's
-blocks get stable expanded slugs (`sued_hoch`) in the lockfile, so
-re-instantiating never re-mints identities.
+## What the language covers
 
-Boolean logic can skip the blocks entirely:
-`jal_sued.AutoShade <- sonne.Q and aussentemp.Q >= temp_schwelle`
-desugars into the same verified gate and comparator blocks — each
-labeled with its sub-expression, so the rule stays readable in Loxone
-Config — and editing the expression re-derives them without ceremony.
-Arithmetic goes the other way: `verbrauch_kw.AI <- verbrauch.AQ / 1000`
-folds the whole calculation into ONE `Formula` block (`I1/1000`), ports
-as inputs, constants inlined. Physical values read as written —
-`Time: 30min`, `2700K`, `70%` — and compile to the port's base unit.
-
-Devices stay Loxone Config's to create, but their assignment can live
-in source: `sensor.title = "Raumklima Bad"`, `sensor.room = "Bad"`,
-`sensor.category = "Klima"` on an extern rewrite its title and its
-room/category binding — and a room change carries along the device's
-inputs and outputs that shared its room (D39).
-
-Who may open a door lives in source too: `access haustuer … end` on an
-NFC Code Touch lists users and groups by title, each with its access
-schedule (`user "alice": "Always"`), and owns that block's access
-rights: whoever it leaves out loses them (D49). Users, their tags and
-codes stay with Loxone Config and the app.
-
-Lighting moods are declared once and claimed per room:
-`moods wohnen … end` lists moods by name with circuit values
-(`"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)`), and `licht.moods = wohnen`
-makes them a Lichtsteuerung's mood list. A claim inside a room template
-gives every room the same four moods; existing moods keep their
-identity by name, so the switch buttons keep selecting them (D58).
-`loxl adopt` writes a config's existing moods as such sets, one per
-distinct mood list, ready to be moved into a template.
-
-PicoC programs live in their own files: `hue = Code16("Hue", Code:
-file("hue.c"), AI1: rgb.AQ)` compiles the file into the program block,
-written the way Loxone Config writes it (D40).
+- **Templates.** `template fassade(jalousie: AutoJalousie, pos = 70) … end` declares a body once;
+  `sued = fassade(jalousie: jal_sued)` creates it per facade. Each instance keeps stable identities.
+- **Expressions.** `jal_sued.AutoShade <- sonne.Q and aussentemp.Q >= temp_schwelle` compiles into gate
+  and comparator blocks, each labeled with its sub-expression. Arithmetic such as
+  `verbrauch.AQ / 1000` becomes one `Formula` block.
+- **Units.** `Time: 30min`, `2700K` and `70%` compile to the port's base unit.
+- **Device assignment.** `sensor.title`, `sensor.room` and `sensor.category` set an object's title, room
+  and category. A room change also moves the device's inputs and outputs that shared its room.
+- **Door access.** `access haustuer … end` on an NFC Code Touch lists who may open it and when. Users
+  left out lose access. Users, tags and codes stay with Loxone Config and the app.
+- **Lighting moods.** `moods wohnen … end` declares moods with circuit values, and `licht.moods = wohnen`
+  gives them to a lighting controller. Moods keep their identity by name, so switches keep working.
+- **PicoC programs.** `Code: file("hue.c")` on a `Code16` block takes the program from a file.
+- **Also:** DayTimer schedules, Automatic Designer rules, Touch Pure Flex tiles, operating modes,
+  virtual inputs, push notifications and the settings of physical inputs and outputs. The full list is
+  [docs/language.md](docs/language.md).
 
 ## Why
 
-A Miniserver's entire behavior lives in one opaque `.Loxone` XML file,
-editable only in a Windows GUI. There is no reviewable diff, no reuse (ten
-shading rules are ten hand-drawn copies), no way to test before uploading
-to the house, and no safe way for scripts or AI agents to author logic —
-the file's identity model (UUIDs, counters, per-port identifiers) is
-undocumented, and naive editing corrupts it.
+A Miniserver's behavior lives in one `.Loxone` XML file that only a Windows program edits. You cannot
+review a change, reuse a rule or test logic before it reaches the house. Scripts and agents cannot edit
+it safely either: its identity model (UUIDs, counters, per-port identifiers) is undocumented, and naive
+edits corrupt it.
 
-Lox Logic treats the config the way Terraform treats infrastructure: the `.loxl`
-module is source, the `.Loxone` file is the deployed artifact, and the
-lockfile — like `terraform.tfstate` — pins every identity in between. A
-wire change becomes a one-line diff in a pull request.
+Lox Logic works like Terraform. The `.loxl` module is the source, the `.Loxone` file is the deployed
+artifact, and the lockfile pins every identity in between, like `terraform.tfstate`.
 
-Crucially, the language describes **only the logic you choose to manage**.
-Everything else — hardware, rooms, visualization, other people's logic —
-passes through the compiler byte-for-byte untouched. Manage one shading
-rule today; the rest of the config never notices. See
-[docs/vision.md](docs/vision.md).
+The source describes only the logic you choose to manage. Hardware, rooms, visualization and other
+logic pass through the compiler byte for byte. You can manage one shading rule and leave the rest alone.
+See [docs/vision.md](docs/vision.md).
 
 ## How it stays safe
 
-- **Three writers, one file.** Loxone Config, the Miniserver itself
-  (app-created autopilots, device registrations), and this compiler all
-  write the config. The compiler owns *only* its managed blocks, the wires
-  it drew onto extern ports, the `Def=` values it assigned there, and the
-  title/room/category it assigned to externs — everything else
-  round-trips untouched through a byte-faithful XML layer.
-- **Identity is UUID, not title.** Titles are locale-volatile (one observed
-  save renamed 111 built-ins). Externs match by `uuid` > `iname` > `title`,
-  or a ref by its target (`mirrors: <slug>`, D32); once resolved, the
-  lockfile pins the UUID — object *and* every port.
-- **Determinism.** Same base + module + lock + options → same output bytes.
-  New UUIDs come from a deterministic minter (no clock, no RNG), are
-  recorded in the lock, and never change again. Recompiling the compiler's
-  own output is a byte-level fixpoint (tested).
-- **Refuse, never guess.** Only live-verified block types can be minted;
-  wiring a port the base config doesn't have is an error, not an invented
-  UUID; a managed block vanishing from source is an error unless removal is
-  explicit.
+- **The compiler owns only what it wrote.** Loxone Config, the Miniserver (app-created rules, device
+  registrations) and the compiler all write the config. The compiler owns its managed blocks, the wires
+  and values it set on extern ports, and the titles, rooms and categories it assigned. Everything else
+  round-trips unchanged through a byte-faithful XML layer.
+- **Identity is the UUID, not the title.** Titles change with the language of Loxone Config. Externs
+  match by `uuid`, `iname` or `title`, and the lockfile then pins the UUID of the object and of every
+  port.
+- **Deterministic output.** The same base, module, lockfile and options give the same bytes. New UUIDs
+  come from a deterministic generator (no clock, no randomness) and never change once recorded.
+  Compiling the compiler's own output again changes nothing.
+- **Refuse, never guess.** The compiler creates only block types verified on a live Miniserver. Wiring a
+  port the base config lacks is an error. A managed block that disappears from the source is an error
+  unless you mark it `removed`.
 
 ## Try it on your own config
 
-loxone-config never talks to a Miniserver — it only reads and writes `.Loxone`
-files (and the backup ZIPs a Miniserver serves: every command that reads
-a config also takes a backup ZIP). Transport is [`lox`](https://github.com/discostu105/lox)'s job,
-the CLI this crate lives in: every `loxl` command below also runs as
-`lox logic …`. A careful first loop:
+loxone-config never talks to a Miniserver. It reads and writes `.Loxone` files and backup ZIPs; every
+command that reads a config also takes a backup ZIP. [`lox`](https://github.com/discostu105/lox) is
+the CLI that talks to the Miniserver, and it runs every `loxl` command as `lox logic …`.
 
 ```sh
 brew tap discostu105/lox https://github.com/discostu105/lox
-brew install discostu105/lox/lox   # or a release binary of lox;
-                                   # `cargo install loxone-config` for loxl alone
+brew install discostu105/lox/lox   # or a release binary; `cargo install loxone-config` for loxl alone
 
-# 1. Get the deployed config as XML (or use the .Loxone file
-#    Loxone Config saves locally):
+# 1. Download the deployed config (or use the .Loxone file Loxone Config saves locally).
 lox config download --extract --save-as current.zip   # writes current.Loxone
 
-# 2. Look around — decompile is a read-only view of every page:
+# 2. Look around. Decompile is a read-only view of every page.
 loxl decompile current.Loxone | less
 
-# 3. Start small: adopt ONE existing block you own mentally,
-#    or add a page-placed block of your own. This writes a module
-#    and a lockfile pinning the block's identity:
+# 3. Adopt one existing block. This writes a module and a lockfile that pins its identity.
 loxl adopt current.Loxone --uuid <uuid> --as my_block \
      --module modules/ --lock modules/haus.lock.json
 
-# 4. Edit the module, then compile onto the *current* base:
+# 4. Edit the module, then compile it onto the current config.
 loxl compile --base current.Loxone --module modules/ \
      --lock modules/haus.lock.json --out out.Loxone --serial <serial>
 
-# 5. Trust nothing — read the diff. It must show exactly your change:
+# 5. Read the diff. It must show exactly your change.
 loxl diff current.Loxone out.Loxone
 
 # 6. Deploy. In a lox.toml project (base, module, lock, serial):
 lox config push            # drift check, compile, show the changes, stage
 lox config push --force    # upload byte-exact, restart the program, verify, move base
-#    Or open out.Loxone in Loxone Config and upload from there.
-#    Upload exactly the file you diffed — a tool that re-serializes
-#    or re-wires on the way (lox-cli's `config push`) can change it.
 ```
 
-After a push, download again and keep that file as the new base
-(`lox config push` does both) — `loxl drift` tells you when someone else
-(GUI, app, Miniserver) has written to the config since, *before* you
-compile over their change.
-`loxl coverage --lock modules/haus.lock.json current.Loxone` shows how
-much of the config the source owns, type by type, and lists the blocks
-left to adopt (an extern adopts under its own slug and becomes managed)
-and the attributes of managed blocks that still come from Loxone Config
-(`At:` claims a PulseAt's fire time, for one).
-Everything you did not adopt passes through byte-for-byte; the diff in
-step 5 is the proof, every time.
+You can also open `out.Loxone` in Loxone Config and upload it from there. Upload the file you diffed: a
+tool that rewrites the XML on the way can change it.
+
+After a push, keep the downloaded config as the new base; `lox config push` does both. `loxl drift`
+tells you when Loxone Config, the app or the Miniserver changed the config since, before you compile
+over that change. `loxl coverage --lock modules/haus.lock.json current.Loxone` shows how much of the
+config the source owns and lists the blocks left to adopt.
 
 ## Quickstart (CLI)
 
 ```sh
-cargo run --bin loxl -- help         # in the lox repo; or `lox logic help`
-
-loxl check modules/beschattung.loxl  # parse + validate (line-numbered errors)
+loxl help                            # or `lox logic help`
+loxl check modules/beschattung.loxl  # parse and validate, with line numbers
 loxl fmt --write modules/beschattung.loxl
 loxl compile                         # in a lox.toml project: no flags needed
 loxl compile --base current.Loxone --module modules/beschattung.loxl \
              --lock modules/beschattung.lock.json --out out.Loxone \
              --serial 504F94112233
-loxl rename alter_name neuer_name    # refactor: sources + lockfile together,
-                                     # identities kept, output verified
-loxl lint                            # advisory: unused names, blocks whose
-                                     # outputs feed nothing (GUI wires count),
-                                     # NFC tags that open no Code Touch
-loxl diff current.Loxone out.Loxone  # semantic diff, locale noise flagged,
-                                     # users/access section; --json
-loxl diff --summary current.Loxone out.Loxone  # the same as a commit
-                                     # message, by name instead of UUID
-loxl render out.Loxone --page Beschattung --out page.svg
-                                     # a page as SVG + layout metrics
-loxl compile --relayout Beschattung  # place the page's managed blocks
-                                     # afresh (GUI drags are kept otherwise)
-loxl decompile current.Loxone        # full Lox Logic view, grouped by page
-loxl decompile --out-dir view/ current.Loxone  # one module per page
+loxl rename alter_name neuer_name    # rename in sources and lockfile, identities kept
+loxl lint                            # unused names, blocks whose outputs feed nothing
+loxl diff current.Loxone out.Loxone  # semantic diff; --summary for a commit message, --json
+loxl render out.Loxone --page Beschattung --out page.svg   # a page as SVG
+loxl compile --relayout Beschattung  # place a page's managed blocks afresh
+loxl decompile --out-dir view/ current.Loxone              # one module per page
 loxl adopt current.Loxone --out-module modules/haus.loxl \
-     --out-lock modules/haus.lock.json  # take over existing blocks in place
-loxl adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
-     --lock modules/haus.lock.json  # adopt one freshly drawn block
-loxl observe current.Loxone          # port-direction evidence (JSON)
-loxl types [<Type>]                  # mintable types: purpose, ports, units, labels, ranges
-loxl types --search hysteresis       # the types whose name or purpose mentions it
-loxl templates [<name>]              # the template library; a name prints its file
+     --out-lock modules/haus.lock.json                      # take over existing blocks
+loxl types [<Type>]                  # block types the compiler can create: ports, units, ranges
+loxl types --search hysteresis       # search names and descriptions
+loxl templates [<name>]              # the template library
 loxl roundtrip current.Loxone        # byte-fidelity self-check
-loxl repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
-                                     # writer back to raw line breaks
-loxl scan configs/                   # personal data in configs: where, never
-                                     # what; exit 1 if any (CI guard)
-loxl test                            # run the module's `test … end` blocks
-                                     # in the Lox Logic simulator
+loxl repair current.Loxone --out fixed.Loxone   # turn `&#xA;` text back into line breaks
+loxl scan configs/                   # find personal data in configs (exit 1 if any)
+loxl test                            # run the module's `test … end` blocks in the simulator
 ```
 
-A directory with a `lox.toml` — flat `key = "value"` lines naming the
-base config, module, lockfile, output, and optionally serial and page —
-is a **project**: `loxl compile` inside it needs no flags,
-`check`/`fmt`/`drift` default to its module and lock, and the module
-directory may nest subdirectories (`rooms/`, `systems/`). Fragments
-merge into one namespace, so there is no `import` statement to write
-(decision D25).
+A directory with a `lox.toml` is a **project**. Its flat `key = "value"` lines name the base config,
+module, lockfile and output, and optionally the serial and page. Inside it, `loxl compile` needs no
+flags and `check`, `fmt` and `drift` use its module and lockfile. The module directory may have
+subdirectories (`rooms/`, `systems/`). All fragments share one namespace, so there is no `import`.
 
-For a repo holding your `.loxl` sources, [examples/ci.sh](examples/ci.sh)
-is the CI check path: parse/validate, canonical formatting, lock currency,
-byte-determinism, optionally byte-comparison against a committed expected
-output — and `--sync` mode, which additionally requires the sources to
-equal the deployed state (empty semantic diff, drift green). The lox
-repo's [workflow](../../.github/workflows/ci.yml) runs it against the
-shipped examples.
+[examples/ci.sh](examples/ci.sh) is a CI check for a repo of `.loxl` sources. It checks parsing,
+formatting, that the lockfile is current, deterministic output, and optionally a committed expected
+output. `--sync` also requires the sources to match the deployed config. The lox
+[workflow](../../.github/workflows/ci.yml) runs it on the shipped examples.
 
 ## Quickstart (library)
 
@@ -247,119 +177,104 @@ let module = Module::parse(&std::fs::read_to_string("examples/logic/beschattung.
 let mut lock = Lockfile::new(); // or Lockfile::load(path)
 
 let out = compile(&base, &module, &mut lock, &CompileOptions {
-    machine: parse_serial("504F94112233")?,   // stamped into minted UUIDs
-    mint_time_unix: 1_767_225_600,            // caller-provided → reproducible
+    machine: parse_serial("504F94112233")?,   // stamped into new UUIDs
+    mint_time_unix: 1_767_225_600,            // fixed time: reproducible output
     page_title: Some("Beschattung".into()),
     allow_removals: false,
-    accept_version: None,                     // ConfigVersion pin (D22)
+    accept_version: None,                     // accept a new Loxone Config release
+    relayout: Vec::new(),
 })?;
 std::fs::write("out.Loxone", out.to_bytes())?;
 lock.save(std::path::Path::new("beschattung.lock.json"))?;
 ```
 
-Runnable examples (`cargo run --example …`): `compile`, `decompile`,
-`diff`, `observe`, `roundtrip_check`, `lifecycle`. The committed
-`examples/out/` files are the output of the `compile` example; running it
-again reproduces them byte-for-byte.
+Runnable examples (`cargo run --example …`): `compile`, `decompile`, `diff`, `observe`,
+`roundtrip_check`, `lifecycle`. The committed `examples/out/` files are the output of the `compile`
+example, and running it again reproduces them byte for byte.
 
-For a complete end-to-end module, see `examples/logic/pool.loxl` against
-`examples/configs/pool.Loxone`: it exercises the core language — `page`
-placement, named constants, externs matched by iname and by composite
-`title` + `room:`, a template with an instance, an expression as an
-argument, a unit-suffixed value (`Time: 30min`), a boolean expression
-wired onto an extern port, an arithmetic binding folded into a
-`Formula` block, and two `test … end` scenarios runnable with
-`loxl test` — the sketch's pool idea, kept compiling by the
-test suite. [examples/README.md](examples/README.md) indexes the rest:
-`examples/logic/sprachtour.loxl` walks every remaining construct (matchers,
-mirrors, templates in full, units, fan-in), `examples/logic/lifecycle/`
-stages `moved`/`removed`, and `examples/project/` is a committed
-`lox.toml` project with fragment modules.
+`examples/logic/pool.loxl` (against `examples/configs/pool.Loxone`) is a complete module: pages,
+constants, externs, a template, expressions, units, a `Formula` block and two tests.
+[examples/README.md](examples/README.md) lists the others, including `examples/project/`, a `lox.toml`
+project with fragment modules.
 
-Tests live in the module itself and simulate the *compiled* config:
+## Tests
+
+Tests live in the module and simulate the compiled config:
 
 ```text
 test "Frostwächter schlägt an und beruhigt sich"
-	wassertemp.Q = 2         # inject: drive the sensor
-	tick 2
-	expect frost_alarm.Q == 1
-	wassertemp.Q = 10
-	tick 2
-	expect frost_alarm.Q == 0
+    wassertemp.Q = 2         # drive the sensor
+    tick 2
+    expect frost_alarm.Q == 1
+    wassertemp.Q = 10
+    tick 2
+    expect frost_alarm.Q == 0
 end
 ```
 
-`loxl test` compiles in memory, runs each scenario in Lox Logic's own
-simulator, and reports each `expect` with its actual value on failure.
-Comparators: `== != > >= < <= ~=` (approximately); `clock 06:30` sets the
-simulated time for `DayTimer`-style logic. The simulator models the
-blocks Loxone documents ([docs/simulator.md](docs/simulator.md)); a test
-that depends on any other block reports an error naming it, never a
-guessed value. `--trace` prints each test cycle by cycle: what it sets,
-every change of the ports its expectations depend on, and each outcome.
-`--lox <path>` runs the scenarios in lox-cli's `lox sim` instead.
+`loxl test` compiles in memory, runs each scenario in the Lox Logic simulator and shows the actual value
+of each failed `expect`.
 
-## Scope
+- Comparators: `== != > >= < <= ~=` (`~=` is approximately equal).
+- `clock 06:30` sets the simulated time, for `DayTimer` logic.
+- `--trace` prints each test cycle by cycle.
+- `--lox <path>` runs the scenarios in lox-cli's `lox sim` instead.
 
-**In scope** — the pure model, reusable by any tool:
+The simulator models the blocks Loxone documents ([docs/simulator.md](docs/simulator.md)). A test that
+depends on another block reports an error that names it.
+
+## Modules
 
 | Module | What it does |
 |---|---|
-| `xml` | Lossless concrete-syntax parser/writer for `.Loxone` XML. Handles Loxone's spec-violations (attribute names starting with digits, raw newlines inside attribute values) that break conforming XML parsers. |
-| `uuid` | The anatomy of Loxone UUIDs — creation time, mint counters, minting-machine id, connector index — plus a deterministic minter (no clock, no RNG). |
-| `doc` | Semantic read layer: objects, ports, wires, counters, pages. |
-| `connectors` | Port-direction knowledge: a **verified** builtin table (33 types — gates, comparators, timers, `Formula`, `AutoJalousie`, `LightController2`, `State`, `VirtualIn`, … — `loxl types` lists them; see [docs/connector-db.md](docs/connector-db.md)) and evidence-based inference (`observe`, corpus merge, legacy-db crosscheck) over real configs. |
-| `logic` | The text language: constructor-style block declarations with inline wires/parameters, `extern`, `let`, `page` placement, templates with instances, boolean/comparison/arithmetic expressions (as arguments and on wires; arithmetic folds into `Formula` blocks), unit-suffixed values, lifecycle statements, `test … end` scenarios; parser, canonical printer, `compile` (base + module + lockfile → config), `decompile` (config → Lox Logic view), `adopt` (existing blocks → module + identity-pinning lockfile), `test` (compile in memory → `lox sim` → per-expect results). |
-| `lock` | The lockfile: slug → object *and per-port* UUIDs, counters, layout, extern-wire ownership, extern-port `Def=` originals, attribute claims. |
-| `diff` | Semantic diff between two configs, with locale-rename noise flagged. |
-| `archive` | Backup ZIPs (feature `archive`, default): the LoxCC codec of `sps0.LoxCC`, extracting the program file, staging an upload ZIP that copies every other entry raw. |
+| `xml` | Lossless parser and writer for `.Loxone` XML, including Loxone's deviations from XML (attribute names starting with a digit, raw newlines in attribute values). |
+| `uuid` | Loxone UUIDs: creation time, counters, machine id, connector index; a deterministic generator. |
+| `doc` | Read layer: objects, ports, wires, counters, pages. |
+| `connectors` | Port directions: the verified builtin table (`loxl types` lists it, see [docs/connector-db.md](docs/connector-db.md)) and inference from real configs. |
+| `logic` | Lox Logic: parser, formatter, `compile`, `decompile`, `adopt`, lint, `test`. |
+| `lock` | The lockfile: per-object and per-port UUIDs, counters, layout, claims. |
+| `diff` | Semantic diff between two configs. |
+| `archive` | Backup ZIPs (feature `archive`, on by default): the LoxCC codec, extracting the program file, staging an upload. |
 
-**Out of scope** — deliberately: transport (FTP/HTTP to the Miniserver)
-and credentials. Those live in
-[`lox`](https://github.com/discostu105/lox), the CLI that builds on this
-crate.
+[docs/implementation.md](docs/implementation.md) lists every module. Transport (FTP and HTTP to the
+Miniserver) and credentials are out of scope; they live in [`lox`](https://github.com/discostu105/lox).
 
 ## Documentation
 
 | Doc | Contents |
 |---|---|
-| [docs/vision.md](docs/vision.md) | Why config-as-code for Loxone; the Terraform analogy; the two-masters workflow |
-| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D45 |
-| [docs/language.md](docs/language.md) | Normative spec of the `.loxl` language (v2) |
-| [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v4) and its invariants |
-| [docs/loxone-format.md](docs/loxone-format.md) | Validated reverse-engineering notes on the `.Loxone` format |
-| [docs/implementation.md](docs/implementation.md) | Module map, testing strategy, how to extend |
-| [docs/connector-db.md](docs/connector-db.md) | The consolidated connector database: methodology, findings, admission rules |
-| [docs/oracle-wine.md](docs/oracle-wine.md) | The save oracle: driving Loxone Config under Wine, and what a save changes |
-| [docs/agents.md](docs/agents.md) | Operational guide for AI agents using the toolchain |
-| [skills/lox-logic/SKILL.md](skills/lox-logic/SKILL.md) | The same, condensed as a Claude Code skill (link into `~/.claude/skills/`) |
-| [docs/roadmap.md](docs/roadmap.md) | Stufen −1…4: hardening, templates, expressions, verification, multi-module |
-
-[`AGENTS.md`](AGENTS.md) at the repo root gives agents the build/test
-commands and repo rules at a glance.
+| [docs/language.md](docs/language.md) | The `.loxl` language spec (v2) |
+| [docs/agents.md](docs/agents.md) | How AI agents use the toolchain |
+| [skills/lox-logic/SKILL.md](skills/lox-logic/SKILL.md) | The hard rules as a Claude Code skill (link into `~/.claude/skills/`) |
+| [docs/vision.md](docs/vision.md) | Why config as code for Loxone |
+| [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy |
+| [docs/decisions/](docs/decisions/) | Design decisions |
+| [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v8) |
+| [docs/loxone-format.md](docs/loxone-format.md) | Verified facts about the `.Loxone` format |
+| [docs/implementation.md](docs/implementation.md) | Module map, tests, how to extend |
+| [docs/connector-db.md](docs/connector-db.md) | The connector table: evidence and admission rules |
+| [docs/simulator.md](docs/simulator.md) | What the simulator models |
+| [docs/oracle-wine.md](docs/oracle-wine.md) | Running Loxone Config under Wine |
+| [docs/oracle-sessions.md](docs/oracle-sessions.md) | Log of the Loxone Config save checks |
+| [docs/roadmap.md](docs/roadmap.md) | Direction and non-goals |
 
 ## Editor support
 
-`loxl lsp` is a language server on stdin/stdout:
-- diagnostics as you type: what `loxl check` and the lints report, and,
-  on save in a `lox.toml` project, the compile against the base config
-  (nothing is written);
-- go to definition across the fragments of a module;
-- hover: the base object an extern resolves to (type, title, room, page,
-  UUID), and the ports and port facts of a type;
-- completion of ports after `name.` and of block types after `name =`;
-- formatting (`loxl fmt`) and the outline;
-- find references and rename of a module-level name (constant, extern,
-  block, template, instance) across the fragments; in a project, rename
-  is `loxl rename` (verified to change only titles, the lockfile
-  re-keyed with it); the editor applies the edits;
-- quick fixes for "did you mean `X`?".
+`loxl lsp` is a language server on stdin/stdout. It offers:
 
-`editor/vscode/` contains the VS Code extension for `.loxl` files: syntax
-highlighting, comment/bracket support, snippets for all statement forms,
-and the client that starts the server (see
-[editor/vscode/README.md](editor/vscode/README.md)). Other editors start
-`loxl lsp` (or `lox logic lsp`) for the file type `loxl`. Neovim:
+- diagnostics as you type (`loxl check` and the lints), and on save in a `lox.toml` project, a compile
+  against the base config that writes nothing
+- go to definition across a module's fragments
+- hover: the object an extern resolves to, and a type's ports
+- completion of ports after `name.` and of block types after `name =`
+- formatting and the outline
+- find references and rename of module-level names (in a project, rename runs `loxl rename`, which
+  also updates the lockfile)
+- quick fixes for "did you mean `X`?"
+
+`editor/vscode/` is the VS Code extension: highlighting, snippets and the client that starts the server
+(see [editor/vscode/README.md](editor/vscode/README.md)). Other editors run `loxl lsp` (or
+`lox logic lsp`) for the file type `loxl`. Neovim:
 
 ```lua
 vim.filetype.add({ extension = { loxl = "loxl" } })
@@ -371,56 +286,37 @@ end })
 
 ## Validation
 
-- The XML layer round-trips **byte-identically** on six real Miniserver
-  configs spanning two years of history and three writers (117 KB–1.34 MB)
-  — verified against a live installation. Real configs contain personal
-  data and are not committed; point `LOXL_CORPUS` at a directory of
-  `.Loxone` files to run the corpus test:
+- The XML layer round-trips real Miniserver configs byte for byte. Real configs contain personal data
+  and are not committed. To run the corpus test, point `LOXL_CORPUS` at a directory of `.Loxone` files
+  (`tools/fetch-corpus.py` downloads a public corpus):
 
   ```sh
   LOXL_CORPUS=~/loxone-backups cargo test --test roundtrip
   ```
 
-- UUID anatomy (epoch 2009-01-01, `ffff` + machine-id object tails,
-  `<index>ff` + entity port tails, ports minted before their object) was
-  established from live evidence and is encoded in `uuid`'s tests.
-- The **save oracle passed**: Loxone Config 17.1 (under Wine) opened a
-  compiled config and re-saved it with an empty semantic diff — every
-  minted UUID, wire, and parameter survived. See
-  [docs/oracle-wine.md](docs/oracle-wine.md).
-- The former grown-gate assumption is **resolved, negatively**: Loxone
-  Config 17 gates are fixed two-input, and an off-descriptor `I3` is
-  silently deleted on save (oracle-verified). The compiler refuses `I3`+
-  instead of minting it — see design decision D8.
+- The UUID layout (epoch 2009-01-01, object and port tails, ports created before their object) comes
+  from live configs and is covered by the `uuid` tests.
+- Loxone Config 17 (under Wine) opens a compiled config and saves it back with an empty semantic diff:
+  every new UUID, wire and parameter survives. See [docs/oracle-sessions.md](docs/oracle-sessions.md).
+- Logic gates have two inputs. Loxone Config deletes an `I3` on save, so the compiler refuses it; cascade
+  two-input gates instead.
 
-## Relationship to `lox` / `lox-cli`
+## Relationship to `lox` and `lox-cli`
 
-loxone-config lives in the [`lox`](https://github.com/discostu105/lox) repository
-as `crates/loxone-config`. It started as the standalone repository
-[discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir` up
-to 0.2, files `.lxir`; renamed to loxone-config and Lox Logic in 0.3), was merged here
-with its history, and is developed only here now: the standalone repository
-is archived. lox (server API, transport) depends on
-it for everything config-model-related: `lox config diff/show/wiring/lint`,
-`lox config push`, and the whole toolchain as `lox logic`. The crate stays a
-separate, network-free library, published on crates.io for anyone else to
-build on.
+loxone-config is developed in the [`lox`](https://github.com/discostu105/lox) repository as
+`crates/loxone-config`. lox uses it for `lox config diff/show/wiring/lint`, `lox config push` and the
+whole toolchain as `lox logic`. The crate stays a network-free library that anyone can build on. It
+started as [discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir` and `.lxir` files up to
+0.2), which is now archived.
 
-[`lox-cli`](https://github.com/eisber/lox-cli) is a separate project by
-Markus Cozowicz, based on an earlier version of lox. Its own code is AGPL-3.0
-or commercial. It takes another approach:
-- An AI agent edits the `.Loxone` XML directly, one command per step
-  (`lox config add`, `set-param`, `wire-connector`).
-- It tests the result in its offline simulator, `lox sim`.
-
-Lox Logic keeps the logic as source and compiles it with pinned identities, and
-it passes everything the source doesn't own through unchanged. lox-cli does
-not use loxone-config, and neither project contains the other's code; the Lox Logic
-simulator is its own, written from Loxone's documentation. `loxl test
---lox <path>` can still run the scenarios in lox-cli's `lox sim`. Both
-projects install a binary named `lox`.
+[`lox-cli`](https://github.com/eisber/lox-cli) is a separate project by Markus Cozowicz, based on an
+earlier version of lox, licensed AGPL-3.0 or commercial. There, an AI agent edits the `.Loxone` XML
+directly, one command per step (`lox config add`, `set-param`, `wire-connector`), and tests the result
+in the `lox sim` simulator. Lox Logic instead keeps the logic as source and compiles it with pinned
+identities. Neither project contains the other's code; the Lox Logic simulator is written from Loxone's
+documentation. Both projects install a binary named `lox`.
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE), the same as `lox`. Early v0, published on
-[crates.io](https://crates.io/crates/loxone-config) as `loxl`.
+[Apache License 2.0](LICENSE), the same as `lox`. Published on
+[crates.io](https://crates.io/crates/loxone-config) as `loxone-config`.

@@ -1,127 +1,147 @@
 # Implementation guide
 
-Orientation for working on the crate itself. Rust edition 2024, MSRV 1.88.
-Dependencies are deliberately light: `serde`/`serde_json` (lockfile,
-observe output), `sha2` (slug entities, config hashes), `thiserror`.
+How the crate is built, for people working on it. Rust edition 2024, MSRV 1.88. Dependencies stay light:
+`serde`/`serde_json` (lockfile, JSON output), `sha2` (slug entities, config hashes), `thiserror`, and for
+the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 
 ## Module map
 
-| Path | Contents | Key invariant |
+### The program file
+
+| Path | Contents | Invariant |
 |---|---|---|
-| `src/xml.rs` | Lossless CST: `XmlDocument`, `Element`, `Node`, `Attr`; hand-rolled parser; canonical writer; `escape`/`unescape` | `parse(bytes).to_bytes() == bytes` for real Loxone output |
-| `src/uuid.rs` | `LoxUuid` parse/format, `TailKind`, `Minter`, `parse_serial`, `entity_for_slug` | no clock, no RNG — fully caller-driven |
-| `src/doc.rs` | `LoxoneDoc` + read views: `objects()`, `ports()`, `wires()`, `index()`, counters, `page_path`, `remove_by_uuid`, `duplicate_uuids()` (D38) | views derive from the tree on demand; nothing caches |
-| `src/connectors.rs` | verified `builtin()` table, evidence `observe()` | only live-verified types in `builtin` |
-| `src/observed_defaults.rs` | GENERATED corpus-observed GUI defaults (D30, `tools/extract-defaults.py`) | view-only: full-view elision, never affects compile |
-| `src/port_meta.rs` | GENERATED documented port facts — unit, canvas label, range, default (D52, `tools/extract-port-meta.py` over lox-cli's TechDoc scrape, read from a path, never vendored) | units scale suffixes and refuse mismatches; labels are error hints only; ranges are lint only |
-| `src/lock.rs` | `Lockfile` (spec: [lockfile-spec.md](lockfile-spec.md)); load/save/stable JSON; `remove_object`/`rename_object`/`absorb_counters` | serialization is deterministic (BTreeMaps) |
-| `src/logic/parser.rs` | line-oriented lexer + parser (block `( … )` argument lists span lines) | errors carry 1-based line numbers; v0 keywords give migration errors |
-| `src/logic/ast.rs` | `Module`, `Item` (incl. `Comment`), decls, argument `Binding`s (param vs. wire), typed `Value`; `validate()`; canonical `to_text()` | `parse(to_text(m)) == m`; `to_text` is a fixpoint |
-| `src/logic/validate.rs` | static builtin-table checks (`validate_ports`): types, port names, wire directions; "did you mean" suggestions | needs no base config — shared by `loxl check` and `compile` |
-| `src/logic/compile.rs` | the compiler (strategy: [design.md](design.md)) | tear-down/rebuild convergence; determinism |
-| `src/logic/tiles.rs` | Touch Pure Flex tiles (D41): `program` (tile args → three functions), `apply` (compile phase: rewrite claimed `<btns>`, API-link and abbreviation checks), `lint_tiles` (`tile-broadcast`/`tile-dead-command`) | rewrites existing `<btn>` functions only; unlisted tiles and layout carried byte for byte |
-| `src/logic/decompile.rs` | config → Lox Logic view (`decompile` with `page` statement sections (D28), `decompile_pages` per page), `slugify`, `DecompileReport`; the shared `Lift` | full view by default (D17); `ManagedOnly` lifts only managed-touching wires (D7) |
-| `src/logic/adopt.rs` | `adopt`: managed-only module + lockfile pinning existing identity (D18); per-block rebuild verification (`AdoptReport::refused`) | adopt → compile is a semantic no-op; skipped blocks stay untouched |
-| `src/diff.rs` | UUID-keyed semantic diff, `locale_suspect` heuristic; compares attribute parameters (`Formula=`) and canonicalized `APC=` rule payloads (D37) | `diff(a, a).is_empty()` |
-| `src/layout.rs` | page geometry as the GUI draws it (`PageGeometry`: footprints, visible port rows, wires, off-page labels) and `place` (D42: clusters as layered graphs, ref tags beside their port; D50: on the paper sheet, packed tighter where room is short) | deterministic; moves only the objects it is handed |
-| `src/render.rs` | `loxl render`: one page as SVG, `PageMetrics` (overlaps, backward and long wires, crossings, wire length) | read-only |
-| `src/scan.rs` | `loxl scan`: personal data in a config by rule (location, person, access code, credential, remote access, mail, network, hardware serial) | reports element, attribute and length only, never a value; CI runs it over every committed `.Loxone` |
-| `src/autopilot.rs` | Automatic Designer `APC=` payload: parse/canonicalize, view summary, field-path change list (D37) | read-only; untyped JSON so unknown fields still diff |
-| `src/lsp/` | `loxl lsp` (D59): JSON-RPC framing and handlers (`mod.rs`), the protocol-free analysis: diagnostics, lexical declarations, hover, completion, references and rename (`analysis.rs`), UTF-16 columns and `file://` URIs (`text.rs`) | writes nothing; the deep check compiles on a copy of the lock |
-| `src/project.rs` | `Project`: `lox.toml` load/parse (strict flat TOML subset), path resolution against the file's directory | refuses everything outside the subset with pointed errors (D25) |
-| `src/cli.rs` | CLI; thin wrappers over the public API only | no semantics of its own |
+| `src/xml.rs` | Lossless syntax tree (`XmlDocument`, `Element`, `Node`, `Attr`), hand-written parser and writer, `escape`/`unescape` | `parse(bytes).to_bytes() == bytes` for real Loxone output |
+| `src/uuid.rs` | `LoxUuid`, `TailKind`, `Minter`, `parse_serial`, `entity_for_slug` | no clock, no randomness: the caller supplies everything |
+| `src/doc.rs` | `LoxoneDoc` and its read views: `objects()`, `ports()`, `wires()`, `index()`, counters, `page_path`, `remove_by_uuid`, `duplicate_uuids()` | views are derived on demand; nothing is cached |
+| `src/connectors.rs` | the verified `builtin()` table, evidence from `observe()` | only live-verified types in `builtin` |
+| `src/observed_defaults.rs` | GENERATED: the defaults Loxone Config writes, from the corpus (`tools/extract-defaults.py`) | view only: hides defaults in decompile, never affects compile |
+| `src/port_meta.rs` | GENERATED: documented port facts (unit, canvas label, range, default) from lox-cli's TechDoc scrape (`tools/extract-port-meta.py`, read from a path, never vendored) | units scale suffixes and refuse mismatches; labels only feed error hints; ranges only feed lint |
+| `src/canvas_labels.rs` | canvas labels of input keys that `port_meta` lacks, read off Loxone Config's canvas | hand-written; only entries checked in Loxone Config |
+| `src/blockdoc.rs` | one line per builtin type on what it is for (`loxl types`, LSP hover) | written for Lox Logic, not copied from Loxone |
+| `src/lock.rs` | `Lockfile` ([lockfile-spec.md](lockfile-spec.md)): load, save, `remove_object`/`rename_object`/`absorb_counters` | serialization is deterministic (BTreeMaps) |
+| `src/diff.rs` | UUID-keyed semantic diff with the `locale_suspect` heuristic; compares attribute parameters (`Formula=`) and canonical `APC=` rule payloads | `diff(a, a).is_empty()` |
+| `src/access.rs` | users, groups and access rights as a read model, for the users/access section of the diff | read only |
+| `src/moods.rs` | LightController2 moods: read model and the circuit value codec, shared by `moods` claims and the diff | |
+| `src/autopilot.rs` | Automatic Designer `APC=` payload: parse, canonicalize, summary, field-path changes | untyped JSON, so unknown fields still diff |
+| `src/autopilot_caps.rs` | GENERATED (`scripts/autopilot_caps.py`): the Miniserver's condition and action codes per app control type | codes only, no localized texts |
+| `src/settings.rs` | settings of physical inputs and outputs the source may claim (description, unit, correction, timing) | only attributes the corpus shows on these types; the original is kept in the lock |
+| `src/periphery.rs` | virtual devices and Modbus: the object-tree objects a source can create, and their I/Os | |
+| `src/archive.rs` | feature `archive`: backup ZIPs, the LoxCC codec, `stage_upload_zip` | bytes only, no transport; other entries copied raw |
+| `src/catalogue.rs` | `LoxAPP3.json`: carries a compile's renames, rooms, categories, deletions and new entries into the app catalogue | new entries only for types in `KNOWN` |
+| `src/permissions.rs` | `permissions.bin`: which principals may see and use which object | |
+| `src/layout.rs` | page geometry as Loxone Config draws it (`PageGeometry`) and `place`: layered clusters, ref tags beside their port, on the paper sheet | deterministic; moves only the objects it is handed |
+| `src/render.rs` | `loxl render`: one page as SVG, and `PageMetrics` (overlaps, backward and long wires, crossings) | read only |
+| `src/scan.rs` | `loxl scan`: personal data in a config by rule | reports element, attribute and length, never a value; CI runs it over every committed `.Loxone` |
+| `src/coverage.rs` | `loxl coverage`: every object by type against the lockfile (managed, extern, rule, untouched), and the attributes still carried from the base | read only |
 
-## Testing strategy
+### Lox Logic (`src/logic/`)
 
-Three layers, all run by `cargo test`:
+| Path | Contents | Invariant |
+|---|---|---|
+| `parser.rs` | line-oriented lexer and parser; only a block's `( … )` argument list spans lines | errors carry 1-based line numbers; v0 keywords give migration errors |
+| `ast.rs`, `ast/check.rs` | `Module`, `Item`, declarations, `Binding`s, typed `Value`; canonical `to_text()`; `Module::validate` (names, references, per-statement checks) | `parse(to_text(m)) == m` |
+| `validate.rs` | builtin-table checks (`validate_ports`): types, port names, wire directions, "did you mean" | needs no base config; shared by `check` and `compile` |
+| `template.rs` | template expansion into plain statements | the lockfile and compiler only see the expanded form |
+| `desugar.rs` | expressions into gate and comparator blocks; arithmetic into one `Formula` | runs after expansion, before port validation |
+| `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims) | teardown and rebuild converge; deterministic |
+| `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |
+| `adopt.rs`, `adopt_tree.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
+| `rename.rs` | `loxl rename`: slug rename across module and lockfile, synthetic slugs included | output unchanged except titles the slug feeds |
+| `lint.rs` | advisory lints: unused names, values out of range, blocks whose outputs feed nothing in the compiled config | never part of compile |
+| `tiles.rs` | Touch Pure Flex tiles: tile arguments → functions, rewrite of claimed `<btns>`, tile lints | unlisted tiles and layout kept byte for byte |
+| `access.rs` | access rights on NFC Code Touch blocks, and push notification recipients | an `access` declaration owns every `TIM=` on its block |
+| `schedule.rs` | DayTimer schedules from source | rewrites `Modes=`, the entries and their counts only |
+| `rule.rs` | Automatic Designer rules from source | writes only when the payload differs; edits the way the app does |
+| `moods.rs` | LightController2 mood claims | moods keep their identity by name |
+| `simtest.rs` | `loxl test`: plan the test bodies against the compiled config, run them in `sim`, map results back to `expect` lines | the lockfile is never written |
 
-1. **Unit tests** in each module — format details pinned to live
-   observations (e.g. `uuid` tests contain real UUIDs from the
-   investigation).
-2. **`tests/ir.rs`** — end-to-end pipeline properties: byte determinism,
-   lock pinning across mint times, recompile-own-output fixpoint, counter
-   monotonicity, set-restore and wire-teardown, the removal trichotomy,
-   refusal paths (unknown type/port, grown gate inputs, no-match,
-   direction misuse), decompile views (managed-only subset, full view,
-   per-page split).
-3. **`tests/roundtrip.rs`** — byte fidelity on the committed example
-   configs, plus an opt-in corpus:
+### Simulator (`src/sim/`)
 
-   ```sh
-   LOXL_CORPUS=~/loxone-backups cargo test --test roundtrip
-   ```
+| Path | Contents |
+|---|---|
+| `mod.rs` | runs a compiled document cycle by cycle; a port whose logic has no model is an error that names the object |
+| `model.rs` | one model per simulated type, written from Loxone's documentation ([simulator.md](simulator.md)) |
+| `formula.rs` | the `Formula` expression language as Loxone documents it |
+| `clock.rs` | the simulated local wall clock |
 
-   Real configs contain personal data (addresses, key hashes) — **never
-   commit them**; `.gitignore` blocks `/corpus`, and CI runs `loxl scan`
-   over every committed `.Loxone`, failing on any finding (run it before
-   adding a fixture). Every new real config is a
-   free test case: drop it in the corpus dir and run the suite.
+### Tools and front-ends
 
-   The public corpus (~150 configs from Loxone's KB samples, LoxWiki and
-   GitHub) is reproducible from its committed manifest,
-   [`tools/corpus-manifest.json`](../tools/corpus-manifest.json): every
-   file with its source (GitHub pinned to a commit), sha256 and license.
+| Path | Contents |
+|---|---|
+| `src/lsp/` | `loxl lsp`: JSON-RPC framing and handlers (`mod.rs`), diagnostics, hover, completion, references and rename (`analysis.rs`), UTF-16 columns and URIs (`text.rs`). Writes nothing; the deep check compiles on a copy of the lock |
+| `src/project.rs` | `Project`: `lox.toml` (a strict flat TOML subset) and path resolution; anything outside the subset is refused |
+| `src/library.rs` | the template library (`templates/`, `loxl templates`) |
+| `src/cli.rs` | the CLI, run by `loxl` (`src/main.rs`) and `lox logic`; thin wrappers over the public API |
+| `src/error.rs` | the crate's error type |
 
-   ```sh
-   tools/fetch-corpus.py              # download into corpus/web, verify hashes
-   LOXL_CORPUS=corpus/web cargo test --release --test corpus --test roundtrip
-   tools/fetch-corpus.py --discover   # search the sources afresh, rewrite the manifest
-   ```
+## Tests
 
-   The *Corpus* workflow runs the same weekly and on demand. Configs whose
-   license allows redistributing them also go into the browsable
-   [example library](../examples/library/README.md).
+`cargo test -p loxone-config` runs:
 
-QA bar for changes: `cargo test && cargo clippy --all-targets && cargo fmt
---check`, all clean.
+- **Unit tests** in each module. Format details are pinned to live observations, e.g. real UUIDs in the
+  `uuid` tests.
+- **Integration tests** in `tests/`, one file per feature. `tests/logic.rs` covers the pipeline:
+  determinism, lockfile identity, teardown and restore, refusals, and the decompile views.
+  `tests/skill.rs` keeps the agent skill's example compiling, `tests/agent_cases.rs` the reference
+  solutions in `tools/agent/`.
+- **`tests/roundtrip.rs`**: byte fidelity on the example configs, plus an opt-in corpus:
 
-Outside `cargo test`, **`tools/eval/`** grades Lox Logic solutions to lox-cli's
-natural-language automation tasks (blocks, wires, parameters, simulator
-scenarios), reading the cases from a lox-cli checkout. It measures the Lox Logic
-as an agent's tool; see [tools/eval/README.md](../tools/eval/README.md).
+  ```sh
+  LOXL_CORPUS=~/loxone-backups cargo test --test roundtrip
+  ```
 
-## How to add a block type to the builtin table
+Real configs contain personal data (addresses, key hashes). **Never commit them.** `.gitignore` blocks
+`/corpus`, and CI fails on any `loxl scan` finding in a committed `.Loxone`; run it before adding a
+fixture.
 
-The table (`connectors::builtin`) is the compiler's license to mint. Grow it
-evidence-first:
+The public corpus (about 150 configs from Loxone's KB samples, LoxWiki and GitHub) is pinned in
+[`tools/corpus-manifest.json`](../tools/corpus-manifest.json) with each file's source, sha256 and
+license:
 
-1. Run `loxl observe <cfg.Loxone>...` over the whole corpus (multiple
-   configs merge). The output gives, per port key: connector index (from
-   the port UUIDs), sink/source/def counts.
-2. Cross-check with `--crosscheck` against both legacy databases (lox-cli
-   `docs/schemas/connector-map.json`; lox-sim `block_signature` via
-   `tools/extract-sim-signature.py`) — they disagree and have corrupt
-   entries; disagreement means more evidence is needed, not a vote. The
-   admission rules and the current state live in
-   [connector-db.md](connector-db.md).
-3. Confirm the full connector list and index order against a real block
-   instance in the XML (all `<Co>`s, in order).
-4. Add the `const` slice in index order with directions. Emit the
-   descriptor's **complete** connector set and nothing beyond it — Loxone
-   Config deletes off-descriptor connectors on save (D8).
-5. Add a test pinning the shape, and ideally a compile test whose output
-   you have loaded into Loxone Config once (the ultimate oracle).
+```sh
+tools/fetch-corpus.py              # download into corpus/web, verify hashes
+LOXL_CORPUS=corpus/web cargo test --release --test corpus --test roundtrip
+tools/fetch-corpus.py --discover   # search the sources again, rewrite the manifest
+```
 
-## Extending the Lox Logic
+The *Corpus* workflow runs this weekly and on demand. Configs whose license allows it also go into the
+[example library](../examples/library/README.md).
 
-Grammar changes touch, in order: `logic/parser.rs` (lexer/statement),
-`logic/ast.rs` (AST + `to_text` + `validate`), `logic/validate.rs` when the
-builtin-table checks are affected, [language.md](language.md) (normative
-text), the VS Code grammar + snippets (`editor/vscode/`), and
-`docs/agents.md` if agent guidance changes. Keep `parse ∘ to_text = id` —
-the `text_roundtrip` test enforces it.
+Before a change: `cargo test && cargo clippy --all-targets && cargo fmt --check`, all clean.
+
+Outside `cargo test`, [`tools/eval/`](../tools/eval/README.md) grades Lox Logic solutions to lox-cli's
+automation tasks, and [`tools/agent/`](../tools/agent/README.md) runs Claude Code on our own requests.
+
+## Adding a block type to the builtin table
+
+The table (`connectors::builtin`) decides which types the compiler may create. Grow it from evidence:
+
+1. Run `loxl observe <cfg.Loxone>...` over the corpus (several configs merge). Per port key it reports
+   the connector index (from the port UUIDs) and the sink, source and default counts.
+2. Cross-check with `--crosscheck` against the legacy databases: lox-cli's
+   `docs/schemas/connector-map.json`, and lox-sim's `block_signature` via
+   `tools/extract-sim-signature.py`. They contain wrong entries. A disagreement means more evidence is
+   needed, not a vote. The admission rules are in [connector-db.md](connector-db.md).
+3. Check the full connector list and order against a real instance in the XML (all `<Co>`s, in order).
+4. Add the `const` slice in index order, with directions. Write the descriptor's complete connector set
+   and nothing more: Loxone Config deletes unknown connectors on save.
+5. Add a test that pins the shape, and ideally a compile whose output you have opened and saved in
+   Loxone Config.
+
+## Changing the language
+
+A grammar change touches, in order: `logic/parser.rs`, `logic/ast.rs` (AST, `to_text`, `validate`),
+`logic/validate.rs` if the builtin-table checks change, [language.md](language.md), the VS Code grammar
+and snippets (`editor/vscode/`), and [agents.md](agents.md) if agent guidance changes. The
+`text_roundtrip` test keeps `parse ∘ to_text = id`.
 
 ## Gotchas
 
-- `Element.attrs` order **is** the serialized order — use
-  `set_attr_ordered`-style insertion (see `logic/compile.rs`) when Loxone has
-  a canonical position (`Co`: `K, Nc, Def, U`).
-- Attribute values in the tree are stored **raw/escaped**; use
-  `attr_decoded` for semantics and `set_attr` (which escapes) for writing.
-- Paths from `objects()` are child indexes counting *all* nodes; they go
-  stale after structural mutations — re-derive or locate by UUID
-  (`find_c_mut` in the compiler).
-- On compile error, the lockfile may be partially advanced — callers must
-  reload it (the CLI saves only after success).
-- Emptied elements must flip back to self-closing (`fixup_emptied_elements`)
-  or the writer would emit `></C>`, which Loxone never does.
+- `Element.attrs` order is the serialized order. Where Loxone has a canonical position (`Co`:
+  `K, Nc, Def, U`), insert in order like `set_attr_ordered` in `logic/compile.rs`.
+- Attribute values are stored escaped. Read with `attr_decoded`, write with `set_attr` (it escapes).
+- Paths from `objects()` are child indexes over all nodes and go stale after a structural change.
+  Derive them again, or find the element by UUID (`find_c_mut`).
+- After a compile error the lockfile may be partly advanced. Reload it; the CLI saves only on success.
+- An element the compiler empties must be written self-closing (see `remove_object` in `doc.rs`).
+  Loxone never writes `<C ...></C>` for an emptied element.

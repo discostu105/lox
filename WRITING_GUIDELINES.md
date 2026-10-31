@@ -54,7 +54,8 @@ about 10 lines; the details go on the items.
 names from real configs there.
 
 **Decision IDs in code.** Use them only in `//` comments, and only where the reasoning is too long to
-repeat. Never use one as a noun ("the D34 pin").
+repeat. Never use one as a noun ("the D34 pin"). CI (`.github/scripts/check_writing.py`) rejects them in
+strings, `///` docs and user docs.
 
 **Docs.** Docs describe what is. When a plan or design doc is done, delete it, because git keeps it. Open
 work goes to GitHub issues, not markdown checklists. A decision records the context, the choice and the
