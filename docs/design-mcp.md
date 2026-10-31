@@ -1,35 +1,21 @@
-# Design: `lox mcp` — Model Context Protocol server
+# Design: `lox mcp`
 
-> **Status: IMPLEMENTED (v2)** — built on rmcp 3.5 (the official Rust SDK), speaks MCP **2026-07-28** and every
-> revision back to 2024-11-05 over stdio. 16 tools with input and output schemas, user confirmation for risky
-> actions, progress and cancellation for scenes. Tracking issue: #107.
-> Out of scope for now: Streamable HTTP transport, resources and `subscriptions/listen`, the tasks extension (§10).
+`lox mcp serve` turns the installed binary into an MCP server over stdio. MCP clients that can't run shell commands
+(Claude Desktop, Cursor, n8n, VS Code agents) get the same name resolution, contexts, caches and action layer as the
+CLI. The server is a protocol adapter on top of `src/actions.rs`, so it behaves like the CLI and the TUI.
 
-## 1. Why
+Design goals:
 
-`lox` already works as a shell tool for agents that can run commands (Claude Code, Codex, Gemini CLI).
-Many AI clients cannot run shell commands and only speak MCP: Claude Desktop, ChatGPT connectors,
-Cursor, n8n, VS Code agents. Vendors are moving there too; Nanoleaf ships an official MCP server for
-its lights. Community Loxone MCP servers exist (Rust, Kotlin, TypeScript, Python), but each
-re-implements Miniserver access from scratch.
-
-`lox` has the hard parts already: fuzzy name resolution with room qualifiers, aliases, multi-context
-config, token/structure caching, and a shared action layer (`src/actions.rs`) with per-action risk
-levels and type checks. The MCP server is a protocol adapter on top.
-
-Goals:
-
-1. `lox mcp serve` turns the installed binary into an MCP server. No extra runtime, no second tool.
-2. **Current protocol**: the newest MCP revision, with full backward compatibility for older clients.
-3. Agents get **few, well-described, schema-typed tools** that cover discovery and everyday control.
-4. **Safe by default**: doors, gates and the alarm need a human's confirmation, not just the model's intent.
-5. Behavior matches the CLI and the TUI exactly, because all three go through `actions.rs`.
+1. No extra runtime and no second tool.
+2. The newest MCP revision, compatible with older clients.
+3. Few, well-described, schema-typed tools for discovery and everyday control.
+4. Doors, gates and the alarm need a human's confirmation, not just the model's intent.
 
 ## 2. Protocol
 
 The server is built on [rmcp](https://crates.io/crates/rmcp) (default features off; `server`,
 `macros`, `transport-io`, `elicitation`). rmcp owns JSON-RPC framing, version negotiation, the
-lifecycle, cancellation, and the result shapes of every revision; `lox` owns the tools.
+lifecycle, cancellation and the result shapes of every revision. `lox` owns the tools.
 
 | Revision | Lifecycle | What `lox` uses |
 |----------|-----------|-----------------|
@@ -38,19 +24,15 @@ lifecycle, cancellation, and the result shapes of every revision; `lox` owns the
 
 - Newer clients probe `server/discover`; older ones send `initialize`. rmcp answers both on the same
   stdio stream, so one binary serves Claude Desktop today and 2026-07-28 clients as they ship.
-- Transport: stdio. stdout carries protocol messages only; diagnostics go to stderr.
+- Transport: stdio. stdout carries protocol messages only. Diagnostics go to stderr.
 - `tools/list` is fixed for the server's lifetime, so 2026-07-28 clients get `ttlMs` = 1 h and
   `cacheScope: public`. Older clients get the legacy result shape without the hints.
 - `serverInfo` carries a title, description, website and an SVG icon (2025-11-25 icons).
-- Miniserver access is blocking (`reqwest::blocking`); every tool runs it on tokio's blocking pool,
-  so a slow Miniserver never stalls the protocol loop, pings or cancellations.
+- Miniserver access is blocking (`reqwest::blocking`). Every tool runs it on tokio's blocking pool, so a slow
+  Miniserver never stalls the protocol loop, pings or cancellations.
 
-### Cost of the SDK
-
-rmcp adds 11 crates (rmcp, rmcp-macros, schemars and their helpers) and about 2.8 MB to the stripped
-release binary (13.9 → 16.7 MB). In exchange the server tracks each spec revision through the SDK
-instead of by hand: 2026-07-28 replaced the handshake, server-to-client requests, sessions, ping and
-several error codes at once.
+rmcp adds about 2.8 MB to the release binary. In exchange, the server follows each spec revision through the SDK
+instead of by hand.
 
 ## 3. Commands
 
@@ -85,11 +67,17 @@ a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destr
 | `list_light_moods` | `name`, `room?` | mood IDs and names of a lighting controller (WebSocket) |
 | `list_scenes` | — | local `lox` scenes with description and step count |
 | `system_status` | — | firmware, PLC state, heap |
-| `get_wiring` | `name`, `room?`, `trace?` (up, down, both), `depth?`, `all_params?`, `download?`, `live?` | the config logic around a control or block: inputs, outputs (hardware refs folded to the device and room), non-default parameters, optional traced paths, and the app control it is. Reads the config repo or the cached `.Loxone`; `download` fetches it via FTP (read-only). `live` adds the current value to every wire (and traced node) whose source connector is a state the app streams, as `live: {value, text?, control, state}` with `text` in the control's own format (`22000lx`), and the control's own main value as `value`: one WebSocket state dump for all of them, the same read as the TUI's wiring overlay. A wire without a streamed source (an unvisualized block, a hardware input) gets no value, never a guessed one; a failed WebSocket leaves the config wiring and says why in `live_error` |
+| `get_wiring` | `name`, `room?`, `trace?` (up, down, both), `depth?`, `all_params?`, `download?`, `live?` | The config logic around a control or block: inputs, outputs (hardware folded to device and room), non-default parameters, traced paths, and the app control it is. See below |
 | `list_users` | — | users with state and admin flag (`getuserlist2`) |
 | `get_user` | `name` | one user (`getuser`): state, validity, groups, NFC tags, number of access codes |
 | `access_log` | `code_touch`, `limit?` | the NFC Code Touch's access log (`/log/<uuid>.txt`), newest entries, decoded |
 | `access_check` | `user`, `code_touch?`, `cached?` | per Code Touch: verdict (granted, no-access-right, no-credential, user-disabled, unknown-full-access), the rights found, warnings where the program file and the live state disagree. Downloads the config via FTP (read-only) unless `cached` |
+
+`get_wiring` reads the config repo or the cached `.Loxone`. `download` fetches the config over FTP (read-only).
+`live` adds the current value to every wire whose source is a state the app streams, as
+`live: {value, text?, control, state}`. `text` is in the control's own format (`22000lx`). One WebSocket state dump
+serves all wires, the same read as the TUI's wiring overlay. A wire without a streamed source gets no value, never
+a guessed one. If the WebSocket fails, the config wiring is still returned and `live_error` says why.
 
 ### 4.2 Action tools
 
@@ -114,10 +102,21 @@ only in the Miniserver's custom changes until Loxone Config saves the program.
 
 | Tool | Arguments | Does |
 |------|-----------|------|
-| `learn_nfc_tag` | `code_touch`, `timeout_secs?` (60, at most 300) | starts the Code Touch's learn mode over the WebSocket (`nfc/startlearn`), waits for a new `nfcLearnResult` (the value in the initial state dump is the last learned tag and ignored), ends learn mode (`nfc/stoplearn`) on success, error, timeout and cancel; returns the ID and, for a known tag, name and user. A secured Code Touch gets both as secured commands signed with the visualization password from `LOX_VISU_PASSWORD` or the config's `visu_password_file` (never a tool argument); without one the tool fails before asking. A tag that is already paired opens the door instead of being learned, and the tool says so The confirmation tells the user to hold the tag or unlocked phone to the reader; a progress notification repeats it when the call carries a progress token |
+| `learn_nfc_tag` | `code_touch`, `timeout_secs?` (60, at most 300) | Starts the Code Touch's learn mode, waits for a new tag, ends learn mode on success, error, timeout and cancel. Returns the ID and, for a known tag, its name and user. See below |
 | `assign_nfc_tag` | `user`, `id`, `name` | `addusernfc`; refuses a tag the user has already |
 | `remove_nfc_tag` | `user`, `tag` (ID or name) | `removeusernfc` |
 | `set_access_code` | `user`, `code` (2–8 digits) | `updateuseraccesscode`; the code is masked (`****`) in results, errors, `dry_run` and the confirmation, and bound to the confirmation by hash only; `code_in_use` when another user has it |
+
+`learn_nfc_tag` details:
+
+- It uses `nfc/startlearn` and `nfc/stoplearn` over the WebSocket. The `nfcLearnResult` in the initial state dump
+  is the last learned tag and is ignored.
+- A secured Code Touch gets both as secured commands, signed with the visualization password from
+  `LOX_VISU_PASSWORD` or the config's `visu_password_file`. It is never a tool argument. Without one, the tool fails
+  before asking.
+- A tag that is already paired opens the door instead of being learned, and the tool says so.
+- The confirmation tells the user to hold the tag or unlocked phone to the reader. A progress notification repeats
+  it when the call carries a progress token.
 
 Results are structured content matching the tool's `outputSchema`: the resolved control, the action
 as text, the commands sent (PINs masked), the Miniserver response, and the equivalent `lox` command
@@ -231,10 +230,7 @@ Protocol errors are left to rmcp (unknown tool, malformed request, unsupported p
   (discover), pinned `2026-07-28`, and `legacy` modes, including the door confirmation. It caught the
   one bug the Rust tests had missed: output schemas that required fields the server omits.
 
-## 10. Later
+## 10. Not built
 
-- Streamable HTTP transport (`lox mcp serve --http`) with authorization, for remote connectors.
-- Resources (`loxone://rooms`, `loxone://controls/{uuid}`) with `subscriptions/listen` backed by
-  `lox stream`, so clients see state changes live.
-- The tasks extension (SEP-2663) for long scenes.
-- More device tools: intercom, EV charger, music zones, statistics/history.
+Streamable HTTP transport, resources with `subscriptions/listen`, the tasks extension, and tools for intercoms,
+chargers, music zones and statistics. Requests for these go to GitHub issues.

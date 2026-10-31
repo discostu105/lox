@@ -22,7 +22,7 @@ Multi-step automation sequences defined as YAML files.
 ## Overview
 
 Scenes let you define a sequence of commands that run in order. They are YAML files in `~/.lox/scenes/`, or
-`~/.lox/contexts/<name>/scenes/` when you use [contexts](/lox/commands/configuration#context-management), so each
+`~/.lox/contexts/<name>/scenes/` when you use [contexts](https://github.com/discostu105/lox/blob/main/COMMANDS.md#context-management), so each
 Miniserver has its own.
 
 ## Creating a scene

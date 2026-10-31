@@ -1,14 +1,39 @@
 # Command Reference
 
-All commands support `-o`/`--output` for format selection (`json`, `csv`, `table`) and `-q`/`--quiet` to suppress non-essential output. Controls can be referenced by name (fuzzy matched), UUID, or alias.
+Every command and flag, by topic. `lox <command> --help` shows the same flags, and `lox schema -o json` describes
+them for scripts.
 
-When multiple controls share the same name, disambiguate with `-r`/`--room` or bracket syntax:
+Controls can be referenced by name (fuzzy matched), UUID or alias. When several controls share a name, add the room
+with `-r`/`--room` or in brackets:
+
 ```bash
 lox get "Temperatur" -r "Schlafzimmer"
 lox get "Temperatur [OG Schlafzimmer]"
 ```
 
-Global flags: `-o`/`--output json|csv|table`, `-q`/`--quiet`, `--no-color` (also respects `NO_COLOR` env var), `--no-header`, `-v`/`--verbose` (request logging), `--dry-run`, `--non-interactive`, `--trace-id`, `--ctx <name>` (use a specific context)
+Resolution order: alias, exact UUID, bracket room, `--room`, then substring match. Among several matches, a single
+exact name wins (`Zentral` over `Jalousie Zentral`).
+
+Global flags:
+
+| Flag | Effect |
+|------|--------|
+| `-o`, `--output` | Output format: `table` (default), `json`, `csv` |
+| `-q`, `--quiet` | Drop non-essential output |
+| `--no-color` | No colors (also `NO_COLOR`) |
+| `--no-header` | No table headers |
+| `-v`, `--verbose` | Log HTTP requests (`-vv` adds response bodies) |
+| `--dry-run` | Resolve and validate, send nothing |
+| `--non-interactive` | Fail instead of prompting (implied by `-o json`) |
+| `--trace-id` | Correlation ID for agent tracing |
+| `--ctx <name>` | Use this context instead of the active one |
+
+Scripting: every command exits `0` on success and non-zero on error, and `lox if` exits `1` when the condition is
+false. With `-o json`, errors are a JSON envelope (see [Error Envelopes](#error-envelopes)).
+
+```bash
+lox ls -t Jalousie -r OG -o json | jq -r '.[].uuid' | while read -r b; do lox blind "$b" up; done
+```
 
 ---
 
@@ -419,7 +444,7 @@ All of them take `-o json`.
 
 `lox logic` runs the [Lox Logic](crates/loxone-config) toolchain: logic written as `.loxl` text, compiled into the `.Loxone`
 config with a lockfile that pins every UUID. The arguments go to `loxl` as they are (`lox logic …` works too),
-so the Lox Logic docs apply word for word — `loxl compile` is `lox logic compile`. Nothing here talks to the Miniserver.
+so the Lox Logic docs apply word for word: `loxl compile` is `lox logic compile`. Nothing here talks to the Miniserver.
 
 ```bash
 lox logic help                            # every command and flag
@@ -430,8 +455,8 @@ lox logic compile --base current.Loxone --module pages/ --lock haus.lock.json \
                --out out.Loxone --serial 504F94112233
 lox logic diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
 lox logic diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
-lox logic drift current.Loxone            # did another writer change the config since the last compile?
-lox logic coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched — and attributes still carried from the base (--json)
+lox logic drift current.Loxone            # did someone change the config since the last compile?
+lox logic coverage                        # in a lox.toml project: blocks by type (managed, extern, untouched), attributes carried from the base
 lox logic adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
 lox logic adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
 lox logic decompile current.Loxone        # the Lox Logic view of every page (read-only)
@@ -450,7 +475,7 @@ Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a 
 Access rights on an NFC Code Touch can live in the module too: an `access` declaration lists the users and groups
 that may open it, by title, each with its access schedule, and takes the right away from everyone else. Users,
 groups, schedules, tags and codes stay with Loxone Config and the app. `decompile` and `adopt` lift the rights the
-config has. Spec: [Lox Logic language spec](crates/loxone-config/docs/language.md), decision D49.
+config has. Spec: the `access` section of the [language spec](crates/loxone-config/docs/language.md).
 
 ```text
 extern haustuer = NfcCodeTouch(uuid: "…")
@@ -461,8 +486,9 @@ access haustuer
 end
 ```
 
-Push notifications too (decision D51): the notification is created in Loxone Config and named as an extern; an
+Push notifications work the same way. The notification is created in Loxone Config and named as an extern. An
 `OutputRefLM` block sends its message when its input turns on, and a `recipients` declaration lists who gets it.
+Spec: the push notifications section of the [language spec](crates/loxone-config/docs/language.md).
 
 ```text
 extern frost = Notification(title: "Frostwarnung Garten")
@@ -504,57 +530,78 @@ lox config push --discard-custom-changes --force  # push although the Miniserver
 
 Each step stops the push when it fails:
 
-1. Download the config the Miniserver runs now (`backups/<stamp>-pre-push.zip` and `.Loxone`), and look for its
-   *custom changes*: what the app, the web UI or the API changed and Loxone Config has not saved yet (light moods,
-   timer schedules, autopilot rules), one `/sys/custom/<UUID>.LoxCC` per object. The download doesn't contain them
-   and loading the upload deletes them (def.log: `Remove old custom changes`). With any present, `--force` refuses
-   and names them (`custom_changes_pending` in `-o json`). To keep them, load the project from the Miniserver in
-   Loxone Config and save it, then bring the project up to date; `--discard-custom-changes` deletes them on purpose.
-   A staging run only warns. If `/sys/custom` cannot be listed, `--force` refuses too. A change to an object the
-   compiled upload deletes (`removed` in the source, a rule deleted in the app say) goes with the object and does
-   not stop `--force` (`"removed": true` in the JSON).
-   The push settings of a registered phone (which notifications it receives, changed in the app's settings) belong
-   to the app, not to the program: the push carries them into the upload and keeps them (`custom_changes_kept`),
-   instead of refusing. Only phones the program already has qualify; a newly registered one still refuses.
-2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
-   since (someone saved from Loxone Config or the app), the push refuses and names the `lox logic diff` to run.
-   Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
-   (`kept_as_live` in the JSON report) and goes on.
-3. Compile the module against the live download with a scratch copy of the lock, so users, passwords, access
-   rights, layout and visualization stay as they are live. Live identical to the compiled config: nothing to push.
-4. Print the logic changes (live → compiled) and check the users: the Miniserver keeps users, groups, NFC tags and
-   access codes changed in the app or with `lox user` apart from its program file until the program is saved
-   again, and loading the upload deletes them. The push compares every live user with the program file (exists,
-   name, last edit, groups, NFC tag names and count, number of access codes) and lists the differences
-   (`user_changes_pending` in `-o json`). It needs an admin connection (`lox setup set --user <admin>`); users it
-   cannot read stop `--force` (a staging run only warns).
-5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced, verified to extract to exactly the compiled
-   file (`<stamp>-push.zip`). Without `--force` (or with `--dry-run`) the push ends here. The ZIP's app catalogue
-   (`LoxAPP3.json`, what the app shows; the Miniserver never rebuilds it) gets what the push changes about the
-   app's controls: new names, rooms, categories and favourites, deleted and hidden controls, and entries for new push
-   buttons, digital virtual inputs, memory flags, pulses at a time, digital day timers and sensor info displays that
-   have a room and a category (`app_catalogue_updated` in `-o json`). Its
-   `lastModified` becomes the push time, so the app reloads. What it cannot carry over (other block types, a
-   room the catalogue does not list, an icon) is named (`app_catalogue_stale`) until a save from Loxone Config. `permissions.bin`, which lists who may use each object, is regenerated for the
-   compiled config when loxone-config reproduces the live file byte for byte (`permissions` in the JSON report:
-   `unchanged`, `regenerated`). Otherwise the live file stays (`kept`), and when the compiled config assigns users
-   and groups differently the push warns that it is stale (`permissions_stale: true`).
-6. Upload it as `/prog/sps_new.zip` and restart the program (`/jdev/sps/restart`), as Loxone Config's save does:
-   the Miniserver loads the file, renames it to its next program file and runs it again within seconds (about 2 s
-   on a Miniserver Gen 2, firmware 17.2), keeping remanent values. The push waits until the PLC runs
-   (`/jdev/sps/state` 5) and the newest program file has changed, at most a minute. `--reboot` reboots the
-   Miniserver instead and waits until it answers (up to 5 minutes). Users changed
-   live stop `--force` before the upload (error `user_changes_pending`): load the program from the Miniserver in
-   Loxone Config and save it back, so the program file holds the changes and the push keeps them, or pass
-   `--discard-custom-changes` to delete them.
-7. Download again: the Miniserver must run exactly the compiled file (`<stamp>-post-push.*`). If not, the push
-   fails and the project is left as it was. When app controls changed, the push also reads the catalogue the
-   Miniserver serves and checks that it is the uploaded one (same `lastModified`; `app_catalogue_rebuilt: true`
-   when not).
-8. Copy the lock, write `out`, and point `base` in lox.toml at the verified download — commit those.
+1. Download the running config to `backups/<stamp>-pre-push.zip` and `.Loxone`, and list its custom changes.
+2. Drift check: the live logic must still match the project's `base`.
+3. Compile the module against the live download, with a scratch copy of the lock.
+4. Print the logic changes (live → compiled) and compare the live users with the program file.
+5. Stage the upload as `<stamp>-push.zip` and check that it extracts to exactly the compiled file. Without
+   `--force`, or with `--dry-run`, the push ends here.
+6. Upload it as `/prog/sps_new.zip`, restart the program and wait until it runs again (at most a minute).
+7. Download again and check that the Miniserver runs exactly the compiled file (`<stamp>-post-push.*`).
+8. Copy the lock, write `out`, and point `base` in lox.toml at the verified download. Commit those files.
 
-A new backup directory gets a `.gitignore` (`*`): real configs carry personal data. The upload is byte-exact:
-nothing re-serializes the XML on the way.
+If live and compiled are identical, there is nothing to push. If step 7 fails, the project is left as it was.
+
+The compile in step 3 keeps users, passwords, access rights, layout and visualization as they are live. The drift
+check ignores users, groups, credentials and access rights: they are listed as kept as live. If the logic changed
+since the last push, the push refuses and names the `lox logic diff` to run.
+
+The program restart works like a save from Loxone Config. The Miniserver loads the file within seconds and keeps
+remanent values. `--reboot` reboots instead and waits up to 5 minutes for the Miniserver to answer.
+
+The upload is the downloaded ZIP with only `sps0.LoxCC` replaced, so nothing re-serializes the XML on the way.
+A new backup directory gets a `.gitignore` (`*`), because real configs carry personal data.
+
+#### Custom changes
+
+Custom changes are what the app, the web UI or the API changed and Loxone Config has not saved yet. Examples are
+light moods, timer schedules, automatic rules, users, groups, NFC tags and access codes. The download doesn't
+contain them, and loading the upload deletes them.
+
+- With custom changes present, `--force` refuses and names them. A staging run only warns.
+- If `/sys/custom` cannot be listed, or users cannot be read, `--force` refuses too.
+- Reading users needs an admin connection (`lox setup set --user <admin>`). The push compares each user's name,
+  last edit, groups, NFC tag names and count, and number of access codes.
+- A change to an object that the upload deletes goes with the object and doesn't stop the push.
+- The notification settings of a phone the program already knows belong to the app. The push carries them into
+  the upload. A newly registered phone still refuses.
+
+To keep the changes, open the project from the Miniserver in Loxone Config, save it, then bring the project up to
+date. To delete them on purpose, pass `--discard-custom-changes`.
+
+#### The app catalogue and permissions
+
+The upload ZIP also holds `LoxAPP3.json`, the catalogue the app shows. The Miniserver never rebuilds it, so the push
+updates it for the controls it changes:
+
+- New names, rooms, categories and favourites, deleted and hidden controls.
+- New entries for push buttons, digital virtual inputs, memory flags, pulses at a time, digital day timers and
+  sensor info displays that have a room and a category.
+- `lastModified` is set to the push time, so the app reloads.
+
+Other block types, a room the catalogue doesn't list and icons wait for a save from Loxone Config. Step 7 checks
+that the Miniserver serves the uploaded catalogue.
+
+`permissions.bin` lists who may use each object. The push regenerates it when loxone-config reproduces the live
+file byte for byte. Otherwise the live file stays, and the push warns if the compiled config assigns users and
+groups differently.
+
+#### JSON report
+
+`-o json` reports these keys:
+
+| Key | Meaning |
+|-----|---------|
+| `custom_changes_pending` | Custom changes the upload would delete (error with `--force`) |
+| `custom_changes_kept` | Phone notification settings carried into the upload |
+| `removed: true` | On a custom change: its object is deleted by the upload |
+| `user_changes_pending` | Live user changes the upload would delete (error with `--force`) |
+| `kept_as_live` | Users, groups, credentials and access rights that differ from `base` and stay as they are live |
+| `app_catalogue_updated` | What the push changed in the app catalogue |
+| `app_catalogue_stale` | What it couldn't carry over until a save from Loxone Config |
+| `app_catalogue_rebuilt: true` | The Miniserver serves a catalogue other than the uploaded one |
+| `permissions` | `unchanged`, `regenerated` or `kept` |
+| `permissions_stale: true` | The kept `permissions.bin` no longer matches the compiled users and groups |
 
 To go back to the config from before a push, upload its download again:
 `lox config upload backups/<stamp>-pre-push.zip --force && lox reboot`.
@@ -625,7 +672,7 @@ and not the members of the listed groups.
 ```bash
 lox access learn "Code Touch"                              # read a tag's ID: hold the tag or the unlocked phone to the reader
 lox access learn "Code Touch" --user alice --name "alice phone"  # … and pair it with alice
-lox user nfc add alice "04 A1 B2 C3 D4 E5 F6" "alice card" # pair a tag by ID (spaces, case and : or - don't matter)
+lox user nfc add alice "04 A1 B2 C3 9F E5 F6" "alice card" # pair a tag by ID (spaces, case and : or - don't matter)
 lox user nfc rm alice "alice card"                         # remove a tag, by name or ID
 lox user code set alice                                    # new access code: hidden prompt, asked twice
 echo 4711 | lox user code set alice --yes                  # … or the first line of stdin (never an argument)
@@ -789,8 +836,8 @@ lox watch "Temperatur" -i 5            # custom poll interval in seconds
 
 ## Terminal UI
 
-A full-screen, live view of the house: rooms and controls, a live event feed, energy flow, Miniserver health,
-config history and all your Miniservers — and you can act on it. Design: [docs/design-tui.md](docs/design-tui.md).
+A full-screen, live view of the house that you can act on. The guide is
+[docs/guides/tui.md](docs/guides/tui.md): screens, safety and preferences in `~/.lox/tui.yaml`.
 
 ```bash
 lox tui                                # start on the last screen (Home the first time)
@@ -799,43 +846,21 @@ lox tui -r Kitchen                     # start in Rooms with a room selected
 lox tui --read-only                    # no actions at all (wall display, screen sharing)
 lox tui --theme mono                   # theme: night (default) | day | mono | neon
 lox tui --icons nerd                   # Nerd Font icons (plain Unicode by default)
-lox tui --no-mouse --no-motion         # no mouse capture, no animations (drag-select + auto-copy works with the mouse on)
+lox tui --no-mouse --no-motion         # no mouse capture, no animations
 lox tui --demo                         # a synthetic demo house, no Miniserver needed
 lox --ctx office tui                   # another context; switch live with C or on the Sites screen
 ```
 
-Global `--no-color` (or `NO_COLOR`) selects the `mono` theme. Harmless actions (lights, blinds, moods) are
-instant; doors, gates, alarm, wallbox, door openers wired as push-buttons and controls on the config's `confirm:` list ask `y/N`; reboot and firmware update ask you to type the context name.
-
-Preferences live in `~/.lox/tui.yaml`:
-
-```yaml
-theme: night          # night | day | mono | neon
-icons: plain          # plain | nerd
-motion: true          # animated energy flow, pulses
-mouse: true
-transparent: false    # keep the terminal background
-roles:                # energy role overrides: meter name or UUID → grid | pv | battery | load
-  Balcony PV: pv
-```
-
-UI state (pins, mutes, palette history, last screen) is kept per context in `tui-state.yaml`.
-
 ### Keys
 
-`?` shows the keys for where you are; every pane's bottom border shows the ones in reach. `:` (or `Ctrl-K`) opens
-the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
+`?` shows the keys for where you are, and every pane's bottom border shows the ones in reach. `:` (or `Ctrl-K`)
+opens the palette: fuzzy go-to for rooms, controls and scenes, plus any `lox` command.
 
-Getting around takes two keys:
+- **`Esc` (or `⌫`) goes back one step.** In a popup it returns to where you were, then closes the popup. On a
+  screen it clears the filter, facets or marks, then returns to the screen a jump came from. `Esc` never quits.
+- **`q` closes** the popup in one press. On a screen with no popup open, `q` quits.
 
-- **`Esc` (or `⌫`) goes back one step**, everywhere: in a popup to where you were before (the previous block in
-  the wiring, the page list in the config browser, the chart without its cursor), then it closes the popup; on a
-  screen it clears the filter, facets or marks, focuses the parent pane, and finally returns to the screen a jump
-  came from (`e`, `⏎` on a room or event, a palette result — the header shows `Esc ← rooms`). `Esc` never quits.
-- **`q` closes** the popup in one press, however deep you are in it. On a screen, with no popup open, `q` quits.
-  Holding `q` closes the popups but doesn't quit.
-
-In text fields (`/`, `:`, `=`, facets, search) letters are text: `Esc` cancels, `⏎` confirms.
+In text fields (`/`, `:`, `=`, facets, search), letters are text. `Esc` cancels and `⏎` confirms.
 
 <!-- keys:start (generated from src/tui/keymap.rs) -->
 | Global | Action |

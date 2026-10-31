@@ -9,8 +9,7 @@
       "pinned": true,
       "covers": "WebSocket protocol, commands, encryption, hashing, token auth, event tables, file access",
       "used_by": [
-        "crates/loxone-client",
-        "docs/api-research.md"
+        "crates/loxone-client"
       ],
       "sha256": "da209f7b810604d98acc74401b9f701302caf34c93815fe30aeb2a865c943b44",
       "bytes": 583060,
@@ -97,9 +96,7 @@
       "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2016/10/API_Commands.pdf",
       "pinned": true,
       "covers": "Legacy /jdev and /dev command list (diagnostics, bus and LAN stats)",
-      "used_by": [
-        "docs/api-research.md"
-      ],
+      "used_by": [],
       "sha256": "1b444c29a697b8ccfe48081711aad1eaf3e018c544bed827ce07e7b76893abbc",
       "bytes": 292100,
       "checked": "2026-10-31"
@@ -123,9 +120,7 @@
       "url": "https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/Required-Ports-and-Domains.pdf",
       "pinned": true,
       "covers": "Ports and cloud domains the Miniserver uses (discovery, remote connect, updates)",
-      "used_by": [
-        "docs/api-research.md"
-      ],
+      "used_by": [],
       "sha256": "08dcb16051abfc44839a356f490af923aad167bb8c7bdbf134f857b5766ace40",
       "bytes": 393208,
       "checked": "2026-10-31"
@@ -146,9 +141,7 @@
       "url": "https://www.loxone.com/enen/kb/web-services/",
       "pinned": false,
       "covers": "HTTP /dev and /jdev commands",
-      "used_by": [
-        "docs/api-research.md"
-      ]
+      "used_by": []
     },
     {
       "id": "kb-sample-files",
@@ -190,8 +183,7 @@
       "pinned": false,
       "covers": "Miniserver internals, the LoxCC format, the file system",
       "used_by": [
-        "crates/loxone-config/src/archive.rs",
-        "docs/loxone-config-research.md"
+        "crates/loxone-config/src/archive.rs"
       ]
     },
     {
@@ -224,7 +216,6 @@
       "pinned": false,
       "covers": "Community knowledge, REST web service notes, example configs (part of the test corpus)",
       "used_by": [
-        "docs/api-research.md",
         "crates/loxone-config/tools/fetch-corpus.py"
       ]
     },
@@ -235,9 +226,7 @@
       "url": "https://github.com/UncleSamSwiss/ioBroker.loxone",
       "pinned": false,
       "covers": "Second opinion on control types: states and commands per type",
-      "used_by": [
-        "docs/api-research.md"
-      ]
+      "used_by": []
     }
   ]
 }
