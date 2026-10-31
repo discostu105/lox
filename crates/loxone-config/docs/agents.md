@@ -163,6 +163,15 @@ rule regel                           # an app rule (D57): active, all
 	then pumpe "on"
 end
 
+rule party "Party-Licht"             # D73: a block's state, a mode,
+	active                           # `or` for another group
+	when bewegung.active == on
+	when mode "Party"
+	or
+	when helligkeit.value < 20
+	then mode "Party" off
+end
+
 rule mittag "Pumpe Mittag"           # a named rule (D60): the config's
 	inactive                         # rule of that name, else created
 	when time 12:30

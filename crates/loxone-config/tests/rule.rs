@@ -41,11 +41,16 @@ fn fixture_with(on_apc: &str, off_apc: &str) -> String {
          <ControlList Version=\"1\" NextObj=\"9\" NextConst=\"1\" NextNote=\"1\" NextMem=\"1\">\r\n\
          \t<C Type=\"Document\" V=\"175\" U=\"40000000-0000-0001-ffff504f94112233\">\r\n\
          \t\t<C Type=\"Page\" V=\"175\" U=\"40000000-0000-0002-ffff504f94112233\" Title=\"Automatik-Regeln\" SpNo=\"1\">\r\n\
-         \t\t\t<C Type=\"PushButton\" V=\"175\" U=\"{PUMP}\" Title=\"Pumpe\">\r\n\
+         \t\t\t<C Type=\"PushButton\" V=\"175\" U=\"{PUMP}\" Title=\"Pumpe\" SpStates=\"40000001-0000-0013-ffffaaaaaaaa0001,40000001-0000-0014-ffffaaaaaaaa0001,40000001-0000-0015-ffffaaaaaaaa0001\">\r\n\
+         \t\t\t\t<Co K=\"Reset\" U=\"40000001-0000-0012-00ffaaaaaaaa0001\"/>\r\n\
          \t\t\t\t<Co K=\"Q\" U=\"40000001-0000-0011-01ffaaaaaaaa0001\"/>\r\n\
+         \t\t\t\t<IoData Visu=\"true\" Pr=\"40000000-0000-0003-ffff504f94112233\" Cr=\"40000000-0000-0004-ffff504f94112233\"/>\r\n\
+         \t\t\t\t<Display Type=\"1\"/>\r\n\
          \t\t\t</C>\r\n\
          \t\t\t<C Type=\"PButtonT\" V=\"175\" U=\"{COVER}\" Title=\"Abdeckung\">\r\n\
+         \t\t\t\t<Co K=\"Reset\" U=\"40000003-0000-0032-00ffaaaaaaaa0003\"/>\r\n\
          \t\t\t\t<Co K=\"Q\" U=\"40000003-0000-0031-01ffaaaaaaaa0003\"/>\r\n\
+         \t\t\t\t<IoData Visu=\"true\" Pr=\"40000000-0000-0003-ffff504f94112233\" Cr=\"40000000-0000-0004-ffff504f94112233\"/>\r\n\
          \t\t\t</C>\r\n\
          \t\t\t<C Type=\"Switch\" V=\"175\" U=\"{LIGHT}\" Title=\"Licht\">\r\n\
          \t\t\t\t<Co K=\"Q\" U=\"40000004-0000-0041-01ffaaaaaaaa0004\"/>\r\n\
@@ -641,4 +646,100 @@ fn a_rule_is_adopted_only_with_a_name_of_its_own() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("not a free, valid slug"), "{err}");
+}
+
+// --- More shapes (D73): control states, operating modes, `or` groups.
+
+/// The fixture with an operating mode `Party` (`Mode="-5"`).
+fn mode_fixture() -> String {
+    fixture().replace(
+        "\t\t</C>\r\n\t</C>\r\n</ControlList>",
+        "\t\t\t<C Type=\"Mode\" V=\"175\" U=\"40000006-0000-0060-ffff504f94112233\" Title=\"Party\" Nio=\"2\" WF=\"16384\" Mode=\"-5\">\r\n\
+         \t\t\t\t<Co K=\"I\" U=\"40000006-0000-0061-00ffaaaaaaaa0006\"/>\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"40000006-0000-0062-01ffaaaaaaaa0006\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\t</C>\r\n</ControlList>",
+    )
+}
+
+const SHAPES: &str = "rule pumpe_aus\n\
+                      \tinactive\n\
+                      \twhen pumpe.active == on\n\
+                      \twhen mode \"Party\"\n\
+                      \tor\n\
+                      \twhen time 17:00\n\
+                      \tthen mode \"Party\" off\n\
+                      \tthen abdeckung \"pulse\"\n\
+                      end\n";
+
+#[test]
+fn states_modes_and_groups_compile_and_read_back() {
+    let base = mode_fixture();
+    let src = AS_READ.replace(
+        "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n",
+        SHAPES,
+    );
+    let out = compile_rules(&base, &src).unwrap();
+    let off = tag_of(&out, RULE_OFF);
+    let json = |s: &str| esc(s);
+    // Two groups: the state and the mode, then the old time event.
+    assert!(
+        off.contains(&json(
+            r#""eventGroups":[{"operator":1,"events":[{"type":0,"descID":342001,"#
+        )),
+        "{off}"
+    );
+    assert!(
+        off.contains(&json(
+            r#"{"type":1,"descID":21001,"id":-5,"value":1,"operator":1,"forceEdge":false}]},{"operator":1,"events":[{"type":5,"descID":272001,"id":272,"value":1020"#
+        )),
+        "{off}"
+    );
+    assert!(
+        off.contains(&json(
+            r#"{"type":1,"descID":21101,"id":-5,"command":"0","arrValues":[0]}"#
+        )),
+        "{off}"
+    );
+    // It reads back as the source (the mode by title), and compiling
+    // that again writes the same bytes.
+    let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    assert!(
+        text.contains(&SHAPES.replace("rule pumpe_aus\n", "rule pumpe_aus \"Pumpe Aus\"\n")),
+        "{text}"
+    );
+    assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    // Back to the old rule: the original bytes.
+    assert_eq!(compile_rules(&out, AS_READ).unwrap(), base);
+}
+
+#[test]
+fn states_and_modes_are_checked() {
+    let base = mode_fixture();
+    let with = |rule: &str| AS_READ.replace("\twhen time 17:00\n", rule);
+    // A state the app does not offer for a Switch-shown push button.
+    let e = compile_rules(&base, &with("\twhen pumpe.level > 3\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("level"), "{e}");
+    // A mode the config does not have.
+    let e = compile_rules(&base, &with("\twhen mode \"Urlaub\"\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("Urlaub") && e.contains("Party"), "{e}");
+    // `or` needs conditions before it.
+    let e = Module::parse(&format!(
+        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\tor\n\twhen time 17:00\n\tthen pumpe \"off\"\nend\n"
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("`or`"), "{e}");
+    // A state of an undeclared slug.
+    let e = Module::parse(&format!(
+        "{EXTERNS}\nrule pumpe_aus\n\tinactive\n\twhen nope.active == on\n\tthen pumpe \"off\"\nend\n"
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("nope"), "{e}");
 }

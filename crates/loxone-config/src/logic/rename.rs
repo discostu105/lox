@@ -16,8 +16,9 @@
 //! positionally — the structure is identical, only names differ.
 
 use super::ast::{
-    AccessItem, ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, Module, MoodsItem, Operand,
-    RuleItem, RuleStmtKind, ScheduleItem, TemplateDecl, TestItem, TilesItem, Value,
+    AccessItem, ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, ModeName, Module,
+    MoodsItem, Operand, RuleItem, RuleStmtKind, ScheduleItem, TemplateDecl, TestItem, TilesItem,
+    Value,
 };
 use crate::error::{Error, Result};
 use crate::lock::Lockfile;
@@ -222,8 +223,18 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             for stmt in &mut r.body {
                 match stmt {
                     RuleItem::Stmt(st) => {
-                        if let RuleStmtKind::Then { target, .. } = &mut st.kind {
-                            sub(target);
+                        match &mut st.kind {
+                            RuleStmtKind::Then { target, .. }
+                            | RuleStmtKind::State { target, .. }
+                            | RuleStmtKind::Mode {
+                                mode: ModeName::Slug(target),
+                                ..
+                            }
+                            | RuleStmtKind::ThenMode {
+                                mode: ModeName::Slug(target),
+                                ..
+                            } => sub(target),
+                            _ => {}
                         }
                         sub_comment(&mut st.comment);
                     }

@@ -508,9 +508,13 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       app's edit. Action codes come from document evidence or the
       observed PushButton/PButtonT triples, else refused. Validated
       live: a compiled rule executes at its time.
-- [ ] More rule shapes: control-state conditions (`type` 0 with
-      `controlUUID`), operating modes, OR groups — each needs its corpus
-      evidence first.
+- [x] More rule shapes 2026-10-31 (D73): control-state conditions
+      (`when <slug>.<state> <op> <value>`), operating modes (`when mode`,
+      `then mode`), OR groups (`or`); conditions and actions on any
+      block the app offers, from the Miniserver's own capability table.
+      All corpus rules are byte fixpoints.
+- [ ] Rule conditions on weather, dates and text values; notification,
+      mailer, caller and pause actions.
 - [x] Creating rules from source 2026-10-30 (D60): `rule <slug>
       "Name"` takes the config's rule of that name or creates one below
       the last rule, filed like it; the lock pins its UUID (v7 `rules`).

@@ -23,23 +23,16 @@
 //! to the rules the document already has, and from there it is edited
 //! like any other.
 
-use super::ast::{Module, RULE_BLOCK_TYPE, RuleDecl, RuleItem, RuleStmt, RuleStmtKind};
-use crate::autopilot::{self, Action, Event, Rule};
+use super::ast::{
+    CmpOp, ModeName, Module, RULE_BLOCK_TYPE, RuleDecl, RuleItem, RuleStmt, RuleStmtKind,
+};
+use crate::autopilot::{self, Action, CAPABILITIES, Capability, Event, EventCap, Kind, Rule};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
 use crate::uuid::{LoxUuid, Minter};
 use crate::xml::{Attr, Element, Node};
 use serde_json::Value;
 use std::collections::BTreeMap;
-
-/// Action `descID`s observed for a target block type and command, with no
-/// action of that kind in the document to copy from (corpus: the house
-/// config's rules and the use-case configs, docs/loxone-format.md).
-const OBSERVED_ACTIONS: &[(&str, &str, i64)] = &[
-    ("PushButton", "on", 342_101),
-    ("PushButton", "off", 342_102),
-    ("PButtonT", "pulse", 493_103),
-];
 
 const DAYS: &[(&str, &[u8])] = &[
     ("mon", &[0]),
@@ -312,6 +305,139 @@ fn rule_ports(rule: &str) -> Option<Vec<String>> {
     )
 }
 
+/// What a rule declaration needs from the document: the block types, the
+/// app's view of the blocks (control type and states, for conditions and
+/// action codes) and the operating modes.
+struct Context {
+    types: BTreeMap<String, String>,
+    app: BTreeMap<String, (String, BTreeMap<String, String>)>,
+    /// UUID, title, `Mode=` number.
+    modes: Vec<(String, String, i64)>,
+    /// The block conditions of the document's rules: control (lowercase),
+    /// code, state UUID — evidence for a block whose app view Lox Logic does
+    /// not derive.
+    seen: Vec<(String, i64, String)>,
+}
+
+impl Context {
+    fn of(doc: &LoxoneDoc) -> Context {
+        Context {
+            types: doc
+                .objects()
+                .iter()
+                .map(|o| (o.uuid.clone(), o.block_type.clone()))
+                .collect(),
+            app: crate::catalogue::app_controls(doc),
+            modes: super::schedule::config_modes(doc),
+            seen: doc
+                .objects()
+                .iter()
+                .filter(|o| o.block_type == RULE_BLOCK_TYPE)
+                .filter_map(|o| autopilot::parse(&doc.element_at(&o.path)?.attr_decoded("APC")?))
+                .flat_map(|rule| {
+                    let events: Vec<Value> = rule["eventGroups"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|g| g["events"].as_array().cloned().unwrap_or_default())
+                        .collect();
+                    events
+                })
+                .filter_map(|e| match autopilot::interpret_event(&e) {
+                    Ok(Event::State {
+                        control, desc, id, ..
+                    }) => Some((control.to_ascii_lowercase(), desc, id)),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    fn app(&self, uuid: &str) -> Option<&(String, BTreeMap<String, String>)> {
+        self.app.get(&uuid.to_ascii_lowercase())
+    }
+
+    /// The capability row of a block's app control type — by its app view,
+    /// else by a condition on it in the document's rules.
+    fn capability(&self, uuid: &str) -> Option<&'static Capability> {
+        match self.app(uuid) {
+            Some((ty, _)) => CAPABILITIES
+                .iter()
+                .find(|c| c.control_types.contains(&ty.as_str())),
+            None => {
+                let lower = uuid.to_ascii_lowercase();
+                let (_, desc, _) = self.seen.iter().find(|(c, _, _)| *c == lower)?;
+                CAPABILITIES
+                    .iter()
+                    .find(|c| c.events.iter().any(|e| e.desc == *desc))
+            }
+        }
+    }
+
+    /// The UUID of a block's state: by its app view, else from a
+    /// condition on that state in the document's rules.
+    fn state_id(&self, uuid: &str, state: &str) -> Option<String> {
+        if let Some((_, states)) = self.app(uuid) {
+            return states.get(state).cloned();
+        }
+        let lower = uuid.to_ascii_lowercase();
+        self.seen
+            .iter()
+            .find(|(c, d, _)| {
+                *c == lower && autopilot::event_cap(*d).and_then(|e| e.state) == Some(state)
+            })
+            .map(|(_, _, id)| id.clone())
+    }
+
+    /// A block's app control type, for messages.
+    fn type_name(&self, uuid: &str) -> String {
+        match (self.app(uuid), self.capability(uuid)) {
+            (Some((ty, _)), _) => ty.clone(),
+            (None, Some(c)) => c.control_types[0].to_string(),
+            (None, None) => self.types.get(uuid).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// The `Mode=` number of a mode a rule names.
+    fn mode(&self, ctx: &str, mode: &ModeName, uuid_of: &BTreeMap<String, String>) -> Result<i64> {
+        let found: Vec<&(String, String, i64)> = match mode {
+            ModeName::Slug(s) => {
+                let uuid = uuid_of
+                    .get(s)
+                    .ok_or_else(|| Error::Compile(format!("{ctx}: `{s}` resolves to no object")))?;
+                self.modes.iter().filter(|(u, _, _)| u == uuid).collect()
+            }
+            ModeName::Title(t) => self.modes.iter().filter(|(_, x, _)| x == t).collect(),
+        };
+        match found.as_slice() {
+            [(_, _, n)] => Ok(*n),
+            [] => {
+                let titles: Vec<String> = self
+                    .modes
+                    .iter()
+                    .map(|(_, t, _)| format!("\"{t}\""))
+                    .collect();
+                Err(Error::Compile(format!(
+                    "{ctx}: `{mode}` is no operating mode of the config — it has {}",
+                    titles.join(", ")
+                )))
+            }
+            _ => Err(Error::Compile(format!(
+                "{ctx}: {} operating modes are titled {mode} — rename one",
+                found.len()
+            ))),
+        }
+    }
+
+    /// The source name of a mode number: its title.
+    fn mode_title(&self, n: i64) -> Option<&str> {
+        self.modes
+            .iter()
+            .find(|(_, _, m)| *m == n)
+            .map(|(_, t, _)| t.as_str())
+    }
+}
+
 pub(crate) fn apply(
     doc: &mut LoxoneDoc,
     module: &Module,
@@ -320,18 +446,15 @@ pub(crate) fn apply(
     if module.rule_decls().next().is_none() {
         return Ok(());
     }
+    let cx = Context::of(doc);
     let objects = doc.objects();
-    let types: BTreeMap<&str, &str> = objects
-        .iter()
-        .map(|o| (o.uuid.as_str(), o.block_type.as_str()))
-        .collect();
     let path_of: BTreeMap<&str, &[usize]> = objects
         .iter()
         .map(|o| (o.uuid.as_str(), o.path.as_slice()))
         .collect();
 
-    // Every documented action in the document, by target type and command:
-    // the templates for new actions.
+    // Every block action in the document, by target type and command: the
+    // templates for new actions.
     let mut templates: BTreeMap<(String, String), Value> = BTreeMap::new();
     for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
         let Some(rule) = doc
@@ -342,11 +465,11 @@ pub(crate) fn apply(
             continue;
         };
         for a in rule["actions"].as_array().into_iter().flatten() {
-            if let Ok(act) = autopilot::interpret_action(a)
-                && let Some(ty) = types.get(act.target.as_str())
+            if let Ok(Action::Control { target, command }) = autopilot::interpret_action(a)
+                && let Some(ty) = cx.types.get(target.as_str())
             {
                 templates
-                    .entry((ty.to_string(), act.command))
+                    .entry((ty.to_string(), command))
                     .or_insert_with(|| a.clone());
             }
         }
@@ -356,7 +479,7 @@ pub(crate) fn apply(
     for decl in module.rule_decls() {
         let ctx = format!("`rule {}`", decl.slug);
         let uuid = uuid_of[&decl.slug].as_str();
-        let ty = types.get(uuid).copied().unwrap_or("");
+        let ty = cx.types.get(uuid).map_or("", String::as_str);
         if ty != RULE_BLOCK_TYPE {
             return Err(Error::Compile(format!(
                 "{ctx}: the block ({uuid}) is a `{ty}`, not an Automatic Designer rule \
@@ -377,16 +500,11 @@ pub(crate) fn apply(
                  this rule in the app and drop the declaration"
             ))
         })?;
-        let want = wanted(decl, uuid_of)?;
-        let targets: Vec<&str> = want
-            .actions
-            .iter()
-            .map(|a| types.get(a.target.as_str()).copied().unwrap_or(""))
-            .collect();
+        let want = wanted(&ctx, decl, uuid_of, &cx)?;
         if have == want {
             continue;
         }
-        let new = rewrite(&ctx, &old, &want, &targets, &templates)?;
+        let new = rewrite(&ctx, &old, &want, &cx, &templates)?;
         writes.push((uuid.to_string(), autopilot::to_text(&new), want.active));
     }
 
@@ -419,40 +537,247 @@ pub(crate) fn apply(
     Ok(())
 }
 
-/// The rule a declaration states, its action targets as UUIDs.
-fn wanted(decl: &RuleDecl, uuid_of: &BTreeMap<String, String>) -> Result<Rule> {
+/// The app's operator code of a comparison.
+fn op_code(op: CmpOp) -> u8 {
+    let sym = op.symbol();
+    autopilot::OPERATORS
+        .iter()
+        .find(|(_, s)| *s == sym)
+        .map(|(c, _)| *c)
+        .expect("every comparison has an app operator")
+}
+
+fn op_of(code: u8) -> Option<CmpOp> {
+    [
+        CmpOp::Eq,
+        CmpOp::Ne,
+        CmpOp::Gt,
+        CmpOp::Lt,
+        CmpOp::Ge,
+        CmpOp::Le,
+    ]
+    .into_iter()
+    .find(|o| op_code(*o) == code)
+}
+
+/// The condition `when <target>.<state> <op> <value>` stands for: the
+/// capability-table event of the block's app control type that watches
+/// `state` — the digital one waiting for exactly this value when the
+/// comparison is `==`, else the one analog one.
+fn state_event(
+    ctx: &str,
+    line: &str,
+    control: &str,
+    state: &str,
+    op: CmpOp,
+    value: &str,
+    cx: &Context,
+) -> Result<Event> {
+    let fail = |m: String| Err(Error::Compile(format!("{ctx}: `{line}` — {m}")));
+    let Some(cap) = cx.capability(control) else {
+        return fail(if cx.app(control).is_some() {
+            format!(
+                "the app offers no conditions on a `{}` (the Miniserver's table lists none)",
+                cx.type_name(control)
+            )
+        } else {
+            "Lox Logic does not know this block's app view (its type and states) — only blocks \
+             shown in the app whose catalogue entry Lox Logic derives, or that a rule of the \
+             config already watches, can be watched"
+                .into()
+        });
+    };
+    let ty = cx.type_name(control);
+    let value = match value {
+        "on" => "1",
+        "off" => "0",
+        v => v,
+    };
+    let number: serde_json::Number = match value.parse::<f64>() {
+        Ok(f) if f.is_finite() => match serde_json::from_str(value) {
+            Ok(n) => n,
+            Err(_) => return fail(format!("`{value}` is not a number")),
+        },
+        _ => return fail(format!("`{value}` is not a number")),
+    };
+    let candidates: Vec<&EventCap> = cap
+        .events
+        .iter()
+        .filter(|e| e.state == Some(state))
+        .collect();
+    let digital = candidates.iter().find(|e| {
+        e.kind == Kind::Digital
+            && e.value.is_some_and(|v| v.to_string() == number.to_string())
+            && op == CmpOp::Eq
+    });
+    let analog: Vec<&&EventCap> = candidates
+        .iter()
+        .filter(|e| e.kind == Kind::Analog && e.value.is_none())
+        .collect();
+    let cap_event = match (digital, analog.as_slice()) {
+        (Some(e), _) => *e,
+        (None, [e]) => **e,
+        (None, []) => {
+            let offered: Vec<String> = cap
+                .events
+                .iter()
+                .filter_map(|e| {
+                    let s = e.state?;
+                    Some(match (e.kind, e.value) {
+                        (Kind::Digital, Some(v)) => format!("`{s} == {v}`"),
+                        (Kind::Analog, None) => format!("`{s} <op> <number>`"),
+                        _ => return None,
+                    })
+                })
+                .collect();
+            return fail(if offered.is_empty() {
+                format!("the app offers no state conditions on a `{ty}`")
+            } else {
+                format!("the app offers on a `{ty}`: {}", offered.join(", "))
+            });
+        }
+        (None, _) => {
+            return fail(format!(
+                "the app offers {} conditions on `{state}` of a `{ty}` that Lox Logic cannot tell \
+                 apart — keep this rule in the app",
+                analog.len()
+            ));
+        }
+    };
+    let Some(id) = cx.state_id(control, state) else {
+        return fail(format!(
+            "Lox Logic does not know the `{state}` state's UUID of this `{ty}`"
+        ));
+    };
+    Ok(Event::State {
+        control: control.to_string(),
+        desc: cap_event.desc,
+        id,
+        op: op_code(op),
+        value: number.to_string(),
+    })
+}
+
+/// The rule a declaration states, its blocks as UUIDs.
+fn wanted(
+    ctx: &str,
+    decl: &RuleDecl,
+    uuid_of: &BTreeMap<String, String>,
+    cx: &Context,
+) -> Result<Rule> {
     let mut rule = Rule {
         active: false,
-        events: Vec::new(),
+        groups: vec![Vec::new()],
         actions: Vec::new(),
     };
+    let resolve = |st: &RuleStmt, slug: &str| {
+        uuid_of.get(slug).cloned().ok_or_else(|| {
+            Error::Compile(format!(
+                "{ctx}: `{}` — `{slug}` resolves to no block",
+                st.kind
+            ))
+        })
+    };
     for st in decl.stmts() {
+        let group = rule.groups.last_mut().expect("one group at least");
         match &st.kind {
             RuleStmtKind::Active(a) => rule.active = *a,
-            RuleStmtKind::Time(m) => rule.events.push(Event::Time(*m)),
+            RuleStmtKind::Or => rule.groups.push(Vec::new()),
+            RuleStmtKind::Time(m) => group.push(Event::Time(*m)),
             RuleStmtKind::Weekday(words) => {
                 let mut days: Vec<u8> = words
                     .iter()
                     .flat_map(|w| weekdays(w).expect("checked by validate").iter().copied())
                     .collect();
                 days.sort_unstable();
-                rule.events.push(Event::Weekdays(days));
+                group.push(Event::Weekdays(days));
             }
-            RuleStmtKind::Then { target, command } => {
-                let uuid = uuid_of.get(target).ok_or_else(|| {
-                    Error::Compile(format!(
-                        "`rule {}`: `{}` — `{target}` resolves to no block",
-                        decl.slug, st.kind
-                    ))
-                })?;
-                rule.actions.push(Action {
-                    target: uuid.clone(),
-                    command: command.clone(),
-                });
+            RuleStmtKind::Mode { mode, on } => group.push(Event::Mode {
+                mode: cx.mode(ctx, mode, uuid_of)?,
+                on: *on,
+            }),
+            RuleStmtKind::State {
+                target,
+                state,
+                op,
+                value,
+            } => {
+                let control = resolve(st, target)?;
+                let line = st.kind.to_string();
+                group.push(state_event(ctx, &line, &control, state, *op, value, cx)?);
             }
+            RuleStmtKind::Then { target, command } => rule.actions.push(Action::Control {
+                target: resolve(st, target)?,
+                command: command.clone(),
+            }),
+            RuleStmtKind::ThenMode { mode, on } => rule.actions.push(Action::Mode {
+                mode: cx.mode(ctx, mode, uuid_of)?,
+                on: *on,
+            }),
         }
     }
     Ok(rule)
+}
+
+/// The action the capability table offers a block for a command: an
+/// action whose command text is the command, or whose `<valN>`
+/// placeholders the command fills with numbers (`setMode/4` for
+/// `setMode/<val0>`) — those numbers its `arrValues`.
+fn table_action(cap: &Capability, command: &str) -> Option<Value> {
+    for a in cap.actions {
+        let mut values = Vec::new();
+        let mut rest = command;
+        let mut ok = true;
+        let parts: Vec<&str> = a.command.split('<').collect();
+        for (i, part) in parts.iter().enumerate() {
+            let lit = if i == 0 {
+                *part
+            } else {
+                let Some((name, lit)) = part.split_once('>') else {
+                    ok = false;
+                    break;
+                };
+                if !name.starts_with("val") {
+                    ok = false;
+                    break;
+                }
+                // The number runs up to the next literal (or the end).
+                let end = if lit.is_empty() {
+                    rest.len()
+                } else {
+                    match rest.find(lit) {
+                        Some(e) => e,
+                        None => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                };
+                let Ok(n) = rest[..end].parse::<serde_json::Number>() else {
+                    ok = false;
+                    break;
+                };
+                values.push(Value::Number(n));
+                rest = &rest[end..];
+                lit
+            };
+            match rest.strip_prefix(lit) {
+                Some(r) => rest = r,
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok && rest.is_empty() {
+            let mut v = serde_json::json!({"type": 0, "descID": a.desc, "command": command});
+            if !values.is_empty() {
+                v["arrValues"] = Value::Array(values);
+            }
+            return Some(v);
+        }
+    }
+    None
 }
 
 /// `old` edited into `want`: unchanged parts keep their JSON, changed
@@ -461,7 +786,7 @@ fn rewrite(
     ctx: &str,
     old: &Value,
     want: &Rule,
-    targets: &[&str],
+    cx: &Context,
     templates: &BTreeMap<(String, String), Value>,
 ) -> Result<Value> {
     let mut new = old.clone();
@@ -469,47 +794,54 @@ fn rewrite(
     new["active"] = Value::Bool(want.active);
     new["activeIfValid"] = Value::Bool(want.active);
 
-    let old_events = old["eventGroups"][0]["events"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let events: Vec<Value> = want
-        .events
+    let old_groups = old["eventGroups"].as_array().cloned().unwrap_or_default();
+    let groups: Vec<Value> = want
+        .groups
         .iter()
         .enumerate()
-        .map(|(i, e)| {
-            let same = |o: &&Value| autopilot::interpret_event(o).as_ref() == Ok(e);
-            if let Some(o) = old_events.get(i).filter(same) {
-                return o.clone();
-            }
-            match (e, old_events.get(i).map(autopilot::interpret_event)) {
-                (Event::Time(m), Some(Ok(Event::Time(_)))) => {
-                    let mut o = old_events[i].clone();
-                    o["value"] = (*m).into();
-                    o
-                }
-                (Event::Weekdays(d), Some(Ok(Event::Weekdays(_)))) => {
-                    let mut o = old_events[i].clone();
-                    match (d.as_slice(), o.get("arrValues").is_some()) {
-                        // The one-day spelling stays one-day.
-                        ([one], false) => o["value"] = (*one).into(),
-                        _ => {
-                            o["value"] = autopilot::WEEKDAY_SENTINEL.into();
-                            o["arrValues"] = d.clone().into();
+        .map(|(g, events)| {
+            let mut group = old_groups
+                .get(g)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({"operator": 1, "events": []}));
+            let old_events = group["events"].as_array().cloned().unwrap_or_default();
+            let events: Vec<Value> = events
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let read = old_events.get(i).map(autopilot::interpret_event);
+                    match (e, read) {
+                        (_, Some(Ok(o))) if &o == e => old_events[i].clone(),
+                        (Event::Time(m), Some(Ok(Event::Time(_)))) => {
+                            let mut o = old_events[i].clone();
+                            o["value"] = (*m).into();
+                            o
                         }
+                        (Event::Weekdays(d), Some(Ok(Event::Weekdays(_)))) => {
+                            let mut o = old_events[i].clone();
+                            match (d.as_slice(), o.get("arrValues").is_some()) {
+                                // The one-day spelling stays one-day.
+                                ([one], false) => o["value"] = (*one).into(),
+                                _ => {
+                                    o["value"] = autopilot::WEEKDAY_SENTINEL.into();
+                                    o["arrValues"] = d.clone().into();
+                                }
+                            }
+                            o
+                        }
+                        _ => autopilot::new_event(e),
                     }
-                    o
-                }
-                (Event::Time(m), _) => autopilot::time_event(*m),
-                (Event::Weekdays(d), _) => autopilot::weekday_event(d),
-            }
+                })
+                .collect();
+            group["events"] = Value::Array(events);
+            group
         })
         .collect();
-    new["eventGroups"][0]["events"] = Value::Array(events);
+    new["eventGroups"] = Value::Array(groups);
 
     let old_actions = old["actions"].as_array().cloned().unwrap_or_default();
     let mut actions = Vec::new();
-    for (i, (a, ty)) in want.actions.iter().zip(targets).enumerate() {
+    for (i, a) in want.actions.iter().enumerate() {
         let read = old_actions.get(i).map(autopilot::interpret_action);
         if let Some(Ok(o)) = &read
             && o == a
@@ -517,26 +849,38 @@ fn rewrite(
             actions.push(old_actions[i].clone());
             continue;
         }
-        let mut action = match templates.get(&(ty.to_string(), a.command.clone())) {
-            Some(t) => t.clone(),
-            None => match OBSERVED_ACTIONS
-                .iter()
-                .find(|(t, c, _)| t == ty && *c == a.command)
-            {
-                Some((_, _, desc)) => serde_json::json!({
-                    "type": 0, "descID": desc, "command": a.command,
-                }),
-                None => {
-                    return Err(Error::Compile(format!(
-                        "{ctx}: no rule in this config sends `{}` to a `{ty}`, and Lox Logic \
-                         knows no action code (`descID`) for it — create one such action \
-                         in the app once, then the compile can copy it",
-                        a.command
-                    )));
-                }
-            },
+        let action = match a {
+            Action::Mode { mode, on } => autopilot::mode_action(*mode, *on),
+            Action::Control { target, command } => {
+                let ty = cx.types.get(target.as_str()).map_or("", String::as_str);
+                let found = templates
+                    .get(&(ty.to_string(), command.clone()))
+                    .cloned()
+                    .or_else(|| table_action(cx.capability(target)?, command));
+                let Some(mut action) = found else {
+                    let offered = cx.capability(target).map(|c| {
+                        c.actions
+                            .iter()
+                            .map(|a| format!("`{}`", a.command))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    });
+                    return Err(Error::Compile(match offered {
+                        Some(list) if !list.is_empty() => format!(
+                            "{ctx}: the app has no action `{command}` for this `{ty}` — it \
+                             offers {list} (`<val0>` a number)"
+                        ),
+                        _ => format!(
+                            "{ctx}: Lox Logic knows no action code (`descID`) for `{command}` on a \
+                             `{ty}` — create one such action in the app once, then the \
+                             compile can copy it"
+                        ),
+                    }));
+                };
+                action["id"] = Value::String(target.clone());
+                action
+            }
         };
-        action["id"] = Value::String(a.target.clone());
         actions.push(action);
     }
     new["actions"] = Value::Array(actions);
@@ -544,36 +888,81 @@ fn rewrite(
 }
 
 /// A rule's payload as a `rule` declaration, with `slug_of` naming the
-/// action targets. `Err` says why it cannot be one.
+/// blocks. `Err` says why it cannot be one.
 pub(crate) fn lift(
     rule_slug: &str,
     apc: &str,
+    doc: &LoxoneDoc,
     slug_of: &dyn Fn(&str) -> Option<String>,
 ) -> std::result::Result<RuleDecl, String> {
     let payload = autopilot::parse(apc).ok_or("the payload is not JSON")?;
     let rule = autopilot::interpret(&payload)?;
-    if rule.events.is_empty() || rule.actions.is_empty() {
+    if rule.groups.iter().any(Vec::is_empty) || rule.actions.is_empty() {
         return Err("the rule has no condition or no action".into());
     }
+    let cx = Context::of(doc);
     let stmt = |kind| {
         RuleItem::Stmt(RuleStmt {
             kind,
             comment: None,
         })
     };
+    let slug = |u: &str| slug_of(u).ok_or_else(|| format!("its block {u} is not in the config"));
+    let mode = |n: i64| {
+        cx.mode_title(n)
+            .map(|t| ModeName::Title(t.to_string()))
+            .ok_or_else(|| format!("its operating mode {n} is not in the config"))
+    };
     let mut body = vec![stmt(RuleStmtKind::Active(rule.active))];
-    for e in &rule.events {
-        body.push(stmt(match e {
-            Event::Time(m) => RuleStmtKind::Time(*m),
-            Event::Weekdays(d) => RuleStmtKind::Weekday(day_words(d)),
-        }));
+    for (g, events) in rule.groups.iter().enumerate() {
+        if g > 0 {
+            body.push(stmt(RuleStmtKind::Or));
+        }
+        for e in events {
+            body.push(stmt(match e {
+                Event::Time(m) => RuleStmtKind::Time(*m),
+                Event::Weekdays(d) => RuleStmtKind::Weekday(day_words(d)),
+                Event::Mode { mode: n, on } => RuleStmtKind::Mode {
+                    mode: mode(*n)?,
+                    on: *on,
+                },
+                Event::State {
+                    control,
+                    desc,
+                    op,
+                    value,
+                    ..
+                } => {
+                    let cap = autopilot::event_cap(*desc).expect("interpret checked the code");
+                    let state = cap
+                        .state
+                        .ok_or_else(|| format!("its condition {desc} watches no named state"))?;
+                    let op = op_of(*op).expect("interpret checked the operator");
+                    let value = match (cap.kind, value.as_str()) {
+                        (Kind::Digital, "1") => "on".to_string(),
+                        (Kind::Digital, "0") => "off".to_string(),
+                        (_, v) => v.to_string(),
+                    };
+                    RuleStmtKind::State {
+                        target: slug(control)?,
+                        state: state.to_string(),
+                        op,
+                        value,
+                    }
+                }
+            }));
+        }
     }
     for a in &rule.actions {
-        let target = slug_of(&a.target)
-            .ok_or_else(|| format!("its action target {} is not in the config", a.target))?;
-        body.push(stmt(RuleStmtKind::Then {
-            target,
-            command: a.command.clone(),
+        body.push(stmt(match a {
+            Action::Control { target, command } => RuleStmtKind::Then {
+                target: slug(target)?,
+                command: command.clone(),
+            },
+            Action::Mode { mode: n, on } => RuleStmtKind::ThenMode {
+                mode: mode(*n)?,
+                on: *on,
+            },
         }));
     }
     Ok(RuleDecl {

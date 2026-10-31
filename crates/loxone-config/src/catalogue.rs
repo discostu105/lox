@@ -451,6 +451,34 @@ fn entry(el: &Element, objs: &Objects) -> Option<String> {
     if io.attr("IconV").is_some() {
         return None;
     }
+    entry_any_icon(el, objs)
+}
+
+/// The app's view of the document's blocks, as the catalogue derives it:
+/// UUID (lowercase) → app control type and states (state name → UUID),
+/// for each object shown in the app whose entry Lox Logic knows. Automatic
+/// Designer conditions name a block's state by this map (D73).
+pub(crate) fn app_controls(
+    doc: &LoxoneDoc,
+) -> BTreeMap<String, (String, BTreeMap<String, String>)> {
+    let objs = Objects::of(doc);
+    objs.shown_in_order
+        .iter()
+        .filter_map(|(uuid, el)| {
+            let v: serde_json::Value = serde_json::from_str(&entry_any_icon(el, &objs)?).ok()?;
+            let ty = v["type"].as_str()?.to_string();
+            let states = v["states"]
+                .as_object()?
+                .iter()
+                .filter_map(|(k, s)| Some((k.clone(), s.as_str()?.to_string())))
+                .collect();
+            Some((uuid.clone(), (ty, states)))
+        })
+        .collect()
+}
+
+/// [`entry`] for an object with or without an icon of its own.
+fn entry_any_icon(el: &Element, objs: &Objects) -> Option<String> {
     let co = |k: &str| {
         el.child_elements()
             .find(|c| c.name == "Co" && c.attr("K") == Some(k))

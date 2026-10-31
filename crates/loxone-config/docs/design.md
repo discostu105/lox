@@ -2247,3 +2247,23 @@ Anything unverified is an error, not a heuristic:
   either. Not derived, one sample each in the corpus with fields no
   setting explains: the alarm, smoke alarm, irrigation and room
   controller entries (#190).
+- **D73 — Rule conditions on states and modes, OR groups** (2026-10-31).
+  The Automatic Designer's codes come from the Miniserver itself, not
+  from corpus guesses: the capability table it serves the app
+  (`capabilities/getraw`) is generated into `loxone_config::autopilot_caps`
+  (codes only, `scripts/autopilot_caps.py`), and the web app's enums
+  name the event, action and operator codes (loxone-format.md). The
+  language gains `when <slug>.<state> <op> <value>`, `when mode <mode>
+  [on|off]`, `or` (a new event group) and `then mode <mode> on|off`; a
+  `then` takes any command the table offers for the target's app type.
+  The app type and state UUIDs come from the block's catalogue entry;
+  a block the catalogue does not list (or a type outside the table)
+  works only with codes the config's own rules already use for it. A
+  condition is picked from the table by its state: a digital event
+  with that value for `==`, else the state's one analog event; an
+  ambiguous choice is refused. Decompile lifts every rule of these
+  shapes (the blocks it names become externs) and keeps the rest a
+  comment; on the corpus, every lifted rule compiles back byte for
+  byte (`corpus_rule_declarations_are_byte_fixpoints`). Not covered:
+  weather, date and text conditions, notification/mailer/caller/pause
+  actions.

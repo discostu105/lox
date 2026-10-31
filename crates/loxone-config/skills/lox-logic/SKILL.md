@@ -81,7 +81,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   extern `Notification(…)`; `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")`
   sends it, and `recipients <it> … end` (`user "<title>"`) says who gets it.
 - An Automatic Designer rule is `rule <slug> "Name" … end` (`active`,
-  `when time 07:30`, `when weekday mon`, `then <block> "on"`): the
+  `when time 07:30`, `when weekday mon`, `when <block>.active == on`,
+  `when <block>.value >= 65`, `when mode "Party"`, `or` between groups,
+  `then <block> "on"`, `then mode "Party" off`): the
   config's rule of that name, else created; `removed <slug>` deletes it.
   `loxl adopt --uuid <rule> --as <slug>` takes over one made in the app.
 - A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,

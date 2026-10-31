@@ -882,9 +882,9 @@ fn adopt_rule(
                     .map(|(s, _)| s.clone())
             })
     };
-    let mut decl = super::rule::lift(slug, &apc, &slug_of).map_err(|why| {
+    let mut decl = super::rule::lift(slug, &apc, doc, &slug_of).map_err(|why| {
         fail(format!(
-            "cannot adopt {ident}: {why} (its action targets must be managed or extern)"
+            "cannot adopt {ident}: {why} (the blocks it names must be managed or extern)"
         ))
     })?;
     decl.title = Some(title);
