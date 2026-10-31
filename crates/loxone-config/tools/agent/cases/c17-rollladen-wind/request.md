@@ -1,0 +1,1 @@
+Der Rollladen im Wohnzimmer braucht 40 Sekunden zum Öffnen und 35 Sekunden zum Schließen. Ein Druck auf „Taster Rollladen auf“ soll ihn ganz öffnen, ein Druck auf „Taster Rollladen ab“ ganz schließen; ein Druck während der Fahrt hält ihn an. Bei Wind über 50 km/h soll er ganz auffahren und sich nicht mehr bedienen lassen, solange der Wind anhält.

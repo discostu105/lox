@@ -1,0 +1,1 @@
+Der Heizstab hat eine feste Leistung von 3 kW; ob er läuft, meldet „Heizstab an“. Sein Energieverbrauch soll mit einem Zähler erfasst werden, und sobald er 6 kWh erreicht, soll der „Hinweis Energie Heizstab“ eingeschaltet werden.

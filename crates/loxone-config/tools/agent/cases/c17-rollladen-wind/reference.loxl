@@ -1,0 +1,25 @@
+extern taster_auf = VirtualIn(title: "Taster Rollladen auf")
+extern taster_ab = VirtualIn(title: "Taster Rollladen ab")
+extern wind = VirtualIn(title: "Windgeschwindigkeit")
+extern motor_auf = VirtualOutCmd(title: "Rollladen Wohnzimmer auf")
+extern motor_ab = VirtualOutCmd(title: "Rollladen Wohnzimmer ab")
+
+page "Logik"
+
+sturm = Greater(
+	Input1: wind.Q,
+	Input2: 50,
+)
+
+rollladen = AutoJalousie(
+	"Rollladen Wohnzimmer",
+	EndUp: taster_auf.Q,
+	EndDown: taster_ab.Q,
+	Safety: sturm.Q,
+	Type: 1,
+	TimeEnd: 40,
+	TimeEndDown: 35,
+)
+
+motor_auf.I <- rollladen.OutputUp
+motor_ab.I <- rollladen.OutputDown

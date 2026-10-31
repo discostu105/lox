@@ -59,6 +59,7 @@ count. `--work` keeps the directories (default: a new temp dir, kept),
 |---|---|---|---|---|
 | c01–c12 (one or two blocks per actuator) | 12/12 | 13.5 | 26–69 s | $0.29–0.40 |
 | c13–c16 (timers combined, schedule + override, latch + delay) | 4/4 | 15 | 28–73 s | $0.31–0.40 |
+| c17–c19 (roller shutter with wind alarm, lighting controller, fixed value meter; Lox Logic 0.6) | 3/3 | 13 | 62–66 s | $0.32–0.35 |
 
 Every solution compiled; the agents read `loxl types <Type>` for port
 names and wrote tests of their own before finishing. Findings:
@@ -69,6 +70,11 @@ names and wrote tests of their own before finishing. Findings:
 - The schedule cases (c12, c14) worked once the base config had the
   operating-mode objects: without them a DayTimer has no columns, in
   the Miniserver as in the simulator.
+- c17–c19 need the blocks the simulator models since loxone-config 0.6
+  (AutoJalousie, LightController2, MeterDig). The agents found the
+  right inputs (`EndUp`/`EndDown` for complete open/close, `Safety`,
+  `Move`, `A`/`Ppwr`) from the skill and `loxl types`, and gave the
+  motion mood a percentage.
 - The simulator used to refuse expectations on an actuator's command
   input (a block without a model); an input now reads what its wires
   carry on any block.

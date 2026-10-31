@@ -170,6 +170,25 @@ inline (`<Key>2B35</Key>`).
   Lox Logic (design decision D20): carried verbatim, refused as a source-
   declared wire/value target.
 
+### Canvas labels of input keys
+
+The KB names a block's inputs by their canvas labels (`Tr`, `Co`, `Mo`);
+the XML by keys that often say something else (`EndUp` is *complete
+open*, not an end switch; `EnMove` is *DisP*, disable motion). Oracle
+session 34 read the labels off the canvas for each key
+([oracle-wine.md](oracle-wine.md)):
+
+| Type | Key → label |
+|---|---|
+| `Switch2Button` (*Tastschalter*, push switch) | `InputTrigger` Tr, `On` On, `Reset` Off, `InputDisable` DisPc |
+| `PulseAt` (*Impuls um*) | `InputDisable` Off, `Remanence` Rem |
+| `MeterDig` (*Festwertzähler*, fixed value meter) | `A` S, `R` R |
+| `MeterAbsUni` (*Zähler*) | `Pf` Pf, `Mr` Mr, `R` R |
+| `MeterAbsBi` (*Zähler Bidirektional*) | `Pf` Pf, `Mr1` Mrc, `Mr2` Mrd, `R` R |
+| `AutoJalousie` | `InputTrigger` Tg, `InputTriggerUp` Po, `InputTriggerDown` Pc, `EndUp` Co, `EndDown` Cc, `Shade` So, `AutoShade` Sps, `EnAutoShade` DisSp, `ReactAutoShade` Spr, `Safety` Wa, `Window` Dwc, `Stop` Off, `ManualPosition` Pos, `ManualLamelle` Slat, `Gesture` T5, `InputDisable` DisPc, `Type` Type, `SO` Wap, `Rdd` Rdd, `Deadtime` Bld; `WP` has no row |
+| `CentralShade` | as `AutoJalousie` without `Window`; its outputs `OutOpen` No and `OutClose` Nc count open and closed shades, the shades it drives are its `rec=` list |
+| `LightController2` | `I1`–`I8` Lc1–Lc8, `InputTriggerUp` M+, `InputTriggerDown` M−, `Select` Mood, `Reset` Off, `Sel1`–`Sel8` T5/1–T5/8, `EnMove` DisP, `Move` Mo, `On` On, `Alarm` Alarm, `AlarmClock` Buzzer, `Brightness` Br, `InputDisable` DisPc, `Presence` P, `RtD` Rtd, `MasterBr` MBr, `Remanence` Rem, `MoveOn` Moet |
+
 ## Refs: `<C Type="InputRef"/"OutputRef" Ref=…>`
 
 A ref is the GUI's page-local mirror of an object living elsewhere — a

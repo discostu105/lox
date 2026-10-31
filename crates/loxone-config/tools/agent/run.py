@@ -111,7 +111,7 @@ def grade(binary, fixture, case, solution, work):
 
 
 def run_agent(args, case, work):
-    shutil.copytree(CRATE / "skills" / "loxl", work / ".claude" / "skills" / "loxl")
+    shutil.copytree(CRATE / "skills" / "lox-logic", work / ".claude" / "skills" / "lox-logic")
     (work / "lox.toml").write_text(TOML.format(serial=SERIAL))
     prompt = PROMPT.format(docs=CRATE / "docs",
                            request=(case / "request.md").read_text().strip())

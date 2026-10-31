@@ -59,8 +59,8 @@ pub fn summary(ty: &str) -> Option<&'static str> {
              and brightness inputs; moods with `moods … end`."
         }
         "Switch2Button" => {
-            "Switch: InputTrigger toggles Q, On and Reset switch it on and off; Qon and \
-             Qoff pulse on each change."
+            "Push switch: Q pulses for its duration on each edge at InputTrigger (Qon \
+             on the rising, Qoff on the falling one); On latches Q until Reset."
         }
         "CentralShade" => {
             "Central shading: one command (up, down, shade, safety) to many automatic \
@@ -140,8 +140,8 @@ pub fn summary(ty: &str) -> Option<&'static str> {
              camera."
         }
         "MeterDig" => {
-            "Meter, pulse input: counts pulses into power and energy, with day, week, \
-             month and year totals."
+            "Fixed value meter: while A is on, power is the rating Ppwr and the meter \
+             reading counts its on-time, with day, week, month and year totals."
         }
         "MeterAbsUni" => {
             "Meter, absolute reading: power and a meter reading in one direction \

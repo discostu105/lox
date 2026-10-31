@@ -775,6 +775,25 @@ access, energy) came out of it.
 - Offline-added Tree devices carry `Serial="00000000"`. A page renamed
   in the GUI gets `LtE=`.
 
+## Canvas labels of input keys (session 34, D68) — passed
+
+Ran 2026-10-31 with Loxone Config 17.2.8.28 on a private prefix clone and
+display, offline, for the simulator's new models. Synthetic configs crash
+on open, so the base was `examples/library/shading/shading.Loxone`. One
+compiled probe per block put the block on the page with a `Not` wired
+into every fourth input (`keys[g::4]`, one file per offset `g`). The
+canvas lists wired rows in key order, so each wire pins one key to its
+label without ambiguity. The labels are recorded in
+[loxone-format.md](loxone-format.md) (*Canvas labels of input keys*).
+
+- **Finding — `MeterDig` is the fixed value meter.** Its block reads
+  *Festwertzähler* with the inputs S and R. It is not the pulse meter that
+  the generated block description claimed.
+- **Finding — `EndUp`/`EndDown` are Co/Cc** (complete open/close), and
+  `EnMove` is DisP (disable motion): the keys' names say otherwise.
+- `AutoJalousie.WP` has no canvas row. `CentralShade`'s outputs are
+  counts (No, Nc), not wires to its shades.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

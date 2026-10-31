@@ -186,6 +186,47 @@ pub enum Model {
         pulse: Pulse,
         tr: Edge,
     },
+    /// `Switch2Button` is Loxone's *Push switch* (kb/push-switch).
+    PushSwitch {
+        latched: bool,
+        pulse: Pulse,
+        qon: Pulse,
+        qoff: Pulse,
+        tr: Edge,
+        on: Edge,
+    },
+    /// `PulseAt` with a fixed time of day (`Typ="0"`, kb/pulse-at).
+    PulseAt {
+        /// Seconds since midnight (`Sec=`, loxone-format.md).
+        sec: f64,
+        last_now: f64,
+        /// The running pulse's end, in clock seconds.
+        end: Option<f64>,
+    },
+    /// `MeterDig` is Loxone's *Fixed Value Meter* (kb/fixed-value-meter).
+    FixedMeter {
+        mr: f64,
+        last: Option<(f64, f64)>,
+    },
+    /// `MeterAbsUni` is Loxone's *Meter* (kb/meter).
+    Meter {
+        mr: f64,
+        last: Option<(f64, f64)>,
+        reading: Reading,
+    },
+    /// `MeterAbsBi` is Loxone's *Meter Bidirectional*
+    /// (kb/meter-bidirectional).
+    MeterBi {
+        consumption: Reading,
+        delivery: Reading,
+    },
+    /// `AutoJalousie` is Loxone's *Automatic Shading*
+    /// (kb/automatic-blinds): complete open/close, safety and lock.
+    Blind(Box<Blind>),
+    /// `LightController2` is Loxone's *Lighting Controller*
+    /// (kb/lighting-controller): its motion mood from all off, Off and
+    /// DisPc.
+    Lights(Box<Lights>),
     Threshold {
         q: bool,
         rise: Pulse,
@@ -239,6 +280,9 @@ const SOURCES: &[&str] = &[
     "LoxIRsensor",
     "ModbusASensor",
     "ModbusSensor",
+    // A device's thermal-shutdown status (`IName="TSD"`, a child of the
+    // hardware device): hardware behaviour, not program logic.
+    "OvertempShutdown",
     "TreeAsensor",
     "TreeSensor",
     "VirtualHttpIn",
@@ -308,6 +352,43 @@ impl Model {
                 pulse: Pulse::default(),
                 tr: Edge::default(),
             },
+            "Switch2Button" => Model::PushSwitch {
+                latched: false,
+                pulse: Pulse::default(),
+                qon: Pulse::default(),
+                qoff: Pulse::default(),
+                tr: Edge::default(),
+                on: Edge::default(),
+            },
+            "PulseAt" => match pulse_at_time(el) {
+                Ok(sec) => Model::PulseAt {
+                    sec,
+                    last_now: 0.0,
+                    end: None,
+                },
+                Err(e) => return Support::Unsupported(e),
+            },
+            "MeterDig" => Model::FixedMeter {
+                mr: 0.0,
+                last: None,
+            },
+            "MeterAbsUni" => Model::Meter {
+                mr: 0.0,
+                last: None,
+                reading: Reading::default(),
+            },
+            "MeterAbsBi" => Model::MeterBi {
+                consumption: Reading::default(),
+                delivery: Reading::default(),
+            },
+            "AutoJalousie" => Model::Blind(Box::default()),
+            "LightController2" => match motion_mood(el) {
+                Ok(mood) => Model::Lights(Box::new(Lights {
+                    mood,
+                    ..Lights::default()
+                })),
+                Err(e) => return Support::Unsupported(e),
+            },
             "AnalogThresholdTrigger" => Model::Threshold {
                 q: false,
                 rise: Pulse::default(),
@@ -368,6 +449,13 @@ impl Model {
             Model::OnOffDelay { .. } => &["InputTrigger", "Reset", "TimeOn", "TimeOff"],
             Model::Switch { .. } => &["InputTrigger", "On", "Reset", "InputDisable"],
             Model::PushButton { .. } => &["InputTrigger", "Reset", "InputDisable", "Time"],
+            Model::PushSwitch { .. } => &["InputTrigger", "On", "Reset", "InputDisable", "Time"],
+            Model::PulseAt { .. } => &["InputDisable", "Time"],
+            Model::FixedMeter { .. } => &["A", "R", "Ppwr", "Mro"],
+            Model::Meter { .. } => &["Pf", "Mr", "R", "Mro"],
+            Model::MeterBi { .. } => &["Pf", "Mr1", "Mr2", "R", "Mro1", "Mro2"],
+            Model::Blind(_) => BLIND_READS,
+            Model::Lights(_) => LIGHTS_READS,
             Model::Threshold { .. } => &["Input", "On", "Off", "PulseTime"],
             Model::SrFlipFlop { .. } => &["InputS", "InputR", "InputTrigger"],
             Model::EdgeDetection { .. } => &["Input", "PulseTime"],
@@ -394,9 +482,20 @@ impl Model {
             | Model::OnOffDelay { .. }
             | Model::PushButton { .. }
             | Model::SrFlipFlop { .. }
+            | Model::PulseAt { .. }
             | Model::Mode { .. } => &["Q"],
             Model::Arith(_) | Model::Add4 | Model::Formula(_) => &["AQ"],
-            Model::Switch { .. } => &["Q", "Qon", "Qoff"],
+            Model::Switch { .. } | Model::PushSwitch { .. } => &["Q", "Qon", "Qoff"],
+            Model::FixedMeter { .. } | Model::Meter { .. } => &["OPf", "OMr"],
+            Model::MeterBi { .. } => &["OPf", "OMr1", "OMr2"],
+            Model::Blind(_) => &[
+                "OutputUp",
+                "OutputDown",
+                "OutputPos",
+                "OutputSafety",
+                "OutputLock",
+            ],
+            Model::Lights(_) => LIGHTS_WRITES,
             Model::Threshold { .. } => &["Q", "RisingEdge", "FallingEdge"],
             Model::EdgeDetection { .. } => &["Edge", "RisingEdge", "FallingEdge"],
             Model::DayTimer { .. } => &["AQ", "Qon", "Qoff"],
@@ -632,6 +731,175 @@ impl Model {
                 }
                 io.set_bool("Q", *q);
             }
+            // Every edge at Tr pulses O for Don, the rising one Qon,
+            // the falling one Qoff; On switches O on and it stays on
+            // until Off; Off switches off and, held, locks; DisPc
+            // disables Tr, On and Off (kb/push-switch, its table and
+            // timing diagram). The diagram also pulses Qon/Qoff when On
+            // and Off switch O, which the table does not mention: the
+            // model follows the diagram. A Tr edge during a running pulse
+            // or while On holds O on is undocumented and fails.
+            Model::PushSwitch {
+                latched,
+                pulse,
+                qon,
+                qoff,
+                tr,
+                on,
+            } => {
+                let don = io.i(4).v;
+                if don <= 0.0 {
+                    return Err(format!("Don = {don}: an on-duration of 0 is undocumented"));
+                }
+                let (tr_rise, tr_fall) = tr.update(io.i(0).on());
+                let (on_rise, _) = on.update(io.i(1).on());
+                if !io.i(3).on() {
+                    if io.i(2).on() {
+                        if *latched {
+                            qoff.start(now, don);
+                        }
+                        *latched = false;
+                        pulse.0 = None;
+                    } else {
+                        if on_rise && !*latched {
+                            *latched = true;
+                            qon.start(now, don);
+                        }
+                        if tr_rise || tr_fall {
+                            if *latched {
+                                return Err("an edge at Tr while On holds O on is \
+                                            undocumented"
+                                    .into());
+                            }
+                            if pulse.on(now) {
+                                return Err(format!(
+                                    "an edge at Tr while O still pulses (Don = {don} s) \
+                                     is undocumented"
+                                ));
+                            }
+                            pulse.start(now, don);
+                            if tr_rise {
+                                qon.start(now, don);
+                            } else {
+                                qoff.start(now, don);
+                            }
+                        }
+                    }
+                }
+                let q = *latched || pulse.on(now);
+                let (on, off) = (qon.on(now), qoff.on(now));
+                io.set_bool("Q", q);
+                io.set_bool("Qon", on);
+                io.set_bool("Qoff", off);
+            }
+            // O for Don from the configured time of day, every day; Off
+            // ends the pulse and, held, locks (dominating) (kb/pulse-at).
+            // The pulse starts when the simulated time passes the time
+            // during a tick; a `clock` statement that jumps over it is not
+            // time passing and starts none. A pulse shorter than the tick
+            // shows for that one cycle, like the other pulse outputs.
+            Model::PulseAt { sec, last_now, end } => {
+                const TOL: f64 = 1e-6;
+                let don = io.i(1).v;
+                if don <= 0.0 {
+                    return Err(format!("Don = {don}: an on-duration of 0 is undocumented"));
+                }
+                let to = io.clock.secs;
+                let from = to - (now - *last_now);
+                *last_now = now;
+                let first_day = (from / 86_400.0).floor() as i64;
+                let mut started = false;
+                for day in first_day..=io.clock.day() {
+                    let start = day as f64 * 86_400.0 + *sec;
+                    if start > from + TOL && start <= to + TOL {
+                        *end = Some(start + don);
+                        started = true;
+                    }
+                }
+                if io.i(0).on() {
+                    *end = None;
+                }
+                let q = match *end {
+                    Some(e) => {
+                        let running = to + TOL < e;
+                        if !running {
+                            *end = None;
+                        }
+                        running || started
+                    }
+                    None => false,
+                };
+                io.set_bool("Q", q);
+            }
+            // While S is 1, Pf is the power rating and the meter runs; the
+            // reading comes from the switch-on duration (kb/fixed-value-meter).
+            Model::FixedMeter { mr, last } => {
+                meter_reset(io.i(1))?;
+                let s = io.i(0).v;
+                if s != 0.0 && s != 1.0 {
+                    return Err(format!("S = {s}: only 0 and 1 are documented"));
+                }
+                let pf = if s == 1.0 { io.i(2).v } else { 0.0 };
+                integrate(mr, last, now, pf);
+                let mro = io.i(3).v;
+                io.set("OPf", pf);
+                io.set("OMr", *mr + mro);
+            }
+            // Pf alone: the block is the meter and integrates Pf over
+            // hours; with Mr it maps the reading and passes Pf through
+            // (kb/meter, *Meter reading and units*).
+            Model::Meter { mr, last, reading } => {
+                meter_reset(io.i(2))?;
+                let (pf, mr_in, mro) = (io.i(0), io.i(1), io.i(3).v);
+                let reading_v = if mr_in.connected {
+                    meter_power_needs_pf(pf)?;
+                    reading.update(mr_in.v)?
+                } else {
+                    if pf.v < 0.0 {
+                        return Err(format!(
+                            "Pf = {}: a negative power at a unidirectional meter is \
+                             undocumented (its range is 0…∞)",
+                            pf.v
+                        ));
+                    }
+                    integrate(mr, last, now, pf.v);
+                    *mr
+                };
+                io.set("OPf", pf.v);
+                io.set("OMr", reading_v + mro);
+            }
+            // Mrc/Mrd map the consumption and delivery readings, Pf passes
+            // through (kb/meter-bidirectional). How the block splits a Pf
+            // alone into the two readings is not on the block's page.
+            Model::MeterBi {
+                consumption,
+                delivery,
+            } => {
+                meter_reset(io.i(3))?;
+                let (pf, mr1, mr2) = (io.i(0), io.i(1), io.i(2));
+                if !mr1.connected && !mr2.connected && pf.connected {
+                    return Err("Pf alone: how the block splits it into consumption and \
+                                delivery readings is undocumented"
+                        .into());
+                }
+                meter_power_needs_pf(pf)?;
+                let c = if mr1.connected {
+                    consumption.update(mr1.v)?
+                } else {
+                    0.0
+                };
+                let d = if mr2.connected {
+                    delivery.update(mr2.v)?
+                } else {
+                    0.0
+                };
+                let (mro1, mro2) = (io.i(4).v, io.i(5).v);
+                io.set("OPf", pf.v);
+                io.set("OMr1", c + mro1);
+                io.set("OMr2", d + mro2);
+            }
+            Model::Blind(b) => b.step(io)?,
+            Model::Lights(l) => l.step(io)?,
             // O switches on above Von and off below Voff; with Von below
             // Voff the other way round; with both equal O is on only at
             // exactly that value. On/Off pulse for Pd at the edges
@@ -726,6 +994,552 @@ impl Model {
         }
         Ok(())
     }
+}
+
+/// Inputs of an `AutoJalousie` in [`Model::reads`] order; the first
+/// [`BLIND_REFUSED`] are inputs without a model, the last two of those
+/// taking a value.
+const BLIND_READS: &[&str] = &[
+    "InputTrigger",
+    "InputTriggerUp",
+    "InputTriggerDown",
+    "AutoShade",
+    "ReactAutoShade",
+    "Gesture",
+    "ManualPosition",
+    "ManualLamelle",
+    "EndUp",
+    "EndDown",
+    "Shade",
+    "Safety",
+    "Window",
+    "Stop",
+    "InputDisable",
+    "TimeEnd",
+    "TimeEndDown",
+    "SO",
+    "Rdd",
+    "Type",
+    "Back",
+];
+const BLIND_REFUSED: usize = 8;
+
+/// Which way a blind is driven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dir {
+    Up,
+    Down,
+}
+
+/// A running drive: its direction and when the output ends, in sim
+/// seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Drive {
+    dir: Dir,
+    until: f64,
+}
+
+/// An `AutoJalousie`'s state. The position is the block's estimate from
+/// run time, 0 open … 1 closed; a fresh simulation starts open.
+#[derive(Debug, Clone, Default)]
+pub struct Blind {
+    pos: f64,
+    drive: Option<Drive>,
+    last_now: f64,
+    co: Edge,
+    cc: Edge,
+    so: Edge,
+    /// Wa or Dwc as last acted on: `(wind, window)`.
+    safety: (bool, bool),
+    stop_held: bool,
+}
+
+impl Blind {
+    /// Complete open runs Op for the whole Opd "regardless of the current
+    /// position" (a reference run); complete close runs Cl only for "the
+    /// determined remaining run time", or the whole Cld with Rdd
+    /// (kb/automatic-blinds, *Complete movement, end positions and
+    /// remanence*; parameter Rdd).
+    fn complete(&self, dir: Dir, now: f64, opd: f64, cld: f64, rdd: bool) -> Drive {
+        let len = match dir {
+            Dir::Up => opd,
+            Dir::Down if rdd => cld,
+            Dir::Down => (1.0 - self.pos) * cld,
+        };
+        Drive {
+            dir,
+            until: now + len,
+        }
+    }
+
+    fn start(&mut self, d: Drive) -> Result<(), String> {
+        if let Some(run) = self.drive
+            && run.dir != d.dir
+        {
+            return Err("a move reverses a running one: the motor lock between \
+                        direction changes (Mld) is not simulated"
+                .into());
+        }
+        self.drive = Some(d);
+        Ok(())
+    }
+
+    fn step(&mut self, io: &mut Io) -> Result<(), String> {
+        let now = io.now;
+        let v = |k: usize| io.i(k);
+        for (k, key) in BLIND_READS[..BLIND_REFUSED].iter().enumerate() {
+            let input = v(k);
+            // Pos and Slat take a value, the others a pulse.
+            if input.on() || (k >= 6 && input.connected) {
+                return Err(not_simulated("AutoJalousie", key));
+            }
+        }
+        let (opd, cld) = (v(15).v, v(16).v);
+        let (wap, rdd, kind, rd) = (v(17).v, v(18).on(), v(19).v, v(20).v);
+        if opd <= 0.0 || cld <= 0.0 {
+            return Err("an opening or closing duration of 0 is undocumented".into());
+        }
+        // The position follows the drive since the last cycle, linearly
+        // over Opd and Cld — the reading of "remaining run time".
+        if let Some(d) = self.drive {
+            let ran = d.until.min(now) - self.last_now;
+            if ran > 0.0 {
+                self.pos = match d.dir {
+                    Dir::Up => (self.pos - ran / opd).max(0.0),
+                    Dir::Down => (self.pos + ran / cld).min(1.0),
+                };
+            }
+            if now + EPS >= d.until {
+                self.drive = None;
+            }
+        }
+        self.last_now = now;
+
+        let disabled = v(14).on();
+        let (co, _) = self.co.update(v(8).on());
+        let (cc, _) = self.cc.update(v(9).on());
+        let (so, _) = self.so.update(v(10).on());
+        let (wind, window, stop) = (v(11).on(), v(12).on(), v(13).on());
+
+        // Off dominates and "overrules the safetyActive, as not even
+        // moving to the safety position is allowed" (Structure File,
+        // Jalousie `locked`): it stops, and locks while held.
+        if stop {
+            self.drive = None;
+            self.stop_held = true;
+        } else {
+            if self.stop_held && (wind || window) {
+                return Err("Off ends while Wa or Dwc is on: what the block does \
+                            then is undocumented"
+                    .into());
+            }
+            self.stop_held = false;
+            if (wind, window) != self.safety {
+                let (was_wind, was_window) = self.safety;
+                if was_window && !window {
+                    return Err("Dwc ends: what the block does when the window \
+                                closes is undocumented"
+                        .into());
+                }
+                if wind && window && wap != 0.0 {
+                    return Err("Wa (to close, Wap = 1) and Dwc (to open) at once \
+                                is undocumented"
+                        .into());
+                }
+                // Wa moves to the wind alarm position Wap (0 complete open,
+                // 1 complete close), Dwc opens completely; both lock. At the
+                // end of Wa "automatic conditions are not re-evaluated": the
+                // lock lifts and nothing moves.
+                if (window && !was_window) || (wind && !was_wind && wap == 0.0) {
+                    self.start(self.complete(Dir::Up, now, opd, cld, rdd))?;
+                } else if wind && !was_wind {
+                    if wap != 1.0 {
+                        return Err(format!("Wap = {wap}: only 0 and 1 are documented"));
+                    }
+                    self.start(self.complete(Dir::Down, now, opd, cld, rdd))?;
+                }
+                self.safety = (wind, window);
+            }
+            if !wind && !window && !disabled {
+                // Co and Cc: "If in motion, stops."
+                if (co || cc) && self.drive.is_some() {
+                    self.drive = None;
+                } else if co {
+                    self.start(self.complete(Dir::Up, now, opd, cld, rdd))?;
+                } else if cc {
+                    self.start(self.complete(Dir::Down, now, opd, cld, rdd))?;
+                } else if so {
+                    self.slightly_open(now, kind, rd, opd, cld)?;
+                }
+            }
+        }
+        let dir = self.drive.map(|d| d.dir);
+        let pos = self.pos;
+        io.set_bool("OutputUp", dir == Some(Dir::Up));
+        io.set_bool("OutputDown", dir == Some(Dir::Down));
+        io.set("OutputPos", pos);
+        io.set_bool("OutputSafety", wind || window);
+        io.set_bool("OutputLock", stop);
+        Ok(())
+    }
+
+    /// So: roller blinds, curtains and awnings "move into position
+    /// according to parameter (Rd)", open 0.1 … closed 1.0
+    /// (kb/automatic-blinds). Venetian blinds tilt their slats, which is
+    /// not simulated.
+    fn slightly_open(
+        &mut self,
+        now: f64,
+        kind: f64,
+        rd: f64,
+        opd: f64,
+        cld: f64,
+    ) -> Result<(), String> {
+        if !matches!(kind as i64, 1 | 2 | 4 | 5 | 6) || kind.fract() != 0.0 {
+            return Err(format!(
+                "So on shading type {kind}: venetian blinds tilt their slats, \
+                 which is not simulated"
+            ));
+        }
+        if !(0.1..=1.0).contains(&rd) {
+            return Err(format!("So with Rd = {rd}: the position must be 0.1 … 1.0"));
+        }
+        if self.drive.is_some() {
+            return Err("So while the blind moves is undocumented".into());
+        }
+        let d = if rd > self.pos {
+            Drive {
+                dir: Dir::Down,
+                until: now + (rd - self.pos) * cld,
+            }
+        } else {
+            Drive {
+                dir: Dir::Up,
+                until: now + (self.pos - rd) * opd,
+            }
+        };
+        if d.until > now {
+            self.start(d)?;
+        }
+        Ok(())
+    }
+}
+
+/// Inputs of a `LightController2` in [`Model::reads`] order: the
+/// [`LIGHTS_MODELLED`] ones, then those without a model.
+const LIGHTS_READS: &[&str] = &[
+    "Move",
+    "Presence",
+    "Brightness",
+    "Reset",
+    "InputDisable",
+    "BrightnessLimit",
+    "MoveOn",
+    "MoveTimeout",
+    "MoveIgnore",
+    "MoveScene",
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "InputTriggerUp",
+    "InputTriggerDown",
+    "Select",
+    "Sel1",
+    "Sel2",
+    "Sel3",
+    "Sel4",
+    "Sel5",
+    "Sel6",
+    "Sel7",
+    "Sel8",
+    "EnMove",
+    "On",
+    "Alarm",
+    "AlarmClock",
+    "RtD",
+    "MasterBr",
+];
+const LIGHTS_MODELLED: usize = 10;
+const LIGHTS_WRITES: &[&str] = &[
+    "AQ1",
+    "AQ2",
+    "AQ3",
+    "AQ4",
+    "AQ5",
+    "AQ6",
+    "AQ7",
+    "AQ8",
+    "AQ9",
+    "AQ10",
+    "AQ11",
+    "AQ12",
+    "AQ13",
+    "AQ14",
+    "AQ15",
+    "AQ16",
+    "AQ17",
+    "AQ18",
+    "OutputReset",
+];
+
+/// A `LightController2`'s state: off, or showing its motion mood.
+#[derive(Debug, Clone, Default)]
+pub struct Lights {
+    /// The motion mood: its name and `Q1` … `Q18`.
+    mood: (String, Vec<u32>),
+    lit: bool,
+    /// When the lights go off after motion ended.
+    off_at: Option<f64>,
+    /// Set by a manual off: the automatic stays disabled until this
+    /// time, which motion pushes back by Pto.
+    suppressed_until: Option<f64>,
+    move_edge: Edge,
+    presence_edge: Edge,
+    reset_edge: Edge,
+    reset_pulse: bool,
+}
+
+impl Lights {
+    fn step(&mut self, io: &mut Io) -> Result<(), String> {
+        let now = io.now;
+        let v = |k: usize| io.i(k);
+        for (k, key) in LIGHTS_READS.iter().enumerate().skip(LIGHTS_MODELLED) {
+            let input = v(k);
+            // Select (Mood) and MasterBr take a value, the others a pulse.
+            let valued = matches!(*key, "Select" | "MasterBr");
+            if input.on() || (valued && input.connected) {
+                return Err(not_simulated("LightController2", key));
+            }
+        }
+        let (motion, presence, br) = (v(0), v(1), v(2).v);
+        let (reset, disabled) = (v(3).on(), v(4).on());
+        let (brt, moet, met, pto, pm) = (v(5).v, v(6).v, v(7).v, v(8).v, v(9).v);
+        if pm != 0.0 {
+            return Err(format!(
+                "presence mood Pm = {pm}: how its ID names a mood is undocumented"
+            ));
+        }
+        if motion.on() && presence.on() {
+            return Err("Mo and P at once is not simulated".into());
+        }
+        let (_, move_fell) = self.move_edge.update(motion.on());
+        let (_, presence_fell) = self.presence_edge.update(presence.on());
+        let (reset_rose, _) = self.reset_edge.update(reset && !disabled);
+        let wants = motion.on() || presence.on();
+        let timeout = if presence.connected { 0.01 } else { pto };
+
+        // Off: "Pulse (< 1 s): Outputs are reset / switched off. Constant
+        // 1 (> 1 s): Block is locked. Dominating input"; 2C pulses on it
+        // (one cycle, like the other pulse outputs). DisPc disables it.
+        self.reset_pulse = reset_rose;
+        if reset && !disabled {
+            // Switching the lights off by hand disables the automatic for
+            // Pto, restarted by motion; with P wired Pto is 0.01 s, so the
+            // automatic returns once presence has ended (parameter Pto).
+            if self.lit && pto > 0.0 {
+                self.suppressed_until = Some(now + timeout);
+            }
+            self.lit = false;
+            self.off_at = None;
+        } else {
+            if let Some(t) = self.suppressed_until {
+                if wants {
+                    self.suppressed_until = Some(now + timeout);
+                } else if now + EPS >= t {
+                    self.suppressed_until = None;
+                }
+            }
+            // Mo and P activate the motion mood "when 1"; the brightness
+            // counts only while every light is off, and above Brt motion
+            // and presence are ignored.
+            if wants && !self.lit && br <= brt && self.suppressed_until.is_none() {
+                self.lit = true;
+            }
+            if wants {
+                self.off_at = None;
+            }
+            // P: the mood "remains active as long as (P) is ON".
+            if presence_fell && self.lit && !motion.on() {
+                self.lit = false;
+            }
+            // Mo: off Moet after the falling edge, or Met when that is
+            // shorter; Moet 0 never switches off.
+            if move_fell && self.lit {
+                if met <= 0.0 {
+                    return Err("Met = 0 with motion: which timeout applies is \
+                                undocumented"
+                        .into());
+                }
+                if moet > 0.0 {
+                    self.off_at = Some(now + moet.min(met));
+                }
+            }
+            if let Some(t) = self.off_at
+                && now + EPS >= t
+            {
+                self.lit = false;
+                self.off_at = None;
+            }
+        }
+        let (name, qs) = &self.mood;
+        for (n, key) in LIGHTS_WRITES[..18].iter().enumerate() {
+            let q = qs.get(n).copied().unwrap_or(0);
+            let value = if self.lit {
+                mood_output(name, n, q)?
+            } else {
+                0.0
+            };
+            io.set(key, value);
+        }
+        let pulse = self.reset_pulse;
+        io.set_bool("OutputReset", pulse);
+        Ok(())
+    }
+}
+
+/// "its input Tg (`InputTrigger`) is not simulated": by canvas label where
+/// one is known.
+fn not_simulated(block_type: &str, key: &str) -> String {
+    match crate::canvas_labels::label(block_type, key) {
+        Some(label) if label != key => format!("its input {label} (`{key}`) is not simulated"),
+        _ => format!("its input `{key}` is not simulated"),
+    }
+}
+
+/// The output value of a mood's circuit: off is 0 and a percentage is
+/// that value (on a switch or dimmer circuit); a switch circuit's `on`
+/// (stored 1) could read 1 or 100, and colour values have no documented
+/// output encoding.
+fn mood_output(mood: &str, n: usize, q: u32) -> Result<f64, String> {
+    use crate::moods::MoodValue;
+    match crate::moods::decode(q) {
+        MoodValue::Off => Ok(0.0),
+        MoodValue::Pct(p) if q >> 28 <= 1 => Ok(f64::from(p)),
+        v => Err(format!(
+            "mood \"{mood}\" sets AQ{} to `{v}`: what the output reads for it is \
+             undocumented (give it a percentage)",
+            n + 1
+        )),
+    }
+}
+
+/// The controller's motion mood: the mood flagged `Move="true"`, which
+/// `<LSConfig ScMv=>` names (loxone-format.md, *LightController2 moods*).
+fn motion_mood(el: &Element) -> Result<(String, Vec<u32>), String> {
+    let moods = crate::moods::Moods::read(el)
+        .ok_or("it has no moods yet (Loxone Config writes them on its first save)")?;
+    let scenes = el
+        .child_elements()
+        .find(|c| c.name == "LightscenesC")
+        .ok_or("no moods")?;
+    let flagged: Vec<usize> = scenes
+        .child_elements()
+        .filter(|c| c.name == "LightsceneC")
+        .enumerate()
+        .filter(|(_, c)| c.attr("Move") == Some("true"))
+        .map(|(i, _)| i)
+        .collect();
+    let [ix] = flagged[..] else {
+        return Err(format!("{} moods flagged for motion", flagged.len()));
+    };
+    let mood = &moods.moods[ix];
+    let named = el
+        .child_elements()
+        .find(|c| c.name == "LSConfig")
+        .and_then(|c| c.attr("ScMv"));
+    if named != mood.sid.as_deref() {
+        return Err(
+            "its motion settings name another mood than the one flagged \
+                    for motion"
+                .into(),
+        );
+    }
+    Ok((mood.name.clone(), mood.qs.clone()))
+}
+
+/// The time of day of a `PulseAt` (`Sec=`), for the fixed-time kind
+/// only: other `Typ=` values (sunrise, hour pulse, …) and `AutP=` have no
+/// documented format.
+fn pulse_at_time(el: &Element) -> Result<f64, String> {
+    match el.attr("Typ") {
+        None | Some("0") => {}
+        Some(t) => {
+            return Err(format!(
+                "a pulse of kind `Typ=\"{t}\"` (undocumented format)"
+            ));
+        }
+    }
+    if el.attr("AutP").is_some() {
+        return Err("its `AutP=` setting (undocumented format)".into());
+    }
+    let sec = el
+        .attr("Sec")
+        .and_then(parse_num)
+        .ok_or("no `Sec=` time of day")?;
+    if !(0.0..86_400.0).contains(&sec) {
+        return Err(format!("`Sec=\"{sec}\"` is not a time of day"));
+    }
+    Ok(sec)
+}
+
+/// A meter reading from an Mr input. "Only increasing or constant meter
+/// readings are allowed; decreasing or jumping to 0 readings are
+/// discarded" (kb/meter, *Detection of Invalid Meter Readings*).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Reading(Option<f64>);
+
+impl Reading {
+    fn update(&mut self, v: f64) -> Result<f64, String> {
+        match self.0 {
+            None => self.0 = Some(v),
+            Some(was) if v < was => {}
+            // The page discards "unrealistically high" increases by two
+            // conditions without saying whether both must hold.
+            Some(was) if v - was > 10_000.0 => {
+                return Err(format!(
+                    "the meter reading jumps from {was} to {v}: whether Loxone \
+                     discards that as invalid is ambiguous"
+                ));
+            }
+            Some(_) => self.0 = Some(v),
+        }
+        Ok(self.0.unwrap_or(0.0))
+    }
+}
+
+/// R resets "meter reading outputs" on a pulse and locks while on; which
+/// outputs and to what is not documented.
+fn meter_reset(r: Input) -> Result<(), String> {
+    if r.on() {
+        return Err("R is on: which readings a reset clears, and to what, is \
+                    undocumented"
+            .into());
+    }
+    Ok(())
+}
+
+/// With Mr and no Pf the block estimates the power from the last two
+/// readings, which "only works if the same value causes an additional
+/// edge" — edges the simulator does not see.
+fn meter_power_needs_pf(pf: Input) -> Result<(), String> {
+    if !pf.connected {
+        return Err("Mr without Pf: the power from meter readings is not simulated".into());
+    }
+    Ok(())
+}
+
+/// Add the energy since the last cycle: the power of the last cycle times
+/// the time in hours ("the units for Pf/Mr must be hour-related", kb/meter).
+fn integrate(mr: &mut f64, last: &mut Option<(f64, f64)>, now: f64, pf: f64) {
+    if let Some((t, p)) = *last {
+        *mr += p * (now - t) / 3600.0;
+    }
+    *last = Some((now, pf));
 }
 
 /// The built-in mode number from a mode's fixed UUID

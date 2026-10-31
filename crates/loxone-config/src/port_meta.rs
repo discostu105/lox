@@ -47,8 +47,21 @@ const fn m(
     }
 }
 
-/// The documented metadata of a builtin block's port, if any.
+/// The documented metadata of a builtin block's port, if any. A canvas
+/// label the documentation lacks comes from the oracle-verified table
+/// in `canvas_labels`.
 pub fn port_meta(block_type: &str, port: &str) -> Option<PortMeta> {
+    let label = crate::canvas_labels::label(block_type, port);
+    match documented(block_type, port) {
+        Some(meta) => Some(PortMeta {
+            label: meta.label.or(label),
+            ..meta
+        }),
+        None => label.map(|l| m(None, Some(l), None, None, None)),
+    }
+}
+
+fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
     Some(match (block_type, port) {
         ("AnalogMultiplexer2", "Input1") => m(None, Some("V1"), None, None, Some("0")),
         ("AnalogMultiplexer2", "Input2") => m(None, Some("V2"), None, None, Some("0")),

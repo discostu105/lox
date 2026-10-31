@@ -1250,8 +1250,10 @@ Config numbers them; one the set leaves out is deleted — except the
 built-in "Viel Licht" (the motion mood) and any mood the controller's
 motion settings name, which must stay in the set (with values of your
 choice). A claim whose moods already match changes nothing, byte for
-byte. Moods select through the controller's `Sel1`…`Sel8` inputs in list
-order, so wiring a switch's buttons to them is ordinary source.
+byte. Wiring a switch's buttons to the controller's T5 inputs (`Sel1`…`Sel8`)
+is ordinary source; which mood each input selects is assigned in Loxone
+Config's mood dialog, and where that assignment is stored is not yet a
+format fact.
 
 A controller minted from source has no moods until Loxone Config saves
 it; a claim on it first writes what that save would — the stock "Viel

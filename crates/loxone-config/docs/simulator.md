@@ -50,7 +50,12 @@ of a guessed value.
   value. The trace keeps 500 cycles with changes.
 - Sources read 0 until the test sets them: virtual inputs (`VirtualIn`,
   HTTP/UDP inputs and their commands, `VirtualTextIn`), digital and
-  analog inputs, Tree, Air, 1-Wire, RS485, KNX and Modbus sensors.
+  analog inputs, Tree, Air, 1-Wire, RS485, KNX and Modbus sensors, and a
+  device's thermal-shutdown status (`OvertempShutdown`).
+- A model refuses an input it does not simulate only when that input
+  matters: a pulse input when it is on, a value input (a position, a
+  mood number) when it is connected. Such an input wired from a block
+  without a model still stops the test; set it, or the port behind it.
 
 ## Block models
 
@@ -77,13 +82,22 @@ The KB pages are at `https://www.loxone.com/enen/kb/<page>/`.
 | `SRFlipFlop` | SR flip-flop | kb `flipflop-sr`, timing diagram | S sets and dominates, R resets, a rising Tg toggles | remanence |
 | `EdgeDetection` | Edge detection | kb `edge-detection`, timing diagram | pulses of Pd at every edge (P), rising (On), falling (Off); a new edge restarts the pulse | — |
 | `AnalogThresholdTrigger` | Threshold switch | kb `threshold-switch` | hysteresis between Von and Voff (inverted when Von < Voff, only the exact value when equal); On/Off pulse for Pd | remanence |
+| `Switch2Button` | Push switch | kb `push-switch`, its table and timing diagram | Q pulses for Don on each edge at Tr, Qon on the rising, Qoff on the falling one; On latches Q until Off; Off switches off and, held, locks; DisPc disables Tr, On and Off. Qon and Qoff also pulse when On and Off switch Q: the diagram shows it, the output table does not (the model follows the diagram) | a Tr edge while Q still pulses or while On holds it (undocumented: refused); Don 0 (refused) |
+| `PulseAt` | Pulse at | kb `pulse-at`; loxone-format.md (`Sec=`) | the fixed time of day (`Typ="0"`): Q on for Don from the moment a tick passes `Sec=`, every day; a pulse shorter than the tick shows for that cycle; Off ends it and, held, locks. A `clock` statement that jumps over the time is not time passing and starts no pulse | the other kinds (sunrise, hour pulse, …: refused, their format is not documented), `AutP=`, one-off dates, remanence |
+| `MeterDig` | Fixed value meter (oracle session 34: not a pulse meter) | kb `fixed-value-meter`; units from kb `meter` | OPf = Ppwr while A (S) is 1, else 0; OMr counts Ppwr × the on-time in hours, plus Mro. Each step counts with the power of the cycle before it | A other than 0 or 1 (refused); R on (refused: what a reset clears is undocumented); the period readings (day, week, month, year and the previous ones) |
+| `MeterAbsUni` | Meter | kb `meter`, *Meter reading and units* | Pf alone: OMr integrates Pf over hours, plus Mro; with Mr: OMr = the reading + Mro, a decreasing reading is discarded; OPf = Pf | Mr without Pf (the power from readings needs edges the simulator does not see); a negative Pf; a jump of more than 10000 (the discard rule is ambiguous); R on; the period readings; the relative-metering property (its attribute is unknown: the model assumes absolute readings) |
+| `MeterAbsBi` | Meter bidirectional | kb `meter-bidirectional` | OMr1 (Mrc) and OMr2 (Mrd) map their readings plus Mro1/Mro2, decreasing readings discarded; OPf = Pf | Pf alone (how the block splits it into consumption and delivery is not on its page), Mr without Pf, R on, the period readings |
+| `AutoJalousie` | Automatic shading | kb `automatic-blinds`, *Complete movement, end positions and remanence*; Structure File *Jalousie* | Co: Op for the whole Opd (a reference run); Cc: Cl for the remaining run time (the whole Cld with Rdd); Co or Cc while moving stops. Pos (0 open … 1 closed) follows the run time linearly over Opd/Cld — the reading of "remaining run time"; a fresh simulation starts open. Wa moves to Wap (0 open, 1 closed) and locks, Dwc opens and locks, Wds = Wa or Dwc; at the end of Wa the lock lifts and nothing moves. Off stops, locks while held and overrules Wa/Dwc; OutputLock = Off. So moves a roller blind, curtain or awning to the position Rd. DisPc disables Co, Cc and So | Tg, Po, Pc, Sps, Spr, T5 (refused when on), Pos and Slat (refused when connected): the sun automatic, slats, Mld/backlash/minimum-travel timing, So on venetian blinds, the end of Dwc, Off ending during Wa/Dwc, Wa to close with Dwc at once, a move reversing a running one (all refused); TPos, AQpp, Slat, Sp |
+| `LightController2` | Lighting controller | kb `lighting-controller`; moods: loxone-format.md *LightController2 moods* | Mo or P switch on the motion mood (the mood flagged `Move="true"`, which `ScMv=` names) when every light is off and Br ≤ Brt; Mo: off Moet after its falling edge (Met when shorter, Moet 0 never); P: off when it ends. Off resets every circuit and, held, locks; 2C pulses for one cycle; after an Off that switched lights off the automatic waits until there was no motion for Pto (0.01 s with P wired). DisPc disables Off. A circuit's output is its mood value: 0 for off, the percentage on a switch or dimmer circuit | Lc1–8, M+, M−, Mood, T5/1–8, DisP, On, Alarm, Buzzer, Rtd (refused when on), MBr (refused when connected); a mood value `on` (1 or 100?) and colour values (refused when shown); Pm other than 0 (how an ID names a mood is undocumented); Mo and P at once; Met 0 with motion; motion while a manual mood is on cannot occur (every manual input is refused); M, 3C, AQ19/AQ20, fading |
 | `Mode` | operating mode | loxone-format.md *Operating modes* | Monday–Sunday (built-in modes 4–10) follow the clock; all others off unless the test sets them | a mode with `I` wired is refused |
 | `DayTimer` | Schedule | kb `timerscheduler`; loxone-format.md *DayTimer* | the entry of the active mode's column covering the time of day: digital 1, analog its value, else 0 / the default value; entries needing activation switch on with a rising edge at Act, for Don seconds when set; Reset switches off; On/Off pulse for one cycle | manual mode (refused); two active modes of the timer (refused: which one wins is undocumented); remanence, the remaining-time output |
 
 ## Not modelled
 
-Every other type: lighting and shading controllers, intelligent room
-controllers, alarms, pulse generators (the enable input is
+Every other type: central lighting and shading (`CentralShade`: what
+its counts of open and closed shades count is undocumented), intelligent
+room controllers, alarms, access schedules (`SwitchingTimer`, not program
+logic), pulse generators (the enable input is
 undocumented), constants (where the value is stored is not yet a format
 fact) and all integrations. A test can still cover logic downstream of
 them by setting their outputs. A new model needs a KB page or a format
