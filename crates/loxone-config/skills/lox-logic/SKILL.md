@@ -117,8 +117,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - `loxl test` simulates only documented behavior
   (`docs/simulator.md`) and names any block or input in the way. A
   lighting controller simulates motion, Off, M+/M−, single clicks on
-  T5, On and Buzzer, and output M; double clicks, long clicks, Mood,
-  Alarm and motion after a manual mood change are refused.
+  T5, Mood, On, Buzzer, Alarm (set Afi and MaxAbr) and output M; double
+  clicks, long clicks, Lc1–8 and motion after a manual step to off are
+  refused.
 - To take over logic someone drew in the GUI, use `loxl adopt`, then
   confirm with `loxl diff --exit-code` that the takeover changed nothing.
   `loxl coverage` lists what is not managed yet, including the

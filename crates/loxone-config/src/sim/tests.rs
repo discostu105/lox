@@ -1113,24 +1113,131 @@ fn lights_refuse_unverified_manual_operation() {
     });
     assert!(err.contains("more than 30 s"), "{err}");
     let err = refused(&|sim| {
-        click(sim, "p13-AQ");
+        for _ in 0..4 {
+            click(sim, "p13-AQ");
+        }
         click(sim, "p18-AQ");
     });
-    assert!(err.contains("Mo or P after a manual mood change"), "{err}");
+    assert!(err.contains("switched off by M+, M−, T5 or Mood"), "{err}");
     let err = refused(&|sim| {
         click(sim, "p18-AQ");
         click(sim, "p11-AQ");
     });
-    assert!(err.contains("while the motion automatic"), "{err}");
-    let err = refused(&|sim| {
-        click(sim, "p11-AQ");
-        sim.tick(3600.0);
-    });
-    assert!(err.contains("after Met = 3600 s"), "{err}");
+    assert!(err.contains("wait to go off"), "{err}");
     let err = refused(&|sim| {
         sim.set("p15-AQ", 1.0);
         sim.tick(1.0);
         click(sim, "p11-AQ");
     });
     assert!(err.contains("while On or Buzzer is held"), "{err}");
+}
+
+#[test]
+fn lights_m_plus_and_t5_act_on_release_on_acts_on_press() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    sim.set("p11-AQ", 1.0);
+    sim.tick(0.1);
+    sim.tick(2.0);
+    assert_eq!(sim.read("p20-Scene"), 0.0, "M+ held");
+    sim.set("p11-AQ", 0.0);
+    sim.tick(0.1);
+    assert_eq!(sim.read("p20-Scene"), 99.0);
+    click(&mut sim, "p17-AQ");
+    sim.set("p15-AQ", 1.0);
+    sim.tick(0.1);
+    assert_eq!(sim.read("p20-Scene"), 99.0, "On held");
+}
+
+#[test]
+fn lights_manual_moods_and_motion_go_off_met_after_motion() {
+    let d = doc(&mood_lights(&["MoveTimeout=20"]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    // A mood chosen by hand stays without motion, Met or not.
+    click(&mut sim, "p13-AQ");
+    sim.tick(100.0);
+    assert_eq!(sim.read("p20-Scene"), 1.0);
+    // Motion keeps it; Met (not Moet) after motion ends it goes off.
+    click(&mut sim, "p18-AQ");
+    assert_eq!(sim.read("p20-Scene"), 1.0);
+    sim.tick(19.0);
+    assert_eq!(sim.read("p20-Scene"), 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p20-Scene"), 0.0);
+    // A mood chosen during motion goes off Met after it too.
+    sim.set("p18-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p20-Scene"), 99.0);
+    click(&mut sim, "p14-AQ");
+    assert_eq!(sim.read("p20-Scene"), 2.0);
+    sim.set("p18-AQ", 0.0);
+    sim.tick(0.1);
+    sim.tick(19.8);
+    assert_eq!(sim.read("p20-Scene"), 2.0);
+    sim.tick(0.2);
+    assert_eq!(sim.read("p20-Scene"), 0.0);
+}
+
+#[test]
+fn lights_mood_selects_by_id_when_it_changes() {
+    let d = doc(&(vin(19) + &mood_lights(&["Select<p19-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    sim.tick(0.5);
+    let mut select = |v: f64| {
+        sim.set("p19-AQ", v);
+        sim.tick(0.5);
+        sim.read("p20-Scene")
+    };
+    let seen: Vec<f64> = [2.0, 0.0, 777.0, 778.0, 99.0, 1.0, 4.0, 3.0, 102.0]
+        .into_iter()
+        .map(&mut select)
+        .collect();
+    assert_eq!(seen, [2.0, 0.0, 99.0, 0.0, 99.0, 1.0, 99.0, 3.0, 99.0]);
+    // A constant selects nothing.
+    let d = doc(&mood_lights(&["Select=2"]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    sim.tick(1.0);
+    assert_eq!(sim.read("p20-Scene"), 0.0);
+}
+
+#[test]
+fn lights_alarm_flashes_every_circuit_and_returns_to_the_mood() {
+    let alarm = ["Alarm<p19-AQ", "AlarmPeriod=10", "AlarmBrightness=70"];
+    let d = doc(&(vin(19) + &mood_lights(&alarm)));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    click(&mut sim, "p13-AQ");
+    sim.set("p19-AQ", 1.0);
+    let seen: Vec<(f64, f64)> = (0..5)
+        .map(|_| {
+            sim.tick(2.5);
+            (sim.read("p20-Scene"), sim.read("p20-AQ1"))
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (99.0, 70.0),
+            (99.0, 70.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (99.0, 70.0)
+        ],
+        "Afi 10: 5 s on, 5 s off"
+    );
+    sim.set("p19-AQ", 0.0);
+    sim.tick(0.1);
+    assert_eq!((sim.read("p20-Scene"), sim.read("p20-AQ1")), (1.0, 20.0));
+    // Without Afi and MaxAbr on the block Config flashed at another rate.
+    let d = doc(&(vin(19) + &mood_lights(&["Alarm<p19-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-Scene").unwrap();
+    sim.set("p19-AQ", 1.0);
+    sim.tick(0.1);
+    let err = sim.check("p20-Scene").unwrap_err();
+    assert!(err.contains("Alarm without Afi and MaxAbr"), "{err}");
 }
