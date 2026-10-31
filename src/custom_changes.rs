@@ -27,6 +27,10 @@ pub(crate) struct CustomChange {
     /// The program file has no object with this UUID: created at runtime
     /// (an autopilot rule made in the app, say)
     pub new: bool,
+    /// The upload deletes the object too (`removed` in the source): its
+    /// custom change goes with it and nothing is lost
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
 impl CustomChange {
@@ -46,6 +50,9 @@ impl CustomChange {
         }
         if self.new {
             what.push("not in the program file".into());
+        }
+        if self.removed {
+            what.push("the upload deletes it too".into());
         }
         if !what.is_empty() {
             s.push_str(&format!(" ({})", what.join(", ")));
@@ -80,6 +87,7 @@ pub(crate) fn describe(files: &[(String, Vec<u8>)], live_xml: Option<&[u8]>) -> 
                     title: obj.title.clone(),
                     page: live.as_ref().and_then(|d| page_of(d, &obj.path)),
                     new: false,
+                    removed: false,
                 },
                 None => CustomChange {
                     uuid,
@@ -95,6 +103,7 @@ pub(crate) fn describe(files: &[(String, Vec<u8>)], live_xml: Option<&[u8]>) -> 
                     // Without a program file to look in, nothing is known
                     // to be new.
                     new: live.is_some(),
+                    removed: false,
                 },
             }
         })
@@ -186,6 +195,7 @@ mod tests {
                 title: Some("Timer & Licht".into()),
                 page: Some("Küche".into()),
                 new: false,
+                removed: false,
             }]
         );
         assert_eq!(

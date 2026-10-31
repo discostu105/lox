@@ -479,7 +479,9 @@ Each step stops the push when it fails:
    and loading the upload deletes them (def.log: `Remove old custom changes`). With any present, `--force` refuses
    and names them (`custom_changes_pending` in `-o json`). To keep them, load the project from the Miniserver in
    Loxone Config and save it, then bring the project up to date; `--discard-custom-changes` deletes them on purpose.
-   A staging run only warns. If `/sys/custom` cannot be listed, `--force` refuses too.
+   A staging run only warns. If `/sys/custom` cannot be listed, `--force` refuses too. A change to an object the
+   compiled upload deletes (`removed` in the source, a rule deleted in the app say) goes with the object and does
+   not stop `--force` (`"removed": true` in the JSON).
 2. Drift check: the live config must still be the project's `base`, at least semantically. If the logic changed
    since (someone saved from Loxone Config or the app), the push refuses and names the `lox ir diff` to run.
    Users, groups, credentials and access rights may differ: the push lists them as "kept as live"
