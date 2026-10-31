@@ -3,7 +3,7 @@
 //!
 //! A rename is a refactoring: the compiled output must not change, except
 //! for display titles the slug itself feeds — a block without an explicit
-//! label uses its slug as `Title=`, and D24 expression blocks label
+//! label uses its slug as `Title=`, and expression blocks label
 //! themselves with their sub-expression text. The CLI verifies exactly
 //! that before writing anything.
 //!
@@ -28,7 +28,7 @@ use crate::lock::Lockfile;
 pub enum RekeyKind {
     Object,
     Extern,
-    /// A named rule (D60, `rule <slug> "Name"`).
+    /// A named rule (`rule <slug> "Name"`).
     Rule,
 }
 

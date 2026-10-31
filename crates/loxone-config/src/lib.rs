@@ -39,8 +39,7 @@
 //! Transport (FTP, HTTP, WebSocket, push) is deliberately **out of scope**:
 //! it lives in the `lox` CLI (same repository), which consumes this crate.
 
-// `cli` was the `loxl` binary's main file and still names the crate as
-// `loxone_config::…`, the way a dependent does.
+// `cli` names the crate as `loxone_config::…`, the way a dependent does.
 extern crate self as loxone_config;
 
 pub mod access;

@@ -1,6 +1,6 @@
 //! How much of a config the source governs: every object of the config,
 //! by type, against the lockfile — managed, referenced as an extern, a
-//! rule (D60), or untouched — and what Lox Logic can do with its type,
+//! rule, or untouched — and what Lox Logic can do with its type,
 //! and per managed type the element attributes the compile carries from
 //! the base instead of writing them from source (#248). `loxl coverage`
 //! prints it; the goal it measures is a config whose logic is all source.
@@ -25,7 +25,7 @@ pub enum Support {
     /// Verified builtin that Loxone Config creates when it pairs a device
     /// (Code Touch, Intercom, Touch Pure Flex): adopted, never minted.
     AdoptOnly,
-    /// An Autopilot rule (D60): one the source names is its own, one made
+    /// An Autopilot rule: one the source names is its own, one made
     /// in the app is referenced (`rule <slug>`).
     Rule,
     /// Not in the verified table: the source references it as an extern
@@ -93,7 +93,7 @@ pub struct Coverage {
 }
 
 /// One element attribute of one managed type that the compile carries
-/// from the base (D19) rather than writing it from source.
+/// from the base rather than writing it from source.
 #[derive(Debug, Clone, Serialize)]
 pub struct CarriedAttr {
     pub block_type: String,
@@ -109,8 +109,8 @@ pub struct CarriedAttr {
 }
 
 /// Carried attributes that are identity, not behaviour: the UUIDs of a
-/// block's special states, minted once and pinned (D66), and a virtual
-/// input's `VI<n>` designation (D54).
+/// block's special states, minted once and pinned, and a virtual
+/// input's `VI<n>` designation.
 const IDENTITY_ATTRS: &[&str] = &["SpStates", "IName"];
 
 /// Page furniture that is not logic of its own: the page, the mirrors
@@ -178,7 +178,7 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
                 Some(_) => t.externs += 1,
                 None => t.untouched += 1,
             }
-            // A virtual or Modbus device is adopted with its I/O (D64): the
+            // A virtual or Modbus device is adopted with its I/O: the
             // topmost one the source does not manage is the work left.
             let topmost = device
                 && !(1..o.path.len()).any(|n| {
@@ -218,7 +218,7 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
 }
 
 /// Per managed type, the attributes its elements carry from the base:
-/// the GUI-owned ones (D19) and the type's own carried set.
+/// the GUI-owned ones and the type's own carried set.
 fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<CarriedAttr> {
     // (object UUID, attribute) the source writes: a bound attribute
     // parameter of a managed block.
@@ -249,8 +249,7 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
             let name = a.name.as_str();
             let gui =
                 GUI_OWNED_ATTRS.contains(&name) || carried_attrs(&o.block_type).contains(&name);
-            // A ref's mirror identity is the compiler's, from `mirrors:`
-            // (D33).
+            // A ref's mirror identity is the compiler's, from `mirrors:`.
             let mirror = matches!(
                 o.block_type.as_str(),
                 "InputRef" | "OutputRef" | "OutputRefLM"

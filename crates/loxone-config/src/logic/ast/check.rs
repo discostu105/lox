@@ -199,7 +199,7 @@ impl Module {
     }
 
     /// A block declaration: its parameters, wires and expressions, each
-    /// once, and no value next to a wire on one port (D77).
+    /// once, and no value next to a wire on one port.
     fn check_block(&self, names: &Names, b: &BlockDecl) -> Result<()> {
         let mut params_seen: BTreeSet<&str> = BTreeSet::new();
         let mut wires_seen: BTreeSet<(&str, &PortRef)> = BTreeSet::new();
@@ -208,12 +208,12 @@ impl Module {
             match &binding.kind {
                 BindingKind::Param(v) => {
                     // `mirrors:` on a minted ref names an object,
-                    // not a constant (D33) — its target is
+                    // not a constant — its target is
                     // checked by `validate_ports`. On any other
                     // type the key is a mistake worth a message
                     // clearer than the constant-resolution one.
                     if binding.port == "device" {
-                        // The device an I/O hangs below (D64),
+                        // The device an I/O hangs below,
                         // checked by `validate_ports`.
                         if crate::periphery::device_types(&b.block_type).is_empty() {
                             return compile_err(format!(
@@ -265,7 +265,7 @@ impl Module {
                 }
             }
         }
-        // A value next to a wire on one port (D77): the wire
+        // A value next to a wire on one port: the wire
         // wins and the value is inert, so writing both is a
         // mistake — or a decompiled stale constant restated.
         for binding in b.bindings() {
@@ -345,14 +345,14 @@ impl Module {
         Ok(())
     }
 
-    /// `slug.title|room|category = value` (D39, D63).
+    /// `slug.title|room|category = value`.
     fn check_attr<'a>(&self, names: &Names, a: &'a AttrDecl, seen: &mut Seen<'a>) -> Result<()> {
         let attrs_seen = &mut seen.attrs_seen;
         let target = format!("{}.{}", a.slug, a.attr);
         match names.get(a.slug.as_str()) {
             Some(NameKind::Extern) => {}
             // A managed block's room and category are the
-            // source's when it states them (D63); its title
+            // source's when it states them; its title
             // is its label.
             Some(NameKind::Block) if a.attr != Attr::Title => {}
             Some(NameKind::Block) => {
@@ -477,8 +477,8 @@ impl Module {
         for binding in call.bindings() {
             let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
                 // A binding naming no parameter forwards as a
-                // port binding onto the body's single block
-                // (D23); like a block's feeds it may repeat, and
+                // port binding onto the body's single block;
+                // like a block's feeds it may repeat, and
                 // the expanded module re-validates its refs.
                 if body_blocks == 1 {
                     if let BindingKind::Param(v) = &binding.kind {
@@ -592,7 +592,7 @@ impl Module {
         Ok(())
     }
 
-    /// `device.tiles = set` claims a Touch Pure Flex's tiles (D41).
+    /// `device.tiles = set` claims a Touch Pure Flex's tiles.
     fn check_tiles_claim<'a>(
         &self,
         names: &Names,
@@ -661,7 +661,7 @@ impl Module {
         Ok(())
     }
 
-    /// `access`/`recipients` on an NFC Code Touch or a notification (D49).
+    /// `access`/`recipients` on an NFC Code Touch or a notification.
     fn check_access<'a>(
         &self,
         names: &Names,
@@ -770,7 +770,7 @@ impl Module {
         Ok(())
     }
 
-    /// `timer.schedule = set` claims a DayTimer's schedule (D53).
+    /// `timer.schedule = set` claims a DayTimer's schedule.
     fn check_schedule_claim<'a>(
         &self,
         sc: &Scope,
@@ -850,7 +850,7 @@ impl Module {
         Ok(())
     }
 
-    /// `controller.moods = set` claims a LightController2's moods (D58).
+    /// `controller.moods = set` claims a LightController2's moods.
     fn check_moods_claim<'a>(
         &self,
         sc: &Scope,
@@ -915,7 +915,7 @@ impl Module {
         Ok(())
     }
 
-    /// An Automatic Designer rule (D57): its slug or name (D60), then its
+    /// An Automatic Designer rule: its slug or name, then its
     /// statements.
     fn check_rule<'a>(&self, sc: &Scope, r: &'a RuleDecl, seen: &mut Seen<'a>) -> Result<()> {
         let names = &sc.names;
@@ -926,7 +926,7 @@ impl Module {
         } = seen;
         let ctx = format!("`rule {}`", r.slug);
         match (&r.title, names.get(r.slug.as_str())) {
-            // A titled rule names itself (D60): its slug is
+            // A titled rule names itself: its slug is
             // its own, like a managed block's.
             (Some(title), None) => {
                 if title.trim().is_empty() {
@@ -1236,7 +1236,7 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
     Ok(())
 }
 
-/// A `moods` set (D58): named moods, each once, a whole-controller setting
+/// A `moods` set: named moods, each once, a whole-controller setting
 /// only first.
 fn check_moods(t: &MoodsDecl) -> Result<()> {
     let mut names: BTreeSet<&str> = BTreeSet::new();

@@ -1,4 +1,4 @@
-//! Template expansion (D23): a pure source-to-source pass replacing
+//! Template expansion: a pure source-to-source pass replacing
 //! `template` declarations and their instantiations with plain statements
 //! before anything downstream runs. Body slug `b` in instance `sued`
 //! becomes `sued_b`, object parameters substitute to the passed slugs,
@@ -114,8 +114,7 @@ impl Module {
         // composite block, so its call reads like a block declaration with
         // the shared parameters factored away (feeds may repeat, exactly as
         // in a block's argument list). Bodies with several blocks cannot
-        // take forwards yet (a qualified form is deferred with D23's other
-        // extensions).
+        // take forwards (a qualified form is not designed yet).
         let mut forwards: Vec<Binding> = Vec::new();
         for binding in call.bindings() {
             let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
@@ -325,7 +324,7 @@ impl Module {
                     comment: s.comment.clone(),
                     bulk: s.bulk,
                 })),
-                // A mood claim (D58) on a body block: the set is named
+                // A mood claim on a body block: the set is named
                 // directly, or by a value parameter so each instance can
                 // pass its own (`stimmungen = "standard"`, overridden with
                 // `stimmungen: "kueche"`).

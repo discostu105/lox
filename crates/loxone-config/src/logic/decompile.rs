@@ -8,9 +8,9 @@
 //! wire between lifted objects is shown (wires into managed blocks in the
 //! argument list, wires onto extern ports as `target.Port <- source.Port`,
 //! sorted by sink) — except `InputRef`/`OutputRef` plumbing, which folds
-//! behind a `# mirrors …` note on the ref's extern declaration (D29).
+//! behind a `# mirrors …` note on the ref's extern declaration.
 //! Output is grouped by logic page: `page "Title"` statements head the
-//! sections of the single-module view (D28), one module per page from
+//! sections of the single-module view, one module per page from
 //! [`decompile_pages`]; the periphery keeps a `# periphery` comment.
 //!
 //! The full view is for reading, not compiling: compiling it against the
@@ -19,23 +19,27 @@
 //! the view to managed-type objects and what is wired to them — the
 //! starting point for adopting existing logic.
 //!
-//! A `Def=` under a wire (a stale constant, D77) is never a second
+//! A `Def=` under a wire (a stale constant) is never a second
 //! argument for the port: it rides as a comment on the wire binding, and
 //! the compile carries it from the base.
 //!
-//! Honest limits of the view: parameters (`Def=`) of extern objects are
-//! never lifted (a `target.Port = value` statement would claim ownership
-//! of the value); wires between two unlifted periphery objects stay raw
-//! (the view covers page logic, not the device tree); objects whose type
-//! or port keys cannot be written as language identifiers stay raw and
-//! their wires are not shown. The report counts what was not lifted.
+//! Not shown:
 //!
-//! Access rights on NFC Code Touch blocks lift into `access` declarations
-//! (D49), in both scopes, with an extern for every Code Touch that has
+//! - Parameters (`Def=`) of extern objects. A `target.Port = value`
+//!   statement would claim ownership of the value.
+//! - Wires between two unlifted periphery objects. The view covers page
+//!   logic, not the device tree.
+//! - Objects whose type or port keys cannot be written as language
+//!   identifiers, and their wires.
+//!
+//! The report counts what was not lifted.
+//!
+//! Access rights on NFC Code Touch blocks lift into `access` declarations,
+//! in both scopes, with an extern for every Code Touch that has
 //! any: adopting a config takes its access over unchanged.
 //!
 //! LightController2 moods lift into `moods` sets with a claim per
-//! controller (D58), in both scopes, again with an extern for every
+//! controller, in both scopes, again with an extern for every
 //! controller that has moods of its own: controllers with the same moods
 //! share one set. A controller with only the stock moods is left alone.
 //!
@@ -56,7 +60,7 @@ use crate::logic::ast::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-/// A block another block owns (D78): a `<C>` nested in a block whose
+/// A block another block owns: a `<C>` nested in a block whose
 /// child `<C>`s the compile carries verbatim ([`carried_children`]), such
 /// as the *Rest* meter an energy flow monitor creates for itself. It is
 /// part of its owner, not a block of its own: the view leaves it out and
@@ -94,8 +98,8 @@ pub struct DecompileOptions {
     /// `managed_types` (they can still appear as externs). `adopt` uses
     /// this for individual blocks whose rebuild would not be faithful.
     pub exclude: BTreeSet<String>,
-    /// Show parameters whose value equals the corpus-observed GUI default
-    /// (D30) in the `Full` view instead of eliding them (`--all-params`).
+    /// Show parameters whose value equals the GUI default seen in real configs
+    /// in the `Full` view instead of eliding them (`--all-params`).
     /// The `ManagedOnly` view always keeps every parameter — rebuilding
     /// must write the exact `Def=` back — so this only affects `Full`.
     pub all_params: bool,
@@ -104,7 +108,7 @@ pub struct DecompileOptions {
 impl Default for DecompileOptions {
     fn default() -> Self {
         DecompileOptions {
-            // Objects of the object tree (a VirtualIn, D54) can be minted
+            // Objects of the object tree (a VirtualIn) can be minted
             // but are not adopted — existing ones stay externs.
             managed_types: BUILTIN_TYPES
                 .iter()
@@ -127,16 +131,16 @@ pub struct DecompileReport {
     /// Logic pages with lifted content: sections in the single-module
     /// view, files from [`decompile_pages`].
     pub pages: usize,
-    /// Objects left as raw XML (not counting Document/Page containers) —
-    /// the honest measure of what the view does not cover.
+    /// Objects left as raw XML (not counting Document/Page containers): what
+    /// the view does not cover.
     pub raw_objects: usize,
     /// Plumbing wires between an `InputRef`/`OutputRef` and the object
-    /// its `Ref=` attribute names, folded out of the `Full` view (D29) —
+    /// its `Ref=` attribute names, folded out of the `Full` view —
     /// the ref's extern declaration carries a `# mirrors …` note instead.
     /// Always 0 in the `ManagedOnly` view.
     pub ref_wires_folded: usize,
     /// Parameters elided from the `Full` view because their value equals
-    /// the corpus-observed GUI default (D30, [`crate::observed_defaults`]);
+    /// the GUI default seen in real configs ([`crate::observed_defaults`]).
     /// `all_params` shows them. Always 0 in the `ManagedOnly` view.
     pub default_params_elided: usize,
 }
@@ -149,7 +153,7 @@ pub struct PageModule {
     /// Slugified file-name stem, unique across the document's pages
     /// (`eg_buero` for "EG Büro").
     pub slug: String,
-    /// A self-contained module opening with its `page` statement (D28);
+    /// A self-contained module opening with its `page` statement;
     /// objects the page references but does not contain are declared as
     /// externs with a `# page: …` / `# periphery` origin comment.
     pub module: Module,
@@ -205,26 +209,26 @@ pub(super) struct Lift {
     pub(super) extern_decls: BTreeMap<usize, ExternDecl>,
     pub(super) block_decls: BTreeMap<usize, BlockDecl>,
     pub(super) match_specs: BTreeMap<usize, MatchSpec>,
-    /// `device:` constraints (D55) for the title matches that need one.
+    /// `device:` constraints for the title matches that need one.
     devices: BTreeMap<usize, String>,
     /// `<-` statements with the sink and source object indexes,
     /// deduplicated — document order in the adoptable view, sorted by
-    /// (sink, source) in the full view (D29).
+    /// (sink, source) in the full view.
     pub(super) wires: Vec<(WireDecl, usize, usize)>,
-    /// Ref plumbing wires folded out of the full view (D29).
+    /// Ref plumbing wires folded out of the full view.
     ref_wires_folded: usize,
-    /// Observed-default parameters elided from the full view (D30).
+    /// Observed-default parameters elided from the full view.
     default_params_elided: usize,
     /// Automatic Designer rule summaries (full view only): extern object
     /// index → `#` comment lines rendered from the rule's `APC=` payload.
     rule_notes: BTreeMap<usize, Vec<String>>,
     /// The `access` declaration of each NFC Code Touch extern with access
-    /// rights (D49), or why its rights cannot be written as one.
+    /// rights, or why its rights cannot be written as one.
     access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>>,
     /// The `rule` declaration of each Automatic Designer rule whose
-    /// payload reads as the documented shapes (D57).
+    /// payload reads as the documented shapes.
     rule_decls: BTreeMap<usize, RuleDecl>,
-    /// Mood sets lifted from LightController2s (D58), each with the
+    /// Mood sets lifted from LightController2s, each with the
     /// bucket it is declared in: the earliest of its controllers'.
     mood_sets: Vec<(MoodsDecl, Option<usize>)>,
     /// Each controller with moods of its own: the index of the set it
@@ -323,7 +327,7 @@ impl Lift {
         }
     }
 
-    /// The `access` declarations of the given lifted objects (D49); a
+    /// The `access` declarations of the given lifted objects; a
     /// block whose rights cannot be written as one gets a comment saying
     /// why.
     fn push_access<'a>(&self, objs: impl IntoIterator<Item = &'a usize>, items: &mut Vec<Item>) {
@@ -339,7 +343,7 @@ impl Lift {
         }
     }
 
-    /// The mood sets and claims of a bucket's controllers (D58). A
+    /// The mood sets and claims of a bucket's controllers. A
     /// `self_contained` module declares every set its claims name; in
     /// one shared namespace each set is declared once, in its home
     /// bucket.
@@ -386,7 +390,7 @@ impl Lift {
         self.rule_decls.get(&i).is_some_and(|d| d.title.is_some())
     }
 
-    /// The `rule` declarations of the given externs (D57).
+    /// The `rule` declarations of the given externs.
     fn push_rules(&self, externs: &[usize], items: &mut Vec<Item>) {
         for i in externs {
             if let Some(decl) = self.rule_decls.get(i) {
@@ -426,7 +430,7 @@ impl Lift {
     }
 
     fn bucket_items(&self, page: Option<usize>, b: &Bucket) -> Vec<Item> {
-        // A real `page` statement (D28) — placement is part of the source.
+        // A real `page` statement — placement is part of the source.
         // The periphery is not a page, so its section stays a comment.
         let mut items = vec![match page {
             Some(p) => Item::Page(PageDecl {
@@ -644,12 +648,12 @@ fn page_tables(objects: &[ObjectSummary]) -> (Vec<String>, Vec<String>, BTreeMap
     (page_titles, page_uuids, page_of)
 }
 
-/// Ref plumbing (D29, full view only): an `InputRef`/`OutputRef`
-/// carries a `Ref=` attribute naming the object it mirrors, and the
-/// wires between the two are GUI routing, not logic. They are
-/// folded out of the view — the ref's extern declaration carries a
-/// `# mirrors …` note instead — and a periphery object whose only
-/// connection was such plumbing is never pulled in as an extern.
+/// Ref plumbing (full view only): an `InputRef`/`OutputRef` carries a
+/// `Ref=` attribute naming the object it mirrors, and the wires between
+/// the two are GUI routing, not logic. They are folded out of the view,
+/// and the ref's extern declaration carries a `# mirrors …` note instead.
+/// A periphery object whose only connection was such plumbing is never
+/// pulled in as an extern.
 fn mirror_targets<'a>(doc: &'a LoxoneDoc, objects: &[ObjectSummary]) -> BTreeMap<usize, &'a str> {
     objects
         .iter()
@@ -663,14 +667,14 @@ fn mirror_targets<'a>(doc: &'a LoxoneDoc, objects: &[ObjectSummary]) -> BTreeMap
         .collect()
 }
 
-/// D34 inversion (both scopes): a consumer wire on a ref is emitted
-/// against the mirrored object itself — compile routes it back
-/// through the very same ref (same-page reuse, pinned by the base
-/// wire). Maps a ref's consumer-facing port uuid to the target
-/// (uuid, key) it stands for, plus the ref uuids carrying that
-/// port (one in a sound config; several only where a push tool
-/// gave mirrors shared ports, D38); a wire folds only when its
-/// consumer shares a carrying ref's page.
+/// Ref inversion (both scopes): a consumer wire on a ref is emitted
+/// against the mirrored object itself. Compile routes it back through the
+/// same ref (same-page reuse, pinned by the base wire).
+///
+/// Maps a ref's consumer-facing port uuid to the target (uuid, key) it
+/// stands for, plus the ref uuids carrying that port. A sound config has
+/// one; several occur only where a push tool gave mirrors shared ports. A
+/// wire folds only when its consumer shares a carrying ref's page.
 type Fold = (String, String, Vec<String>);
 
 /// A LightController2's own moods, or why they cannot be written as a set.
@@ -694,7 +698,7 @@ struct Scan<'a> {
 }
 
 impl Scan<'_> {
-    /// The D34 fold table: which ref ports stand for a target port.
+    /// The ref inversion table ([`Fold`]): which ref ports stand for a target port.
     fn ref_folds(&self) -> BTreeMap<String, Fold> {
         let Scan {
             doc,
@@ -800,7 +804,7 @@ impl Scan<'_> {
             for (i, o) in objects.iter().enumerate() {
                 if !lifted[i]
                     && !matches!(o.block_type.as_str(), "Document" | "Page")
-                    // Refs are page visuals, not logic (D34): one appears
+                    // Refs are page visuals, not logic: one appears
                     // in the view only when an unfoldable wire names it.
                     && !mirror_target.contains_key(&i)
                     && !owned_by_block(doc, o)
@@ -850,9 +854,9 @@ impl Scan<'_> {
             };
             let (mut fi, mut ti) = (obj_index[fo.as_str()], obj_index[to.as_str()]);
             let (mut fk, mut tk) = (fk.clone(), tk.clone());
-            // D34 inversion: a ref endpoint is rewritten to its target
-            // when the consumer sits on the ref's page — compile routes
-            // the wire back through that very ref.
+            // Ref inversion (see `Fold`): a ref endpoint is rewritten to its target
+            // when the consumer sits on the ref's page. Compile routes
+            // the wire back through that ref.
             if let Some(f) = ref_fold.get(&w.from_port)
                 && self.page_serves(f, &objects[ti].uuid)
             {
@@ -913,7 +917,7 @@ impl Scan<'_> {
         (touched, ref_wires_folded)
     }
 
-    /// NFC Code Touch blocks with access rights (D49), in both scopes:
+    /// NFC Code Touch blocks with access rights, in both scopes:
     /// the `access` declaration needs the block lifted — as an extern,
     /// unless it is lifted as a managed block already.
     fn access_blocks(
@@ -937,7 +941,7 @@ impl Scan<'_> {
     }
 
     /// Automatic Designer rules whose payload reads as the documented
-    /// shapes (D57), in both scopes: the `rule` declaration needs the
+    /// shapes, in both scopes: the `rule` declaration needs the
     /// rule and its action targets as externs.
     fn liftable_rules(
         &self,
@@ -989,7 +993,7 @@ impl Scan<'_> {
         liftable_rules
     }
 
-    /// LightController2s with moods of their own (D58), in both scopes:
+    /// LightController2s with moods of their own, in both scopes:
     /// the claim needs the controller as an extern — also one excluded
     /// from management, whose moods a claim owns all the same.
     fn mood_controllers(
@@ -1083,11 +1087,11 @@ impl Scan<'_> {
 
     /// Match specs for every lifted object (managed ones may be needed
     /// as foreign externs in the per-page view). A ref whose `Ref=`
-    /// target has a slug in this module says so semantically (D32,
-    /// `mirrors:`) — but only when it is the sole ref of its type on
+    /// target has a slug in this module says so semantically
+    /// (`mirrors:`), but only when it is the sole ref of its type on
     /// that target, so resolution cannot need more than the slug.
     /// A title that repeats across identical devices, but not within
-    /// its own: `title:` narrowed by the device's serial (D55).
+    /// its own: `title:` narrowed by the device's serial.
     /// Returns the specs and the serial each device-narrowed one carries.
     fn match_specs(
         &self,
@@ -1172,7 +1176,7 @@ impl Scan<'_> {
     }
 
     /// Extern declarations for every extern object.
-    /// A ref extern says what it mirrors (D29) — the plumbing wires
+    /// A ref extern says what it mirrors — the plumbing wires
     /// that carried that fact were folded above.
     fn extern_decls(
         &self,
@@ -1218,7 +1222,7 @@ impl Scan<'_> {
         extern_decls
     }
 
-    /// Rule declarations for the liftable Automatic Designer rules (D57).
+    /// Rule declarations for the liftable Automatic Designer rules.
     fn rule_decls(
         &self,
         slug_of: &BTreeMap<String, String>,
@@ -1238,7 +1242,7 @@ impl Scan<'_> {
                 let mut decl =
                     super::rule::lift(slug, apc, doc, &|u| slug_of.get(u).cloned()).ok()?;
                 // A rule with a name no other rule has is declared by it
-                // (D60, #192): the source owns it whole, no extern.
+                // (#192): the source owns it whole, no extern.
                 decl.title = objects[*i]
                     .title
                     .clone()
@@ -1273,7 +1277,7 @@ impl Scan<'_> {
             let mut args = Vec::new();
             // Attribute parameters (block logic stored as an element
             // attribute, e.g. `Formula=`) lead the argument list. A
-            // GUI-owned one (`Code=`, D40) stays unclaimed: the compile
+            // GUI-owned one (`Code=`) stays unclaimed: the compile
             // carries it, and claiming it is a source decision.
             // A fire time (`At:` from `Sec=`, #248) is lifted as a time of
             // day, and only where it is one: a time function (`Typ=` other
@@ -1295,7 +1299,7 @@ impl Scan<'_> {
                 } else if bool_params(&o.block_type).contains(param)
                     && (v == "true" || v == "false")
                 {
-                    // A text-boolean attribute reads `on`/`off` (D80).
+                    // A text-boolean attribute reads `on`/`off`.
                     Value::Bool(v == "true")
                 } else {
                     Value::from_literal(&v)
@@ -1311,7 +1315,7 @@ impl Scan<'_> {
                     continue; // not representable, stays raw
                 }
                 if p.inv {
-                    // GUI-owned connector (D20): its Def and wires are
+                    // GUI-owned connector: its Def and wires are
                     // carried verbatim by the rebuild, never restated in
                     // source — the Inv flag would silently invert them.
                     continue;
@@ -1321,8 +1325,8 @@ impl Scan<'_> {
                     let Some((src_obj, src_key)) = idx.port_owner.get(input) else {
                         continue; // dangling <In> — not representable, stays raw
                     };
-                    // D34 inversion, argument-list side: this block is the
-                    // consumer — a ref source on its page names the target.
+                    // Ref inversion, argument-list side: this block is the
+                    // consumer, and a ref source on its page names the target.
                     let (src_obj, src_key) = match ref_fold.get(input) {
                         Some(f) if self.page_serves(f, &o.uuid) => (&f.0, &f.1),
                         _ => (src_obj, src_key),
@@ -1343,9 +1347,9 @@ impl Scan<'_> {
                     });
                 }
                 if let Some(def) = &p.def {
-                    // A value at the corpus-observed GUI default is noise
-                    // to a reader — elided from the full view (D30,
-                    // `--all-params` shows it). The adoptable view keeps
+                    // A value at the GUI default seen in real configs is
+                    // noise to a reader, so the full view elides it
+                    // (`--all-params` shows it). The adoptable view keeps
                     // every parameter: rebuilding writes `Def=` back.
                     if opts.scope == DecompileScope::Full
                         && !opts.all_params
@@ -1354,7 +1358,7 @@ impl Scan<'_> {
                     {
                         default_params_elided += 1;
                     } else if let Some(first) = wires.first_mut() {
-                        // A `Def=` under a wire is a stale constant (D77):
+                        // A `Def=` under a wire is a stale constant:
                         // inert while the wire exists, kept by Loxone
                         // Config so it returns when the wire is removed.
                         // Never a second argument for the same port — the
@@ -1381,7 +1385,7 @@ impl Scan<'_> {
                     // A title identical to the slug is what `compile`
                     // defaults to — dropping it keeps the view minimal.
                     // The read-only full view also drops a title the slug
-                    // already encodes (`slugify(title) == slug`, D29); the
+                    // already encodes (`slugify(title) == slug`); the
                     // adoptable view keeps it, because rebuilding must
                     // write the exact `Title=` back.
                     title: o.title.clone().filter(|t| {
@@ -1433,7 +1437,7 @@ impl Scan<'_> {
         }
         if opts.scope == DecompileScope::Full {
             // Big fan-ins pile up dozens of `<-` lines; sorted by sink,
-            // then source, they read as a table (D29). View-only: the
+            // then source, they read as a table. View-only: the
             // adoptable view keeps document order, because the relative
             // `<In>` order within a sink is part of the compiled bytes.
             wires.sort_by(|a, b| {
@@ -1450,8 +1454,8 @@ impl Scan<'_> {
 
     /// An `AutopilotRule` extern's whole rule lives in its `APC=`
     /// JSON — invisible as a bare declaration. The full view renders
-    /// it as comment lines above the extern (view-only liberty, D29;
-    /// the payload stays app-owned and is never language surface).
+    /// it as comment lines above the extern (full view only). The payload
+    /// stays app-owned and is never language surface.
     fn rule_notes(&self, externs: &[usize]) -> BTreeMap<usize, Vec<String>> {
         let Scan {
             doc,
@@ -1489,7 +1493,7 @@ impl Scan<'_> {
     }
 }
 
-/// The access rights on `block` as an `access` declaration (D49): users,
+/// The access rights on `block` as an `access` declaration: users,
 /// then groups, each in document order. Titles are the references, so a
 /// principal or schedule without a unique title cannot be written down.
 fn access_decl(
@@ -1567,7 +1571,7 @@ fn is_ident(s: &str) -> bool {
 }
 
 /// Statement-initial keywords (v1, plus reserved v0 words) and the
-/// expression operators (D24). A slug colliding with one would change the
+/// expression operators. A slug colliding with one would change the
 /// meaning of the line or expression it appears in, so [`SlugTable`] never
 /// hands them out and the parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
@@ -1646,7 +1650,7 @@ mod tests {
     #[test]
     fn slug_table_dedupes() {
         let mut t = SlugTable::default();
-        // `or` itself is reserved (expression operator, D24), so the
+        // `or` itself is reserved (expression operator), so the
         // first Or block already dedupes.
         assert_eq!(t.assign("Or"), "or_2");
         assert_eq!(t.assign("Or"), "or_3");

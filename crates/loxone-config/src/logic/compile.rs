@@ -13,9 +13,9 @@
 //!    `Def=`; the pre-set value is remembered and restored when the
 //!    statement disappears.
 //! 4. **Attribute claims** — `target.title|room|category = value` on an
-//!    extern rewrites its `Title=` or its `<IoData Pr=/Cr=>` binding (D39),
+//!    extern rewrites its `Title=` or its `<IoData Pr=/Cr=>` binding,
 //!    carrying along the descendants that shared the old room/category and
-//!    the refs that copy the title (D43); the originals are remembered and
+//!    the refs that copy the title; the originals are remembered and
 //!    restored the same way.
 //!
 //! Everything is deterministic: same base + module + lock + options → the
@@ -29,7 +29,7 @@
 //!   in the base config (Loxone omits nothing we have observed, but an
 //!   unverified type could; we refuse to invent port UUIDs for them).
 //! - `And`/`Or` are fixed two-input blocks: wiring `I3`+ is an error. The
-//!   Wine oracle showed Loxone Config 17 silently deletes off-descriptor
+//!   Loxone Config 17 silently deletes off-descriptor
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
 use crate::connectors::{
@@ -70,7 +70,7 @@ pub struct CompileOptions {
     /// The preferred authorization is a `removed <slug>` statement in the
     /// module — scoped and reviewable. `allow_removals` is the blunt
     /// alternative: *every* vanished block is deleted from the config.
-    /// Either way the block leaves a lockfile tombstone (D31) that keeps
+    /// Either way the block leaves a lockfile tombstone that keeps
     /// deleting it from bases predating the deployment. The third option,
     /// [`Lockfile::remove_object`], *forgets* the block without a
     /// tombstone, leaving its XML in the config as an unmanaged orphan.
@@ -78,52 +78,52 @@ pub struct CompileOptions {
     /// Explicit acceptance of a base whose `ConfigVersion` differs from
     /// the lock's pin (i.e. a new Loxone Config release). Must equal the
     /// base's version exactly; `None` leaves the mismatch a hard error.
-    /// Qualify the release first — one oracle open+save run
-    /// (docs/oracle-wine.md) — then accept.
+    /// Qualify the release first with one open and save in Loxone Config
+    /// (docs/oracle-wine.md), then accept.
     pub accept_version: Option<String>,
-    /// Page titles whose managed blocks are placed afresh (D42) — the one
+    /// Page titles whose managed blocks are placed afresh. This is the one
     /// way the compiler moves a block it has placed before. A block wired
-    /// to a ref another writer owns stays where it is: the ref was drawn
+    /// to a ref the source does not manage stays where it is: the ref was drawn
     /// for that spot, and moving the block alone would tear them apart.
     pub relayout: Vec<String>,
 }
 
-/// GUI-owned residue of an existing managed block (D19), harvested at
-/// teardown and re-emitted verbatim by the rebuild: the GUI owns this
-/// content, so it is read from the base on every compile — never stored —
-/// and later GUI edits to it are carried, not reverted.
+/// GUI-owned residue of an existing managed block, harvested at
+/// teardown and re-emitted verbatim by the rebuild. The GUI owns this
+/// content, so it is read from the base on every compile and never
+/// stored. Later GUI edits to it are carried, not reverted.
 struct Residue {
     /// `Cl`/`LtE`/`WF` and [`GUI_OWNED_ATTRS`], raw values in element order.
     attrs: Vec<(String, String)>,
     /// [`GUI_OWNED_CHILDREN`] subtrees in element order.
     children: Vec<Element>,
-    /// GUI-owned connectors (design decision D20): the whole `<Co>` of
+    /// GUI-owned connectors: the whole `<Co>` of
     /// every `Inv=`-carrying connector, keyed by `K`, re-emitted verbatim
     /// at its spec position — inversion flag, `Def=`, and wires included.
     /// The source may not wire or set these (see [`add_wire`] /
     /// [`apply_def`] and the param guard in the build loop), so carrying
     /// them can never contradict what the source expresses.
     gui_ports: BTreeMap<String, Element>,
-    /// Stale constants (design decision D77): the raw `Def=` of every
+    /// Stale constants: the raw `Def=` of every
     /// wired connector, keyed by `K`. Inert while the wire exists; Loxone
     /// Config keeps it so the value returns when the wire is removed. The
     /// source never states it (a value next to a wire is refused), so the
     /// rebuild carries it onto a port the source still wires.
     stale_defs: BTreeMap<String, String>,
     /// `FLG=` wire flags, keyed by (sink port UUID, source port UUID).
-    /// Miniserver/app-created wire metadata: the oracle probe (2026-08-25)
-    /// showed Loxone Config round-trips the flag verbatim, never
-    /// regenerates it, and accepts its absence — so it is carried exactly
-    /// like the element residue. A wire whose source changed no longer
-    /// matches its key and is emitted plain, which the GUI accepts.
+    /// Wire metadata the Miniserver or app creates. Loxone Config
+    /// round-trips the flag verbatim, never regenerates it, and accepts its
+    /// absence, so it is carried exactly like the element residue. A wire
+    /// whose source changed does not match its key and is emitted plain,
+    /// which the GUI accepts.
     wire_flags: BTreeMap<(String, String), String>,
-    /// Where the block is drawn in the base (D42): a position Loxone Config
+    /// Where the block is drawn in the base: a position Loxone Config
     /// moved it to is taken over instead of reverted.
     layout: Option<Layout>,
     /// The page the base draws the block on.
     page: Option<String>,
     /// Every attribute name and every `<Co>` key in base element order:
-    /// the rebuild writes its own in the same order (D47).
+    /// the rebuild writes its own in the same order.
     attr_order: Vec<String>,
     co_order: Vec<String>,
 }
@@ -149,9 +149,9 @@ fn page_of(doc: &LoxoneDoc, path: &[usize]) -> Option<String> {
 }
 
 fn harvest_residue(el: &Element) -> Residue {
-    // A virtual or Modbus device and its I/Os (D64) carry everything the
+    // A virtual or Modbus device and its I/Os carry everything the
     // rebuild does not write: the source states identity and settings,
-    // the rest of the element is the GUI's (D19).
+    // the rest of the element is the GUI's.
     let periphery = crate::periphery::periphery(el.attr("Type").unwrap_or("")).is_some();
     Residue {
         layout: Layout::of_element(el),
@@ -221,7 +221,7 @@ pub fn compile(
     lock: &mut Lockfile,
     opts: &CompileOptions,
 ) -> Result<LoxoneDoc> {
-    // Templates expand first (D23), then expressions desugar (D24):
+    // Templates expand first, then expressions desugar:
     // everything below — the lockfile, minting — sees only plain
     // statements. Validation runs before desugaring so reference errors
     // name what the user wrote, and again after as a self-check on the
@@ -251,7 +251,7 @@ pub fn compile(
 
     // --- Tear down our previous output: managed objects, extern wires,
     //     extern sets. What remains is exactly the Loxone-Config-owned state.
-    //     Each removed element hands back its GUI-owned residue (D19) so
+    //     Each removed element hands back its GUI-owned residue so
     //     the rebuild carries it forward verbatim.
     let (residue, in_torn_down) = teardown::tear_down_managed(&mut doc, lock, &snap.base_page);
     teardown::sweep_tombstones(&mut doc, lock, &src_slugs, &residue, in_torn_down);
@@ -260,7 +260,7 @@ pub fn compile(
     let mut minter = seeded_minter(lock, opts);
     let mint_base = minter.counter();
 
-    // --- Pages the source asks for and the base lacks are created (D56),
+    // --- Pages the source asks for and the base lacks are created,
     //     before anything is pinned to them.
     create_pages(&mut doc, module, lock, &mut minter)?;
 
@@ -315,19 +315,20 @@ pub fn compile(
 /// What the base carried before teardown, read once from the untouched
 /// base: the rebuild puts wires, blocks and I/Os back where they were.
 struct BaseSnapshot {
-    /// XML type and title per object, for `mirrors:` targets (D33).
+    /// XML type and title per object, for `mirrors:` targets.
     type_by_uuid: BTreeMap<String, (String, Option<String>)>,
-    /// Every wire the base carried: the D34 routing pin and the out-routes.
+    /// Every wire the base carried: which mirror each consumer wire went
+    /// through, and the out-routes.
     all_base_wires: Vec<WireView>,
     /// The same wires as (source port, sink port).
     base_wires: BTreeSet<(String, String)>,
-    /// Each sink's `<In>` sources in base order (D45).
+    /// Each sink's `<In>` sources in base order.
     base_in_order: BTreeMap<String, Vec<String>>,
-    /// Each page's objects in base order (D47).
+    /// Each page's objects in base order.
     base_page_order: BTreeMap<String, Vec<String>>,
     /// The page each managed object is drawn on.
     base_page: BTreeMap<String, String>,
-    /// Parent and grandparent of each managed object of the object tree (D64).
+    /// Parent and grandparent of each managed object of the object tree.
     base_parent: BTreeMap<String, (String, Option<String>)>,
     /// Each such parent's objects in base order.
     base_tree_order: BTreeMap<String, Vec<String>>,
@@ -335,7 +336,7 @@ struct BaseSnapshot {
 
 /// The previous compile's edits on externs, taken back by teardown: what
 /// the base still carried of them decides which withdrawn ones leave a
-/// tombstone (D31) once the rebuild has redone the rest.
+/// tombstone once the rebuild has redone the rest.
 struct PriorEdits {
     /// The lock's extern wires before this compile.
     old_wires: Vec<LockedWire>,
@@ -347,7 +348,7 @@ struct PriorEdits {
     old_originals: BTreeMap<String, Option<String>>,
     /// What each of those ports carried before the restore.
     defs_written: BTreeMap<String, String>,
-    /// The lock's attribute claims (D39) before this compile.
+    /// The lock's attribute claims before this compile.
     old_claims: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
     /// What each claimed object carried before the restore.
     claims_written: BTreeMap<(String, Attr), String>,
@@ -359,21 +360,21 @@ struct Params {
     managed_defs: BTreeMap<(String, String), String>,
     /// An element attribute ([`attr_params`]).
     managed_attrs: BTreeMap<(String, String), String>,
-    /// Message parameters of an `OutputRefLM` (D51), written onto its
+    /// Message parameters of an `OutputRefLM`, written onto its
     /// `<LoggerMailer>` child.
     managed_msgs: BTreeMap<(String, String), String>,
 }
 
-/// A minted ref's mirrored object (D33) and the identity attributes its
+/// A minted ref's mirrored object and the identity attributes its
 /// element carries.
 struct Mirror {
     ref_uuid: String,
-    /// `None` on a message ref (D51), which carries no code.
+    /// `None` on a message ref, which carries no code.
     link_type: Option<u32>,
     value: RefValue,
-    /// The GUI derives a ref's `Title=` from its target (oracle
-    /// session 11: a save rewrites whatever else stands there) — the
-    /// compiler emits the derived title so the file converges.
+    /// The GUI derives a ref's `Title=` from its target: a save rewrites
+    /// whatever else stands there. The compiler emits the derived title so
+    /// the file converges.
     title: String,
     /// The mirrored object's XML type.
     target_type: String,
@@ -460,8 +461,8 @@ fn check_removals(
 ) -> Result<BTreeSet<String>> {
     let src_slugs: BTreeSet<String> = module.blocks().map(|b| b.slug.clone()).collect();
     let removed_slugs: BTreeSet<&str> = module.removed().map(|r| r.slug.as_str()).collect();
-    // D67: `removed <rule>` deletes a named rule the lock pins (D60): its
-    // pin becomes a tombstone, which the sweep below deletes from every
+    // `removed <rule>` deletes a named rule the lock pins. Its pin
+    // becomes a tombstone, which the sweep below deletes from every
     // base that still has the rule, as for a block.
     for r in module.removed() {
         let Some(uuid) = lock.rules.get(&r.slug).cloned() else {
@@ -483,11 +484,11 @@ fn check_removals(
             },
         );
     }
-    // A `removed` statement must name a block the lock still knows — as a
-    // managed object (the removal happens now) or as a tombstone (D31, the
-    // removal is compiled but not yet seen deployed). Once the tombstone
-    // clears, a lingering statement is a hard error: the removal is done,
-    // delete the line (or it never named anything — a typo).
+    // A `removed` statement must name a block the lock still knows: a
+    // managed object (the removal happens now) or a tombstone (the removal
+    // is compiled but not yet seen deployed). Once the tombstone clears, a
+    // lingering statement is a hard error. Either the removal is done and
+    // the line can go, or it never named anything (a typo).
     for r in module.removed() {
         if !lock.objects.contains_key(&r.slug) && !lock.removed.values().any(|t| t.slug == r.slug) {
             return Err(Error::Compile(format!(
@@ -515,8 +516,8 @@ fn check_removals(
 }
 
 /// An extern is the GUI's object: one the source manages is rebuilt from
-/// its declaration, and a statement on it would be lost (D64 — an adopted
-/// device takes its I/O along).
+/// its declaration, and a statement on it would be lost. An adopted device
+/// takes its I/O along.
 fn check_externs_unmanaged(
     extern_uuid: &BTreeMap<String, String>,
     module: &Module,
@@ -566,8 +567,8 @@ fn seeded_minter(lock: &Lockfile, opts: &CompileOptions) -> Minter {
 }
 
 /// The writes kept in their own modules, last of all: Touch Pure Flex
-/// tiles (D41), DayTimer schedules (D53), access rights (D49), Automatic
-/// Designer rules (D57, D60) and LightController2 moods (D58).
+/// tiles, DayTimer schedules, access rights, Automatic
+/// Designer rules and LightController2 moods.
 fn apply_features(
     doc: &mut LoxoneDoc,
     base: &LoxoneDoc,
@@ -587,14 +588,14 @@ fn apply_features(
         .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
         .collect();
     super::tiles::apply(doc, module, &uuid_of)?;
-    // DayTimer schedules (D53): the claimed `Modes=`/`N=`/`<Entry>` set,
+    // DayTimer schedules: the claimed `Modes=`/`N=`/`<Entry>` set,
     //     on extern and managed timers alike; no lock state either.
     super::schedule::apply(doc, module, &uuid_of)?;
 
-    // --- Access rights on NFC Code Touch blocks (D49): users, groups and
+    // --- Access rights on NFC Code Touch blocks: users, groups and
     //     schedules are the base's; no lock state, like tiles.
     super::access::apply(doc, module, &uuid_of)?;
-    // Automatic Designer rules (D57); a named one (D60) is found or
+    // Automatic Designer rules; a named one is found or
     //     created first, its UUID pinned in the lock while it is declared.
     //     A rule or mood minted here moves the mint mark.
     let mint_mark = minter.counter();
@@ -602,7 +603,7 @@ fn apply_features(
     uuid_of.extend(lock.rules.iter().map(|(s, u)| (s.clone(), u.clone())));
     super::rule::apply(doc, module, &uuid_of)?;
     super::rule::watch(base, doc);
-    // LightController2 moods (D58): the claimed `<LightscenesC>` list; a
+    // LightController2 moods: the claimed `<LightscenesC>` list; a
     //     new mood mints its UUID (pinned in the lock until the base has
     //     it).
     let minted_moods = std::mem::take(&mut lock.moods);
@@ -613,7 +614,7 @@ fn apply_features(
     Ok(())
 }
 
-/// Placement (D42), once every wire is drawn: blocks without a position,
+/// Placement, once every wire is drawn: blocks without a position,
 /// and those on pages laid out afresh, go where their wires want them on
 /// the page as it now stands.
 fn place_blocks(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild) {
@@ -651,7 +652,7 @@ fn place_blocks(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild) {
             if let Some(l) = plan.layout {
                 // Wired to a ref the compile does not own and drawn beside
                 // it: arranged with that ref in the GUI, so it stays. A
-                // wire routed through a ref elsewhere (D34) pins nothing.
+                // wire routed through a ref elsewhere pins nothing.
                 let pinned = geo.wires.iter().any(|w| {
                     let other = match (w.from.0 == i, w.to.0 == i) {
                         (true, _) => w.to.0,
@@ -739,12 +740,12 @@ struct PlannedBlock {
     /// All port keys in connector-index order.
     keys: Vec<String>,
     ports: BTreeMap<String, String>,
-    /// `None` until placement (D42) gives the block a position.
+    /// `None` until placement gives the block a position.
     layout: Option<Layout>,
     /// The block's page is laid out afresh this compile.
     relayout: bool,
     /// UUID of the page the block is (re)built on — or, when not
-    /// `placed`, of its object-tree container (D54).
+    /// `placed`, of its object-tree container.
     page_uuid: String,
     /// Drawn on a page (laid out, `Px=`/`Py=`); false for objects of the
     /// object tree.
@@ -793,8 +794,8 @@ fn resolve_externs(
             .attr(attr)
             .map(str::to_string)
     };
-    // `mirrors:` disambiguation is positional page governance (D32): the
-    // `page` statement in force at the extern's declaration site (D28).
+    // `mirrors:` disambiguation is positional page governance: the
+    // `page` statement in force at the extern's declaration site.
     let page_of_extern = extern_pages(module);
     // Pages with their tree paths: a candidate's page is the longest
     // `Page` path that prefixes its own.
@@ -845,7 +846,7 @@ fn resolve_externs(
                     })
             })
             .collect();
-        // Page narrowing, `mirrors:` only (D32): several refs of the same
+        // Page narrowing, `mirrors:` only: several refs of the same
         // target usually sit on different pages — the declaring file's
         // page picks its own. Narrowing never widens: if no candidate is
         // on the declared page, the ambiguity stands and is reported.
@@ -952,7 +953,7 @@ fn resolve_externs(
 }
 
 /// The `page` statement in force at each extern's declaration site
-/// (D28) — `mirrors:` disambiguation is positional page governance (D32).
+/// — `mirrors:` disambiguation is positional page governance.
 fn extern_pages(module: &Module) -> BTreeMap<&str, &str> {
     let mut page_of_extern: BTreeMap<&str, &str> = BTreeMap::new();
     let mut current: Option<&str> = None;
@@ -1122,7 +1123,7 @@ fn find_co_mut<'a>(el: &'a mut Element, port_uuid: &str) -> Option<&'a mut Eleme
         .find_map(|c| find_co_mut(c, port_uuid))
 }
 
-/// `items` with the ones `rank` places in rank order, the base's (D47).
+/// `items` with the ones `rank` places in rank order, the base's.
 /// An item the base did not have stays right behind the item it follows
 /// in `items`, so a value new to the block keeps its emitted neighbour.
 fn in_base_order<T>(items: Vec<T>, rank: impl Fn(&T) -> Option<usize>) -> Vec<T> {
@@ -1168,7 +1169,7 @@ fn order_connectors(el: &mut Element, base: &[String]) {
 }
 
 /// Create the pages the source names with `room:` that the base has no
-/// page titled for (D56), as Loxone Config's "Neue Seite" does: a
+/// page titled for, as Loxone Config's "Neue Seite" does: a
 /// `<C Type="Page">` in the program, sorted in by title, assigned to the
 /// room and category through its `<IoData>`. The lock remembers each
 /// created page's UUID — a recompile against a base from before the
@@ -1328,7 +1329,7 @@ fn insert_page(program: &mut Element, el: Element, title: &str) {
     program.self_closing = false;
 }
 
-/// Insert a rebuilt block into its page where the base had it (D47):
+/// Insert a rebuilt block into its page where the base had it:
 /// before the first object the base listed after it, or that the base did
 /// not have; else behind the page's last object. A block new to the page
 /// is appended, as before.
@@ -1355,7 +1356,7 @@ fn insert_in_page(page: &mut Element, el: Element, base: &[String]) {
 }
 
 /// Put `<In Input=from/>` under the sink `<Co>` and maintain `Nc`.
-/// `flg` re-emits a harvested `FLG=` wire flag verbatim (D19 residue);
+/// `flg` re-emits a harvested `FLG=` wire flag verbatim (GUI-owned residue);
 /// `base_order` is the sink's `<In>` sources as the base listed them.
 fn add_wire(
     doc: &mut LoxoneDoc,
@@ -1379,7 +1380,7 @@ fn add_wire(
             co.attr_decoded("K").unwrap_or_default()
         )));
     }
-    // A declared wire keeps the place the base gave it (D45). `<In>` order
+    // A declared wire keeps the place the base gave it. `<In>` order
     // is semantically unordered, but Loxone Config sorts it on save; a
     // wire the teardown removed goes back before the first `<In>` the base
     // listed after it, so compiling a GUI-saved base reproduces it byte
@@ -1426,7 +1427,7 @@ fn wire_flag(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> Option<Stri
 /// Remove `<In Input=from/>` from the sink `<Co>` (used to tear down wires
 /// the previous compile owned).
 /// Returns whether a wire was actually present (and thus removed) — the
-/// tombstone lifecycle (D31) keys on this.
+/// tombstone lifecycle keys on this.
 fn remove_wire(doc: &mut LoxoneDoc, from_port: &str, to_port: &str) -> bool {
     if let Some(co) = find_co_mut(&mut doc.xml.root, to_port) {
         let before = co.children.len();
@@ -1454,8 +1455,8 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
 }
 
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
-/// in Loxone's canonical position: after `Def`, before `U` (oracle save
-/// 2026-08-25 rewrote a compiler-emitted `K,Nc,Def,U` to `K,Def,Nc,U`).
+/// in Loxone's canonical position: after `Def`, before `U` (a save rewrites
+/// `K,Nc,Def,U` to `K,Def,Nc,U`).
 pub(super) fn sync_nc(co: &mut Element) {
     let n = co.child_elements().filter(|c| c.name == "In").count();
     if n == 0 {
@@ -1510,7 +1511,7 @@ fn restore_def(doc: &mut LoxoneDoc, port_uuid: &str, original: Option<&str>) {
     }
 }
 
-/// A setting of a physical input or output (D65): an attribute of the
+/// A setting of a physical input or output: an attribute of the
 /// object, or `Unit=` of its `<Display>`.
 fn read_setting(doc: &LoxoneDoc, owner: &str, name: &str) -> Option<String> {
     let c = find_c(&doc.xml.root, owner)?;
@@ -1694,8 +1695,8 @@ fn restore_claim(doc: &mut LoxoneDoc, uuid: &str, attr: Attr, c: &AttrClaim) {
 }
 
 /// The descendants of `uuid` whose room/category equals the object's
-/// `original` — those follow a claim on it (D39). `stop` excludes an
-/// object and its subtree: managed blocks (their binding is D19 residue)
+/// `original` — those follow a claim on it. `stop` excludes an
+/// object and its subtree: managed blocks (their binding is GUI-owned residue)
 /// and descendants claimed explicitly for the same attribute.
 fn followers_of(
     doc: &LoxoneDoc,
@@ -1729,8 +1730,8 @@ fn followers_of(
     out
 }
 
-/// The refs that copy `uuid`'s title — those follow a title claim on it
-/// (D43): every `InputRef`/`OutputRef` with `Ref=` the object, since a
+/// The refs that copy `uuid`'s title — those follow a title claim on it:
+/// every `InputRef`/`OutputRef` with `Ref=` the object, since a
 /// save re-derives their `Title=` from the target whatever stood there.
 /// Not the inputs an alarm block collected itself (`WF` bit 0x1000 on an
 /// `InputRef`): the GUI keeps their titles. `stop` excludes managed refs
@@ -1793,7 +1794,7 @@ fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<S
 /// `<LoggerMailer>` elements carry it).
 const DEFAULT_MINIMUM_TIME_MS: &str = "5000";
 
-/// A duration in seconds, as the source resolves it (D27), in the whole
+/// A duration in seconds, as the source resolves it, in the whole
 /// milliseconds `MinimumTime=` stores.
 fn seconds_to_ms(seconds: &str) -> Option<String> {
     let s: f64 = seconds.parse().ok()?;

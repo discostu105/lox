@@ -1,5 +1,5 @@
 //! Wires: block argument bindings and `<-` statements, drawn through the
-//! page's mirrors where one serves (D34).
+//! page's mirrors where one serves.
 
 use super::*;
 use crate::doc::ObjectSummary;
@@ -16,14 +16,16 @@ struct MirrorRoute {
     feeds: Option<String>,
 }
 
-/// Mirror routing (D34): a wire may name the mirrored object directly;
-/// when the consumer's *own page* carries a ref of it fed from exactly that
-/// port, the wire is drawn through the ref — an `AI`-fed mirror serves
-/// `AQ`, an `I`-fed mirror serves `Q`. Reuse-only and page-local: no
-/// same-page ref, no rerouting (a direct wire is legal, oracle session 6);
-/// a ref on another page is someone else's visual. Symmetric for actors: a
-/// wire into an extern port that the base feeds from an OutputRef's `AQ`
-/// lands on that ref's `AI` instead — the ref on the *writer's* page.
+/// Mirror routing: a wire may name the mirrored object directly. When the
+/// consumer's *own page* carries a ref of it fed from exactly that port,
+/// the wire is drawn through the ref. An `AI`-fed mirror serves `AQ`, an
+/// `I`-fed mirror serves `Q`.
+///
+/// Routing only reuses refs on the same page. Without one the wire stays
+/// direct, which Loxone Config accepts. A ref on another page is someone
+/// else's visual. Symmetric for actors: a wire into an extern port that the
+/// base feeds from an OutputRef's `AQ` lands on that ref's `AI` instead,
+/// the ref on the *writer's* page.
 struct Routes<'a> {
     pages_idx: Vec<(&'a [usize], &'a str)>,
     path_by_uuid: BTreeMap<&'a str, &'a [usize]>,
@@ -92,7 +94,7 @@ impl<'a> Routes<'a> {
                 );
             }
         }
-        // From the base's wires: a managed sink (a Modbus actuator, D64) lost
+        // From the base's wires: a managed sink (a Modbus actuator) lost
         // its `<In>` from the ref with the teardown.
         let mut out_routes: BTreeMap<String, Vec<MirrorRoute>> = BTreeMap::new();
         for w in all_base_wires {
@@ -190,7 +192,7 @@ pub(super) fn draw_wires(
     lock.extern_wires.sort();
     lock.extern_wires.dedup();
     // A wire this base carried that the source no longer draws was
-    // withdrawn — tombstone it (D31) so pre-deployment bases keep losing
+    // withdrawn — tombstone it so pre-deployment bases keep losing
     // it instead of passing it through.
     for w in old_wires {
         if wires_present.contains(w) && !lock.extern_wires.contains(w) {
@@ -307,7 +309,7 @@ fn draw_wire(
     Ok(())
 }
 
-/// Reroutes a wire's ends through the mirrors on the relevant page (D34).
+/// Reroutes a wire's ends through the mirrors on the relevant page.
 fn route_through_mirrors(
     doc: &mut LoxoneDoc,
     cx: &Rebuild,

@@ -1,4 +1,4 @@
-//! A page as a picture (D42): SVG drawing and layout metrics of one
+//! A page as a picture: SVG drawing and layout metrics of one
 //! [`PageGeometry`] — eyes on a layout without opening Loxone Config.
 //!
 //! Wires are drawn orthogonally (out of the source port, across at the

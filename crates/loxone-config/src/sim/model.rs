@@ -1,4 +1,4 @@
-//! Block behavior, one model per simulated type (D68). Every model is
+//! Block behavior, one model per simulated type. Every model is
 //! written from Loxone's documentation of the block — the KB page and its
 //! timing diagram, cited per type — or from a format fact in
 //! loxone-format.md; [docs/simulator.md](../../docs/simulator.md) lists
@@ -137,9 +137,8 @@ struct Entry {
 #[derive(Debug, Clone)]
 pub enum Model {
     /// `InputRef`: `AQ` mirrors `AI`; `Q` mirrors `I`, or `AI` when `I`
-    /// is open (refs of block outputs wire `AI` only — loxone-format.md,
-    /// *Refs* — and the house's alarm chain triggers a Monoflop from such
-    /// a ref's `Q`).
+    /// is open. Refs of block outputs wire `AI` only (loxone-format.md,
+    /// *Refs*), and a real config triggers a Monoflop from such a ref's `Q`.
     InputRef,
     /// `OutputRef`/`OutputRefLM`: `AQ` mirrors `AI`.
     OutputRef,
@@ -704,10 +703,11 @@ impl Model {
                 io.set_bool("Qon", on);
                 io.set_bool("Qoff", off);
             }
-            // A rising edge at Tr switches O on for Don, a new edge
-            // restarts it; Don 0 keeps O on while Tr is; Off resets and,
-            // held, locks; DisPc disables Tr and Off (kb/push-button,
-            // timing diagram).
+            // From the kb/push-button timing diagram:
+            // - A rising edge at Tr switches O on for Don. A new edge restarts it.
+            // - Don 0 keeps O on while Tr is on.
+            // - Off resets and, held, locks.
+            // - DisPc disables Tr and Off.
             Model::PushButton { q, pulse, tr } => {
                 let (rising, _) = tr.update(io.i(0).on());
                 if !io.i(2).on() {
@@ -1307,8 +1307,8 @@ struct Key {
 /// A `LightController2`'s state: which of its moods shows, and who chose
 /// it.
 ///
-/// The manual inputs follow Loxone Config 17.2.8.28's simulation (oracle
-/// sessions 35–36, not a Miniserver): M+/M− step through the mood list in
+/// The manual inputs follow Loxone Config 17.2.8.28's simulation
+/// (not a Miniserver): M+/M− step through the mood list in
 /// `<LightscenesC>` order, the off mood included, cyclically; T5/n selects
 /// the mood `SID="n"`, and steps on like M+ while it made the last mood
 /// change or that mood shows; both act when the input falls. On selects

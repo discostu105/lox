@@ -1,5 +1,5 @@
-//! Access rights on NFC Code Touch blocks (D49) and the recipients of push
-//! notifications (D51).
+//! Access rights on NFC Code Touch blocks and the recipients of push
+//! notifications.
 //!
 //! A user or group may open a Code Touch when its `<PH>` list has a
 //! `<PRM REF="<block>" TIM="<schedule>"/>`: the right is on the block,
@@ -12,15 +12,15 @@
 //! schedules, and revokes what it does not list. Blocks without a
 //! declaration are not touched. Users, groups and schedules stay with
 //! Loxone Config and the app; the declaration names them by title, and a
-//! title that is missing or not unique is an error. Like tiles (D41) the
+//! title that is missing or not unique is an error. Like tiles the
 //! declaration keeps no lock state: withdrawing it leaves the rights as
 //! they are.
 //!
 //! A `recipients <slug>` declaration does the same for `ACT=` on a push
 //! notification (`Notification`): a user or group with `ACT=` on it gets
 //! the message. A new recipient gets `ACT="3"`, the value Loxone Config 17.2
-//! writes (oracle session 15); an `ACT=` already there counts whatever its
-//! value (older configs have `ACT="1"`) and stays.
+//! writes. An `ACT=` already there counts whatever its value (older configs
+//! have `ACT="1"`) and stays.
 //!
 //! The edit is the one Loxone Config makes (docs/loxone-format.md, *Users,
 //! groups and access rights*): a new right is a `<PRM REF TIM/>` appended

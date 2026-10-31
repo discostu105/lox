@@ -1,4 +1,4 @@
-//! The logic simulator behind `loxl test` (D68): runs a compiled
+//! The logic simulator behind `loxl test`: runs a compiled
 //! `.Loxone` document cycle by cycle, without a Miniserver.
 //!
 //! Every block with a model ([`model`]) is evaluated once per tick in

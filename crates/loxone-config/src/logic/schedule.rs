@@ -1,6 +1,6 @@
-//! DayTimer schedules from source (D53).
+//! DayTimer schedules from source.
 //!
-//! A DayTimer keeps its schedule as GUI-owned content (D19): the
+//! A DayTimer keeps its schedule as GUI-owned content: the
 //! `Modes=` attribute lists the operating modes it has a column for, and
 //! one `<Entry>` child per interval names its mode by index into that
 //! list (`Ix=`, absent = 0), its span in minutes of the day (`From=`,
@@ -13,7 +13,7 @@
 //! The built-in operating modes have fixed UUIDs in every config
 //! (`00000000-0000-000N-1500000000000000`, corpus-wide) and are named by
 //! keyword. Any mode of the config, a user-defined one included, can be
-//! named by its title (D69): the title resolves against the compiled
+//! named by its title: the title resolves against the compiled
 //! document's `Mode` objects. A column's place in `Modes=` follows the
 //! modes' `Mode=` numbers, ascending — how every observed timer lists
 //! them (a user-defined mode, `Mode="-3"`, before Monday, `Mode="3"`).
@@ -79,8 +79,7 @@ impl Column {
 /// A schedule resolved to columns: column → its intervals, sorted by
 /// start. A column with no intervals is listed (the timer is off all
 /// day). The seven weekdays are always listed: Loxone Config fills a
-/// missing weekday column with an all-day entry on load (oracle session
-/// 18), so a weekday the schedule does not name is written as off,
+/// missing weekday column with an all-day entry on load, so a weekday the schedule does not name is written as off,
 /// explicitly.
 pub(crate) type Program<'a> = BTreeMap<Column, Vec<&'a Interval>>;
 

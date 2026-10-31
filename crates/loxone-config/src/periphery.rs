@@ -1,4 +1,4 @@
-//! Virtual devices and Modbus from source (D64): the objects of the
+//! Virtual devices and Modbus from source: the objects of the
 //! object tree a source can create and own — HTTP, UDP and text virtual
 //! inputs, virtual outputs, Modbus servers and their devices — and the
 //! I/Os that hang below them.
@@ -13,10 +13,9 @@
 //! is carried verbatim from the base, so a rebuild changes only what the
 //! source states.
 //!
-//! The shapes below are the corpus's (133 configs plus the house) and what
-//! a save in Loxone Config 17.2.8 gives a minimal element (oracle session
-//! 26, docs/oracle-wine.md): a fresh mint is written as that save writes
-//! it, so the first save after a push is a no-op.
+//! The shapes below are the ones in 134 real configs, and what a save in
+//! Loxone Config 17.2.8 gives a minimal element. A fresh mint is written as
+//! that save writes it, so the first save after a push is a no-op.
 
 use crate::connectors::PortDir::{Input, Output};
 use crate::connectors::PortSpec;
@@ -79,7 +78,7 @@ const MODBUS_DEV: &[PortSpec] = &[port("AQ", Input)];
 const MODBUS_SENSOR: &[PortSpec] = &[port("Q", Output), port("Qe", Output)];
 // A Modbus actuator is written through `I` (2 corpus, 1 house sink).
 const MODBUS_ACTOR: &[PortSpec] = &[port("I", Input)];
-// An operating mode (D69): `I` switches it from logic, `Q` reports it —
+// An operating mode: `I` switches it from logic, `Q` reports it —
 // the two connectors on every one of the house's 18 modes, built-in and
 // user-defined alike.
 const MODE: &[PortSpec] = &[port("I", Input), port("Q", Output)];
@@ -147,7 +146,7 @@ pub const PERIPHERY: &[PeripheryType] = &[
         ],
         mint_children: &[],
     },
-    // A user-defined operating mode (D69). Its `Mode=` number is minted
+    // A user-defined operating mode. Its `Mode=` number is minted
     // by the compiler: one below the lowest in the document (the GUI
     // numbers user-defined modes -1, -2, … in creation order).
     PeripheryType {
@@ -489,7 +488,7 @@ pub fn folder(block_type: &str) -> Option<&'static str> {
     }
 }
 
-/// `device:` on a block names the device it hangs below (D64) — an
+/// `device:` on a block names the device it hangs below — an
 /// identity binding like `mirrors:`, not a value.
 pub fn is_device_binding(block_type: &str, key: &str) -> bool {
     key == "device" && !device_types(block_type).is_empty()

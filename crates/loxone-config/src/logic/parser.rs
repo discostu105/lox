@@ -9,7 +9,7 @@ enum Tok {
     Ident(String),
     Str(String),
     Num(String),
-    /// A number with a unit suffix (`40s`, `1.5h` — D27).
+    /// A number with a unit suffix (`40s`, `1.5h`).
     UnitNum(String, Unit),
     Colon,
     Dot,
@@ -21,11 +21,11 @@ enum Tok {
     RParen,
     LBrace,
     RBrace,
-    /// Comparison operators (expression sugar, D24).
+    /// Comparison operators (expression sugar).
     Cmp(CmpOp),
-    /// `~=` — approximately-equal, valid only in a test `expect` (D36).
+    /// `~=` — approximately-equal, valid only in a test `expect`.
     Approx,
-    /// Arithmetic operators (formula backend, D24). `-` is only lexed as
+    /// Arithmetic operators (formula backend). `-` is only lexed as
     /// binary minus after a token that can end an operand — everywhere
     /// else it starts a negative number.
     Plus,
@@ -223,7 +223,7 @@ fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
 }
 
 /// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
-/// immediately following letter run or `%` is a unit suffix (D27):
+/// immediately following letter run or `%` is a unit suffix:
 /// `40s`, `1.5h`, `2700K`, `70%`.
 fn number(
     s: String,
@@ -279,7 +279,7 @@ fn sink<'a>(
     }
 }
 
-/// A closed `tile <i>(…)` argument list becomes the tile (D41).
+/// A closed `tile <i>(…)` argument list becomes the tile.
 fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
     if call.title.is_some() {
         return Err(Error::Parse {
@@ -298,8 +298,8 @@ fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
     })
 }
 
-/// A closed call becomes a block declaration or — lowercase callee — a
-/// template instantiation.
+/// A closed call becomes a block declaration, or a template instantiation
+/// when the callee is lowercase.
 fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
     let lower = call
         .block_type
@@ -356,19 +356,19 @@ struct Parser {
     open_call: Option<BlockDecl>,
     /// A `template` whose body is still open (until `end`).
     open_template: Option<TemplateDecl>,
-    /// A `test` whose body is still open (until `end`) — D36.
+    /// A `test` whose body is still open (until `end`).
     open_test: Option<TestDecl>,
-    /// A `tiles` set whose body is still open (until `end`) — D41.
+    /// A `tiles` set whose body is still open (until `end`).
     open_tiles: Option<TilesDecl>,
     /// The index of the `tile` whose argument list `open_call` carries.
     open_tile: Option<u32>,
-    /// An `access` declaration whose body is still open (until `end`) — D49.
+    /// An `access` declaration whose body is still open (until `end`).
     open_access: Option<AccessDecl>,
-    /// A `schedule` whose body is still open (until `end`) — D53.
+    /// A `schedule` whose body is still open (until `end`).
     open_schedule: Option<ScheduleDecl>,
-    /// A `rule` whose body is still open (until `end`) — D57.
+    /// A `rule` whose body is still open (until `end`).
     open_rule: Option<RuleDecl>,
-    /// A `moods` set whose body is still open (until `end`) — D58.
+    /// A `moods` set whose body is still open (until `end`).
     open_moods: Option<MoodsDecl>,
 }
 
@@ -629,7 +629,7 @@ impl Parser {
         Ok(())
     }
 
-    /// Module-level statements are refused inside a template body (D23).
+    /// Module-level statements are refused inside a template body.
     fn refuse_in_template(&self, toks: &[Tok], lineno: usize) -> Result<()> {
         let err = |msg: String| Error::Parse { line: lineno, msg };
         if self.open_template.is_some()
@@ -905,7 +905,7 @@ impl Parser {
 }
 
 /// `template <name>(<param>: <Type> | <param> = <literal>, …)` opens a
-/// template body (D23).
+/// template body.
 fn parse_template_head(
     toks: &[Tok],
     comment: Option<String>,
@@ -967,8 +967,8 @@ fn parse_template_head(
     })
 }
 
-/// `rule <slug>` (an existing rule's extern) or `rule <slug> "Name"` (D57,
-/// D60) opens a rule body.
+/// `rule <slug>` (an existing rule's extern) or `rule <slug> "Name"`
+/// opens a rule body.
 fn parse_rule_head(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let (slug, title) = match toks {
@@ -989,7 +989,7 @@ fn parse_rule_head(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     })
 }
 
-/// `access <slug>` (D49) or `recipients <slug>` (D51) opens a body of
+/// `access <slug>` or `recipients <slug>` opens a body of
 /// grants.
 fn parse_access_head(
     kw: &str,
@@ -1186,8 +1186,8 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
     }
 }
 
-/// `page "<Title>"` (D28), optionally `(room: "…"[, category: "…"])` to
-/// create it (D56).
+/// `page "<Title>"`, optionally `(room: "…"[, category: "…"])` to
+/// create it.
 fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<PageDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     match toks {
@@ -1199,7 +1199,7 @@ fn parse_page(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Pa
         }),
         [_, Tok::Str(title), Tok::LParen, args @ .., Tok::RParen] => {
             // `page "T" (room: "…"[, category: "…"])` — what a page
-            // the compiler creates is assigned to (D56).
+            // the compiler creates is assigned to.
             let (mut room, mut category) = (None, None);
             for arg in args.split(|t| matches!(t, Tok::Comma)) {
                 let [Tok::Ident(k), Tok::Colon, Tok::Str(v)] = arg else {
@@ -1257,7 +1257,7 @@ fn mode_name(tok: &Tok, lineno: usize, usage: &str) -> Result<ModeName> {
     }
 }
 
-/// One statement of a `rule` body (D57, D73, D76): `active`/`inactive`,
+/// One statement of a `rule` body: `active`/`inactive`,
 /// `when time HH:MM`, `when weekday <days>`, `when mode <mode> [off]`,
 /// `when <slug>.<state> <op> <value>`, the weather, day, daylight, sun
 /// and date conditions, `or`, `then <slug> "<command>"`,
@@ -1517,7 +1517,7 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             }
         }
         // `then pumpe on` — a one-word command is bare; `then x "on"`
-        // canonicalizes to it (D80).
+        // canonicalizes to it.
         [
             Tok::Ident(w),
             Tok::Ident(target),
@@ -1531,9 +1531,9 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
     Ok(kind)
 }
 
-/// One statement of a `test` body (D36): a port injection, `tick`,
+/// One statement of a `test` body: a port injection, `tick`,
 /// `expect`, or `clock`.
-/// One line of a `moods` body (D58): `"<name>": <setting>, …`, a
+/// One line of a `moods` body: `"<name>": <setting>, …`, a
 /// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
 /// `<n>%`, `rgb(<r>, <g>, <b>)` (percent), `temp(<n>%, <k>K)` or a bare
 /// number (the stored value verbatim).
@@ -1646,7 +1646,7 @@ fn parse_mood_line(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     })
 }
 
-/// One line of a `schedule` body (D53): day keywords, then either `off`
+/// One line of a `schedule` body: day keywords, then either `off`
 /// or comma-separated intervals `HH:MM-HH:MM [= <number>] [activate]`.
 fn parse_schedule_line(
     toks: &[Tok],
@@ -1790,8 +1790,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     })?;
                     (n, None)
                 }
-                // `tick 5min` — that much simulated time at the step's dt
-                // (D80).
+                // `tick 5min` — that much simulated time at the step's dt.
                 Tok::UnitNum(number, unit)
                     if matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H) =>
                 {
@@ -1956,7 +1955,7 @@ fn parse_ident_statement(
             "`{slug} = \"…\"` — did you mean `let {slug} = \"…\"`?"
         ))),
         // slug.Port <- … — a plain wire (`slug.Port` RHS) or an
-        // expression that desugars into gate/comparator blocks (D24).
+        // expression that desugars into gate/comparator blocks.
         [
             Tok::Ident(ts),
             Tok::Dot,
@@ -1979,7 +1978,7 @@ fn parse_ident_statement(
         ] => Err(err(format!(
             "`{ts}.{tp} = {vs}.{vp}` — use `<-` to wire a port: `{ts}.{tp} <- {vs}.{vp}`"
         ))),
-        // slug.tiles = set — a Touch Pure Flex tiles claim (D41).
+        // slug.tiles = set — a Touch Pure Flex tiles claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "tiles" => {
             let [Tok::Ident(set)] = rest else {
                 return Err(err(format!(
@@ -2000,7 +1999,7 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
-        // slug.schedule = name — a DayTimer schedule claim (D53).
+        // slug.schedule = name — a DayTimer schedule claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "schedule" => {
             let [Tok::Ident(name)] = rest else {
                 return Err(err(format!(
@@ -2021,7 +2020,7 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
-        // slug.moods = name — a LightController2 mood claim (D58). Unlike
+        // slug.moods = name — a LightController2 mood claim. Unlike
         // the other claims it may sit in a template body: one mood set for
         // every room the template stamps out.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "moods" => {
@@ -2052,7 +2051,7 @@ fn parse_ident_statement(
             items.extend(parse_bulk(inner, tp, val, comment, lineno)?);
             Ok(())
         }
-        // slug.title|room|category = value — an attribute claim (D39).
+        // slug.title|room|category = value — an attribute claim.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
             items.push(Item::Attr(AttrDecl {
                 slug: ts.clone(),
@@ -2083,7 +2082,7 @@ fn parse_ident_statement(
 }
 
 /// `slug.Port <- …`: a plain wire (`slug.Port` RHS) or an expression
-/// that desugars into gate/comparator blocks (D24).
+/// that desugars into gate/comparator blocks.
 fn parse_wire(
     ts: &str,
     tp: &str,
@@ -2248,7 +2247,7 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                 }
                 // The binding value runs to the next top-level comma or the
                 // call's closing `)` — one value token, a `slug.Port`
-                // source, or an expression (D26).
+                // source, or an expression.
                 let start = i + 2;
                 let mut end = start;
                 let mut depth = 0usize;
@@ -2293,7 +2292,7 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
 }
 
 /// Classify one binding's value tokens: a literal or constant is a
-/// parameter, a `slug.Port` a wire, anything longer an expression (D26).
+/// parameter, a `slug.Port` a wire, anything longer an expression.
 /// A parenthesized bare port or value canonicalizes to the plain form —
 /// one spelling per fact.
 fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> {
@@ -2322,7 +2321,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
         clock if clock_toks(clock).is_some() => {
             BindingKind::Param(clock_value(clock, port, lineno)?)
         }
-        // `file("hue.c")` — program text from a file (D40); validate
+        // `file("hue.c")` — program text from a file; validate
         // decides which ports may take it.
         [Tok::Ident(f), Tok::LParen, Tok::Str(path), Tok::RParen] if f == "file" => {
             if path.is_empty() {
@@ -2400,7 +2399,7 @@ fn is_date(d: &str) -> bool {
     d.len() == 10 && crate::logic::rule::parse_date(d).is_some()
 }
 
-/// The canonical spec of a test's `clock` (D80): `HH:MM[:SS]` or
+/// The canonical spec of a test's `clock`: `HH:MM[:SS]` or
 /// `YYYY-MM-DD HH:MM[:SS]`, written bare like `At: 19:00`. The v1 quoted
 /// form is refused with its replacement.
 fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
@@ -2438,7 +2437,7 @@ fn clock_spec(toks: &[Tok], lineno: usize) -> Result<String> {
 }
 
 /// The v2 replacement for a quoted boolean on a text-boolean attribute
-/// (`Analog: "true"` → `Analog: on`, D80).
+/// (`Analog: "true"` → `Analog: on`).
 pub(crate) fn bool_hint(port: &str, text: &str) -> String {
     let word = if text == "true" { "on" } else { "off" };
     format!("`{port}:` is on or off — write `{port}: {word}` instead of `{port}: \"{text}\"`")
@@ -2515,7 +2514,7 @@ fn check_slug(s: &str, lineno: usize) -> Result<String> {
     }
 }
 
-/// Parse the RHS of `<-` as an expression (D24). Precedence, loosest to
+/// Parse the RHS of `<-` as an expression. Precedence, loosest to
 /// tightest: `or` < `and` < `not` < comparison < `+ -` < `* /`; parens
 /// group; comparisons take plain operands and do not chain. Arithmetic
 /// stands alone — under a gate or a comparison it is deferred (v1) with a

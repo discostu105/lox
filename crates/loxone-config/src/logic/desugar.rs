@@ -1,4 +1,4 @@
-//! Expression desugaring (D24): `sink.Port <- <expr>` becomes managed
+//! Expression desugaring: `sink.Port <- <expr>` becomes managed
 //! gate/comparator blocks plus a plain wire onto the sink.
 //!
 //! Runs after template expansion and validation, before port validation
@@ -38,8 +38,8 @@ pub struct DesugarInfo {
 }
 
 impl Module {
-    /// Replace every expression — `<-` statements (D24) and argument-list
-    /// expression bindings (D26) — with its discrete-backend expansion.
+    /// Replace every expression — `<-` statements and argument-list
+    /// expression bindings — with its discrete-backend expansion.
     /// A module without expressions comes back unchanged (cloned).
     pub fn desugar(&self) -> Result<(Module, DesugarInfo)> {
         let mut info = DesugarInfo::default();

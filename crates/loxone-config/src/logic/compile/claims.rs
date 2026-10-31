@@ -1,10 +1,10 @@
-//! Extern edits: port assignments, settings (D65) and attribute claims
-//! (D39), each with the tombstones of the withdrawn ones (D31).
+//! Extern edits: port assignments, settings and attribute claims,
+//! each with the tombstones of the withdrawn ones.
 
 use super::*;
 
 /// Port assignments (always extern ports — validate rejects managed
-/// targets), and settings of physical inputs and outputs (D65).
+/// targets), and settings of physical inputs and outputs.
 pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild) -> Result<()> {
     let Rebuild {
         module,
@@ -13,7 +13,7 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
         ..
     } = *cx;
     for s in module.sets() {
-        // A setting of a physical input or output (D65): an attribute of
+        // A setting of a physical input or output: an attribute of
         // the extern object, with the port assignments' lifecycle.
         if let Some(e) = module.externs().find(|e| e.slug == s.target.slug)
             && let Some(addable) = crate::settings::setting(&e.block_type, &s.target.port)
@@ -99,7 +99,7 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
 }
 
 /// A Def write that vanished from source was withdrawn — tombstone it
-/// (D31) unless it never changed the port's bytes in the first place.
+/// unless it never changed the port's bytes in the first place.
 pub(super) fn retire_sets(lock: &mut Lockfile, prior: &PriorEdits) {
     let PriorEdits {
         old_originals,
@@ -124,8 +124,8 @@ pub(super) fn retire_sets(lock: &mut Lockfile, prior: &PriorEdits) {
     }
 }
 
-/// Attribute claims on externs (D39), and a managed block's room and
-/// category (D63). Planned against the torn-down document before anything
+/// Attribute claims on externs, and a managed block's room and
+/// category. Planned against the torn-down document before anything
 /// is written, so nested claims (a device and one of its outputs) never
 /// record each other's write as their original, and an explicitly claimed
 /// descendant is never a follower.
@@ -139,7 +139,7 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
     let resolve = |v: &Value| -> Result<String> { Ok(module.resolve_value(v)?.to_string()) };
     let managed_uuids: BTreeSet<&str> = managed.values().map(|b| b.uuid.as_str()).collect();
     let mut claimed: BTreeMap<(String, Attr), &str> = BTreeMap::new();
-    // A managed block's room and category (D63): written onto the rebuilt
+    // A managed block's room and category: written onto the rebuilt
     // block on every compile, no lock state — the block is the source's.
     let mut managed_claims: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
     for a in module.attrs().filter(|a| managed.contains_key(&a.slug)) {
@@ -216,7 +216,7 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
     Ok(())
 }
 
-/// A claim that vanished from source was withdrawn — tombstone it (D31)
+/// A claim that vanished from source was withdrawn — tombstone it
 /// unless it never changed the object's bytes in the first place.
 pub(super) fn retire_claims(lock: &mut Lockfile, prior: &PriorEdits) {
     let PriorEdits {
