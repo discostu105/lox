@@ -795,21 +795,7 @@ fn resolve_externs(
     };
     // `mirrors:` disambiguation is positional page governance (D32): the
     // `page` statement in force at the extern's declaration site (D28).
-    let mut page_of_extern: BTreeMap<&str, &str> = BTreeMap::new();
-    {
-        let mut current: Option<&str> = None;
-        for item in &module.items {
-            match item {
-                Item::Page(p) => current = Some(p.title.as_str()),
-                Item::Extern(e) => {
-                    if let Some(t) = current {
-                        page_of_extern.insert(e.slug.as_str(), t);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    let page_of_extern = extern_pages(module);
     // Pages with their tree paths: a candidate's page is the longest
     // `Page` path that prefixes its own.
     let pages: Vec<(&[usize], Option<&str>)> = objects
@@ -826,12 +812,6 @@ fn resolve_externs(
     };
     let ref_attr =
         |o: &crate::doc::ObjectSummary| -> Option<&str> { doc.element_at(&o.path)?.attr("Ref") };
-    let kind = |m: &MatchSpec| match m {
-        MatchSpec::Uuid(_) => "uuid",
-        MatchSpec::IName(_) => "iname",
-        MatchSpec::Title(_) => "title",
-        MatchSpec::Mirrors(_) => "mirrors",
-    };
     // The declared matcher, evaluated fresh. For `mirrors:` the target's
     // uuid is resolved by the caller (it needs the phase order below).
     let matches_of = |ext: &crate::logic::ast::ExternDecl,
@@ -894,35 +874,7 @@ fn resolve_externs(
         .externs()
         .partition(|e| !matches!(e.match_spec, MatchSpec::Mirrors(_)));
     for ext in plain.into_iter().chain(mirrored) {
-        let mirror_uuid: Option<String> = match &ext.match_spec {
-            MatchSpec::Mirrors(target) => {
-                if !matches!(
-                    ext.block_type.as_str(),
-                    "InputRef" | "OutputRef" | "OutputRefLM"
-                ) {
-                    return Err(Error::Compile(format!(
-                        "extern `{}`: `mirrors:` applies to InputRef/OutputRef/OutputRefLM only, \
-                         not {}",
-                        ext.slug, ext.block_type
-                    )));
-                }
-                Some(
-                    lock.objects
-                        .get(target)
-                        .map(|o| o.uuid.clone())
-                        .or_else(|| out.get(target).cloned())
-                        .ok_or_else(|| {
-                            Error::Compile(format!(
-                                "extern `{}` mirrors `{target}`, but `{target}` is neither \
-                                 a managed block with a locked identity nor a plain-matched \
-                                 extern of this module",
-                                ext.slug
-                            ))
-                        })?,
-                )
-            }
-            _ => None,
-        };
+        let mirror_uuid = mirror_target_uuid(ext, lock, &out)?;
         // Lock pin wins as long as it still resolves to an object of the
         // declared type; otherwise fall back to fresh resolution by spec.
         // If the matcher *kind* changed in source, the new matcher must
@@ -942,7 +894,7 @@ fn resolve_externs(
             && !(locked.matched_by == "uuid"
                 && matches!(&ext.match_spec, MatchSpec::Uuid(u) if *u != locked.uuid))
         {
-            if locked.matched_by != kind(&ext.match_spec)
+            if locked.matched_by != matcher_kind(&ext.match_spec)
                 || matches!(ext.match_spec, MatchSpec::Mirrors(_))
             {
                 let confirms = matches_of(ext, mirror_uuid.as_deref());
@@ -957,7 +909,7 @@ fn resolve_externs(
                         locked.uuid
                     )));
                 }
-                locked.matched_by = kind(&ext.match_spec).to_string();
+                locked.matched_by = matcher_kind(&ext.match_spec).to_string();
             }
             out.insert(ext.slug.clone(), locked.uuid.clone());
             continue;
@@ -975,7 +927,7 @@ fn resolve_externs(
                     ext.slug.clone(),
                     LockedExternal {
                         uuid: only.uuid.clone(),
-                        matched_by: kind(&ext.match_spec).to_string(),
+                        matched_by: matcher_kind(&ext.match_spec).to_string(),
                         title_at_match: only.title.clone(),
                         iname_at_match: only.iname.clone(),
                     },
@@ -997,6 +949,74 @@ fn resolve_externs(
     lock.externals
         .retain(|slug, _| declared.contains(slug.as_str()));
     Ok(out)
+}
+
+/// The `page` statement in force at each extern's declaration site
+/// (D28) — `mirrors:` disambiguation is positional page governance (D32).
+fn extern_pages(module: &Module) -> BTreeMap<&str, &str> {
+    let mut page_of_extern: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut current: Option<&str> = None;
+    for item in &module.items {
+        match item {
+            Item::Page(p) => current = Some(p.title.as_str()),
+            Item::Extern(e) => {
+                if let Some(t) = current {
+                    page_of_extern.insert(e.slug.as_str(), t);
+                }
+            }
+            _ => {}
+        }
+    }
+    page_of_extern
+}
+
+/// The lockfile's `matched_by` name of a matcher kind.
+fn matcher_kind(m: &MatchSpec) -> &'static str {
+    match m {
+        MatchSpec::Uuid(_) => "uuid",
+        MatchSpec::IName(_) => "iname",
+        MatchSpec::Title(_) => "title",
+        MatchSpec::Mirrors(_) => "mirrors",
+    }
+}
+
+/// For a `mirrors:` extern, the uuid of the mirrored object: a managed
+/// block with a locked identity or an extern `resolved` before it. None
+/// for the other matchers.
+fn mirror_target_uuid(
+    ext: &crate::logic::ast::ExternDecl,
+    lock: &Lockfile,
+    resolved: &BTreeMap<String, String>,
+) -> Result<Option<String>> {
+    Ok(match &ext.match_spec {
+        MatchSpec::Mirrors(target) => {
+            if !matches!(
+                ext.block_type.as_str(),
+                "InputRef" | "OutputRef" | "OutputRefLM"
+            ) {
+                return Err(Error::Compile(format!(
+                    "extern `{}`: `mirrors:` applies to InputRef/OutputRef/OutputRefLM only, \
+                     not {}",
+                    ext.slug, ext.block_type
+                )));
+            }
+            Some(
+                lock.objects
+                    .get(target)
+                    .map(|o| o.uuid.clone())
+                    .or_else(|| resolved.get(target).cloned())
+                    .ok_or_else(|| {
+                        Error::Compile(format!(
+                            "extern `{}` mirrors `{target}`, but `{target}` is neither \
+                             a managed block with a locked identity nor a plain-matched \
+                             extern of this module",
+                            ext.slug
+                        ))
+                    })?,
+            )
+        }
+        _ => None,
+    })
 }
 
 fn resolve_port(

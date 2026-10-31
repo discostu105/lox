@@ -1259,6 +1259,18 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
     let kind = match toks {
         [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
         [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
+        [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
+        [Tok::Ident(w), ..] if w == "when" => parse_rule_when(toks, lineno, usage)?,
+        [Tok::Ident(w), ..] if w == "then" => parse_rule_then(toks, lineno, usage)?,
+        _ => return Err(err(format!("unexpected rule line; {usage}"))),
+    };
+    Ok(RuleStmt { kind, comment })
+}
+
+/// A `when …` condition line of a `rule` body (see [`parse_rule_stmt`]).
+fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtKind> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let kind = match toks {
         [
             Tok::Ident(w),
             Tok::Ident(k),
@@ -1296,7 +1308,6 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             }
             RuleStmtKind::Weekday(words)
         }
-        [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
         [Tok::Ident(w), Tok::Ident(k), mode, rest @ ..] if w == "when" && k == "mode" => {
             let on = match rest {
                 [] => true,
@@ -1388,7 +1399,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             }
             RuleStmtKind::Date(d.clone())
         }
-        [Tok::Ident(w), ..] if w == "when" => {
+        _ => {
             return Err(err(format!(
                 "Lox Logic knows the conditions `when time`, `when weekday`, `when mode`, \
                  `when <slug>.<state> <op> <value>`, `when weather <field> <op> <value>`, \
@@ -1396,6 +1407,14 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                  `when date \"YYYY-MM-DD\"`; {usage}"
             )));
         }
+    };
+    Ok(kind)
+}
+
+/// A `then …` action line of a `rule` body (see [`parse_rule_stmt`]).
+fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtKind> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let kind = match toks {
         [
             Tok::Ident(w),
             Tok::Ident(k),
@@ -1475,7 +1494,7 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
         }
         _ => return Err(err(format!("unexpected rule line; {usage}"))),
     };
-    Ok(RuleStmt { kind, comment })
+    Ok(kind)
 }
 
 /// One statement of a `test` body (D36): a port injection, `tick`,
@@ -1878,50 +1897,7 @@ fn parse_ident_statement(
             Tok::LArrow,
             rest @ ..,
         ] => {
-            if let Some(attr) = Attr::parse(tp) {
-                return Err(err(format!(
-                    "`{ts}.{attr}` is an object attribute, not a port — attributes \
-                     are assigned (`{ts}.{attr} = \"…\"`), never wired"
-                )));
-            }
-            if tp == "tiles" {
-                return Err(err(format!(
-                    "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
-                )));
-            }
-            if tp == "schedule" {
-                return Err(err(format!(
-                    "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
-                )));
-            }
-            if tp == "moods" {
-                return Err(err(format!(
-                    "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
-                )));
-            }
-            let to = PortRef {
-                slug: ts.clone(),
-                port: tp.clone(),
-            };
-            if rest.is_empty() {
-                return Err(err(format!(
-                    "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
-                     expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
-                     value, use `{ts}.{tp} = <value>`"
-                )));
-            }
-            match parse_expr(rest, lineno)? {
-                Expr::Atom(Operand::Port(from)) => {
-                    items.push(Item::Wire(WireDecl { to, from, comment }));
-                }
-                Expr::Atom(Operand::Value(v)) => {
-                    return Err(err(format!(
-                        "`{to} <- {v}` wires a constant — to assign a value, \
-                         use `{to} = {v}`"
-                    )));
-                }
-                expr => items.push(Item::ExprWire(ExprWireDecl { to, expr, comment })),
-            }
+            items.push(parse_wire(ts, tp, rest, comment, lineno)?);
             Ok(())
         }
         // slug.Port = value — a Def write on an extern port.
@@ -2006,55 +1982,7 @@ fn parse_ident_statement(
             Tok::Eq,
             val,
         ] => {
-            let mut slugs: Vec<&String> = Vec::new();
-            for (k, t) in inner.iter().enumerate() {
-                match t {
-                    Tok::Ident(s) if k % 2 == 0 => {
-                        if slugs.contains(&s) {
-                            return Err(err(format!("`{s}` is listed twice")));
-                        }
-                        slugs.push(s);
-                    }
-                    Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
-                    _ => {
-                        return Err(err(format!(
-                            "expected `(<slug>, <slug>, …).{tp} = <value>`"
-                        )));
-                    }
-                }
-            }
-            if slugs.is_empty() {
-                return Err(err(format!(
-                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
-                )));
-            }
-            if matches!(tp.as_str(), "tiles" | "schedule" | "moods") {
-                return Err(err(format!(
-                    "`.{tp}` takes one object; write a statement per object"
-                )));
-            }
-            let value = value_of(val, lineno)?;
-            for (k, s) in slugs.into_iter().enumerate() {
-                let comment = if k == 0 { comment.clone() } else { None };
-                items.push(match Attr::parse(tp) {
-                    Some(attr) => Item::Attr(AttrDecl {
-                        slug: s.clone(),
-                        attr,
-                        value: value.clone(),
-                        comment,
-                        bulk: Some(lineno),
-                    }),
-                    None => Item::Set(SetDecl {
-                        target: PortRef {
-                            slug: s.clone(),
-                            port: tp.clone(),
-                        },
-                        value: value.clone(),
-                        comment,
-                        bulk: Some(lineno),
-                    }),
-                });
-            }
+            items.extend(parse_bulk(inner, tp, val, comment, lineno)?);
             Ok(())
         }
         // slug.title|room|category = value — an attribute claim (D39).
@@ -2090,6 +2018,121 @@ fn parse_ident_statement(
                 .into(),
         )),
     }
+}
+
+/// `slug.Port <- …`: a plain wire (`slug.Port` RHS) or an expression
+/// that desugars into gate/comparator blocks (D24).
+fn parse_wire(
+    ts: &str,
+    tp: &str,
+    rest: &[Tok],
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<Item> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    if let Some(attr) = Attr::parse(tp) {
+        return Err(err(format!(
+            "`{ts}.{attr}` is an object attribute, not a port — attributes \
+             are assigned (`{ts}.{attr} = \"…\"`), never wired"
+        )));
+    }
+    if tp == "tiles" {
+        return Err(err(format!(
+            "`{ts}.tiles` takes a tiles set (`{ts}.tiles = <name>`), never a wire"
+        )));
+    }
+    if tp == "schedule" {
+        return Err(err(format!(
+            "`{ts}.schedule` takes a schedule (`{ts}.schedule = <name>`), never a wire"
+        )));
+    }
+    if tp == "moods" {
+        return Err(err(format!(
+            "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
+        )));
+    }
+    let to = PortRef {
+        slug: ts.to_string(),
+        port: tp.to_string(),
+    };
+    if rest.is_empty() {
+        return Err(err(format!(
+            "expected a source after `<-` (`{ts}.{tp} <- <slug>.<Port>`, or an \
+             expression like `{ts}.{tp} <- a.Q and b.AQ >= 28`); to assign a \
+             value, use `{ts}.{tp} = <value>`"
+        )));
+    }
+    match parse_expr(rest, lineno)? {
+        Expr::Atom(Operand::Port(from)) => Ok(Item::Wire(WireDecl { to, from, comment })),
+        Expr::Atom(Operand::Value(v)) => Err(err(format!(
+            "`{to} <- {v}` wires a constant — to assign a value, \
+             use `{to} = {v}`"
+        ))),
+        expr => Ok(Item::ExprWire(ExprWireDecl { to, expr, comment })),
+    }
+}
+
+/// `(a, b, …).Setting = value`: one setting or attribute for several
+/// objects (#199) — a statement per object, each remembering the line.
+fn parse_bulk(
+    inner: &[Tok],
+    tp: &str,
+    val: &Tok,
+    comment: Option<String>,
+    lineno: usize,
+) -> Result<Vec<Item>> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let mut items = Vec::new();
+    let mut slugs: Vec<&String> = Vec::new();
+    for (k, t) in inner.iter().enumerate() {
+        match t {
+            Tok::Ident(s) if k % 2 == 0 => {
+                if slugs.contains(&s) {
+                    return Err(err(format!("`{s}` is listed twice")));
+                }
+                slugs.push(s);
+            }
+            Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
+            _ => {
+                return Err(err(format!(
+                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                )));
+            }
+        }
+    }
+    if slugs.is_empty() {
+        return Err(err(format!(
+            "expected `(<slug>, <slug>, …).{tp} = <value>`"
+        )));
+    }
+    if matches!(tp, "tiles" | "schedule" | "moods") {
+        return Err(err(format!(
+            "`.{tp}` takes one object; write a statement per object"
+        )));
+    }
+    let value = value_of(val, lineno)?;
+    for (k, s) in slugs.into_iter().enumerate() {
+        let comment = if k == 0 { comment.clone() } else { None };
+        items.push(match Attr::parse(tp) {
+            Some(attr) => Item::Attr(AttrDecl {
+                slug: s.clone(),
+                attr,
+                value: value.clone(),
+                comment,
+                bulk: Some(lineno),
+            }),
+            None => Item::Set(SetDecl {
+                target: PortRef {
+                    slug: s.clone(),
+                    port: tp.to_string(),
+                },
+                value: value.clone(),
+                comment,
+                bulk: Some(lineno),
+            }),
+        });
+    }
+    Ok(items)
 }
 
 struct ArgOutcome {

@@ -1944,291 +1944,319 @@ impl Module {
                 out.push('\n');
             }
             prev = Some(disc);
-            prev_multiline = false;
-            let tail =
-                |c: &Option<String>| c.as_ref().map(|t| format!(" #{t}")).unwrap_or_default();
-            match item {
-                Item::Extern(e) => {
-                    out.push_str(&format!(
-                        "extern {} = {}({}){}\n",
-                        e.slug,
-                        e.block_type,
-                        e.spec(),
-                        tail(&e.comment)
-                    ));
-                }
-                Item::Block(b) | Item::Instance(b) => {
-                    out.push_str(&format!("{} = {}(", b.slug, b.block_type));
-                    if b.args.is_empty() {
-                        // Single line: `slug = Type()` or `slug = Type("Label")`.
-                        if let Some(t) = &b.title {
-                            out.push_str(&quote(t));
-                        }
-                        out.push(')');
-                        out.push_str(&tail(&b.comment));
-                    } else {
-                        out.push_str(&tail(&b.comment));
-                        out.push('\n');
-                        if let Some(t) = &b.title {
-                            out.push_str(&format!("\t{},\n", quote(t)));
-                        }
-                        for arg in &b.args {
-                            match arg {
-                                ArgItem::Binding(x) => out.push_str(&format!(
-                                    "\t{}: {},{}\n",
-                                    x.port,
-                                    x.kind,
-                                    tail(&x.comment)
-                                )),
-                                ArgItem::Comment(text) => {
-                                    out.push_str(&format!("\t#{text}\n"));
-                                }
-                            }
-                        }
-                        out.push(')');
-                        out.push_str(&tail(&b.close_comment));
-                        prev_multiline = true;
-                    }
-                    out.push('\n');
-                }
-                Item::Wire(w) => {
-                    out.push_str(&format!("{} <- {}{}\n", w.to, w.from, tail(&w.comment)));
-                }
-                Item::ExprWire(w) => {
-                    out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
-                }
-                // The statements of one bulk line go back to that line.
-                Item::Set(SetDecl {
-                    bulk: Some(line),
-                    target,
-                    value,
-                    comment,
-                }) => {
-                    let slugs = bulk_run(&self.items[i..], *line, |x| match x {
-                        Item::Set(s) if s.target.port == target.port && s.value == *value => {
-                            Some((s.bulk, s.target.slug.as_str()))
-                        }
-                        _ => None,
-                    });
-                    skip = slugs.len() - 1;
-                    out.push_str(&format!(
-                        "({}).{} = {value}{}\n",
-                        slugs.join(", "),
-                        target.port,
-                        tail(comment)
-                    ));
-                }
-                Item::Attr(AttrDecl {
-                    bulk: Some(line),
-                    attr,
-                    value,
-                    comment,
-                    ..
-                }) => {
-                    let slugs = bulk_run(&self.items[i..], *line, |x| match x {
-                        Item::Attr(a) if a.attr == *attr && a.value == *value => {
-                            Some((a.bulk, a.slug.as_str()))
-                        }
-                        _ => None,
-                    });
-                    skip = slugs.len() - 1;
-                    out.push_str(&format!(
-                        "({}).{attr} = {value}{}\n",
-                        slugs.join(", "),
-                        tail(comment)
-                    ));
-                }
-                Item::Set(s) => {
-                    out.push_str(&format!("{} = {}{}\n", s.target, s.value, tail(&s.comment)));
-                }
-                Item::Attr(a) => {
-                    out.push_str(&format!("{a}{}\n", tail(&a.comment)));
-                }
-                Item::Let(l) => {
-                    out.push_str(&format!(
-                        "let {} = {}{}\n",
-                        l.name,
-                        l.value,
-                        tail(&l.comment)
-                    ));
-                }
-                Item::Removed(r) => {
-                    out.push_str(&format!("removed {}{}\n", r.slug, tail(&r.comment)));
-                }
-                Item::Moved(m) => {
-                    out.push_str(&format!(
-                        "moved {} -> {}{}\n",
-                        m.from,
-                        m.to,
-                        tail(&m.comment)
-                    ));
-                }
-                Item::Template(t) => {
-                    let params = t
-                        .params
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    out.push_str(&format!(
-                        "template {}({params}){}\n",
-                        t.name,
-                        tail(&t.comment)
-                    ));
-                    // The body is a module in miniature — reuse its
-                    // canonical form, indented one level.
-                    let body = Module {
-                        items: t.body.clone(),
-                    }
-                    .to_text();
-                    for line in body.lines() {
-                        if !line.is_empty() {
-                            out.push('\t');
-                            out.push_str(line);
-                        }
-                        out.push('\n');
-                    }
-                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::Page(p) => {
-                    let mut args = Vec::new();
-                    if let Some(r) = &p.room {
-                        args.push(format!("room: {}", quote(r)));
-                    }
-                    if let Some(c) = &p.category {
-                        args.push(format!("category: {}", quote(c)));
-                    }
-                    let args = if args.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" ({})", args.join(", "))
-                    };
-                    out.push_str(&format!(
-                        "page {}{args}{}\n",
-                        quote(&p.title),
-                        tail(&p.comment)
-                    ));
-                }
-                Item::Test(t) => {
-                    out.push_str(&format!("test {}{}\n", quote(&t.name), tail(&t.comment)));
-                    for stmt in &t.body {
-                        out.push_str(&format!("\t{stmt}\n"));
-                    }
-                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::Tiles(t) => {
-                    out.push_str(&format!("tiles {}{}\n", t.name, tail(&t.comment)));
-                    for stmt in &t.body {
-                        match stmt {
-                            TilesItem::Tile(tile) => {
-                                out.push_str(&format!("\ttile {}(", tile.index));
-                                if tile.args.is_empty() {
-                                    out.push(')');
-                                    out.push_str(&tail(&tile.comment));
-                                } else {
-                                    out.push_str(&tail(&tile.comment));
-                                    out.push('\n');
-                                    for arg in &tile.args {
-                                        match arg {
-                                            ArgItem::Binding(x) => out.push_str(&format!(
-                                                "\t\t{}: {},{}\n",
-                                                x.port,
-                                                x.kind,
-                                                tail(&x.comment)
-                                            )),
-                                            ArgItem::Comment(text) => {
-                                                out.push_str(&format!("\t\t#{text}\n"));
-                                            }
-                                        }
-                                    }
-                                    out.push_str("\t)");
-                                    out.push_str(&tail(&tile.close_comment));
-                                }
-                                out.push('\n');
-                            }
-                            TilesItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
-                        }
-                    }
-                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::TilesClaim(c) => {
-                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
-                }
-                Item::Access(a) => {
-                    out.push_str(&format!(
-                        "{} {}{}\n",
-                        a.right.keyword(),
-                        a.slug,
-                        tail(&a.comment)
-                    ));
-                    for stmt in &a.body {
-                        match stmt {
-                            AccessItem::Grant(g) => {
-                                out.push_str(&format!("\t{g}{}\n", tail(&g.comment)));
-                            }
-                            AccessItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
-                        }
-                    }
-                    out.push_str(&format!("end{}\n", tail(&a.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::Schedule(t) => {
-                    out.push_str(&format!("schedule {}{}\n", t.name, tail(&t.comment)));
-                    for stmt in &t.body {
-                        match stmt {
-                            ScheduleItem::Line(l) => out.push_str(&format!("\t{l}\n")),
-                            ScheduleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
-                        }
-                    }
-                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::ScheduleClaim(c) => {
-                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
-                }
-                Item::Moods(t) => {
-                    out.push_str(&format!("moods {}{}\n", t.name, tail(&t.comment)));
-                    for stmt in &t.body {
-                        match stmt {
-                            MoodsItem::Mood(m) => out.push_str(&format!("\t{m}\n")),
-                            MoodsItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
-                        }
-                    }
-                    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::MoodsClaim(c) => {
-                    out.push_str(&format!("{c}{}\n", tail(&c.comment)));
-                }
-                Item::Rule(r) => {
-                    let title = r.title.as_deref().map(|t| format!(" {}", quote(t)));
-                    out.push_str(&format!(
-                        "rule {}{}{}\n",
-                        r.slug,
-                        title.unwrap_or_default(),
-                        tail(&r.comment)
-                    ));
-                    for stmt in &r.body {
-                        match stmt {
-                            RuleItem::Stmt(st) => {
-                                out.push_str(&format!("\t{}{}\n", st.kind, tail(&st.comment)));
-                            }
-                            RuleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
-                        }
-                    }
-                    out.push_str(&format!("end{}\n", tail(&r.end_comment)));
-                    prev_multiline = true;
-                }
-                Item::Comment(text) => {
-                    out.push_str(&format!("#{text}\n"));
-                }
-            }
+            (prev_multiline, skip) = self.write_item(i, item, &mut out);
         }
         out
     }
+
+    /// Writes one item in canonical form (the body of [`Module::to_text`]).
+    /// `i` is its index in `self.items`. Returns whether it was written
+    /// over several lines and how many following items a bulk line
+    /// absorbed.
+    fn write_item(&self, i: usize, item: &Item, out: &mut String) -> (bool, usize) {
+        let mut multiline = false;
+        let mut skip = 0;
+        match item {
+            Item::Extern(e) => {
+                out.push_str(&format!(
+                    "extern {} = {}({}){}\n",
+                    e.slug,
+                    e.block_type,
+                    e.spec(),
+                    tail(&e.comment)
+                ));
+            }
+            Item::Block(b) | Item::Instance(b) => {
+                multiline = write_block(b, out);
+            }
+            Item::Wire(w) => {
+                out.push_str(&format!("{} <- {}{}\n", w.to, w.from, tail(&w.comment)));
+            }
+            Item::ExprWire(w) => {
+                out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
+            }
+            // The statements of one bulk line go back to that line.
+            Item::Set(SetDecl {
+                bulk: Some(line),
+                target,
+                value,
+                comment,
+            }) => {
+                let slugs = bulk_run(&self.items[i..], *line, |x| match x {
+                    Item::Set(s) if s.target.port == target.port && s.value == *value => {
+                        Some((s.bulk, s.target.slug.as_str()))
+                    }
+                    _ => None,
+                });
+                skip = slugs.len() - 1;
+                out.push_str(&format!(
+                    "({}).{} = {value}{}\n",
+                    slugs.join(", "),
+                    target.port,
+                    tail(comment)
+                ));
+            }
+            Item::Attr(AttrDecl {
+                bulk: Some(line),
+                attr,
+                value,
+                comment,
+                ..
+            }) => {
+                let slugs = bulk_run(&self.items[i..], *line, |x| match x {
+                    Item::Attr(a) if a.attr == *attr && a.value == *value => {
+                        Some((a.bulk, a.slug.as_str()))
+                    }
+                    _ => None,
+                });
+                skip = slugs.len() - 1;
+                out.push_str(&format!(
+                    "({}).{attr} = {value}{}\n",
+                    slugs.join(", "),
+                    tail(comment)
+                ));
+            }
+            Item::Set(s) => {
+                out.push_str(&format!("{} = {}{}\n", s.target, s.value, tail(&s.comment)));
+            }
+            Item::Attr(a) => {
+                out.push_str(&format!("{a}{}\n", tail(&a.comment)));
+            }
+            Item::Let(l) => {
+                out.push_str(&format!(
+                    "let {} = {}{}\n",
+                    l.name,
+                    l.value,
+                    tail(&l.comment)
+                ));
+            }
+            Item::Removed(r) => {
+                out.push_str(&format!("removed {}{}\n", r.slug, tail(&r.comment)));
+            }
+            Item::Moved(m) => {
+                out.push_str(&format!(
+                    "moved {} -> {}{}\n",
+                    m.from,
+                    m.to,
+                    tail(&m.comment)
+                ));
+            }
+            Item::Template(t) => {
+                write_template(t, out);
+                multiline = true;
+            }
+            Item::Page(p) => {
+                let mut args = Vec::new();
+                if let Some(r) = &p.room {
+                    args.push(format!("room: {}", quote(r)));
+                }
+                if let Some(c) = &p.category {
+                    args.push(format!("category: {}", quote(c)));
+                }
+                let args = if args.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", args.join(", "))
+                };
+                out.push_str(&format!(
+                    "page {}{args}{}\n",
+                    quote(&p.title),
+                    tail(&p.comment)
+                ));
+            }
+            Item::Test(t) => {
+                out.push_str(&format!("test {}{}\n", quote(&t.name), tail(&t.comment)));
+                for stmt in &t.body {
+                    out.push_str(&format!("\t{stmt}\n"));
+                }
+                out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                multiline = true;
+            }
+            Item::Tiles(t) => {
+                write_tiles(t, out);
+                multiline = true;
+            }
+            Item::TilesClaim(c) => {
+                out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+            }
+            Item::Access(a) => {
+                out.push_str(&format!(
+                    "{} {}{}\n",
+                    a.right.keyword(),
+                    a.slug,
+                    tail(&a.comment)
+                ));
+                for stmt in &a.body {
+                    match stmt {
+                        AccessItem::Grant(g) => {
+                            out.push_str(&format!("\t{g}{}\n", tail(&g.comment)));
+                        }
+                        AccessItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                    }
+                }
+                out.push_str(&format!("end{}\n", tail(&a.end_comment)));
+                multiline = true;
+            }
+            Item::Schedule(t) => {
+                out.push_str(&format!("schedule {}{}\n", t.name, tail(&t.comment)));
+                for stmt in &t.body {
+                    match stmt {
+                        ScheduleItem::Line(l) => out.push_str(&format!("\t{l}\n")),
+                        ScheduleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                    }
+                }
+                out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                multiline = true;
+            }
+            Item::ScheduleClaim(c) => {
+                out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+            }
+            Item::Moods(t) => {
+                out.push_str(&format!("moods {}{}\n", t.name, tail(&t.comment)));
+                for stmt in &t.body {
+                    match stmt {
+                        MoodsItem::Mood(m) => out.push_str(&format!("\t{m}\n")),
+                        MoodsItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                    }
+                }
+                out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+                multiline = true;
+            }
+            Item::MoodsClaim(c) => {
+                out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+            }
+            Item::Rule(r) => {
+                let title = r.title.as_deref().map(|t| format!(" {}", quote(t)));
+                out.push_str(&format!(
+                    "rule {}{}{}\n",
+                    r.slug,
+                    title.unwrap_or_default(),
+                    tail(&r.comment)
+                ));
+                for stmt in &r.body {
+                    match stmt {
+                        RuleItem::Stmt(st) => {
+                            out.push_str(&format!("\t{}{}\n", st.kind, tail(&st.comment)));
+                        }
+                        RuleItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+                    }
+                }
+                out.push_str(&format!("end{}\n", tail(&r.end_comment)));
+                multiline = true;
+            }
+            Item::Comment(text) => {
+                out.push_str(&format!("#{text}\n"));
+            }
+        }
+        (multiline, skip)
+    }
+}
+
+/// ` #comment` for a trailing comment, empty without one.
+fn tail(c: &Option<String>) -> String {
+    c.as_ref().map(|t| format!(" #{t}")).unwrap_or_default()
+}
+
+/// Canonical text of a block or instance call: on one line without
+/// arguments, else one argument per line. True when multi-line.
+fn write_block(b: &BlockDecl, out: &mut String) -> bool {
+    let mut multiline = false;
+    out.push_str(&format!("{} = {}(", b.slug, b.block_type));
+    if b.args.is_empty() {
+        // Single line: `slug = Type()` or `slug = Type("Label")`.
+        if let Some(t) = &b.title {
+            out.push_str(&quote(t));
+        }
+        out.push(')');
+        out.push_str(&tail(&b.comment));
+    } else {
+        out.push_str(&tail(&b.comment));
+        out.push('\n');
+        if let Some(t) = &b.title {
+            out.push_str(&format!("\t{},\n", quote(t)));
+        }
+        for arg in &b.args {
+            match arg {
+                ArgItem::Binding(x) => {
+                    out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
+                }
+                ArgItem::Comment(text) => {
+                    out.push_str(&format!("\t#{text}\n"));
+                }
+            }
+        }
+        out.push(')');
+        out.push_str(&tail(&b.close_comment));
+        multiline = true;
+    }
+    out.push('\n');
+    multiline
+}
+
+/// Canonical text of a template: its head, the body indented one level, `end`.
+fn write_template(t: &TemplateDecl, out: &mut String) {
+    let params = t
+        .params
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "template {}({params}){}\n",
+        t.name,
+        tail(&t.comment)
+    ));
+    // The body is a module in miniature — reuse its
+    // canonical form, indented one level.
+    let body = Module {
+        items: t.body.clone(),
+    }
+    .to_text();
+    for line in body.lines() {
+        if !line.is_empty() {
+            out.push('\t');
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
+}
+
+/// Canonical text of a `tiles` set: one `tile` call per tile, then `end`.
+fn write_tiles(t: &TilesDecl, out: &mut String) {
+    out.push_str(&format!("tiles {}{}\n", t.name, tail(&t.comment)));
+    for stmt in &t.body {
+        match stmt {
+            TilesItem::Tile(tile) => {
+                out.push_str(&format!("\ttile {}(", tile.index));
+                if tile.args.is_empty() {
+                    out.push(')');
+                    out.push_str(&tail(&tile.comment));
+                } else {
+                    out.push_str(&tail(&tile.comment));
+                    out.push('\n');
+                    for arg in &tile.args {
+                        match arg {
+                            ArgItem::Binding(x) => out.push_str(&format!(
+                                "\t\t{}: {},{}\n",
+                                x.port,
+                                x.kind,
+                                tail(&x.comment)
+                            )),
+                            ArgItem::Comment(text) => {
+                                out.push_str(&format!("\t\t#{text}\n"));
+                            }
+                        }
+                    }
+                    out.push_str("\t)");
+                    out.push_str(&tail(&tile.close_comment));
+                }
+                out.push('\n');
+            }
+            TilesItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+        }
+    }
+    out.push_str(&format!("end{}\n", tail(&t.end_comment)));
 }
 
 fn quote(s: &str) -> String {
