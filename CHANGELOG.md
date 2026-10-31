@@ -10,6 +10,13 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.53.0] — 2026-10-31
+
+### Added
+- **`lox logic test --trace`** (also `loxl test --trace`) prints each test cycle by cycle: what a step sets,
+  every change of the ports its expectations depend on, named by slug, and each `expect` with its actual value.
+  A failing run without it points to the flag.
+
 ## [0.52.1] — 2026-10-31
 
 ### Added
