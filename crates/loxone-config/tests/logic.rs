@@ -1557,7 +1557,7 @@ fn template_misuse_is_reported() {
 
 #[test]
 fn grown_gate_inputs_are_refused() {
-    // Oracle-verified (docs/oracle-wine.md): Loxone Config 17 silently
+    // Oracle-verified (docs/oracle-sessions.md): Loxone Config 17 silently
     // deletes off-descriptor connectors on save. A grown `I3` must be a
     // compile error, never minted.
     let m = Module::parse(

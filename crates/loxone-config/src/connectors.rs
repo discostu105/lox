@@ -91,7 +91,7 @@ const THRESHOLD: &[PortSpec] = &[
     p("FallingEdge", Output),
 ];
 
-// Admitted 2026-08-25 after the mint-oracle run (docs/oracle-wine.md):
+// Admitted 2026-08-25 after the mint-oracle run (docs/oracle-sessions.md):
 // real-instance evidence (7×/5×/8× in one config, zero index conflicts),
 // legacy-db agreement on every overlapping port, and a minted minimal
 // instance of each surviving a Loxone Config open+save. These blocks
@@ -1738,7 +1738,7 @@ mod tests {
         assert_eq!((dt[7].key, dt[7].dir), ("AQ", PortDir::Output));
         assert_eq!((dt[11].key, dt[11].dir), ("AQmt", PortDir::Output));
         assert_eq!((dt[12].key, dt[12].dir), ("OutputAPI", PortDir::Input));
-        // Mint-oracle verified 2026-08-25 (docs/oracle-wine.md): minted
+        // Mint-oracle verified 2026-08-25 (docs/oracle-sessions.md): minted
         // minimal instances survived a GUI open+save; Memory's never-wired
         // `Q` proved an output by a compiled wire sourced from it surviving
         // the save (off-descriptor wires get deleted).
