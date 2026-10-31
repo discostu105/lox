@@ -305,7 +305,13 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   zero rules, 100+ corpus configs): locale-volatile title
   ("Automatik-Regeln"/"Automatic rules"/…), `Nio="2"` (`Input`,
   `output`), `SpStates=`, sitting among the system objects. Each rule's
-  `ref=` attribute names this container's UUID.
+  `ref=` attribute names this container's UUID. Its `Input` lists, as
+  `<In Input=… FLG="1"/>`, every source a rule watches: the `DayOfWeek`
+  block's `Q` for a weekday condition, the state UUID for a state
+  condition, the mode's `Q` for a mode condition; a time condition adds
+  none. A save writes them in reverse document order of the rules'
+  conditions, each once (oracle session 31). Older corpus files mark
+  them `Hidden="true"`.
 - **Rule element**: `Nio="7"` with connectors in index order
   `InputTrigger, Reset, On, run, Q, A, OutputAPI` (matching the app's
   documented Tr/R/O inputs and status outputs), an `<IoData>` child,
@@ -333,18 +339,31 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   resolve to `<C>` objects in the same document** (every occurrence);
   `command` is verbatim app command text (`on`, `off`, `pulse`,
   `setMode/4`, …), with `arrValues` duplicating the command's numeric
-  argument where one exists. Observations short of validation: event
-  `type` selects the condition source (0 = control state with
-  `controlUUID`; 1 with `descID` 21001 looks operating-mode-shaped;
-  3 with `descID` 270001 weekday-shaped, weekday sets via `arrValues`
-  and a `9999999999` sentinel `value`; 5 with `descID` 272001
-  time-shaped, `value` = minutes since midnight — 540 on a rule titled
-  "Skimmer Ein", matching the `Time` singleton's unit); `descID` reads
-  as a per-control-type code × 1000 plus an offset (+001… events,
-  +101… actions: 342xxx on PushButton, 493xxx on PButtonT, 527xxx on
-  AcControl); the group/rule `operator` codes (observed only 1 and 3)
-  presumably encode the AND/OR combination. The full `descID`/`type`
-  tables ship inside the Loxone app bundle, not in any config.
+  argument where one exists.
+- **The codes, from the Miniserver** (2026-10-31, D73): the app builds
+  rules from a capability table the Miniserver serves,
+  `jdev/sps/io/<AutoPilot container>/capabilities/getraw` (JSON,
+  `version` `20260521DEU` on firmware 17.2; `capabilities/version`
+  alone). One entry per app control type (`controlTypes`, e.g.
+  `["Switch"]`, `["Pushbutton"]`), with `events` (`descID`, `type`
+  digital/analog/text, `sourceState`, a digital one's `sourceValue`)
+  and `actions` (`descID`, `action` = the command with `<val0>`…
+  placeholders, value kinds). The web app's `AutomaticDesignerEnums`
+  name the rest: event `type` 0 control, 1 operating mode, 2 weather,
+  3 weekday, 4 date, 5 time of day; action `type` 0 control, 1
+  operating mode, 2 cloud mailer, 3 caller, 4 notification, 5 pause;
+  `operator` 0 bool, 1 `==`, 2 `!=`, 3 `>`, 4 `<`, 5 `>=`, 6 `<=`, 7–12
+  text comparisons. A rule's `operator` is 3, each event group's 1:
+  the events of a group must all hold, the groups are alternatives (the
+  editor's sections). A control condition is `{"type": 0, "descID",
+  "id": <UUID of the state named by sourceState>, "controlUUID":
+  <the control's uuidAction>, "value": <sourceValue or the user's
+  number>, "operator", "forceEdge": false}`; an operating-mode
+  condition `{"type": 1, "descID": 21001, "id": <the mode's number>,
+  "value": 1|0, "operator": 1, "forceEdge": false}` (the number is the
+  `Mode=` attribute: 0 … 11 built in, negatives user modes); a mode
+  action `{"type": 1, "descID": 21101, "id": <number>, "command":
+  "1"|"0", "arrValues": [1|0]}`.
 - The raw payload text is **not writer-stable**: two of the house
   rules carry a raw CRLF *inside* the JSON (between tokens — the
   parsed value is unaffected), the other eight are single-line. Any
@@ -355,7 +374,9 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   projection, canonicalized as parsed JSON per the point above), and
   rendered as comment lines in the decompile full view. Since D57 a
   `rule` declaration edits the rules of the documented shapes (time,
-  weekday; actions with an observed `descID`); since D60 a named one
+  weekday; actions with an observed `descID`; since D73 control states,
+  operating modes, OR groups and any action of the capability table);
+  since D60 a named one
   creates a rule the config lacks (below), and Lox Logic never deletes one.
 - **Activation is two flags** (live, 2026-10-30): the engine runs a
   rule only with `"active": true` *and* `"activeIfValid": true`. Rules
@@ -562,11 +583,31 @@ Config 17.2) and the default template:
 - A fresh mode saved by Loxone Config: `Nio="2" WF="147456"`,
   `<IoData></IoData>`. Modes made in the GUI earlier carry
   `WF="16384"` and an `<IoData Cr=…>` category.
-- Calendar entries (*Betriebszeiten*): `CalendarEntry` under
-  `CalendarCaption`, with `I`/`Q`. Both observed entries are date
-  ranges, `Mode="4"` with `Month`/`Day` to `Month2`/`Day2`,
-  `WeekDayInMonth="1"`, and `CalType` = the `Mode=` number of the mode
-  they switch. Other kinds are unobserved (#211).
+- Calendar entries (*Betriebszeiten*): see below.
+
+### Calendar entries
+
+The *Betriebszeiten* folder is a `CalendarCaption` holding one
+`CalendarEntry` per entry, `Nio="2" WF="16384"`, with an `I` (`-00ff`)
+and a `Q` (`-01ff`) connector that none of the corpus's 397 entries
+wires. Attributes, in the save's order:
+
+- `CalType` — the `Mode=` number of the operating mode the entry
+  switches on; absent for 0, the holiday mode. User modes are negative.
+- `Mode` — the kind of date: absent, a fixed date every year (`Month`,
+  `Day`); `1`, relative to Easter Sunday (`EasterOffset` in days, which
+  may be negative); `3`, one period (`From`, `To`: days since
+  2009-01-01 — `2375` is 4 July 2015); `4`, a yearly range (`Month`,
+  `Day` to `Month2`, `Day2`). No other value occurs.
+- `Month`, `Day`, `Month2`, `Day2` — always present; `1` where the kind
+  does not use them. Some Easter entries carry a date there (the day
+  of some year the offset gave); it is carried as written.
+- `From`, `To`, `EasterOffset` — only with their kind.
+- `WeekDayInMonth` — always `1`.
+
+A save of fresh period, Easter and yearly-range entries changed nothing
+(oracle session 31); a fixed-date entry for the day switched its mode on
+on the house (firmware 17.2.8.28).
 
 ## Users, groups and access rights
 

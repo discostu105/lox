@@ -119,7 +119,12 @@ rule       = "rule" slug [ comment ]               (* Automatic Designer rule (D
 rule-line  = ( "active" | "inactive"
              | "when" "time" time                  (* 00:00 … 23:59 *)
              | "when" "weekday" rule-day { rule-day }
-             | "then" slug string ) [ comment ] ;
+             | "when" slug "." ident cmp ( number | "on" | "off" )   (* D73 *)
+             | "when" "mode" mode-name [ "on" | "off" ]             (* D73 *)
+             | "or"                                (* starts another group, D73 *)
+             | "then" slug string
+             | "then" "mode" mode-name ( "on" | "off" ) ) [ comment ] ;
+mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
 rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | "weekdays" | "weekend" | "daily" ;
 
@@ -450,8 +455,35 @@ virtual input: no position, no `page`. A fresh one gets the next
 can be named in schedules by its title. Existing modes — the built-in
 ones and those made in Loxone Config — are referenced by title in a
 schedule or as an extern (`extern montag = Mode(title: "Montag")`);
-`adopt` does not take them over. Which dates switch a mode on (the
-*Betriebszeiten* calendar) stays with Loxone Config (#211).
+`adopt` does not take them over.
+
+### Calendar entries — the *Betriebszeiten* that switch a mode on (D74)
+
+```text
+ferien = CalendarEntry("Sommerferien", CalType: 2, Mode: 3, From: 6393, To: 6456)
+ostern = CalendarEntry("Ostermontag", Mode: 1, EasterOffset: 1)
+silvester = CalendarEntry("Silvester", CalType: -8, Month: 12, Day: 31)
+```
+
+An entry of the *Betriebszeiten* calendar is an object of the object
+tree, minted into the `CalendarCaption` folder. `CalType` is the
+`Mode=` number of the mode it switches on (absent: 0, the holiday
+mode); `Mode` says what kind of date it is:
+
+| `Mode` | Kind | Attributes |
+|---|---|---|
+| absent | a fixed date, every year | `Month`, `Day` |
+| `1` | relative to Easter Sunday | `EasterOffset` (days) |
+| `3` | one period | `From`, `To` (days since 2009-01-01) |
+| `4` | a yearly range | `Month`, `Day` to `Month2`, `Day2` |
+
+Other kinds do not occur among the corpus's 397 entries; the attributes
+are written as stated. A fresh entry carries the attributes Loxone
+Config writes for an unset date (`Month`/`Day`/`Month2`/`Day2` 1,
+`WeekDayInMonth="1"`). The entries Loxone Config made are taken over
+with `adopt --uuid`; edits change only the attributes the source
+states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
+is the output to use.
 
 ### `<-` — wire onto an extern port
 
@@ -1088,18 +1120,34 @@ created, named and deleted in the app; the declaration edits one.
 - **`when time HH:MM`** — at that time of day.
 - **`when weekday <days>`** — on those days (`mon` … `sun`, `weekdays`,
   `weekend`, `daily`; no day twice).
+- **`when <slug>.<state> <op> <value>`** (D73) — a state of a block
+  the app shows: `==`, `!=`, `>`, `<`, `>=`, `<=` against a number, or
+  `on`/`off` (1/0) for a digital state (`when pumpe.active == on`).
+  The state names and condition codes are the app's own: the
+  capability table the Miniserver serves the app
+  (`loxone_config::autopilot_caps`), per app control type.
+- **`when mode <mode> [on|off]`** (D73) — while an operating mode is
+  (not) active; `<mode>` is a `Mode` block's slug or a mode's title
+  (`when mode "Party"`).
+- **`or`** (D73) — the conditions after it form another group: the
+  rule fires when all conditions of any one group hold.
 - **`then <slug> "<command>"`** — the app's command text to a block:
-  `on`/`off` to a `PushButton`, `pulse` to a `PButtonT`, or any
-  target type and command some rule of the config already sends (the
-  compile copies that action's code). Anything else is refused.
+  any command the capability table offers for the block's app type
+  (`on`/`off` to a `PushButton`, `pulse` to a `PButtonT`, `<valN>`
+  numbers filled in), or one some rule of the config already sends (the
+  compile copies that action's code). Anything else is refused, with
+  the commands the block offers.
+- **`then mode <mode> on|off`** (D73) — activates or deactivates an
+  operating mode.
 
 Compiling writes the rule's `APC=` payload only when the declaration
 differs from the rule as read, and then as the app's edit: unchanged
 conditions and actions keep their JSON, `STA` follows `active`.
 `decompile`/`adopt` lift every rule of these shapes into a declaration,
 by its name (below) when no other rule has that name, else on an extern;
-a rule with other conditions (a control's state, an operating mode, OR
-groups) stays a comment and must not be declared. `loxl adopt --uuid
+the blocks it watches or drives become externs. A rule with other
+conditions (weather, a date, notifications, text values) stays a comment
+and must not be declared. `loxl adopt --uuid
 <rule> --as <slug>` takes one rule into an existing project the same
 way: an extern rule of the module (`--as` its slug) loses its `extern`
 line and unnamed `rule`, and the named declaration takes their place;

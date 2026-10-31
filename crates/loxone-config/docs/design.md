@@ -1967,8 +1967,9 @@ Anything unverified is an error, not a heuristic:
     statements about it (wires into it, port values) become the block's
     own declaration, other files' wires to it are kept, the lock drops
     the extern's entries. Refused, naming the reason, when a template
-    writes onto the extern, when it carries room/category/tile/schedule
-    claims, or when a removal is pending.
+    writes onto the extern, when it carries a tiles claim, or when a
+    removal is pending. Its room, category and schedule claims move to
+    the block (2026-10-31, #191).
   - **Coverage.** `loxl coverage` counts every object by type against
     the lock — managed, extern, rule, untouched — and lists what is left
     to adopt.
@@ -2247,3 +2248,49 @@ Anything unverified is an error, not a heuristic:
   either. Not derived, one sample each in the corpus with fields no
   setting explains: the alarm, smoke alarm, irrigation and room
   controller entries (#190).
+- **D73 — Rule conditions on states and modes, OR groups** (2026-10-31).
+  The Automatic Designer's codes come from the Miniserver itself, not
+  from corpus guesses: the capability table it serves the app
+  (`capabilities/getraw`) is generated into `loxone_config::autopilot_caps`
+  (codes only, `scripts/autopilot_caps.py`), and the web app's enums
+  name the event, action and operator codes (loxone-format.md). The
+  language gains `when <slug>.<state> <op> <value>`, `when mode <mode>
+  [on|off]`, `or` (a new event group) and `then mode <mode> on|off`; a
+  `then` takes any command the table offers for the target's app type.
+  The app type and state UUIDs come from the block's catalogue entry;
+  a block the catalogue does not list (or a type outside the table)
+  works only with codes the config's own rules already use for it. A
+  condition is picked from the table by its state: a digital event
+  with that value for `==`, else the state's one analog event; an
+  ambiguous choice is refused. Decompile lifts every rule of these
+  shapes (the blocks it names become externs) and keeps the rest a
+  comment; on the corpus, every lifted rule compiles back byte for
+  byte (`corpus_rule_declarations_are_byte_fixpoints`). Not covered:
+  weather, date and text conditions, notification/mailer/caller/pause
+  actions.
+  The rules' sources are wired into the AutoPilot container's `Input`
+  (oracle session 31): Loxone Config adds an `<In … FLG="1"/>` for every
+  source a rule watches (a weekday condition the `DayOfWeek` block's
+  `Q`, a state condition the state, a mode condition the mode's `Q`; a
+  time condition none), in reverse document order. Every compile sets
+  that list from the rules, so a compiled file has what a save writes;
+  it is left alone when a rule watches a source Lox Logic cannot place
+  (weather, dates). `adopt`'s no-op check does not count these wires.
+- **D74 — Calendar entries** (2026-10-31; #211). An entry of the
+  *Betriebszeiten* calendar is a `CalendarEntry` object in the
+  `CalendarCaption` folder, minted, adopted and edited like a virtual
+  input (D54): `CalendarEntry("Title", CalType: …, Mode: …, …)`. The
+  attributes are those of the corpus's 397 entries (loxone-format.md):
+  `CalType` names the mode, `Mode` the kind of date (fixed, Easter,
+  period, yearly range). Validated: oracle session 31 (fresh entries of
+  the period, Easter and yearly-range kinds, saved without change); live
+  on the house (2026-10-31): a fixed-date entry for the day switched its
+  mode on.
+- **D75 — A redacted copy** (2026-10-31; #205). `loxl scan --redact
+  <cfg> --out <copy>` writes a copy with every finding of `loxl scan`
+  replaced by a placeholder of the same kind (`redacted`,
+  `redacted@example.invalid`, `192.0.2.1`, coordinates 0, MAC 0, codes
+  and credentials empty); hardware serials become a counter, also inside
+  the UUIDs that embed them. It exits 1 when a finding is left, so a
+  copy that passes can be shared (an issue, a test fixture). The copy is
+  for reading, never for uploading.

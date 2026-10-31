@@ -19,6 +19,8 @@
 
 use serde_json::Value;
 
+pub use crate::autopilot_caps::{ActionCap, CAPABILITIES, Capability, EventCap, Kind};
+
 /// Parse a decoded `APC=` attribute value. `None` if it is not JSON —
 /// callers fall back to showing the raw text.
 pub fn parse(apc: &str) -> Option<Value> {
@@ -187,19 +189,35 @@ fn join(path: &str, key: &str) -> String {
     }
 }
 
-// --- The rule model (D57) ------------------------------------------------
+// --- The rule model (D57, D73) -------------------------------------------
 
-/// What a rule does, in the shapes the corpus documents: one event group
-/// whose events must all hold (group `operator` 1 under rule `operator`
-/// 3, the only codes observed), and the actions it then sends. Two
-/// payloads with the same `Rule` do the same thing, whatever their raw
-/// spelling.
+/// What a rule does: its condition groups — the rule runs when every
+/// event of one group holds (the app's sections: group `operator` 1 under
+/// rule `operator` 3, the only codes the app writes, D73) — and the
+/// actions it then sends. Two payloads with the same `Rule` do the same
+/// thing, whatever their raw spelling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
     /// `active` and `activeIfValid` both set: the rule runs.
     pub active: bool,
-    pub events: Vec<Event>,
+    pub groups: Vec<Vec<Event>>,
     pub actions: Vec<Action>,
+}
+
+impl Rule {
+    /// The blocks the rule names: the ones its conditions watch, then its
+    /// action targets.
+    pub fn blocks(&self) -> Vec<&str> {
+        let watched = self.groups.iter().flatten().filter_map(|e| match e {
+            Event::State { control, .. } => Some(control.as_str()),
+            _ => None,
+        });
+        let targets = self.actions.iter().filter_map(|a| match a {
+            Action::Control { target, .. } => Some(target.as_str()),
+            Action::Mode { .. } => None,
+        });
+        watched.chain(targets).collect()
+    }
 }
 
 /// A condition of a rule.
@@ -212,19 +230,51 @@ pub enum Event {
     /// `arrValues`) or as the sentinel `value` 9999999999 with the days
     /// in `arrValues`; both read the same.
     Weekdays(Vec<u8>),
+    /// An operating mode is active (`on`) or not (`type` 1, `descID`
+    /// 21001, `id` = the mode's `Mode=` number).
+    Mode { mode: i64, on: bool },
+    /// A block's state (`type` 0): the condition `desc` of the block
+    /// `control` (its `uuidAction`), watching the state `id`, compared by
+    /// `op` (the app's value operators, 1 `==` … 6 `<=`) with `value` (a
+    /// JSON number, as text).
+    State {
+        control: String,
+        desc: i64,
+        id: String,
+        op: u8,
+        value: String,
+    },
 }
 
-/// An action: the app command text sent to a control (an object UUID).
+/// An action of a rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Action {
-    pub target: String,
-    pub command: String,
+pub enum Action {
+    /// The app command text sent to a block (an object UUID).
+    Control { target: String, command: String },
+    /// Switch an operating mode on or off (`type` 1, `descID` 21101).
+    Mode { mode: i64, on: bool },
 }
 
 const TIME: (i64, i64, i64) = (5, 272_001, 272);
 const WEEKDAY: (i64, i64, i64) = (3, 270_001, 270);
+/// The operating mode's condition and action (the capability table's
+/// one `type` 1 entry, D73).
+pub const MODE_EVENT: i64 = 21_001;
+pub const MODE_ACTION: i64 = 21_101;
 /// The `value` of a weekday event whose days are in `arrValues`.
 pub const WEEKDAY_SENTINEL: i64 = 9_999_999_999;
+
+/// The app's value operators (`AutomaticDesignerEnums.VALUE_OPERATORS`):
+/// code and symbol. The text operators (7–12) take a text state, which no
+/// condition Lox Logic writes watches.
+pub const OPERATORS: &[(u8, &str)] = &[
+    (1, "=="),
+    (2, "!="),
+    (3, ">"),
+    (4, "<"),
+    (5, ">="),
+    (6, "<="),
+];
 
 /// Read a payload as a [`Rule`]. `Err` names the first part outside the
 /// documented shapes — such a rule is not Lox Logic's to write.
@@ -251,23 +301,27 @@ pub fn interpret(rule: &Value) -> Result<Rule, String> {
     let groups = rule
         .get("eventGroups")
         .and_then(Value::as_array)
-        .ok_or("no `eventGroups` list")?;
-    let [group] = groups.as_slice() else {
-        return Err(format!("{} event groups (one is documented)", groups.len()));
-    };
-    if int(group, "operator") != Some(1) {
-        return Err(format!(
-            "event group `operator` {} (only 1 is documented)",
-            show(group.get("operator"))
-        ));
-    }
-    let events = group
-        .get("events")
-        .and_then(Value::as_array)
-        .ok_or("no `events` list")?
+        .ok_or("no `eventGroups` list")?
         .iter()
-        .map(interpret_event)
+        .map(|group| {
+            if int(group, "operator") != Some(1) {
+                return Err(format!(
+                    "event group `operator` {} (only 1 is documented)",
+                    show(group.get("operator"))
+                ));
+            }
+            group
+                .get("events")
+                .and_then(Value::as_array)
+                .ok_or("no `events` list")?
+                .iter()
+                .map(interpret_event)
+                .collect::<Result<Vec<_>, _>>()
+        })
         .collect::<Result<Vec<_>, _>>()?;
+    if groups.is_empty() {
+        return Err("no event group".into());
+    }
     let actions = rule
         .get("actions")
         .and_then(Value::as_array)
@@ -277,7 +331,7 @@ pub fn interpret(rule: &Value) -> Result<Rule, String> {
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Rule {
         active,
-        events,
+        groups,
         actions,
     })
 }
@@ -286,14 +340,17 @@ fn show(v: Option<&Value>) -> String {
     v.map_or_else(|| "absent".into(), Value::to_string)
 }
 
+/// The capability-table condition with this code, if there is one.
+pub fn event_cap(desc: i64) -> Option<&'static EventCap> {
+    CAPABILITIES
+        .iter()
+        .flat_map(|c| c.events)
+        .find(|e| e.desc == desc)
+}
+
 /// One event, if its shape is documented.
 pub fn interpret_event(e: &Value) -> Result<Event, String> {
     let int = |k: &str| e.get(k).and_then(Value::as_i64);
-    let key = (
-        int("type").unwrap_or(-1),
-        int("descID").unwrap_or(-1),
-        int("id").unwrap_or(-1),
-    );
     let what = || {
         format!(
             "event type {}, descID {}",
@@ -301,15 +358,61 @@ pub fn interpret_event(e: &Value) -> Result<Event, String> {
             show(e.get("descID"))
         )
     };
-    if int("operator") != Some(1) || e.get("forceEdge").and_then(Value::as_bool) != Some(false) {
+    if e.get("forceEdge").and_then(Value::as_bool) != Some(false) {
         return Err(format!(
-            "{} with operator {} / forceEdge {} (only 1 / false is documented)",
+            "{} with forceEdge {} (only false is documented)",
             what(),
-            show(e.get("operator")),
             show(e.get("forceEdge"))
         ));
     }
+    let op = int("operator")
+        .and_then(|o| u8::try_from(o).ok())
+        .filter(|o| OPERATORS.iter().any(|(c, _)| c == o))
+        .ok_or_else(|| format!("{} with operator {}", what(), show(e.get("operator"))))?;
+    let (ty, desc) = (int("type").unwrap_or(-1), int("descID").unwrap_or(-1));
+    if ty == 0 {
+        let cap = event_cap(desc).ok_or_else(|| format!("{} (not in the app's table)", what()))?;
+        if e.get("arrValues").is_some() || cap.kind == Kind::Text {
+            return Err(format!("{} (a text or list condition)", what()));
+        }
+        let (Some(control), Some(id)) = (
+            e.get("controlUUID").and_then(Value::as_str),
+            e.get("id").and_then(Value::as_str),
+        ) else {
+            return Err(format!(
+                "{} without a `controlUUID` and a state `id`",
+                what()
+            ));
+        };
+        let Some(Value::Number(value)) = e.get("value") else {
+            return Err(format!("{} without a number `value`", what()));
+        };
+        return Ok(Event::State {
+            control: control.to_string(),
+            desc,
+            id: id.to_string(),
+            op,
+            value: value.to_string(),
+        });
+    }
+    if op != 1 {
+        return Err(format!(
+            "{} with operator {op} (only 1 is documented)",
+            what()
+        ));
+    }
     let value = int("value").ok_or_else(|| format!("{} without a whole `value`", what()))?;
+    if (ty, desc) == (1, MODE_EVENT) {
+        let mode = int("id").ok_or_else(|| format!("{} without a mode number `id`", what()))?;
+        return match value {
+            0 | 1 => Ok(Event::Mode {
+                mode,
+                on: value == 1,
+            }),
+            _ => Err(format!("operating mode event with value {value}")),
+        };
+    }
+    let key = (ty, desc, int("id").unwrap_or(-1));
     if key == TIME {
         return match u16::try_from(value) {
             Ok(m) if m < 1440 => Ok(Event::Time(m)),
@@ -337,24 +440,34 @@ pub fn interpret_event(e: &Value) -> Result<Event, String> {
     Err(format!("{} (not documented)", what()))
 }
 
-/// One action, if its shape is documented: `type` 0, a target UUID, the
-/// command text.
+/// One action, if its shape is documented: `type` 0 with a target UUID
+/// and the command text, or `type` 1 switching an operating mode.
 pub fn interpret_action(a: &Value) -> Result<Action, String> {
-    if a.get("type").and_then(Value::as_i64) != Some(0) {
-        return Err(format!("action type {}", show(a.get("type"))));
-    }
-    if a.get("descID").and_then(Value::as_i64).is_none() {
+    let ty = a.get("type").and_then(Value::as_i64);
+    let desc = a.get("descID").and_then(Value::as_i64);
+    if desc.is_none() {
         return Err("action without a `descID`".into());
     }
-    match (
-        a.get("id").and_then(Value::as_str),
-        a.get("command").and_then(Value::as_str),
-    ) {
-        (Some(id), Some(cmd)) => Ok(Action {
-            target: id.to_string(),
-            command: cmd.to_string(),
-        }),
-        _ => Err("action without a target `id` and a `command`".into()),
+    let command = a.get("command").and_then(Value::as_str);
+    match ty {
+        Some(0) => match (a.get("id").and_then(Value::as_str), command) {
+            (Some(id), Some(cmd)) => Ok(Action::Control {
+                target: id.to_string(),
+                command: cmd.to_string(),
+            }),
+            _ => Err("action without a target `id` and a `command`".into()),
+        },
+        Some(1) if desc == Some(MODE_ACTION) => {
+            match (a.get("id").and_then(Value::as_i64), command) {
+                (Some(mode), Some(c @ ("0" | "1"))) => Ok(Action::Mode { mode, on: c == "1" }),
+                _ => Err(format!(
+                    "operating mode action with id {} and command {}",
+                    show(a.get("id")),
+                    show(a.get("command"))
+                )),
+            }
+        }
+        _ => Err(format!("action type {}", show(a.get("type")))),
     }
 }
 
@@ -373,6 +486,41 @@ pub fn weekday_event(days: &[u8]) -> Value {
         "type": WEEKDAY.0, "descID": WEEKDAY.1, "id": WEEKDAY.2,
         "value": WEEKDAY_SENTINEL, "operator": 1, "forceEdge": false,
         "arrValues": days,
+    })
+}
+
+/// A new event of the other kinds: the fields the app sends (its
+/// `_applyEventToRule`), and `forceEdge`, which the Miniserver adds.
+pub fn new_event(e: &Event) -> Value {
+    match e {
+        Event::Time(m) => time_event(*m),
+        Event::Weekdays(d) => weekday_event(d),
+        Event::Mode { mode, on } => serde_json::json!({
+            "type": 1, "descID": MODE_EVENT, "id": mode, "value": u8::from(*on),
+            "operator": 1, "forceEdge": false,
+        }),
+        Event::State {
+            control,
+            desc,
+            id,
+            op,
+            value,
+        } => serde_json::json!({
+            "type": 0, "descID": desc, "id": id, "controlUUID": control,
+            "value": serde_json::from_str::<Value>(value).unwrap_or(Value::Null),
+            "operator": op, "forceEdge": false,
+        }),
+    }
+}
+
+/// A new operating mode action, as the app's `_applyActionToRule` builds
+/// it from the table's entry (`action` `<val0>`, the picked value in
+/// `arrValues`).
+pub fn mode_action(mode: i64, on: bool) -> Value {
+    let v = u8::from(on);
+    serde_json::json!({
+        "type": 1, "descID": MODE_ACTION, "id": mode, "command": v.to_string(),
+        "arrValues": [v],
     })
 }
 
@@ -515,24 +663,30 @@ mod tests {
     #[test]
     fn interpret_reads_the_documented_shapes() {
         let mut r = rule();
-        // The control event is not documented: the rule is not Lox Logic's.
-        let err = interpret(&r).unwrap_err();
-        assert!(err.contains("descID 42001"), "{err}");
-        r["eventGroups"][0]["events"]
-            .as_array_mut()
-            .unwrap()
-            .truncate(1);
         assert_eq!(
             interpret(&r).unwrap(),
             Rule {
                 active: true,
-                events: vec![Event::Time(540)],
-                actions: vec![Action {
+                groups: vec![vec![
+                    Event::Time(540),
+                    Event::State {
+                        control: "30000001-0000-0010-ffff504f94112233".into(),
+                        desc: 42001,
+                        id: "30000001-0000-0010-ffff504f94112233".into(),
+                        op: 5,
+                        value: "65".into(),
+                    },
+                ]],
+                actions: vec![Action::Control {
                     target: "30000005-0000-0050-ffff504f94112233".into(),
                     command: "on".into(),
                 }],
             }
         );
+        // A condition code the app's table does not have.
+        r["eventGroups"][0]["events"][1]["descID"] = 1.into();
+        let err = interpret(&r).unwrap_err();
+        assert!(err.contains("descID 1 "), "{err}");
         // Both weekday spellings read the same.
         let one: Value = serde_json::from_str(
             r#"{"type":3,"descID":270001,"id":270,"value":1,"operator":1,"forceEdge":false}"#,
@@ -547,6 +701,38 @@ mod tests {
         let mut op = time_event(60);
         op["operator"] = 2.into();
         assert!(interpret_event(&op).is_err());
+    }
+
+    #[test]
+    fn modes_and_groups_read_as_the_app_writes_them() {
+        // The corpus's operating mode condition (use-case config).
+        let e: Value = serde_json::from_str(
+            r#"{"type":1,"descID":21001,"id":-7,"value":1,"operator":1,"forceEdge":false}"#,
+        )
+        .unwrap();
+        let mode = Event::Mode { mode: -7, on: true };
+        assert_eq!(interpret_event(&e), Ok(mode.clone()));
+        assert_eq!(new_event(&mode), e);
+        let a = mode_action(-5, false);
+        assert_eq!(
+            to_text(&a),
+            r#"{"type":1,"descID":21101,"id":-5,"command":"0","arrValues":[0]}"#
+        );
+        assert_eq!(
+            interpret_action(&a),
+            Ok(Action::Mode {
+                mode: -5,
+                on: false
+            })
+        );
+        let mut r = rule();
+        r["eventGroups"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"operator": 1, "events": [e]}));
+        assert_eq!(interpret(&r).unwrap().groups.len(), 2);
+        r["eventGroups"][1]["operator"] = 2.into();
+        assert!(interpret(&r).is_err());
     }
 
     #[test]

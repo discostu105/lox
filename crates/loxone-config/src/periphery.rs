@@ -99,7 +99,54 @@ const CMD_IN_SETTINGS: &[&str] = &[
 /// IoData and Display as the save writes them on a fresh I/O.
 const IODATA: MintChild = ("IoData", &[], true);
 
+// A calendar entry (#211): `I` and `Q` like a mode's (`-00ff`/`-01ff`
+// UUIDs), never wired in the corpus's 397 entries or the house's 2.
+const CALENDAR: &[PortSpec] = &[port("I", Input), port("Q", Output)];
+
 pub const PERIPHERY: &[PeripheryType] = &[
+    // A calendar entry (#211): on which dates an operating mode is on.
+    // `CalType=` is the mode's `Mode=` number (absent: 0, the holiday
+    // mode); `Mode=` the kind — absent a fixed date (`Month`/`Day`), 1
+    // relative to Easter (`EasterOffset` days; `Month`/`Day` the date in
+    // the year of the save), 3 one period (`From`/`To`, days since
+    // 2009-01-01), 4 every year from `Month`/`Day` to `Month2`/`Day2`.
+    // Every one of the corpus's 397 entries carries `Month`, `Day`,
+    // `Month2`, `Day2` and `WeekDayInMonth` (1 where unused), in this
+    // order; `From`/`To` and `EasterOffset` only where they apply.
+    PeripheryType {
+        block_type: "CalendarEntry",
+        home: Home::Folder("CalendarCaption"),
+        ports: CALENDAR,
+        iname: None,
+        settings: &[
+            "CalType",
+            "Mode",
+            "Month",
+            "Day",
+            "Month2",
+            "Day2",
+            "From",
+            "To",
+            "EasterOffset",
+            "WeekDayInMonth",
+        ],
+        required: &[],
+        mint_attrs: &[
+            ("Nio", Some("2")),
+            ("WF", Some("16384")),
+            ("CalType", None),
+            ("Mode", None),
+            ("Month", Some("1")),
+            ("Day", Some("1")),
+            ("Month2", Some("1")),
+            ("Day2", Some("1")),
+            ("From", None),
+            ("To", None),
+            ("EasterOffset", None),
+            ("WeekDayInMonth", Some("1")),
+        ],
+        mint_children: &[],
+    },
     // A user-defined operating mode (D69). Its `Mode=` number is minted
     // by the compiler: one below the lowest in the document (the GUI
     // numbers user-defined modes -1, -2, … in creation order).

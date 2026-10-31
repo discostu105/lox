@@ -292,6 +292,7 @@ pub fn update(
         }
     }
     edits.extend(removal_spans(&entries, &removed).map(|r| (r, String::new())));
+    modes(body, &top, live, compiled, &mut edits, &mut applied)?;
     if !added.is_empty() {
         let mut text = added;
         if removed.len() == entries.len() {
@@ -329,6 +330,76 @@ pub fn update(
         applied,
         left,
     })
+}
+
+/// The operating modes the compile adds, renames or deletes (D69), in
+/// `operatingModes`: number → title, the program's modes in their order
+/// (live: a mode minted from source is missing from the app until this
+/// lists it).
+fn modes(
+    body: &str,
+    top: &[Member],
+    live: &LoxoneDoc,
+    compiled: &LoxoneDoc,
+    edits: &mut Vec<(Range<usize>, String)>,
+    applied: &mut Vec<Change>,
+) -> Result<(), String> {
+    let Some(section) = top.iter().find(|m| m.key == "operatingModes") else {
+        return Ok(());
+    };
+    let (members, close) = object(body, section.value.start)?;
+    let by_number = |doc: &LoxoneDoc| -> BTreeMap<String, (String, String)> {
+        crate::logic::schedule::config_modes(doc)
+            .into_iter()
+            .map(|(uuid, title, n)| (n.to_string(), (uuid, title)))
+            .collect()
+    };
+    let (was, now) = (by_number(live), by_number(compiled));
+    let change = |uuid: &str, name: &str, what: &str| Change {
+        uuid: uuid.to_string(),
+        name: name.to_string(),
+        what: what.to_string(),
+    };
+    let mut removed = BTreeSet::new();
+    for (idx, m) in members.iter().enumerate() {
+        match (was.get(&m.key), now.get(&m.key)) {
+            (Some((uuid, old)), None) => {
+                removed.insert(idx);
+                applied.push(change(uuid, old, "operating mode deleted"));
+            }
+            (Some((_, old)), Some((uuid, new))) if old != new => {
+                edits.push((m.value.clone(), json_str(new)));
+                applied.push(change(
+                    uuid,
+                    new,
+                    &format!("operating mode renamed \"{old}\" → \"{new}\""),
+                ));
+            }
+            _ => {}
+        }
+    }
+    edits.extend(removal_spans(&members, &removed).map(|r| (r, String::new())));
+    // Loxone Config lists every mode: one the catalogue lacks is added,
+    // also when an older push left it out.
+    let listed: BTreeSet<&str> = members.iter().map(|m| m.key.as_str()).collect();
+    let mut added = String::new();
+    for (uuid, title, n) in crate::logic::schedule::config_modes(compiled) {
+        let key = n.to_string();
+        if listed.contains(key.as_str()) {
+            continue;
+        }
+        if !added.is_empty() || removed.len() < members.len() {
+            added.push(',');
+        }
+        added.push_str(&json_str(&key));
+        added.push(':');
+        added.push_str(&json_str(&title));
+        applied.push(change(&uuid, &title, "operating mode added to the app"));
+    }
+    if !added.is_empty() {
+        edits.push((close..close, added));
+    }
+    Ok(())
 }
 
 /// A control key without its `U:` prefix (Loxone Config 16 writes the
@@ -451,6 +522,34 @@ fn entry(el: &Element, objs: &Objects) -> Option<String> {
     if io.attr("IconV").is_some() {
         return None;
     }
+    entry_any_icon(el, objs)
+}
+
+/// The app's view of the document's blocks, as the catalogue derives it:
+/// UUID (lowercase) → app control type and states (state name → UUID),
+/// for each object shown in the app whose entry Lox Logic knows. Automatic
+/// Designer conditions name a block's state by this map (D73).
+pub(crate) fn app_controls(
+    doc: &LoxoneDoc,
+) -> BTreeMap<String, (String, BTreeMap<String, String>)> {
+    let objs = Objects::of(doc);
+    objs.shown_in_order
+        .iter()
+        .filter_map(|(uuid, el)| {
+            let v: serde_json::Value = serde_json::from_str(&entry_any_icon(el, &objs)?).ok()?;
+            let ty = v["type"].as_str()?.to_string();
+            let states = v["states"]
+                .as_object()?
+                .iter()
+                .filter_map(|(k, s)| Some((k.clone(), s.as_str()?.to_string())))
+                .collect();
+            Some((uuid.clone(), (ty, states)))
+        })
+        .collect()
+}
+
+/// [`entry`] for an object with or without an icon of its own.
+fn entry_any_icon(el: &Element, objs: &Objects) -> Option<String> {
     let co = |k: &str| {
         el.child_elements()
             .find(|c| c.name == "Co" && c.attr("K") == Some(k))
@@ -1461,6 +1560,50 @@ mod tests {
         // In document order, as text: the button's entry is Loxone Config's.
         let button = cat.find(&format!("\"U:{BUTTON}\"")).unwrap();
         assert!(back.text.ends_with(&cat[button..]), "{}", back.text);
+    }
+
+    #[test]
+    fn operating_modes_follow_the_program() {
+        let mode = |n: i64, title: &str| {
+            format!(
+                r#"<C Type="Mode" U="0f000000-0000-00c{}-ffff000000000000" Title="{title}" Mode="{n}"/>"#,
+                n.unsigned_abs()
+            )
+        };
+        let live = doc("Licht", ROOM, &mode(-1, "Party"));
+        let cat = catalogue("").replace(
+            ",\"controls\"",
+            ",\"operatingModes\":{\"0\":\"Feiertag\",\"-1\":\"Party\"},\"controls\"",
+        );
+        // A new mode is listed after the others.
+        let added = doc("Licht", ROOM, &(mode(-1, "Party") + &mode(-2, "Probe")));
+        let u = update(&cat, &live, &added, NOW).unwrap();
+        assert_eq!(whats(&u).0, ["operating mode added to the app"]);
+        assert!(
+            u.text.contains(
+                "\"operatingModes\":{\"0\":\"Feiertag\",\"-1\":\"Party\",\"-2\":\"Probe\"}"
+            ),
+            "{}",
+            u.text
+        );
+        assert!(u.text.contains(NOW));
+        // Renamed, then deleted.
+        let renamed = doc("Licht", ROOM, &(mode(-1, "Fest") + &mode(-2, "Probe")));
+        let r = update(&u.text, &added, &renamed, NOW).unwrap();
+        assert_eq!(whats(&r).0, ["operating mode renamed \"Party\" → \"Fest\""]);
+        assert!(r.text.contains("\"-1\":\"Fest\""), "{}", r.text);
+        let back = update(&u.text, &added, &live, NOW).unwrap();
+        assert_eq!(whats(&back).0, ["operating mode deleted"]);
+        assert!(
+            back.text
+                .contains("\"operatingModes\":{\"0\":\"Feiertag\",\"-1\":\"Party\"}")
+        );
+        // Nothing changed: the catalogue as it was.
+        assert_eq!(update(&cat, &live, &live, NOW).unwrap().text, cat);
+        // A mode an older push left out of the catalogue is listed.
+        let healed = update(&cat, &added, &added, NOW).unwrap();
+        assert_eq!(whats(&healed).0, ["operating mode added to the app"]);
+        assert!(healed.text.contains("\"-2\":\"Probe\""), "{}", healed.text);
     }
 
     /// The entry of the one object of type `ty` in a page holding `xml`.

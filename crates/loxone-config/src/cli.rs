@@ -189,6 +189,12 @@ USAGE:
         serials. Shows where each sits, never the value. Exits 1 when it
         finds any: a guard against committing a real config.
 
+  loxl scan --redact <cfg.Loxone> --out <copy.Loxone>
+        Write a copy with every finding replaced by a placeholder of its
+        kind and the hardware serials by a counter (inside UUIDs too), to
+        share in an issue or a fixture. Exits 1 when a finding is left.
+        The copy is for reading, never for uploading.
+
   loxl observe <cfg.Loxone>... [--crosscheck <legacy.json>]...
         Port-direction evidence per block type, as JSON. Multiple configs
         merge into one corpus-level view. --crosscheck compares the
@@ -1537,7 +1543,14 @@ fn cmd_adopt_one(
     // The block's wires onto externs are recorded by a compile; take them
     // from this one so the next compile leaves the lock as written.
     lock.extern_wires = vlock.extern_wires;
-    let d = loxone_config::diff::diff(&doc, &out);
+    let mut d = loxone_config::diff::diff(&doc, &out);
+    // The AutoPilot container's inputs follow the rules (a compile keeps
+    // them as Loxone Config saves them), whatever the block adopted.
+    let watched = autopilot_input(&doc);
+    d.wires_added
+        .retain(|w| Some(&w.to_port) != watched.as_ref());
+    d.wires_removed
+        .retain(|w| Some(&w.to_port) != watched.as_ref());
     if !d.is_empty() {
         return Err(format!(
             "adoption verification failed — rebuilding with the updated module/lock \
@@ -2204,10 +2217,13 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
 }
 
 fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
+    if args.contains(&"--redact") {
+        return cmd_scan_redact(args);
+    }
     let json = args.contains(&"--json");
     let paths: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
     if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
-        return Err("usage: loxl scan [--json] <cfg.Loxone | dir>...".into());
+        return Err("usage: loxl scan [--json] <cfg.Loxone | dir>... | loxl scan --redact <cfg> --out <copy>".into());
     }
     let mut files = Vec::new();
     for p in &paths {
@@ -2260,6 +2276,40 @@ fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
         );
     }
     Ok(if total + unreadable > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `loxl scan --redact <cfg> --out <copy>`: a shareable copy, every
+/// finding replaced by a placeholder.
+fn cmd_scan_redact(args: &[&str]) -> Result<ExitCode, AnyError> {
+    let usage = "usage: loxl scan --redact <cfg.Loxone> --out <copy.Loxone>";
+    let mut input = None;
+    let mut out = None;
+    let mut it = args.iter().copied();
+    while let Some(a) = it.next() {
+        match a {
+            "--redact" => {}
+            "--out" => out = Some(it.next().ok_or(usage)?),
+            a if a.starts_with("--") => return Err(usage.into()),
+            a if input.is_none() => input = Some(a),
+            _ => return Err(usage.into()),
+        }
+    }
+    let (Some(input), Some(out)) = (input, out) else {
+        return Err(usage.into());
+    };
+    if std::path::Path::new(input) == std::path::Path::new(out) {
+        return Err("--out must name another file than the config".into());
+    }
+    let mut doc = LoxoneDoc::parse(&std::fs::read(input).map_err(|e| format!("{input}: {e}"))?)?;
+    let n = loxone_config::scan::redact(&mut doc);
+    std::fs::write(out, doc.to_bytes()).map_err(|e| format!("{out}: {e}"))?;
+    let left = loxone_config::scan::scan(&doc).len();
+    println!("{out}: {n} value(s) redacted, {left} finding(s) left");
+    Ok(if left > 0 {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
@@ -2391,4 +2441,18 @@ fn cmd_roundtrip(path: &str) -> Result<ExitCode, AnyError> {
         );
         Ok(ExitCode::FAILURE)
     }
+}
+
+/// The `Input` connector of the config's AutoPilot container.
+fn autopilot_input(doc: &LoxoneDoc) -> Option<String> {
+    doc.objects()
+        .iter()
+        .filter(|o| o.block_type == "AutoPilot")
+        .find_map(|o| {
+            doc.element_at(&o.path)?
+                .child_elements()
+                .find(|c| c.name == "Co" && c.attr("K") == Some("Input"))?
+                .attr("U")
+                .map(str::to_string)
+        })
 }

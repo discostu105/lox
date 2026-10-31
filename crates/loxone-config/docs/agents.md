@@ -40,6 +40,7 @@ keeps its example module valid.
 7. **Keep real configs out of repositories.** A house config carries the
    owner's address, users, access codes and serials. `loxl scan <file or
    dir>` lists where (never what); exit 1 means it must not be committed.
+   `loxl scan --redact <cfg> --out <copy>` writes a shareable copy.
    Synthetic fixtures scan clean.
 
 ## The loop
@@ -161,6 +162,15 @@ rule regel                           # an app rule (D57): active, all
 	when weekday weekdays
 	when time 09:00
 	then pumpe "on"
+end
+
+rule party "Party-Licht"             # D73: a block's state, a mode,
+	active                           # `or` for another group
+	when bewegung.active == on
+	when mode "Party"
+	or
+	when helligkeit.value < 20
+	then mode "Party" off
 end
 
 rule mittag "Pumpe Mittag"           # a named rule (D60): the config's

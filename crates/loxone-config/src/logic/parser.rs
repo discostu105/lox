@@ -1114,12 +1114,28 @@ pub fn parse(src: &str) -> Result<Module> {
     Ok(Module { items })
 }
 
-/// One statement of a `rule` body (D57): `active`/`inactive`,
-/// `when time HH:MM`, `when weekday <days>`, or `then <slug> "<command>"`.
+/// An operating mode in a rule line: a slug or a quoted title.
+fn mode_name(tok: &Tok, lineno: usize, usage: &str) -> Result<ModeName> {
+    match tok {
+        Tok::Ident(s) => Ok(ModeName::Slug(check_slug(s, lineno)?)),
+        Tok::Str(t) => Ok(ModeName::Title(t.clone())),
+        _ => Err(Error::Parse {
+            line: lineno,
+            msg: format!("a mode is a slug or a quoted title; {usage}"),
+        }),
+    }
+}
+
+/// One statement of a `rule` body (D57, D73): `active`/`inactive`,
+/// `when time HH:MM`, `when weekday <days>`, `when mode <mode> [off]`,
+/// `when <slug>.<state> <op> <value>`, `or`, `then <slug> "<command>"` or
+/// `then mode <mode> on|off`.
 fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let usage = "a rule line is `active`, `inactive`, `when time HH:MM`, \
-                 `when weekday <days>`, `then <slug> \"<command>\"` or `end`";
+                 `when weekday <days>`, `when mode <mode> [off]`, \
+                 `when <slug>.<state> <op> <value>`, `or`, `then <slug> \"<command>\"`, \
+                 `then mode <mode> on|off` or `end`";
     let kind = match toks {
         [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
         [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
@@ -1160,10 +1176,61 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             }
             RuleStmtKind::Weekday(words)
         }
+        [Tok::Ident(w)] if w == "or" => RuleStmtKind::Or,
+        [Tok::Ident(w), Tok::Ident(k), mode, rest @ ..] if w == "when" && k == "mode" => {
+            let on = match rest {
+                [] => true,
+                [Tok::Ident(v)] if v == "on" => true,
+                [Tok::Ident(v)] if v == "off" => false,
+                _ => {
+                    return Err(err(format!(
+                        "`when mode <mode>` ends with nothing, `on` or `off`; {usage}"
+                    )));
+                }
+            };
+            RuleStmtKind::Mode {
+                mode: mode_name(mode, lineno, usage)?,
+                on,
+            }
+        }
+        [
+            Tok::Ident(w),
+            Tok::Ident(target),
+            Tok::Dot,
+            Tok::Ident(state),
+            Tok::Cmp(op),
+            value,
+        ] if w == "when" => {
+            let value = match value {
+                Tok::Num(n) => n.clone(),
+                Tok::Ident(v) if v == "on" || v == "off" => v.clone(),
+                _ => {
+                    return Err(err(format!(
+                        "`when {target}.{state} {}` compares with a number, `on` or `off`",
+                        op.symbol()
+                    )));
+                }
+            };
+            RuleStmtKind::State {
+                target: check_slug(target, lineno)?,
+                state: state.clone(),
+                op: *op,
+                value,
+            }
+        }
         [Tok::Ident(w), ..] if w == "when" => {
             return Err(err(format!(
-                "Lox Logic knows the conditions `when time` and `when weekday`; {usage}"
+                "Lox Logic knows the conditions `when time`, `when weekday`, `when mode` and \
+                 `when <slug>.<state> <op> <value>`; {usage}"
             )));
+        }
+        [Tok::Ident(w), Tok::Ident(k), mode, Tok::Ident(v)]
+            if w == "then" && k == "mode" && (v == "on" || v == "off") =>
+        {
+            RuleStmtKind::ThenMode {
+                mode: mode_name(mode, lineno, usage)?,
+                on: v == "on",
+            }
         }
         [Tok::Ident(w), Tok::Ident(target), Tok::Str(command)] if w == "then" => {
             RuleStmtKind::Then {

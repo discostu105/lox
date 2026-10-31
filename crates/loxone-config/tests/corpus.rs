@@ -176,6 +176,56 @@ fn corpus_access_declarations_are_byte_fixpoints() {
 }
 
 #[test]
+fn corpus_rule_declarations_are_byte_fixpoints() {
+    // Every Automatic Designer rule decompile lifts (D57, D73), declared
+    // back onto its config with the blocks it names as externs, must
+    // reproduce the bytes: what reads as source writes as the payload it
+    // came from.
+    let Some(files) = corpus() else {
+        eprintln!("LXIR_CORPUS not set — skipping corpus rule fixpoints");
+        return;
+    };
+    let (mut configs, mut decls, mut total) = (0usize, 0usize, 0usize);
+    for path in &files {
+        let name = path.display();
+        let bytes = std::fs::read(path).unwrap();
+        let base = LoxoneDoc::parse(&bytes).unwrap();
+        total += base
+            .objects()
+            .iter()
+            .filter(|o| o.block_type == "AutopilotRule")
+            .count();
+        let view_opts = DecompileOptions {
+            managed_types: Default::default(),
+            ..DecompileOptions::default()
+        };
+        let Ok((view, _)) = decompile(&base, &view_opts) else {
+            continue;
+        };
+        let rules: Vec<_> = view.rule_decls().cloned().collect();
+        if rules.is_empty() {
+            continue;
+        }
+        let module = Module {
+            items: view
+                .externs()
+                .map(|e| Item::Extern(e.clone()))
+                .chain(rules.iter().cloned().map(Item::Rule))
+                .collect(),
+        };
+        let out = compile(&base, &module, &mut Lockfile::new(), &opts())
+            .unwrap_or_else(|e| panic!("{name}: compile failed: {e}"));
+        assert!(
+            out.to_bytes() == bytes,
+            "{name}: the lifted rules do not reproduce the bytes"
+        );
+        configs += 1;
+        decls += rules.len();
+    }
+    eprintln!("corpus: {decls} of {total} rules in {configs} configs are byte fixpoints");
+}
+
+#[test]
 fn corpus_mood_sets_are_byte_fixpoints() {
     // Every controller's lifted moods (D58), claimed back onto it, must
     // reproduce the bytes; reversed and restored, the semantic diff must

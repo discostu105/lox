@@ -687,6 +687,21 @@ the board, row and position on the relay and the dimmer.
   bookkeeping that is carried. A recompile against the saved file was
   byte-identical.
 
+## Rule sources, calendar entries (session 31, D73/D74) — passed, one finding
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28): the D73 probe rule (a state condition, a mode condition, an
+`or` group, a mode action) and three fresh calendar entries — a yearly
+range, a period, an Easter entry — next to the two existing ones.
+
+- **Pass:** the calendar entries came back unchanged, attributes and
+  order included.
+- **Finding:** the save wired the rule's state (the UV switch's
+  `active`) and the mode's `Q` into the AutoPilot container's `Input`,
+  before the `DayOfWeek` input already there. Compiles now set that
+  list from the rules (D73); a recompile against the saved file is
+  byte-identical.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

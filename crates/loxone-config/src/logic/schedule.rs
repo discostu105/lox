@@ -148,7 +148,7 @@ struct ModeColumn {
 
 /// The config's operating modes: UUID, title and `Mode=` number (absent
 /// is 0, the holiday mode's).
-fn config_modes(doc: &LoxoneDoc) -> Vec<(String, String, i64)> {
+pub(crate) fn config_modes(doc: &LoxoneDoc) -> Vec<(String, String, i64)> {
     doc.objects()
         .iter()
         .filter(|o| o.block_type == "Mode")

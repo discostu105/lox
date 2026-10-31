@@ -499,12 +499,12 @@ impl Lift {
                 continue;
             };
             let targets: Option<Vec<usize>> = rule
-                .actions
-                .iter()
-                .map(|a| uuid_index.get(a.target.as_str()).copied())
+                .blocks()
+                .into_iter()
+                .map(|u| uuid_index.get(u).copied())
                 .collect();
             let Some(targets) = targets else { continue };
-            if rule.events.is_empty() || rule.actions.is_empty() {
+            if rule.groups.iter().any(Vec::is_empty) || rule.actions.is_empty() {
                 continue;
             }
             for j in std::iter::once(i).chain(targets) {
@@ -698,7 +698,8 @@ impl Lift {
             .iter()
             .filter_map(|(i, apc)| {
                 let slug = &slug_of[&objects[*i].uuid];
-                let mut decl = super::rule::lift(slug, apc, &|u| slug_of.get(u).cloned()).ok()?;
+                let mut decl =
+                    super::rule::lift(slug, apc, doc, &|u| slug_of.get(u).cloned()).ok()?;
                 // A rule with a name no other rule has is declared by it
                 // (D60, #192): the source owns it whole, no extern.
                 decl.title = objects[*i]
@@ -1133,6 +1134,12 @@ impl Lift {
                     let w = &self.wires[wi].0;
                     reference(&w.from.slug);
                     reference(&w.to.slug);
+                }
+                // A rule's targets may live on another page.
+                for i in &b.externs {
+                    if let Some(decl) = self.rule_decls.get(i) {
+                        decl.slugs().for_each(&mut reference);
+                    }
                 }
             }
             let mut seen: BTreeSet<usize> = BTreeSet::new();

@@ -1426,6 +1426,24 @@ impl RuleDecl {
             RuleItem::Comment(_) => None,
         })
     }
+
+    /// The objects the body names: action targets, the blocks its
+    /// conditions watch and the modes it names by slug (D57, D73).
+    pub fn slugs(&self) -> impl Iterator<Item = &str> {
+        self.stmts().filter_map(|st| match &st.kind {
+            RuleStmtKind::Then { target, .. }
+            | RuleStmtKind::State { target, .. }
+            | RuleStmtKind::Mode {
+                mode: ModeName::Slug(target),
+                ..
+            }
+            | RuleStmtKind::ThenMode {
+                mode: ModeName::Slug(target),
+                ..
+            } => Some(target.as_str()),
+            _ => None,
+        })
+    }
 }
 
 /// One line of a `rule` body.
@@ -1455,6 +1473,40 @@ pub enum RuleStmtKind {
     Weekday(Vec<String>),
     /// `then <slug> "<command>"` — the app command sent to a block.
     Then { target: String, command: String },
+    /// `when <slug>.<state> <op> <value>` — a block's state (D73): the
+    /// state as the app names it (`active`, `position`, `value`, …), a
+    /// comparison and a number, `on` (1) or `off` (0), as written.
+    State {
+        target: String,
+        state: String,
+        op: CmpOp,
+        value: String,
+    },
+    /// `when mode <mode>` / `when mode <mode> off` — an operating mode is
+    /// active (or not, D73).
+    Mode { mode: ModeName, on: bool },
+    /// `then mode <mode> on|off` — switch an operating mode (D73).
+    ThenMode { mode: ModeName, on: bool },
+    /// `or` — the conditions after it are another group: the rule runs
+    /// when all conditions of one group hold (D73).
+    Or,
+}
+
+/// An operating mode in a rule: an extern or minted `Mode` by slug, or a
+/// mode of the config by its title (as in a schedule, D69).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModeName {
+    Slug(String),
+    Title(String),
+}
+
+impl fmt::Display for ModeName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModeName::Slug(s) => f.write_str(s),
+            ModeName::Title(t) => f.write_str(&quote(t)),
+        }
+    }
 }
 
 impl fmt::Display for RuleStmtKind {
@@ -1467,6 +1519,18 @@ impl fmt::Display for RuleStmtKind {
             RuleStmtKind::Then { target, command } => {
                 write!(f, "then {target} {}", quote(command))
             }
+            RuleStmtKind::State {
+                target,
+                state,
+                op,
+                value,
+            } => write!(f, "when {target}.{state} {} {value}", op.symbol()),
+            RuleStmtKind::Mode { mode, on: true } => write!(f, "when mode {mode}"),
+            RuleStmtKind::Mode { mode, on: false } => write!(f, "when mode {mode} off"),
+            RuleStmtKind::ThenMode { mode, on } => {
+                write!(f, "then mode {mode} {}", if *on { "on" } else { "off" })
+            }
+            RuleStmtKind::Or => f.write_str("or"),
         }
     }
 }
@@ -1598,7 +1662,8 @@ impl Module {
             Item::Wire(w) => w.to.slug != slug,
             Item::ExprWire(w) => w.to.slug != slug,
             Item::Set(s) => s.target.slug != slug,
-            Item::Attr(a) => a.slug != slug,
+            // `.room`/`.category` hold on a managed block (D63).
+            Item::Attr(a) => a.slug != slug || a.attr != Attr::Title,
             // An extern rule's edits (D57): a promoted rule is declared
             // by name, with its whole payload.
             Item::Rule(r) => r.title.is_some() || r.slug != slug,
@@ -2710,10 +2775,50 @@ impl Module {
                         ));
                     }
                     let (mut active, mut when, mut then) = (0, 0, 0);
+                    // A block a condition watches or a mode a line names:
+                    // declared, and an object (an extern or a managed one).
+                    let object = |slug: &str, line: &RuleStmtKind, what: &str| -> Result<()> {
+                        match names.get(slug) {
+                            Some(NameKind::Extern | NameKind::Block) => Ok(()),
+                            None if !flattened => Ok(()),
+                            Some(kind) => compile_err(format!(
+                                "{ctx}: `{line}` — `{slug}` is {}; {what}",
+                                kind.describe()
+                            )),
+                            None => {
+                                compile_err(format!("{ctx}: `{line}` — undeclared slug `{slug}`"))
+                            }
+                        }
+                    };
                     for st in r.stmts() {
                         match &st.kind {
                             RuleStmtKind::Active(_) => active += 1,
+                            RuleStmtKind::Or => {
+                                if when == 0 {
+                                    return compile_err(format!(
+                                        "{ctx}: `or` needs conditions before it — it starts \
+                                         another group of conditions"
+                                    ));
+                                }
+                                when = 0;
+                            }
                             RuleStmtKind::Time(_) => when += 1,
+                            RuleStmtKind::State { target, .. } => {
+                                when += 1;
+                                object(target, &st.kind, "a condition watches a block")?;
+                            }
+                            RuleStmtKind::Mode { mode, .. } => {
+                                when += 1;
+                                if let ModeName::Slug(s) = mode {
+                                    object(s, &st.kind, "a mode is an operating mode object")?;
+                                }
+                            }
+                            RuleStmtKind::ThenMode { mode, .. } => {
+                                then += 1;
+                                if let ModeName::Slug(s) = mode {
+                                    object(s, &st.kind, "a mode is an operating mode object")?;
+                                }
+                            }
                             RuleStmtKind::Weekday(days) => {
                                 when += 1;
                                 let mut seen = BTreeSet::new();
@@ -2771,7 +2876,7 @@ impl Module {
                     if when == 0 || then == 0 {
                         return compile_err(format!(
                             "{ctx}: a rule needs at least one `when` condition and one \
-                             `then` action"
+                             `then` action, and every `or` conditions after it"
                         ));
                     }
                 }

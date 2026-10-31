@@ -106,7 +106,8 @@ pub struct AdoptedBlock {
     /// The block was an extern of the module and is managed now: every
     /// statement on it (its `extern` line, `<-` wires, port assignments,
     /// `.title` claim) moved into the declaration — strip them from the
-    /// source with [`Module::strip_extern`].
+    /// source with [`Module::strip_extern`]. Its `.room`, `.category` and
+    /// `schedule` claims stay: they hold on the managed block (D63).
     pub promoted: Vec<String>,
     /// The block sits on a logic page (`page_title` names it); a virtual
     /// or Modbus device (D64) sits in the periphery tree instead, and
@@ -533,21 +534,16 @@ pub(super) fn check_promotable(
              template first, then promote it"
         ));
     }
-    for a in raw.attrs().filter(|a| a.slug == x) {
-        if a.attr != crate::logic::ast::Attr::Title {
-            return Err(format!(
-                "`{x}.{} = …` claims a binding a managed block does not take — remove \
-                 the claim (or set it in Loxone Config) first",
-                a.attr
-            ));
-        }
-    }
-    if raw.items.iter().any(|i| {
-        matches!(i, Item::TilesClaim(c) if c.slug == x)
-            || matches!(i, Item::ScheduleClaim(c) if c.slug == x)
-    }) {
+    // `.room`/`.category` (D63) and a DayTimer's `schedule` claim hold on
+    // a managed block as on an extern, and stay as they are; tiles belong
+    // to a Touch Pure Flex, a device — never a page block.
+    if raw
+        .items
+        .iter()
+        .any(|i| matches!(i, Item::TilesClaim(c) if c.slug == x))
+    {
         return Err(format!(
-            "`{x}` carries a tiles or schedule claim, which stays on externs"
+            "`{x}` carries a tiles claim, which stays on externs"
         ));
     }
     let el = doc
@@ -882,9 +878,9 @@ fn adopt_rule(
                     .map(|(s, _)| s.clone())
             })
     };
-    let mut decl = super::rule::lift(slug, &apc, &slug_of).map_err(|why| {
+    let mut decl = super::rule::lift(slug, &apc, doc, &slug_of).map_err(|why| {
         fail(format!(
-            "cannot adopt {ident}: {why} (its action targets must be managed or extern)"
+            "cannot adopt {ident}: {why} (the blocks it names must be managed or extern)"
         ))
     })?;
     decl.title = Some(title);

@@ -4285,3 +4285,55 @@ fn extern_matching_narrows_by_air_device_serial() {
     // The Air base's own serial no longer stands for its devices' I/Os.
     assert!(resolve("0CDA9D5A").is_err());
 }
+
+#[test]
+fn a_promoted_extern_keeps_its_room_claim() {
+    // #191: `.room` holds on a managed block (D63), so the claim stays as
+    // it is and the promotion goes through.
+    let with_room = |d: LoxoneDoc| {
+        let text = String::from_utf8(d.to_bytes()).unwrap().replace(
+            "\t\t<C Type=\"Page\"",
+            "\t\t<C Type=\"Place\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"K\u{fc}che\"/>\r\n\
+             \t\t<C Type=\"Page\"",
+        );
+        LoxoneDoc::parse(text.as_bytes()).unwrap()
+    };
+    let (mut module, mut lock, _) = adopt(&incr_base("", INCR_I2_UNWIRED)).unwrap();
+    module.items.extend(
+        Module::parse(
+            "extern nachtlicht = Or(title: \"Nachtlicht\")\n\
+             nachtlicht.room = \"K\u{fc}che\"\n",
+        )
+        .unwrap()
+        .items,
+    );
+    let or_block = INCR_OR_HALF.replace(
+        "</C>\r\n",
+        "<IoData Pr=\"00000003-0000-0000-ffff000000000001\"/></C>\r\n",
+    );
+    let base = compile(
+        &with_room(incr_base(&or_block, INCR_I2_UNWIRED)),
+        &module,
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    let mut promoted_lock = lock.clone();
+    let adopted = adopt_one(&base, OR_UUID, "nachtlicht", &module, &mut promoted_lock).unwrap();
+    assert_eq!(adopted.promoted, ["nachtlicht"]);
+    assert!(module.strip_extern("nachtlicht"));
+    assert!(
+        module
+            .to_text()
+            .contains("nachtlicht.room = \"K\u{fc}che\"")
+    );
+    module.items.extend(adopted.items);
+    module.validate().unwrap();
+    let noop_opts = CompileOptions {
+        page_title: None,
+        ..opts()
+    };
+    let out = compile(&base, &module, &mut promoted_lock, &noop_opts).unwrap();
+    let d = loxone_config::diff::diff(&base, &out);
+    assert!(d.is_empty(), "{d:#?}");
+}
