@@ -256,6 +256,15 @@ fn pin_identity<'a>(
     if entry.uuid.is_empty() {
         entry.block_type = block.block_type.clone();
     } else if entry.block_type != block.block_type {
+        if desugar_info.signals.contains(&block.slug) {
+            return Err(Error::Compile(format!(
+                "Named signal `{slug}` changed its top operator, so its block type \
+                 changed from {} to {}. Give the signal a new name and add `removed {slug}`.",
+                entry.block_type,
+                block.block_type,
+                slug = block.slug,
+            )));
+        }
         return Err(Error::Compile(format!(
             "block `{}` changed type from `{}` to `{}`. Delete its lockfile entry first \
                  to give it a new identity.",

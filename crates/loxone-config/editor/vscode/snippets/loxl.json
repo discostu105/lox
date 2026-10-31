@@ -67,6 +67,11 @@
     "body": "${1:extern}.${2:On} <- ${3:a}.Q ${4|and,or|} ${5:b}.Q >= ${6:limit}",
     "description": "Expression on a wire; each operator becomes a managed gate block with a deterministic slug (D24)"
   },
+  "signal": {
+    "prefix": "signal",
+    "body": "${1:name} = ${2:a}.Q ${3|and,or|} ${4:b}.AQ >= ${5:limit}",
+    "description": "Named signal: the expression's top block is `name` (`name.Q`, a Formula's `name.AQ`), its sub-blocks `name__<op><n>` (D81)"
+  },
   "set": {
     "prefix": "set",
     "body": "${1:extern}.${2:TargetPos} = ${3:70}",

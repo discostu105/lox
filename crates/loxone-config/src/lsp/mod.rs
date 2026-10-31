@@ -459,10 +459,10 @@ fn completion_kind(kind: &str) -> u32 {
 /// LSP `SymbolKind`.
 fn symbol_kind(kind: &str) -> u32 {
     match kind {
-        "let" => 14,                // Constant
-        "template" => 5,            // Class
-        "extern" => 13,             // Variable
-        "block" | "instance" => 19, // Object
-        _ => 2,                     // Module
+        "let" => 14,                           // Constant
+        "template" => 5,                       // Class
+        "extern" => 13,                        // Variable
+        "block" | "signal" | "instance" => 19, // Object
+        _ => 2,                                // Module
     }
 }

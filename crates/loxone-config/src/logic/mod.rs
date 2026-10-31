@@ -6,6 +6,7 @@
 //! let     <name> = <value>                     (named constant)
 //! extern  <slug> = <Type>(iname: "<value>")    (an object of the base config)
 //! <slug>  = <Type>(["Label",] <Port>: <value | slug.Port>, …)   (managed block)
+//! <slug>  = <expr>                             (named signal)
 //! <slug>.<Port> <- <slug.Port | expr>          (wire onto an extern port)
 //! <slug>.<Port> = <value>                      (Def write on an extern port)
 //! removed <slug>                               (delete a managed block)
@@ -52,8 +53,9 @@ pub use ast::{
     Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl,
     MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind,
     RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem,
-    ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
+    ScheduleLine, SetDecl, SignalDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem,
+    TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds,
+    clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{

@@ -21,6 +21,11 @@
 //! auto-removes the orphaned ones (they are marked expression-owned in the
 //! lockfile — no `removed` statement needed, because no hand ever wrote
 //! those blocks).
+//!
+//! A named signal (`<slug> = <expr>`) desugars the same way with the
+//! prefix `<slug>__`, except that its top block takes `<slug>` itself.
+//! That one slug was written by hand: it is hand-owned in the lockfile,
+//! and only its sub-blocks are expression-owned.
 
 use super::ast::*;
 use crate::error::{Error, Result};
@@ -33,8 +38,11 @@ pub struct DesugarInfo {
     /// Number of expressions desugared — `<-` statements and argument-list
     /// expression bindings alike.
     pub expressions: usize,
-    /// Slugs of all synthetic blocks.
+    /// Slugs of all synthetic blocks — expression-owned in the lockfile.
     pub synthetic: BTreeSet<String>,
+    /// The named signals' top blocks. They are generated, but the source
+    /// names and owns them.
+    pub signals: BTreeSet<String>,
 }
 
 impl Module {
@@ -44,6 +52,7 @@ impl Module {
     pub fn desugar(&self) -> Result<(Module, DesugarInfo)> {
         let mut info = DesugarInfo::default();
         if self.expr_wires().next().is_none()
+            && self.signals().next().is_none()
             && !self.blocks().any(|b| b.expr_bindings().next().is_some())
         {
             return Ok((self.clone(), info));
@@ -57,6 +66,7 @@ impl Module {
             .filter_map(|i| match i {
                 Item::Extern(e) => Some(e.slug.as_str()),
                 Item::Block(b) | Item::Instance(b) => Some(b.slug.as_str()),
+                Item::Signal(x) => Some(x.slug.as_str()),
                 Item::Let(l) => Some(l.name.as_str()),
                 Item::Template(t) => Some(t.name.as_str()),
                 Item::Tiles(t) => Some(t.name.as_str()),
@@ -81,7 +91,8 @@ impl Module {
                     info.expressions += 1;
                     let mut ctx = Desugar {
                         prefix: format!("{}_{}__", w.to.slug, w.to.port.to_lowercase()),
-                        sink: &w.to,
+                        sink: w.to.to_string(),
+                        top: None,
                         counters: &mut counters,
                         out: &mut items,
                         minted: &mut minted,
@@ -116,7 +127,8 @@ impl Module {
                         };
                         let mut ctx = Desugar {
                             prefix: format!("{}_{}__", sink.slug, sink.port.to_lowercase()),
-                            sink: &sink,
+                            sink: sink.to_string(),
+                            top: None,
                             counters: &mut counters,
                             out: &mut items,
                             minted: &mut minted,
@@ -132,6 +144,30 @@ impl Module {
                     }
                     items.push(Item::Block(BlockDecl { args, ..b.clone() }));
                 }
+                // A named signal (D81): the same blocks, the top one
+                // named by the source. Nothing to wire — references to
+                // `<slug>.Q` / `<slug>.AQ` resolve to that block.
+                Item::Signal(x) => {
+                    info.expressions += 1;
+                    let mut ctx = Desugar {
+                        prefix: format!("{}__", x.slug),
+                        sink: x.slug.clone(),
+                        top: Some((&x.expr, &x.slug)),
+                        counters: &mut counters,
+                        out: &mut items,
+                        minted: &mut minted,
+                        taken: &taken,
+                        lets: &lets,
+                    };
+                    let root = ctx.node(&x.expr)?;
+                    if root.slug != x.slug {
+                        return Err(Error::Compile(format!(
+                            "`{} = {}` is a bare port: an alias is not a block.",
+                            x.slug, x.expr
+                        )));
+                    }
+                    info.signals.insert(x.slug.clone());
+                }
                 other => items.push(other.clone()),
             }
         }
@@ -140,9 +176,42 @@ impl Module {
     }
 }
 
+impl Expr {
+    /// The block type the expression's top node desugars into, which is
+    /// the type of a named signal: `And`, `GreaterEqual`, `Formula`, ….
+    /// `None` for a bare operand.
+    pub fn top_block_type(&self) -> Option<&'static str> {
+        Some(match self {
+            Expr::And(..) => "And",
+            Expr::Or(..) => "Or",
+            Expr::Not(_) => "Not",
+            Expr::Cmp { op, .. } => cmp_block(*op).1,
+            Expr::Arith { .. } => "Formula",
+            Expr::Atom(_) => return None,
+        })
+    }
+}
+
+/// A comparison's slug operator and block type.
+fn cmp_block(op: CmpOp) -> (&'static str, &'static str) {
+    match op {
+        CmpOp::Ge => ("ge", "GreaterEqual"),
+        CmpOp::Gt => ("gt", "Greater"),
+        CmpOp::Le => ("le", "LessEqual"),
+        CmpOp::Lt => ("lt", "Less"),
+        CmpOp::Eq => ("eq", "Equal"),
+        CmpOp::Ne => ("ne", "NotEqual"),
+    }
+}
+
 struct Desugar<'a> {
     prefix: String,
-    sink: &'a PortRef,
+    /// What the expression feeds, for messages: the sink port, or the
+    /// named signal's slug.
+    sink: String,
+    /// A named signal's expression and slug: the block for that
+    /// node takes the slug instead of a synthetic one.
+    top: Option<(&'a Expr, &'a str)>,
     /// Per-(sink, operator) counters (`__ge1`, `__ge2`, …), shared across
     /// the module's expressions.
     counters: &'a mut BTreeMap<(String, &'static str), usize>,
@@ -182,14 +251,7 @@ impl Desugar<'_> {
                         self.sink,
                     )));
                 }
-                let (opname, ty) = match op {
-                    CmpOp::Ge => ("ge", "GreaterEqual"),
-                    CmpOp::Gt => ("gt", "Greater"),
-                    CmpOp::Le => ("le", "LessEqual"),
-                    CmpOp::Lt => ("lt", "Less"),
-                    CmpOp::Eq => ("eq", "Equal"),
-                    CmpOp::Ne => ("ne", "NotEqual"),
-                };
+                let (opname, ty) = cmp_block(*op);
                 self.emit(
                     opname,
                     ty,
@@ -350,6 +412,11 @@ impl Desugar<'_> {
         args: Vec<ArgItem>,
         out_port: &str,
     ) -> Result<PortRef> {
+        if let Some((top, name)) = self.top
+            && std::ptr::eq(top, node)
+        {
+            return Ok(self.push_block(name.to_string(), ty, node, args, out_port));
+        }
         let n = self.counters.entry((self.prefix.clone(), op)).or_insert(0);
         *n += 1;
         let slug = format!("{}{op}{}", self.prefix, n);
@@ -360,6 +427,18 @@ impl Desugar<'_> {
                 self.sink, self.prefix,
             )));
         }
+        self.minted.push(slug.clone());
+        Ok(self.push_block(slug, ty, node, args, out_port))
+    }
+
+    fn push_block(
+        &mut self,
+        slug: String,
+        ty: &str,
+        node: &Expr,
+        args: Vec<ArgItem>,
+        out_port: &str,
+    ) -> PortRef {
         self.out.push(Item::Block(BlockDecl {
             slug: slug.clone(),
             block_type: ty.to_string(),
@@ -370,11 +449,10 @@ impl Desugar<'_> {
             comment: None,
             close_comment: None,
         }));
-        self.minted.push(slug.clone());
-        Ok(PortRef {
+        PortRef {
             slug,
             port: out_port.to_string(),
-        })
+        }
     }
 }
 

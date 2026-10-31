@@ -39,6 +39,10 @@ pub enum Item {
     /// result is wired onto the extern port. A bare `slug.Port` RHS is a
     /// plain [`Item::Wire`], not an expression.
     ExprWire(ExprWireDecl),
+    /// `<slug> = <expr>`, a named signal. It desugars like an inline
+    /// expression, but its top block is `<slug>` (hand-owned in the
+    /// lockfile). Its sub-blocks are `<slug>__<op><n>` (expression-owned).
+    Signal(SignalDecl),
     /// `page "Title"` — the base-config page the following block
     /// declarations are placed on. Positional: governs every block
     /// after it, until the next `page` statement; blocks above the first
@@ -565,6 +569,24 @@ pub struct WireDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprWireDecl {
     pub to: PortRef,
+    pub expr: Expr,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+/// `<slug> = <expr>`, a named signal. [`Module::desugar`] turns the
+/// expression into the blocks an inline expression gets, but the top block
+/// takes the slug itself. Its output is `<slug>.Q` for a gate or
+/// comparator and `<slug>.AQ` for the `Formula` of an arithmetic signal.
+///
+/// The sub-blocks are `<slug>__<op><n>` and expression-owned. The top block
+/// is hand-owned: a deleted signal needs `removed <slug>`, a renamed one
+/// `moved`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalDecl {
+    pub slug: String,
+    /// Never a bare port or value — the parser refuses those (an alias is
+    /// not a block).
     pub expr: Expr,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
@@ -1666,6 +1688,8 @@ pub const ACCESS_BLOCK_TYPE: &str = "NfcCodeTouch";
 enum NameKind {
     Extern,
     Block,
+    /// A named signal: a managed block once desugared.
+    Signal,
     Let,
     Template,
     Instance,
@@ -1679,6 +1703,7 @@ impl NameKind {
         match self {
             NameKind::Extern => "an extern",
             NameKind::Block => "a managed block",
+            NameKind::Signal => "a named signal",
             NameKind::Let => "a `let` constant",
             NameKind::Template => "a template",
             NameKind::Instance => "a template instance",
@@ -1791,6 +1816,14 @@ impl Module {
     pub fn expr_wires(&self) -> impl Iterator<Item = &ExprWireDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::ExprWire(w) => Some(w),
+            _ => None,
+        })
+    }
+
+    /// The named signals (`<slug> = <expr>`).
+    pub fn signals(&self) -> impl Iterator<Item = &SignalDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Signal(x) => Some(x),
             _ => None,
         })
     }
@@ -1993,7 +2026,8 @@ impl Module {
         fn family(item: &Item) -> u8 {
             match item {
                 Item::Extern(_) => 0,
-                Item::Block(_) => 1,
+                // A named signal declares a block, like a declaration.
+                Item::Block(_) | Item::Signal(_) => 1,
                 Item::Wire(_) | Item::ExprWire(_) => 2,
                 Item::Set(_)
                 | Item::Attr(_)
@@ -2063,6 +2097,9 @@ impl Module {
             }
             Item::ExprWire(w) => {
                 out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
+            }
+            Item::Signal(x) => {
+                out.push_str(&format!("{} = {}{}\n", x.slug, x.expr, tail(&x.comment)));
             }
             // The statements of one bulk line go back to that line.
             Item::Set(SetDecl {

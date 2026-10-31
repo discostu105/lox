@@ -10,7 +10,7 @@
 use crate::error::{Error, Result};
 use crate::logic::ast::{
     ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, Module, MoodsClaim,
-    Operand, PortRef, SetDecl, TemplateDecl, TemplateParam, Value, WireDecl,
+    Operand, PortRef, SetDecl, SignalDecl, TemplateDecl, TemplateParam, Value, WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -118,14 +118,30 @@ impl Module {
         let mut forwards: Vec<Binding> = Vec::new();
         for binding in call.bindings() {
             let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
+                // A named signal counts as one of the body's blocks — its
+                // inputs are its expression, so nothing forwards onto it.
                 let body_blocks: Vec<&str> = t
                     .body
                     .iter()
                     .filter_map(|i| match i {
                         Item::Block(b) => Some(b.slug.as_str()),
+                        Item::Signal(x) => Some(x.slug.as_str()),
                         _ => None,
                     })
                     .collect();
+                let signal_only = matches!(
+                    t.body
+                        .iter()
+                        .find(|i| matches!(i, Item::Block(_) | Item::Signal(_))),
+                    Some(Item::Signal(_))
+                );
+                if signal_only && body_blocks.len() == 1 {
+                    return Err(fail(format!(
+                        "`{}` names no parameter of `{}`. Its only block is the named \
+                         signal `{}`, which takes no port bindings.",
+                        binding.port, t.name, body_blocks[0]
+                    )));
+                }
                 if body_blocks.len() == 1 {
                     forwards.push(binding.clone());
                     continue;
@@ -189,6 +205,7 @@ impl Module {
             .iter()
             .filter_map(|i| match i {
                 Item::Block(b) => Some(b.slug.as_str()),
+                Item::Signal(x) => Some(x.slug.as_str()),
                 _ => None,
             })
             .collect();
@@ -315,6 +332,13 @@ impl Module {
                     to: map_ref(&w.to),
                     expr: map_expr(&w.expr, &map_ref, &map_value)?,
                     comment: w.comment.clone(),
+                })),
+                // A named signal is a body-local name like a block: its
+                // slug (and so its sub-blocks' prefix) is the instance's.
+                Item::Signal(x) => out.push(Item::Signal(SignalDecl {
+                    slug: map_slug(&x.slug),
+                    expr: map_expr(&x.expr, &map_ref, &map_value)?,
+                    comment: x.comment.clone(),
                 })),
                 Item::Set(s) => out.push(Item::Set(SetDecl {
                     target: map_ref(&s.target),

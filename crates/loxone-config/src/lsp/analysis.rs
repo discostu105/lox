@@ -102,7 +102,7 @@ pub fn is_name(s: &str) -> bool {
 }
 
 /// The declaration kinds rename and references take.
-const RENAMEABLE: &[&str] = &["extern", "block", "instance", "let", "template"];
+const RENAMEABLE: &[&str] = &["extern", "block", "signal", "instance", "let", "template"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completion {
@@ -604,7 +604,7 @@ impl Workspace {
                 .get(&project.module)?
                 .get(&decl.slug)?
                 .clone(),
-            "block" => {
+            "block" | "signal" => {
                 let lock = Lockfile::load(&project.lock).ok()?;
                 match lock.objects.get(&decl.slug) {
                     Some(o) => o.uuid.clone(),
@@ -1105,6 +1105,14 @@ pub fn scan(text: &str, file: &Path) -> Vec<Decl> {
                 "instance"
             };
             out.push(decl(0, kind, Some(callee)));
+        } else if rest.starts_with('=')
+            && !rest.starts_with("==")
+            && let Ok(m) = crate::logic::Module::parse_fragment(code.trim())
+            && let [crate::logic::Item::Signal(x)] = m.items.as_slice()
+        {
+            // `name = <expression>` — a named signal (D81); its type is
+            // the block its top operator becomes.
+            out.push(decl(0, "signal", x.expr.top_block_type()));
         }
     }
     out
@@ -1177,6 +1185,7 @@ x = heizen.Q == 1
                 ("licht", "template", None, 10),
                 ("g", "block", Some("Or"), 11),
                 ("a", "instance", Some("licht"), 13),
+                ("x", "signal", Some("Equal"), 14),
             ]
         );
         assert_eq!((d[1].span.start, d[1].span.end), (7, 13));

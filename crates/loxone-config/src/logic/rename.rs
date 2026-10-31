@@ -105,6 +105,11 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             rename_expr(&mut w.expr, old, new);
             sub_comment(&mut w.comment);
         }
+        Item::Signal(x) => {
+            sub(&mut x.slug);
+            rename_expr(&mut x.expr, old, new);
+            sub_comment(&mut x.comment);
+        }
         Item::Set(s) => {
             sub(&mut s.target.slug);
             rename_value(&mut s.value, old, new);
@@ -271,9 +276,11 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
 
 fn shadows(t: &TemplateDecl, name: &str) -> bool {
     t.params.iter().any(|p| p.name() == name)
-        || t.body
-            .iter()
-            .any(|i| matches!(i, Item::Block(b) if b.slug == name))
+        || t.body.iter().any(|i| match i {
+            Item::Block(b) => b.slug == name,
+            Item::Signal(x) => x.slug == name,
+            _ => false,
+        })
 }
 
 fn rename_block_args(b: &mut BlockDecl, old: &str, new: &str) {

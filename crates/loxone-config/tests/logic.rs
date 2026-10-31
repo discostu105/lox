@@ -347,12 +347,14 @@ fn pool_showcase_compiles_end_to_end() {
     );
     // Three declared blocks (the template's `frost_alarm`, the
     // Monoflop, the threshold trigger) plus seven desugared: one gate
-    // from the argument expression, five from the three-way wire
-    // expression, one Formula from the arithmetic binding (D35).
+    // from the argument expression, five from the named signal (its top
+    // gate `wp_bedarf` hand-owned, D81), one Formula from the arithmetic
+    // binding (D35).
     assert_eq!(lock.objects.len(), 10);
     assert!(lock.objects.contains_key("frost_alarm"));
     assert!(lock.objects["nachlauf_inputtrigger__ge1"].expr_owned);
-    assert!(lock.objects["wp_freigabe_on__and2"].expr_owned);
+    assert!(!lock.objects["wp_bedarf"].expr_owned);
+    assert!(lock.objects["wp_bedarf__and1"].expr_owned);
     assert!(lock.objects["pv_kw_input__f1"].expr_owned);
     // `Time: 30min` compiled exactly to seconds.
     let nachlauf = out
