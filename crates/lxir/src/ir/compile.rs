@@ -1066,6 +1066,24 @@ pub fn compile(
             .unwrap_or(0);
         next_iname.insert(prefix, n + 1);
     }
+    // A fresh user-defined operating mode (D69) gets the next `Mode=`
+    // number: one below the lowest the document or the residue holds (the
+    // GUI numbers them -1, -2, … — built-in ones are 0 and up).
+    let mut next_mode: i64 = doc
+        .objects()
+        .iter()
+        .filter(|o| o.block_type == "Mode")
+        .filter_map(|o| doc.element_at(&o.path)?.attr("Mode")?.parse::<i64>().ok())
+        .chain(residue.values().flat_map(|r| {
+            r.attrs
+                .iter()
+                .filter(|(n, _)| n == "Mode")
+                .filter_map(|(_, v)| v.parse::<i64>().ok())
+        }))
+        .min()
+        .unwrap_or(0)
+        .min(0)
+        - 1;
     // Devices before what hangs below them (D64), so a minted I/O finds
     // its minted device.
     let rank = |t: &str| {
@@ -1225,6 +1243,10 @@ pub fn compile(
                     }
                 }
             }
+        }
+        if block.block_type == "Mode" && res.is_none() {
+            el.set_attr("Mode", &next_mode.to_string());
+            next_mode -= 1;
         }
         for name in attr_params(&block.block_type) {
             if let Some(v) = managed_attrs.get(&(block.slug.clone(), (*name).to_string())) {

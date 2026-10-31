@@ -652,6 +652,25 @@ Then a jalousie minted with seven special states, `<IoData>` and
   `<IoData Visu Cr Pr>` and `<COHist>` as lxir wrote them and set `WF`
   to 16384. A recompile against the saved file was byte-identical.
 
+## Operating modes (session 29, D69) — passed, with two heals
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28): a minted user-defined mode wired into an `And`, and a fresh
+DayTimer whose schedule named the minted mode, the GUI's user mode
+"Haus im Tiefschlaf" (`off`), the weekdays and `heating`.
+
+- **Pass a:** empty semantic diff. Two changes on save: the minted
+  mode's `WF="16384"` became `147456`, and the timer's `UserModes="3"`
+  became `2` — `UserModes=` counts the columns before Monday, not every
+  column beyond the weekdays (the heating column comes after Sunday).
+  **Heals:** a fresh mode is minted with `WF="147456"`; `UserModes=`
+  counts the columns with `Mode=` below Monday's 3.
+- **Pass b:** the mode element and the timer's `Modes=`, `UserModes=`,
+  `N=` and entries came back byte-identical, with the columns in
+  ascending `Mode=` order (minted `-7`, GUI `-3`, Monday … Sunday,
+  heating). The timer gained `On`/`Off`/`SpStates` as every minted
+  DayTimer does (session 18).
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

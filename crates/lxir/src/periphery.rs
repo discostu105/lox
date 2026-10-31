@@ -79,6 +79,10 @@ const MODBUS_DEV: &[PortSpec] = &[port("AQ", Input)];
 const MODBUS_SENSOR: &[PortSpec] = &[port("Q", Output), port("Qe", Output)];
 // A Modbus actuator is written through `I` (2 corpus, 1 house sink).
 const MODBUS_ACTOR: &[PortSpec] = &[port("I", Input)];
+// An operating mode (D69): `I` switches it from logic, `Q` reports it —
+// the two connectors on every one of the house's 18 modes, built-in and
+// user-defined alike.
+const MODE: &[PortSpec] = &[port("I", Input), port("Q", Output)];
 
 const CMD_IN_SETTINGS: &[&str] = &[
     "Check",
@@ -96,6 +100,19 @@ const CMD_IN_SETTINGS: &[&str] = &[
 const IODATA: MintChild = ("IoData", &[], true);
 
 pub const PERIPHERY: &[PeripheryType] = &[
+    // A user-defined operating mode (D69). Its `Mode=` number is minted
+    // by the compiler: one below the lowest in the document (the GUI
+    // numbers user-defined modes -1, -2, … in creation order).
+    PeripheryType {
+        block_type: "Mode",
+        home: Home::Folder("ModeCaption"),
+        ports: MODE,
+        iname: None,
+        settings: &[],
+        required: &[],
+        mint_attrs: &[("Nio", Some("2")), ("WF", Some("147456"))],
+        mint_children: &[IODATA, ("Display", &[("StateOnly", "true")], false)],
+    },
     PeripheryType {
         block_type: "VirtualHttpIn",
         home: Home::Folder("VirtualInCaption"),

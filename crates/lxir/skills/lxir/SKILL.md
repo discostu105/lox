@@ -82,6 +82,12 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   `when time 07:30`, `when weekday mon`, `then <block> "on"`): the
   config's rule of that name, else created; `removed <slug>` deletes it.
   `lxir adopt --uuid <rule> --as <slug>` takes over one made in the app.
+- A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
+  `weekend off`, `sat 07:00-22:00`, `holiday …`, `heating …`) and
+  `timer.schedule = <set>`. Any operating mode can be named by title
+  (`"Party" 18:00-24:00`); `party = Mode("Party")` creates a mode of your
+  own, and `party.Q` is on while it is active. Users are never declared:
+  they belong to the Miniserver's user management.
 - Light moods: `moods <set> … end` lists moods by name (`"Lesen": all on,
   AQ3 temp(60%, 2700K)`; values `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`
   per circuit kind), `<controller>.moods = <set>` writes them onto a

@@ -106,7 +106,9 @@ schedule   = "schedule" slug [ comment ]           (* DayTimer schedule (D53) *)
 sched-line = day { day } ( "off" | interval { "," interval } ) [ comment ] ;
 day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | "holiday" | "vacation" | "dayoff"
-           | "weekdays" | "weekend" | "daily" ;
+           | "weekdays" | "weekend" | "daily"
+           | "heating" | "cooling"
+           | string ;                      (* any operating mode by title (D69) *)
 interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
 schedule-claim = slug "." "schedule" "=" slug [ comment ] ;
@@ -431,6 +433,23 @@ follows `page`.
   extern of an object the source manages is an error.
 - `extern … (device: "<serial>")` is something else: an extern matched
   by the serial of a physical device.
+
+### Operating modes — minted into the "Betriebsmodi" folder (D69)
+
+```text
+party = Mode("Party")
+party.I <- partytaster.Q          # switch the mode from logic
+licht = And(I1: party.Q)          # or read it
+```
+
+A user-defined operating mode is an object of the object tree, like a
+virtual input: no position, no `page`. A fresh one gets the next
+`Mode=` number below the lowest in use (`-1`, `-2`, …) and keeps it. It
+can be named in schedules by its title. Existing modes — the built-in
+ones and those made in Loxone Config — are referenced by title in a
+schedule or as an extern (`extern montag = Mode(title: "Montag")`);
+`adopt` does not take them over. Which dates switch a mode on (the
+*Betriebszeiten* calendar) stays with Loxone Config (#211).
 
 ### `<-` — wire onto an extern port
 
@@ -975,13 +994,17 @@ timers. Each line lists days, then the intervals the timer is on:
 
 - **Days** are the built-in operating modes: `mon` … `sun`, `holiday`
   (Feiertag), `vacation` (Urlaub), `dayoff` (Freier Tag/Schulferien),
-  and the groups `weekdays` (mon–fri), `weekend` (sat, sun), `daily`
-  (mon–sun). A day may appear on several lines; its intervals merge.
+  `heating` (Heizperiode), `cooling` (Kühlperiode), and the groups
+  `weekdays` (mon–fri), `weekend` (sat, sun), `daily` (mon–sun). Any
+  operating mode of the config, a user-defined one included, is named
+  by its title in quotes: `"Party" 18:00-24:00` (D69). The title must
+  name exactly one mode of the compiled config (minted ones included).
+  A day may appear on several lines; its intervals merge.
   The timer always has a column for each of the seven weekdays — a
   weekday the schedule does not name is **off all day** — plus one for
-  each of `holiday`, `vacation`, `dayoff` the schedule names (one it
-  does not name gets no column). User-defined
-  operating modes are not supported yet.
+  each other mode the schedule names (one it does not name gets no
+  column). Columns are written in the modes' `Mode=` order: user-defined
+  modes, holiday, vacation, day off, Monday … Sunday, heating, cooling.
 - **Intervals** are `HH:MM-HH:MM`, minute precision, `24:00` for
   midnight at the end of the day. Per day they must not overlap
   (touching is fine); an interval cannot wrap past midnight — split it.

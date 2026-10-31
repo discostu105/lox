@@ -527,6 +527,32 @@ so they differ between projects. The operating modes (`Mode` under
 `ModeCaption`) share the singleton nature but use deterministic
 `00000000-…` system UUIDs, identical across projects.
 
+## Operating modes
+
+The *Betriebsmodi* folder is a `ModeCaption` holding one `Mode` per
+operating mode, each with an `I` and a `Q` connector (`Nio="2"`) and
+`<Display StateOnly="true"/>`. Observed on the house config (Loxone
+Config 17.2) and the default template:
+
+- Twelve built-in modes with fixed UUIDs
+  `00000000-0000-000N-1500000000000000`, N = 1 … 12: holiday, vacation,
+  day off, Monday … Sunday, heating period, cooling period. Their
+  `Mode=` attribute is `N - 1` (absent on the holiday mode: 0).
+- User-defined modes have UUIDs minted like any object and negative
+  numbers, `Mode="-1"`, `"-2"`, … in creation order.
+- A timer's `Modes=` (DayTimer, and the `<Timer>` of other blocks) lists
+  its columns in ascending `Mode=` order; `UserModes=` counts the
+  columns before Monday, so a heating column does not count (oracle
+  session 29).
+- A fresh mode saved by Loxone Config: `Nio="2" WF="147456"`,
+  `<IoData></IoData>`. Modes made in the GUI earlier carry
+  `WF="16384"` and an `<IoData Cr=…>` category.
+- Calendar entries (*Betriebszeiten*): `CalendarEntry` under
+  `CalendarCaption`, with `I`/`Q`. Both observed entries are date
+  ranges, `Mode="4"` with `Month`/`Day` to `Month2`/`Day2`,
+  `WeekDayInMonth="1"`, and `CalType` = the `Mode=` number of the mode
+  they switch. Other kinds are unobserved (#211).
+
 ## Users, groups and access rights
 
 The GUI's *Users and Permissions* folder is a `LoxCaption

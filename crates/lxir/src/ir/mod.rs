@@ -78,12 +78,12 @@ pub use access::lint_access;
 pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adopt_pages};
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl, Binding,
-    BindingKind, BlockDecl, ClockDecl, CmpOp, ExpectDecl, Expr, ExprWireDecl, ExternDecl, Interval,
-    Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem,
-    MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl,
-    RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine,
-    SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl,
-    TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
+    BindingKind, BlockDecl, ClockDecl, CmpOp, Day, ExpectDecl, Expr, ExprWireDecl, ExternDecl,
+    Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl,
+    MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind,
+    RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem,
+    ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
+    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{

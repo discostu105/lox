@@ -1057,6 +1057,8 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "ModbusASensor",
     "ModbusSensor",
     "ModbusAActor",
+    // A user-defined operating mode (D69), in the "Betriebsmodi" folder.
+    "Mode",
 ];
 
 /// Block versions (`V=` on `<C>`) the builtin table is verified for,
