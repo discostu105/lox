@@ -1,6 +1,6 @@
 [package]
 name = "loxone-client"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.91"
 description = "Client for the Loxone Miniserver: HTTP API, token auth (RSA/AES key exchange), WebSocket state stream, FTP backups, statistics"

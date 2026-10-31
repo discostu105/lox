@@ -13,14 +13,6 @@ use crate::otel;
 use crate::util::{abs_path, bar, kb_fmt, xml_attr};
 use crate::{FilesCmd, OtelCmd, UpdateCmd};
 
-/// Extract the `value` attribute, returning `"—"` for missing or empty values.
-fn nonempty_attr(s: &str) -> &str {
-    match xml_attr(s, "value") {
-        Some(v) if !v.is_empty() => v,
-        _ => "—",
-    }
-}
-
 pub fn cmd_status(
     ctx: &RunContext,
     energy: bool,
@@ -121,9 +113,7 @@ pub fn cmd_status(
     }
     if show_diag {
         let d = lox.diagnostics().unwrap_or_default();
-        let sd = lox.get_text("/jdev/sys/sdtest").unwrap_or_default();
-        let sd_val = xml_attr(&sd, "value").unwrap_or("?");
-        let sd_info = parse_sdtest(sd_val);
+        let sd_info = lox.sdtest().unwrap_or_else(|_| parse_sdtest("?"));
         if ctx.json {
             let diag = serde_json::json!({
                 "cpu": d.cpu, "sps": d.sps, "tasks": d.tasks,
@@ -159,136 +149,84 @@ pub fn cmd_status(
         }
     }
     if show_net {
-        let ip = lox.get_text("/jdev/cfg/ip").unwrap_or_default();
-        let mac = lox.get_text("/jdev/cfg/mac").unwrap_or_default();
-        let mask = lox.get_text("/jdev/cfg/mask").unwrap_or_default();
-        let gw = lox.get_text("/jdev/cfg/gateway").unwrap_or_default();
-        let dns1 = lox.get_text("/jdev/cfg/dns1").unwrap_or_default();
-        let dns2 = lox.get_text("/jdev/cfg/dns2").unwrap_or_default();
-        let dhcp = lox.get_text("/jdev/cfg/dhcp").unwrap_or_default();
-        let ntp = lox.get_text("/jdev/cfg/ntp").unwrap_or_default();
-        let ip_val = nonempty_attr(&ip);
-        let mac_val = nonempty_attr(&mac);
-        let mask_val = nonempty_attr(&mask);
-        let gw_val = nonempty_attr(&gw);
-        let dns1_val = nonempty_attr(&dns1);
-        let dns2_val = nonempty_attr(&dns2);
-        let dhcp_val = nonempty_attr(&dhcp);
-        let ntp_val = nonempty_attr(&ntp);
+        let n = lox.network();
+        let dash = |v: &str| if v.is_empty() { "—" } else { v }.to_string();
+        let rows = [
+            ("ip", "IP", &n.ip),
+            ("mac", "MAC", &n.mac),
+            ("mask", "Mask", &n.mask),
+            ("gateway", "Gateway", &n.gateway),
+            ("dns", "DNS 1", &n.dns1),
+            ("dns2", "DNS 2", &n.dns2),
+            ("dhcp", "DHCP", &n.dhcp),
+            ("ntp", "NTP", &n.ntp),
+        ];
         if ctx.json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "ip": ip_val, "mac": mac_val, "mask": mask_val,
-                    "gateway": gw_val, "dns": dns1_val, "dns2": dns2_val,
-                    "dhcp": dhcp_val, "ntp": ntp_val,
-                })
-            );
+            let obj: serde_json::Map<_, _> = rows
+                .iter()
+                .map(|(k, _, v)| (k.to_string(), dash(v).into()))
+                .collect();
+            println!("{}", serde_json::Value::Object(obj));
         } else {
             println!("┌─ Network ───────────────────────────────────────────");
-            println!("│  IP:      {}", ip_val);
-            println!("│  MAC:     {}", mac_val);
-            println!("│  Mask:    {}", mask_val);
-            println!("│  Gateway: {}", gw_val);
-            println!("│  DNS 1:   {}", dns1_val);
-            println!("│  DNS 2:   {}", dns2_val);
-            println!("│  DHCP:    {}", dhcp_val);
-            println!("│  NTP:     {}", ntp_val);
+            for (_, label, v) in rows {
+                println!("│  {:<8} {}", format!("{label}:"), dash(v));
+            }
             println!("└─────────────────────────────────────────────────────");
         }
     }
     if show_bus {
-        let sent = lox.get_text("/jdev/bus/packetssent").unwrap_or_default();
-        let recv = lox
-            .get_text("/jdev/bus/packetsreceived")
-            .unwrap_or_default();
-        let rerr = lox.get_text("/jdev/bus/receiveerrors").unwrap_or_default();
-        let ferr = lox.get_text("/jdev/bus/frameerrors").unwrap_or_default();
-        let over = lox.get_text("/jdev/bus/overruns").unwrap_or_default();
-        let perr = lox.get_text("/jdev/bus/parityerrors").unwrap_or_default();
-        let sent_val = nonempty_attr(&sent);
-        let recv_val = nonempty_attr(&recv);
-        let rerr_val = nonempty_attr(&rerr);
-        let ferr_val = nonempty_attr(&ferr);
-        let over_val = nonempty_attr(&over);
-        let perr_val = nonempty_attr(&perr);
+        let b = lox.bus_stats();
         if ctx.json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "packets_sent": sent_val, "packets_received": recv_val,
-                    "receive_errors": rerr_val, "frame_errors": ferr_val,
-                    "overruns": over_val, "parity_errors": perr_val,
-                })
-            );
+            println!("{}", serde_json::to_value(&b)?);
         } else {
             println!("┌─ CAN Bus ───────────────────────────────────────────");
-            println!("│  Packets sent:     {}", sent_val);
-            println!("│  Packets received: {}", recv_val);
-            println!("│  Receive errors:   {}", rerr_val);
-            println!("│  Frame errors:     {}", ferr_val);
-            println!("│  Parity errors:    {}", perr_val);
-            println!("│  Overruns:         {}", over_val);
+            for (label, v) in [
+                ("Packets sent", b.packets_sent),
+                ("Packets received", b.packets_received),
+                ("Receive errors", b.receive_errors),
+                ("Frame errors", b.frame_errors),
+                ("Parity errors", b.parity_errors),
+                ("Overruns", b.overruns),
+            ] {
+                println!("│  {:<17} {}", format!("{label}:"), count(v));
+            }
             println!("└─────────────────────────────────────────────────────");
         }
     }
     if show_lan {
-        let txp = lox.get_text("/jdev/lan/txp").unwrap_or_default();
-        let txe = lox.get_text("/jdev/lan/txe").unwrap_or_default();
-        let txc = lox.get_text("/jdev/lan/txc").unwrap_or_default();
-        let txu = lox.get_text("/jdev/lan/txu").unwrap_or_default();
-        let rxp = lox.get_text("/jdev/lan/rxp").unwrap_or_default();
-        let rxo = lox.get_text("/jdev/lan/rxo").unwrap_or_default();
-        let eof = lox.get_text("/jdev/lan/eof").unwrap_or_default();
-        let exh = lox.get_text("/jdev/lan/exh").unwrap_or_default();
-        let nob = lox.get_text("/jdev/lan/nob").unwrap_or_default();
-        let txp_val = nonempty_attr(&txp);
-        let txe_val = nonempty_attr(&txe);
-        let txc_val = nonempty_attr(&txc);
-        let txu_val = nonempty_attr(&txu);
-        let rxp_val = nonempty_attr(&rxp);
-        let rxo_val = nonempty_attr(&rxo);
-        let eof_val = nonempty_attr(&eof);
-        let exh_val = nonempty_attr(&exh);
-        let nob_val = nonempty_attr(&nob);
+        let l = lox.lan_stats();
         if ctx.json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "tx_packets": txp_val, "tx_errors": txe_val,
-                    "tx_collisions": txc_val, "tx_underruns": txu_val,
-                    "rx_packets": rxp_val, "rx_overflow": rxo_val,
-                    "eof_errors": eof_val, "exhaustion": exh_val,
-                    "no_buffers": nob_val,
-                })
-            );
+            println!("{}", serde_json::to_value(&l)?);
         } else {
             println!("┌─ LAN Statistics ────────────────────────────────────");
-            println!("│  TX packets:    {}", txp_val);
-            println!("│  TX errors:     {}", txe_val);
-            println!("│  TX collisions: {}", txc_val);
-            println!("│  TX underruns:  {}", txu_val);
-            println!("│  RX packets:    {}", rxp_val);
-            println!("│  RX overflow:   {}", rxo_val);
-            println!("│  EOF errors:    {}", eof_val);
-            println!("│  Exhaustion:    {}", exh_val);
-            println!("│  No buffers:    {}", nob_val);
+            for (label, v) in [
+                ("TX packets", l.tx_packets),
+                ("TX errors", l.tx_errors),
+                ("TX collisions", l.tx_collisions),
+                ("TX underruns", l.tx_underruns),
+                ("RX packets", l.rx_packets),
+                ("RX overflow", l.rx_overflow),
+                ("EOF errors", l.eof_errors),
+                ("Exhaustion", l.exhaustion),
+                ("No buffers", l.no_buffers),
+            ] {
+                println!("│  {:<14} {}", format!("{label}:"), count(v));
+            }
             println!("└─────────────────────────────────────────────────────");
         }
     }
     Ok(())
 }
 
+/// A counter for the status tables: `—` when missing.
+fn count(v: Option<u64>) -> String {
+    v.map_or("—".to_string(), |n| n.to_string())
+}
+
 pub fn cmd_log(_ctx: &RunContext, lines: usize) -> Result<()> {
     let lox = Config::load()?.client()?;
-    let log = lox.get_text("/dev/fsget/log/def.log")?;
-    if log.contains("<errorcode>403</errorcode>") || log.contains("<errorcode>401</errorcode>") {
-        bail!("Access denied. The Miniserver log requires admin privileges.");
-    }
-    if log.trim_start().starts_with('<') && log.contains("<errorcode>") {
-        let code = xml_attr(&log, "errorcode").unwrap_or("?");
-        bail!("Miniserver returned error code {}", code);
-    }
+    let log = lox.log()?;
     let all: Vec<&str> = log.lines().collect();
     for line in &all[all.len().saturating_sub(lines)..] {
         println!("{}", line);
@@ -609,18 +547,12 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     }
 
     let bus_errors: Option<(String, String, String)> = {
-        let rerr = lox.get_text("/jdev/bus/receiveerrors").ok();
-        let ferr = lox.get_text("/jdev/bus/frameerrors").ok();
-        let over = lox.get_text("/jdev/bus/overruns").ok();
-        match (rerr, ferr, over) {
-            (Some(r), Some(f), Some(o)) => {
-                let rv = xml_attr(&r, "value").unwrap_or("0").to_string();
-                let fv = xml_attr(&f, "value").unwrap_or("0").to_string();
-                let ov = xml_attr(&o, "value").unwrap_or("0").to_string();
-                Some((rv, fv, ov))
-            }
-            _ => None,
-        }
+        let b = lox.bus_stats();
+        let errs = [b.receive_errors, b.frame_errors, b.overruns];
+        errs.iter().any(Option::is_some).then(|| {
+            let [r, f, o] = errs.map(|v| v.unwrap_or(0).to_string());
+            (r, f, o)
+        })
     };
 
     let total = devices.len();

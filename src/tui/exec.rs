@@ -26,7 +26,7 @@ use crate::config::{Config, GlobalConfig};
 use crate::logic::{DiffLine, Logic};
 use loxone_client::client::LoxClient;
 use loxone_client::stream::StateEvent;
-use loxone_client::system::{parse_counter, parse_cpu};
+use loxone_client::system::{check_ll, parse_cpu, parse_flag};
 
 static EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -141,41 +141,6 @@ pub struct Live {
     roles: BTreeMap<String, String>,
 }
 
-/// `/jdev/...` value with the `LL.Code` checked.
-fn jdev(client: &LoxClient, path: &str) -> Result<String> {
-    let v = client.get_json(path)?;
-    check_code(&v)?;
-    Ok(match v.pointer("/LL/value") {
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => other.to_string(),
-        None => String::new(),
-    })
-}
-
-fn check_code(v: &Value) -> Result<()> {
-    let code = v
-        .pointer("/LL/Code")
-        .or_else(|| v.pointer("/LL/code"))
-        .and_then(|c| {
-            c.as_str()
-                .map(|s| s.to_string())
-                .or_else(|| c.as_i64().map(|n| n.to_string()))
-        });
-    match code.as_deref() {
-        None | Some("200") => Ok(()),
-        Some(c) => {
-            let hint = match c {
-                "401" => " (unauthorized)",
-                "403" => " (forbidden — the user lacks rights for this control)",
-                "404" => " (unknown control or command)",
-                "500" => " (Miniserver error)",
-                _ => "",
-            };
-            bail!("Miniserver answered {}{}", c, hint)
-        }
-    }
-}
-
 impl Live {
     pub fn new(
         rt: Handle,
@@ -244,7 +209,7 @@ impl Live {
                         if let Err(e) = client
                             .send_cmd(&uuid, c)
                             .map_err(anyhow::Error::from)
-                            .and_then(|v| check_code(&v))
+                            .and_then(|v| Ok(check_ll(c, &v)?))
                         {
                             // transport errors quote the URL, PIN included
                             let mut msg = short_err(&e);
@@ -309,7 +274,7 @@ impl Live {
                         if let Err(e) = client
                             .send_cmd(&uuid, &cmd)
                             .map_err(anyhow::Error::from)
-                            .and_then(|v| check_code(&v))
+                            .and_then(|v| Ok(check_ll(&cmd, &v)?))
                         {
                             let _ = tx.send(Msg::Log(LogMsg {
                                 t: now(),
@@ -389,7 +354,7 @@ impl Live {
                         "/jdev/sys/updatetolatestrelease"
                     };
                     let what = if reboot { "reboot" } else { "firmware update" };
-                    match jdev(&client, path) {
+                    match client.value(path).map_err(anyhow::Error::from) {
                         Ok(_) => {
                             let _ = tx.send(Msg::Toast(
                                 ToastKind::Ok,
@@ -584,7 +549,7 @@ async fn stream_loop_inner(
             // structure changed while we were away?
             let c = client.clone();
             if let Ok(Ok(v)) =
-                tokio::task::spawn_blocking(move || jdev(&c, "/jdev/sps/LoxAPPversion3")).await
+                tokio::task::spawn_blocking(move || c.value("/jdev/sps/LoxAPPversion3")).await
                 && !v.is_empty()
                 && !last_modified.is_empty()
                 && v.trim() != last_modified.trim()
@@ -749,10 +714,7 @@ fn poll_live(client: &LoxClient, ctx: &PollCtx, kind: &PollKind) -> Result<Polle
         PollKind::Devices => {
             Polled::Devices(data::parse_status_xml(&client.get_text("/data/status")?))
         }
-        PollKind::Log => Polled::Log(data::parse_log(
-            &client.get_bytes("/dev/fsget/log/def.log")?,
-            500,
-        )),
+        PollKind::Log => Polled::Log(data::parse_log(client.log()?.as_bytes(), 500)),
         PollKind::Sites => Polled::Sites(sites(ctx)),
         PollKind::History(cid) => {
             let (uuid, src) = ctx.stats.clone().context("no statistics")?;
@@ -798,7 +760,8 @@ fn diag(client: &LoxClient) -> Result<Diag> {
         ints: d.interrupts,
         comints: d.comm_interrupts,
         sd: sd_test(client),
-        plc: jdev(client, "/jdev/sps/status")
+        plc: client
+            .value("/jdev/sps/status")
             .ok()
             .filter(|s| !s.is_empty()),
         clock_drift: clock_drift(client),
@@ -815,7 +778,7 @@ fn clock_drift(client: &LoxClient) -> Option<f64> {
         match tz.as_ref() {
             Some((h, off)) if *h == host => *off,
             _ => {
-                let off = data::parse_tz_offset(&jdev(client, "/jdev/cfg/timezoneoffset").ok()?)?;
+                let off = data::parse_tz_offset(&client.value("/jdev/cfg/timezoneoffset").ok()?)?;
                 *tz = Some((host, off));
                 off
             }
@@ -828,7 +791,7 @@ fn clock_drift(client: &LoxClient) -> Option<f64> {
             .unwrap_or(0.0)
     };
     let t0 = unix();
-    let ms = data::parse_hms(&jdev(client, "/jdev/sys/time").ok()?)?;
+    let ms = data::parse_hms(&client.value("/jdev/sys/time").ok()?)?;
     let t1 = unix();
     // the Miniserver reports whole seconds: compare against the middle of that second
     Some(data::clock_drift(ms + 0.5, (t0 + t1) / 2.0, tz))
@@ -844,73 +807,70 @@ fn sd_test(client: &LoxClient) -> Option<String> {
     {
         return v.clone();
     }
-    let v = jdev(client, "/jdev/sys/sdtest")
+    let v = client
+        .sdtest()
         .ok()
+        .map(|sd| sd.raw)
         .filter(|s| !s.is_empty());
     *last = Some((Instant::now(), v.clone()));
     v
 }
 
 fn info(client: &LoxClient, ctx: &PollCtx) -> Result<MsInfo> {
-    let get = |p: &str| jdev(client, p).unwrap_or_default();
-    let firmware = jdev(client, "/jdev/cfg/version")?;
-    let yes = |s: String| match s.to_lowercase().as_str() {
-        "" => None,
-        "1" | "true" | "on" | "yes" => Some(true),
-        _ => Some(false),
-    };
+    let firmware = client.value("/jdev/cfg/version")?;
+    let n = client.network();
     Ok(MsInfo {
         firmware,
         serial: ctx.house_serial.clone(),
         ms_type: ctx.house_ms_type.clone(),
-        ip: get("/jdev/cfg/ip"),
-        mask: get("/jdev/cfg/mask"),
-        gateway: get("/jdev/cfg/gateway"),
-        dns: [get("/jdev/cfg/dns1"), get("/jdev/cfg/dns2")]
+        dhcp: parse_flag(&n.dhcp),
+        ntp: parse_flag(&n.ntp),
+        dns: [n.dns1, n.dns2]
             .into_iter()
             .filter(|d| !d.is_empty() && d != "0.0.0.0")
             .collect(),
-        mac: get("/jdev/cfg/mac"),
-        dhcp: yes(get("/jdev/cfg/dhcp")),
-        ntp: yes(get("/jdev/cfg/ntp")),
-        structure_version: get("/jdev/sps/LoxAPPversion3"),
+        ip: n.ip,
+        mask: n.mask,
+        gateway: n.gateway,
+        mac: n.mac,
+        structure_version: client.value("/jdev/sps/LoxAPPversion3").unwrap_or_default(),
         sps_state: None,
         ms_time: None,
     })
 }
 
-const BUS: [(&str, &str); 6] = [
-    ("CAN sent", "/jdev/bus/packetssent"),
-    ("CAN received", "/jdev/bus/packetsreceived"),
-    ("CAN receive errors", "/jdev/bus/receiveerrors"),
-    ("CAN frame errors", "/jdev/bus/frameerrors"),
-    ("CAN overruns", "/jdev/bus/overruns"),
-    ("CAN parity errors", "/jdev/bus/parityerrors"),
+/// The TUI's labels for `BusStats::counters` and `LanStats::counters`,
+/// in their order.
+const BUS_LABELS: [&str; 6] = [
+    "CAN sent",
+    "CAN received",
+    "CAN receive errors",
+    "CAN frame errors",
+    "CAN overruns",
+    "CAN parity errors",
 ];
-const LAN: [(&str, &str); 9] = [
-    ("LAN tx packets", "/jdev/lan/txp"),
-    ("LAN tx errors", "/jdev/lan/txe"),
-    ("LAN tx collisions", "/jdev/lan/txc"),
-    ("LAN tx underruns", "/jdev/lan/txu"),
-    ("LAN rx packets", "/jdev/lan/rxp"),
-    ("LAN rx overflows", "/jdev/lan/rxo"),
-    ("LAN rx EOF", "/jdev/lan/eof"),
-    ("LAN exhausted", "/jdev/lan/exh"),
-    ("LAN no buffer", "/jdev/lan/nob"),
+const LAN_LABELS: [&str; 9] = [
+    "LAN tx packets",
+    "LAN tx errors",
+    "LAN tx collisions",
+    "LAN tx underruns",
+    "LAN rx packets",
+    "LAN rx overflows",
+    "LAN rx EOF",
+    "LAN exhausted",
+    "LAN no buffer",
 ];
 
 fn buslan(client: &LoxClient) -> Result<BusLan> {
-    let mut counters = Vec::new();
-    let mut ok = 0;
-    for (name, path) in BUS.iter().chain(LAN.iter()) {
-        let v = jdev(client, path)
-            .ok()
-            .and_then(|v| parse_counter(&v))
-            .map(|f| f as u64);
-        ok += v.is_some() as usize;
-        counters.push((name.to_string(), v));
-    }
-    if ok == 0 {
+    let bus = client.bus_stats().counters();
+    let lan = client.lan_stats().counters();
+    let counters: Vec<(String, Option<u64>)> = BUS_LABELS
+        .iter()
+        .zip(bus)
+        .chain(LAN_LABELS.iter().zip(lan))
+        .map(|(label, (_, v))| (label.to_string(), v))
+        .collect();
+    if counters.iter().all(|(_, v)| v.is_none()) {
         bail!("no bus/LAN counters available");
     }
     Ok(BusLan { counters })
@@ -940,7 +900,7 @@ fn sites(ctx: &PollCtx) -> Vec<SiteStatus> {
                 match cfg.client() {
                     Ok(c) => {
                         let t0 = Instant::now();
-                        match jdev(&c, "/jdev/cfg/version") {
+                        match c.value("/jdev/cfg/version").map_err(anyhow::Error::from) {
                             Ok(fw) => {
                                 s.latency_ms = Some(t0.elapsed().as_millis() as u64);
                                 s.online = true;
