@@ -39,14 +39,14 @@
   "template": {
     "prefix": "template",
     "body": [
-      "template ${1:name}(${2:sensor}: ${3:VirtualIn}, ${4:grenze} = ${5:3})",
+      "template ${1:name}(${2:sensor}: ${3:VirtualIn}, ${4:grenze} = ${5:3}) -> ${6:alarm}",
       "\t${6:alarm} = ${7:Less}(",
       "\t\t${8:Input1}: ${2:sensor}.Q,",
       "\t\t${9:Input2}: ${4:grenze},",
       "\t)",
       "end"
     ],
-    "description": "Reusable body, expanded per instance with locked identities (D23)"
+    "description": "Reusable body, expanded per instance with locked identities (D23); `-> block` names the primary block, the instance itself (D82)"
   },
   "instance": {
     "prefix": "instance",
@@ -55,7 +55,7 @@
       "\t${3:sensor}: ${4:slug},",
       ")"
     ],
-    "description": "Instantiate a template; body blocks get slugs prefixed with the instance name"
+    "description": "Instantiate a template; name its blocks as instance.block (instance.Port for the primary block)"
   },
   "wire": {
     "prefix": "wire",

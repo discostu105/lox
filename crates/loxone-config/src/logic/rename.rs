@@ -67,11 +67,7 @@ pub fn rename_slug(module: &mut Module, old: &str, new: &str) {
 }
 
 fn rename_item(item: &mut Item, old: &str, new: &str) {
-    let sub = |s: &mut String| {
-        if s == old {
-            *s = new.to_string();
-        }
-    };
+    let sub = |s: &mut String| sub_ref(s, old, new);
     let sub_comment = |c: &mut Option<String>| {
         if let Some(text) = c {
             sub_text(text, old, new);
@@ -291,11 +287,7 @@ fn rename_block_args(b: &mut BlockDecl, old: &str, new: &str) {
                 // — a different namespace, never renamed.
                 match &mut binding.kind {
                     BindingKind::Param(v) => rename_value(v, old, new),
-                    BindingKind::Wire(p) => {
-                        if p.slug == old {
-                            p.slug = new.to_string();
-                        }
-                    }
+                    BindingKind::Wire(p) => sub_ref(&mut p.slug, old, new),
                     BindingKind::Expr(e) => rename_expr(e, old, new),
                 }
                 if let Some(text) = &mut binding.comment {
@@ -334,12 +326,18 @@ fn rename_expr(e: &mut Expr, old: &str, new: &str) {
 
 fn rename_operand(o: &mut Operand, old: &str, new: &str) {
     match o {
-        Operand::Port(p) => {
-            if p.slug == old {
-                p.slug = new.to_string();
-            }
-        }
+        Operand::Port(p) => sub_ref(&mut p.slug, old, new),
         Operand::Value(v) => rename_value(v, old, new),
+    }
+}
+
+/// A referenced name: `old` itself, or a block of instance `old`
+/// (`old.block`).
+fn sub_ref(s: &mut String, old: &str, new: &str) {
+    if s == old {
+        *s = new.to_string();
+    } else if let Some(block) = s.strip_prefix(old).and_then(|r| r.strip_prefix('.')) {
+        *s = format!("{new}.{block}");
     }
 }
 

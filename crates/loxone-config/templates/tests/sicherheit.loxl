@@ -22,20 +22,20 @@ alarm = alarm_abwesend(
 test "tuer_offen_hinweis: nach 3 Minuten"
 	tuer.Q = 1
 	tick 170
-	expect hinweis_ausgang.Q == 0
+	expect hinweis.Q == 0
 	tick 20
-	expect hinweis_ausgang.Q == 1
+	expect hinweis.Q == 1
 	tuer.Q = 0
 	tick 2
-	expect hinweis_ausgang.Q == 0
+	expect hinweis.Q == 0
 end
 
 test "wasseralarm: 60 Sekunden"
 	melder.Q = 1
 	tick 2
-	expect wasser_ausgang.Q == 1
+	expect wasser.Q == 1
 	tick 70
-	expect wasser_ausgang.Q == 0
+	expect wasser.Q == 0
 end
 
 test "alarm_abwesend: nach der Frist, höchstens 3 Minuten"
@@ -45,13 +45,13 @@ test "alarm_abwesend: nach der Frist, höchstens 3 Minuten"
 	tick 2
 	tuer.Q = 0
 	tick 20
-	expect alarm_ausgang.Q == 0
+	expect alarm.Q == 0
 	tick 15
-	expect alarm_ausgang.Q == 1
+	expect alarm.Q == 1
 	tick 150
-	expect alarm_ausgang.Q == 1
+	expect alarm.Q == 1
 	tick 40
-	expect alarm_ausgang.Q == 0
+	expect alarm.Q == 0
 end
 
 test "alarm_abwesend: rechtzeitig entschärft"
@@ -61,5 +61,5 @@ test "alarm_abwesend: rechtzeitig entschärft"
 	tick 10
 	abwesend.Q = 0
 	tick 60
-	expect alarm_ausgang.Q == 0
+	expect alarm.Q == 0
 end

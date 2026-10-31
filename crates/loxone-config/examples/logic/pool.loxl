@@ -20,8 +20,9 @@ extern abdeckung_offen = VirtualIn(iname: "VI3")
 
 extern wp_freigabe = Switch(title: "Freigabe", room: "Technikraum")
 
-# Ein wiederverwendbarer Körper (D23): pro Instanz expandiert, der
-# Block der Instanz `frost` heißt dann `frost_alarm`.
+# Ein wiederverwendbarer Körper (D23): pro Instanz expandiert. Der
+# einzige Block ist der Hauptblock: `frost.Q` ist der Ausgang von
+# `alarm` der Instanz `frost` (im Lock `frost_alarm`).
 
 template waechter(sensor: VirtualIn, grenze = 3)
 	alarm = Less(
@@ -70,15 +71,15 @@ pv_kw = AnalogThresholdTrigger(
 # Speicher und spielt jeden Ablauf im eingebauten Simulator durch.
 # Zuweisungen injizieren Signale, `tick` lässt simulierte Zeit
 # vergehen, `expect` prüft danach — auch auf den expandierten
-# Template-Blöcken (frost_alarm) und dem benannten Signal (wp_bedarf).
+# Template-Blöcken (frost.Q) und dem benannten Signal (wp_bedarf).
 
 test "Frostwächter schlägt an und beruhigt sich"
 	wassertemp.Q = 2
 	tick 2
-	expect frost_alarm.Q == 1
+	expect frost.Q == 1
 	wassertemp.Q = 10
 	tick 2
-	expect frost_alarm.Q == 0
+	expect frost.Q == 0
 end
 
 test "WP-Freigabe folgt PV und Abdeckung"

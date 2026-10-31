@@ -85,7 +85,10 @@ speicher = Memory(
 # Ein Ein-Block-Template ist ein zusammengesetzter Block: "{titel}"
 # setzt pro Instanz den App-Titel, Wert-Parameter tragen Defaults, und
 # eine Bindung, die keinen Parameter nennt, wird als Port-Bindung an
-# den Körperblock durchgereicht.
+# den Körperblock durchgereicht. Der einzige Block ist der Hauptblock:
+# `hitze.Q` liest ihn (D82); bei mehreren Blöcken heißt einer
+# `hitze.<block>.Q`, und `template name(…) -> <block>` macht einen zum
+# Hauptblock.
 
 template grenzwaechter(quelle: VirtualIn, titel = "Wächter", ein = 30, aus = 28)
 	alarm = AnalogThresholdTrigger(
@@ -192,13 +195,13 @@ test "Hitzewarnung mit Hysterese"
 	clock 2026-07-15 14:00 # simulierte Uhrzeit, für Zeitlogik
 	aussentemp.Q = 35
 	tick 4
-	expect hitze_alarm.Q == 1
+	expect hitze.Q == 1
 	aussentemp.Q = 29 # unter Ein (30), über Aus (28)
 	tick 2s dt 500ms # zwei Sekunden in feineren Schritten (4 Ticks)
-	expect hitze_alarm.Q == 1 # Hysterese hält
+	expect hitze.Q == 1 # Hysterese hält
 	aussentemp.Q = 20
 	tick 4
-	expect hitze_alarm.Q ~= 0 # ~= toleriert 5 %
+	expect hitze.Q ~= 0 # ~= toleriert 5 %
 end
 
 test "Abdeckungswächter schaltet"

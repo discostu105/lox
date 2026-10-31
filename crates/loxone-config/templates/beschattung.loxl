@@ -2,12 +2,12 @@
 #
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
-# gelesen; das Ergebnis jeder Vorlage ist der Block `ausgang` der Instanz:
+# gelesen; das Ergebnis jeder Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
 #
 #   markise = markise_schutz(wind: windgeschwindigkeit, regen: regensensor)
-#   markise_ein.I <- markise_ausgang.Q
+#   markise_ein.I <- markise.Q
 
-template markise_schutz(wind: any, regen: any, grenze = 40, freigabe = 10min, titel = "Markise Sperre")
+template markise_schutz(wind: any, regen: any, grenze = 40, freigabe = 10min, titel = "Markise Sperre") -> ausgang
 	# Einfahren sofort bei Wind über `grenze` km/h oder Regen; wieder
 	# freigeben erst nach `freigabe` ohne beides.
 
@@ -28,7 +28,7 @@ template markise_schutz(wind: any, regen: any, grenze = 40, freigabe = 10min, ti
 	)
 end
 
-template sonnenschutz(helligkeit: any, aussentemp: any, lux = 30000, temperatur = 24)
+template sonnenschutz(helligkeit: any, aussentemp: any, lux = 30000, temperatur = 24) -> ausgang
 	# Sonnenschutz: beschatten, wenn die Helligkeit über `lux` und die
 	# Außentemperatur über `temperatur` °C liegt.
 

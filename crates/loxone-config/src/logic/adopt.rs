@@ -134,6 +134,20 @@ pub fn adopt_one(
     module: &Module,
     lock: &mut Lockfile,
 ) -> Result<AdoptedBlock> {
+    let mut adopted = adopt_one_expanded(doc, uuid, slug, module, lock)?;
+    // The items reference the lock's (expanded) slugs; source names an
+    // instance's blocks by the instance.
+    module.respell(&mut adopted.items);
+    Ok(adopted)
+}
+
+fn adopt_one_expanded(
+    doc: &LoxoneDoc,
+    uuid: &str,
+    slug: &str,
+    module: &Module,
+    lock: &mut Lockfile,
+) -> Result<AdoptedBlock> {
     doc.require_unique_uuids("config")?;
     let fail = |m: String| Error::Compile(m);
     // Templates and expressions: the checks below — slug
@@ -331,11 +345,12 @@ pub fn adopt_one(
                     })
                 });
             if !declared {
+                let shown = raw.spelling(&to_slug);
                 return Err(fail(format!(
-                    "the config wires {slug}.{fk} into managed block `{to_slug}` port \
-                     {tk}, which the declaration of `{to_slug}` does not state, so the next \
+                    "the config wires {slug}.{fk} into managed block `{shown}` port \
+                     {tk}, which the declaration of `{shown}` does not state, so the next \
                      compile would remove it. Add `{tk}: {slug}.{fk},` to the \
-                     argument list of `{to_slug}` and run the adoption again.",
+                     argument list of `{shown}` and run the adoption again.",
                     fk = w.from.port,
                     tk = w.to.port,
                 )));

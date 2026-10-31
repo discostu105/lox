@@ -329,6 +329,13 @@ impl Workspace {
     /// else the declaration of the first declared one, else the first use
     /// of one, else the top of `fallback`.
     fn locate(&self, message: &str, decls: &[Decl], unit: &Unit, fallback: &Path) -> Span {
+        // "write `a.Q` instead of `a_ein.Q`": the old spelling, so the quick
+        // fix applies.
+        if let Some((_, old)) = replacement(message)
+            && let Some(s) = self.first_text(old, unit)
+        {
+            return s;
+        }
         let names: Vec<&str> = message
             .split('`')
             .skip(1)
@@ -358,6 +365,26 @@ impl Workspace {
             }
         }
         span(fallback, 0, 0, 0)
+    }
+
+    /// The first occurrence of `needle` in the unit's code (not in a
+    /// comment), not inside a longer name.
+    fn first_text(&self, needle: &str, unit: &Unit) -> Option<Span> {
+        let name_char = |c: char| c.is_alphanumeric() || c == '_';
+        unit.files.iter().find_map(|f| {
+            let text = self.text(f)?;
+            text.split('\n').enumerate().find_map(|(n, line)| {
+                let code = code(line);
+                code.match_indices(needle).find_map(|(s, _)| {
+                    let e = s + needle.len();
+                    let before = code[..s].chars().next_back();
+                    let after = code[e..].chars().next();
+                    (!before.is_some_and(|c| name_char(c) || c == '.')
+                        && !after.is_some_and(name_char))
+                    .then(|| span(f, n, s, e))
+                })
+            })
+        })
     }
 
     /// The first `slug.port` in the unit, as the span of `port`.
@@ -694,6 +721,9 @@ impl Workspace {
             let Some(decl) = find_decl(&decls, slug, path) else {
                 return Vec::new();
             };
+            if decl.kind == "instance" {
+                return self.instance_completions(&unit, &decls, decl);
+            }
             return self.port_completions(&unit, decl);
         }
         if is_type_position(&before[..partial]) {
@@ -727,6 +757,54 @@ impl Workspace {
                 detail: d.ty.clone(),
             })
             .collect()
+    }
+
+    /// After `instance.`: the template's blocks (`licht.taster`) and the
+    /// ports of its primary block (`licht.Q`).
+    fn instance_completions(&self, unit: &Unit, decls: &[Decl], inst: &Decl) -> Vec<Completion> {
+        let Some(t) = inst.ty.as_deref().and_then(|ty| self.template(decls, ty)) else {
+            return Vec::new();
+        };
+        let primary = t.primary_block();
+        let mut out = Vec::new();
+        for item in &t.body {
+            let (slug, ty) = match item {
+                crate::logic::Item::Block(b) => (&b.slug, Some(b.block_type.as_str())),
+                crate::logic::Item::Signal(s) => (&s.slug, s.expr.top_block_type()),
+                _ => continue,
+            };
+            if Some(slug.as_str()) == primary {
+                let block = Decl {
+                    slug: slug.clone(),
+                    kind: "block",
+                    ty: ty.map(str::to_string),
+                    span: inst.span.clone(),
+                };
+                out.extend(self.port_completions(unit, &block));
+            } else {
+                out.push(Completion {
+                    label: slug.clone(),
+                    kind: "block",
+                    detail: ty.map(str::to_string),
+                });
+            }
+        }
+        out
+    }
+
+    /// The template `name`, parsed from its declaration to its `end`.
+    fn template(&self, decls: &[Decl], name: &str) -> Option<crate::logic::TemplateDecl> {
+        let d = decls
+            .iter()
+            .find(|d| d.kind == "template" && d.slug == name)?;
+        let text = self.text(&d.span.file)?;
+        let lines: Vec<&str> = text.split('\n').skip(d.span.line).collect();
+        let end = lines.iter().position(|l| code(l).trim() == "end")?;
+        let m = Module::parse_fragment(&lines[..=end].join("\n")).ok()?;
+        m.items.into_iter().find_map(|i| match i {
+            crate::logic::Item::Template(t) => Some(t),
+            _ => None,
+        })
     }
 
     fn port_completions(&self, unit: &Unit, decl: &Decl) -> Vec<Completion> {

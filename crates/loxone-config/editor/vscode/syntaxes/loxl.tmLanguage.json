@@ -94,11 +94,21 @@
         "2": { "name": "entity.name.function.loxl" },
         "3": { "name": "punctuation.definition.parameters.begin.loxl" }
       },
-      "end": "\\)",
+      "end": "(\\))(?:\\s*(->)\\s*([a-z][a-z0-9_]*))?",
       "endCaptures": {
-        "0": { "name": "punctuation.definition.parameters.end.loxl" }
+        "1": { "name": "punctuation.definition.parameters.end.loxl" },
+        "2": { "name": "keyword.operator.primary.loxl" },
+        "3": { "name": "variable.other.primary.loxl" }
       },
       "patterns": [
+        {
+          "match": "([a-z][a-z0-9_]*)\\s*(:)\\s*(moods|schedule|tiles|any)\\b",
+          "captures": {
+            "1": { "name": "variable.parameter.loxl" },
+            "2": { "name": "punctuation.separator.loxl" },
+            "3": { "name": "storage.type.set.loxl" }
+          }
+        },
         {
           "match": "([a-z][a-z0-9_]*)\\s*(:)\\s*([A-Z][A-Za-z0-9]*)",
           "captures": {

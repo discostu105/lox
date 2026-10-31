@@ -31,14 +31,14 @@ args       = arg { "," arg } [ "," ] ;
 arg        = string                                (* label; first argument only *)
            | port ":" binding ;
 binding    = value                                 (* Def= parameter *)
-           | slug "." port                         (* wire from that source *)
+           | ref "." port                          (* wire from that source *)
            | expr ;                                (* expression sugar:
                                                       desugars into gate blocks *)
 
 signal     = slug "=" expr [ comment ] ;            (* named signal: not a
                                                       bare operand; the top
                                                       block is `slug` *)
-wire       = slug "." port "<-" ( slug "." port | expr ) [ comment ] ;
+wire       = slug "." port "<-" ( ref "." port | expr ) [ comment ] ;
                                     (* extern target; an expression RHS
                                        desugars into gate blocks *)
 set        = slug "." port "=" value [ comment ] ;            (* extern target *)
@@ -56,32 +56,39 @@ arith      = term { ("+" | "-") term } ;           (* standalone only:
                                                       a whole RHS or binding *)
 term       = factor { ("*" | "/") factor } ;
 factor     = operand | "(" arith ")" ;
-operand    = slug "." port | number [ unit ] | bool | const-ref ;
-removed    = "removed" slug [ comment ] ;
-moved      = "moved" slug "->" slug [ comment ] ;
+operand    = ref "." port | number [ unit ] | bool | const-ref ;
+removed    = "removed" ref [ comment ] ;
+moved      = "moved" ref "->" ref [ comment ] ;
 page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
                                                   (* placement, creation *)
 page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
-template   = "template" slug "(" [ params ] ")" [ comment ]
-             { comment | block-head | arg-line | signal | wire | set }
+template   = "template" slug "(" [ params ] ")" [ "->" slug ] [ comment ]
+                                    (* "-> block": the primary block *)
+             { comment | block-head | arg-line | signal | wire | set
+             | tiles-claim | schedule-claim | moods-claim }
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
+           | slug ":" set-kind [ "=" slug ]        (* set parameter, default *)
            | slug "=" ( number [ unit ] | string | bool ) ;  (* value parameter, default *)
+set-kind   = "moods" | "schedule" | "tiles" ;
 instance   = slug "=" slug "(" [ inst-args ] ")" [ comment ] ;
-inst-args  = param-name ":" ( slug | value ) { "," … } [ "," ] ;
+inst-args  = param-name ":" ( ref | value ) { "," … } [ "," ] ;
+ref        = slug                                  (* a name; an instance stands
+                                                      for its primary block *)
+           | slug "." slug ;                       (* instance.block *)
 
 test       = "test" string [ comment ]
              { comment | inject | tick | expect | test-clock }
              "end" [ comment ] ;
 test-cmp   = "==" | "!=" | ">=" | ">" | "<=" | "<" | "~=" ;
-inject     = slug "." port "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
+inject     = ref "." port "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
 tick       = "tick" ( integer | number time-unit )   (* a count, or a duration:
                                                       a whole number of dt steps *)
              [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
 time-unit  = "ms" | "s" | "min" | "h" ;
-expect     = "expect" slug "." port test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
+expect     = "expect" ref "." port test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
 test-clock = "clock" [ date ] clock [ comment ] ;  (* bare: 07:30, 2026-01-03 07:30:15 *)
 date       = digit digit digit digit "-" digit digit "-" digit digit ;
 
@@ -91,10 +98,11 @@ tiles      = "tiles" slug [ comment ]              (* Touch Pure Flex *)
 tile-head  = "tile" integer "(" [ tile-args ] [ ")" ] [ comment ] ;
 tile-args  = tile-arg { "," tile-arg } [ "," ] ;
 tile-arg   = ( fn | "text" | fn "_text" ) ":" ( string | number )
-           | ( "to" | fn "_to" ) ":" slug ;       (* "to" may repeat *)
+           | ( "to" | fn "_to" ) ":" ref ;        (* "to" may repeat *)
 fn         = "click" | "up" | "down" ;
 tiles-claim = slug "." "tiles" "=" slug [ comment ] ;
-                                    (* extern TreeDevice, top-level only *)
+                                    (* extern TreeDevice; in a template body
+                                       through a set parameter *)
 
 access     = "access" slug [ comment ]             (* NFC Code Touch *)
              { comment | grant }
@@ -113,18 +121,20 @@ day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
 schedule-claim = slug "." "schedule" "=" slug [ comment ] ;
-                                    (* DayTimer, extern or managed; top-level only *)
+                                    (* DayTimer, extern or managed *)
+moods-claim = slug "." "moods" "=" slug [ comment ] ;
+                                    (* LightController2 *)
 rule       = "rule" slug [ comment ]               (* Automatic Designer rule *)
              { comment | rule-line }
              "end" [ comment ] ;
 rule-line  = ( "active" | "inactive"
              | "when" "time" time                  (* 00:00 … 23:59 *)
              | "when" "weekday" rule-day { rule-day }
-             | "when" slug "." ident cmp ( number | "on" | "off" )
+             | "when" ref "." ident cmp ( number | "on" | "off" )
              | "when" "mode" mode-name [ "on" | "off" ]
              | "or"                                (* starts another group *)
              | "when" "date" date                  (* bare *)
-             | "then" slug ( command-word | string )
+             | "then" ref ( command-word | string )
              | "then" "mode" mode-name ( "on" | "off" ) ) [ comment ] ;
 mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
 command-word = letter { letter | digit | "_" } ;  (* one word, bare: `then pumpe on`;
@@ -160,7 +170,8 @@ Notes:
   conventional (the formatter uses one tab inside argument lists).
 - A bare identifier in value position is always a **constant reference**;
   it must name a `let` in the same module. A dotted identifier
-  (`slug.Port`) is always a **port reference**. String values are always
+  (`slug.Port`) is always a **port reference**. With three parts
+  (`instance.block.Port`) it names a block of a template instance. String values are always
   quoted.
 - **`on` and `off`** are the boolean literals in every value position: block and extern parameters,
   `let`, template defaults, expression operands, test injections and expectations.
@@ -768,27 +779,44 @@ distinguishes an instantiation from a block declaration: `sued =
 fassade(…)` calls the template `fassade`, while `hoch = GreaterEqual(…)`
 declares a `GreaterEqual` block (block types are PascalCase).
 
-Parameters come in two forms:
+Parameters come in three forms:
 
-- An **object parameter** (`jalousie: AutoJalousie`) is required at every call site and passes a slug.
-  The annotation is checked against the argument's declared type when it is known. `any`
-  (`bewegung: any`) takes an object of any type, for a template over a sensor that may be virtual or
-  physical; the ports the body uses are checked after expansion, against the type passed.
+- An **object parameter** (`jalousie: AutoJalousie`) is required at every call site and passes a name:
+  an extern, a block, or a block of an instance (`jalousie: sued`, `jalousie: sued.hoch`). The
+  annotation is checked against the argument's declared type when it is known. It takes no default.
+  `any` (`bewegung: any`) takes an object of any type, for a template over a sensor that may be virtual
+  or physical; the ports the body uses are checked after expansion, against the type passed.
 - A **value parameter** (`pos = 70`) has a default and may be overridden with a literal or a `let`
   reference.
+- A **set parameter** (`stimmungen: moods = standard`) passes a `moods`, `schedule` or `tiles` set by
+  its bare name (`stimmungen: kueche`) to a claim in the body (`lc.moods = stimmungen`). The set must
+  be declared and of that kind. Without a default, the set must be given.
 
 Free identifiers in the body that are not parameters refer to the module's names (externs, lets,
 blocks), like any other reference.
+
+**Instance names.** Source names a block of an instance through the instance: `sued.hoch.Q` is the
+output `Q` of body block `hoch` in instance `sued`.
+
+- An instance stands for its **primary block**: the body's only block, or the one the header names
+  with `-> <block>` (`template fassade(…) -> beschatten`). `sued.Q` reads the primary block's output.
+- The primary block has one spelling: write `sued.Q`, not `sued.beschatten.Q`.
+- An instance whose body has several blocks and no primary block must name the block.
+- These names work everywhere a block is referenced: arguments, `<-`, `=`, tests, a tile's `to:`,
+  rules, claims, `removed sued.hoch` and `moved sued.alt -> sued.hoch`. `loxl rename` of an instance
+  renames them all.
 
 Expansion is pure macro substitution before compile: body slug `hoch` in
 instance `sued` becomes `sued_hoch`, and that **expanded slug is the
 lockfile key**. Re-instantiating therefore never re-mints; editing the
 body mints only what is new in each instance; `removed` and `moved` apply
-per expanded slug (`removed sued_hoch`). Reference an instance's blocks by
-their expanded names.
+per expanded slug. Source never writes the expanded slug:
+`sued_hoch.Q` is an error that names its replacement, `sued.hoch.Q`.
+Compile errors name blocks by their lock keys; `loxl test` reports them
+as source spells them.
 
 A call-site binding that names no template parameter forwards as a
-**port binding** onto the body's single block — an instance is a
+**port binding** onto the primary block — an instance is a
 composite block, so its call reads exactly like a block declaration
 with the shared parameters factored away:
 
@@ -805,9 +833,8 @@ fenster = jalousie(
 Forwarded feeds may repeat, exactly as in a block's argument list, and
 resolve in module scope (never against the template's parameters). The
 expanded block re-validates them, so a typo surfaces as an unknown
-port with the block's known ports listed. A template whose body
-declares more than one block takes no forwards (a qualified form is
-not supported).
+port with the block's known ports listed. A template without a primary block takes no forwards.
+Mark one with `-> <block>`.
 
 A block title in the body may interpolate value parameters:
 `"{titel} (scharf)"` substitutes the parameter's string at expansion, so
@@ -821,9 +848,9 @@ The template library (`templates/`, listed by `loxl templates`)
 ships tested templates for common automations; copy a file into the
 module directory to call them.
 
-The body may contain only block declarations, named signals, wires, sets and comments. No nesting,
-no template-local `let`/`extern`. `template`
-and `end` are reserved words; `use` is reserved for the old-syntax error.
+The body may contain only block declarations, named signals, wires, sets, claims (`.moods`,
+`.schedule`, `.tiles`, through a set parameter) and comments. No nesting, no template-local
+`let`/`extern`. `template` and `end` are reserved words; `use` is reserved for the old-syntax error.
 
 ### Expressions — sugar over the discrete blocks
 
@@ -931,7 +958,8 @@ The right side must be an expression:
 
 The sub-blocks are **expression-owned**, as inline: derived from the text, orphans removed
 automatically. A declared name in the `<slug>__` namespace is an error. In a template body a signal is
-body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `sued_warm__ge1`.
+body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `sued_warm__ge1` in the
+lock, and source names it `sued.warm` (`sued` when it is the primary block).
 
 ### `test` — a simulated scenario
 
@@ -939,13 +967,13 @@ body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `
 test "Frostwächter schlägt an"
 	wassertemp.Q = 2        # inject: override that output for the whole test
 	tick 2                  # advance the simulation two steps (default dt 1s)
-	expect frost_alarm.Q == 1
+	expect frost.Q == 1
 	wassertemp.Q = 10
 	tick 2 dt 0.5           # per-step dt override, unit values allowed
-	expect frost_alarm.Q == off
+	expect frost.Q == off
 	clock 06:30             # the wall clock, bare
 	tick 5min               # a duration: 300 steps of 1s
-	expect frost_alarm.Q != on
+	expect frost.Q != on
 end
 ```
 
@@ -986,8 +1014,8 @@ Statements, in file order:
   `clock 07:30`.
 
 References resolve on the **flattened** module (templates expanded,
-expressions desugared), so tests can name template-produced slugs
-(`frost_alarm`) and expression-synthetic slugs
+expressions desugared), so tests can name the blocks of template
+instances (`frost`, `frost.alarm`) and expression-synthetic slugs
 (`pv_kw_input__f1.AQ`) — exactly what the simulator sees. Each slug
 resolves through the lockfile to its object's UUID.
 
@@ -1046,8 +1074,8 @@ Keys of a `tile`:
   `down_to:`** — replace `text:`/`to:` for one function. `up_text: ""`
   drops the text there.
 
-A `to:` target is an extern or a managed block, by its flattened name (`<instance>_<block>` for a
-block in a template body). It must be **API-linked** to the device:
+A `to:` target is an extern or a managed block, a block of a template instance by its instance name
+(`to: ost`, `to: ost.jal`). It must be **API-linked** to the device:
 
 - its `OutputAPI` is wired to the device's API connector (`ApiActor.I`), or
 - its `OutputAPI` is wired to the `AI` of an `OutputRef` mirroring it, whose `AQ` feeds `ApiActor.I`.
@@ -1341,8 +1369,8 @@ the Miniserver such a circuit is a switch, and a percentage reads 1 on its outpu
 - Removing a claim leaves the moods as last written.
 - One claim per controller.
 - Claims are allowed in a template body, so a room template can give every room the same moods:
-  `<lc>.moods = <param>` with a string value parameter naming the set
-  (`template raum(stimmungen = "standard")`, called as `raum(stimmungen: "kueche")`).
+  `<lc>.moods = <param>` with a set parameter (`template raum(stimmungen: moods = standard)`, called
+  as `raum(stimmungen: kueche)`).
 
 `loxl decompile` and `loxl adopt` lift a controller's own moods into a set and a claim, with the
 controller as an extern.
@@ -1415,7 +1443,11 @@ recipients, and leaves `OutputRefLM` blocks with the GUI.
   `access` or `recipients` declaration names an extern and declares
   nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
-  extern or block; every bare-identifier value must name a declared `let`.
+  extern or block, or a block of a template instance (`inst.Port` for its
+  primary block, `inst.block.Port` for any other); every
+  bare-identifier value must name a declared `let`.
+- Instance names share the namespace too: an instance may not be named
+  like a declaration.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).
 - Duplicate parameter bindings, duplicate identical wire bindings, and a
   parameter next to a wire on the same port, in one argument list are
@@ -1518,9 +1550,19 @@ compile output of a migrated file is byte-identical.
 - The "expected a statement" error lists every statement kind.
 - **Named signals**: `wp_bedarf = a.Q and b.AQ >= 5` names an expression's result (see
   [Named signals](#named-signals-slug--expr)). New syntax only; no v1 file changes.
+- **Instance names**: a block of a template instance is `inst.block.Port`, its primary block (the
+  body's only block, or the one `template t(…) -> block` names) is `inst.Port`. The expanded name
+  `inst_block.Port` is an error naming the scoped one. The lock keys stay `inst_block`. Call-site
+  forwards go to the primary block.
+- **Set parameters**: `template raum(stimmungen: moods = standard)` passes a set by its bare name
+  (`raum(stimmungen: kueche)`). The string forms `stimmungen = "standard"` and
+  `stimmungen: "kueche"` are errors naming that spelling. `.schedule` and `.tiles` claims work in
+  template bodies too. An object parameter takes no default.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
-→ `on`/`off`, unquote `clock "…"` and `when date "…"`, then `loxl fmt`
+→ `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
+`inst_block` as `inst.block` (or `inst` for the primary block) and turn
+string-valued set parameters into set parameters, then `loxl fmt`
 (which also unquotes one-word `then` commands).
 
 ## Versioning

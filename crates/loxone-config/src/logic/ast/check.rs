@@ -47,6 +47,12 @@ fn not_a_signal(names: &Names, target: &PortRef, what: &str) -> Result<()> {
 
 /// A reference to an object: the slug must name an extern or a block.
 fn object_ref(names: &Names, r: &PortRef) -> Result<()> {
+    // `instance.block`: resolved by the expansion.
+    if let Some((a, _)) = r.slug.split_once('.')
+        && names.get(a) == Some(&NameKind::Instance)
+    {
+        return Ok(());
+    }
     match names.get(r.slug.as_str()) {
         None => compile_err(format!(
             "reference to undeclared slug `{}` (in `{r}`)",
@@ -61,12 +67,9 @@ fn object_ref(names: &Names, r: &PortRef) -> Result<()> {
                      (`<slug> = {slug}(…)`) (in `{r}`)",
             slug = r.slug
         )),
-        Some(NameKind::Instance) => compile_err(format!(
-            "`{slug}` is a template instance and names no object itself. \
-                     Reference one of its blocks by its expanded name \
-                     (`{slug}_<block>`) (in `{r}`)",
-            slug = r.slug
-        )),
+        // An instance names its primary block; the expansion checks it
+        // has one.
+        Some(NameKind::Instance) => Ok(()),
         Some(NameKind::Tiles) => compile_err(format!(
             "`{}` is a `tiles` set, not an object (in `{r}`)",
             r.slug
@@ -82,6 +85,7 @@ impl Module {
     /// [`crate::logic::validate_ports`].
     pub fn validate(&self) -> Result<()> {
         let names = self.name_table()?;
+        self.check_scoped_names()?;
         // Tests are named by display string, in a namespace of their own.
         let mut test_names: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
@@ -422,7 +426,7 @@ impl Module {
     /// Unlike `Set`, a test may target managed blocks — driving
     /// their inputs (and overriding outputs) is the point. Slug
     /// references are deferred to the flattened view: tests may
-    /// name template-expanded blocks (`frost_alarm`) and
+    /// name the blocks of template instances (`frost.Q`) and
     /// expression-owned blocks (`…__and2`), which only exist
     /// after expansion and desugaring — compile/check/test all
     /// re-validate that form.
@@ -487,18 +491,14 @@ impl Module {
             ));
         }
         let mut seen: BTreeSet<&str> = BTreeSet::new();
-        let body_blocks = t
-            .body
-            .iter()
-            .filter(|i| matches!(i, Item::Block(_) | Item::Signal(_)))
-            .count();
+        let body_blocks = t.body_slugs().count();
         for binding in call.bindings() {
             let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
-                // A binding naming no parameter forwards as a
-                // port binding onto the body's single block;
-                // like a block's feeds it may repeat, and
-                // the expanded module re-validates its refs.
-                if body_blocks == 1 {
+                // A binding naming no parameter forwards as a port
+                // binding onto the template's primary block;
+                // like a block's feeds it may repeat, and the expanded
+                // module re-validates its refs.
+                if t.primary_block().is_some() {
                     if let BindingKind::Param(v) = &binding.kind {
                         self.value_refs(names, v)?;
                     }
@@ -510,9 +510,9 @@ impl Module {
                 );
                 return compile_err(format!(
                     "`{} = {}(…)`: `{}` names no parameter of `{}`, and \
-                                 port bindings forward only when the template body \
-                                 declares exactly one block (this one declares \
-                                 {body_blocks}){hint}",
+                                 port bindings forward only to a primary block (this \
+                                 body declares {body_blocks} blocks; mark one with \
+                                 `-> <block>`){hint}",
                     call.slug, call.block_type, binding.port, call.block_type
                 ));
             };
@@ -524,11 +524,41 @@ impl Module {
             }
             match (p, &binding.kind) {
                 (TemplateParam::Object { .. }, BindingKind::Param(Value::Ref(_))) => {}
+                (TemplateParam::Set { name, kind, .. }, BindingKind::Param(Value::Ref(s))) => {
+                    if !self.declares_set(*kind, s) {
+                        return compile_err(format!(
+                            "`{} = {}(…)`: `{name}: {s}`: `{s}` is not a `{kw}` set \
+                             (declare it with `{kw} {s}` … `end`)",
+                            call.slug,
+                            call.block_type,
+                            kw = kind.keyword()
+                        ));
+                    }
+                }
+                // `p: licht.lc`, a block of an instance.
+                (TemplateParam::Object { .. }, BindingKind::Wire(r))
+                    if r.port.starts_with(|c: char| c.is_ascii_lowercase()) => {}
                 (TemplateParam::Object { name, .. }, _) => {
                     return compile_err(format!(
                         "`{} = {}(…)`: object parameter `{name}` takes an \
-                                     extern or block slug (`{name}: <slug>`)",
+                                     extern, block or instance (`{name}: <slug>`)",
                         call.slug, call.block_type
+                    ));
+                }
+                (TemplateParam::Set { name, .. }, BindingKind::Param(Value::Str(s))) => {
+                    return compile_err(format!(
+                        "`{} = {}(…)`: a set parameter takes the set's bare name. \
+                         Write `{name}: {s}` instead of `{name}: \"{s}\"`.",
+                        call.slug, call.block_type
+                    ));
+                }
+                (TemplateParam::Set { name, kind, .. }, _) => {
+                    return compile_err(format!(
+                        "`{} = {}(…)`: set parameter `{name}` takes the name of a \
+                         `{}` set (`{name}: <name>`)",
+                        call.slug,
+                        call.block_type,
+                        kind.keyword()
                     ));
                 }
                 (TemplateParam::Value { .. }, BindingKind::Param(v)) => {
@@ -548,20 +578,25 @@ impl Module {
             }
         }
         for p in &t.params {
-            if let TemplateParam::Object { name, .. } = p
-                && !seen.contains(name.as_str())
-            {
+            let what = match p {
+                TemplateParam::Object { .. } => "object",
+                TemplateParam::Set { default: None, .. } => "set",
+                _ => continue,
+            };
+            if !seen.contains(p.name()) {
                 return compile_err(format!(
-                    "`{} = {}(…)`: object parameter `{name}` must be given",
-                    call.slug, call.block_type
+                    "`{} = {}(…)`: {what} parameter `{}` must be given",
+                    call.slug,
+                    call.block_type,
+                    p.name()
                 ));
             }
         }
         Ok(())
     }
 
-    /// `to:` targets name blocks, which may be template-expanded
-    /// (`<instance>_jal`) — an unknown slug is judged on the
+    /// `to:` targets name blocks, which may be blocks of template
+    /// instances (`ost`, `ost.jal`) — an unknown slug is judged on the
     /// flattened view only, like test references.
     fn check_tiles(&self, sc: &Scope, t: &TilesDecl) -> Result<()> {
         let (names, flattened) = (&sc.names, sc.flattened);
@@ -591,13 +626,8 @@ impl Module {
                             "{ctx}: `to: {slug}` names an undeclared slug{hint}"
                         ));
                     }
-                    Some(NameKind::Instance) => {
-                        return compile_err(format!(
-                            "{ctx}: `to: {slug}` names a template instance. \
-                                         Name the block that receives the command by its \
-                                         expanded name (`{slug}_<block>`)"
-                        ));
-                    }
+                    // Resolved by the expansion.
+                    Some(NameKind::Instance) => {}
                     Some(kind) => {
                         return compile_err(format!(
                             "{ctx}: `to: {slug}` names {}, not a block",
@@ -1245,6 +1275,8 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::ExprWire(_)
             | Item::Set(_)
             | Item::MoodsClaim(_)
+            | Item::ScheduleClaim(_)
+            | Item::TilesClaim(_)
             | Item::Comment(_) => {}
             _ => {
                 return compile_err(format!(

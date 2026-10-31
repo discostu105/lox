@@ -197,6 +197,12 @@ one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it
 inline expression's synthetic slug (`jal_autoshade__and1`) in a test or a second consumer. `x` counts as
 a declared block, so deleting the line needs `removed x`.
 
+A template instance names its blocks through the instance. `bad.Q` is the output of its primary block
+(the body's only block, or the one `template t(…) -> <block>` names), and `bad.melder.Q` of any other
+block. The lock keys are `bad_melder`; source never writes those. A `moods`, `schedule` or `tiles` set
+goes into a template by a set parameter: `template raum(stimmungen: moods = standard)`, called as
+`raum(stimmungen: kueche)`.
+
 Removing a block declaration makes the next compile **fail on purpose**. When deletion is intended,
 add `removed <slug>`: it covers that one block and shows the intent in the diff. For a slug rename,
 use `loxl rename`, or rename the declaration and add `moved <old> -> <new>`. Both statements become
@@ -217,7 +223,7 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   and staircase light, push-button, heating and humidity hysteresis, CO2 ventilation, door and water
   alarms, intrusion alarm, awning protection). `loxl templates <name> > pages/licht.loxl` copies one
   into the module. One line calls it (`flur = bewegungslicht(bewegung: pir_flur)`), and its result is
-  `<instance>_ausgang.Q`, wired to the actuator (`licht_flur.I <- flur_ausgang.Q`). Sensors are read
+  the instance itself, `flur.Q`, wired to the actuator (`licht_flur.I <- flur.Q`). Sensors are read
   at `Q`.
 - **Virtual and Modbus devices are blocks:** `wp = ModbusServer("WP", Address: "192.0.2.12:502")`,
   `regler = ModbusDev("Regler", device: wp)`,
@@ -276,6 +282,9 @@ it only when it matches what you intended.
 | `no <C Type="VirtualInCaption"> to hold a new VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then compile again |
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
 | `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
+| `` Write `a.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name; `a.Q` when `b` is the primary block |
+| `has no primary block` | `a.Q` on an instance whose template has several blocks | name the block (`a.<block>.Q`), or mark one with `template t(…) -> <block>` |
+| `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |
 | `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
 | `is not a whole number of … ticks` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
 | `` uses `!=`, which lox-cli's `lox sim` lacks `` (from `test --lox`) | lox-cli's simulator has no `!=` | run the test in the built-in simulator, or rewrite as `==` |

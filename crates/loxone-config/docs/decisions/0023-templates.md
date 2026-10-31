@@ -1,6 +1,6 @@
 # D23: Templates are macro expansion with locked identities
 
-Status: accepted (2026-08-25)
+Status: accepted (2026-08-25), amended by [D82](0082-template-instance-names.md)
 
 ## Context
 
