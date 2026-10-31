@@ -2297,7 +2297,10 @@ Anything unverified is an error, not a heuristic:
   replaced by a placeholder of the same kind (`redacted`,
   `redacted@example.invalid`, `192.0.2.1`, coordinates 0, MAC 0, codes
   and credentials empty); hardware serials become a counter, also inside
-  the UUIDs that embed them. It exits 1 when a finding is left, so a
+  the UUIDs that embed them. Distinct values of one attribute get
+  distinct names (`redacted`, `redacted-2`, …; #227), so redacted users
+  stay apart and an `access` or `recipients` declaration still lifts from
+  the copy. It exits 1 when a finding is left, so a
   copy that passes can be shared (an issue, a test fixture). The copy is
   for reading, never for uploading.
 - **D76 — Weather, dates and messages in rules** (2026-10-31; #208).

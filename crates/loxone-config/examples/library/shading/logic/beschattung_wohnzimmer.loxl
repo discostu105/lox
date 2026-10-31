@@ -1,0 +1,63 @@
+page "Beschattung Wohnzimmer"
+
+extern windgeschwindigkeit = TreeAsensor(title: "Windgeschwindigkeit") # periphery
+extern windwarnung = TreeSensor(title: "Windwarnung") # periphery
+extern temperatur = TreeAsensor(uuid: "218a0e3b-020e-4e40-ffffed57184a04d2") # periphery
+extern sonnenschein = TreeSensor(title: "Sonnenschein") # periphery
+extern taste_links_oben = TreeSensor(title: "Taste links oben") # periphery
+extern taste_links_unten = TreeSensor(title: "Taste links unten") # periphery
+extern raffstore_sued_ab = Actor(iname: "Q2") # periphery
+extern raffstore_sued_auf = Actor(iname: "Q1") # periphery
+extern raffstore_west_ab = Actor(iname: "Q4") # periphery
+extern raffstore_west_auf = Actor(iname: "Q3") # periphery
+
+wind_ueber_40_km_h = Greater(
+	Input1: windgeschwindigkeit.AQ,
+	Input2: 40,
+)
+
+windalarm = Or(
+	I1: wind_ueber_40_km_h.Q,
+	I2: windwarnung.Q,
+)
+
+windalarm_halten = OffDelay(
+	InputTrigger: windalarm.Q,
+	Time: 600,
+)
+
+aussen_ueber_22_c = Greater(
+	Input1: temperatur.AQ,
+	Input2: 22,
+)
+
+sonne_und_warm = And(
+	I1: sonnenschein.Q,
+	I2: aussen_ueber_22_c.Q,
+)
+
+raffstore_sued = AutoJalousie(
+	InputTriggerUp: taste_links_oben.Q,
+	InputTriggerDown: taste_links_unten.Q,
+	AutoShade: sonne_und_warm.Q,
+	Safety: windalarm_halten.Q,
+	Type: 1,
+	TimeEnd: 60,
+	TimeEndDown: 58,
+)
+
+raffstore_west = AutoJalousie(
+	InputTriggerUp: taste_links_oben.Q,
+	InputTriggerDown: taste_links_unten.Q,
+	AutoShade: sonne_und_warm.Q,
+	Safety: windalarm_halten.Q,
+	Type: 1,
+	Dir: 270,
+	TimeEnd: 60,
+	TimeEndDown: 58,
+)
+
+raffstore_sued_ab.I <- raffstore_sued.OutputDown
+raffstore_sued_auf.I <- raffstore_sued.OutputUp
+raffstore_west_ab.I <- raffstore_west.OutputDown
+raffstore_west_auf.I <- raffstore_west.OutputUp

@@ -1,0 +1,34 @@
+page "Energie"
+
+extern total_active_power = ModbusASensor(iname: "AMQ-1") # periphery
+extern total_meter_reading_consumption = ModbusASensor(iname: "AMQ-2") # periphery
+extern total_meter_reading_delivery = ModbusASensor(iname: "AMQ-3") # periphery
+extern total_active_power_2 = ModbusASensor(iname: "AMQ-4") # periphery
+extern total_meter_reading_consumption_2 = ModbusASensor(iname: "AMQ-5") # periphery
+extern heizstab = Actor(iname: "Q1") # periphery
+
+netz = MeterAbsBi(
+	Pf: total_active_power.Q,
+	Mr1: total_meter_reading_consumption.Q,
+	Mr2: total_meter_reading_delivery.Q,
+)
+
+photovoltaik = MeterAbsUni(
+	Pf: total_active_power_2.Q,
+	Mr: total_meter_reading_consumption_2.Q,
+)
+
+energiefluss = EFM()
+rest = MeterAbsBi()
+netz_opf_1 = Formula(
+	Formula: "I1*(-1)",
+	Input1: netz.OPf,
+)
+
+pv_ueberschuss = AnalogThresholdTrigger(
+	Input: netz_opf_1.AQ,
+	On: 3,
+	Off: 0.5,
+)
+
+heizstab.I <- pv_ueberschuss.Q

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Licht Wohnzimmer</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 0 · long 0 · crossings 0 · length 6720</text>
+<polyline points="3072,1536 3552,1536 3552,1536 4032,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,1728 3552,1728 3552,1728 4032,1728" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,1920 3552,1920 3552,1920 4032,1920" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,2112 3552,2112 3552,2112 4032,2112" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,2304 3552,2304 3552,2304 4032,2304" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6720,1536 7200,1536 7200,1536 7680,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6720,1728 7200,1728 7200,1728 7680,1728" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="960" y="1824" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Bewegung (InputRef)</title></rect>
+<text x="1056" y="1964" font-size="120" fill="#0f172a">Bewegung</text>
+<rect x="960" y="2208" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Präsenz (InputRef)</title></rect>
+<text x="1056" y="2348" font-size="120" fill="#0f172a">Präsenz</text>
+<rect x="960" y="2016" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Helligkeit (InputRef)</title></rect>
+<text x="1056" y="2156" font-size="120" fill="#0f172a">Helligkeit</text>
+<rect x="960" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Taste rechts unten (InputRef)</title></rect>
+<text x="1056" y="1580" font-size="120" fill="#0f172a">Taste rechts unten</text>
+<rect x="960" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Taste links unten (InputRef)</title></rect>
+<text x="1056" y="1772" font-size="120" fill="#0f172a">Taste links unten</text>
+<rect x="4032" y="960" width="2688" height="2232" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Licht Wohnzimmer (LightController2)</title></rect>
+<text x="4128" y="1140" font-size="140" fill="#0f172a">Licht Wohnzimmer</text>
+<circle cx="4032" cy="1536" r="36" fill="#64748b"/><text x="4104" y="1570" font-size="100" text-anchor="start" fill="#334155">InputTriggerUp</text>
+<circle cx="4032" cy="1728" r="36" fill="#64748b"/><text x="4104" y="1762" font-size="100" text-anchor="start" fill="#334155">InputTriggerDown</text>
+<circle cx="4032" cy="1920" r="36" fill="#64748b"/><text x="4104" y="1954" font-size="100" text-anchor="start" fill="#334155">Move</text>
+<circle cx="4032" cy="2112" r="36" fill="#64748b"/><text x="4104" y="2146" font-size="100" text-anchor="start" fill="#334155">Brightness</text>
+<circle cx="4032" cy="2304" r="36" fill="#64748b"/><text x="4104" y="2338" font-size="100" text-anchor="start" fill="#334155">Presence</text>
+<circle cx="6720" cy="1536" r="36" fill="#64748b"/><text x="6648" y="1570" font-size="100" text-anchor="end" fill="#334155">AQ1</text>
+<circle cx="6720" cy="1728" r="36" fill="#64748b"/><text x="6648" y="1762" font-size="100" text-anchor="end" fill="#334155">AQ2</text>
+<rect x="7680" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Deckenlicht (OutputRef)</title></rect>
+<text x="7776" y="1580" font-size="120" fill="#0f172a">Deckenlicht</text>
+<rect x="7680" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>LED-Streifen (OutputRef)</title></rect>
+<text x="7776" y="1772" font-size="120" fill="#0f172a">LED-Streifen</text>
+</svg>

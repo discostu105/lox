@@ -55,7 +55,15 @@ fn every_entry_names_its_source_and_license() {
     for entry in entries() {
         let source = std::fs::read_to_string(entry.join("SOURCE.md"))
             .unwrap_or_else(|_| panic!("{}: SOURCE.md missing", entry.display()));
-        for field in ["Source:", "Commit:", "License:", "Changes:"] {
+        // Entries made for this repository have no upstream commit and
+        // fall under the crate's own license.
+        let own = source.contains("Source: made for this repository");
+        let fields: &[&str] = if own {
+            &["Source:", "License: Apache-2.0", "Changes:"]
+        } else {
+            &["Source:", "Commit:", "License:", "Changes:"]
+        };
+        for field in fields {
             assert!(
                 source.contains(field),
                 "{}: SOURCE.md lacks {field}",
@@ -63,7 +71,7 @@ fn every_entry_names_its_source_and_license() {
             );
         }
         assert!(
-            entry.join("LICENSE").exists(),
+            own || entry.join("LICENSE").exists(),
             "{}: LICENSE missing",
             entry.display()
         );

@@ -1,0 +1,19 @@
+page "Zutritt Eingang"
+
+extern api_connector = ApiActor(title: "API Connector") # periphery
+extern tueroeffner_haustuer = Actor(iname: "Q1") # periphery
+
+code_touch_eingang = NfcCodeTouch(
+	Au: 1,
+	Lbr: 50,
+	PulseTime: 3,
+	OutputAPI: api_connector.I,
+)
+
+api_connector.I <- code_touch_eingang.OutputAPI
+tueroeffner_haustuer.I <- code_touch_eingang.Q1
+
+access code_touch_eingang
+	user "redacted-2": "Immer"
+	user "redacted-3": "Immer"
+end

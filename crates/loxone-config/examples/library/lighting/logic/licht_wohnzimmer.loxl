@@ -1,0 +1,30 @@
+page "Licht Wohnzimmer"
+
+extern taste_rechts_unten = TreeSensor(iname: "I5") # periphery
+extern taste_links_unten = TreeSensor(title: "Taste links unten") # periphery
+extern bewegung = TreeSensor(title: "Bewegung") # periphery
+extern helligkeit = TreeAsensor(title: "Helligkeit") # periphery
+extern praesenz = TreeSensor(title: "Präsenz") # periphery
+extern deckenlicht = Actor(iname: "Q1") # periphery
+extern led_streifen = TreeAactor(title: "LED-Streifen") # periphery
+
+licht_wohnzimmer = LightController2(
+	InputTriggerUp: taste_rechts_unten.Q,
+	InputTriggerDown: taste_links_unten.Q,
+	Move: bewegung.Q,
+	Brightness: helligkeit.AQ,
+	Presence: praesenz.Q,
+	BrightnessLimit: 80,
+)
+
+deckenlicht.I <- licht_wohnzimmer.AQ1
+led_streifen.I <- licht_wohnzimmer.AQ2
+
+moods licht_wohnzimmer_moods
+	"Viel Licht": all on, AQ2 rgb(100, 100, 100)
+	"Lesen": AQ1 on, AQ2 rgb(100, 90, 70)
+	"Abendlicht": AQ2 rgb(100, 60, 20)
+	"Kino": AQ2 rgb(0, 0, 15)
+end
+
+licht_wohnzimmer.moods = licht_wohnzimmer_moods

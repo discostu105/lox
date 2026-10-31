@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Energie</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 0 · long 0 · crossings 0 · length 7680</text>
+<polyline points="3072,1536 3552,1536 3552,1536 4032,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,1728 3552,1728 3552,1728 4032,1728" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,1920 3552,1920 3552,1920 4032,1920" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6144,6624 6624,6624 6624,6624 7104,6624" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6144,6816 6624,6816 6624,6816 7104,6816" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6720,1536 7200,1536 7200,1536 7680,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="9024,1536 9504,1536 9504,1536 9984,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11328,1536 11808,1536 11808,1536 12288,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="960" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Total Active Power (InputRef)</title></rect>
+<text x="1056" y="1580" font-size="120" fill="#0f172a">Total Active Power</text>
+<rect x="960" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Total Meter Reading Consumption (InputRef)</title></rect>
+<text x="1056" y="1772" font-size="120" fill="#0f172a">Total Meter Reading Consumption</text>
+<rect x="960" y="1824" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Total Meter Reading Delivery (InputRef)</title></rect>
+<text x="1056" y="1964" font-size="120" fill="#0f172a">Total Meter Reading Delivery</text>
+<rect x="4032" y="6528" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Total Active Power (InputRef)</title></rect>
+<text x="4128" y="6668" font-size="120" fill="#0f172a">Total Active Power</text>
+<rect x="4032" y="6720" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Total Meter Reading Consumption (InputRef)</title></rect>
+<text x="4128" y="6860" font-size="120" fill="#0f172a">Total Meter Reading Consumption</text>
+<rect x="4032" y="960" width="2688" height="4344" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Netz (MeterAbsBi)</title></rect>
+<text x="4128" y="1140" font-size="140" fill="#0f172a">Netz</text>
+<circle cx="4032" cy="1536" r="36" fill="#64748b"/><text x="4104" y="1570" font-size="100" text-anchor="start" fill="#334155">Pf</text>
+<circle cx="4032" cy="1728" r="36" fill="#64748b"/><text x="4104" y="1762" font-size="100" text-anchor="start" fill="#334155">Mr1</text>
+<circle cx="4032" cy="1920" r="36" fill="#64748b"/><text x="4104" y="1954" font-size="100" text-anchor="start" fill="#334155">Mr2</text>
+<circle cx="4032" cy="2112" r="36" fill="#64748b"/><text x="4104" y="2146" font-size="100" text-anchor="start" fill="#334155">R</text>
+<circle cx="6720" cy="1536" r="36" fill="#64748b"/><text x="6648" y="1570" font-size="100" text-anchor="end" fill="#334155">OPf</text>
+<circle cx="6720" cy="1728" r="36" fill="#64748b"/><text x="6648" y="1762" font-size="100" text-anchor="end" fill="#334155">OMr1</text>
+<circle cx="6720" cy="1920" r="36" fill="#64748b"/><text x="6648" y="1954" font-size="100" text-anchor="end" fill="#334155">ORd1</text>
+<circle cx="6720" cy="2112" r="36" fill="#64748b"/><text x="6648" y="2146" font-size="100" text-anchor="end" fill="#334155">ORld1</text>
+<circle cx="6720" cy="2304" r="36" fill="#64748b"/><text x="6648" y="2338" font-size="100" text-anchor="end" fill="#334155">ORw1</text>
+<circle cx="6720" cy="2496" r="36" fill="#64748b"/><text x="6648" y="2530" font-size="100" text-anchor="end" fill="#334155">ORlw1</text>
+<circle cx="6720" cy="2688" r="36" fill="#64748b"/><text x="6648" y="2722" font-size="100" text-anchor="end" fill="#334155">ORm1</text>
+<circle cx="6720" cy="2880" r="36" fill="#64748b"/><text x="6648" y="2914" font-size="100" text-anchor="end" fill="#334155">ORlm1</text>
+<circle cx="6720" cy="3072" r="36" fill="#64748b"/><text x="6648" y="3106" font-size="100" text-anchor="end" fill="#334155">ORy1</text>
+<circle cx="6720" cy="3264" r="36" fill="#64748b"/><text x="6648" y="3298" font-size="100" text-anchor="end" fill="#334155">ORly1</text>
+<circle cx="6720" cy="3456" r="36" fill="#64748b"/><text x="6648" y="3490" font-size="100" text-anchor="end" fill="#334155">OMr2</text>
+<circle cx="6720" cy="3648" r="36" fill="#64748b"/><text x="6648" y="3682" font-size="100" text-anchor="end" fill="#334155">ORd2</text>
+<circle cx="6720" cy="3840" r="36" fill="#64748b"/><text x="6648" y="3874" font-size="100" text-anchor="end" fill="#334155">ORld2</text>
+<circle cx="6720" cy="4032" r="36" fill="#64748b"/><text x="6648" y="4066" font-size="100" text-anchor="end" fill="#334155">ORw2</text>
+<circle cx="6720" cy="4224" r="36" fill="#64748b"/><text x="6648" y="4258" font-size="100" text-anchor="end" fill="#334155">ORlw2</text>
+<circle cx="6720" cy="4416" r="36" fill="#64748b"/><text x="6648" y="4450" font-size="100" text-anchor="end" fill="#334155">ORm2</text>
+<circle cx="6720" cy="4608" r="36" fill="#64748b"/><text x="6648" y="4642" font-size="100" text-anchor="end" fill="#334155">ORlm2</text>
+<circle cx="6720" cy="4800" r="36" fill="#64748b"/><text x="6648" y="4834" font-size="100" text-anchor="end" fill="#334155">ORy2</text>
+<circle cx="6720" cy="4992" r="36" fill="#64748b"/><text x="6648" y="5026" font-size="100" text-anchor="end" fill="#334155">ORly2</text>
+<circle cx="6720" cy="5184" r="36" fill="#64748b"/><text x="6648" y="5218" font-size="100" text-anchor="end" fill="#334155">OutputAPI</text>
+<rect x="7104" y="6048" width="2688" height="2616" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Photovoltaik (MeterAbsUni)</title></rect>
+<text x="7200" y="6228" font-size="140" fill="#0f172a">Photovoltaik</text>
+<circle cx="7104" cy="6624" r="36" fill="#64748b"/><text x="7176" y="6658" font-size="100" text-anchor="start" fill="#334155">Pf</text>
+<circle cx="7104" cy="6816" r="36" fill="#64748b"/><text x="7176" y="6850" font-size="100" text-anchor="start" fill="#334155">Mr</text>
+<circle cx="7104" cy="7008" r="36" fill="#64748b"/><text x="7176" y="7042" font-size="100" text-anchor="start" fill="#334155">R</text>
+<circle cx="9792" cy="6624" r="36" fill="#64748b"/><text x="9720" y="6658" font-size="100" text-anchor="end" fill="#334155">OPf</text>
+<circle cx="9792" cy="6816" r="36" fill="#64748b"/><text x="9720" y="6850" font-size="100" text-anchor="end" fill="#334155">OMr</text>
+<circle cx="9792" cy="7008" r="36" fill="#64748b"/><text x="9720" y="7042" font-size="100" text-anchor="end" fill="#334155">ORd</text>
+<circle cx="9792" cy="7200" r="36" fill="#64748b"/><text x="9720" y="7234" font-size="100" text-anchor="end" fill="#334155">ORld</text>
+<circle cx="9792" cy="7392" r="36" fill="#64748b"/><text x="9720" y="7426" font-size="100" text-anchor="end" fill="#334155">ORw</text>
+<circle cx="9792" cy="7584" r="36" fill="#64748b"/><text x="9720" y="7618" font-size="100" text-anchor="end" fill="#334155">ORlw</text>
+<circle cx="9792" cy="7776" r="36" fill="#64748b"/><text x="9720" y="7810" font-size="100" text-anchor="end" fill="#334155">ORm</text>
+<circle cx="9792" cy="7968" r="36" fill="#64748b"/><text x="9720" y="8002" font-size="100" text-anchor="end" fill="#334155">ORlm</text>
+<circle cx="9792" cy="8160" r="36" fill="#64748b"/><text x="9720" y="8194" font-size="100" text-anchor="end" fill="#334155">ORy</text>
+<circle cx="9792" cy="8352" r="36" fill="#64748b"/><text x="9720" y="8386" font-size="100" text-anchor="end" fill="#334155">ORly</text>
+<circle cx="9792" cy="8544" r="36" fill="#64748b"/><text x="9720" y="8578" font-size="100" text-anchor="end" fill="#334155">OutputAPI</text>
+<rect x="4032" y="9408" width="2688" height="3192" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Energiefluss (EFM)</title></rect>
+<text x="4128" y="9588" font-size="140" fill="#0f172a">Energiefluss</text>
+<circle cx="4032" cy="9984" r="36" fill="#64748b"/><text x="4104" y="10018" font-size="100" text-anchor="start" fill="#334155">R</text>
+<circle cx="6720" cy="9984" r="36" fill="#64748b"/><text x="6648" y="10018" font-size="100" text-anchor="end" fill="#334155">OGpwr</text>
+<circle cx="6720" cy="10176" r="36" fill="#64748b"/><text x="6648" y="10210" font-size="100" text-anchor="end" fill="#334155">OPpwr</text>
+<circle cx="4032" cy="10176" r="36" fill="#64748b"/><text x="4104" y="10210" font-size="100" text-anchor="start" fill="#334155">OCpwr</text>
+<circle cx="6720" cy="10368" r="36" fill="#64748b"/><text x="6648" y="10402" font-size="100" text-anchor="end" fill="#334155">OSpwr</text>
+<circle cx="6720" cy="10560" r="36" fill="#64748b"/><text x="6648" y="10594" font-size="100" text-anchor="end" fill="#334155">OEd</text>
+<circle cx="6720" cy="10752" r="36" fill="#64748b"/><text x="6648" y="10786" font-size="100" text-anchor="end" fill="#334155">OId</text>
+<circle cx="6720" cy="10944" r="36" fill="#64748b"/><text x="6648" y="10978" font-size="100" text-anchor="end" fill="#334155">OPd</text>
+<circle cx="6720" cy="11136" r="36" fill="#64748b"/><text x="6648" y="11170" font-size="100" text-anchor="end" fill="#334155">OCd</text>
+<circle cx="6720" cy="11328" r="36" fill="#64748b"/><text x="6648" y="11362" font-size="100" text-anchor="end" fill="#334155">OScd</text>
+<circle cx="6720" cy="11520" r="36" fill="#64748b"/><text x="6648" y="11554" font-size="100" text-anchor="end" fill="#334155">OCo2d</text>
+<circle cx="6720" cy="11712" r="36" fill="#64748b"/><text x="6648" y="11746" font-size="100" text-anchor="end" fill="#334155">OYd</text>
+<circle cx="6720" cy="11904" r="36" fill="#64748b"/><text x="6648" y="11938" font-size="100" text-anchor="end" fill="#334155">OSc</text>
+<circle cx="6720" cy="12096" r="36" fill="#64748b"/><text x="6648" y="12130" font-size="100" text-anchor="end" fill="#334155">OYt</text>
+<circle cx="6720" cy="12288" r="36" fill="#64748b"/><text x="6648" y="12322" font-size="100" text-anchor="end" fill="#334155">Rest</text>
+<circle cx="6720" cy="12480" r="36" fill="#64748b"/><text x="6648" y="12514" font-size="100" text-anchor="end" fill="#334155">OutputAPI</text>
+<rect x="7680" y="1152" width="1344" height="1080" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>netz.OPf * -1 (Formula)</title></rect>
+<text x="7776" y="1332" font-size="140" fill="#0f172a">netz.OPf * -1</text>
+<circle cx="7680" cy="1536" r="36" fill="#64748b"/><text x="7752" y="1570" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="7680" cy="1728" r="36" fill="#64748b"/><text x="7752" y="1762" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="7680" cy="1920" r="36" fill="#64748b"/><text x="7752" y="1954" font-size="100" text-anchor="start" fill="#334155">Input3</text>
+<circle cx="7680" cy="2112" r="36" fill="#64748b"/><text x="7752" y="2146" font-size="100" text-anchor="start" fill="#334155">Input4</text>
+<circle cx="9024" cy="1536" r="36" fill="#64748b"/><text x="8952" y="1570" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<circle cx="9024" cy="1728" r="36" fill="#64748b"/><text x="8952" y="1762" font-size="100" text-anchor="end" fill="#334155">TQ</text>
+<rect x="9984" y="1152" width="1344" height="888" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>PV-Überschuss (AnalogThresholdTrigger)</title></rect>
+<text x="10080" y="1332" font-size="140" fill="#0f172a">PV-Überschuss</text>
+<circle cx="9984" cy="1536" r="36" fill="#64748b"/><text x="10056" y="1570" font-size="100" text-anchor="start" fill="#334155">Input</text>
+<circle cx="11328" cy="1536" r="36" fill="#64748b"/><text x="11256" y="1570" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<circle cx="11328" cy="1728" r="36" fill="#64748b"/><text x="11256" y="1762" font-size="100" text-anchor="end" fill="#334155">RisingEdge</text>
+<circle cx="11328" cy="1920" r="36" fill="#64748b"/><text x="11256" y="1954" font-size="100" text-anchor="end" fill="#334155">FallingEdge</text>
+<rect x="12288" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Heizstab (OutputRef)</title></rect>
+<text x="12384" y="1580" font-size="120" fill="#0f172a">Heizstab</text>
+</svg>

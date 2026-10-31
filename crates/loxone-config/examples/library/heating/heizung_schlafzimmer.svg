@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Heizung Schlafzimmer</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 0 · long 0 · crossings 0 · length 4800</text>
+<polyline points="3072,1920 3552,1920 3552,1920 4032,1920" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,2112 3552,2112 3552,2112 4032,2112" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,3840 3552,3840 3552,3840 4032,3840" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="3072,4032 3552,4032 3552,4032 4032,4032" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6720,1536 7200,1536 7200,1536 7680,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="960" y="1824" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Temperatur (InputRef)</title></rect>
+<text x="1056" y="1964" font-size="120" fill="#0f172a">Temperatur</text>
+<rect x="960" y="3936" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Luftfeuchte (InputRef)</title></rect>
+<text x="1056" y="4076" font-size="120" fill="#0f172a">Luftfeuchte</text>
+<rect x="960" y="3744" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>CO2 (InputRef)</title></rect>
+<text x="1056" y="3884" font-size="120" fill="#0f172a">CO2</text>
+<rect x="960" y="2016" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Fenster Schlafzimmer (InputRef)</title></rect>
+<text x="1056" y="2156" font-size="120" fill="#0f172a">Fenster Schlafzimmer</text>
+<rect x="4032" y="960" width="2688" height="4344" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Raumregelung Schlafzimmer (HeatIRoomController2)</title></rect>
+<text x="4128" y="1140" font-size="140" fill="#0f172a">Raumregelung Schlafzimmer</text>
+<circle cx="4032" cy="1536" r="36" fill="#64748b"/><text x="4104" y="1570" font-size="100" text-anchor="start" fill="#334155">AMode</text>
+<circle cx="4032" cy="1728" r="36" fill="#64748b"/><text x="4104" y="1762" font-size="100" text-anchor="start" fill="#334155">Input</text>
+<circle cx="4032" cy="1920" r="36" fill="#64748b"/><text x="4104" y="1954" font-size="100" text-anchor="start" fill="#334155">Temp</text>
+<circle cx="4032" cy="2112" r="36" fill="#64748b"/><text x="4104" y="2146" font-size="100" text-anchor="start" fill="#334155">Window</text>
+<circle cx="4032" cy="2304" r="36" fill="#64748b"/><text x="4104" y="2338" font-size="100" text-anchor="start" fill="#334155">Comfort</text>
+<circle cx="4032" cy="2496" r="36" fill="#64748b"/><text x="4104" y="2530" font-size="100" text-anchor="start" fill="#334155">Save</text>
+<circle cx="4032" cy="2688" r="36" fill="#64748b"/><text x="4104" y="2722" font-size="100" text-anchor="start" fill="#334155">Save2</text>
+<circle cx="4032" cy="2880" r="36" fill="#64748b"/><text x="4104" y="2914" font-size="100" text-anchor="start" fill="#334155">Move</text>
+<circle cx="4032" cy="3072" r="36" fill="#64748b"/><text x="4104" y="3106" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="4032" cy="3264" r="36" fill="#64748b"/><text x="4104" y="3298" font-size="100" text-anchor="start" fill="#334155">DisMv</text>
+<circle cx="4032" cy="3456" r="36" fill="#64748b"/><text x="4104" y="3490" font-size="100" text-anchor="start" fill="#334155">RtD</text>
+<circle cx="4032" cy="3648" r="36" fill="#64748b"/><text x="4104" y="3682" font-size="100" text-anchor="start" fill="#334155">TempO</text>
+<circle cx="4032" cy="3840" r="36" fill="#64748b"/><text x="4104" y="3874" font-size="100" text-anchor="start" fill="#334155">InCo2</text>
+<circle cx="4032" cy="4032" r="36" fill="#64748b"/><text x="4104" y="4066" font-size="100" text-anchor="start" fill="#334155">InHumid</text>
+<circle cx="4032" cy="4224" r="36" fill="#64748b"/><text x="4104" y="4258" font-size="100" text-anchor="start" fill="#334155">inFan</text>
+<circle cx="4032" cy="4416" r="36" fill="#64748b"/><text x="4104" y="4450" font-size="100" text-anchor="start" fill="#334155">inAirDir</text>
+<circle cx="6720" cy="1536" r="36" fill="#64748b"/><text x="6648" y="1570" font-size="100" text-anchor="end" fill="#334155">AQh</text>
+<circle cx="6720" cy="1728" r="36" fill="#64748b"/><text x="6648" y="1762" font-size="100" text-anchor="end" fill="#334155">AQc</text>
+<circle cx="6720" cy="1920" r="36" fill="#64748b"/><text x="6648" y="1954" font-size="100" text-anchor="end" fill="#334155">AQhc</text>
+<circle cx="6720" cy="2112" r="36" fill="#64748b"/><text x="6648" y="2146" font-size="100" text-anchor="end" fill="#334155">AQh1</text>
+<circle cx="6720" cy="2304" r="36" fill="#64748b"/><text x="6648" y="2338" font-size="100" text-anchor="end" fill="#334155">AQc1</text>
+<circle cx="6720" cy="2496" r="36" fill="#64748b"/><text x="6648" y="2530" font-size="100" text-anchor="end" fill="#334155">AQhc1</text>
+<circle cx="6720" cy="2688" r="36" fill="#64748b"/><text x="6648" y="2722" font-size="100" text-anchor="end" fill="#334155">AQh2</text>
+<circle cx="6720" cy="2880" r="36" fill="#64748b"/><text x="6648" y="2914" font-size="100" text-anchor="end" fill="#334155">AQc2</text>
+<circle cx="6720" cy="3072" r="36" fill="#64748b"/><text x="6648" y="3106" font-size="100" text-anchor="end" fill="#334155">AQhc2</text>
+<circle cx="6720" cy="3264" r="36" fill="#64748b"/><text x="6648" y="3298" font-size="100" text-anchor="end" fill="#334155">AQh3</text>
+<circle cx="6720" cy="3456" r="36" fill="#64748b"/><text x="6648" y="3490" font-size="100" text-anchor="end" fill="#334155">AQc3</text>
+<circle cx="6720" cy="3648" r="36" fill="#64748b"/><text x="6648" y="3682" font-size="100" text-anchor="end" fill="#334155">AQhc3</text>
+<circle cx="6720" cy="3840" r="36" fill="#64748b"/><text x="6648" y="3874" font-size="100" text-anchor="end" fill="#334155">Qs</text>
+<circle cx="6720" cy="4032" r="36" fill="#64748b"/><text x="6648" y="4066" font-size="100" text-anchor="end" fill="#334155">AQs</text>
+<circle cx="6720" cy="4224" r="36" fill="#64748b"/><text x="6648" y="4258" font-size="100" text-anchor="end" fill="#334155">Qe</text>
+<circle cx="6720" cy="4416" r="36" fill="#64748b"/><text x="6648" y="4450" font-size="100" text-anchor="end" fill="#334155">Qa</text>
+<circle cx="6720" cy="4608" r="36" fill="#64748b"/><text x="6648" y="4642" font-size="100" text-anchor="end" fill="#334155">AQt</text>
+<circle cx="6720" cy="4800" r="36" fill="#64748b"/><text x="6648" y="4834" font-size="100" text-anchor="end" fill="#334155">AQhm</text>
+<circle cx="6720" cy="4992" r="36" fill="#64748b"/><text x="6648" y="5026" font-size="100" text-anchor="end" fill="#334155">AQtm</text>
+<circle cx="6720" cy="5184" r="36" fill="#64748b"/><text x="6648" y="5218" font-size="100" text-anchor="end" fill="#334155">Qb</text>
+<circle cx="4032" cy="4608" r="36" fill="#64748b"/><text x="4104" y="4642" font-size="100" text-anchor="start" fill="#334155">OutputAPI</text>
+<rect x="7680" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Stellantrieb Schlafzimmer (OutputRef)</title></rect>
+<text x="7776" y="1580" font-size="120" fill="#0f172a">Stellantrieb Schlafzimmer</text>
+</svg>
