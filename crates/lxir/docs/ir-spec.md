@@ -215,8 +215,10 @@ repeats its I/O titles (every Tree push-button interface has a
 "Taster 1"), `device: "<serial>"` narrows the match to the objects of
 that device: the `Serial=` of the object's nearest enclosing element
 that carries one — a Tree device, an extension, or for the
-Miniserver's own I/Os and virtual folders the Miniserver (D55). Serials
-compare case-insensitively. These constraints never combine with
+Miniserver's own I/Os and virtual folders the Miniserver (D55) — or
+the object's own, for a device. An Air device's serial is the one the
+Miniserver's `/data/status` lists (`50:4F:94:FF:FE:BA:1F:0E`, D71).
+Serials compare without case and `:`. These constraints never combine with
 `uuid:`, which pins exactly on its own. Once resolved, the UUID is
 pinned in the lockfile; subsequent compiles use the pin (even if the title
 has changed since) as long as an object with that UUID and type still
@@ -509,6 +511,30 @@ leaves the source.
 - `Desc` is the name the app shows; setting it renames the control in
   the app.
 - On any other type a setting name is an error.
+
+An Air or Tree device (`LoxAIRDevice`, `TreeDevice`) has settings of its
+own (D71): `Desc`, which may be added, and where it is installed —
+`Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` —
+which are rewritten only (a Tree device has a board only when it is
+mounted in one).
+
+```text
+extern relais = LoxAIRDevice(title: "Relais Jalousie", device: "50:4F:94:FF:FE:BA:1F:0E")
+relais.Installation = "Fenster Ost"
+relais.SwitchBoardPos = 3
+```
+
+### `(a, b, …).X = value` — one setting on several objects (D71)
+
+```text
+(garten, terrasse, pool).MinTime = 600
+(garten, terrasse).room = "Garten"
+```
+
+The statement is the assignment on each listed object, in that order —
+a port, a setting or `title`/`room`/`category`. `fmt` keeps it as one
+line. A slug may be listed once; `.tiles`, `.schedule` and `.moods` take
+one object.
 
 ### `.title` / `.room` / `.category` — assign an extern object (D39)
 

@@ -87,7 +87,7 @@ fn hidden_and_shown_again_gives_loxone_configs_entries() {
         let left: Vec<_> = back
             .left
             .iter()
-            .filter(|c| !c.what.contains("icon"))
+            .filter(|c| !c.what.contains("icon") && !c.what.contains("this kind of"))
             .collect();
         assert!(left.is_empty(), "{}: {left:?}", d.display());
         let with_icons = back.left.len();

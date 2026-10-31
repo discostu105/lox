@@ -413,6 +413,14 @@ haus/
       unit, analog correction and transmission timing of extension,
       Tree, Air and 1-Wire inputs and outputs, claimed on externs and
       restored on withdrawal; diff and fingerprint (v8) compare them.
+- [x] Device settings and the bulk form 2026-10-31 (D71, #197, #199):
+      an Air or Tree device's description, installation place and
+      switch board; `(a, b).X = v` for several objects; Air devices
+      matched by serial; fingerprint v9.
+- [x] Light controllers in the app catalogue 2026-10-31 (D72, #184):
+      circuits, masters and colour ranges, 22 of the house's 23 byte for
+      byte. Open: alarm, smoke alarm, irrigation and room controller
+      entries (#190, one sample each).
 - [x] Drift fingerprint 2026-08-25 (D21): `semantic_fingerprint` hashes
       exactly the projection the semantic diff compares (locale-suspect
       titles excluded), recorded in the lock at adopt/compile; `lxir

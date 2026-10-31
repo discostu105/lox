@@ -507,8 +507,23 @@ inside its Tree Extension inside the Miniserver, each with its own
 serial, the I/O objects as children of the innermost. An empty
 `Serial=` occurs (`LoxDMXdevice`) and means none. Air devices
 (`LoxAIRDevice`) have no `Serial=`; a 32-digit hex `IP=` identifies
-them. lxir reads `Serial=` for `device:` extern matching (D55) and
-`lxir scan` reports it as personal data.
+them: the link-local IPv6 address formed from the device's MAC (EUI-64),
+and that MAC is its serial — `/data/status` on the Miniserver lists
+`IP="FE80000000000000524F94FFFEBA1F0E"` as
+`Serial="50:4F:94:FF:FE:BA:1F:0E"` (the universal/local bit of the first
+byte flipped back, `52` → `50`; checked on the house, 38 of 38). lxir
+reads `Serial=`, and an Air device's serial from its `IP=`, for
+`device:` extern matching (D55, D71); `lxir scan` reports both as
+personal data.
+
+A device's own attributes: an Air device always carries `Installation`,
+`SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` (103 of 103 in the
+corpus); a Tree device `Installation`, the board only where it is
+mounted in one — a save drops a board written onto a room device
+(oracle session 30). Every Air device in the corpus has
+`PWMFrequency="123"`, `UseDimmer="true"` and (99 of 103)
+`UseRGBDimmer="true"`. A save writes `TId=` (`NanoIO`,
+`RoomsensorTree`) right after a `Desc` it finds on a device.
 
 ## Time functions: per-project singletons
 
@@ -814,10 +829,36 @@ to the program's `Date=`; and two pushes to the same Miniserver
     group 2 the reading(s) (title `Zählerstand`, format `""`), group 3
     the storage level (`Speicherstand`, `0%`). Seen only with
     `StatsType="8"` and no `Un2=`.
-  Hiding these objects per save (117, of them 41 a central block or the
+  - `LightController2` → `LightControllerV2`, no `defaultIcon`. Details
+    `{"jLockable":true,"controlHistory":true,"hasHistory":N,"movementScene":M[,"masterValue":"U/masterValue"][,"masterColor":"U/masterColor"]}`
+    (`N` the `<COHist TRK_NE=>`, `M` the place of the `Move="true"` mood
+    in `<LightscenesC>`, from 1); states `jLocked` (`Reset`, top bit
+    set), `activeMoods`, `moodList`, `activeMoodsNum`, `favoriteMoods`,
+    `additionalMoods`, `circuitNames`, `daylightConfig`, `presence`
+    (`SpStates[2, 3, 10, 4, 5, 9, 11, 12]`). After the states
+    `subControls`: the masters, then a circuit `U/AI<n>` per
+    `NameAI<n-1>=` (output `AQ<n>`), each
+    `{"name","type","uuidAction","defaultRating":0,"isFavorite":false,"isSecured":false,"restrictions":0[,"details"],"states"}`.
+    The circuit's kind is the actuator's capability Loxone Config copies
+    onto the block (`CapAI<i>=`, the actuator's `CCap=`): `31` a
+    `ColorPickerV2` `Rgb`, `80` one `TunableWhite`, details
+    `{"pickerType":K,"TWMin":a,"TWMax":b}` from the `TWMIN=`/`TWMAX=` of
+    the actuator an `OutputRef` on the output names (2200/6500 without),
+    states `color` (`AQ<n>`), `sequence`/`sequenceColorIdx`
+    (`uuidSeqencing[n-1]`/`uuidSeqenceIx[n-1]`); without a capability a
+    `Switch` (`active`: `AQ<n>`). With two circuits or more a master:
+    `Master-Schalter` (`Switch`, `AQ20`) over switches only, else
+    `Master-Helligkeit` (`Dimmer`: `position` `AQ20`, `min`/`max`
+    `SpStates[7]`/`[8]`, `step` `Step`); `Master-Farbe` (`ColorPickerV2`
+    `Rgb` over the circuits' widest range, `AQ19`, the sequence lists'
+    19th) when every circuit is a colour. Not derived: a circuit
+    without a capability whose moods carry values other than `0`/`1` (a
+    Lumitech output, one of 23 in the house), one an analog `OutputRef`
+    takes, other capabilities.
+  Hiding these objects per save (140, of them 51 a central block or the
   energy flow monitor names, dropped by hand) and showing them again
   gives back
-  Loxone Config's entries byte for byte (98), but for the 19 with an icon
+  Loxone Config's entries byte for byte (120), but for the 20 with an icon
   (`LXIR_CATALOGUE_CORPUS=<dir> cargo test -p lxir --test catalogue`).
   The corpus holds catalogues Loxone Config wrote; a catalogue from an
   older push is stale against its program and no evidence.
@@ -836,8 +877,12 @@ to the program's `Date=`; and two pushes to the same Miniserver
   `Rec=""` and two `<statGrp>` on a meter); lxir mints a jalousie's (D66),
   which the save keeps.
 - **Unknown:** the entries of the other block types (taken over as they
-  are: light controllers, the energy flow monitor,
-  intercom, alarms, irrigation, room controllers), analog day timers,
+  are: the energy flow monitor, intercom, alarms, irrigation, room
+  controllers — one each in the corpus, with details and states no
+  setting or connector explains, such as the irrigation's
+  `maxExpectedPrecipitation` naming a connector the block does not
+  write), a light controller minted from source (no `NameAI<n>=`, no
+  circuits, until a save), analog day timers,
   display texts of an object's own, other `StatsType` values, whether Loxone Config drops an entry when the room is removed,
   and where it puts a new entry (lxir appends it).
 

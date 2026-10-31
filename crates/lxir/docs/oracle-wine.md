@@ -671,6 +671,22 @@ DayTimer whose schedule named the minted mode, the GUI's user mode
   heating). The timer gained `On`/`Off`/`SpStates` as every minted
   DayTimer does (session 18).
 
+## Settings of Air and Tree devices (session 30, D71) — passed
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28). A first run wrote a switch board onto two Tree room devices
+that had none (a room sensor, a presence sensor): the save dropped
+`SwitchBoard`, `SwitchBoardRow` and `SwitchBoardPos` again, kept
+everything else — a Tree device has a board only where its type is
+mounted in one, so lxir rewrites it and never adds it. Then: `Desc` and
+`Installation` on an Air relay, a Tree dimmer and a Tree room sensor,
+the board, row and position on the relay and the dimmer.
+
+- **Pass:** the semantic diff was empty. The save kept `Desc` right
+  after `Type` and wrote `TId=` after it (`NanoIO`, `RoomsensorTree`),
+  bookkeeping that is carried. A recompile against the saved file was
+  byte-identical.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

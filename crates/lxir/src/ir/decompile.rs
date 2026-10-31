@@ -583,7 +583,7 @@ impl Lift {
         // that target, so resolution cannot need more than the slug.
         // A title that repeats across identical devices, but not within
         // its own: `title:` narrowed by the device's serial (D55).
-        let device_unique = |i: usize| -> Option<&str> {
+        let device_unique = |i: usize| -> Option<std::borrow::Cow<'_, str>> {
             let obj = &objects[i];
             let title = obj.title.as_deref()?;
             let serial = doc.device_serial(&obj.path)?;
@@ -594,7 +594,7 @@ impl Lift {
                         && o.title.as_deref() == Some(title)
                         && doc
                             .device_serial(&o.path)
-                            .is_some_and(|s| s.eq_ignore_ascii_case(serial))
+                            .is_some_and(|s| crate::doc::same_serial(&s, &serial))
                 })
                 .count()
                 == 1)
@@ -633,7 +633,7 @@ impl Lift {
             } else if let Some(title) = obj.title.as_deref()
                 && let Some(serial) = device_unique(i)
             {
-                let device = Some(serial.to_string());
+                let device = Some(serial.into_owned());
                 (MatchSpec::Title(title.to_string()), device)
             } else {
                 (MatchSpec::Uuid(obj.uuid.clone()), None)

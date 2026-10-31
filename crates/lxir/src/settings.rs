@@ -62,26 +62,66 @@ const ORDER: &[&str] = &[
     "Idx",
 ];
 
-/// `Some(addable)` when `name` is a claimable setting of `block_type`.
-pub fn setting(block_type: &str, name: &str) -> Option<bool> {
-    if !SETTING_TYPES.contains(&block_type) {
-        return None;
+/// The Air and Tree devices whose own settings can be claimed (#197):
+/// the description and where the device is installed — the
+/// installation place and the switch board with its row and position.
+/// An Air device always carries the place and the board (103 of 103 in
+/// the corpus); a Tree device the place, the board only where it is
+/// mounted in one (31 of 111): a board added to another is dropped by
+/// the save (oracle session 29), so it is rewritten, never added. Not
+/// claimable: `PWMFrequency`, `UseDimmer`, `UseRGBDimmer` — every config
+/// in the corpus carries `123`/`true`, so what another value means is
+/// unknown; pairing and firmware stay in Loxone Config.
+pub const DEVICE_TYPES: &[&str] = &["LoxAIRDevice", "TreeDevice"];
+
+/// The claimable device settings and whether a missing one may be added.
+fn device_settings(block_type: &str) -> &'static [(&'static str, bool)] {
+    match block_type {
+        "LoxAIRDevice" => &[
+            ("Desc", true),
+            ("Installation", false),
+            ("SwitchBoard", false),
+            ("SwitchBoardRow", false),
+            ("SwitchBoardPos", false),
+        ],
+        "TreeDevice" => &[
+            ("Desc", true),
+            ("Installation", false),
+            ("SwitchBoard", false),
+            ("SwitchBoardRow", false),
+            ("SwitchBoardPos", false),
+        ],
+        _ => &[],
     }
-    SETTINGS.iter().find(|(n, _)| *n == name).map(|(_, a)| *a)
 }
 
-/// Whether `name` is a setting of some physical input or output.
+fn settings_of(block_type: &str) -> &'static [(&'static str, bool)] {
+    if SETTING_TYPES.contains(&block_type) {
+        SETTINGS
+    } else {
+        device_settings(block_type)
+    }
+}
+
+/// `Some(addable)` when `name` is a claimable setting of `block_type`.
+pub fn setting(block_type: &str, name: &str) -> Option<bool> {
+    settings_of(block_type)
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, a)| *a)
+}
+
+/// Whether `name` is a setting of some physical input, output or device.
 pub fn is_setting(name: &str) -> bool {
-    SETTINGS.iter().any(|(n, _)| *n == name)
+    SETTINGS
+        .iter()
+        .chain(DEVICE_TYPES.iter().flat_map(|t| device_settings(t)))
+        .any(|(n, _)| *n == name)
 }
 
 /// The settings of a type, for messages.
 pub fn names(block_type: &str) -> Vec<&'static str> {
-    if SETTING_TYPES.contains(&block_type) {
-        SETTINGS.iter().map(|(n, _)| *n).collect()
-    } else {
-        Vec::new()
-    }
+    settings_of(block_type).iter().map(|(n, _)| *n).collect()
 }
 
 /// The lock key of a setting claim: it shares the port assignments'
@@ -128,5 +168,16 @@ mod tests {
         assert_eq!(setting("VoltageIn", "Desc"), Some(true));
         assert_eq!(setting("Formula", "Desc"), None);
         assert_eq!(split_key(&key("u-1", "Desc")), Some(("u-1", "Desc")));
+    }
+
+    #[test]
+    fn device_settings_are_rewritten_but_the_description() {
+        assert_eq!(setting("TreeDevice", "Desc"), Some(true));
+        assert_eq!(setting("TreeDevice", "SwitchBoard"), Some(false));
+        assert_eq!(setting("LoxAIRDevice", "SwitchBoard"), Some(false));
+        assert_eq!(setting("LoxAIRDevice", "PWMFrequency"), None);
+        assert_eq!(setting("LoxAIRDevice", "MinTime"), None);
+        assert!(is_setting("Installation"));
+        assert_eq!(names("TreeDevice").len(), 5);
     }
 }
