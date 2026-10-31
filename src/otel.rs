@@ -269,31 +269,25 @@ fn record_system_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter)
     Ok(())
 }
 
-/// Fetch a cumulative value from the Miniserver and record it as a gauge.
-/// When `delta` is true, computes and records the difference since the last call.
+/// Record a cumulative counter as a gauge. When `delta` is true, records
+/// the difference since the last call instead.
 fn record_cumulative(
-    lox: &LoxClient,
     meter: &opentelemetry::metrics::Meter,
     prev: &mut PrevValues,
-    path: &str,
     name: &str,
+    current: Option<f64>,
     delta: bool,
 ) {
-    if let Some(current) = lox
-        .value(path)
-        .ok()
-        .and_then(|v| loxone_client::system::parse_counter(&v))
-    {
-        let val = if delta {
-            let prev_val = prev.get(name).copied().unwrap_or(current);
-            let d = current - prev_val;
-            prev.insert(name.to_string(), current);
-            if d < 0.0 { current } else { d } // handle counter reset
-        } else {
-            current
-        };
-        meter.f64_gauge(name.to_string()).build().record(val, &[]);
-    }
+    let Some(current) = current else { return };
+    let val = if delta {
+        let prev_val = prev.get(name).copied().unwrap_or(current);
+        let d = current - prev_val;
+        prev.insert(name.to_string(), current);
+        if d < 0.0 { current } else { d } // handle counter reset
+    } else {
+        current
+    };
+    meter.f64_gauge(name.to_string()).build().record(val, &[]);
 }
 
 /// Record CAN bus and LAN network metrics.
@@ -305,22 +299,20 @@ fn record_network_metrics(
     prev: &mut PrevValues,
     delta: bool,
 ) -> Result<()> {
-    let counters: &[(&str, &str)] = &[
-        ("/jdev/bus/packetssent", "loxone.can.packets_sent"),
-        ("/jdev/bus/packetsreceived", "loxone.can.packets_received"),
-        ("/jdev/bus/receiveerrors", "loxone.can.receive_errors"),
-        ("/jdev/bus/frameerrors", "loxone.can.frame_errors"),
-        ("/jdev/bus/overruns", "loxone.can.overruns"),
-        ("/jdev/bus/parityerrors", "loxone.can.parity_errors"),
-        ("/jdev/lan/txp", "loxone.lan.tx_packets"),
-        ("/jdev/lan/txe", "loxone.lan.tx_errors"),
-        ("/jdev/lan/txc", "loxone.lan.tx_collisions"),
-        ("/jdev/lan/txu", "loxone.lan.tx_underruns"),
-        ("/jdev/lan/rxp", "loxone.lan.rx_packets"),
-        ("/jdev/lan/rxo", "loxone.lan.rx_overflow"),
-        ("/jdev/lan/eof", "loxone.lan.eof_errors"),
-        ("/jdev/lan/exh", "loxone.lan.exhaustion"),
-        ("/jdev/lan/nob", "loxone.lan.no_buffers"),
+    let as_f64 = |v: Option<u64>| v.map(|n| n as f64);
+    for (key, v) in lox.bus_stats().counters() {
+        record_cumulative(meter, prev, &format!("loxone.can.{key}"), as_f64(v), delta);
+    }
+    for (key, v) in lox.lan_stats().counters() {
+        record_cumulative(meter, prev, &format!("loxone.lan.{key}"), as_f64(v), delta);
+    }
+    // one request each: no need for the whole diagnostics() here
+    let counter = |p: &str| {
+        lox.value(p)
+            .ok()
+            .and_then(|v| loxone_client::system::parse_counter(&v))
+    };
+    for (path, name) in [
         (
             "/jdev/sys/contextswitches",
             "loxone.system.context_switches",
@@ -329,11 +321,9 @@ fn record_network_metrics(
             "/jdev/sys/contextswitchesi",
             "loxone.system.context_switches_idle",
         ),
-    ];
-    for (path, name) in counters {
-        record_cumulative(lox, meter, prev, path, name, delta);
+    ] {
+        record_cumulative(meter, prev, name, counter(path), delta);
     }
-
     Ok(())
 }
 
@@ -342,42 +332,21 @@ fn record_network_metrics(
 /// This endpoint performs a live read/write benchmark, so it's heavier than
 /// other diagnostic endpoints. Call it at a lower frequency if needed.
 fn record_sdtest_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) {
-    use loxone_client::sdtest::parse_sdtest;
-
-    let text = match lox.get_text("/jdev/sys/sdtest") {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-    let val = crate::util::xml_attr(&text, "value").unwrap_or("");
-    let sd = parse_sdtest(val);
-
-    if let Some(v) = sd.read_speed_kb {
-        meter
-            .f64_gauge("loxone.sd.read_speed")
-            .with_unit("kBy/s")
-            .build()
-            .record(v, &[]);
-    }
-    if let Some(v) = sd.write_speed_kb {
-        meter
-            .f64_gauge("loxone.sd.write_speed")
-            .with_unit("kBy/s")
-            .build()
-            .record(v, &[]);
-    }
-    if let Some(count) = sd.error_count {
-        meter
-            .f64_gauge("loxone.sd.errors")
-            .with_unit("{errors}")
-            .build()
-            .record(count as f64, &[]);
-    }
-    if let Some(v) = sd.usage_pct {
-        meter
-            .f64_gauge("loxone.sd.usage")
-            .with_unit("%")
-            .build()
-            .record(v, &[]);
+    let Ok(sd) = lox.sdtest() else { return };
+    let gauges = [
+        ("loxone.sd.read_speed", "kBy/s", sd.read_speed_kb),
+        ("loxone.sd.write_speed", "kBy/s", sd.write_speed_kb),
+        (
+            "loxone.sd.errors",
+            "{errors}",
+            sd.error_count.map(|n| n as f64),
+        ),
+        ("loxone.sd.usage", "%", sd.usage_pct),
+    ];
+    for (name, unit, v) in gauges {
+        if let Some(v) = v {
+            meter.f64_gauge(name).with_unit(unit).build().record(v, &[]);
+        }
     }
 }
 
@@ -549,13 +518,7 @@ fn emit_out_of_service_log(provider: &SdkLoggerProvider) {
 /// Fetch and emit Miniserver system log lines as OTel log records.
 /// Tracks the last seen line count to avoid re-emitting old lines.
 fn emit_system_logs(provider: &SdkLoggerProvider, lox: &LoxClient, last_line_count: &mut usize) {
-    let log = match lox.get_text("/dev/fsget/log/def.log") {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-    if log.contains("<errorcode>") {
-        return;
-    }
+    let Ok(log) = lox.log() else { return };
 
     let lines: Vec<&str> = log.lines().collect();
     let new_lines = if lines.len() >= *last_line_count {

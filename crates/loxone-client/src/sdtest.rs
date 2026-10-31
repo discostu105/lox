@@ -1,6 +1,11 @@
 //! The Miniserver's SD card self-test (`/jdev/sys/sdtest`): parsing its
 //! free-text response into fields.
 
+use serde::Serialize;
+
+use crate::client::LoxClient;
+use crate::error::Result;
+
 /// Parsed fields from a Miniserver `/jdev/sys/sdtest` response.
 ///
 /// Example raw value:
@@ -11,51 +16,43 @@
 /// WriteSpeed 22222222Hz, MaxReadCurrentVDDmin 3, MaxReadCurrentVDDmax 5,
 /// MaxWriteCurrentVDDmin: 3, MaxWriteCurrentVDDmax: 1, Usage: 2.79%
 /// ```
-#[derive(Debug, Clone, Default)]
+///
+/// Serializes like [`to_json`](Self::to_json): the speeds as
+/// `read_speed_kbs`/`write_speed_kbs`, missing fields left out.
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SdTestResult {
+    #[serde(rename = "read_speed_kbs", skip_serializing_if = "Option::is_none")]
     pub read_speed_kb: Option<f64>,
+    #[serde(rename = "write_speed_kbs", skip_serializing_if = "Option::is_none")]
     pub write_speed_kb: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_type: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manufacturer_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub card_type: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_size: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_pct: Option<f64>,
     pub raw: String,
 }
 
 impl SdTestResult {
     pub fn to_json(&self) -> serde_json::Value {
-        let mut obj = serde_json::json!({ "raw": self.raw });
-        if let Some(v) = self.read_speed_kb {
-            obj["read_speed_kbs"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.write_speed_kb {
-            obj["write_speed_kbs"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.error_type {
-            obj["error_type"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.error_count {
-            obj["error_count"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.manufacturer_id {
-            obj["manufacturer_id"] = serde_json::json!(v);
-        }
-        if let Some(ref v) = self.date {
-            obj["date"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.card_type {
-            obj["card_type"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.block_size {
-            obj["block_size"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.usage_pct {
-            obj["usage_pct"] = serde_json::json!(v);
-        }
-        obj
+        serde_json::to_value(self).unwrap_or_default()
+    }
+}
+
+impl LoxClient {
+    /// Run the SD card self-test (`/jdev/sys/sdtest`). It reads and writes
+    /// the card: don't call it often.
+    pub fn sdtest(&self) -> Result<SdTestResult> {
+        Ok(parse_sdtest(&self.value("/jdev/sys/sdtest")?))
     }
 }
 
