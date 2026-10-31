@@ -390,9 +390,12 @@ wire directly into blocks on any page.
   read 0 ([loxone-format.md](loxone-format.md)).
 - The room/category binding (`<IoData>`) and display settings stay
   with Loxone Config.
-- A base without the folder is a compile error. Existing virtual inputs
-  are referenced as externs (`extern x = VirtualIn(iname: "VI3")`);
-  `adopt` does not take them over.
+- A base without the folder is a compile error. An existing virtual
+  input is an extern (`extern x = VirtualIn(iname: "VI3")`) or, with
+  `lxir adopt --uuid <it> --as <slug>`, a managed block (#198): rebuilt
+  in its place in the folder, its settings left to the GUI until bound;
+  an extern on it is promoted (`--as` its slug). A whole-config `adopt`
+  leaves virtual inputs as externs, as it does devices.
 
 ### Virtual and Modbus devices — the object tree (D64)
 
@@ -563,6 +566,11 @@ compile that applies it (the tombstone carries the intent from there); it
 is tolerated while the tombstone is pending, and once the removal has
 reached the deployed config a lingering statement is a compile error.
 Declaring a slug and `removed`-ing it in the same module is an error.
+
+The same statement deletes a named rule (`rule <slug> "Name"`, D60) in
+place of its declaration: the rule the lock pins is deleted with its
+connectors, under the same tombstone (D67). A rule whose outputs feed a
+block is refused until that wire is gone.
 
 ### `moved` — rename a managed block, keeping identity
 
@@ -1032,9 +1040,14 @@ created, named and deleted in the app; the declaration edits one.
 Compiling writes the rule's `APC=` payload only when the declaration
 differs from the rule as read, and then as the app's edit: unchanged
 conditions and actions keep their JSON, `STA` follows `active`.
-`decompile`/`adopt` lift every rule of these shapes into a declaration;
+`decompile`/`adopt` lift every rule of these shapes into a declaration,
+by its name (below) when no other rule has that name, else on an extern;
 a rule with other conditions (a control's state, an operating mode, OR
-groups) stays a comment and must not be declared. Removing a
+groups) stays a comment and must not be declared. `lxir adopt --uuid
+<rule> --as <slug>` takes one rule into an existing project the same
+way: an extern rule of the module (`--as` its slug) loses its `extern`
+line and unnamed `rule`, and the named declaration takes their place;
+its action targets must be in the lock already. Removing a
 declaration leaves the rule as last written. Top-level only.
 
 **Named rules (D60).** `rule <slug> "Name"` declares a rule by its name

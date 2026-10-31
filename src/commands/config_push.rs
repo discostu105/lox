@@ -300,7 +300,6 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let live_path = file("pre-push.Loxone");
     fs::write(file("pre-push.zip"), &live_zip)?;
     fs::write(&live_path, &live_xml)?;
-    let pending = check_custom_changes(ms, opts, &live_xml, &say)?;
 
     // 2. Drift: nobody else may have changed the logic since the base.
     let mut kept_as_live = Vec::new();
@@ -365,6 +364,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     lock.save(&scratch_lock)?;
     let compiled_path = file("push.Loxone");
     fs::write(&compiled_path, &compiled)?;
+    let pending = check_custom_changes(ms, opts, &live_xml, &compiled, &say)?;
 
     // 4. What the push changes.
     let mut report = PushReport {
@@ -545,11 +545,14 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
 
 /// The custom changes an upload would delete. With `--force` any present
 /// stop the push, unless `--discard-custom-changes`; a staging run only warns.
-/// A failed check counts as changes present: it stops `--force` too.
+/// A failed check counts as changes present: it stops `--force` too. A change
+/// to an object the upload deletes (`removed` in the source: a rule deleted
+/// in the app, say) goes with the object and stops nothing.
 fn check_custom_changes(
     ms: &dyn Miniserver,
     opts: &PushOptions,
     live_xml: &[u8],
+    compiled: &[u8],
     say: &dyn Fn(&str),
 ) -> Result<Vec<CustomChange>> {
     let refuse = opts.force && !opts.discard_custom_changes;
@@ -570,9 +573,28 @@ fn check_custom_changes(
             return Ok(Vec::new());
         }
     };
-    let pending = custom_changes::describe(&files, Some(live_xml));
+    let mut pending = custom_changes::describe(&files, Some(live_xml));
     if pending.is_empty() {
         return Ok(pending);
+    }
+    let kept: std::collections::HashSet<String> = parse(compiled)?
+        .objects()
+        .into_iter()
+        .map(|o| o.uuid.to_ascii_lowercase())
+        .collect();
+    for c in &mut pending {
+        c.removed = !c.new && !kept.contains(&c.uuid.to_ascii_lowercase());
+    }
+    let (gone, pending): (Vec<_>, Vec<_>) = pending.into_iter().partition(|c| c.removed);
+    if !gone.is_empty() {
+        let list: String = gone.iter().map(|c| format!("\n  {}", c.label())).collect();
+        say(&format!(
+            "The Miniserver holds custom changes to objects the upload deletes; they go \
+             with them:{list}"
+        ));
+    }
+    if pending.is_empty() {
+        return Ok(gone);
     }
     let list: String = pending
         .iter()
@@ -599,7 +621,7 @@ fn check_custom_changes(
              --discard-custom-changes)."
         ));
     }
-    Ok(pending)
+    Ok(gone.into_iter().chain(pending).collect())
 }
 
 /// After a push that changed controls of the app: does the Miniserver serve
@@ -1355,6 +1377,42 @@ mod tests {
             Some(title.as_str())
         );
         assert!(!report.custom_changes_pending[0].new);
+    }
+
+    #[test]
+    fn a_custom_change_to_a_removed_block_goes_with_it() {
+        // The Miniserver runs the example's compiled module; its app
+        // changed the block the source now removes.
+        let dir = project();
+        let deployed = fs::read(Path::new(EXAMPLES).join("project/out.Loxone")).unwrap();
+        fs::write(dir.path().join("pool.Loxone"), &deployed).unwrap();
+        let netz_warnung = "1ff9b180-0000-0007-ffff504f94112233";
+        let fragment = format!(r#"<C Type="GreaterEqual" U="{netz_warnung}"/>"#);
+        let mut ms = FakeMiniserver::new(config_zip(&deployed));
+        ms.custom = Some(vec![(
+            format!("{netz_warnung}.LoxCC"),
+            loxcc::compress_loxcc(fragment.as_bytes()).unwrap(),
+        )]);
+        fs::write(
+            dir.path().join("pages/technik.lxir"),
+            "page \"Technik\"\n\nremoved netz_warnung\n",
+        )
+        .unwrap();
+        let mut opts = options(dir.path(), true);
+        opts.allow_removals = true;
+
+        let report = push(&ms, &opts, true).unwrap();
+
+        assert_eq!(report.outcome, "pushed");
+        assert_eq!(report.custom_changes_pending.len(), 1);
+        assert!(report.custom_changes_pending[0].removed);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["custom_changes_pending"][0]["removed"], true);
+        assert!(
+            report.custom_changes_pending[0]
+                .label()
+                .contains("the upload deletes it too")
+        );
     }
 
     #[test]

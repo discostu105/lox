@@ -688,11 +688,23 @@ impl Lift {
             })
             .collect();
 
+        let mut rule_names: BTreeMap<&str, usize> = BTreeMap::new();
+        for o in objects.iter().filter(|o| o.block_type == RULE_BLOCK_TYPE) {
+            if let Some(t) = &o.title {
+                *rule_names.entry(t.as_str()).or_default() += 1;
+            }
+        }
         let rule_decls: BTreeMap<usize, RuleDecl> = liftable_rules
             .iter()
             .filter_map(|(i, apc)| {
                 let slug = &slug_of[&objects[*i].uuid];
-                let decl = super::rule::lift(slug, apc, &|u| slug_of.get(u).cloned()).ok()?;
+                let mut decl = super::rule::lift(slug, apc, &|u| slug_of.get(u).cloned()).ok()?;
+                // A rule with a name no other rule has is declared by it
+                // (D60, #192): the source owns it whole, no extern.
+                decl.title = objects[*i]
+                    .title
+                    .clone()
+                    .filter(|t| !t.is_empty() && rule_names.get(t.as_str()) == Some(&1));
                 Some((*i, decl))
             })
             .collect();
@@ -965,6 +977,11 @@ impl Lift {
         }
     }
 
+    /// A rule declared by its name: no `extern` line for it.
+    fn named_rule(&self, i: usize) -> bool {
+        self.rule_decls.get(&i).is_some_and(|d| d.title.is_some())
+    }
+
     /// The `rule` declarations of the given externs (D57).
     fn push_rules(&self, externs: &[usize], items: &mut Vec<Item>) {
         for i in externs {
@@ -1017,6 +1034,9 @@ impl Lift {
             None => Item::Comment(" periphery (not placed on a page)".to_string()),
         }];
         for &i in &b.externs {
+            if self.named_rule(i) {
+                continue;
+            }
             self.push_rule_notes(i, &mut items);
             items.push(Item::Extern(self.extern_decls[&i].clone()));
         }
@@ -1082,6 +1102,9 @@ impl Lift {
                 comment: None,
             })];
             for &i in &b.externs {
+                if self.named_rule(i) {
+                    continue;
+                }
                 self.push_rule_notes(i, &mut items);
                 items.push(Item::Extern(self.extern_decls[&i].clone()));
             }

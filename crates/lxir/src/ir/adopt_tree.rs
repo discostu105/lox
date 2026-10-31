@@ -2,7 +2,8 @@
 //! below it become managed blocks in one go — an I/O hangs below its
 //! device, so a managed device carries none it does not manage. Adopting
 //! one I/O alone leaves its device with the GUI (an extern its `device:`
-//! names).
+//! names). A virtual input (D54, #198) is adopted the same way: alone, its
+//! input-dialog settings left to the GUI as for a minted one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,7 +41,10 @@ fn value_of(raw: &str) -> Value {
 /// `Err(reason)` unless the rebuild reproduces the element: its
 /// connectors are the verified ones and carry nothing but wires.
 fn verify(el: &Element, block_type: &str) -> std::result::Result<(), String> {
-    let spec = periphery(block_type).expect("a periphery type").ports;
+    let spec = periphery(block_type)
+        .map(|p| p.ports)
+        .or_else(|| crate::connectors::builtin(block_type))
+        .expect("a periphery or builtin type");
     let keys: BTreeSet<String> = ports(el).into_iter().map(|p| p.key).collect();
     let want: BTreeSet<String> = spec.iter().map(|p| p.key.to_string()).collect();
     if keys != want {
@@ -121,7 +125,10 @@ pub(super) fn adopt_device(
     // object of a periphery type inside the root.
     let members: Vec<&ObjectSummary> = objects
         .iter()
-        .filter(|o| o.path.starts_with(&root.path) && periphery(&o.block_type).is_some())
+        .filter(|o| {
+            o.uuid == root.uuid
+                || (o.path.starts_with(&root.path) && periphery(&o.block_type).is_some())
+        })
         .collect();
     let managed_uuid: BTreeMap<&str, &str> = lock
         .objects
@@ -263,7 +270,7 @@ pub(super) fn adopt_device(
     let mut blocks: Vec<BlockDecl> = Vec::new();
     for o in &members {
         let el = doc.element_at(&o.path).expect("path from objects()");
-        let pt = periphery(&o.block_type).expect("a periphery type");
+        let settings = periphery(&o.block_type).map_or(&[][..], |p| p.settings);
         let s = slug_of[&o.uuid].clone();
         let mut args: Vec<ArgItem> = Vec::new();
         if !device_types(&o.block_type).is_empty() {
@@ -292,7 +299,7 @@ pub(super) fn adopt_device(
                 comment: None,
             }));
         }
-        for name in pt.settings {
+        for name in settings {
             if let Some(v) = el.attr_decoded(name) {
                 args.push(ArgItem::Binding(Binding {
                     port: (*name).to_string(),

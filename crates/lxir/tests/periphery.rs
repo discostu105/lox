@@ -289,3 +289,38 @@ fn removing_a_device_and_an_io_converges_against_the_old_base() {
     assert_eq!(out3.to_bytes(), out.to_bytes());
     assert!(again.removed.is_empty());
 }
+
+#[test]
+fn a_virtual_input_is_adopted_in_its_place() {
+    // Three virtual inputs; another project names the middle one.
+    let three = Module::parse(
+        "a = VirtualIn(\"Eingang A\")\nb = VirtualIn(\"Eingang B\")\nc = VirtualIn(\"Eingang C\")\n",
+    )
+    .unwrap();
+    let mut lock1 = Lockfile::default();
+    let base1 = compile(&base(), &three, &mut lock1, &opts()).unwrap();
+    let base1 = LoxoneDoc::parse(&base1.to_bytes()).unwrap();
+    let b = lock1.objects["b"].uuid.clone();
+
+    let mut module = Module::parse("extern eingang = VirtualIn(title: \"Eingang B\")\n").unwrap();
+    let mut lock = Lockfile::default();
+    compile(&base1, &module, &mut lock, &opts()).unwrap();
+    let adopted = adopt_one(&base1, &b, "eingang", &module, &mut lock).unwrap();
+    assert_eq!(adopted.promoted, ["eingang"]);
+    assert!(!adopted.on_page);
+    assert_eq!(adopted.page_title, "Virtuelle Eingänge");
+    assert!(module.strip_extern("eingang"));
+    module.items.extend(adopted.items);
+    assert!(
+        module
+            .to_text()
+            .contains("eingang = VirtualIn(\"Eingang B\")"),
+        "{}",
+        module.to_text()
+    );
+    // Rebuilt where it was, between the other two.
+    let out = compile(&base1, &module, &mut lock, &opts()).unwrap();
+    assert!(out.to_bytes() == base1.to_bytes());
+    assert_eq!(lock.objects["eingang"].uuid, b);
+    assert!(lock.objects["eingang"].page_uuid.is_none());
+}

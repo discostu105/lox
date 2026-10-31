@@ -7,7 +7,9 @@
 //! writes them — `Pumpe Ein` (active, weekdays in the `arrValues` form,
 //! 09:00, `on` to the pump) and `Pumpe Aus` (inactive, 17:00, `off`).
 
-use lxir::ir::{CompileOptions, DecompileOptions, Module, adopt, compile, decompile};
+use lxir::ir::{
+    CompileOptions, DecompileOptions, Item, Module, adopt, adopt_one, compile, decompile,
+};
 use lxir::uuid::parse_serial;
 use lxir::{Lockfile, LoxoneDoc};
 
@@ -202,7 +204,12 @@ fn decompile_lifts_rules_and_adopt_compiles_them_back_byte_identical() {
     let base = fixture();
     let (m, _) = decompile(&parse(&base), &DecompileOptions::default()).unwrap();
     let text = m.to_text();
-    assert!(text.contains(AS_READ), "{text}");
+    // Each rule has a name of its own: declared by it, no extern (#192).
+    let named = AS_READ
+        .replace("rule pumpe_ein\n", "rule pumpe_ein \"Pumpe Ein\"\n")
+        .replace("rule pumpe_aus\n", "rule pumpe_aus \"Pumpe Aus\"\n");
+    assert!(text.contains(&named), "{text}");
+    assert!(!text.contains("AutopilotRule"), "{text}");
 
     let (m, mut lock, _) = adopt(&parse(&base)).unwrap();
     assert_eq!(m.rule_decls().count(), 2);
@@ -265,7 +272,8 @@ fn active_alone_is_not_active() {
     let base = fixture_with(&half, &rule_off_apc());
     let (m, _) = decompile(&parse(&base), &DecompileOptions::default()).unwrap();
     assert!(
-        m.to_text().contains("rule pumpe_ein\n\tinactive\n"),
+        m.to_text()
+            .contains("rule pumpe_ein \"Pumpe Ein\"\n\tinactive\n"),
         "{}",
         m.to_text()
     );
@@ -311,7 +319,7 @@ fn new_conditions_and_actions_are_built_from_evidence() {
     let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
     assert!(
         m.to_text().contains(
-            "rule pumpe_aus\n\tinactive\n\twhen time 17:00\n\twhen weekday wed\n\
+            "rule pumpe_aus \"Pumpe Aus\"\n\tinactive\n\twhen time 17:00\n\twhen weekday wed\n\
              \tthen abdeckung \"pulse\"\n\tthen pumpe \"on\"\nend\n"
         ),
         "{}",
@@ -504,4 +512,130 @@ fn named_rules_are_checked() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("create one in the app"), "{e}");
+}
+
+#[test]
+fn a_removed_rule_is_deleted_until_the_miniserver_runs_without_it() {
+    let base = placed_fixture();
+    let mut lock = Lockfile::new();
+    let created = compile_with(&base, NEW_RULE, &mut lock).unwrap();
+    let uuid = lock.rules["mittag"].clone();
+
+    // `removed` deletes it with its connectors, and the lock keeps a
+    // tombstone instead of the pin.
+    let out = compile_with(&created, "removed mittag\n", &mut lock).unwrap();
+    assert!(!out.contains(&uuid[..18]), "{out}");
+    assert_eq!(out, compile_with(&base, "", &mut Lockfile::new()).unwrap());
+    assert!(lock.rules.is_empty());
+    assert_eq!(lock.removed[&uuid].slug, "mittag");
+
+    // A base from before the deployment loses it again; the deployed one
+    // retires the tombstone, and the statement is then an error.
+    let mut again = lock.clone();
+    assert_eq!(
+        compile_with(&created, "removed mittag\n", &mut again).unwrap(),
+        out
+    );
+    assert_eq!(
+        compile_with(&out, "removed mittag\n", &mut again).unwrap(),
+        out
+    );
+    assert!(again.removed.is_empty());
+    let e = compile_with(&out, "removed mittag\n", &mut again).unwrap_err();
+    assert!(e.to_string().contains("delete the `removed` line"), "{e}");
+
+    // A rule that drives a block stays until that wire is gone.
+    let seq = u32::from_str_radix(&uuid[14..18], 16).unwrap();
+    let port = format!("{}{:04x}-04ff504f94112233", &uuid[..14], seq - 3);
+    assert!(
+        created.contains(&format!("<Co K=\"Q\" U=\"{port}\"/>")),
+        "{port}"
+    );
+    let light = "<Co K=\"Q\" U=\"40000004-0000-0041-01ffaaaaaaaa0004\"/>";
+    assert!(created.contains(light));
+    let wired = created.replace(
+        light,
+        &format!(
+            "<Co K=\"Q\" Nc=\"1\" U=\"40000004-0000-0041-01ffaaaaaaaa0004\"><In Input=\"{port}\"/></Co>"
+        ),
+    );
+    let mut l = Lockfile::new();
+    compile_with(&wired, NEW_RULE, &mut l).unwrap();
+    let e = compile_with(&wired, "removed mittag\n", &mut l).unwrap_err();
+    assert!(e.to_string().contains("drives Licht"), "{e}");
+}
+
+#[test]
+fn adopting_an_extern_rule_declares_it_by_name() {
+    // A project that edits both rules as externs (D57).
+    let base = fixture();
+    let module = Module::parse(&format!("{EXTERNS}\n{AS_READ}")).unwrap();
+    let mut lock = Lockfile::new();
+    compile(&parse(&base), &module, &mut lock, &opts()).unwrap();
+
+    let err = adopt_one(
+        &parse(&base),
+        RULE_ON,
+        "morgens",
+        &module,
+        &mut lock.clone(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("--as pumpe_ein"), "{err}");
+
+    let adopted = adopt_one(&parse(&base), RULE_ON, "pumpe_ein", &module, &mut lock).unwrap();
+    assert_eq!(adopted.promoted, ["pumpe_ein"]);
+    assert_eq!(adopted.page_title, "Automatik-Regeln");
+    let [Item::Rule(decl)] = &adopted.items[..] else {
+        panic!("{:?}", adopted.items)
+    };
+    assert_eq!(decl.title.as_deref(), Some("Pumpe Ein"));
+    assert_eq!(lock.rules["pumpe_ein"], RULE_ON);
+    assert!(!lock.externals.contains_key("pumpe_ein"));
+
+    // The extern and its edits leave the source; the named rule compiles
+    // to the same bytes.
+    let mut m = module.clone();
+    assert!(m.strip_extern("pumpe_ein"));
+    assert_eq!(m.rule_decls().count(), 1);
+    m.items.extend(adopted.items);
+    let out = compile(&parse(&base), &m, &mut lock, &opts()).unwrap();
+    assert_eq!(String::from_utf8(out.to_bytes()).unwrap(), base);
+
+    let err = adopt_one(&parse(&base), RULE_ON, "pumpe_ein", &m, &mut lock)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("already rule `pumpe_ein`"), "{err}");
+}
+
+#[test]
+fn a_rule_is_adopted_only_with_a_name_of_its_own() {
+    let twins = fixture().replace("Title=\"Pumpe Aus\"", "Title=\"Pumpe Ein\"");
+    let module = Module::parse("extern pumpe = PushButton(title: \"Pumpe\")\n").unwrap();
+    let mut lock = Lockfile::new();
+    compile(&parse(&fixture()), &module, &mut lock, &opts()).unwrap();
+    let err = adopt_one(
+        &parse(&twins),
+        RULE_ON,
+        "morgens",
+        &module,
+        &mut lock.clone(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("2 rules of this name"), "{err}");
+    // Decompile keeps such twins as extern rules.
+    let (m, _) = decompile(&parse(&twins), &DecompileOptions::default()).unwrap();
+    assert!(m.to_text().contains("= AutopilotRule("), "{}", m.to_text());
+
+    // A fresh slug for a rule the source does not know yet; its target
+    // is in the lock.
+    let adopted = adopt_one(&parse(&fixture()), RULE_ON, "morgens", &module, &mut lock).unwrap();
+    assert!(adopted.promoted.is_empty());
+    assert_eq!(lock.rules["morgens"], RULE_ON);
+    let err = adopt_one(&parse(&fixture()), RULE_OFF, "pumpe", &module, &mut lock)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not a free, valid slug"), "{err}");
 }

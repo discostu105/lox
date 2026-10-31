@@ -1241,11 +1241,14 @@ fn incremental_adopt_refuses_claimed_or_unverified_identities() {
         .unwrap()
         .uuid
         .clone();
-    let err = adopt_one(&base, &vi, "x", &module, &mut lock.clone()).unwrap_err();
-    assert!(
-        err.to_string().contains("reference it as an extern"),
-        "{err}"
-    );
+    // A virtual input is adopted in its folder (#198), not refused.
+    let mut l = lock.clone();
+    let err = adopt_one(&base, &vi, "x", &module, &mut l.clone()).unwrap_err();
+    assert!(err.to_string().contains("--as aussentemp"), "{err}");
+    let adopted = adopt_one(&base, &vi, "aussentemp", &module, &mut l).unwrap();
+    assert!(!adopted.on_page);
+    assert_eq!(adopted.promoted, ["aussentemp"]);
+    assert_eq!(l.objects["aussentemp"].uuid, vi);
 }
 
 const FASSADE_MODULE: &str = "\

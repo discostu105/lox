@@ -1403,6 +1403,7 @@ mod tests {
             title: Some("T".into()),
             page: None,
             new: false,
+            removed: false,
         }
     }
 

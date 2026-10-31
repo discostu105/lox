@@ -1,0 +1,1 @@
+- **`lox config push`**: a custom change to an object that the upload deletes (`removed` in the source, a rule deleted in the app, for example) goes with the object. It no longer stops `--force`, and the JSON marks it `"removed": true`.

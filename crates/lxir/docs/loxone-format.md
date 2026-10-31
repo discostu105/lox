@@ -367,6 +367,10 @@ r50 house config, 5 across three public use-case configs (V172–V175).
   child) — the raw CRLF inside the JSON comes from this writer. Runs
   are logged to `/log/<AutoPilot-container-uuid>.txt` and the
   container's `history` state (`YYYY-MM-DD HH:MM:SS <uuid> <name>`).
+  A rule deleted in the app (live, 2026-10-31, one sample) stays a
+  custom change under the same name: the whole rule element, `STA` and
+  payload as before, without the `<TPC>` child, `WF="33570816"` (the
+  program's `16384` plus `0x2000000`). Loading an upload removes it.
 - **Edits, as the app makes them** (house config history and a live
   push, 2026-10-29): deactivating a rule in the app changed exactly
   `"active": true → false` and removed `STA`; a compiled payload in the

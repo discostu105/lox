@@ -69,9 +69,9 @@ types) contradict each other. Results and methodology:
 - [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
       land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
       input range as claimed attribute parameters, and the defaults a
-      save writes (oracle session 18). Open: adopting existing ones
-      (they stay externs); a room/category for minted ones (the D39
-      claims work on externs only).
+      save writes (oracle session 18). Existing ones are adopted one at
+      a time since 2026-10-31 (#198). Open: a room/category for minted
+      ones (the D39 claims work on externs only).
 - [x] Eval harness over lox-cli's task set (2026-10-29,
       `tools/eval/`): 260 of 475 tasks use only mintable types; a
       10-case sample passes 9, and the failure is lox-sim's DayTimer model
@@ -487,11 +487,13 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       "Name"` takes the config's rule of that name or creates one below
       the last rule, filed like it; the lock pins its UUID (v7 `rules`).
       Oracle-validated (session 24).
-- [ ] Live check of a created rule (#181): push one, see it in the app and run
-      at its time (the Miniserver loads program rules, D57; a created one
-      has not been pushed yet).
-- [ ] Deleting rules from source (`removed`-style tombstone) — only with
-      a use for it.
+- [x] Live check of a created rule (#181), 2026-10-31: pushed, ran at its
+      time, listed in the app (and deleted there, D67).
+- [x] Taking app rules over (#192), 2026-10-31: decompile/adopt declare
+      rules by name; `lxir adopt --uuid <rule>` for one.
+- [x] Deleting rules from source: `removed <slug>` in place of the
+      `rule` declaration (D67), 2026-10-31 — the use was a test rule
+      deleted in the app, which an upload would have brought back.
 - [x] The app catalogue follows the compile 2026-10-30 (D61, #155):
       `lxir::catalogue` edits `LoxAPP3.json` for names, rooms,
       categories, deletions and new push buttons/virtual inputs; the push

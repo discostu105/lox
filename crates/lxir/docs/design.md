@@ -1646,9 +1646,12 @@ Anything unverified is an error, not a heuristic:
     `MaxVal:`, `DefVal:` are attribute parameters with claim semantics
     (D40): written while bound, the GUI's otherwise. The `<IoData>`
     room/category binding and `<Display>` stay GUI-owned.
-  - **Not adopted.** Existing VirtualIns stay externs (`iname:`
-    matching); `adopt` refuses them. Adopting would add nothing an
-    extern cannot do.
+  - **Adopted one at a time** (since #198, 2026-10-31; refused until
+    then). `lxir adopt --uuid` takes an existing VirtualIn the way it
+    takes a device (D64): promoting an extern on it, its input-dialog
+    settings carried, and rebuilt in its base place in the folder (the
+    tree's order, as for a device's I/O). A whole-config adopt leaves
+    them externs. The house's nine adopted and rebuilt byte-identically.
   Validated with the oracle (session 18): see oracle-wine.md.
 - **D55 — device-narrowed extern matching** (2026-10-29). Identical
   hardware repeats its I/O titles: every Tree push-button interface has
@@ -1879,15 +1882,22 @@ Anything unverified is an error, not a heuristic:
     `descID`s) as an edited one. A config with no rule is refused:
     where rules live (a special page, logic pages) is the app's choice,
     and one rule made in the app settles it.
-  - **No deletion.** Removing the declaration drops the lock entry and
-    leaves the rule; a slug already declared otherwise, or a named rule
+  - **No deletion** (until D67). Removing the declaration drops the lock
+    entry and leaves the rule; a slug already declared otherwise, or a named rule
     that some `rule <extern>` also declares, is refused.
   Validated: oracle session 24 (byte-identical but for `WF=`, which the
   save drops from every rule); live on the house (firmware 17.2.8.28,
   2026-10-30, #181): a created rule, pushed with a verified byte-exact
   download, ran at its compiled minute (22:40:00) and switched its
-  target; pushed again as `inactive`, it stopped. Unchecked: the app's
-  Automatic Designer listing it.
+  target; pushed again as `inactive`, it stopped. The app's Automatic
+  Designer listed it (the user deleted it there, 2026-10-31, D67).
+  - **Taking rules over** (#192, 2026-10-31). Decompile and adopt declare
+    a liftable rule by its name when no other rule shares it, with no
+    extern; `lxir adopt --uuid <rule>` does it for one rule of an
+    existing project, promoting an extern rule (its `extern` line and
+    unnamed `rule` go). Name twins stay extern rules. The house's five
+    app rules went over with no semantic change: 157 of 157 page blocks
+    managed.
 - **D61 — The app catalogue follows the compile** (2026-10-30). The
   Miniserver serves the `LoxAPP3.json` of the upload as it is, so a push
   that only replaced `sps0.LoxCC` left the app on the last save from
@@ -2048,8 +2058,29 @@ Anything unverified is an error, not a heuristic:
   single-instance types (alarm, smoke alarm, irrigation, room
   controller) — their entries wait for a save. Validated: oracle
   session 28 (a minted jalousie: the save kept its states, `<IoData>`
-  and `<COHist>`, a recompile of the save byte-identical).
-
+  and `<COHist>`, a recompile of the save byte-identical); live
+  2026-10-31 on the house: a jalousie minted from source and pushed was
+  served in the app catalogue (`Jalousie`, room and category, 16
+  states), its seven minted states streamed values over the WebSocket,
+  and `removed` deleted entry and block again.
+- **D67 — Deleting a rule from source** (2026-10-31). A rule deleted in
+  the app lives in the Miniserver's custom changes only: the program
+  file still has it, and the next upload brings it back. `removed
+  <slug>` in place of a `rule <slug> "Name"` declaration deletes the
+  rule the lock pins: the pin becomes a removal tombstone (D31) under the
+  rule's UUID, so every compile against a base that still holds the
+  rule deletes it (with its connectors, which live inside it) and a
+  deployed base retires the tombstone; then the statement is an error,
+  as for a block. The app catalogue lists only the rules container, not
+  single rules, so it is unchanged. A rule whose outputs feed a block is
+  refused (the wire would dangle). Removing only the declaration still
+  leaves the rule (D60). The rule deleted in the app remains a custom
+  change (the whole rule, `WF` with bit `0x2000000` set, no `<TPC>`
+  child, unlike an edit — one sample), so `lox config push` lets a
+  custom change to an object the upload deletes pass `--force`: it goes
+  with the object. Validated live 2026-10-31 on the house: the test
+  rule of #181, deleted in the app, deleted by the push with its
+  switch; `/sys/custom` empty afterwards, the program running.
 - **D68 — `lxir test` runs in a simulator of its own** (2026-10-31).
   Supersedes D36's "owning a simulator is out of scope": the tests now
   run in `lxir::sim`, the external `lox sim` stays an option
