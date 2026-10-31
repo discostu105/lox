@@ -397,7 +397,7 @@ as `crates/loxone-config`. It started as the standalone repository
 [discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir` up
 to 0.2, files `.lxir`; renamed to loxone-config and Lox Logic in 0.3), was merged here
 with its history, and is developed only here now: the standalone repository
-receives no further changes. lox (server API, transport) depends on
+is archived. lox (server API, transport) depends on
 it for everything config-model-related: `lox config diff/show/wiring/lint`,
 `lox config push`, and the whole toolchain as `lox logic`. The crate stays a
 separate, network-free library, published on crates.io for anyone else to

@@ -385,7 +385,7 @@ The parts of lox that other Rust projects can use are published as crates:
 - **[Lox Logic](crates/loxone-config)**: the config-as-code toolchain behind `lox logic`, the logic diffs and `lox config push`.
   It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir`), was merged
   into this repository with its history, and is developed here as `crates/loxone-config`. Its crates.io package is
-  [`loxone-config`](https://crates.io/crates/loxone-config). The standalone repository receives no further changes.
+  [`loxone-config`](https://crates.io/crates/loxone-config). The standalone repository is archived.
 - **[eisber/lox-cli](https://github.com/eisber/lox-cli)**: a separate project by Markus Cozowicz, based on an
   earlier version of lox. Its own code is AGPL-3.0 or commercial. It edits a config differently:
   - An AI agent builds the logic one command per step (`lox config add`, `set-param`, `wire-connector`), and
