@@ -10,6 +10,18 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-10-31 — lox logic
+
+The config-as-code language has a name of its own: Lox Logic, written in `.loxl` files and run as `lox logic` or `loxl`. Its library crate is loxone-config now (formerly lxir).
+
+### Changed
+- **lox logic**: `lox ir` is now `lox logic` (`lox loxl` works too); the language is called Lox Logic and its files
+  end in `.loxl` instead of `.lxir`. The standalone binary is `loxl` (was `lxir`), a new project's lockfile defaults
+  to `logic.lock.json`, the env vars are `LOXL`/`LOXL_CORPUS`, and the editor extension and agent skill are named
+  `loxl` and `lox-logic`. Existing lockfiles and fingerprints stay valid; rename your `.lxir` files to `.loxl`.
+- **loxone-config 0.3.0** (on crates.io): the lxir crate is renamed to loxone-config (`use loxone_config::…`; the
+  `ir` module is `logic`, `Error::IrParse` is `Error::Parse`). The last lxir release points to it.
+
 ## [0.43.0] — 2026-10-31 — lox as libraries
 
 The Miniserver client and the config toolchain are now two crates on crates.io, loxone-client and lxir 0.2.0, so other Rust projects can talk to a Miniserver and read its program file the way lox does.
