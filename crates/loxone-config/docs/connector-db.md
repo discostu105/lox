@@ -104,7 +104,7 @@ Each table gives the ports and the evidence that admitted them.
 ### Memory and push-buttons
 
 New minimal instances survived a Loxone Config open and save (details in
-[oracle-wine.md](oracle-wine.md)). `Memory.Q` is proven an output by a compiled wire from it that
+[oracle-sessions.md](oracle-sessions.md)). `Memory.Q` is proven an output by a compiled wire from it that
 survived the save.
 
 | Type | Ports (index order) | Basis |
@@ -142,7 +142,7 @@ observed counterexample flips them to Api.)
 `FLG="1"` on incoming API wires (wire metadata written by the Miniserver or app) is inert stored
 state: Loxone Config keeps it verbatim, never regenerates it and accepts its absence. It is carried
 per (sink, source) pair like other content Loxone Config owns
-([oracle-wine.md](oracle-wine.md)).
+([loxone-format.md](loxone-format.md); the probe is in [oracle-sessions.md](oracle-sessions.md)).
 
 ### The public corpus and `OutputAPI`
 
@@ -219,7 +219,8 @@ appears on exactly one managed type:
   stays with Loxone Config.
 
 A connector with `Inv=` is owned by Loxone Config as a whole: its `<Co>` is written back verbatim
-(flag, Def, wires), and the compiler refuses source wires and values on it. Every LightController2 in
+(flag, Def, wires), and the compiler refuses source wires and values on it
+([decision 0020](decisions/0020-inv-connector-gui-owned.md)). Every LightController2 in
 the house config has `Inv="true"` on an unwired `Remanence`, which is how Loxone Config stores the
 ticked Remanenz checkbox.
 
@@ -235,7 +236,7 @@ their exact connector sets. Loxone Config fills in the content it owns
 (LightController2's default scenes, `IoData`, DayTimer's default
 entries) rather than rejecting the block; central blocks are legal
 with no `rec=`, Code16 with no `Code=`. Details in
-[oracle-wine.md](oracle-wine.md).
+[oracle-sessions.md](oracle-sessions.md).
 
 ### Timers, edges, multiplexer, flip-flop, State
 
@@ -254,7 +255,7 @@ copied).
 
 **Checked in Loxone Config:** all eight types survive an open and save with their exact connector
 sets, order and UUIDs, in a wired chain with parameters on every block
-([oracle-wine.md](oracle-wine.md)).
+([oracle-sessions.md](oracle-sessions.md)).
 
 ### VirtualIn
 

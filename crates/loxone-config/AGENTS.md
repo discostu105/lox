@@ -51,11 +51,12 @@ tools/fetch-corpus.py && LOXL_CORPUS=corpus/web cargo test --release -p loxone-c
 | [docs/language.md](docs/language.md) | the `.loxl` language spec |
 | [docs/lockfile-spec.md](docs/lockfile-spec.md) | the lockfile format |
 | [docs/loxone-format.md](docs/loxone-format.md) | verified `.Loxone` format facts |
-| [docs/design.md](docs/design.md) | architecture |
-| [docs/decisions/](docs/decisions/) | design decisions |
+| [docs/design.md](docs/design.md) | architecture and the index of decisions |
+| [docs/decisions/](docs/decisions/) | one file per design decision: context, choice, rejected alternatives |
 | [docs/implementation.md](docs/implementation.md) | module map, tests, gotchas |
 | [docs/connector-db.md](docs/connector-db.md) | connector table: evidence and admission rules |
 | [docs/simulator.md](docs/simulator.md) | what `loxl test` simulates |
-| [docs/oracle-wine.md](docs/oracle-wine.md) | Loxone Config under Wine, to check what a save keeps |
+| [docs/oracle-wine.md](docs/oracle-wine.md) | running Loxone Config under Wine |
+| [docs/oracle-sessions.md](docs/oracle-sessions.md) | historical log of the Loxone Config save checks |
 | [docs/vision.md](docs/vision.md) | why this exists |
 | [docs/roadmap.md](docs/roadmap.md) | direction; open work is in GitHub issues |

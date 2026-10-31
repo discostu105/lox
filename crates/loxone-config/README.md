@@ -254,7 +254,8 @@ Miniserver) and credentials are out of scope; they live in [`lox`](https://githu
 | [docs/implementation.md](docs/implementation.md) | Module map, tests, how to extend |
 | [docs/connector-db.md](docs/connector-db.md) | The connector table: evidence and admission rules |
 | [docs/simulator.md](docs/simulator.md) | What the simulator models |
-| [docs/oracle-wine.md](docs/oracle-wine.md) | Running Loxone Config under Wine to check what a save keeps |
+| [docs/oracle-wine.md](docs/oracle-wine.md) | Running Loxone Config under Wine |
+| [docs/oracle-sessions.md](docs/oracle-sessions.md) | Log of the Loxone Config save checks |
 | [docs/roadmap.md](docs/roadmap.md) | Direction and non-goals |
 
 ## Editor support
@@ -296,7 +297,7 @@ end })
 - The UUID layout (epoch 2009-01-01, object and port tails, ports created before their object) comes
   from live configs and is covered by the `uuid` tests.
 - Loxone Config 17 (under Wine) opens a compiled config and saves it back with an empty semantic diff:
-  every new UUID, wire and parameter survives. See [docs/oracle-wine.md](docs/oracle-wine.md).
+  every new UUID, wire and parameter survives. See [docs/oracle-sessions.md](docs/oracle-sessions.md).
 - Logic gates have two inputs. Loxone Config deletes an `I3` on save, so the compiler refuses it; cascade
   two-input gates instead.
 
