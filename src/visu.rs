@@ -99,9 +99,8 @@ pub fn prompt(user: &str) -> Result<VisuPassword> {
 /// The error for a secured control without a password.
 pub fn missing(control: &str, user: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "{} is secured: its commands need the visualization password of {} — set {}, put \
-         `visu_password_file: ~/.lox/visu-password` in the config (`lox setup set \
-         --visu-password-file <path>`), or run it in a terminal to be asked",
+        "{} is secured and needs the visualization password of {}. Set {}, run \
+         `lox setup set --visu-password-file <path>`, or run it in a terminal to be asked",
         control,
         user,
         ENV

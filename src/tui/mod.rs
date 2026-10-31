@@ -1,4 +1,6 @@
-//! `lox tui` — interactive terminal UI (docs/design-tui.md).
+//! `lox tui`: the interactive terminal UI.
+//!
+//! The design is in docs/design-tui.md.
 // Render helpers take a buffer, an area, a position and styling; bundling
 // those into structs would only move the argument list elsewhere.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]

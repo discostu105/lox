@@ -491,16 +491,13 @@ pub(crate) enum AccessCmd {
     },
     /// Read an NFC tag's ID at a Code Touch, and optionally pair it with a user
     ///
-    /// Starts the Code Touch's learn mode (it shows a cyan running light);
-    /// hold the tag, or the unlocked phone, to the reader. Prints the ID and
-    /// whether the tag is known already. Learn mode always ends again, also
-    /// on timeout and Ctrl-C. With --user (and --name) the tag is then paired
-    /// with that user, after a confirmation.
+    /// Hold the tag or the unlocked phone to the reader while the Code Touch
+    /// shows a cyan running light. Prints the ID and whether the tag is known.
+    /// With --user and --name, pairs the tag with that user after a confirmation.
     ///
-    /// A secured Code Touch takes learn mode only as a secured command, signed
-    /// with the visualization password of the user lox connects with: from
+    /// A secured Code Touch needs the visualization password of lox's user:
     /// --visu-password-file, LOX_VISU_PASSWORD, `visu_password_file:` in the
-    /// config, or a hidden prompt.
+    /// config, or a prompt.
     #[command(verbatim_doc_comment)]
     Learn {
         /// NFC Code Touch: name (or a unique part of it), alias or UUID
@@ -601,8 +598,7 @@ pub fn cmd_access(ctx: &RunContext, action: AccessCmd) -> Result<()> {
             }
             if !ctx.quiet {
                 println!(
-                    "\n{} assigned to {} ({}) — UI and access rights alike; members of \
-                     groups are not listed",
+                    "\n{} assigned to {} ({}), UI and access rights. Group members are not listed.",
                     p.count, p.control, p.typ
                 );
             }

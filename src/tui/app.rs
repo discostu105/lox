@@ -1,4 +1,4 @@
-//! App state, messages and effects (§8.2). `update.rs` is the only writer.
+//! App state, messages and effects. `update.rs` is the only writer.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -90,7 +90,7 @@ pub enum GKey {
     Unassigned,
 }
 
-/// A list filter value (§4.5a). Values of one dimension combine with OR,
+/// A list filter value. Values of one dimension combine with OR,
 /// dimensions with AND: `room ∈ {Kitchen, Hall} ∧ type = LightController`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Facet {
@@ -168,11 +168,11 @@ pub struct RoomsState {
     /// 0 = groups, 1 = controls, 2 = inspector
     pub pane: u8,
     pub sel_group: Option<GKey>,
-    /// Selected control (UUID) per group — back restores place (§4.1 rule 10)
+    /// Selected control (UUID) per group — back restores place
     pub sel_ctrl: HashMap<GKey, String>,
     pub filter_groups: String,
     pub filter_ctrls: String,
-    /// Live sorts are frozen while the list has focus (§7.2)
+    /// Live sorts are frozen while the list has focus
     pub frozen: Option<Vec<GKey>>,
     pub marks: HashSet<Cid>,
 }
@@ -350,7 +350,7 @@ impl Line {
             .unwrap_or(self.buf.len())
     }
     pub fn insert(&mut self, s: &str) {
-        // Paste is text, never a submit (§4.1 rule 9): newlines become spaces
+        // Paste is text, never a submit: newlines become spaces
         let s: String = s
             .chars()
             .map(|c| {
@@ -735,7 +735,7 @@ pub struct ChartData {
     pub series: Series,
 }
 
-/// `c`: the full-screen history chart (§5.10).
+/// `c`: the full-screen history chart.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartState {
     /// The control, then added series (`+`)
@@ -1163,7 +1163,7 @@ pub struct App {
     /// Mouse text selection in progress or just made
     pub drag: Option<Drag>,
     pub wiring: WiringDoc,
-    /// Last key press (code, time) for auto-repeat suppression (§4.1 rule 8)
+    /// Last key press (code, time) for auto-repeat suppression
     pub last_key: Option<(String, f64)>,
     /// State batches held back while paused (`p`)
     pub paused_buf: Vec<StateEvent>,
@@ -1302,7 +1302,7 @@ impl App {
         }
     }
 
-    /// Record a failure: toast + message log (a toast is never the only record, §5.1).
+    /// Record a failure: toast + message log (a toast is never the only record).
     pub fn fail(
         &mut self,
         what: impl Into<String>,

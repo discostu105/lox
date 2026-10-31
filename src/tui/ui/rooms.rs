@@ -1,4 +1,4 @@
-//! ² Rooms — the control surface (§5.3).
+//! ² Rooms — the control surface.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

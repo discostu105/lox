@@ -1,6 +1,6 @@
 // `print!`/`println!` for the whole crate: like std's, except that a closed
-// stdout (`lox … | head -1`) ends the process quietly instead of panicking
-// (#116). Tests keep std's macros so libtest still captures their output.
+// stdout (`lox … | head -1`) ends the process quietly instead of panicking.
+// Tests keep std's macros so libtest still captures their output.
 #[cfg(not(test))]
 macro_rules! print {
     ($($arg:tt)*) => { $crate::print_stdout(format_args!($($arg)*)) };
@@ -407,11 +407,9 @@ pub(crate) enum Cmd {
         initial: bool,
         /// Keep streaming across Miniserver reboots and dropped connections
         ///
-        /// Waits until the Miniserver answers again (retries back off from 1 s to
-        /// 30 s; gives up after 30 min), re-reads the structure and resumes the
-        /// same output. The gap is reported on stderr and, with -o json, as
-        /// {"event":"disconnected"} / {"event":"reconnected"} lines. States that
-        /// changed while offline are printed after the reconnect.
+        /// Retries every 1 to 30 s and gives up after 30 min. The gap is reported
+        /// on stderr, or with -o json as "disconnected"/"reconnected" events.
+        /// States that changed while offline are printed after the reconnect.
         #[arg(long)]
         reconnect: bool,
     },

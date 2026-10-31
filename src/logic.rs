@@ -1,4 +1,4 @@
-//! Thin adapter over `loxl` (§12.1): load a `.Loxone` config, index blocks and
+//! Thin adapter over loxone-config: load a `.Loxone` config, index blocks and
 //! wires by UUID, and answer "what is wired around this control?".
 //!
 //! Hardware never sits on a logic page directly: Loxone Config places an

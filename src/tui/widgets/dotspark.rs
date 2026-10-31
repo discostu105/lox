@@ -1,4 +1,4 @@
-//! DotSpark — one-row braille sparkline, 2 samples per cell, 4 levels (§6.3).
+//! DotSpark — one-row braille sparkline, 2 samples per cell, 4 levels.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

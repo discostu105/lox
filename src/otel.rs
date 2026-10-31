@@ -662,7 +662,6 @@ pub fn serve(
     no_logs: bool,
     no_traces: bool,
 ) -> Result<()> {
-    // Load structure for UUID mapping
     let mut lox = cfg.client()?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
@@ -673,14 +672,12 @@ pub fn serve(
     let weather_store: WeatherStore = Arc::new(Mutex::new(Vec::new()));
     let weather_ws = Arc::clone(&weather_store);
 
-    // Autopilot UUIDs for trace correlation
     let autopilot_uuids = build_autopilot_uuids(&state_map);
 
-    // Verify the OTLP endpoint is reachable before starting
     check_endpoint(endpoint, headers)?;
 
-    // Create tokio runtime — the async PeriodicReader and batch exporters
-    // spawn tokio tasks, so the runtime must be active for their lifetime.
+    // The async PeriodicReader and batch exporters spawn tokio tasks, so the
+    // runtime must outlive them.
     let rt = tokio::runtime::Runtime::new()?;
 
     // Build all providers inside the runtime context so background tasks
@@ -911,11 +908,9 @@ pub fn push(
         eprintln!("Collecting current state...");
     }
 
-    // Create tokio runtime — needed for both WS streaming and the async
-    // PeriodicReader. The runtime stays alive for the entire function.
+    // WS streaming and the async PeriodicReader both need the runtime.
     let rt = tokio::runtime::Runtime::new()?;
 
-    // Build providers inside the runtime context.
     let (metric_provider, log_provider) = rt.block_on(async {
         let mp = build_metric_provider(cfg, endpoint, Duration::from_secs(60), headers, delta)?;
         let lp = if !no_logs {

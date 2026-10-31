@@ -37,10 +37,9 @@ impl fmt::Display for UserChangesPending {
             .collect();
         write!(
             f,
-            "Users changed on the Miniserver since its program file was saved, and loading the \
-             upload would delete that: {}. Load the program from the Miniserver in Loxone Config and \
-             save it back, so the program file holds the changes (the push then compiles against \
-             it and keeps them), or pass --discard-custom-changes to delete them.",
+            "Loading the upload would delete user changes made on the Miniserver: {}. To keep \
+             them, load the program from the Miniserver in Loxone Config and save it, or pass \
+             --discard-custom-changes to delete them.",
             users.join(", ")
         )
     }
@@ -49,9 +48,8 @@ impl fmt::Display for UserChangesPending {
 impl std::error::Error for UserChangesPending {}
 
 /// The hint when the live users cannot be read.
-pub(crate) const UNREADABLE: &str = "Cannot read the Miniserver's users to check for user \
-     changes, which loading the upload would delete. Fix that, or pass --discard-custom-changes \
-     to push without the check";
+pub(crate) const UNREADABLE: &str = "Cannot read the Miniserver's users to check for changes \
+     the upload would delete. Fix the error below, or pass --discard-custom-changes to skip the check";
 
 /// The live users' changes the program file `xml` does not hold.
 pub(crate) fn pending_in(xml: &[u8], live: &[User]) -> Result<Vec<PendingUserChange>> {

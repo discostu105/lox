@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
 `lox` controls, monitors and manages a [Loxone](https://www.loxone.com) Miniserver from the terminal.
-It talks to the Miniserver directly over your local network: no cloud, no runtime, one ~4 MB binary for
+It talks to the Miniserver directly over your local network, without a cloud service. It is one ~4 MB binary for
 Windows, macOS and Linux.
 
 The Loxone app is made for tapping on a phone. `lox` covers what it can't: scripts, cron jobs, headless
@@ -286,9 +286,9 @@ lox config push --force                             # deploy, verified
 Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). Reference:
 [COMMANDS.md](COMMANDS.md#config-as-code-lox-logic) and the [Lox Logic docs](crates/loxone-config/README.md).
 
-The toolchain is the [`loxl`](crates/loxone-config) crate in this repository, a library without network access (also on
-[crates.io](https://crates.io/crates/loxone-config)). `lox` uses it for `lox logic`, the logic diffs, the TUI's Wiring view
-and `lox config show/wiring/find/lint/history`.
+The toolchain is the [`loxone-config`](crates/loxone-config) crate in this repository, a library without network
+access (also on [crates.io](https://crates.io/crates/loxone-config)). Its CLI is the `loxl` binary. `lox` uses it for
+`lox logic`, the logic diffs, the TUI's Wiring view and `lox config show/wiring/find/lint/history`.
 
 ---
 
@@ -357,7 +357,7 @@ the config in Loxone Config.
 - An admin user for `lox log`
 - Windows (x86_64, ARM64), macOS (x86_64, Apple Silicon), Linux (x86_64, ARM64)
 
-TLS uses rustls; the Miniserver's self-signed certificate is accepted unless you set `verify_ssl: true`.
+TLS uses rustls. The Miniserver's self-signed certificate is accepted unless you set `verify_ssl: true`.
 
 ## Documentation
 
@@ -384,10 +384,6 @@ The parts of lox that other Rust projects can use are published as crates:
 
 ## Related projects
 
-- **[Lox Logic](crates/loxone-config)**: the config-as-code toolchain behind `lox logic`, the logic diffs and `lox config push`.
-  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir`), was merged
-  into this repository with its history, and is developed here as `crates/loxone-config`. Its crates.io package is
-  [`loxone-config`](https://crates.io/crates/loxone-config). The standalone repository is archived.
 - **[eisber/lox-cli](https://github.com/eisber/lox-cli)**: a separate project by Markus Cozowicz, based on an
   earlier version of lox. Its own code is AGPL-3.0 or commercial. It edits a config differently:
   - An AI agent builds the logic one command per step (`lox config add`, `set-param`, `wire-connector`), and
@@ -396,13 +392,13 @@ The parts of lox that other Rust projects can use are published as crates:
   - lox instead keeps the logic as `.loxl` source and compiles it with pinned UUIDs. Everything the source
     doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
 
-  The projects share no code; this repository contains no lox-cli code. `loxl test` runs its scenarios in
-  its own simulator; `--lox <path>` runs them in lox-cli's `lox sim` instead. Both projects install a binary
-  named `lox`, so rename one of them if you install both.
+  The projects share no code. `loxl test` runs its scenarios in its own simulator, and `--lox <path>` runs them
+  in lox-cli's `lox sim` instead. Both projects install a binary named `lox`, so rename one of them if you
+  install both.
 
 ## Status
 
-This project is an experiment. Expect rough edges; not every Miniserver configuration has been tested.
+This project is an experiment. Expect rough edges: not every Miniserver configuration has been tested.
 Contributions are welcome.
 
 **Use at your own risk.** Commands that change your Miniserver (`config upload`, `config push`, `reboot`,

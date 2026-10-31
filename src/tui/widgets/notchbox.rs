@@ -1,4 +1,4 @@
-//! NotchBox — the only pane primitive (§5.1, §6.3).
+//! NotchBox — the only pane primitive.
 //!
 //! ```text
 //! ╭┐²rooms┌┐by room┌────────────── ┐14┌─╮

@@ -1,4 +1,4 @@
-//! ¹ Home — room cards, attention, energy, pinned, quick, live (§5.2).
+//! ¹ Home — room cards, attention, energy, pinned, quick, live.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

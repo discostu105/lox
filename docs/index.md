@@ -8,7 +8,7 @@ nav_order: 1
   <div class="hero-badges">
     <span class="hero-badge">Single binary</span>
     <span class="hero-badge">No cloud</span>
-    <span class="hero-badge">AI-ready</span>
+    <span class="hero-badge">MCP server</span>
     <span class="hero-badge">~4MB</span>
   </div>
 
@@ -17,17 +17,6 @@ nav_order: 1
     Fast, scriptable CLI for the Loxone Miniserver.<br>
     Control, monitor and version your smart home from the terminal.
   </p>
-
-  <div class="install-block">
-    <div class="install-row">
-      <span class="install-label">macOS / Linux</span>
-      <div class="install-cmd"><code>brew install discostu105/lox/lox</code><button class="install-copy" type="button" aria-label="Copy">Copy</button></div>
-    </div>
-    <div class="install-row">
-      <span class="install-label">Windows (PowerShell)</span>
-      <div class="install-cmd"><code>irm https://raw.githubusercontent.com/discostu105/lox/main/install.ps1 | iex</code><button class="install-copy" type="button" aria-label="Copy">Copy</button></div>
-    </div>
-  </div>
 
   <div class="hero-buttons">
     <a href="{{ site.baseurl }}/getting-started" class="btn-hero btn-hero-primary">Get Started</a>
@@ -44,11 +33,11 @@ nav_order: 1
   <div class="feature-card">
     <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg></span>
     <div class="feature-title">Script your home</div>
-    <div class="feature-desc">Bash, Python, cron — use any tool. Chain commands with pipes and exit codes like any Unix CLI.</div>
+    <div class="feature-desc">Use Bash, Python or cron. Chain commands with pipes and exit codes like any Unix CLI.</div>
   </div>
   <div class="feature-card">
     <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span>
-    <div class="feature-title">AI agent ready</div>
+    <div class="feature-title">For AI agents</div>
     <div class="feature-desc">JSON output, schema discovery, fuzzy matching, dry-run mode, structured errors, and an MCP server (<code>lox mcp</code>).</div>
   </div>
   <div class="feature-card">
@@ -84,7 +73,7 @@ nav_order: 1
   <div class="feature-card">
     <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg></span>
     <div class="feature-title">Fast</div>
-    <div class="feature-desc">~80ms warm, ~1.2s cold. A static Rust binary with zero runtime dependencies.</div>
+    <div class="feature-desc">About 80 ms per command once the structure is cached. One static Rust binary.</div>
   </div>
 </div>
 
@@ -124,48 +113,10 @@ nav_order: 1
 
 ---
 
-<div class="section-label">Devices</div>
+<div class="section-label">More</div>
 
-## Supported control types
+## Install and reference
 
-| Type | Commands |
-|:-----|:---------|
-| `LightControllerV2` | `on`, `off`, `light mood <name> plus/minus/off/<id>`, `light moods <name>` |
-| `Jalousie` / `CentralJalousie` | `blind <name> up/down/stop/shade/pos <0-100>` |
-| `Switch` / `Pushbutton` | `on`, `off`, `input pulse` |
-| `Dimmer` | `light dim <name> <0-100>` |
-| `ColorPickerV2` | `light color <name> "#RRGGBB"` / `"hsv(h,s,v)"` / `"temp(brightness,kelvin)"` |
-| `Gate` / `CentralGate` | `gate <name> open/close/stop` |
-| `IRoomControllerV2` | `thermostat <name> temp <°C>` / `mode <auto…>` / `override <°C> [min]` |
-| `Alarm` | `alarm <name> arm/arm-home/disarm/quit` |
-| Door lock, intercom, wallbox | `door … lock/unlock/open`, `intercom … answer/hangup/open`, `charger … start/stop/pause` |
-| Analog / virtual inputs | `input set <name> <value>` |
-| Sensors, meters | `get`, `sensors`, `energy`, `history` (read-only) |
-| Any | `send <name> <raw-command>`, `lock`, `unlock` |
-
----
-
-<div class="section-label">Performance</div>
-
-## Benchmarks
-
-The structure (`LoxApp3.json`) is cached per context for 24 h:
-
-| Operation | Cold | Warm |
-|:----------|:-----|:-----|
-| `lox on "Licht"` | ~1.2s | **~80ms** |
-| `lox ls` | ~1.2s | **~80ms** |
-| `lox ls --values` | ~1.2s + N reqs | slower |
-| `lox status` | ~120ms | **~120ms** |
-
-<script>
-  document.querySelectorAll('.install-copy').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var text = btn.parentElement.querySelector('code').textContent;
-      navigator.clipboard.writeText(text).then(function () {
-        btn.textContent = 'Copied';
-        setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
-      });
-    });
-  });
-</script>
+Install steps are in [Getting started](getting-started). The control types `lox` supports, with their commands, are in
+the [README](https://github.com/discostu105/lox#controlling-the-home), and every command and flag is in
+[COMMANDS.md](https://github.com/discostu105/lox/blob/main/COMMANDS.md).

@@ -212,13 +212,13 @@ Miniserver context.
 | `alarm` | risky | `arm`, `arm-home`, `disarm` (confirmed), `quit` |
 | `door` | risky | `lock`, `unlock`, `open` (all confirmed) |
 | `send_command` | risky | Raw Loxone command, only with `--allow-raw` |
-| `learn_nfc_tag` | risky | Read an NFC tag's ID at a Code Touch (confirmed; tell the user to have the tag or unlocked phone ready). A secured Code Touch needs `LOX_VISU_PASSWORD` or `visu_password_file` in the config of the `lox mcp` process |
+| `learn_nfc_tag` | risky | Read an NFC tag's ID at a Code Touch (confirmed). Tell the user to have the tag or unlocked phone ready. A secured Code Touch needs `LOX_VISU_PASSWORD` or `visu_password_file` in the config of the `lox mcp` process |
 | `assign_nfc_tag` | risky | Pair an NFC tag with a user (confirmed) |
 | `remove_nfc_tag` | risky | Remove a user's NFC tag (confirmed) |
-| `set_access_code` | risky | Set a user's access code; the code is never echoed (confirmed) |
+| `set_access_code` | risky | Set a user's access code (confirmed). The code is never echoed |
 
 Controls are addressed exactly like on the command line: a name substring, `Name [Room]`, an alias
-or a UUID, with an optional `room` argument. Every tool publishes input and output schemas; every
+or a UUID, with an optional `room` argument. Every tool publishes input and output schemas. Every
 action tool accepts `dry_run: true` and returns the equivalent `lox` command line in `cli`.
 
 ### Safety
@@ -237,7 +237,7 @@ Nothing is sent unless you confirm. A declined confirmation is reported to the m
 and to push-buttons that open a door (recognized by their door/gate/lock/key icon).
 
 To have other controls confirmed too, list them in your config (`~/.lox/config.yaml`, or the context
-entry) by UUID, alias, or name with an optional `[Room]`; every action on them is then confirmed:
+entry) by UUID, alias, or name with an optional `[Room]`. Every action on them is then confirmed:
 
 ```yaml
 confirm:
@@ -246,10 +246,10 @@ confirm:
 
 | Flag | Effect |
 |:-----|:-------|
-| *(none)* | Read tools and everyday actions. Risky actions need your confirmation; clients that cannot ask are refused (`action_not_allowed`). |
+| *(none)* | Read tools and everyday actions. Risky actions need your confirmation. Clients that cannot ask are refused (`action_not_allowed`). |
 | `--read-only` | Only read tools are listed and callable. |
 | `--allow-risky` | Risky actions (including the `confirm:` list) run without asking. |
 | `--allow-raw` | Also `send_command` for raw Loxone commands. |
 
-The policy is fixed when the server starts; the model cannot change it. Risky tools carry
-`destructiveHint`, credentials never pass through tool arguments, and alarm PINs are never echoed back.
+The policy is fixed when the server starts, and the model cannot change it. Risky tools carry
+`destructiveHint`. Credentials never pass through tool arguments, and alarm PINs are never echoed back.

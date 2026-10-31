@@ -629,7 +629,6 @@ pub fn cmd_thermostat(
             print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &label);
         }
     } else {
-        // Show current thermostat state
         let xml = lox.get_all(&ctrl.uuid)?;
         let val = xml_attr(&xml, "value").unwrap_or("?");
         if ctx.json {

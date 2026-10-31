@@ -1,4 +1,4 @@
-//! ⁴ Energy — flow diagram, today's mirrored graph, meters table (§5.5).
+//! ⁴ Energy — flow diagram, today's mirrored graph, meters table.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
