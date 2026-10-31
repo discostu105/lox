@@ -64,8 +64,14 @@ types) contradict each other. Results and methodology:
       operating modes, analog values, `activate`; all seven weekday
       columns always written (oracle session 18: a save fills missing
       ones with "on all day"). `lxir diff` and `lxir drift` cover
-      every DayTimer's schedule (lox#162). Open: user-defined modes
-      (resolve the config's mode objects by title).
+      every DayTimer's schedule (lox#162).
+- [x] Operating modes from source (2026-10-31, D69): schedule lines
+      name any mode by title, `heating`/`cooling`; user-defined modes
+      minted with `Mode("…")` (oracle session 29, byte-identical).
+      Open: calendar entries (#211); adopting existing user modes.
+- [x] Users stay the Miniserver's (2026-10-31, D70): referenced by name
+      (access, notifications), never declared — the push guard owns
+      the live/program-file split.
 - [x] Minting virtual inputs (2026-10-29, D54): `VirtualIn` blocks
       land in the "Virtual Inputs" folder with a fresh `VI<n>`, the
       input range as claimed attribute parameters, and the defaults a

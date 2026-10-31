@@ -1211,15 +1211,33 @@ pub enum ScheduleItem {
 }
 
 /// `mon tue 06:00-08:00 = 21.5, 17:00-22:00` — the days (operating-mode
-/// keywords, kept as written: `weekdays` stays `weekdays`) and their
-/// intervals. No intervals (`holiday off`) lists the modes with the timer
-/// off all day.
+/// keywords, kept as written: `weekdays` stays `weekdays`; or modes by
+/// title, D69) and their intervals. No intervals (`holiday off`) lists the
+/// modes with the timer off all day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleLine {
-    pub days: Vec<String>,
+    pub days: Vec<Day>,
     pub intervals: Vec<Interval>,
     /// Trailing `#` comment, verbatim.
     pub comment: Option<String>,
+}
+
+/// The days of a schedule line: a built-in keyword (`mon`, `weekdays`,
+/// `heating`, …) or an operating mode of the config by its title
+/// (`"Party"`, D69).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Day {
+    Keyword(String),
+    Mode(String),
+}
+
+impl fmt::Display for Day {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Day::Keyword(k) => f.write_str(k),
+            Day::Mode(title) => f.write_str(&quote(title)),
+        }
+    }
 }
 
 /// `HH:MM-HH:MM [= value] [activate]`, times in minutes of the day
@@ -1251,7 +1269,8 @@ impl fmt::Display for Interval {
 
 impl fmt::Display for ScheduleLine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.days.join(" "))?;
+        let days: Vec<String> = self.days.iter().map(Day::to_string).collect();
+        f.write_str(&days.join(" "))?;
         if self.intervals.is_empty() {
             f.write_str(" off")?;
         }

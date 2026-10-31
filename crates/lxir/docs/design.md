@@ -2121,3 +2121,64 @@ Anything unverified is an error, not a heuristic:
     lox-sim's behavior (unverifiable; a wrong model makes a test pass
     that the house fails); keeping lox-cli as the default (an optional
     external binary cannot gate CI).
+- **D69 — Operating modes from source** (2026-10-31). A schedule line
+  may name any operating mode of the config by its title
+  (`"Party" 18:00-24:00`), and `heating`/`cooling` name the built-in
+  modes 11 and 12 (`Heizperiode`, `Kühlperiode`). A source may also
+  mint a user-defined mode: `party = Mode("Party")`, an object of the
+  "Betriebsmodi" folder like a virtual input of its folder (D54, D64),
+  with `I` (switch it from logic) and `Q` (its state).
+  - Evidence (house config, Loxone Config 17.2): the twelve built-in
+    modes carry the fixed UUIDs `…-000N-1500000000000000` and
+    `Mode="N-1"` (absent for the holiday mode, 0); user-defined modes
+    carry minted UUIDs and `Mode="-1"`, `"-2"`, … . A timer of the house
+    lists a user-defined mode as its first column, before Monday, and
+    every observed `Modes=` list is in ascending `Mode=` order, so the
+    compiler writes the columns that way. `UserModes=` counts the
+    columns before Monday: a save rewrote it from 3 to 2 for a timer
+    with a user mode, `Haus im Tiefschlaf` and `heating` (oracle
+    session 29), so a column after Sunday does not count.
+  - A title resolves against the compiled document, minted modes
+    included; a missing title lists the modes the config has, two modes
+    with one title are an error. A title naming a built-in mode merges
+    with its keyword (`mon` and `"Montag"` are one column).
+  - A fresh mode gets the next `Mode=` number below the lowest in the
+    document, and what a save gives it: `Nio="2"`, `WF="147456"`,
+    `<IoData></IoData>`, `<Display StateOnly="true"/>`. Oracle session
+    29: open → save of a mint and a timer with a minted mode, a GUI
+    user mode, the weekdays and `heating` came back byte-identical
+    (mode element; `Modes=`, `UserModes=`, `N=`, entries).
+  - Not covered: calendar entries (`CalendarEntry` under
+    `CalendarCaption`: which dates switch a mode on). The house has two,
+    both the same kind of date range (`Mode="4"`, `Month`/`Day` to
+    `Month2`/`Day2`, `CalType` = the mode's `Mode=` number); the other
+    kinds Loxone Config offers are unobserved, so they stay Loxone
+    Config's until an oracle session records them (#211). Adopting an
+    existing user-defined mode (to rename or delete it from source) is
+    not built; it is referenced by title or as an extern
+    (`extern party = Mode(title: "Party")`).
+- **D70 — Users stay the Miniserver's** (2026-10-31). Users, user
+  groups, passwords, NFC tags and access codes are owned by the
+  Miniserver's user management, never by source. The source references
+  users by name where logic needs them — access rights on an NFC Code
+  Touch (D49), notification recipients (D51) — and the compiler refuses
+  a name the base config does not hold. Three reasons:
+  - Credentials do not belong in a repository. A password or access
+    code in a module would be in every clone and every commit.
+  - The Miniserver changes users outside the program file: the app and
+    `lox user` write the user management, which keeps the change apart
+    from the program file until the program is saved again, and drops it
+    when an uploaded program loads. `lox config push` therefore compares
+    the live users with the users of the program file it compiles
+    against and refuses an upload that would discard a change
+    (`src/commands/push_users.rs`). A source that owned users would
+    fight that guard on every push: whatever the app changed since the
+    last download would read as drift to overwrite.
+  - Who lives in the house is not automation. The rights a user has at
+    a door are (and stay claims, D49); the user is not.
+  - Operating modes, the other half of #194, are D69: their titles and
+    schedules are logic, owned by source where the source mints them.
+  - Rejected: users declared in source with secrets taken from the
+    environment (the push guard and the app would still disagree about
+    who owns a change); users declared without secrets (a user whose
+    password the source cannot set is a half-owned object).

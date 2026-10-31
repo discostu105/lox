@@ -1297,35 +1297,33 @@ fn parse_schedule_line(
                  `<days> off`";
     let mut days = Vec::new();
     let mut i = 0;
-    while let Some(Tok::Ident(w)) = toks.get(i) {
-        if w == "off" || w == "activate" {
-            break;
-        }
-        if !super::schedule::is_day(w) {
-            let known: Vec<&str> = super::schedule::day_keywords().collect();
-            let mut hint = super::validate::suggest(w, known.iter().copied());
-            if hint.is_empty()
-                && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
-            {
-                hint = format!(" — did you mean `{short}`?");
+    loop {
+        match toks.get(i) {
+            Some(Tok::Ident(w)) if w == "off" || w == "activate" => break,
+            Some(Tok::Ident(w)) => {
+                if !super::schedule::is_day(w) {
+                    let known: Vec<&str> = super::schedule::day_keywords().collect();
+                    let mut hint = super::validate::suggest(w, known.iter().copied());
+                    if hint.is_empty()
+                        && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
+                    {
+                        hint = format!(" — did you mean `{short}`?");
+                    }
+                    return Err(err(format!(
+                        "unknown day `{w}`{hint} — days are {}, or an operating mode of \
+                         the config by its title (`\"Party\"`)",
+                        known.join(", ")
+                    )));
+                }
+                days.push(Day::Keyword(w.clone()));
             }
-            return Err(err(format!(
-                "unknown day `{w}`{hint} — days are {} (user-defined operating modes \
-                 are not supported yet)",
-                known.join(", ")
-            )));
+            Some(Tok::Str(s)) if s.trim().is_empty() => {
+                return Err(err("an operating mode's title cannot be empty".into()));
+            }
+            Some(Tok::Str(s)) => days.push(Day::Mode(s.clone())),
+            _ => break,
         }
-        days.push(w.clone());
         i += 1;
-    }
-    if let Some(Tok::Str(s)) = toks.get(i) {
-        return Err(err(format!(
-            "`\"{s}\"`: user-defined operating modes are not supported yet — only the \
-             built-in days ({})",
-            super::schedule::day_keywords()
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
     }
     if days.is_empty() {
         return Err(err(format!("expected a day first; {usage}")));

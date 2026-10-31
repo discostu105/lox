@@ -207,7 +207,7 @@ it only when it matches what you intended.
 | `is no exact decimal number of minutes` | time value on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a representable value |
 | `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |
 | `the timer is analog — … needs a value` / `the timer is digital` | interval values do not fit the DayTimer's analog flag | analog: `HH:MM-HH:MM = <value>` on every interval; digital: drop the values |
-| `user-defined operating modes are not supported yet` | a quoted mode title in a schedule line | use the built-in days; user modes stay with Loxone Config |
+| `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or mint the mode (`party = Mode("Party")`) |
 | `no <C Type="VirtualInCaption"> to hold a minted VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then recompile |
 | `` `Analog:` is "true" or "false" `` | a VirtualIn's `Analog:` got another value | write `Analog: "true"` (or drop it: digital) |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |

@@ -6,17 +6,19 @@
 //! list (`Ix=`, absent = 0), its span in minutes of the day (`From=`,
 //! absent = 0; `To=`, `1440` = midnight), its value (`V=`) and the
 //! needs-activation flag (`NeedActivate="true"`). `N=` counts the
-//! entries, `UserModes=` the modes beyond the seven weekdays. A
+//! entries, `UserModes=` the columns before the seven weekdays. A
 //! `<timer>.schedule = <set>` claim rewrites exactly these — the rest of
 //! the element stays the GUI's.
 //!
-//! Only the ten built-in operating modes are addressable: their UUIDs
-//! are fixed in every config (`00000000-0000-000N-1500000000000000`,
-//! corpus-wide). User-defined modes are objects of each config, with
-//! their own UUIDs; resolving them by title is not built yet, so they
-//! are refused rather than guessed.
+//! The built-in operating modes have fixed UUIDs in every config
+//! (`00000000-0000-000N-1500000000000000`, corpus-wide) and are named by
+//! keyword. Any mode of the config, a user-defined one included, can be
+//! named by its title (D69): the title resolves against the compiled
+//! document's `Mode` objects. A column's place in `Modes=` follows the
+//! modes' `Mode=` numbers, ascending — how every observed timer lists
+//! them (a user-defined mode, `Mode="-3"`, before Monday, `Mode="3"`).
 
-use super::ast::{Interval, Module, ScheduleDecl};
+use super::ast::{Day, Interval, Module, ScheduleDecl};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
 use crate::xml::{Attr, Element, Node};
@@ -38,6 +40,8 @@ const DAYS: &[(&str, &[u8])] = &[
     ("weekdays", &[4, 5, 6, 7, 8]),
     ("weekend", &[9, 10]),
     ("daily", &[4, 5, 6, 7, 8, 9, 10]),
+    ("heating", &[11]),
+    ("cooling", &[12]),
 ];
 
 pub(crate) fn is_day(word: &str) -> bool {
@@ -52,28 +56,51 @@ fn mode_uuid(n: u8) -> String {
     format!("00000000-0000-{n:04x}-1500000000000000")
 }
 
-/// A schedule resolved to modes: mode number → its intervals, sorted by
-/// start. A mode with no intervals is listed (the timer is off all day).
-/// The seven weekdays are always listed: Loxone Config fills a missing
-/// weekday column with an all-day entry on load (oracle session 18), so
-/// a weekday the schedule does not name is written as off, explicitly.
-pub(crate) type Program<'a> = BTreeMap<u8, Vec<&'a Interval>>;
+/// One column of a schedule before the document is known: a built-in
+/// mode by number, or a mode of the config by title.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Column {
+    Builtin(u8),
+    Titled(String),
+}
+
+impl Column {
+    fn name(&self) -> String {
+        match self {
+            Column::Builtin(n) => DAYS
+                .iter()
+                .find(|(_, m)| m == &[*n])
+                .map_or_else(|| format!("mode {n}"), |(k, _)| (*k).to_string()),
+            Column::Titled(t) => format!("\"{t}\""),
+        }
+    }
+}
+
+/// A schedule resolved to columns: column → its intervals, sorted by
+/// start. A column with no intervals is listed (the timer is off all
+/// day). The seven weekdays are always listed: Loxone Config fills a
+/// missing weekday column with an all-day entry on load (oracle session
+/// 18), so a weekday the schedule does not name is written as off,
+/// explicitly.
+pub(crate) type Program<'a> = BTreeMap<Column, Vec<&'a Interval>>;
 
 /// Resolve the day keywords and check the intervals: inside the day,
-/// non-empty, and non-overlapping per mode — the GUI's schedule editor
+/// non-empty, and non-overlapping per column — the GUI's schedule editor
 /// cannot represent two overlapping entries in one column.
 pub(crate) fn program(decl: &ScheduleDecl) -> std::result::Result<Program<'_>, String> {
-    let hm = |m: u16| format!("{:02}:{:02}", m / 60, m % 60);
     let mut out: Program = BTreeMap::new();
     for line in decl.lines() {
         for day in &line.days {
-            let modes = DAYS
-                .iter()
-                .find(|(k, _)| k == day)
-                .map(|(_, m)| *m)
-                .ok_or_else(|| format!("unknown day `{day}`"))?;
-            for &m in modes {
-                out.entry(m).or_default().extend(line.intervals.iter());
+            let columns: Vec<Column> = match day {
+                Day::Keyword(k) => DAYS
+                    .iter()
+                    .find(|(d, _)| d == k)
+                    .map(|(_, m)| m.iter().map(|&n| Column::Builtin(n)).collect())
+                    .ok_or_else(|| format!("unknown day `{k}`"))?,
+                Day::Mode(title) => vec![Column::Titled(title.clone())],
+            };
+            for c in columns {
+                out.entry(c).or_default().extend(line.intervals.iter());
             }
         }
         for iv in &line.intervals {
@@ -86,25 +113,108 @@ pub(crate) fn program(decl: &ScheduleDecl) -> std::result::Result<Program<'_>, S
         }
     }
     for weekday in 4..=10 {
-        out.entry(weekday).or_default();
+        out.entry(Column::Builtin(weekday)).or_default();
+    }
+    for (column, ivs) in &mut out {
+        sort_and_check(&column.name(), ivs)?;
+    }
+    Ok(out)
+}
+
+fn sort_and_check(day: &str, ivs: &mut [&Interval]) -> std::result::Result<(), String> {
+    let hm = |m: u16| format!("{:02}:{:02}", m / 60, m % 60);
+    ivs.sort_by_key(|iv| iv.from);
+    for pair in ivs.windows(2) {
+        if pair[1].from < pair[0].to {
+            return Err(format!(
+                "`{}` and `{}` overlap on {day} ({}–{})",
+                pair[0],
+                pair[1],
+                hm(pair[1].from),
+                hm(pair[0].to.min(pair[1].to))
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A mode the timer has a column for: its `Mode=` number (the column
+/// order) and its UUID.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ModeColumn {
+    number: i64,
+    uuid: String,
+}
+
+/// The config's operating modes: UUID, title and `Mode=` number (absent
+/// is 0, the holiday mode's).
+fn config_modes(doc: &LoxoneDoc) -> Vec<(String, String, i64)> {
+    doc.objects()
+        .iter()
+        .filter(|o| o.block_type == "Mode")
+        .filter_map(|o| {
+            let el = doc.element_at(&o.path)?;
+            let number = el.attr("Mode").and_then(|v| v.parse().ok()).unwrap_or(0);
+            Some((o.uuid.clone(), o.title.clone().unwrap_or_default(), number))
+        })
+        .collect()
+}
+
+/// Resolve each column against the document's modes, merging columns
+/// that turn out to be the same mode (`mon` and `"Montag"`).
+fn resolve<'a>(
+    program: Program<'a>,
+    modes: &[(String, String, i64)],
+) -> std::result::Result<BTreeMap<ModeColumn, Vec<&'a Interval>>, String> {
+    let mut out: BTreeMap<ModeColumn, Vec<&Interval>> = BTreeMap::new();
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    for (column, ivs) in program {
+        let mode = match &column {
+            Column::Builtin(n) => {
+                let uuid = mode_uuid(*n);
+                if *n > 10 && !modes.iter().any(|(u, _, _)| *u == uuid) {
+                    return Err(format!(
+                        "the config has no operating mode `{}` ({uuid})",
+                        column.name()
+                    ));
+                }
+                ModeColumn {
+                    number: i64::from(*n) - 1,
+                    uuid,
+                }
+            }
+            Column::Titled(title) => {
+                let found: Vec<_> = modes.iter().filter(|(_, t, _)| t == title).collect();
+                match found.as_slice() {
+                    [(uuid, _, number)] => ModeColumn {
+                        number: *number,
+                        uuid: uuid.clone(),
+                    },
+                    [] => {
+                        let titles: Vec<String> =
+                            modes.iter().map(|(_, t, _)| format!("\"{t}\"")).collect();
+                        return Err(format!(
+                            "the config has no operating mode titled \"{title}\" — it has {}",
+                            titles.join(", ")
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "{} operating modes are titled \"{title}\" — rename one in \
+                             Loxone Config",
+                            found.len()
+                        ));
+                    }
+                }
+            }
+        };
+        names
+            .entry(mode.uuid.clone())
+            .or_insert_with(|| column.name());
+        out.entry(mode).or_default().extend(ivs);
     }
     for (mode, ivs) in &mut out {
-        ivs.sort_by_key(|iv| iv.from);
-        for pair in ivs.windows(2) {
-            if pair[1].from < pair[0].to {
-                let day = DAYS
-                    .iter()
-                    .find(|(_, m)| m == &[*mode])
-                    .map_or("?", |(k, _)| *k);
-                return Err(format!(
-                    "`{}` and `{}` overlap on {day} ({}–{})",
-                    pair[0],
-                    pair[1],
-                    hm(pair[1].from),
-                    hm(pair[0].to.min(pair[1].to))
-                ));
-            }
-        }
+        sort_and_check(&names[&mode.uuid], ivs)?;
     }
     Ok(out)
 }
@@ -125,6 +235,7 @@ pub(crate) fn apply(
         .iter()
         .map(|o| (o.uuid.clone(), o.path.clone()))
         .collect();
+    let modes = config_modes(doc);
     let mut claimed: BTreeMap<&str, &str> = BTreeMap::new();
     for c in module.schedule_claims() {
         let uuid = uuid_of[&c.slug].as_str();
@@ -138,7 +249,9 @@ pub(crate) fn apply(
             .schedules()
             .find(|s| s.name == c.schedule)
             .expect("validate admitted only declared schedules");
-        let program = program(decl).map_err(|m| Error::Compile(format!("`{c}`: {m}")))?;
+        let program = program(decl)
+            .and_then(|p| resolve(p, &modes))
+            .map_err(|m| Error::Compile(format!("`{c}`: {m}")))?;
         let el = doc
             .element_at_mut(&path_of[uuid])
             .expect("object path from objects()");
@@ -173,10 +286,10 @@ pub(crate) fn apply(
 /// Rewrite `Modes=`, `UserModes=`, `N=` and the `<Entry>` children. The
 /// entries take the place of the old ones (after the connectors when
 /// there were none), in the order Loxone writes them: by mode index, then
-/// start. `UserModes=` counts the modes beyond the seven weekdays and is
+/// start. `UserModes=` counts the columns before the seven weekdays and is
 /// absent when there are none (corpus-wide, and how a save rewrites it).
-fn write_schedule(el: &mut Element, program: &Program) {
-    let modes: Vec<String> = program.keys().map(|&m| mode_uuid(m)).collect();
+fn write_schedule(el: &mut Element, program: &BTreeMap<ModeColumn, Vec<&Interval>>) {
+    let modes: Vec<String> = program.keys().map(|m| m.uuid.clone()).collect();
     let mut entries: Vec<Node> = Vec::new();
     for (ix, ivs) in program.values().enumerate() {
         for iv in ivs {
@@ -209,7 +322,9 @@ fn write_schedule(el: &mut Element, program: &Program) {
     el.set_attr("N", &entries.len().to_string());
     el.set_attr("Modes", &modes.join(","));
     el.remove_attr("UserModes");
-    let extra = program.keys().filter(|&&m| m < 4).count();
+    // The columns before Monday (`Mode="3"`): a heating or cooling column
+    // after Sunday does not count (oracle session 29).
+    let extra = program.keys().filter(|m| m.number < 3).count();
     if extra > 0 {
         let at = el
             .attrs
@@ -250,11 +365,17 @@ mod tests {
         let d = decl("\tweekdays 17:00-22:00\n\tmon 06:00-07:00\n");
         let p = program(&d).unwrap();
         assert_eq!(
-            p.keys().copied().collect::<Vec<_>>(),
-            [4, 5, 6, 7, 8, 9, 10]
+            p.keys().cloned().collect::<Vec<_>>(),
+            (4..=10).map(Column::Builtin).collect::<Vec<_>>()
         );
-        assert!(p[&9].is_empty(), "an unnamed weekday is off");
-        let mon: Vec<(u16, u16)> = p[&4].iter().map(|iv| (iv.from, iv.to)).collect();
+        assert!(
+            p[&Column::Builtin(9)].is_empty(),
+            "an unnamed weekday is off"
+        );
+        let mon: Vec<(u16, u16)> = p[&Column::Builtin(4)]
+            .iter()
+            .map(|iv| (iv.from, iv.to))
+            .collect();
         assert_eq!(mon, [(360, 420), (1020, 1320)]);
         assert_eq!(mode_uuid(10), "00000000-0000-000a-1500000000000000");
     }
@@ -266,5 +387,41 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("overlap on sun (11:00–12:00)"), "{err}");
+    }
+
+    fn modes() -> Vec<(String, String, i64)> {
+        vec![
+            (mode_uuid(4), "Montag".into(), 3),
+            ("u-party".into(), "Party".into(), -2),
+            ("u-tief".into(), "Tiefschlaf".into(), -1),
+        ]
+    }
+
+    #[test]
+    fn modes_by_title_order_by_their_number() {
+        let d = decl("\t\"Tiefschlaf\" off\n\t\"Party\" 18:00-23:00\n\tmon 06:00-07:00\n");
+        let r = resolve(program(&d).unwrap(), &modes()).unwrap();
+        let uuids: Vec<&str> = r.keys().map(|m| m.uuid.as_str()).take(3).collect();
+        assert_eq!(uuids, ["u-party", "u-tief", mode_uuid(4).as_str()]);
+    }
+
+    #[test]
+    fn a_title_naming_a_keyword_mode_merges_with_it() {
+        let d = decl("\tmon 06:00-07:00\n\t\"Montag\" 06:30-08:00\n");
+        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
+        assert!(err.contains("overlap on mon (06:30–07:00)"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_title_lists_the_modes_and_heating_needs_its_object() {
+        let d = decl("\t\"Partymodus\" 18:00-23:00\n");
+        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
+        assert!(
+            err.contains("no operating mode titled \"Partymodus\" — it has \"Montag\", \"Party\""),
+            "{err}"
+        );
+        let d = decl("\theating 00:00-24:00\n");
+        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
+        assert!(err.contains("no operating mode `heating`"), "{err}");
     }
 }
