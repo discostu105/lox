@@ -2,7 +2,7 @@
 # Wassertemperatur, Abdeckungs-Interlock und PV-Überschuss-Freigabe
 # für die Wärmepumpe. Kompiliert gegen examples/configs/pool.Loxone
 # und führt die Sprache vor: page, let, extern (iname / title+room),
-# Templates, Ausdrücke als Argument und am Draht, Einheiten-Werte,
+# Templates, Ausdrücke als Argument, benannte Signale, Einheiten-Werte,
 # Arithmetik als Formula-Block.
 # (Die Lebenszyklus-Statements `removed` und `moved` sind transient
 # und stehen deshalb in keinem Dauer-Beispiel — siehe language.md.)
@@ -45,11 +45,15 @@ nachlauf = Monoflop(
 	Time: 30min,
 )
 
-# Ausdrücke am Draht (D24): heizen, wenn Wasser unter Soll ist, die PV
+# Ein benanntes Signal (D81): heizen, wenn Wasser unter Soll ist, die PV
 # genug liefert und die Abdeckung zu ist (Verdunstungsverlust). Jeder
-# Teilausdruck wird ein Gatter-Block mit deterministischem Slug.
+# Teilausdruck wird ein Gatter-Block (`wp_bedarf__lt1`, …), der oberste
+# heißt wie das Signal — `wp_bedarf.Q` wird verdrahtet und getestet wie
+# ein deklarierter Block.
 
-wp_freigabe.On <- wassertemp.Q < wunschtemp and pv_ueberschuss.Q >= pv_schwelle and not abdeckung_offen.Q
+wp_bedarf = wassertemp.Q < wunschtemp and pv_ueberschuss.Q >= pv_schwelle and not abdeckung_offen.Q
+
+wp_freigabe.On <- wp_bedarf.Q
 
 # Arithmetik (D35): der ganze Rechenbaum wird EIN Formula-Block
 # (`pv_kw_input__f1`, Formel "I1/1000"), gespeist wird der Schwellwert-
@@ -66,7 +70,7 @@ pv_kw = AnalogThresholdTrigger(
 # Speicher und spielt jeden Ablauf im eingebauten Simulator durch.
 # Zuweisungen injizieren Signale, `tick` lässt simulierte Zeit
 # vergehen, `expect` prüft danach — auch auf den expandierten
-# Template-Blöcken (frost_alarm) und den Ausdrucks-Blöcken (…__and2).
+# Template-Blöcken (frost_alarm) und dem benannten Signal (wp_bedarf).
 
 test "Frostwächter schlägt an und beruhigt sich"
 	wassertemp.Q = 2
@@ -82,8 +86,8 @@ test "WP-Freigabe folgt PV und Abdeckung"
 	pv_ueberschuss.Q = 2000
 	abdeckung_offen.Q = 0
 	tick 3
-	expect wp_freigabe_on__and2.Q == 1
+	expect wp_bedarf.Q == 1
 	abdeckung_offen.Q = 1
 	tick 3
-	expect wp_freigabe_on__and2.Q == 0
+	expect wp_bedarf.Q == 0
 end
