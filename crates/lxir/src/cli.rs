@@ -6,10 +6,10 @@
 //! nothing here has semantics of its own.
 
 use lxir::ir::{
-    CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, adopt, adopt_one,
-    adopt_pages, apply_rekeys, compile, decompile, decompile_pages, lint_access, lint_dead_outputs,
-    lint_source, lint_tiles, lock_rekeys, plan_tests, read_results, rename_slug, slugify,
-    valid_slug, validate_ports,
+    CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, TestPlan,
+    TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile, decompile_pages,
+    lint_access, lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests,
+    read_results, rename_slug, run_tests, slugify, valid_slug, validate_ports,
 };
 use lxir::uuid::parse_serial;
 use lxir::{Lockfile, LoxoneDoc, Project};
@@ -73,13 +73,13 @@ USAGE:
   lxir test [<project-dir>] [--filter <substr>] [--lox <path>] [--show-spec]
             [--base <cfg.Loxone>] [--module <m.lxir | module-dir>]
             [--lock <lock.json>] [--serial <12-hex>] [--page <title>]
-        Run the module's `test \"…\"` … `end` scenarios (D36): compile in
-        memory (the lockfile is never written), translate each test into
-        a simulator scenario, and execute it with `lox sim run`
-        (lox-cli). The lox binary is found via --lox, then the LOX
-        environment variable, then PATH. --filter selects tests whose
-        name contains the substring; --show-spec prints the generated
-        scenario JSON instead of running. Exit 1 when a test fails.
+        Run the module's `test \"…\"` … `end` scenarios (D36, D68):
+        compile in memory (the lockfile is never written) and run each
+        test in lxir's simulator. A test depending on a block the
+        simulator does not model reports ERROR and names it. --filter
+        selects tests whose name contains the substring. --lox runs them
+        in lox-cli's `lox sim` instead; --show-spec (with --lox) prints
+        its scenario JSON. Exit 1 when a test fails.
 
   lxir rename <old-slug> <new-slug> [<project-dir>]
         Rename a module-level name — extern, block, constant, template,
@@ -797,57 +797,23 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
         return Ok(ExitCode::SUCCESS);
     }
+    if show_spec && lox_flag.is_none() {
+        return Err("--show-spec prints the lox-cli scenario JSON; it needs --lox".into());
+    }
+    let results = match lox_flag {
+        None => run_tests(&plan, &compiled),
+        Some(lox) => run_lox_sim(&lox, &plan, &compiled, show_spec)?,
+    };
     if show_spec {
-        println!("{}", plan.specs_json());
         return Ok(ExitCode::SUCCESS);
     }
-
-    // The simulator lives in lox-cli (`lox sim`): --lox flag, LOX env
-    // var, then PATH.
-    let lox = lox_flag
-        .or_else(|| std::env::var("LOX").ok())
-        .unwrap_or_else(|| "lox".to_string());
-    let probe = std::process::Command::new(&lox)
-        .args(["sim", "--help"])
-        .output();
-    if !probe.map(|o| o.status.success()).unwrap_or(false) {
-        return Err(format!(
-            "no sim-capable `lox` binary (tried `{lox}`) — install lox-cli \
-             (github.com/eisber/lox-cli) or point --lox / the LOX environment \
-             variable at it"
-        )
-        .into());
-    }
-
-    let tmp = std::env::temp_dir().join(format!("lxir-test-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp)?;
-    let cfg_path = tmp.join("compiled.Loxone");
-    let specs_path = tmp.join("specs.json");
-    std::fs::write(&cfg_path, compiled.to_bytes())?;
-    std::fs::write(&specs_path, plan.specs_json())?;
-    let output = std::process::Command::new(&lox)
-        .arg("sim")
-        .arg("run")
-        .arg(&cfg_path)
-        .arg("--sim-file")
-        .arg(&specs_path)
-        .args(["--output", "json", "--non-interactive"])
-        .output();
-    let _ = std::fs::remove_dir_all(&tmp);
-    let output = output?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return Err(format!(
-            "`{lox} sim run` produced no output; stderr: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
-        .into());
-    }
-
-    let results = read_results(&stdout, &plan)?;
     let mut failed = 0;
     for r in &results {
-        if r.pass {
+        if let Some(e) = &r.error {
+            failed += 1;
+            println!("test \"{}\" ... ERROR", r.name);
+            println!("    {e}");
+        } else if r.pass {
             println!("test \"{}\" ... ok", r.name);
         } else {
             failed += 1;
@@ -867,6 +833,57 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// Run the plan in lox-cli's `lox sim run` instead of the built-in
+/// simulator (`lxir test --lox <path>`). With `show_spec` it only prints
+/// the scenario JSON.
+fn run_lox_sim(
+    lox: &str,
+    plan: &TestPlan,
+    compiled: &LoxoneDoc,
+    show_spec: bool,
+) -> Result<Vec<TestResult>, AnyError> {
+    let specs = lox_specs(plan, compiled)?;
+    if show_spec {
+        println!("{}", specs.json);
+        return Ok(Vec::new());
+    }
+    let probe = std::process::Command::new(lox)
+        .args(["sim", "--help"])
+        .output();
+    if !probe.map(|o| o.status.success()).unwrap_or(false) {
+        return Err(format!(
+            "`{lox}` is not a sim-capable lox-cli binary (github.com/eisber/lox-cli); \
+             without --lox the built-in simulator runs the tests"
+        )
+        .into());
+    }
+    let tmp = std::env::temp_dir().join(format!("lxir-test-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp)?;
+    let cfg_path = tmp.join("compiled.Loxone");
+    let specs_path = tmp.join("specs.json");
+    std::fs::write(&cfg_path, compiled.to_bytes())?;
+    std::fs::write(&specs_path, &specs.json)?;
+    let output = std::process::Command::new(lox)
+        .arg("sim")
+        .arg("run")
+        .arg(&cfg_path)
+        .arg("--sim-file")
+        .arg(&specs_path)
+        .args(["--output", "json", "--non-interactive"])
+        .output();
+    let _ = std::fs::remove_dir_all(&tmp);
+    let output = output?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Err(format!(
+            "`{lox} sim run` produced no output; stderr: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+        .into());
+    }
+    Ok(read_results(&stdout, plan, &specs)?)
 }
 
 fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {

@@ -62,8 +62,8 @@ pv_kw = AnalogThresholdTrigger(
 	Off: 1.2,
 )
 
-# Simulator-Szenarien (D36): `lxir test` kompiliert das Modul im
-# Speicher und spielt jeden Ablauf mit `lox sim` (lox-cli) durch.
+# Simulator-Szenarien (D36, D68): `lxir test` kompiliert das Modul im
+# Speicher und spielt jeden Ablauf im eingebauten Simulator durch.
 # Zuweisungen injizieren Signale, `tick` lässt simulierte Zeit
 # vergehen, `expect` prüft danach — auch auf den expandierten
 # Template-Blöcken (frost_alarm) und den Ausdrucks-Blöcken (…__and2).

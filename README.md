@@ -381,9 +381,9 @@ TLS uses rustls; the Miniserver's self-signed certificate is accepted unless you
   - lox instead keeps the logic as `.lxir` source and compiles it with pinned UUIDs. Everything the source
     doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
 
-  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios through
-  lox-cli's `lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects install a binary named
-  `lox`, so rename one of them if you install both.
+  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios in
+  lxir's own simulator; `--lox <path>` runs them in lox-cli's `lox sim` instead. Both projects install a binary
+  named `lox`, so rename one of them if you install both.
 
 ## Status
 

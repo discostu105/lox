@@ -34,7 +34,7 @@ lxir check --json pages/                     # types, ports, directions; no base
 lxir compile                                 # in a lox.toml project; else
                                              #   --base --module --lock --out
 lxir diff --summary current.Loxone out.Loxone   # show this to the human
-lxir test                                    # the module's `test … end` blocks via lox sim
+lxir test                                    # the module's `test … end` blocks, simulated
 ```
 
 `lxir diff --summary` names every added block, changed parameter and wire

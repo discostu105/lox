@@ -211,7 +211,7 @@ lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign
 lxir scan configs/                   # personal data in configs: where, never
                                      # what; exit 1 if any (CI guard)
 lxir test                            # run the module's `test … end` blocks
-                                     # through lox-cli's `lox sim` (--lox/$LOX)
+                                     # in lxir's simulator
 ```
 
 A directory with a `lox.toml` — flat `key = "value"` lines naming the
@@ -284,11 +284,14 @@ test "Frostwächter schlägt an und beruhigt sich"
 end
 ```
 
-`lxir test` compiles in memory, hands the scenario to
-[`lox sim`](https://github.com/eisber/lox-cli) (found via `--lox`,
-`$LOX`, or PATH), and reports each `expect` with its actual value on
-failure. Comparators: `== > >= < <= ~=` (approximately); `clock "06:30"`
-sets the simulated time for `DayTimer`-style logic.
+`lxir test` compiles in memory, runs each scenario in lxir's own
+simulator, and reports each `expect` with its actual value on failure.
+Comparators: `== > >= < <= ~=` (approximately); `clock "06:30"` sets the
+simulated time for `DayTimer`-style logic. The simulator models the
+blocks Loxone documents ([docs/simulator.md](docs/simulator.md)); a test
+that depends on any other block reports an error naming it, never a
+guessed value. `--lox <path>` runs the scenarios in lox-cli's `lox sim`
+instead.
 
 ## Scope
 
@@ -404,10 +407,10 @@ or commercial. It takes another approach:
 
 lxir keeps the logic as source and compiles it with pinned identities, and
 it passes everything the source doesn't own through unchanged. lox-cli does
-not use lxir, and neither project contains the other's code. The one
-connection is `lxir test`: it runs its scenarios through lox-cli's
-`lox sim`, which it finds with `--lox`, `$LOX` or `PATH`. Both projects
-install a binary named `lox`.
+not use lxir, and neither project contains the other's code; lxir's
+simulator is its own, written from Loxone's documentation. `lxir test
+--lox <path>` can still run the scenarios in lox-cli's `lox sim`. Both
+projects install a binary named `lox`.
 
 ## License
 

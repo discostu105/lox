@@ -281,6 +281,11 @@ types) contradict each other. Results and methodology:
       params); the pool example's PV test exposed the bug.
 - [x] CI recipe: `examples/ci.sh` runs `lxir test` when a `lox` binary
       is available (`LOX=` or PATH), skips with a note otherwise.
+- [x] Own simulator (D68, 2026-10-31, #201): `lxir test` runs in
+      `lxir::sim` — 31 block types modelled from Loxone's KB and timing
+      diagrams ([simulator.md](simulator.md)), every other type refused
+      by name, addressing by UUID instead of title. `examples/ci.sh`
+      always runs the tests; lox-cli stays an option (`--lox`).
 - [x] CI recipe 2026-08-25: `examples/ci.sh`, a tree-untouched check path
       for a repo holding lxir sources — `check`, `fmt --check`, lock
       currency (compile against a lock copy must change nothing),
@@ -586,5 +591,5 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
 ## Explicit non-goals (unchanged)
 
 Transport, LoxCC, credentials (stay in `lox`/`lox-cli`); simulating block
-semantics (stays in `lox-cli sim`); replacing Loxone Config for hardware/
-visualization authoring.
+semantics Loxone does not document (D68: refused, never guessed);
+replacing Loxone Config for hardware/visualization authoring.
