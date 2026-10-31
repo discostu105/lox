@@ -10,6 +10,15 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-10-31 — devices and their settings in source
+
+The virtual inputs and outputs and the Modbus servers behind them are now source as well, declared, changed and adopted with their I/O like the logic on the pages. The settings of the physical sensors and actuators (description, unit, correction, timing) can be owned by the source too.
+
+### Added
+- **lxir**: virtual and Modbus devices from source (D64). The HTTP, UDP and text virtual inputs, virtual outputs and Modbus servers, together with their commands, devices, sensors and actuators, are declared like blocks. `device:` names the device an I/O hangs in, and the settings (`Address:`, `Check:`, `ModbusAddress:`, …) are parameters. `lxir adopt --uuid <device>` takes an existing device over with all its I/O and promotes the externs on them. `lxir coverage` lists the devices not managed yet.
+- **lxir**: the settings of physical inputs and outputs from source (D65). On an extern of an extension's, Tree, Air or 1-Wire input or output, `x.Desc = "…"`, `x.Unit = "<v.1> °C"`, `x.MinTime = 600` and the analog correction claim that setting; the original returns when the line leaves the source. `lxir diff` and the drift fingerprint now compare these settings and those of the devices; locks written by an older lxir still read as in sync.
+- **lox config push**: a new display unit is carried into the app catalogue (`LoxAPP3.json`), so the app shows the new format without a Loxone Config save.
+
 ## [0.35.0] — 2026-10-30 — the whole house in source
 
 The alarm, smoke alarm, irrigation, room controllers, energy flow monitor and meters join the blocks lxir manages,
