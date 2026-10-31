@@ -72,7 +72,7 @@ All keys: [COMMANDS.md › Terminal UI](https://github.com/discostu105/lox/blob/
 ## Config history
 
 *System › Config* lists your [config repo](config-versioning)'s snapshots with their logic diffs. `⏎` browses a
-snapshot (pages, blocks, lxir source, `/` search), `m` marks a commit to compare any two, `w` opens a changed
+snapshot (pages, blocks, Lox Logic source, `/` search), `m` marks a commit to compare any two, `w` opens a changed
 block's wiring at that snapshot, `P` pulls a new backup.
 
 ## Safety

@@ -1,9 +1,0 @@
-# Ein Projekt: eine Deployment-Einheit (docs/ir-spec.md). In diesem
-# Verzeichnis braucht `lxir compile` keine Flags, und check/fmt/drift
-# finden Modul und Lock von selbst. Pfade sind relativ zu dieser Datei.
-base = "../configs/pool.Loxone"
-module = "pages"
-lock = "pool.lock.json"
-out = "out.Loxone"
-serial = "504F94112233"
-page = "Pool"

@@ -30,14 +30,14 @@ lox tui                                          # live terminal UI
 | **Terminal UI** | `lox tui`: a full-screen live view of the house, with rooms, events, energy flow, system stats and the config wiring behind each control. |
 | **AI agents** | JSON output and exit codes on every command, `--dry-run`, a command schema, and an MCP server (`lox mcp serve`) for Claude, ChatGPT, Cursor and others. |
 | **Config versioning** | Download the Miniserver config into git on a schedule, with commit messages that list the logic that changed. Diff, inspect and restore any version. |
-| **Config as code** | Write logic in `.lxir` text files, review it in a pull request, compile it into the config and deploy it with a verified upload. |
+| **Config as code** | Write logic in `.loxl` text files, review it in a pull request, compile it into the config and deploy it with a verified upload. |
 | **Access** | NFC tags and access codes for users, the door access log, and *why can't this user open the door?* |
 
 ## Contents
 
 - [Install](#install) · [Setup](#setup)
 - [Controlling the home](#controlling-the-home) · [Terminal UI](#terminal-ui) · [AI agents and MCP](#ai-agents-and-mcp)
-- [Config versioning](#config-versioning-gitops) · [Config as code](#config-as-code-lxir)
+- [Config versioning](#config-versioning-gitops) · [Config as code](#config-as-code-lox-logic)
 - [Configuration reference](#configuration-reference) · [Requirements](#requirements)
 - [Documentation](#documentation) · [Related projects](#related-projects) · [Status](#status) · [License](#license)
 
@@ -237,7 +237,7 @@ Every snapshot stays inspectable:
 ```bash
 lox config diff v271                   # what changed in the logic since version 271
 lox config wiring "Licht" --trace up   # what drives this light, back to the sensors
-lox config show -p Wohnzimmer          # a logic page as lxir source
+lox config show -p Wohnzimmer          # a logic page as Lox Logic source
 lox config find bewegung               # search blocks by name, type, device, room
 lox config lint                        # dead blocks, unwired inputs and motors, duplicate names
 lox config history "Licht"             # how one block changed over time
@@ -251,7 +251,7 @@ Guide: [Config versioning](docs/guides/config-versioning.md).
 
 ---
 
-## Config as code (lxir)
+## Config as code (Lox Logic)
 
 Write Miniserver logic as text, review it in a pull request, and compile it into the real config:
 
@@ -260,32 +260,32 @@ temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: 28)
 jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 ```
 
-- `lox ir compile` writes the same XML Loxone Config would have written, and pins every UUID it creates in a
+- `lox logic compile` writes the same XML Loxone Config would have written, and pins every UUID it creates in a
   lockfile, so the next compile changes only what you changed.
 - Everything the source doesn't manage (hardware, rooms, visualization, other logic) passes through byte for
-  byte. `lox ir diff` shows it.
-- `lox ir drift` tells you when Loxone Config or the app changed the config since.
-- `lox ir coverage` shows how much of the config the source owns.
+  byte. `lox logic diff` shows it.
+- `lox logic drift` tells you when Loxone Config or the app changed the config since.
+- `lox logic coverage` shows how much of the config the source owns.
 - `lox config push --force` deploys a project: drift check, compile against the live config, a check for user
   changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
   runs the compiled file.
-- `lox ir lsp` is a language server for your editor.
-- `lox ir templates` ships tested templates for common automations, and `lox ir types --search` says what
+- `lox logic lsp` is a language server for your editor.
+- `lox logic templates` ships tested templates for common automations, and `lox logic types --search` says what
   each block type is for.
 
 ```bash
 lox config download --extract --save-as base.zip   # the deployed config → base.Loxone
-lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json   # take over existing blocks
-$EDITOR pages/*.lxir                                # with base, module and lock in lox.toml:
-lox ir compile && lox config diff base.Loxone out.Loxone
+lox logic adopt base.Loxone --out-dir pages --out-lock logic.lock.json   # take over existing blocks
+$EDITOR pages/*.loxl                                # with base, module and lock in lox.toml:
+lox logic compile && lox config diff base.Loxone out.Loxone
 lox config push --force                             # deploy, verified
 ```
 
 Walkthrough: [Config as Code guide](docs/guides/config-as-code.md). Reference:
-[COMMANDS.md](COMMANDS.md#config-as-code-lxir) and the [lxir docs](crates/lxir/README.md).
+[COMMANDS.md](COMMANDS.md#config-as-code-lox-logic) and the [Lox Logic docs](crates/loxone-config/README.md).
 
-The toolchain is the [`lxir`](crates/lxir) crate in this repository, a library without network access (also on
-[crates.io](https://crates.io/crates/lxir)). `lox` uses it for `lox ir`, the logic diffs, the TUI's Wiring view
+The toolchain is the [`loxl`](crates/loxone-config) crate in this repository, a library without network access (also on
+[crates.io](https://crates.io/crates/loxone-config)). `lox` uses it for `lox logic`, the logic diffs, the TUI's Wiring view
 and `lox config show/wiring/find/lint/history`.
 
 ---
@@ -375,27 +375,27 @@ The parts of lox that other Rust projects can use are published as crates:
 
 - **[loxone-client](crates/loxone-client)** ([crates.io](https://crates.io/crates/loxone-client)): talks to a
   Miniserver: the HTTP API, token auth, the WebSocket state stream, FTP backups, statistics.
-- **[lxir](crates/lxir)** ([crates.io](https://crates.io/crates/lxir)): the program file: the lossless `.Loxone`
-  model, backup ZIPs, the `.lxir` language, semantic diff. No network access.
+- **[loxone-config](crates/loxone-config)** ([crates.io](https://crates.io/crates/loxone-config)): the program file: the lossless `.Loxone`
+  model, backup ZIPs, the `.loxl` language, semantic diff. No network access.
 
 ---
 
 ## Related projects
 
-- **[lxir](crates/lxir)**: the config-as-code toolchain behind `lox ir`, the logic diffs and `lox config push`.
-  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir), was merged
-  into this repository with its history, and is developed here as `crates/lxir`. Its crates.io package is
-  [`lxir`](https://crates.io/crates/lxir). The standalone repository receives no further changes.
+- **[Lox Logic](crates/loxone-config)**: the config-as-code toolchain behind `lox logic`, the logic diffs and `lox config push`.
+  It started as the standalone repository [discostu105/lxir](https://github.com/discostu105/lxir) (crate `lxir`), was merged
+  into this repository with its history, and is developed here as `crates/loxone-config`. Its crates.io package is
+  [`loxone-config`](https://crates.io/crates/loxone-config). The standalone repository receives no further changes.
 - **[eisber/lox-cli](https://github.com/eisber/lox-cli)**: a separate project by Markus Cozowicz, based on an
   earlier version of lox. Its own code is AGPL-3.0 or commercial. It edits a config differently:
   - An AI agent builds the logic one command per step (`lox config add`, `set-param`, `wire-connector`), and
     lox-cli writes each step straight into the `.Loxone` XML.
   - It tests the result in an offline simulator, `lox sim`.
-  - lox instead keeps the logic as `.lxir` source and compiles it with pinned UUIDs. Everything the source
+  - lox instead keeps the logic as `.loxl` source and compiles it with pinned UUIDs. Everything the source
     doesn't own stays byte for byte, and lox verifies the result on the Miniserver after the upload.
 
-  The projects share no code; this repository contains no lox-cli code. `lxir test` runs its scenarios in
-  lxir's own simulator; `--lox <path>` runs them in lox-cli's `lox sim` instead. Both projects install a binary
+  The projects share no code; this repository contains no lox-cli code. `loxl test` runs its scenarios in
+  its own simulator; `--lox <path>` runs them in lox-cli's `lox sim` instead. Both projects install a binary
   named `lox`, so rename one of them if you install both.
 
 ## Status

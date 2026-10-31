@@ -1,6 +1,6 @@
 # Design: `lox tui` — Interactive Terminal UI
 
-> **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (lxir)
+> **Status: IMPLEMENTED (M0–M10)** — `lox tui` ships all six screens, the palette, the wiring overlay (loxone-config)
 > with trace and block history, System › Config diffs with the snapshot browser and compare, themes, mouse and `--demo`. Tested against a real Gen 2 Miniserver (read-only) and the
 > built-in demo house. The history chart (§5.10) and the facet picker (§4.5a) came from real use.
 > §13 records the decisions on the open questions, §14 what real data changed.
@@ -582,7 +582,7 @@ Round 3 (implemented) — only what the Miniserver actually reports:
   (`Off-delay 120 → `**`300`**` s`), not just as whole changed lines. If the repo isn't set up: a hint with `lox config init`.
   - The list shows when each config was **saved** in Loxone Config (the backup date), its version and what changed
     (the single change, or the diff's totals once computed).
-  - The diff is semantic (lxir): a totals line, then changes **grouped by config page**; identical lines collapse
+  - The diff is semantic (Lox Logic): a totals line, then changes **grouped by config page**; identical lines collapse
     (`×24`), and blocks removed and added again with new UUIDs show as one dim `re-created` line. Diffs are
     computed in the background, two at a time; a failure shows the error instead of "loading".
   - `P` = `lox config pull`: downloads the newest backup (Loxone Config writes one to the SD card on every save)
@@ -591,7 +591,7 @@ Round 3 (implemented) — only what the Miniserver actually reports:
     Miniserver). A pull re-reads the history and every diff. It never writes to or restores the Miniserver. The
     footer shows where the data comes from: each row is a git commit of `<ms>/config.Loxone` in `config_repo`
     (the repo is also in the frame's notch, `git · ~/…`). The diff header says what is compared: saved-in-Loxone-Config
-    date, version, pull date, then `lxir diff · commit A vs B (the backup before)`.
+    date, version, pull date, then `loxl diff · commit A vs B (the backup before)`.
   - `⇥` focuses the diff: a cursor row appears, `j`/`k` move it, and `⏎` shows the full diff line.
     `w` opens the wiring of the line's block in that snapshot (the older one for removed blocks). `⇥` goes back
     to the history.
@@ -646,7 +646,7 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
 │ ☼ Brightness Garden ━━━━━22.0k lx━━━━▶│Br               Qp │┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▶ · Stairs light     │
 │                                       ╰────────────────────╯                                   │
 │ ━━▶ live value from the stream     ┄┄▶ block without visualization: topology only               │
-╰┘⏎ follow wire└┘h l upstream · downstream└┘e events└┘Esc back└┘q close└──────┘lxir · r50.Loxone└─╯
+╰┘⏎ follow wire└┘h l upstream · downstream└┘e events└┘Esc back└┘q close└──────┘Lox Logic · r50.Loxone└─╯
 ```
 
 - Opened with `w` on a control (Rooms, Home, palette result) or on an event (Events). It shows the **block that
@@ -659,7 +659,7 @@ Only the active context has a stream. The others are polled cheaply (`/jdev/cfg/
   `text.faint` with their topology only. On a real config this is 13 % of all wires, but it covers the wires
   that matter most here: sensors in, controls out.
 - Source: the `.Loxone` file from the gitops checkout (`lox config pull`) if present, otherwise the TUI offers
-  "download config via FTP" once and caches it per context (structure-version keyed). Parsed with lxir.
+  "download config via FTP" once and caches it per context (structure-version keyed). Parsed with loxone-config.
 - Header: the control's current value, since when, and the input whose change came last before it
   ("triggered by"), from the event buffer; then the block type, its page and room (or device and room for
   hardware), and the parameters someone changed from their defaults with units (`MoveOn 900 s (15 min)`; `p`
@@ -688,7 +688,7 @@ logic of that snapshot:
 ```
 
 - **Pages** (block and wire counts) → `⏎` a page's **blocks** (title, type, room or device) → `⏎` a block's
-  wiring at that snapshot. `s` toggles the page between its blocks and its **lxir source** (`j`/`k`, `C-d`/`C-u`
+  wiring at that snapshot. `s` toggles the page between its blocks and its **Lox Logic source** (`j`/`k`, `C-d`/`C-u`
   scroll; names accented, comments faint). `Esc` goes back a level (source → blocks → pages → close), `h` goes up
   to the pages, `q` closes.
 - `/` searches every block of the snapshot by name, type, device, room or page (all words match); `⏎` opens the
@@ -962,7 +962,7 @@ src/tui/
     palette.rs help.rs confirm.rs picker.rs input.rs wiring.rs
   widgets/                notchbox.rs meter.rs dotmeter.rs dotspark.rs braille.rs flow.rs   (§6.3)
   pollers.rs              diagnostics, health, energy stats, sites (spawn_blocking + LoxClient)
-src/logic.rs              thin adapter over lxir: load .Loxone, index by UUID, neighborhood(uuid) → blocks + wires
+src/logic.rs              thin adapter over loxone-config: load .Loxone, index by UUID, neighborhood(uuid) → blocks + wires
 ```
 
 ### 8.3 Runtime
@@ -992,7 +992,7 @@ src/logic.rs              thin adapter over lxir: load .Loxone, index by UUID, n
 | `ratatui` | rendering and widgets | ~ 300 KB |
 | `crossterm` (feature `event-stream`) | terminal backend and async input | small |
 | `nucleo-matcher` | fuzzy matching | small |
-| `lxir` | `.Loxone` document model, wires, semantic diff (§12.1) | small (serde, serde_json, sha2, thiserror; all but sha2 already in the tree) |
+| `loxl` | `.Loxone` document model, wires, semantic diff (§12.1) | small (serde, serde_json, sha2, thiserror; all but sha2 already in the tree) |
 | `unicode-width` | display width of names (wide/combining characters) | small |
 | `libc` | SIGTERM/SIGHUP → restore the terminal | already in the tree |
 
@@ -1071,8 +1071,8 @@ UI state goes in `~/.lox/contexts/<n>/tui-state.yaml` (pins, mutes, palette hist
 | M6 | **Energy** | role detection, flow widget, meters, history chart | M1 |
 | M7 | **Palette** | fuzzy go-to, clap-parsed commands, completion, history, yank (OSC 52) | M2 |
 | M8 | **Sites** | multi-context polling, switcher, live context switch | M1 |
-| M5b | **Wiring (lxir)** | `src/logic.rs` over lxir, config fetch + cache, wiring overlay `w` (§5.9), inspector *wiring* tab | M2, M4 |
-| M9 | **System ops** | Config (gitops log + **lxir semantic diff**), Update/Reboot with typed confirm | M5, M5b |
+| M5b | **Wiring (loxone-config)** | `src/logic.rs` over loxone-config, config fetch + cache, wiring overlay `w` (§5.9), inspector *wiring* tab | M2, M4 |
+| M9 | **System ops** | Config (gitops log + **loxone-config semantic diff**), Update/Reboot with typed confirm | M5, M5b |
 | M10 | **Polish** | themes day/mono/neon, nerd icons, mouse, responsive breakpoints, scale tests, docs (COMMANDS.md, README, GitHub Pages), GIF | all |
 | (later) | **What-if** | optional: simulate "what would happen if…" via `lox-sim` behind a feature flag (§12.2) | M5b |
 
@@ -1081,11 +1081,11 @@ The former M11 spike is gone: the UUID mapping is verified (§12.1).
 
 ---
 
-## 12. Related projects: lxir and lox-cli
+## 12. Related projects: Lox Logic and lox-cli
 
 ### 12.1 `discostu105/lxir`: **yes — add it, as a regular dependency for M5b**
 
-lxir compiles `.Loxone` XML into a text IR (and back), with a semantic document model (`doc`: objects,
+Lox Logic compiles `.Loxone` XML into a text language, Lox Logic (and back), with a semantic document model (`doc`: objects,
 ports, wires), a verified connector table for 100+ block types, and a semantic `diff` that filters
 out locale noise. It has the same author and licensing as lox, and tiny dependencies
 (`serde`, `serde_json`, `sha2`, `thiserror`).
@@ -1109,16 +1109,16 @@ have a streamed source. Internal logic (AND/OR gates, memory flags, math) has no
 shows those wires dashed, topology only (§5.9). That is honest and still useful: the wires people ask about
 ("which sensor drives this light?") are exactly sensor → controller → output, and those are live.
 
-What lxir gives the TUI, with the API it already has:
+What Lox Logic gives the TUI, with the API it already has:
 
-| Where | lxir API | Value |
+| Where | Lox Logic API | Value |
 |-------|----------|-------|
 | **Wiring overlay** `w` (§5.9) and the inspector *wiring* tab | `LoxoneDoc::parse`, `objects()`, `ports(el)` with `inputs`, `wires()` | Very high. Answers "why is this on?" causally, with live values. Nothing else does this, including the Loxone app. |
 | **System › Config** (J11) | `diff::diff(a, b)` → added/removed/renamed blocks, `param_changes`, `wires_added/removed` | High. "block `Hallway Light` gained input from `Motion 2`", "`Off-delay` 120 → 300 s" instead of counts. Replaces `loxone_xml::diff_configs`. |
 | Rooms inspector | `ports()` parameters | Medium: config-side parameters (off-delays, thresholds) next to live states. |
 
 Recommendation: **add it.** Drop the spike; schedule it as **M5b** right after Events (§11), behind a thin
-`src/logic.rs` adapter so lxir API churn (it is v0) touches one file. No separate cargo feature is needed given
+`src/logic.rs` adapter so Lox Logic API churn (it is v0) touches one file. No separate cargo feature is needed given
 its size; if the binary grows noticeably, fold it under the existing `tui` feature. Measure the size in M5b.
 
 ### 12.2 `eisber/lox-cli`: reassessed without license concerns — **still no code merge; maybe `lox-sim` later**
@@ -1132,9 +1132,9 @@ current tree (~301 commits since 2026-04; last commit 2026-09-08):
 - **Shared code.** `client.rs`, `ftp.rs`, `ctx.rs` are byte-identical to ours; `main.rs`, `token.rs`, `gitops.rs`,
   `ws.rs` have diverged heavily. Nothing there is ahead of lox for runtime use.
 - **Runtime reuse for the TUI: none.** No per-type action mapping, no state decoding, no binary event parsing.
-- **Config model vs. lxir.** Heavy overlap with lxir's `doc`. lxir is the more rigorous one (byte-faithful
-  round-trip, UUID identity) and is already what we'd use. lxir's `lxir test` used lox-cli as its simulation
-  transport until it got a simulator of its own (lxir D68); `--lox` still runs lox-cli's.
+- **Config model vs. Lox Logic.** Heavy overlap with Lox Logic's `doc`. Lox Logic is the more rigorous one (byte-faithful
+  round-trip, UUID identity) and is already what we'd use. Lox Logic's `loxl test` used lox-cli as its simulation
+  transport until it got a simulator of its own (Lox Logic D68); `--lox` still runs lox-cli's.
 - **The simulator (`lox-sim`)** is the one genuinely interesting part: `.Loxone` → `SimGraph` → topological
   tick engine, `set_input`/`get_output`/`trace`, snapshot/restore, 224 registered block types (logic, timer, math
   solid; big controllers like `LightController2` only approximated; many stubs), ~500 tests. Signals are `f64`
@@ -1160,7 +1160,7 @@ for M0–M10.
 ## 13. Decisions (formerly open questions)
 
 Resolved in round 2: event journal (dropped — in-memory only), `␣` on a blind (decided, §4.3),
-theme name ("Loxone Night" stays), lxir timing (M5b, no spike needed).
+theme name ("Loxone Night" stays), Lox Logic timing (M5b, no spike needed).
 
 1. **Nerd Font default** — **off**, opt-in only via `--icons nerd` / `tui.yaml`. There is no reliable way
    to detect a Nerd Font; the help overlay mentions the option.

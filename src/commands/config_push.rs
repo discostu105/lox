@@ -1,4 +1,4 @@
-//! `lox config push` — deploy an lxir project to the Miniserver, verified end
+//! `lox config push` — deploy a Lox Logic project to the Miniserver, verified end
 //! to end.
 //!
 //! Each step stops the push when it fails:
@@ -9,7 +9,7 @@
 //!    upload deletes them: with any present, `--force` refuses unless
 //!    `--discard-custom-changes` says to delete them.
 //! 2. Drift check: the live config must still be the project's base, at least
-//!    semantically (`lox ir diff` would show no logic changes). A change saved
+//!    semantically (`lox logic diff` would show no logic changes). A change saved
 //!    from Loxone Config or the app since then is never overwritten. Users,
 //!    groups and access rights may differ: the report lists them as kept.
 //! 3. Compile the module against the live download, with a scratch copy of the
@@ -20,11 +20,11 @@
 //! 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced,
 //!    verified to extract to exactly the compiled file. Its app catalogue
 //!    (`LoxAPP3.json`, Loxone Config's from before) gets what the push changes
-//!    about the app's controls (`lxir::catalogue`: names, rooms, categories,
+//!    about the app's controls (`loxone_config::catalogue`: names, rooms, categories,
 //!    deleted and hidden controls, new push buttons and virtual inputs) and a
 //!    new `lastModified`; what it cannot carry over is named, for a save from
 //!    Loxone Config. `permissions.bin` is
-//!    regenerated for the compiled config when lxir reproduces the live one
+//!    regenerated for the compiled config when Lox Logic reproduces the live one
 //!    byte for byte; otherwise the live file stays, and the report says when
 //!    it no longer matches the compiled access rights. Without `--force` the
 //!    push ends here.
@@ -42,7 +42,7 @@
 //!    the verified state.
 //!
 //! With `--patched-from DOWNLOAD` the base is a byte patch of an earlier
-//! download (GUI-owned edits lxir cannot express): the live config must be
+//! download (GUI-owned edits Lox Logic cannot express): the live config must be
 //! byte-identical to DOWNLOAD, and the compile uses the patched base.
 
 use crate::app_catalogue::{self, StaleEntry};
@@ -50,9 +50,9 @@ use crate::config::Config;
 use crate::custom_changes::{self, CustomChange};
 use crate::{ftp, logic};
 use anyhow::{Context, Result, anyhow, bail};
-use lxir::archive;
-use lxir::ir::{CompileOptions, compile};
-use lxir::{Lockfile, LoxoneDoc, Project};
+use loxone_config::archive;
+use loxone_config::logic::{CompileOptions, compile};
+use loxone_config::{Lockfile, LoxoneDoc, Project};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -154,7 +154,7 @@ impl Miniserver for LiveMiniserver {
                     "The Miniserver did not run the upload within a minute of the program \
                      restart (its newest program file is still {before}). Check it, then \
                      compare what it runs with the compiled file (`lox config download \
-                     --extract`, `lox ir diff`), or push again with --reboot."
+                     --extract`, `lox logic diff`), or push again with --reboot."
                 );
             }
         }
@@ -176,7 +176,7 @@ impl Miniserver for LiveMiniserver {
                 bail!(
                     "The Miniserver did not answer within 5 minutes after the reboot. \
                      Check it, then compare what it runs with the compiled file \
-                     (`lox config download --extract`, `lox ir diff`)."
+                     (`lox config download --extract`, `lox logic diff`)."
                 );
             }
             std::thread::sleep(Duration::from_secs(5));
@@ -243,7 +243,7 @@ pub(crate) struct PushReport {
     pub app_catalogue_rebuilt: Option<bool>,
     /// What the staged ZIP carries as `permissions.bin`: `unchanged`,
     /// `regenerated` (for the compiled access rights), `kept` (the live file,
-    /// which lxir does not reproduce) or `absent`
+    /// which Lox Logic does not reproduce) or `absent`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<&'static str>,
     /// The kept `permissions.bin` does not match the compiled access rights:
@@ -269,8 +269,8 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     };
     let project_file = Project::find(&opts.project).ok_or_else(|| {
         anyhow!(
-            "No lox.toml in {} — `lox config push` deploys an lxir project \
-             (a directory with lox.toml naming base, module and lock; see `lox ir help`)",
+            "No lox.toml in {} — `lox config push` deploys a Lox Logic project \
+             (a directory with lox.toml naming base, module and lock; see `lox logic help`)",
             opts.project.display()
         )
     })?;
@@ -321,11 +321,11 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
             let base_xml = fs::read(&project.base)
                 .with_context(|| format!("Cannot read the base {}", project.base.display()))?;
             if base_xml != live_xml {
-                let drift = lxir::diff::diff(&parse(&base_xml)?, &parse(&live_xml)?);
+                let drift = loxone_config::diff::diff(&parse(&base_xml)?, &parse(&live_xml)?);
                 if !drift.logic_is_empty() {
                     bail!(
                         "The live config changed since the base: {}. Someone saved from \
-                         Loxone Config or the app. See what with `lox ir diff {} {}`, \
+                         Loxone Config or the app. See what with `lox logic diff {} {}`, \
                          bring the module up to date, and make the download the new base \
                          (`base` in lox.toml) before pushing.",
                         summary(&drift),
@@ -502,7 +502,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     fs::write(file("post-push.zip"), &post_zip)?;
     fs::write(&post_path, &post_xml)?;
     if post_xml != compiled {
-        let d = lxir::diff::diff(&parse(&compiled)?, &parse(&post_xml)?);
+        let d = loxone_config::diff::diff(&parse(&compiled)?, &parse(&post_xml)?);
         if !d.is_empty() {
             bail!(
                 "The Miniserver does not run what was pushed: {} between {} and {}. \
@@ -674,7 +674,7 @@ fn check_served_catalogue(
     Some(false)
 }
 
-/// `lox ir compile` for the project, against `base` instead of the project's
+/// `lox logic compile` for the project, against `base` instead of the project's
 /// own base.
 fn compile_project(
     project: &Project,
@@ -682,7 +682,7 @@ fn compile_project(
     lock: &mut Lockfile,
     opts: &PushOptions,
 ) -> Result<LoxoneDoc> {
-    let module = lxir::cli::read_module(&project.module.display().to_string())
+    let module = loxone_config::cli::read_module(&project.module.display().to_string())
         .map_err(|e| anyhow!("{e}"))?;
     let serial = project
         .serial
@@ -690,12 +690,12 @@ fn compile_project(
         .or_else(|| lock.target.miniserver_serial.clone())
         .context("No serial in lox.toml and none recorded in the lockfile")?;
     let options = CompileOptions {
-        machine: lxir::uuid::parse_serial(&serial)?,
+        machine: loxone_config::uuid::parse_serial(&serial)?,
         accept_version: opts.accept_version.clone(),
         mint_time_unix: chrono::Utc::now().timestamp(),
         page_title: project.page.clone(),
         allow_removals: opts.allow_removals,
-        // Re-laying out a page is a deliberate `lox ir compile --relayout`;
+        // Re-laying out a page is a deliberate `lox logic compile --relayout`;
         // a push deploys the placement the project already has.
         relayout: Vec::new(),
     };
@@ -715,7 +715,7 @@ struct Permissions {
 }
 
 /// `permissions.bin` for the compiled config. Loxone Config writes it next to
-/// the program, from the program and `LoxAPP3.json` (`lxir::permissions`).
+/// the program, from the program and `LoxAPP3.json` (`loxone_config::permissions`).
 /// Only when the generator reproduces the live file byte for byte does the
 /// push trust it with the compiled config; otherwise the live file stays,
 /// stale when the compiled config assigns users and groups differently.
@@ -727,7 +727,7 @@ fn permissions_for(
     compiled: &LoxoneDoc,
     compiled_catalogue: Option<&[u8]>,
 ) -> Result<Permissions> {
-    use lxir::permissions::{assignments, encode, generate};
+    use loxone_config::permissions::{assignments, encode, generate};
     let Some(bin) = archive::read_entry(live_zip, archive::PERMISSIONS_ENTRY)? else {
         return Ok(Permissions {
             status: "absent",
@@ -742,10 +742,10 @@ fn permissions_for(
     let regenerated = app.and_then(|app| {
         let live_bin = generate(live, &app).map_err(|e| e.to_string())?;
         if encode(&live_bin) != bin {
-            return Err("lxir does not reproduce the live file".to_string());
+            return Err("Lox Logic does not reproduce the live file".to_string());
         }
         let compiled_app = match compiled_catalogue {
-            Some(c) => String::from_utf8(c.to_vec()).expect("lxir writes UTF-8"),
+            Some(c) => String::from_utf8(c.to_vec()).expect("Lox Logic writes UTF-8"),
             None => app,
         };
         Ok(encode(
@@ -827,7 +827,7 @@ fn change_lines(live: &[u8], compiled: &[u8]) -> Result<Vec<String>> {
     if !lines.is_empty() {
         return Ok(lines);
     }
-    let d = lxir::diff::diff(&parse(live)?, &parse(compiled)?);
+    let d = loxone_config::diff::diff(&parse(live)?, &parse(compiled)?);
     Ok(vec![if d.is_empty() {
         "no semantic changes: only bytes outside the logic differ".to_string()
     } else {
@@ -836,7 +836,7 @@ fn change_lines(live: &[u8], compiled: &[u8]) -> Result<Vec<String>> {
 }
 
 /// One-line totals of a semantic diff.
-fn summary(d: &lxir::diff::DocDiff) -> String {
+fn summary(d: &loxone_config::diff::DocDiff) -> String {
     let parts = [
         (d.added.len(), "added"),
         (d.removed.len(), "removed"),
@@ -1020,9 +1020,9 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
-    const EXAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/lxir/examples");
+    const EXAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/loxone-config/examples");
 
-    /// lxir's example project in a temp dir, with the base next to it.
+    /// Lox Logic's example project in a temp dir, with the base next to it.
     fn project() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let src = Path::new(EXAMPLES).join("project");
@@ -1399,7 +1399,7 @@ mod tests {
             archive::compress_loxcc(fragment.as_bytes()).unwrap(),
         )]);
         fs::write(
-            dir.path().join("pages/technik.lxir"),
+            dir.path().join("pages/technik.loxl"),
             "page \"Technik\"\n\nremoved netz_warnung\n",
         )
         .unwrap();
@@ -1493,7 +1493,7 @@ mod tests {
         use std::io::Write;
         let dir = project();
         fs::write(
-            dir.path().join("pages/zz_name.lxir"),
+            dir.path().join("pages/zz_name.loxl"),
             "extern technik = Switch(uuid: \"30000006-0000-0060-ffff504f94112233\")\n\
              technik.title = \"Poolpumpe\"\n",
         )
@@ -1674,13 +1674,15 @@ mod tests {
 
     fn generated(xml: &[u8]) -> Vec<u8> {
         let doc = LoxoneDoc::parse(xml).unwrap();
-        lxir::permissions::encode(&lxir::permissions::generate(&doc, &loxapp3()).unwrap())
+        loxone_config::permissions::encode(
+            &loxone_config::permissions::generate(&doc, &loxapp3()).unwrap(),
+        )
     }
 
     /// The project module also gives bob access to the Code Touch.
     fn grant_bob(dir: &Path) {
         fs::write(
-            dir.join("pages/zz_access.lxir"),
+            dir.join("pages/zz_access.loxl"),
             format!(
                 "extern front_door = NfcCodeTouch(uuid: \"{DOOR}\")\n\n\
                  access front_door\n\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Always\"\nend\n"

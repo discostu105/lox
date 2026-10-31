@@ -1,0 +1,65 @@
+# Tests der Sicherheitsvorlagen (templates/sicherheit.loxl) im Simulator.
+
+page "Logik"
+
+tuer = VirtualIn("Haustür offen")
+melder = VirtualIn("Wassermelder")
+abwesend = VirtualIn("Abwesend")
+
+hinweis = tuer_offen_hinweis(
+	kontakt: tuer,
+)
+
+wasser = wasseralarm(
+	melder: melder,
+)
+
+alarm = alarm_abwesend(
+	kontakt: tuer,
+	abwesend: abwesend,
+)
+
+test "tuer_offen_hinweis: nach 3 Minuten"
+	tuer.Q = 1
+	tick 170
+	expect hinweis_ausgang.Q == 0
+	tick 20
+	expect hinweis_ausgang.Q == 1
+	tuer.Q = 0
+	tick 2
+	expect hinweis_ausgang.Q == 0
+end
+
+test "wasseralarm: 60 Sekunden"
+	melder.Q = 1
+	tick 2
+	expect wasser_ausgang.Q == 1
+	tick 70
+	expect wasser_ausgang.Q == 0
+end
+
+test "alarm_abwesend: nach der Frist, höchstens 3 Minuten"
+	abwesend.Q = 1
+	tick 2
+	tuer.Q = 1
+	tick 2
+	tuer.Q = 0
+	tick 20
+	expect alarm_ausgang.Q == 0
+	tick 15
+	expect alarm_ausgang.Q == 1
+	tick 150
+	expect alarm_ausgang.Q == 1
+	tick 40
+	expect alarm_ausgang.Q == 0
+end
+
+test "alarm_abwesend: rechtzeitig entschärft"
+	abwesend.Q = 1
+	tick 2
+	tuer.Q = 1
+	tick 10
+	abwesend.Q = 0
+	tick 60
+	expect alarm_ausgang.Q == 0
+end

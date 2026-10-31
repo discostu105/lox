@@ -5,7 +5,7 @@ parent: Guides
 nav_order: 5
 ---
 
-# Config as Code (lxir)
+# Config as Code (Lox Logic)
 {: .no_toc }
 
 Write Miniserver logic as text, review it in a pull request, deploy it verified.
@@ -21,23 +21,23 @@ Write Miniserver logic as text, review it in a pull request, deploy it verified.
 
 ## How it works
 
-A Miniserver's logic lives in one `.Loxone` XML file that only Loxone Config can edit. `lox ir` runs the
-[lxir](https://github.com/discostu105/lox/tree/main/crates/lxir) toolchain, which treats it like Terraform treats
+A Miniserver's logic lives in one `.Loxone` XML file that only Loxone Config can edit. `lox logic` runs the
+[Lox Logic](https://github.com/discostu105/lox/tree/main/crates/loxone-config) toolchain, which treats it like Terraform treats
 infrastructure:
 
 | | |
 |:--|:--|
-| **Module** (`*.lxir`) | Your source: the blocks, wires and parameters you manage |
+| **Module** (`*.loxl`) | Your source: the blocks, wires and parameters you manage |
 | **Base** (`.Loxone`) | The config the Miniserver runs now (a download) |
 | **Lockfile** (`*.lock.json`) | Pins every UUID the compiler minted, so the next compile changes only what you changed |
 | **Out** (`.Loxone`) | Base + module, written exactly as Loxone Config would have drawn it |
 
 You manage only the logic you choose. Hardware, rooms, visualization, users and everyone else's logic pass through
-byte for byte. Nothing in `lox ir` talks to the Miniserver; `lox config push` does the transport.
+byte for byte. Nothing in `lox logic` talks to the Miniserver; `lox config push` does the transport.
 
 {: .note }
-`lox ir …` and the standalone `lxir …` binary are the same CLI, so lxir's docs apply word for word.
-`lox ir help` lists every command and flag.
+`lox logic …` and the standalone `loxl …` binary are the same CLI, so Lox Logic's docs apply word for word.
+`lox logic help` lists every command and flag.
 
 ## The language in one example
 
@@ -81,8 +81,8 @@ end
 
 The declaration owns that Code Touch's access: whoever it leaves out loses the right on the next push. Users, groups,
 schedules, NFC tags and codes are still created in Loxone Config or the app; a title the config doesn't have stops
-the compile. `lox ir adopt` and `lox ir decompile` write the declarations for the rights the config has, and
-`lox ir lint` names users whose tag or code opens no Code Touch.
+the compile. `lox logic adopt` and `lox logic decompile` write the declarations for the rights the config has, and
+`lox logic lint` names users whose tag or code opens no Code Touch.
 
 ### Switching times and app switches
 
@@ -122,8 +122,8 @@ end
 `recipients` works like `access`: whoever it leaves out stops getting the notification. Members of *Full access*
 always get it.
 
-The full language: [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md).
-Worked examples: [crates/lxir/examples](https://github.com/discostu105/lox/tree/main/crates/lxir/examples).
+The full language: [language.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/language.md).
+Worked examples: [crates/loxone-config/examples](https://github.com/discostu105/lox/tree/main/crates/loxone-config/examples).
 
 ## Set up a project
 
@@ -132,14 +132,14 @@ A directory with a `lox.toml` is a project: one Miniserver, one deployment targe
 ```bash
 mkdir haus && cd haus && git init
 lox config download --extract --save-as base.zip     # → base.zip + base.Loxone
-lox ir decompile base.Loxone | less                  # read-only view of every page
+lox logic decompile base.Loxone | less                  # read-only view of every page
 ```
 
 ```toml
 # lox.toml — paths are relative to this file
 base   = "base.Loxone"       # the deployed config (required)
-module = "pages"             # a .lxir file or a directory of them (required)
-lock   = "lxir.lock.json"    # default: lxir.lock.json
+module = "pages"             # a .loxl file or a directory of them (required)
+lock   = "logic.lock.json"    # default: logic.lock.json
 out    = "out.Loxone"        # default: out.Loxone
 serial = "504F94112233"      # in minted UUIDs; push checks it
 ```
@@ -147,12 +147,12 @@ serial = "504F94112233"      # in minted UUIDs; push checks it
 Then start in one of two ways:
 
 ```bash
-# Take over the existing blocks lxir can manage (one file per page)
-lox ir adopt base.Loxone --out-dir pages --out-lock lxir.lock.json
+# Take over the existing blocks Lox Logic can manage (one file per page)
+lox logic adopt base.Loxone --out-dir pages --out-lock logic.lock.json
 
 # …or adopt one block, e.g. one you just drew in Loxone Config
-lox ir adopt base.Loxone --uuid <uuid> --as stiegenlicht \
-    --module pages --lock lxir.lock.json
+lox logic adopt base.Loxone --uuid <uuid> --as stiegenlicht \
+    --module pages --lock logic.lock.json
 ```
 
 Or write a new page from scratch in `pages/`. Find UUIDs and names with `lox config find` and
@@ -165,15 +165,15 @@ warning) and keeps working, untouched, as part of the base.
 ## The edit loop
 
 ```bash
-lox ir check                          # parse + validate, errors with line numbers
-lox ir fmt --write                    # canonical formatting
-lox ir compile                        # base + module + lock → out.Loxone, lock updated
+lox logic check                          # parse + validate, errors with line numbers
+lox logic fmt --write                    # canonical formatting
+lox logic compile                        # base + module + lock → out.Loxone, lock updated
 lox config diff base.Loxone out.Loxone   # what changes, by name, page by page
-lox ir lint                           # unused names, blocks whose outputs feed nothing
+lox logic lint                           # unused names, blocks whose outputs feed nothing
 ```
 
-`lox config diff` is the readable review: names, pages and values. `lox ir diff --exit-code` is the same
-comparison by UUID, with exit code 1 when anything differs (for scripts and CI). `lox ir diff --summary` says it
+`lox config diff` is the readable review: names, pages and values. `lox logic diff --exit-code` is the same
+comparison by UUID, with exit code 1 when anything differs (for scripts and CI). `lox logic diff --summary` says it
 as a commit message, by title and port name: its first line is the subject.
 
 ```
@@ -209,7 +209,7 @@ Each step stops the push when it fails:
    Miniserver holds it in `/sys/custom/`. The download doesn't contain it and the upload would delete it, so
    `--force` refuses and names what is there.
 2. **Drift check:** the live logic must still be your `base`. If someone saved from Loxone Config or the app since,
-   the push refuses and names the `lox ir diff` to run. Changed users, groups, tags, codes or access rights don't
+   the push refuses and names the `lox logic diff` to run. Changed users, groups, tags, codes or access rights don't
    stop it: the push lists them as kept as live.
 3. Compile against the live download, so users, passwords, access rights and layout stay as they are live.
 4. Show the changes and check the users: users, groups, NFC tags and codes changed in the app after the program file
@@ -219,7 +219,7 @@ Each step stops the push when it fails:
    file. The app's catalogue in it (`LoxAPP3.json`) gets the push's changes to the app's controls: names, rooms,
    categories, deleted controls, new push buttons, switches, memory flags, timers and sensor displays. What it cannot carry over is named; the app shows
    those as before until Loxone Config saves. If your module grants or
-   revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided lxir
+   revokes access ([above](#who-may-open-a-door)), `permissions.bin` is regenerated to match, provided Lox Logic
    reproduces the live one exactly; otherwise the push warns that it stays stale. Without `--force` the push ends
    here.
 6. Upload as `/prog/sps_new.zip` and restart the program, as Loxone Config's save does: the Miniserver runs the
@@ -254,35 +254,35 @@ Loxone Config, the app and the Miniserver itself also write the config. Check be
 
 ```bash
 lox config download --extract --save-as live.zip
-lox ir drift live.Loxone              # exit 0: in sync with the last compile; 1: someone wrote since
+lox logic drift live.Loxone              # exit 0: in sync with the last compile; 1: someone wrote since
 lox config diff base.Loxone live.Loxone   # what they changed
 ```
 
 If they changed something you don't manage, point `base` in `lox.toml` at `live.Loxone` and compile again. If they
-touched a managed block, bring the module up to date first (or `lox ir adopt --uuid` a block they added).
+touched a managed block, bring the module up to date first (or `lox logic adopt --uuid` a block they added).
 
 ## Tests, CI and editors
 
-- **Tests:** `test "…" … end` blocks in a module set inputs, advance time and `expect` outputs. `lox ir test` runs
-  them against the compiled config in lxir's simulator, which models the blocks Loxone documents and names any
+- **Tests:** `test "…" … end` blocks in a module set inputs, advance time and `expect` outputs. `lox logic test` runs
+  them against the compiled config in the Lox Logic simulator, which models the blocks Loxone documents and names any
   other block a test depends on
-  ([simulator.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/simulator.md)).
-- **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/lxir/examples/ci.sh) checks
+  ([simulator.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/simulator.md)).
+- **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/loxone-config/examples/ci.sh) checks
   parsing, formatting, lock currency and byte-determinism; `--sync` also requires the sources to match the deployed
   config.
-- **No personal data in git:** a real config carries the address, users, codes and serials. `lox ir scan <file|dir>`
+- **No personal data in git:** a real config carries the address, users, codes and serials. `lox logic scan <file|dir>`
   lists where (element and attribute, never the value) and exits 1, so a CI step or pre-commit hook can refuse it.
-- **Rename safely:** `lox ir rename old_slug new_slug` renames across all files and the lock, identities kept.
+- **Rename safely:** `lox logic rename old_slug new_slug` renames across all files and the lock, identities kept.
 - **VS Code:** syntax highlighting and snippets in
-  [editor/vscode](https://github.com/discostu105/lox/tree/main/crates/lxir/editor/vscode).
-- **AI agents:** `lox ir check --json` gives machine-readable errors; the
-  [agent guide](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/agents.md) has the rules.
+  [editor/vscode](https://github.com/discostu105/lox/tree/main/crates/loxone-config/editor/vscode).
+- **AI agents:** `lox logic check --json` gives machine-readable errors; the
+  [agent guide](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/agents.md) has the rules.
 
 ## Reference
 
 | Doc | Contents |
 |:----|:---------|
-| [lxir README](https://github.com/discostu105/lox/blob/main/crates/lxir/README.md) | Overview, every CLI command, library use |
-| [ir-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/ir-spec.md) | The `.lxir` language |
-| [lockfile-spec.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/lockfile-spec.md) | The lockfile format |
-| [vision.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/vision.md) | Why, and the "three writers, one file" model |
+| [Lox Logic README](https://github.com/discostu105/lox/blob/main/crates/loxone-config/README.md) | Overview, every CLI command, library use |
+| [language.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/language.md) | The `.loxl` language |
+| [lockfile-spec.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/lockfile-spec.md) | The lockfile format |
+| [vision.md](https://github.com/discostu105/lox/blob/main/crates/loxone-config/docs/vision.md) | Why, and the "three writers, one file" model |

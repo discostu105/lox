@@ -1,0 +1,11 @@
+/target
+/corpus
+*.out.Loxone
+
+# Real Miniserver configs and their derivatives contain personal data —
+# never commit them. Synthetic fixtures live in examples/configs/.
+/sps_*.Loxone
+/sps_*.zip
+/*.Loxone
+/out.loxl
+__pycache__/

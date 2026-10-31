@@ -1,0 +1,89 @@
+# Pool-Automatik — der End-to-End-Showcase aus der Design-Skizze:
+# Wassertemperatur, Abdeckungs-Interlock und PV-Überschuss-Freigabe
+# für die Wärmepumpe. Kompiliert gegen examples/configs/pool.Loxone
+# und führt die Sprache vor: page, let, extern (iname / title+room),
+# Templates, Ausdrücke als Argument und am Draht, Einheiten-Werte,
+# Arithmetik als Formula-Block.
+# (Die Lebenszyklus-Statements `removed` und `moved` sind transient
+# und stehen deshalb in keinem Dauer-Beispiel — siehe language.md.)
+
+page "Pool"
+
+let wunschtemp = 26
+let pv_schwelle = 1500
+
+extern wassertemp = VirtualIn(iname: "VI1")
+extern pv_ueberschuss = VirtualIn(iname: "VI2")
+extern abdeckung_offen = VirtualIn(iname: "VI3")
+
+# Zwei Schalter heißen "Freigabe" — der Raum macht den Titel eindeutig.
+
+extern wp_freigabe = Switch(title: "Freigabe", room: "Technikraum")
+
+# Ein wiederverwendbarer Körper (D23): pro Instanz expandiert, der
+# Block der Instanz `frost` heißt dann `frost_alarm`.
+
+template waechter(sensor: VirtualIn, grenze = 3)
+	alarm = Less(
+		"Unter Grenzwert",
+		Input1: sensor.Q,
+		Input2: grenze,
+	)
+end
+
+frost = waechter(
+	sensor: wassertemp,
+)
+
+# Ein Ausdruck als Argument (D26) und ein Einheiten-Wert (D27): der
+# Monoflop hält nach Erreichen der Wunschtemperatur noch 30min —
+# kompiliert exakt zu Def="1800".
+
+nachlauf = Monoflop(
+	"Filter-Nachlauf",
+	InputTrigger: wassertemp.Q >= wunschtemp,
+	Time: 30min,
+)
+
+# Ausdrücke am Draht (D24): heizen, wenn Wasser unter Soll ist, die PV
+# genug liefert und die Abdeckung zu ist (Verdunstungsverlust). Jeder
+# Teilausdruck wird ein Gatter-Block mit deterministischem Slug.
+
+wp_freigabe.On <- wassertemp.Q < wunschtemp and pv_ueberschuss.Q >= pv_schwelle and not abdeckung_offen.Q
+
+# Arithmetik (D35): der ganze Rechenbaum wird EIN Formula-Block
+# (`pv_kw_input__f1`, Formel "I1/1000"), gespeist wird der Schwellwert-
+# Trigger aus dessen AQ. Boolesche Logik bleibt beim diskreten Backend.
+
+pv_kw = AnalogThresholdTrigger(
+	"PV-Überschuss über 1.5 kW",
+	Input: pv_ueberschuss.Q / 1000,
+	On: 1.5,
+	Off: 1.2,
+)
+
+# Simulator-Szenarien (D36, D68): `loxl test` kompiliert das Modul im
+# Speicher und spielt jeden Ablauf im eingebauten Simulator durch.
+# Zuweisungen injizieren Signale, `tick` lässt simulierte Zeit
+# vergehen, `expect` prüft danach — auch auf den expandierten
+# Template-Blöcken (frost_alarm) und den Ausdrucks-Blöcken (…__and2).
+
+test "Frostwächter schlägt an und beruhigt sich"
+	wassertemp.Q = 2
+	tick 2
+	expect frost_alarm.Q == 1
+	wassertemp.Q = 10
+	tick 2
+	expect frost_alarm.Q == 0
+end
+
+test "WP-Freigabe folgt PV und Abdeckung"
+	wassertemp.Q = 22
+	pv_ueberschuss.Q = 2000
+	abdeckung_offen.Q = 0
+	tick 3
+	expect wp_freigabe_on__and2.Q == 1
+	abdeckung_offen.Q = 1
+	tick 3
+	expect wp_freigabe_on__and2.Q == 0
+end

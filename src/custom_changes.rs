@@ -7,9 +7,9 @@
 //! old custom changes`). Loxone Config merges them in first ("Load from
 //! Miniserver"); lox can only name them and refuse.
 
-use lxir::LoxoneDoc;
-use lxir::archive;
-use lxir::xml::XmlDocument;
+use loxone_config::LoxoneDoc;
+use loxone_config::archive;
+use loxone_config::xml::XmlDocument;
 use serde::Serialize;
 
 /// One pending custom change.

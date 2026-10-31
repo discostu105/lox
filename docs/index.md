@@ -59,7 +59,7 @@ nav_order: 1
   <div class="feature-card">
     <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></svg></span>
     <div class="feature-title">Config as code</div>
-    <div class="feature-desc">Write logic as <code>.lxir</code> text, review it in a pull request, deploy it verified with <code>lox config push</code>.</div>
+    <div class="feature-desc">Write logic as <code>.loxl</code> text, review it in a pull request, deploy it verified with <code>lox config push</code>.</div>
   </div>
   <div class="feature-card">
     <span class="feature-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg></span>

@@ -68,10 +68,10 @@ pub(crate) fn kb_fmt(kb: f64) -> String {
 
 /// The current local time as a ZIP timestamp, for entries staged new
 /// (ZIP times are local).
-pub(crate) fn zip_now() -> lxir::archive::ZipTime {
+pub(crate) fn zip_now() -> loxone_config::archive::ZipTime {
     use chrono::{Datelike, Timelike};
     let now = chrono::Local::now().naive_local();
-    lxir::archive::ZipTime {
+    loxone_config::archive::ZipTime {
         year: u16::try_from(now.year()).unwrap_or(1980),
         month: now.month() as u8,
         day: now.day() as u8,

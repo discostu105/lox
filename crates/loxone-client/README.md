@@ -48,7 +48,7 @@ async fn main() -> loxone_client::Result<()> {
 
 To keep the token between runs and cache the structure file, set `Connection::token_path` and
 `Connection::structure_cache`. To work with the program file itself (`.Loxone`, backup ZIPs), use
-[lxir](https://crates.io/crates/lxir).
+[loxone-config](https://crates.io/crates/loxone-config).
 
 ## License
 

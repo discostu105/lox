@@ -1,10 +1,10 @@
 //! Users, access rights, devices and a summary of a program file
 //! (`.Loxone` XML), shaped the way `lox` lists and checks them. The parsing
-//! is lxir's ([`lxir::LoxoneDoc`], [`lxir::access`]); this module only maps
+//! is loxone-config's ([`loxone_config::LoxoneDoc`], [`loxone_config::access`]); this module only maps
 //! its model onto these views.
 
 use anyhow::{Context, Result};
-use lxir::LoxoneDoc;
+use loxone_config::LoxoneDoc;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -50,7 +50,7 @@ pub struct AccessGrant {
 // The full-access group has UgType="4", the nobody group UgType="3".
 // Seen in configs saved by Loxone Config 16.
 
-pub use lxir::access::Permission;
+pub use loxone_config::access::Permission;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigUser {
@@ -304,7 +304,7 @@ pub fn parse_users(xml: &[u8]) -> Result<Vec<LoxUser>> {
 
 pub fn parse_access_model(xml: &[u8]) -> Result<AccessModel> {
     let doc = parse_doc(xml)?;
-    let access = lxir::access::AccessModel::read(&doc);
+    let access = loxone_config::access::AccessModel::read(&doc);
     let mut model = AccessModel::default();
     for o in doc.objects() {
         if let Some(t) = &o.title {
