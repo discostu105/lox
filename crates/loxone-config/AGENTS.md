@@ -4,7 +4,8 @@
 (`.Loxone` XML) as source code: a text language, Lox Logic (`.loxl` files) compiles against a
 base config with a lockfile pinning all UUIDs. Start with
 [docs/agents.md](docs/agents.md) — it is the operational guide for using the
-toolchain (the loop, hard rules, error remedies).
+toolchain (the loop, hard rules, error remedies). Write help, errors and comments by
+[WRITING_GUIDELINES.md](../../WRITING_GUIDELINES.md): no decision IDs (`D42`) in user-facing text.
 
 ## Build & test
 
@@ -36,7 +37,7 @@ cargo run --bin loxl -- help     # the CLI (also: lox logic help)
   regenerate `examples/out/` via `cargo run --example compile` and the
   project artifacts via `loxl compile --time 1767225600` inside
   `examples/project/` ([examples/README.md](examples/README.md)).
-- Apache-2.0 (see [LICENSE](LICENSE)), same as lox. Published on crates.io as `loxl`; lox itself uses
+- Apache-2.0 (see [LICENSE](LICENSE)), same as lox. Published on crates.io as `loxone-config`; lox itself uses
   it by path.
 - This crate lives in the lox workspace (`crates/loxone-config`). It stays
   network-free: transport and credentials belong to lox (`src/`). Backup
@@ -50,9 +51,9 @@ cargo run --bin loxl -- help     # the CLI (also: lox logic help)
 |---|---|
 | [README.md](README.md) | overview, quickstart |
 | [docs/vision.md](docs/vision.md) | why this exists |
-| [docs/design.md](docs/design.md) | architecture, decisions D1–D12 |
+| [docs/design.md](docs/design.md) | architecture, decisions |
 | [docs/language.md](docs/language.md) | normative `.loxl` language spec |
-| [docs/lockfile-spec.md](docs/lockfile-spec.md) | lockfile v1 spec |
+| [docs/lockfile-spec.md](docs/lockfile-spec.md) | lockfile spec |
 | [docs/loxone-format.md](docs/loxone-format.md) | validated `.Loxone` format facts |
 | [docs/implementation.md](docs/implementation.md) | module map, testing, gotchas |
 | [docs/connector-db.md](docs/connector-db.md) | connector database: evidence, admission rules |

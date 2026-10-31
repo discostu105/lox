@@ -2,6 +2,7 @@
 
 This file provides guidance to Claude Code and other AI agents working with this repository.
 See [API_DESIGN_GUIDELINES.md](API_DESIGN_GUIDELINES.md) for CLI command naming, flag conventions, and output format rules.
+See [WRITING_GUIDELINES.md](WRITING_GUIDELINES.md) for all text people read: help, errors, comments, docs, changelog. Keep it short and plain.
 
 ## Commands
 
