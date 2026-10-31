@@ -2341,3 +2341,14 @@ Anything unverified is an error, not a heuristic:
     (several different wires) stays allowed. The messages of the
     duplicate family name the block first (`` block `b`: … ``), so the
     language server puts them on the port key in the call.
+- **D78 — A block's own blocks stay with it** (2026-10-31; #236). An
+  energy flow monitor holds a nested `MeterAbsBi` *Rest* for the
+  unmetered consumption (Loxone Config creates it: `NOEFM`, `IName=` its
+  own UUID, also the EFM `<root u=>`; oracle session 33). The compile
+  already carried the nested `<C>` verbatim with the EFM (D19), but the
+  decompiler lifted it as a block of its own, `rest = MeterAbsBi()`, and
+  an adoption claimed it in the lock. Now a `<C>` nested in a block whose
+  child `<C>`s are carried (`carried_children`: the EFM's meters, a Code
+  Touch's `Keycode`s) belongs to that block: the view leaves it out, an
+  adoption leaves it to its owner, and `loxl adopt` of its UUID is
+  refused with a pointer to the owning block.

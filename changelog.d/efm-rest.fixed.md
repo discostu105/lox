@@ -1,0 +1,1 @@
+- **loxl decompile/adopt**: the *Rest* meter an energy flow monitor creates for itself is part of the monitor, no longer a top-level `rest = MeterAbsBi()` block; adopting it alone is refused (D78, #236).

@@ -174,3 +174,33 @@ fn views_check_and_adoptions_rebuild_byte_identical() {
         );
     }
 }
+
+#[test]
+fn an_energy_flow_monitors_own_meter_is_not_a_block() {
+    // #236 (D78): the *Rest* meter Loxone Config nests in an energy flow
+    // monitor is part of the monitor. The adoption leaves it to the EFM
+    // (the rebuild above carries it verbatim), and adopting it alone is
+    // refused.
+    use loxone_config::lock::Lockfile;
+    use loxone_config::logic::{Module, adopt, adopt_one};
+    const REST: &str = "218a119c-00c6-4569-ffff8bce8357b7f2";
+    let entry = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/library/energy");
+    let bytes = std::fs::read(entry.join(config(&entry))).unwrap();
+    let base = loxone_config::LoxoneDoc::parse(&bytes).unwrap();
+    let (module, lock, _) = adopt(&base).unwrap();
+    assert!(module.blocks().any(|b| b.block_type == "EFM"));
+    assert!(lock.objects.values().all(|o| o.uuid != REST));
+    let err = adopt_one(
+        &base,
+        REST,
+        "rest",
+        &Module::default(),
+        &mut Lockfile::new(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("belongs to the block it is nested in"),
+        "{err}"
+    );
+}

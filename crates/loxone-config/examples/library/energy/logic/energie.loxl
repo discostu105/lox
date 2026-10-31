@@ -19,7 +19,6 @@ photovoltaik = MeterAbsUni(
 )
 
 energiefluss = EFM()
-rest = MeterAbsBi()
 netz_opf_1 = Formula(
 	Formula: "I1*(-1)",
 	Input1: netz.OPf,

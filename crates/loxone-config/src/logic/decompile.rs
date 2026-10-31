@@ -43,7 +43,7 @@
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
 
-use crate::connectors::{BUILTIN_TYPES, attr_params, container_type};
+use crate::connectors::{BUILTIN_TYPES, attr_params, carried_children, container_type};
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
@@ -52,6 +52,20 @@ use crate::logic::ast::{
     PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, Value, WireDecl,
 };
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A block another block owns (D78): a `<C>` nested in a block whose
+/// child `<C>`s the compile carries verbatim ([`carried_children`]), such
+/// as the *Rest* meter an energy flow monitor creates for itself. It is
+/// part of its owner, not a block of its own: the view leaves it out and
+/// adopt refuses it.
+pub(super) fn owned_by_block(doc: &LoxoneDoc, o: &ObjectSummary) -> bool {
+    o.path
+        .split_last()
+        .and_then(|(_, parent)| doc.element_at(parent))
+        .is_some_and(|p| {
+            p.name == "C" && carried_children(p.attr("Type").unwrap_or("")).contains(&"C")
+        })
+}
 
 /// How much of the config the view lifts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,7 +374,10 @@ impl Lift {
         let mut lifted = vec![false; objects.len()];
         let mut managed = Vec::new();
         for (i, o) in objects.iter().enumerate() {
-            if opts.managed_types.contains(&o.block_type) && !opts.exclude.contains(&o.uuid) {
+            if opts.managed_types.contains(&o.block_type)
+                && !opts.exclude.contains(&o.uuid)
+                && !owned_by_block(doc, o)
+            {
                 lifted[i] = true;
                 managed.push(i);
             }
@@ -373,6 +390,7 @@ impl Lift {
                     // Refs are page visuals, not logic (D34): one appears
                     // in the view only when an unfoldable wire names it.
                     && !mirror_target.contains_key(&i)
+                    && !owned_by_block(doc, o)
                     && page_of.contains_key(&o.uuid)
                     && is_ident(&o.block_type)
                     && !ports(doc.element_at(&o.path).expect("path from objects()")).is_empty()
