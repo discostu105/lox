@@ -1,5 +1,5 @@
 //! The pure `update(app, msg) -> effects`. No I/O happens here, so the
-//! journeys (J1–J12) and edge cases are plain unit tests.
+//! journeys and edge cases are plain unit tests.
 
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
