@@ -100,10 +100,8 @@ never touches the network — that is loxone-client's job. Its CLI is `crates/lo
 documented, never guessed; the connector table only takes live-verified entries; never commit real configs).
 `lox` itself is not published (the crate name is taken).
 
-The crate was called lxir until v0.3.0 (the language: "lxir" → Lox Logic, `.lxir` → `.loxl`). The standalone repo github.com/discostu105/lxir was imported with `git subtree` (history kept). Until it is
-archived, work merged there comes over with
-`git subtree pull --prefix=crates/loxone-config https://github.com/discostu105/lxir.git main` (a moved file such as
-`src/bin/lxir.rs` → `src/cli.rs` still merges).
+The crate was called lxir until v0.3.0 (the language: "lxir" → Lox Logic, `.lxir` → `.loxl`). It came from the
+standalone repo github.com/discostu105/lxir via `git subtree` (history kept); that repo is archived now.
 
 ### Source files
 
