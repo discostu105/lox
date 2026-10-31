@@ -1,1 +1,0 @@
-- **lox logic adopt --uuid**: promoting an extern keeps its room, category and schedule claims (they move to the block); only a tiles claim is still refused.

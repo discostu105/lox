@@ -10,6 +10,22 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-10-31 — smarter rules, calendar, shareable configs
+
+Automatic Designer rules can watch states and operating modes, combine conditions with `or` and switch modes; the *Betriebszeiten* calendar is managed from source; and `loxl scan --redact` makes a config safe to share.
+
+### Added
+- **lox logic rules**: conditions on control states (`when pumpe.active == on`, `when temp.value > 25`) and operating modes (`when mode "Heizperiode"`), `or` between condition groups, and `then mode <mode> on|off`; a `then` takes every command the app offers for the block. The codes come from the Miniserver's own Automatic Designer table. Compiles keep the AutoPilot container's inputs as Loxone Config saves them.
+- **lox logic**: calendar entries (*Betriebszeiten*) from source: `CalendarEntry("Sommerferien", CalType: 2, Mode: 3, From: 6393, To: 6456)`, fixed dates, Easter-relative days, periods and yearly ranges; existing entries are taken over with `adopt --uuid`.
+- **lox logic scan --redact**: `loxl scan --redact <cfg> --out <copy>` writes a copy of a config with all personal data and serials replaced, to share in an issue.
+
+### Changed
+- **lox logic adopt --uuid**: promoting an extern keeps its room, category and schedule claims (they move to the block); only a tiles claim is still refused.
+
+### Fixed
+- **lox logic decompile --out-dir**: a page whose rules drive blocks on other pages declares them as externs instead of failing with "undeclared slug".
+- **lox config push**: operating modes made in source appear in the app (`operatingModes`), and renamed or deleted ones follow.
+
 ## [0.44.0] — 2026-10-31 — lox logic
 
 The config-as-code language has a name of its own: Lox Logic, written in `.loxl` files and run as `lox logic` or `loxl`. Its library crate is loxone-config now (formerly lxir).
