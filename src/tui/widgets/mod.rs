@@ -1,4 +1,4 @@
-//! The six widgets every screen is built from (§6.3).
+//! The six widgets every screen is built from.
 
 pub mod braille;
 pub mod dotmeter;

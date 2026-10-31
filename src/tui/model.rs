@@ -73,7 +73,7 @@ impl Kind {
         }
     }
 
-    /// Default glyph (§6.2).
+    /// Default glyph.
     pub fn glyph(self) -> &'static str {
         match self {
             Kind::LightCtl | Kind::CentralLight | Kind::Dimmer | Kind::ColorPicker => "●",
@@ -97,7 +97,7 @@ impl Kind {
         }
     }
 
-    /// Nerd Font glyph (opt-in, §6.2).
+    /// Nerd Font glyph (opt-in).
     pub fn nerd_glyph(self) -> &'static str {
         match self {
             Kind::LightCtl | Kind::CentralLight | Kind::Dimmer | Kind::ColorPicker => "󰌵",

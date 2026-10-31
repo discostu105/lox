@@ -1,4 +1,4 @@
-//! Effect executors (§8.3): the live Miniserver and the `--demo` simulator.
+//! Effect executors: the live Miniserver and the `--demo` simulator.
 //!
 //! Everything slow runs off the UI thread and reports back as a [`Msg`] tagged
 //! with the epoch it was started under; `update` drops results from an older
@@ -493,7 +493,7 @@ pub fn short_err(e: &anyhow::Error) -> String {
     crate::tui::text::trunc(&s, 160)
 }
 
-/// Stream with reconnect/backoff (§7.3). On reconnect, a changed structure
+/// Stream with reconnect/backoff. On reconnect, a changed structure
 /// version reloads the structure under a new epoch.
 #[allow(clippy::too_many_arguments)]
 async fn stream_loop(
@@ -1647,7 +1647,7 @@ mod live_probe {
         for (k, n) in missing.iter().filter(|(_, n)| **n > 1) {
             println!("  missing {} ×{}", k, n);
         }
-        // the initial dump carries (nearly) every value state (§ stream framing)
+        // the initial dump carries (nearly) every value state
         assert!(seen.len() * 2 > total, "initial dump incomplete");
     }
 }

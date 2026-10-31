@@ -1,4 +1,4 @@
-//! BrailleGraph — multi-row area graph, 2×4 dots per cell, colored by row height (§6.3).
+//! BrailleGraph — multi-row area graph, 2×4 dots per cell, colored by row height.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

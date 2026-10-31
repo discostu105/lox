@@ -1,4 +1,4 @@
-//! FlowLine — `━━━▶━━━━━▶` with moving arrowheads (§6.3).
+//! FlowLine — `━━━▶━━━━━▶` with moving arrowheads.
 //!
 //! Speed is proportional to the value, direction flips with its sign. With motion
 //! off (or zero flow) the arrowheads stand still.
