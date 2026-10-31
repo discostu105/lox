@@ -2219,7 +2219,7 @@ Anything unverified is an error, not a heuristic:
     `PWMFrequency`, `UseDimmer`, `UseRGBDimmer` — 103 of 103 Air devices
     in the corpus carry `123`/`true`, so what another value does is not
     known. Pairing and firmware stay in Loxone Config. The semantic diff
-    compares them; the fingerprint is v9, a lock written with v8 still
+    compares them; the fingerprint was v9 (v10 since D79), a lock written with v8 still
     reads as in sync.
   - An Air device's serial is the MAC its link-local `IP=` is formed
     from (EUI-64 with the universal/local bit flipped back): the
@@ -2354,3 +2354,26 @@ Anything unverified is an error, not a heuristic:
   Touch's `Keycode`s) belongs to that block: the view leaves it out, an
   adoption leaves it to its owner, and `loxl adopt` of its UUID is
   refused with a pointer to the owning block.
+- **D79 — A PulseAt's fire time from source; what the compile carries**
+  (2026-10-31; #248). `At: 19:00` on a PulseAt claims `Sec=`, the
+  seconds since midnight. A time of day is a value of its own
+  (`HH:MM[:SS]`, canonical with two-digit hours and without zero
+  seconds), bound only by `connectors::clock_params`. The parameter is
+  named for what it means; `connectors::attr_name` maps it to the
+  attribute. Like `Code:` (D40) it is a claim: carried while unbound, so
+  a source written before stays correct; written from source, at the
+  base's attribute position, while bound. Unlike `Code:` decompile
+  lifts it: a fire time is one short value, and a source without it hid
+  when a block fires (the house: blinds opening at 18:58, closing at
+  19:00). `Typ="0"` is the fixed-time mode (every V172+ corpus instance
+  with a `Sec=`); a block on a time function (another `Typ=`) refuses
+  `At:` and is lifted without it, since the source cannot say what a
+  fixed time would mean there. A mint writes `Sec=` alone, the way a bare
+  mint left `Typ=` to the save (oracle session 8). The diff names the
+  change `At` and shows times of day. The fingerprint is v10: `Sec=`
+  joined the projection, and a lock recorded with v9 still reads as in
+  sync. `loxl coverage` lists, per managed type, the attributes the
+  compile carries from the base (D19 and `carried_attrs`), with the
+  parameter that claims one where the language has it and minus the
+  blocks whose source claims it: the remaining inventory of behaviour
+  that lives in Loxone Config rather than in the source (#253).

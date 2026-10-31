@@ -170,7 +170,9 @@ After a push, download again and keep that file as the new base
 compile over their change.
 `loxl coverage --lock modules/haus.lock.json current.Loxone` shows how
 much of the config the source owns, type by type, and lists the blocks
-left to adopt (an extern adopts under its own slug and becomes managed).
+left to adopt (an extern adopts under its own slug and becomes managed)
+and the attributes of managed blocks that still come from Loxone Config
+(`At:` claims a PulseAt's fire time, for one).
 Everything you did not adopt passes through byte-for-byte; the diff in
 step 5 is the proof, every time.
 

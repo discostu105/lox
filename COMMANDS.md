@@ -431,7 +431,7 @@ lox logic compile --base current.Loxone --module pages/ --lock haus.lock.json \
 lox logic diff --exit-code current.Loxone out.Loxone  # semantic diff, exit 1 if different
 lox logic diff --json old.Loxone new.Loxone  # the same as JSON, users/access section included
 lox logic drift current.Loxone            # did another writer change the config since the last compile?
-lox logic coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched (--json)
+lox logic coverage                        # in a lox.toml project: blocks by type — managed, extern, untouched — and attributes still carried from the base (--json)
 lox logic adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # take over existing blocks
 lox logic adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
 lox logic decompile current.Loxone        # the Lox Logic view of every page (read-only)

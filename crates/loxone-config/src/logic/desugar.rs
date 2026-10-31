@@ -329,6 +329,11 @@ impl Desugar<'_> {
                  on plain numbers",
                 self.sink,
             ))),
+            Value::Clock(_) => Err(Error::Compile(format!(
+                "`{v}` in the arithmetic on `{}` is a time of day — formulas \
+                 compute on plain numbers",
+                self.sink,
+            ))),
         }
     }
 

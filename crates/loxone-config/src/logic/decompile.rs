@@ -43,13 +43,15 @@
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
 
-use crate::connectors::{BUILTIN_TYPES, attr_params, carried_children, container_type};
+use crate::connectors::{
+    BUILTIN_TYPES, attr_name, attr_params, carried_children, clock_params, container_type,
+};
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
     BlockDecl, ExternDecl, Item, MatchSpec, Module, MoodLine, MoodsClaim, MoodsDecl, MoodsItem,
-    PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, Value, WireDecl,
+    PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, Value, WireDecl, clock_text,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1272,17 +1274,31 @@ impl Scan<'_> {
             // attribute, e.g. `Formula=`) lead the argument list. A
             // GUI-owned one (`Code=`, D40) stays unclaimed: the compile
             // carries it, and claiming it is a source decision.
-            for name in attr_params(&o.block_type) {
-                if GUI_OWNED_ATTRS.contains(name) {
+            // A fire time (`At:` from `Sec=`, #248) is lifted as a time of
+            // day, and only where it is one: a time function (`Typ=` other
+            // than 0) keeps the block's timing with the GUI.
+            for param in attr_params(&o.block_type) {
+                let name = attr_name(&o.block_type, param);
+                let clock = clock_params(&o.block_type).contains(param);
+                if GUI_OWNED_ATTRS.contains(&name) && !clock {
                     continue;
                 }
-                if let Some(v) = el.attr_decoded(name) {
-                    args.push(ArgItem::Binding(Binding {
-                        port: (*name).to_string(),
-                        kind: BindingKind::Param(Value::from_literal(&v)),
-                        comment: None,
-                    }));
-                }
+                let Some(v) = el.attr_decoded(name) else {
+                    continue;
+                };
+                let value = if clock {
+                    match v.parse().ok().and_then(clock_text) {
+                        Some(t) if el.attr("Typ").is_none_or(|t| t == "0") => Value::Clock(t),
+                        _ => continue,
+                    }
+                } else {
+                    Value::from_literal(&v)
+                };
+                args.push(ArgItem::Binding(Binding {
+                    port: (*param).to_string(),
+                    kind: BindingKind::Param(value),
+                    comment: None,
+                }));
             }
             for p in ports(el) {
                 if !is_ident(&p.key) {

@@ -1052,7 +1052,15 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
                 comment,
             })
         }
-        _ => Err(err("expected `let <name> = <number | \"string\">`".into())),
+        // `let abends = 19:00` — a time of day.
+        [_, Tok::Ident(name), Tok::Eq, clock @ ..] if clock_toks(clock).is_some() => Ok(LetDecl {
+            name: check_slug(name, lineno)?,
+            value: clock_value(clock, name, lineno)?,
+            comment,
+        }),
+        _ => Err(err(
+            "expected `let <name> = <number | \"string\" | HH:MM>`".into()
+        )),
     }
 }
 
@@ -2249,6 +2257,10 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
         [Tok::Ident(name)] if !matches!(name.as_str(), "and" | "or" | "not") => {
             BindingKind::Param(Value::Ref(name.clone()))
         }
+        // `At: 19:00` — a time of day.
+        clock if clock_toks(clock).is_some() => {
+            BindingKind::Param(clock_value(clock, port, lineno)?)
+        }
         // `file("hue.c")` — program text from a file (D40); validate
         // decides which ports may take it.
         [Tok::Ident(f), Tok::LParen, Tok::Str(path), Tok::RParen] if f == "file" => {
@@ -2279,6 +2291,38 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             e => BindingKind::Expr(e),
         },
     })
+}
+
+/// The `HH:MM[:SS]` text of a time-of-day token run (`19`, `:`, `00`),
+/// unvalidated; `None` for any other shape.
+fn clock_toks(toks: &[Tok]) -> Option<String> {
+    match toks {
+        [Tok::Num(h), Tok::Colon, Tok::Num(m)] => Some(format!("{h}:{m}")),
+        [
+            Tok::Num(h),
+            Tok::Colon,
+            Tok::Num(m),
+            Tok::Colon,
+            Tok::Num(s),
+        ] => Some(format!("{h}:{m}:{s}")),
+        _ => None,
+    }
+}
+
+/// A time-of-day value, refused unless it is one (00:00 … 23:59:59).
+fn clock_value(toks: &[Tok], name: &str, lineno: usize) -> Result<Value> {
+    let written = clock_toks(toks).expect("checked by the caller");
+    // One spelling per value: `6:58` reads as `06:58`, `19:00:00` as `19:00`.
+    match super::ast::clock_seconds(&written).and_then(super::ast::clock_text) {
+        Some(text) => Ok(Value::Clock(text)),
+        None => Err(Error::Parse {
+            line: lineno,
+            msg: format!(
+                "`{name}`: `{written}` is not a time of day — write `HH:MM` or \
+                 `HH:MM:SS`, 00:00 … 23:59:59"
+            ),
+        }),
+    }
 }
 
 fn value_of(tok: &Tok, lineno: usize) -> Result<Value> {

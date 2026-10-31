@@ -33,9 +33,9 @@
 //!   connectors (and their wires) on save, so minting them would lose logic.
 
 use crate::connectors::{
-    MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_params,
-    builtin, carried_attrs, carried_children, container_type, message_params, object_tree,
-    ref_link_type, save_defaults,
+    MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_name,
+    attr_param, attr_params, builtin, carried_attrs, carried_children, container_type,
+    message_params, object_tree, ref_link_type, save_defaults,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, WireView, ports};
 use crate::error::{Error, Result};

@@ -131,7 +131,9 @@ rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
-value      = number [ unit ] | string | const-ref ;
+value      = number [ unit ] | string | const-ref | clock ;
+clock      = digit [ digit ] ":" digit digit [ ":" digit digit ] ;
+                                                   (* a time of day, 00:00 … 23:59:59 (#248) *)
 const-ref  = slug ;                                (* names a `let` constant *)
 number     = [ "-" ] digits [ "." digits ] ;       (* exactly — `1.2.3`, `5.` are errors *)
 unit       = "ms" | "s" | "min" | "h" | "K" | "%" ;   (* immediately adjacent (D27) *)
@@ -319,6 +321,29 @@ summe = Formula("Summe", Formula: "I1+I2", Input1: a.Q, Input2: b.Q)
 They are declared per type in `connectors::attr_params`. `Formula:` on
 `Formula` blocks compiles to `Formula="I1+I2"` on the `<C>` element,
 together with the observed `Valid="false"` companion.
+
+`At:` on `PulseAt` is the time of day the block fires (D79, #248),
+written `HH:MM` or `HH:MM:SS`:
+
+```text
+jalousie_schliessen = PulseAt("Jalousie schließen", At: 19:00, Time: 1s)
+```
+
+- It compiles to `Sec=` on the `<C>` element, the seconds since midnight
+  (`19:00` → `Sec="68400"`). The canonical form has two-digit hours and
+  drops zero seconds: `6:58` formats as `06:58`, `19:00:00` as `19:00`.
+  A time of day also works as a `let` constant (`let abends = 19:00`).
+- `At:` takes a time of day and nothing else; a time of day binds
+  nothing but `At:` (`connectors::clock_params`).
+- It is a **claim**, like `Code:`: without `At:` the block's fire time
+  stays with Loxone Config and is carried from the base; with it, the
+  source writes it, at the attribute's place in the base element.
+  Decompile and adopt lift it, so an adopted PulseAt states its time.
+- It means a fixed time of day. A PulseAt set to a time function in
+  Loxone Config (sunrise, an hour pulse — any `Typ=` other than `0`) is
+  refused with `At:` and lifted without it. The source does not express
+  time functions yet.
+- `loxl diff` shows a change as `At: 18:58 -> 06:58`.
 
 `Code:` on `Code16` holds the PicoC program (D40). A program is hundreds
 of lines, so its value is a **file**:
