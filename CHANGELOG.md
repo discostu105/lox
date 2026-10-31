@@ -10,6 +10,21 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-10-31
+
+### Added
+- **`lox energy flow`** breaks down the energy flow right now: production, consumption, grid import/export,
+  battery charge/discharge and state of charge, read from the Energy Flow Monitor (`-o json` adds every node)
+  - **`lox energy --top [N]`** ranks the meters by current power, highest first (default 10)
+  - MCP: the new `get_energy_flow` tool returns the same breakdown; `top` adds the meter ranking
+  - `lox tui` and `lox energy flow` share one interpretation of the monitor's nodes and roles (`roles:` in
+    `~/.lox/tui.yaml` applies to both); `lox energy` now lists the flow monitor (type `EFM`) too
+
+### Fixed
+- **`lox logic compile`** no longer rewrites the Automatic Designer's watch list when no rule changed, so compiling
+  the rules a config already has reproduces it byte for byte; `OutputAPI` of `LightController2` and `MeterAbsSt`
+  takes wires in both directions (API links), as the public corpus shows
+
 ## [0.47.0] — 2026-10-31 — rules with weather, dates and messages
 
 Automatic Designer rules can react to the weather, the day of the month, daylight, sunrise and sunset and a date, and send push notifications, mails and message-center entries with pauses in between. Existing user operating modes are taken over with `adopt --uuid`.
