@@ -217,10 +217,7 @@ fn reply_code(text: &str, cmd_suffix: &str) -> Option<u16> {
     if !control.ends_with(cmd_suffix) {
         return None;
     }
-    crate::util::json_val_str(ll.get("Code").or_else(|| ll.get("code"))?)?
-        .trim()
-        .parse()
-        .ok()
+    loxone_client::system::code_of(&v)
 }
 
 /// Why `nfc/startlearn` was refused.

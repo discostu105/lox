@@ -1,0 +1,1 @@
+- **`lox set`**: a Gen 2 Miniserver's answer (`"Code": 200` as a number) is no longer reported as `Error ?`.

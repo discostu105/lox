@@ -28,15 +28,20 @@ pub fn ll_value(text: &str) -> Option<String> {
 /// The `Code` of an `LL` response (`200` on success), from either form.
 pub fn ll_code(text: &str) -> Option<u16> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
-        let c = v.pointer("/LL/Code").or_else(|| v.pointer("/LL/code"))?;
-        return c
-            .as_u64()
-            .and_then(|n| u16::try_from(n).ok())
-            .or_else(|| c.as_str()?.parse().ok());
+        return code_of(&v);
     }
     xml_attr(text, "Code")
         .or_else(|| xml_attr(text, "code"))
-        .and_then(|c| c.parse().ok())
+        .and_then(|c| c.trim().parse().ok())
+}
+
+/// The `Code` of a parsed JSON `LL` answer (`{"LL": {"Code": …}}`), sent as
+/// a number (Gen 2) or a string (Gen 1); `None` without one.
+pub fn code_of(v: &serde_json::Value) -> Option<u16> {
+    let c = v.pointer("/LL/Code").or_else(|| v.pointer("/LL/code"))?;
+    c.as_u64()
+        .and_then(|n| u16::try_from(n).ok())
+        .or_else(|| c.as_str()?.trim().parse().ok())
 }
 
 /// `name="…"` in a single XML element, matched as a whole attribute name.
@@ -58,13 +63,7 @@ fn xml_attr<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
 /// An error when a JSON `LL` answer (a command's, say) carries a `Code`
 /// other than 200; `what` names the request in the message.
 pub fn check_ll(what: &str, v: &serde_json::Value) -> Result<()> {
-    let code = v.pointer("/LL/Code").or_else(|| v.pointer("/LL/code"));
-    let code = code.and_then(|c| {
-        c.as_u64()
-            .and_then(|n| u16::try_from(n).ok())
-            .or_else(|| c.as_str()?.trim().parse().ok())
-    });
-    match code {
+    match code_of(v) {
         None | Some(200) => Ok(()),
         Some(c) => Err(code_error(what, c)),
     }
@@ -497,6 +496,19 @@ mod tests {
         assert_eq!(parse_cpu("38%"), (Some(38.0), None));
         assert_eq!(parse_counter(""), None);
         assert_eq!(parse_counter(" 42 "), Some(42.0));
+    }
+
+    #[test]
+    fn code_of_both_generations() {
+        assert_eq!(
+            code_of(&serde_json::json!({"LL": {"Code": 200}})),
+            Some(200)
+        );
+        assert_eq!(
+            code_of(&serde_json::json!({"LL": {"code": " 403"}})),
+            Some(403)
+        );
+        assert_eq!(code_of(&serde_json::json!({"LL": {}})), None);
     }
 
     #[test]

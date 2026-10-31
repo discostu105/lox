@@ -5,6 +5,7 @@
 //! publishes an `outputSchema` and returns matching `structuredContent`.
 
 use anyhow::{Result, bail};
+use loxone_client::system::code_of;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -936,7 +937,7 @@ pub fn send(
     for cmd in action.commands() {
         last = lox.send_cmd(&ctrl.uuid, &cmd)?;
     }
-    let code = last.pointer("/LL/Code").and_then(json_val_str);
+    let code = code_of(&last).map(|c| c.to_string());
     let value = last.pointer("/LL/value").and_then(json_val_str);
     if let Some(code) = &code
         && code != "200"
@@ -982,9 +983,9 @@ pub fn run_step(lox: &mut LoxClient, step: &SceneStep, dry_run: bool) -> StepRes
     }
     match lox.send_cmd(&uuid, &step.cmd) {
         Ok(resp) => {
-            let code = resp.pointer("/LL/Code").and_then(json_val_str);
-            out.ok = code.as_deref().is_none_or(|c| c == "200");
-            out.code = code.map(|c| typed(&c));
+            let code = code_of(&resp);
+            out.ok = code.is_none_or(|c| c == 200);
+            out.code = code.map(|c| typed(&c.to_string()));
         }
         Err(e) => out.error = Some(format!("{:#}", e)),
     }

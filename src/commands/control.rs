@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use clap::Subcommand;
+use loxone_client::system::code_of;
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::thread;
@@ -21,17 +22,39 @@ fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
             .pointer("/LL/value")
             .and_then(json_val_str)
             .unwrap_or_else(|| "?".to_string());
-        let code = resp
-            .pointer("/LL/Code")
-            .and_then(json_val_str)
-            .unwrap_or_else(|| "?".to_string());
         println!(
             "{}  {} → {} = {}",
-            if code == "200" { "✓" } else { "✗" },
+            if code_of(resp) == Some(200) {
+                "✓"
+            } else {
+                "✗"
+            },
             name,
             cmd,
             val
         );
+    }
+}
+
+/// The answer to setting a value: `✓  name = value`, or an error with the
+/// Miniserver's code.
+fn report_set(resp: &Value, name: &str, quiet: bool) -> Result<()> {
+    let val = resp
+        .pointer("/LL/value")
+        .and_then(json_val_str)
+        .unwrap_or_else(|| "?".to_string());
+    match code_of(resp) {
+        Some(200) => {
+            if !quiet {
+                println!("✓  {} = {}", name, val);
+            }
+            Ok(())
+        }
+        code => bail!(
+            "Error {}: {}",
+            code.map_or("?".to_string(), |c| c.to_string()),
+            val
+        ),
     }
 }
 
@@ -420,21 +443,7 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
                 print_dry_run(ctx.json, ctx.quiet, &uuid, &encoded, &name_or_uuid, None);
             } else {
                 let resp = lox.send_cmd(&uuid, &encoded)?;
-                let code = resp
-                    .pointer("/LL/Code")
-                    .and_then(json_val_str)
-                    .unwrap_or_else(|| "?".to_string());
-                let val = resp
-                    .pointer("/LL/value")
-                    .and_then(json_val_str)
-                    .unwrap_or_else(|| "?".to_string());
-                if code == "200" {
-                    if !ctx.quiet {
-                        println!("✓  {} = {}", name_or_uuid, val);
-                    }
-                } else {
-                    bail!("Error {}: {}", code, val);
-                }
+                report_set(&resp, &name_or_uuid, ctx.quiet)?;
             }
         }
         InputCmd::Pulse { name_or_uuid, room } => {
@@ -791,21 +800,7 @@ pub fn cmd_set(
         print_dry_run(ctx.json, ctx.quiet, &uuid, &encoded, &name_or_uuid, None);
     } else {
         let resp = lox.send_cmd(&uuid, &encoded)?;
-        let code = resp
-            .pointer("/LL/Code")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let val = resp
-            .pointer("/LL/value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        if code == "200" {
-            if !ctx.quiet {
-                println!("✓  {} = {}", name_or_uuid, val);
-            }
-        } else {
-            bail!("Error {}: {}", code, val);
-        }
+        report_set(&resp, &name_or_uuid, ctx.quiet)?;
     }
     Ok(())
 }
@@ -980,6 +975,17 @@ pub fn cmd_music(ctx: &RunContext, action: MusicCmd) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_set_reads_both_code_forms() {
+        let gen2 = serde_json::json!({"LL": {"value": "21.5", "Code": 200}});
+        let gen1 = serde_json::json!({"LL": {"value": "21.5", "Code": "200"}});
+        assert!(report_set(&gen2, "x", true).is_ok());
+        assert!(report_set(&gen1, "x", true).is_ok());
+        let denied = serde_json::json!({"LL": {"value": "", "Code": 403}});
+        let e = report_set(&denied, "x", true).unwrap_err().to_string();
+        assert_eq!(e, "Error 403: ");
+    }
 
     // ── json_val_str (Gen2 numeric value handling) ─────────────────────────
 

@@ -117,16 +117,12 @@ pub fn parse_salt_reply(text: &str) -> Option<Result<Value>> {
     if !control.contains("getvisusalt") {
         return None;
     }
-    let code = ll
-        .get("Code")
-        .or_else(|| ll.get("code"))
-        .and_then(crate::util::json_val_str)
-        .unwrap_or_default();
-    if code.trim() != "200" {
+    let code = loxone_client::system::code_of(&v);
+    if code != Some(200) {
         return Some(Err(anyhow::anyhow!(
             "the Miniserver refused getvisusalt (code {}) — the user lox connects with \
              may not exist or may not be allowed to use secured commands",
-            code.trim()
+            code.map(|c| c.to_string()).unwrap_or_default()
         )));
     }
     let value = ll.get("value").cloned().unwrap_or(Value::Null);
