@@ -482,9 +482,10 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       "Name"` takes the config's rule of that name or creates one below
       the last rule, filed like it; the lock pins its UUID (v7 `rules`).
       Oracle-validated (session 24).
-- [ ] Live check of a created rule (#181): push one, see it in the app and run
-      at its time (the Miniserver loads program rules, D57; a created one
-      has not been pushed yet).
+- [x] Live check of a created rule (#181), 2026-10-31: pushed, ran at its
+      time, listed in the app (and deleted there, D67).
+- [x] Taking app rules over (#192), 2026-10-31: decompile/adopt declare
+      rules by name; `lxir adopt --uuid <rule>` for one.
 - [x] Deleting rules from source: `removed <slug>` in place of the
       `rule` declaration (D67), 2026-10-31 — the use was a test rule
       deleted in the app, which an upload would have brought back.

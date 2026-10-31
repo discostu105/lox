@@ -1574,6 +1574,9 @@ impl Module {
             Item::ExprWire(w) => w.to.slug != slug,
             Item::Set(s) => s.target.slug != slug,
             Item::Attr(a) => a.slug != slug,
+            // An extern rule's edits (D57): a promoted rule is declared
+            // by name, with its whole payload.
+            Item::Rule(r) => r.title.is_some() || r.slug != slug,
             _ => true,
         });
         self.items.len() != before

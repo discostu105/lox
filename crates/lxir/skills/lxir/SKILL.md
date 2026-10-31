@@ -78,9 +78,10 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
 - A push notification is created in Loxone Config and named as an
   extern `Notification(…)`; `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")`
   sends it, and `recipients <it> … end` (`user "<title>"`) says who gets it.
-- An Automatic Designer rule is created in the app and named as an extern
-  `AutopilotRule(…)`; `rule <it> … end` (`active`, `when time 07:30`,
-  `when weekday mon`, `then <block> "on"`) says what it does.
+- An Automatic Designer rule is `rule <slug> "Name" … end` (`active`,
+  `when time 07:30`, `when weekday mon`, `then <block> "on"`): the
+  config's rule of that name, else created; `removed <slug>` deletes it.
+  `lxir adopt --uuid <rule> --as <slug>` takes over one made in the app.
 - Light moods: `moods <set> … end` lists moods by name (`"Lesen": all on,
   AQ3 temp(60%, 2700K)`; values `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`
   per circuit kind), `<controller>.moods = <set>` writes them onto a

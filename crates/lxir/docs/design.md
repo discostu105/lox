@@ -1886,8 +1886,15 @@ Anything unverified is an error, not a heuristic:
   save drops from every rule); live on the house (firmware 17.2.8.28,
   2026-10-30, #181): a created rule, pushed with a verified byte-exact
   download, ran at its compiled minute (22:40:00) and switched its
-  target; pushed again as `inactive`, it stopped. Unchecked: the app's
-  Automatic Designer listing it.
+  target; pushed again as `inactive`, it stopped. The app's Automatic
+  Designer listed it (the user deleted it there, 2026-10-31, D67).
+  - **Taking rules over** (#192, 2026-10-31). Decompile and adopt declare
+    a liftable rule by its name when no other rule shares it, with no
+    extern; `lxir adopt --uuid <rule>` does it for one rule of an
+    existing project, promoting an extern rule (its `extern` line and
+    unnamed `rule` go). Name twins stay extern rules. The house's five
+    app rules went over with no semantic change: 157 of 157 page blocks
+    managed.
 - **D61 — The app catalogue follows the compile** (2026-10-30). The
   Miniserver serves the `LoxAPP3.json` of the upload as it is, so a push
   that only replaced `sps0.LoxCC` left the app on the last save from

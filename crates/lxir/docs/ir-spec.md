@@ -1034,9 +1034,14 @@ created, named and deleted in the app; the declaration edits one.
 Compiling writes the rule's `APC=` payload only when the declaration
 differs from the rule as read, and then as the app's edit: unchanged
 conditions and actions keep their JSON, `STA` follows `active`.
-`decompile`/`adopt` lift every rule of these shapes into a declaration;
+`decompile`/`adopt` lift every rule of these shapes into a declaration,
+by its name (below) when no other rule has that name, else on an extern;
 a rule with other conditions (a control's state, an operating mode, OR
-groups) stays a comment and must not be declared. Removing a
+groups) stays a comment and must not be declared. `lxir adopt --uuid
+<rule> --as <slug>` takes one rule into an existing project the same
+way: an extern rule of the module (`--as` its slug) loses its `extern`
+line and unnamed `rule`, and the named declaration takes their place;
+its action targets must be in the lock already. Removing a
 declaration leaves the rule as last written. Top-level only.
 
 **Named rules (D60).** `rule <slug> "Name"` declares a rule by its name

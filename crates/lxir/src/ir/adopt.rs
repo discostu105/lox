@@ -30,7 +30,9 @@ use crate::connectors::{
 };
 use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, ports};
 use crate::error::{Error, Result};
-use crate::ir::ast::{ArgItem, Binding, BindingKind, Item, MatchSpec, Module, PortRef, WireDecl};
+use crate::ir::ast::{
+    ArgItem, Binding, BindingKind, Item, MatchSpec, Module, PortRef, RULE_BLOCK_TYPE, WireDecl,
+};
 use crate::ir::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED};
 use crate::ir::validate::validate_ports;
 use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
@@ -152,6 +154,9 @@ pub fn adopt_one(
         o.block_type,
         o.title.as_deref().unwrap_or("")
     );
+    if o.block_type == RULE_BLOCK_TYPE {
+        return adopt_rule(doc, o, &ident, slug, module, lock);
+    }
     if builtin(&o.block_type).is_none() {
         return Err(fail(format!(
             "cannot adopt {ident}: `{}` is not in the verified builtin table — only \
@@ -799,4 +804,114 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
         ));
     }
     Ok(())
+}
+
+/// [`adopt_one`] for an Automatic Designer rule (#192): the rule becomes
+/// `rule <slug> "Name"` (D60), pinned in the lock's `rules`, its payload
+/// lifted as the documented shapes (D57). An extern rule of the module is
+/// promoted: its `extern` line and its unnamed `rule` leave the source.
+/// The rule's action targets must already be in the lock.
+fn adopt_rule(
+    doc: &LoxoneDoc,
+    o: &ObjectSummary,
+    ident: &str,
+    slug: &str,
+    module: &Module,
+    lock: &mut Lockfile,
+) -> Result<AdoptedBlock> {
+    let fail = |m: String| Error::Compile(m);
+    if let Some((s, _)) = lock.rules.iter().find(|(_, u)| **u == o.uuid) {
+        return Err(fail(format!(
+            "{ident} is already rule `{s}` — nothing to adopt"
+        )));
+    }
+    let Some(title) = o.title.clone().filter(|t| !t.is_empty()) else {
+        return Err(fail(format!(
+            "cannot adopt {ident}: a rule without a name — name it in the app first"
+        )));
+    };
+    let objects = doc.objects();
+    let same_name = objects
+        .iter()
+        .filter(|r| r.block_type == RULE_BLOCK_TYPE && r.title.as_deref() == Some(&title))
+        .count();
+    if same_name > 1 {
+        return Err(fail(format!(
+            "cannot adopt {ident}: the config has {same_name} rules of this name — rename \
+             all but one in the app"
+        )));
+    }
+    let promoted = lock
+        .externals
+        .iter()
+        .find(|(_, le)| le.uuid == o.uuid)
+        .map(|(s, _)| s.clone());
+    match &promoted {
+        Some(x) if x != slug => {
+            return Err(fail(format!(
+                "{ident} is extern `{x}` of this module — adopt it `--as {x}`"
+            )));
+        }
+        Some(_) => {}
+        None => {
+            let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
+                && slug
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                && !RESERVED.contains(&slug);
+            let taken = lock.objects.contains_key(slug)
+                || lock.externals.contains_key(slug)
+                || lock.rules.contains_key(slug)
+                || module.externs().any(|e| e.slug == slug)
+                || module.blocks().any(|b| b.slug == slug);
+            if !valid || taken {
+                return Err(fail(format!(
+                    "`{slug}` is not a free, valid slug ([a-z][a-z0-9_]*) — pick another"
+                )));
+            }
+        }
+    }
+    let apc = doc
+        .element_at(&o.path)
+        .and_then(|el| el.attr_decoded("APC"))
+        .map(|a| a.into_owned())
+        .unwrap_or_default();
+    let slug_of = |u: &str| -> Option<String> {
+        lock.objects
+            .iter()
+            .find(|(_, lo)| lo.uuid == u)
+            .map(|(s, _)| s.clone())
+            .or_else(|| {
+                lock.externals
+                    .iter()
+                    .find(|(_, le)| le.uuid == u)
+                    .map(|(s, _)| s.clone())
+            })
+    };
+    let mut decl = super::rule::lift(slug, &apc, &slug_of).map_err(|why| {
+        fail(format!(
+            "cannot adopt {ident}: {why} (its action targets must be managed or extern)"
+        ))
+    })?;
+    decl.title = Some(title);
+    let page_title = (1..o.path.len())
+        .rev()
+        .find_map(|n| {
+            let el = doc.element_at(&o.path[..n])?;
+            (el.name == "C" && el.attr("Type") == Some("Page"))
+                .then(|| el.attr_decoded("Title").map(|t| t.into_owned()))
+                .flatten()
+        })
+        .ok_or_else(|| fail(format!("cannot adopt {ident}: it is not on a logic page")))?;
+    if let Some(x) = &promoted {
+        lock.externals.remove(x);
+    }
+    lock.rules.insert(slug.to_string(), o.uuid.clone());
+    Ok(AdoptedBlock {
+        items: vec![Item::Rule(decl)],
+        page_title,
+        new_externs: Vec::new(),
+        promoted: promoted.into_iter().collect(),
+        on_page: true,
+    })
 }
