@@ -23,6 +23,7 @@ exclude:
   - design-mcp.md
   - design-tui.md
   - design-tui-mockups.html
+  - research/
 
 callouts:
   warning:

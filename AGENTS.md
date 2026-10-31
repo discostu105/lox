@@ -191,6 +191,8 @@ Miniserver, Structure File, User Management, …) and community sources. It hold
   republished document shows up as `DRIFT`.
 - Read a protocol fact there before guessing it. Write it into our docs in our own words, citing the reference id
   and section.
+- `docs/research/` holds dated research notes: facts that no other doc records yet. Check them before you build
+  on them, and move a fact into the real docs once a feature uses it.
 - The public test corpus of real configs is `crates/loxone-config/tools/fetch-corpus.py` (see that crate's
   AGENTS.md).
 
