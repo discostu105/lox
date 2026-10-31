@@ -1366,6 +1366,10 @@ nowhere but in the moods' `SID`s ([loxone-format.md](loxone-format.md),
 A controller minted from source has no moods until Loxone Config saves
 it; a claim on it first writes what that save would — the stock "Viel
 Licht" and "Aus" and their defaults (oracle-verified) — then the set.
+Its circuits have no actuator either (Loxone Config writes
+`NameAI<n>=` only from its mood editor), and on the Miniserver such a
+circuit is a switch: a percentage reads 1 on its output (live, #261),
+so dimming needs the circuits set up in Loxone Config.
 The lock pins the UUID of every mood the compiler minted until a base
 carries it ([lockfile-spec.md](lockfile-spec.md)). Removing a claim
 leaves the moods as last written. One claim per controller; claims are

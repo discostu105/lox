@@ -1253,6 +1253,7 @@ const LIGHTS_READS: &[&str] = &[
     "Alarm",
     "AlarmPeriod",
     "AlarmBrightness",
+    // Lc1 … Lc8, from `LIGHTS_LC`.
     "I1",
     "I2",
     "I3",
@@ -1262,10 +1263,12 @@ const LIGHTS_READS: &[&str] = &[
     "I7",
     "I8",
     "EnMove",
-    "RtD",
     "MasterBr",
+    "RtD",
 ];
-const LIGHTS_MODELLED: usize = 28;
+const LIGHTS_MODELLED: usize = 38;
+/// Where Lc1 … Lc8 start in [`LIGHTS_READS`].
+const LIGHTS_LC: usize = 28;
 /// Where the pulse inputs start in [`LIGHTS_READS`]: M+, M−, T5/1 … T5/8,
 /// On, Buzzer.
 const LIGHTS_KEYS: usize = 10;
@@ -1293,33 +1296,75 @@ const LIGHTS_WRITES: &[&str] = &[
     "AQ17",
     "AQ18",
     "OutputReset",
+    "OutputResetAll",
     "Scene",
 ];
 
-/// A pulse input of a `LightController2`: its edge and when it last rose.
+/// A pulse input of a `LightController2`: its edge, when it last rose, and
+/// the clicks of its open click sequence (closed Tdc after the last rise
+/// once the input is released, or by a long click).
 #[derive(Debug, Clone, Copy, Default)]
 struct Key {
     edge: Edge,
     rose: Option<f64>,
+    clicks: u8,
+}
+
+/// What a closed click sequence or a long click does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Act {
+    /// A single click on pulse input `i` (of [`LIGHTS_KEYS`]), or On or
+    /// Buzzer rising.
+    Click(usize),
+    /// Two or three clicks within Tdc each: off, 2C (and 3C).
+    Multi(u8),
+    /// T5 held for Mmd: mix its mood in or out.
+    Long(usize),
 }
 
 /// A `LightController2`'s state: which of its moods shows, and who chose
 /// it.
 ///
-/// The manual inputs follow Loxone Config 17.2.8.28's simulation
-/// (not a Miniserver): M+/M− step through the mood list in
-/// `<LightscenesC>` order, the off mood included, cyclically; T5/n selects
-/// the mood `SID="n"`, and steps on like M+ while it made the last mood
-/// change or that mood shows; both act when the input falls. On selects
-/// `SID="777"` when it rises; Mood selects by ID when its value changes.
+/// The manual inputs follow a live Miniserver (17.2.8.28) where it was
+/// tested, else Loxone Config 17.2.8.28's simulation.
+///
+/// - M+/M− step through the mood list in `<LightscenesC>` order, the off
+///   mood included, cyclically.
+/// - T5/n selects the mood `SID="n"`. It steps on like M+ while that mood
+///   shows or it made the last change within 30 s.
+/// - A click acts Tdc after it began or when released, whichever is later.
+///   Two or three clicks within Tdc switch off and pulse 2C (and 3C).
+/// - T5 held for Mmd mixes its mood in or out.
+/// - On selects `SID="777"` when it rises. Mood selects by ID when its
+///   value changes.
 #[derive(Debug, Clone, Default)]
 pub struct Lights {
     moods: Vec<crate::moods::Mood>,
     /// The index of the motion mood, and of the built-in off mood.
     motion: usize,
     off: usize,
-    /// The mood that shows.
+    /// The mood that shows (with a mix: its first).
     cur: usize,
+    /// The moods mixed by long clicks, two or more (M −3); empty without
+    /// a mix.
+    mix: Vec<usize>,
+    /// Circuit values set by Lc1–8 (`false`) or MBr (`true`) over the
+    /// mood: M shows 0.
+    custom: Option<([f64; 18], bool)>,
+    /// Circuits with an actuator assigned in Loxone Config's mood editor
+    /// (`NameAI<n>=`); without one a circuit is a switch (live: 20 %
+    /// reads 1).
+    named: [bool; 18],
+    /// Circuits some mood switches on.
+    used: [bool; 18],
+    /// The last value seen on MBr: a change acts.
+    master: Option<f64>,
+    lc_edges: [Edge; 8],
+    lc_rose: Option<f64>,
+    dis_edge: Edge,
+    /// Why the automatic is held back where that is untested.
+    suppress_unverified: Option<&'static str>,
+    reset_all_pulse: bool,
     /// The motion automatic switched the current mood on.
     auto: bool,
     /// When a manual input last changed the mood (cleared by Off and the
@@ -1360,14 +1405,61 @@ impl Lights {
             el.child_elements()
                 .any(|c| c.name == "Co" && c.attr("K") == Some(key) && c.attr("Def").is_some())
         };
+        let named = std::array::from_fn(|n| el.attr(&format!("NameAI{n}")).is_some());
+        let used = std::array::from_fn(|n| {
+            moods.iter().any(|m| {
+                m.qs.get(n)
+                    .is_some_and(|&q| crate::moods::decode(q) != crate::moods::MoodValue::Off)
+            })
+        });
         Ok(Lights {
             moods,
             motion,
             off,
             cur: off,
+            named,
+            used,
             alarm_set: has_def("AlarmPeriod") && has_def("AlarmBrightness"),
             ..Lights::default()
         })
+    }
+
+    /// Any light on: a mood, a mix or a circuit set by Lc/MBr.
+    fn lit(&self) -> bool {
+        match &self.custom {
+            Some((out, _)) => out.iter().any(|&v| v > 0.0),
+            None => self.cur != self.off,
+        }
+    }
+
+    /// The circuit values of the moods that show (one, or a mix).
+    fn outputs(&self) -> Result<[f64; 18], String> {
+        let shown: &[usize] = if self.mix.is_empty() {
+            std::slice::from_ref(&self.cur)
+        } else {
+            &self.mix
+        };
+        let mut out = [0.0; 18];
+        for (n, slot) in out.iter_mut().enumerate() {
+            let mut on: Option<f64> = None;
+            for &ix in shown {
+                let mood = &self.moods[ix];
+                let q = mood.qs.get(n).copied().unwrap_or(0);
+                let v = mood_output(&mood.name, n, q, self.named[n])?;
+                if v == 0.0 {
+                    continue;
+                }
+                if on.is_some_and(|w| w != v) {
+                    return Err(format!(
+                        "a mix with two values on AQ{}: which one it shows is untested",
+                        n + 1
+                    ));
+                }
+                on = Some(v);
+            }
+            *slot = on.unwrap_or(0.0);
+        }
+        Ok(out)
     }
 
     /// The index of the mood `SID="sid"`.
@@ -1421,94 +1513,168 @@ impl Lights {
         let now = io.now;
         let v = |k: usize| io.i(k);
         for (k, key) in LIGHTS_READS.iter().enumerate().skip(LIGHTS_MODELLED) {
-            let input = v(k);
-            // MasterBr takes a value, the others a pulse.
-            if input.on() || (*key == "MasterBr" && input.connected) {
+            if v(k).on() {
                 return Err(not_simulated("LightController2", key));
             }
         }
-        let (motion, presence, br) = (v(0), v(1), v(2).v);
+        let (motion_in, presence, br) = (v(0), v(1), v(2).v);
         let (reset, disabled) = (v(3).on(), v(4).on());
         let (brt, moet, met, pto, pm) = (v(5).v, v(6).v, v(7).v, v(8).v, v(9).v);
         let (tdc, mmd) = (v(22).v, v(23).v);
         let (afi, max_abr) = (v(26).v, v(27).v);
+        let (dis, master) = (v(LIGHTS_LC + 8).on(), v(LIGHTS_LC + 9));
         if pm != 0.0 {
             return Err(format!(
                 "presence mood Pm = {pm}: how its ID names a mood is undocumented"
             ));
         }
-        if motion.on() && presence.on() {
+        // DisP: motion is ignored while it is 1 (live: Mo did not switch
+        // on, and did once DisP was 0 again).
+        let (dis_rose, dis_fell) = self.dis_edge.update(dis);
+        if (dis
+            && (presence.on()
+                || self.auto
+                || self.off_at.is_some()
+                || (motion_in.on() && (self.lit() || self.suppressed_until.is_some()))))
+            || ((dis_rose || dis_fell) && motion_in.on())
+        {
+            return Err(
+                "DisP with P, with the motion mood on or timing out, with motion \
+                        while lights are on or held back, or changing during motion is \
+                        not simulated"
+                    .into(),
+            );
+        }
+        let motion = motion_in.on() && !dis;
+        if motion && presence.on() {
             return Err("Mo and P at once is not simulated".into());
         }
-        let (move_rose, move_fell) = self.move_edge.update(motion.on());
+        let (move_rose, move_fell) = self.move_edge.update(motion);
         let (presence_rose, presence_fell) = self.presence_edge.update(presence.on());
         let (reset_rose, _) = self.reset_edge.update(reset && !disabled);
-        let wants = motion.on() || presence.on();
+        let wants = motion || presence.on();
         let timeout = if presence.connected { 0.01 } else { pto };
+        // How long a manual switch-off holds the automatic back.
+        let hold = (pto > 0.0).then_some(timeout);
 
         // The pulse inputs; DisPc disables them all ("Lc1-4, M+, M-,
-        // Mood, Off, T5/1-8, On, Buzzer, MBr"). M+, M− and T5 act when
-        // they fall, On and Buzzer when they rise.
-        let mut acted = None;
+        // Mood, Off, T5/1-8, On, Buzzer, MBr"). On and Buzzer act when
+        // they rise. M+, M− and T5 click (live, #261): a click acts Tdc
+        // after it began or when released, whichever is later; another
+        // within Tdc makes it a double (triple) click; T5 held for Mmd
+        // is a long click, acting while held.
+        let mut acted: Option<Act> = None;
         let mut buzzer_fell = false;
         let held = |k: &Key| k.edge.0;
         let locked = held(&self.keys[KEY_ON]) || held(&self.keys[KEY_BUZZER]);
-        for (i, key) in self.keys.iter_mut().enumerate() {
+        let open = self.keys[..KEY_ON].iter().position(|k| k.clicks > 0);
+        for i in 0..self.keys.len() {
             let name = LIGHTS_READS[LIGHTS_KEYS + i];
+            let label = crate::canvas_labels::label("LightController2", name).unwrap_or(name);
+            let key = &mut self.keys[i];
             let (r, f) = key.edge.update(v(LIGHTS_KEYS + i).on());
             if disabled {
                 key.rose = None;
+                key.clicks = 0;
                 continue;
             }
-            if r {
-                // Config's simulation took two clicks 0.22 s apart for two
-                // single clicks, the KB a double click (off and 2C).
-                if i < KEY_ON && key.rose.is_some_and(|t| now - t + EPS < tdc) {
-                    return Err(format!(
-                        "a double click on {}: two pulses within Tdc = {tdc} s are not simulated",
-                        crate::canvas_labels::label("LightController2", name).unwrap_or(name)
-                    ));
+            let mut act = None;
+            if i >= KEY_ON {
+                if r {
+                    act = Some(Act::Click(i));
                 }
-                key.rose = Some(now);
-            }
-            // A long click on T5 mixes in its mood (Mmd) by the KB; Config's
-            // simulation took it for a click.
-            let limit = if mmd > 0.0 { mmd } else { tdc };
-            if held(key)
-                && (KEY_DOWN + 1..KEY_ON).contains(&i)
-                && key.rose.is_some_and(|t| now - t + EPS >= limit)
-            {
-                return Err(format!(
-                    "T5/{} held for {limit} s: a long click (mixing in a mood, Mmd) is \
-                     not simulated",
-                    i - 1
-                ));
-            }
-            let acts = if i < KEY_ON {
-                f && key.rose.is_some()
+                buzzer_fell |= f && i == KEY_BUZZER;
             } else {
-                r
-            };
-            if acts && acted.replace(i).is_some() {
+                if r {
+                    if open.is_some_and(|o| o != i) {
+                        return Err(format!(
+                            "a click on {label} while another input's click is open \
+                             (within Tdc) is not simulated"
+                        ));
+                    }
+                    let again = key.clicks > 0 && key.rose.is_some_and(|t| now - t + EPS < tdc);
+                    key.clicks = if again { key.clicks + 1 } else { 1 };
+                    if key.clicks > 3 {
+                        return Err(format!(
+                            "{} clicks on {label} within Tdc each are not simulated",
+                            key.clicks
+                        ));
+                    }
+                    key.rose = Some(now);
+                }
+                let since = key.rose.map_or(0.0, |t| now - t + EPS);
+                if held(key) && key.clicks > 0 && i > KEY_DOWN && since >= tdc.min(mmd) {
+                    if mmd <= tdc {
+                        return Err(format!(
+                            "{label} held with Mmd = {mmd} s, not longer than Tdc = {tdc} s, \
+                             is not simulated"
+                        ));
+                    }
+                    if since >= mmd {
+                        if key.clicks > 1 {
+                            return Err(format!(
+                                "a long click on {label} after a click within Tdc is not \
+                                 simulated"
+                            ));
+                        }
+                        key.clicks = 0;
+                        act = Some(Act::Long(i));
+                    }
+                }
+                if key.clicks > 0 && !held(key) && since >= tdc {
+                    act = Some(match key.clicks {
+                        1 => Act::Click(i),
+                        n => Act::Multi(n),
+                    });
+                    key.clicks = 0;
+                }
+            }
+            if let Some(a) = act
+                && acted.replace(a).is_some()
+            {
                 return Err("two of M+, M−, T5, On and Buzzer at once is not simulated".into());
             }
-            buzzer_fell |= f && i == KEY_BUZZER;
         }
+        // Lc1–8: a click toggles its circuit.
+        let mut toggled = None;
+        for k in 0..8 {
+            let (r, _) = self.lc_edges[k].update(v(LIGHTS_LC + k).on());
+            if r && !disabled {
+                if self.lc_rose.is_some_and(|t| now - t + EPS < tdc) {
+                    return Err("two Lc clicks within Tdc are not simulated".into());
+                }
+                self.lc_rose = Some(now);
+                if toggled.replace(k).is_some() {
+                    return Err("two Lc inputs at once are not simulated".into());
+                }
+            }
+        }
+        // MBr acts when its value changes, like Mood.
+        let dimmed = match self.master.replace(master.v) {
+            Some(was) if master.connected && (master.v - was).abs() > EPS && !disabled => {
+                Some(master.v)
+            }
+            _ => None,
+        };
         // Mood selects when its value changes: a constant selects nothing.
         let select = v(24);
         let selected = match self.select.replace(select.v) {
             Some(was) if select.connected && (select.v - was).abs() > EPS && !disabled => {
-                if acted.is_some() {
-                    return Err(
-                        "Mood together with M+, M−, T5, On or Buzzer is not simulated".into(),
-                    );
-                }
                 Some(self.by_id(select.v)?)
             }
             _ => None,
         };
-        let manual = acted.is_some() || selected.is_some();
-        if manual && (locked && !matches!(acted, Some(KEY_ON | KEY_BUZZER))) {
+        let inputs = usize::from(acted.is_some())
+            + usize::from(toggled.is_some())
+            + usize::from(dimmed.is_some())
+            + usize::from(selected.is_some());
+        if inputs > 1 {
+            return Err(
+                "two of Mood, MBr, Lc, M+, M−, T5, On and Buzzer at once are not simulated".into(),
+            );
+        }
+        let manual = inputs > 0;
+        if manual && (locked && !matches!(acted, Some(Act::Click(KEY_ON | KEY_BUZZER)))) {
             return Err("a mood change while On or Buzzer is held is not simulated".into());
         }
         if locked && reset && !disabled {
@@ -1546,8 +1712,14 @@ impl Lights {
                 || presence_fell
                 || buzzer_fell
                 || self.off_at.is_some_and(|t| now + EPS >= t)
+                || self.custom.is_some()
+                || !self.mix.is_empty()
             {
-                return Err("an input or timer during Alarm is not simulated".into());
+                return Err(
+                    "an input or timer during Alarm, or Alarm over a mix or Lc/MBr \
+                            values, is not simulated"
+                        .into(),
+                );
             }
             let lit = ((now - since + EPS) / (afi / 2.0)).floor() as i64 % 2 == 0;
             let mood = &self.moods[self.cur];
@@ -1559,9 +1731,17 @@ impl Lights {
                         n + 1
                     ));
                 }
+                if !self.named[n] && self.used[n] {
+                    return Err(format!(
+                        "Alarm on AQ{}, a circuit without an actuator: its flashing value is \
+                         untested (live, such a circuit reads 1 for a percentage)",
+                        n + 1
+                    ));
+                }
                 io.set(key, if lit { max_abr } else { 0.0 });
             }
             io.set_bool("OutputReset", false);
+            io.set_bool("OutputResetAll", false);
             io.set("Scene", if lit { 99.0 } else { 0.0 });
             return Ok(());
         }
@@ -1570,31 +1750,37 @@ impl Lights {
         // 1 (> 1 s): Block is locked. Dominating input"; 2C pulses on it
         // (one cycle, like the other pulse outputs). DisPc disables it.
         self.reset_pulse = reset_rose;
-        let lit = self.cur != self.off;
+        self.reset_all_pulse = false;
         if reset && !disabled {
             // Switching the lights off by hand disables the automatic for
             // Pto, restarted by motion; with P wired Pto is 0.01 s, so the
             // automatic returns once presence has ended (parameter Pto).
-            if lit && pto > 0.0 {
-                self.suppressed_until = Some(now + timeout);
-            }
+            let lit = self.lit();
             self.switch_off();
+            if lit && let Some(t) = hold {
+                self.suppressed_until = Some(now + t);
+            }
         } else {
             // Motion with a mood chosen by hand: the mood stays and Met
-            // runs from the end of motion (Config's simulation); after a
-            // manual step to off the automatic held back for a time that
-            // fits neither Pto from the off nor Pto from the motion.
-            if wants && self.manual_at.is_some() && (!lit || self.buzzer || presence.on()) {
+            // runs from the end of motion (Config's simulation).
+            if wants
+                && self.manual_at.is_some()
+                && (!self.lit()
+                    || self.buzzer
+                    || presence.on()
+                    || !self.mix.is_empty()
+                    || self.custom.is_some())
+            {
                 return Err(
-                    "Mo or P after the lights were switched off by M+, M−, T5 or \
-                            Mood, during the Buzzer's mood, or P with a manual mood is \
-                            not simulated"
+                    "Mo or P after Mood switched the lights off, during the Buzzer's \
+                            mood, over a mix or Lc/MBr values, or P with a manual mood is not \
+                            simulated"
                         .into(),
                 );
             }
             if manual {
                 if presence.on()
-                    || (wants && !lit)
+                    || (wants && !self.lit())
                     || (self.off_at.is_some() && !wants)
                     || (self.buzzer && !buzzer_fell)
                 {
@@ -1602,15 +1788,37 @@ impl Lights {
                                 back, or while the lights wait to go off is not simulated"
                         .into());
                 }
-                match selected {
-                    Some(ix) => {
-                        self.cur = ix;
-                        self.chain = None;
-                        self.manual_at = Some(now);
-                        self.auto = false;
-                        self.buzzer = false;
+                if let Some(k) = toggled {
+                    self.toggle(k, now)?;
+                } else if let Some(m) = dimmed {
+                    self.dim(m, now)?;
+                } else if let Some(ix) = selected {
+                    if self.custom.is_some() {
+                        return Err("Mood after Lc or MBr set circuits is not simulated".into());
                     }
-                    None => self.manual(acted.unwrap_or_default(), now)?,
+                    self.cur = ix;
+                    self.mix.clear();
+                    self.chain = None;
+                    self.manual_at = Some(now);
+                    self.auto = false;
+                    self.buzzer = false;
+                } else {
+                    match acted.unwrap_or(Act::Click(KEY_UP)) {
+                        Act::Click(i) => self.manual(i, now, hold)?,
+                        Act::Multi(n) => {
+                            // Live: off and 2C, a triple click also 3C, from
+                            // off as well as from a mood.
+                            let lit = self.lit();
+                            self.switch_off();
+                            self.reset_pulse = true;
+                            self.reset_all_pulse = n >= 3;
+                            if lit && let Some(t) = hold {
+                                self.suppressed_until = Some(now + t);
+                                self.suppress_unverified = Some("a double or triple click");
+                            }
+                        }
+                        Act::Long(i) => self.long(i, now, hold)?,
+                    }
                 }
             }
             // Buzzer: "Lighting is switched off after the time set in
@@ -1621,9 +1829,15 @@ impl Lights {
             }
             if let Some(t) = self.suppressed_until {
                 if wants {
+                    if let Some(why) = self.suppress_unverified {
+                        return Err(format!(
+                            "motion after {why} switched the lights off is not simulated"
+                        ));
+                    }
                     self.suppressed_until = Some(now + timeout);
                 } else if now + EPS >= t {
                     self.suppressed_until = None;
+                    self.suppress_unverified = None;
                 }
             }
             // Mo and P activate the motion mood "when 1"; the brightness
@@ -1631,6 +1845,7 @@ impl Lights {
             // and presence are ignored.
             if wants
                 && self.cur == self.off
+                && self.custom.is_none()
                 && self.manual_at.is_none()
                 && br <= brt
                 && self.suppressed_until.is_none()
@@ -1639,12 +1854,12 @@ impl Lights {
                 self.auto = true;
                 self.chain = None;
             }
-            let lit = self.cur != self.off;
+            let lit = self.lit();
             if wants {
                 self.off_at = None;
             }
             // P: the mood "remains active as long as (P) is ON".
-            if presence_fell && lit && !motion.on() {
+            if presence_fell && lit && !motion {
                 self.switch_off();
             }
             // Mo: off Moet after the falling edge, or Met when that is
@@ -1670,29 +1885,56 @@ impl Lights {
                 self.switch_off();
             }
         }
-        let mood = &self.moods[self.cur];
-        for (n, key) in LIGHTS_WRITES[..18].iter().enumerate() {
-            let q = mood.qs.get(n).copied().unwrap_or(0);
-            let value = mood_output(&mood.name, n, q)?;
+        let out = match &self.custom {
+            Some((out, _)) => *out,
+            None => self.outputs()?,
+        };
+        for (key, value) in LIGHTS_WRITES[..18].iter().zip(out) {
             io.set(key, value);
         }
-        let pulse = self.reset_pulse;
-        io.set_bool("OutputReset", pulse);
-        io.set("Scene", scene_id(mood)?);
+        io.set_bool("OutputReset", self.reset_pulse);
+        io.set_bool("OutputResetAll", self.reset_all_pulse);
+        // M: 0 with circuits set by Lc/MBr, −3 for a mix (live).
+        let m = if self.custom.is_some() {
+            0.0
+        } else if !self.mix.is_empty() {
+            -3.0
+        } else {
+            scene_id(&self.moods[self.cur])?
+        };
+        io.set("Scene", m);
         Ok(())
     }
 
     fn switch_off(&mut self) {
         self.cur = self.off;
+        self.mix.clear();
+        self.custom = None;
         self.auto = false;
         self.manual_at = None;
         self.buzzer = false;
         self.chain = None;
         self.off_at = None;
+        self.suppress_unverified = None;
     }
 
-    /// A click on pulse input `i` (of [`LIGHTS_KEYS`]).
-    fn manual(&mut self, i: usize, now: f64) -> Result<(), String> {
+    /// A click on pulse input `i` (of [`LIGHTS_KEYS`]). A step to the off
+    /// mood switches off like Off, holding the automatic back for `hold`
+    /// (live: motion after M+, M− or T5 stepped to off waited for Pto
+    /// without motion).
+    fn manual(&mut self, i: usize, now: f64, hold: Option<f64>) -> Result<(), String> {
+        if self.custom.is_some() {
+            return Err(
+                "M+, M−, T5, On or Buzzer after Lc or MBr set circuits is not \
+                        simulated"
+                    .into(),
+            );
+        }
+        let t5 = (KEY_DOWN + 1..KEY_ON).contains(&i);
+        if !self.mix.is_empty() && !t5 {
+            return Err("M+, M−, On or Buzzer during a mix is not simulated".into());
+        }
+        let was_lit = self.lit();
         let mut chain = None;
         self.cur = match i {
             KEY_UP => self.step_mood(1)?,
@@ -1705,37 +1947,145 @@ impl Lights {
             KEY_BUZZER => self
                 .by_sid("776")
                 .or_else(|| self.by_sid("777"))
-                .ok_or("Buzzer without an alarm-clock or `SID=\"777\"` mood is undocumented")?,
+                .ok_or("Buzzer without an alarm-clock or `SID=\"776\"` mood is undocumented")?,
             _ => {
                 let n = i - 1;
-                let assigned = self.by_sid(&n.to_string());
-                let continues = self.chain.is_some_and(|(k, _)| k == i);
+                let assigned = self.by_sid(&n.to_string()).ok_or_else(|| {
+                    format!("T5/{n} without a mood `SID=\"{n}\"`: what it selects is undocumented")
+                })?;
+                // Live: within 30 s of its last pulse T5/n steps on, after
+                // that only while its mood shows; during a mix it selects
+                // its mood alone.
+                let continues = self.chain.is_some_and(|(k, t)| k == i && now - t < 30.0);
                 chain = Some((i, now));
-                if continues || assigned == Some(self.cur) {
-                    // The KB: "If there is no additional pulse for 30
-                    // seconds, a pulse selects the assigned mood again";
-                    // Config's simulation still stepped on after 65 s.
-                    if let Some((_, t)) = self.chain.filter(|_| continues)
-                        && now - t > 30.0
-                    {
-                        return Err(format!(
-                            "T5/{n} more than 30 s after its last pulse: the KB selects the \
-                             assigned mood again, Loxone Config's simulation steps on"
-                        ));
-                    }
+                if self.mix.is_empty() && (continues || assigned == self.cur) {
                     self.step_mood(1)?
                 } else {
-                    assigned.ok_or_else(|| {
-                        format!(
-                            "T5/{n} without a mood `SID=\"{n}\"`: what it selects is undocumented"
-                        )
-                    })?
+                    assigned
                 }
             }
         };
-        self.chain = chain;
+        self.mix.clear();
         self.auto = false;
+        if self.cur == self.off {
+            self.switch_off();
+            self.chain = chain;
+            if was_lit && let Some(t) = hold {
+                self.suppressed_until = Some(now + t);
+            }
+            return Ok(());
+        }
+        self.chain = chain;
         self.buzzer = i == KEY_BUZZER;
+        self.manual_at = Some(now);
+        Ok(())
+    }
+
+    /// A long click on T5/n (pulse input `i`): from off it selects its
+    /// mood; else it mixes the mood in, or out when it is part of the mix
+    /// (live: M −3 for a mix; the last mood out switches off).
+    fn long(&mut self, i: usize, now: f64, hold: Option<f64>) -> Result<(), String> {
+        let n = i - 1;
+        let ix = self.by_sid(&n.to_string()).ok_or_else(|| {
+            format!("T5/{n} without a mood `SID=\"{n}\"`: what it mixes in is undocumented")
+        })?;
+        if self.custom.is_some() || self.auto {
+            return Err(format!(
+                "a long click on T5/{n} while the motion mood or Lc/MBr values show is not \
+                 simulated"
+            ));
+        }
+        if !self.lit() {
+            self.cur = ix;
+            self.mix.clear();
+        } else {
+            let mut set = if self.mix.is_empty() {
+                vec![self.cur]
+            } else {
+                std::mem::take(&mut self.mix)
+            };
+            match set.iter().position(|&m| m == ix) {
+                Some(p) => {
+                    set.remove(p);
+                }
+                None => set.push(ix),
+            }
+            match set[..] {
+                [] => {
+                    self.switch_off();
+                    if let Some(t) = hold {
+                        self.suppressed_until = Some(now + t);
+                        self.suppress_unverified = Some("a long click");
+                    }
+                    return Ok(());
+                }
+                [one] => self.cur = one,
+                _ => {
+                    self.cur = set[0];
+                    self.mix = set;
+                }
+            }
+        }
+        self.chain = None;
+        self.auto = false;
+        self.buzzer = false;
+        self.manual_at = Some(now);
+        Ok(())
+    }
+
+    /// Lc<k+1> toggles circuit `AQ<k+1>` (live: on reads 1, off 0, the
+    /// other circuits stay, M shows 0) — on a circuit without an actuator.
+    fn toggle(&mut self, k: usize, now: f64) -> Result<(), String> {
+        if self.named[k] {
+            return Err(format!(
+                "Lc{} on a circuit with an actuator: the value it switches on is untested",
+                k + 1
+            ));
+        }
+        if self.auto || !self.mix.is_empty() || matches!(self.custom, Some((_, true))) {
+            return Err(format!(
+                "Lc{} while the motion mood, a mix or MBr values show is not simulated",
+                k + 1
+            ));
+        }
+        let mut out = match &self.custom {
+            Some((out, _)) => *out,
+            None => self.outputs()?,
+        };
+        out[k] = if out[k] > 0.0 { 0.0 } else { 1.0 };
+        self.custom = Some((out, false));
+        self.chain = None;
+        self.buzzer = false;
+        self.manual_at = Some(now);
+        Ok(())
+    }
+
+    /// MBr changed to `m`: the mood's circuits scaled by it (live: on
+    /// circuits without an actuator 50 reads 1, 0 switches off, 100 back
+    /// on, M shows 0); while every light is off it changes nothing.
+    fn dim(&mut self, m: f64, now: f64) -> Result<(), String> {
+        if self.custom.is_none() && !self.lit() {
+            return Ok(());
+        }
+        if self.auto || !self.mix.is_empty() || matches!(self.custom, Some((_, false))) {
+            return Err(
+                "MBr while the motion mood, a mix or Lc values show is not simulated".into(),
+            );
+        }
+        let base = self.outputs()?;
+        let mut out = [0.0; 18];
+        for n in 0..18 {
+            if self.named[n] && self.used[n] {
+                return Err(format!(
+                    "MBr on AQ{}, a circuit with an actuator: its scaled value is untested",
+                    n + 1
+                ));
+            }
+            out[n] = if base[n] > 0.0 && m > 0.0 { 1.0 } else { 0.0 };
+        }
+        self.custom = Some((out, true));
+        self.chain = None;
+        self.buzzer = false;
         self.manual_at = Some(now);
         Ok(())
     }
@@ -1750,15 +2100,17 @@ fn not_simulated(block_type: &str, key: &str) -> String {
     }
 }
 
-/// The output value of a mood's circuit: off is 0, a percentage that
-/// value (on a switch or dimmer circuit), and a switch circuit's `on`
-/// (stored 1) reads 1 (live Miniserver read); colour values have no
-/// documented output encoding.
-fn mood_output(mood: &str, n: usize, q: u32) -> Result<f64, String> {
+/// The output value of a mood's circuit: off is 0, a switch circuit's
+/// `on` (stored 1) reads 1 (live Miniserver read), a percentage that value
+/// on a circuit with an actuator (`named`, Loxone Config's simulation) and
+/// 1 on one without (live: 20 % read 1); colour values have no documented
+/// output encoding.
+fn mood_output(mood: &str, n: usize, q: u32, named: bool) -> Result<f64, String> {
     use crate::moods::MoodValue;
     match crate::moods::decode(q) {
         MoodValue::Off => Ok(0.0),
         MoodValue::On => Ok(1.0),
+        MoodValue::Pct(p) if q >> 28 <= 1 && !named => Ok(if p > 0 { 1.0 } else { 0.0 }),
         MoodValue::Pct(p) if q >> 28 <= 1 => Ok(f64::from(p)),
         v => Err(format!(
             "mood \"{mood}\" sets AQ{} to `{v}`: what the output reads for it is \

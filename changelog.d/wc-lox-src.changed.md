@@ -1,1 +1,0 @@
-- **Help, errors and MCP tool descriptions** are shorter: `lox config push`, `lox access learn`, `lox autopilot changed`, `lox stream --reconnect` and the NFC and access messages say what is wrong and what to do in two sentences at most.
