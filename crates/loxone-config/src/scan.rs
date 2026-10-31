@@ -104,7 +104,9 @@ fn rule_of(ty: &str, name: &str, v: &str) -> Option<&'static str> {
 }
 
 /// Replace every finding of [`scan`] with a placeholder of its kind, in
-/// place: names become `redacted`, mail addresses
+/// place: names become `redacted` — each distinct value of an attribute
+/// its own (`redacted`, `redacted-2`, …), so two users keep apart and an
+/// access right still names one — mail addresses
 /// `redacted@example.invalid`, public addresses `192.0.2.1`, codes and
 /// credentials empty, coordinates `0`, MAC addresses zeros. A hardware
 /// serial becomes a counter of its length (`000000000001`), and so does
@@ -113,8 +115,9 @@ fn rule_of(ty: &str, name: &str, v: &str) -> Option<&'static str> {
 /// number of values replaced; [`scan`] of the result finds nothing.
 pub fn redact(doc: &mut LoxoneDoc) -> usize {
     let mut serials: Vec<(String, String)> = Vec::new();
+    let mut names: Vec<(String, String)> = Vec::new();
     let mut n = 0;
-    redact_walk(&mut doc.xml.root, &mut serials, &mut n);
+    redact_walk(&mut doc.xml.root, &mut serials, &mut names, &mut n);
     if !serials.is_empty() {
         serials.sort_by_key(|(s, _)| std::cmp::Reverse(s.len()));
         rename_serials(&mut doc.xml.root, &serials);
@@ -122,7 +125,12 @@ pub fn redact(doc: &mut LoxoneDoc) -> usize {
     n
 }
 
-fn redact_walk(el: &mut Element, serials: &mut Vec<(String, String)>, n: &mut usize) {
+fn redact_walk(
+    el: &mut Element,
+    serials: &mut Vec<(String, String)>,
+    names: &mut Vec<(String, String)>,
+    n: &mut usize,
+) {
     for child in el.children.iter_mut() {
         let crate::xml::Node::Element(child) = child else {
             continue;
@@ -136,7 +144,21 @@ fn redact_walk(el: &mut Element, serials: &mut Vec<(String, String)>, n: &mut us
             *n += 1;
             a.value = match (rule, a.name.as_str()) {
                 ("location", "Latitude" | "Longitude") => "0".into(),
-                ("location" | "person", _) => "redacted".into(),
+                ("location" | "person", _) => {
+                    let mut seen = names.iter().filter(|(k, _)| *k == a.name);
+                    let i = match seen.position(|(_, v)| *v == value) {
+                        Some(i) => i,
+                        None => {
+                            let i = names.iter().filter(|(k, _)| *k == a.name).count();
+                            names.push((a.name.clone(), value.clone()));
+                            i
+                        }
+                    };
+                    match i {
+                        0 => "redacted".into(),
+                        i => format!("redacted-{}", i + 1),
+                    }
+                }
                 ("network", "MAC") => value
                     .chars()
                     .map(|c| if c.is_ascii_hexdigit() { '0' } else { c })
@@ -167,7 +189,7 @@ fn redact_walk(el: &mut Element, serials: &mut Vec<(String, String)>, n: &mut us
                 _ => String::new(),
             };
         }
-        redact_walk(child, serials, n);
+        redact_walk(child, serials, names, n);
     }
 }
 
@@ -196,6 +218,8 @@ fn rename_serials(el: &mut Element, serials: &[(String, String)]) {
 /// A placeholder [`redact`] writes.
 fn is_redacted(v: &str) -> bool {
     v == "redacted"
+        || v.strip_prefix("redacted-")
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
         || v.split(' ').all(|w| w == "redacted@example.invalid")
         || v == "192.0.2.1"
         || v.chars().all(|c| matches!(c, '0' | ':' | '-' | '.'))
@@ -321,6 +345,20 @@ mod tests {
         );
         assert!(text.contains(r#"Serial="000000000001""#), "{text}");
         assert!(text.contains(r#"Title="redacted""#) && text.contains(r#"Latitude="0""#));
+    }
+
+    #[test]
+    fn redacted_names_stay_apart() {
+        let mut d = doc(concat!(
+            r#"<C Type="UserCaption">"#,
+            r#"<C Type="User" Title="anna"/><C Type="User" Title="bert"/>"#,
+            r#"<C Type="User" Title="anna"/></C>"#,
+        ));
+        assert_eq!(redact(&mut d), 3);
+        assert_eq!(scan(&d), []);
+        let text = String::from_utf8(d.to_bytes()).unwrap();
+        assert_eq!(text.matches(r#"Title="redacted""#).count(), 2, "{text}");
+        assert_eq!(text.matches(r#"Title="redacted-2""#).count(), 1, "{text}");
     }
 
     #[test]

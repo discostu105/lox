@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Zutritt Eingang</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 0 · long 0 · crossings 0 · length 4800</text>
+<polyline points="8160,9504 8640,9504 8640,6624 9120,6624" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8160,6048 8640,6048 8640,6048 9120,6048" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="9120" y="6528" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>API Connector (OutputRef)</title></rect>
+<text x="9216" y="6668" font-size="120" fill="#0f172a">API Connector</text>
+<rect x="5472" y="5472" width="2688" height="4152" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Code Touch Eingang (NfcCodeTouch)</title></rect>
+<text x="5568" y="5652" font-size="140" fill="#0f172a">Code Touch Eingang</text>
+<circle cx="5472" cy="6048" r="36" fill="#64748b"/><text x="5544" y="6082" font-size="100" text-anchor="start" fill="#334155">Disable</text>
+<circle cx="5472" cy="6240" r="36" fill="#64748b"/><text x="5544" y="6274" font-size="100" text-anchor="start" fill="#334155">Lr</text>
+<circle cx="5472" cy="6432" r="36" fill="#64748b"/><text x="5544" y="6466" font-size="100" text-anchor="start" fill="#334155">Lg</text>
+<circle cx="5472" cy="6624" r="36" fill="#64748b"/><text x="5544" y="6658" font-size="100" text-anchor="start" fill="#334155">Lb</text>
+<circle cx="5472" cy="6816" r="36" fill="#64748b"/><text x="5544" y="6850" font-size="100" text-anchor="start" fill="#334155">Lw</text>
+<circle cx="5472" cy="7008" r="36" fill="#64748b"/><text x="5544" y="7042" font-size="100" text-anchor="start" fill="#334155">Bfb</text>
+<circle cx="5472" cy="7200" r="36" fill="#64748b"/><text x="5544" y="7234" font-size="100" text-anchor="start" fill="#334155">ExA</text>
+<circle cx="5472" cy="7392" r="36" fill="#64748b"/><text x="5544" y="7426" font-size="100" text-anchor="start" fill="#334155">ExARem</text>
+<circle cx="5472" cy="7584" r="36" fill="#64748b"/><text x="5544" y="7618" font-size="100" text-anchor="start" fill="#334155">Lon</text>
+<circle cx="5472" cy="7776" r="36" fill="#64748b"/><text x="5544" y="7810" font-size="100" text-anchor="start" fill="#334155">Bg</text>
+<circle cx="5472" cy="7968" r="36" fill="#64748b"/><text x="5544" y="8002" font-size="100" text-anchor="start" fill="#334155">PulseTime</text>
+<circle cx="8160" cy="6048" r="36" fill="#64748b"/><text x="8088" y="6082" font-size="100" text-anchor="end" fill="#334155">Q1</text>
+<circle cx="8160" cy="6240" r="36" fill="#64748b"/><text x="8088" y="6274" font-size="100" text-anchor="end" fill="#334155">Q2</text>
+<circle cx="8160" cy="6432" r="36" fill="#64748b"/><text x="8088" y="6466" font-size="100" text-anchor="end" fill="#334155">Q3</text>
+<circle cx="8160" cy="6624" r="36" fill="#64748b"/><text x="8088" y="6658" font-size="100" text-anchor="end" fill="#334155">Q4</text>
+<circle cx="8160" cy="6816" r="36" fill="#64748b"/><text x="8088" y="6850" font-size="100" text-anchor="end" fill="#334155">Q5</text>
+<circle cx="8160" cy="7008" r="36" fill="#64748b"/><text x="8088" y="7042" font-size="100" text-anchor="end" fill="#334155">Q6</text>
+<circle cx="8160" cy="7200" r="36" fill="#64748b"/><text x="8088" y="7234" font-size="100" text-anchor="end" fill="#334155">TQ</text>
+<circle cx="8160" cy="7392" r="36" fill="#64748b"/><text x="8088" y="7426" font-size="100" text-anchor="end" fill="#334155">TQU</text>
+<circle cx="8160" cy="7584" r="36" fill="#64748b"/><text x="8088" y="7618" font-size="100" text-anchor="end" fill="#334155">TQU2</text>
+<circle cx="8160" cy="7776" r="36" fill="#64748b"/><text x="8088" y="7810" font-size="100" text-anchor="end" fill="#334155">TQU3</text>
+<circle cx="8160" cy="7968" r="36" fill="#64748b"/><text x="8088" y="8002" font-size="100" text-anchor="end" fill="#334155">TQo</text>
+<circle cx="8160" cy="8160" r="36" fill="#64748b"/><text x="8088" y="8194" font-size="100" text-anchor="end" fill="#334155">TQt</text>
+<circle cx="8160" cy="8352" r="36" fill="#64748b"/><text x="8088" y="8386" font-size="100" text-anchor="end" fill="#334155">Qd</text>
+<circle cx="8160" cy="8544" r="36" fill="#64748b"/><text x="8088" y="8578" font-size="100" text-anchor="end" fill="#334155">Qa</text>
+<circle cx="8160" cy="8736" r="36" fill="#64748b"/><text x="8088" y="8770" font-size="100" text-anchor="end" fill="#334155">Qn</text>
+<circle cx="8160" cy="8928" r="36" fill="#64748b"/><text x="8088" y="8962" font-size="100" text-anchor="end" fill="#334155">Be</text>
+<circle cx="8160" cy="9120" r="36" fill="#64748b"/><text x="8088" y="9154" font-size="100" text-anchor="end" fill="#334155">BeSel</text>
+<circle cx="8160" cy="9312" r="36" fill="#64748b"/><text x="8088" y="9346" font-size="100" text-anchor="end" fill="#334155">PUDel</text>
+<circle cx="8160" cy="9504" r="36" fill="#64748b"/><text x="8088" y="9538" font-size="100" text-anchor="end" fill="#334155">OutputAPI</text>
+<rect x="9120" y="5952" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Türöffner Haustür (OutputRef)</title></rect>
+<text x="9216" y="6092" font-size="120" fill="#0f172a">Türöffner Haustür</text>
+</svg>

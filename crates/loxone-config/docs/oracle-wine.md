@@ -717,6 +717,64 @@ time, and the actions message center, pause and notification.
   times wire nothing. Compiles now set these too (D76); a recompile
   against the saved file is byte-identical.
 
+## The scenario library (session 33, #227) — passed, four findings
+
+Ran 2026-10-31 with Loxone Config 17.2.8.28 on a private prefix clone and
+display, offline. These were not house configs: the base was Loxone's own
+factory default `programdata/SDcard/prog/Default2.Loxone` (Config 11.1,
+`V="141"`). It opens and saves cleanly, unlike the synthetic configs
+above. The first save migrates it to `V="178"`. It adds the document's
+`APPKEY`/`APPID`, a document `<HP H="" Sc="-2" S="<salt>" Alg="1"/>` and
+`DeviceTelemetry="true"`, renames *Zeiten* to *Zeitfunktionen* (a locale
+rename) and sets the admin's rights from 8191 to -1. Tree devices were
+added in the GUI, the logic compiled, and each compile opened and saved.
+The five entries of `examples/library/` (lighting, shading, heating,
+access, energy) came out of it.
+
+- **Pass:** every last compile came back with an empty semantic diff.
+  That covers minted `InputRef`/`OutputRef` pairs on Tree sensors,
+  analog sensors, actuators, Miniserver relays and Modbus values of a Tree
+  energy meter; `LightController2` moods; `AutoJalousie`,
+  `HeatIRoomController2`, the meters, `EFM`, `Formula` and
+  `AnalogThresholdTrigger`; `access` on a GUI-made Code Touch; title,
+  room and category claims; pages created with `room:`/`category:`. A
+  recompile onto the energy entry's last save was byte-identical.
+- **Finding — a ref's missing `I` is wired by the save.** An `InputRef`
+  on a `DigitalIn` minted with only `AI: x.Q` came back with its `I`
+  wired from the input's `Qe`, which the factory default already
+  carries. Stating `I: x.Qe` converges.
+- **Finding — `AMode` gets `Def="1"`.** A `HeatIRoomController2` minted
+  without anything on `AMode` came back with `<Co K="AMode" Def="1">`.
+  Stating `AMode: 1` converges. The first save also writes the controller's
+  `<Timer>`: one all-day entry per operating mode in its `Modes=`.
+- **Finding — light controller circuits come from the mood editor.**
+  Neither a compiled wire `AQ2` → RGBW actuator nor an `OutputRef` on it
+  made a plain save write the circuit (`NameAI<n>=`, `CapAI<n>=`,
+  `PresM<n>=`, `COName="1"`). So `moods` with `rgb(…)` on that output
+  did not compile ("does not fit a switch or dimmer circuit").
+  Opening the controller's mood editor and pressing OK wrote them, with
+  `CapAI1="31"` for the *RGBW 24V Dimmer Tree* and the circuit named after
+  the device title, not the actuator's. The confirm also turned the stock
+  mood *Viel Licht* on that output from `1` into a colour temperature
+  (80 %, 4700 K).
+- **Finding — GUI-only pieces.** Adding an *NFC Code Touch Tree* creates
+  only the device (`TId="NFCCodeTouchTree"`, its keycode and NFC-tag
+  captions). The `NfcCodeTouch` block, with `Ref=` to the device, category
+  *Zutritt* and `HSize="10"` (*Anzahl Meldungen*), appears when the
+  device is dragged onto a page. Users and their access codes come from
+  the user dialog (`CodeArr=`: 32 upper-case hex digits; not the plain
+  MD5 or SHA-1 of the code). A new user gets `UsR="16416"`,
+  `UnsP="true"`, `LastEdit=` and the UI right *Eigene Kennwörter
+  ändern*. An `EFM`'s meters come from *Monitor konfigurieren*, which
+  writes `<root t="5" rst="true">` with one
+  `<nd t="2|4" tit= ctrlUuid=<meter> liveState= efmState=>` per meter
+  (`t` 2 grid, 4 producer; the type picker also offers consumer).
+  `liveState`/`efmState` are the monitor's `SpStates` in order. A nested
+  `MeterAbsBi` *Rest* (`IName=` its own UUID, which is also the root's
+  `u=`, `NOEFM="true"`) is added for the unmetered consumption.
+- Offline-added Tree devices carry `Serial="00000000"`. A page renamed
+  in the GUI gets `LtE=`.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):

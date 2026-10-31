@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Beschattung Wohnzimmer</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 1 · backward 0 · long 2 · crossings 7 · length 52416</text>
+<polyline points="2688,1344 3168,1344 3168,1344 3648,1344" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4992,1344 7008,1344 7008,1344 9024,1344" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8064,1536 8544,1536 8544,1536 9024,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="10368,1344 10848,1344 10848,1536 11328,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="2688,2496 3168,2496 3168,2496 3648,2496" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="8064,2496 8544,2496 8544,2496 9024,2496" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4992,2496 7008,2496 7008,2688 9024,2688" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="17088,1536 17568,1536 17568,1536 18048,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="17088,1728 17568,1728 17568,1728 18048,1728" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="10368,2496 14208,2496 14208,1920 18048,1920" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="14016,1536 16032,1536 16032,2112 18048,2112" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="17088,1536 17568,1536 17568,3264 18048,3264" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="17088,1728 17568,1728 17568,3456 18048,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="10368,2496 14208,2496 14208,3648 18048,3648" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="14016,1536 16032,1536 16032,3840 18048,3840" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="20736,1728 21216,1728 21216,1728 21696,1728" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="20736,3264 21216,3264 21216,3264 21696,3264" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="20736,3456 21216,3456 21216,3456 21696,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="20736,1536 21216,1536 21216,1536 21696,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<rect x="576" y="1248" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Windgeschwindigkeit (InputRef)</title></rect>
+<text x="672" y="1388" font-size="120" fill="#0f172a">Windgeschwindigkeit</text>
+<rect x="5952" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Windwarnung (InputRef)</title></rect>
+<text x="6048" y="1580" font-size="120" fill="#0f172a">Windwarnung</text>
+<rect x="576" y="2400" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Temperatur (InputRef)</title></rect>
+<text x="672" y="2540" font-size="120" fill="#0f172a">Temperatur</text>
+<rect x="5952" y="2400" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Sonnenschein (InputRef)</title></rect>
+<text x="6048" y="2540" font-size="120" fill="#0f172a">Sonnenschein</text>
+<rect x="14976" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Taste links oben (InputRef)</title></rect>
+<text x="15072" y="1580" font-size="120" fill="#0f172a">Taste links oben</text>
+<rect x="14976" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Taste links unten (InputRef)</title></rect>
+<text x="15072" y="1772" font-size="120" fill="#0f172a">Taste links unten</text>
+<rect x="3648" y="960" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Wind über 40 km/h (Greater)</title></rect>
+<text x="3744" y="1140" font-size="140" fill="#0f172a">Wind über 40 km/h</text>
+<circle cx="3648" cy="1344" r="36" fill="#64748b"/><text x="3720" y="1378" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="3648" cy="1536" r="36" fill="#64748b"/><text x="3720" y="1570" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="4992" cy="1344" r="36" fill="#64748b"/><text x="4920" y="1378" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="9024" y="960" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Windalarm (Or)</title></rect>
+<text x="9120" y="1140" font-size="140" fill="#0f172a">Windalarm</text>
+<circle cx="9024" cy="1344" r="36" fill="#64748b"/><text x="9096" y="1378" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="9024" cy="1536" r="36" fill="#64748b"/><text x="9096" y="1570" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="10368" cy="1344" r="36" fill="#64748b"/><text x="10296" y="1378" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="11328" y="960" width="2688" height="888" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Windalarm halten (OffDelay)</title></rect>
+<text x="11424" y="1140" font-size="140" fill="#0f172a">Windalarm halten</text>
+<circle cx="11328" cy="1536" r="36" fill="#64748b"/><text x="11400" y="1570" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="11328" cy="1728" r="36" fill="#64748b"/><text x="11400" y="1762" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="14016" cy="1536" r="36" fill="#64748b"/><text x="13944" y="1570" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="3648" y="2112" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Außen über 22 °C (Greater)</title></rect>
+<text x="3744" y="2292" font-size="140" fill="#0f172a">Außen über 22 °C</text>
+<circle cx="3648" cy="2496" r="36" fill="#64748b"/><text x="3720" y="2530" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="3648" cy="2688" r="36" fill="#64748b"/><text x="3720" y="2722" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="4992" cy="2496" r="36" fill="#64748b"/><text x="4920" y="2530" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="9024" y="2112" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Sonne und warm (And)</title></rect>
+<text x="9120" y="2292" font-size="140" fill="#0f172a">Sonne und warm</text>
+<circle cx="9024" cy="2496" r="36" fill="#64748b"/><text x="9096" y="2530" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="9024" cy="2688" r="36" fill="#64748b"/><text x="9096" y="2722" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="10368" cy="2496" r="36" fill="#64748b"/><text x="10296" y="2530" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="18048" y="960" width="2688" height="2040" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Raffstore Süd (AutoJalousie)</title></rect>
+<text x="18144" y="1140" font-size="140" fill="#0f172a">Raffstore Süd</text>
+<circle cx="18048" cy="1536" r="36" fill="#64748b"/><text x="18120" y="1570" font-size="100" text-anchor="start" fill="#334155">InputTriggerUp</text>
+<circle cx="18048" cy="1728" r="36" fill="#64748b"/><text x="18120" y="1762" font-size="100" text-anchor="start" fill="#334155">InputTriggerDown</text>
+<circle cx="18048" cy="1920" r="36" fill="#64748b"/><text x="18120" y="1954" font-size="100" text-anchor="start" fill="#334155">AutoShade</text>
+<circle cx="18048" cy="2112" r="36" fill="#64748b"/><text x="18120" y="2146" font-size="100" text-anchor="start" fill="#334155">Safety</text>
+<circle cx="20736" cy="1536" r="36" fill="#64748b"/><text x="20664" y="1570" font-size="100" text-anchor="end" fill="#334155">OutputUp</text>
+<circle cx="20736" cy="1728" r="36" fill="#64748b"/><text x="20664" y="1762" font-size="100" text-anchor="end" fill="#334155">OutputDown</text>
+<rect x="18048" y="2688" width="2688" height="2040" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Raffstore West (AutoJalousie)</title></rect>
+<text x="18144" y="2868" font-size="140" fill="#0f172a">Raffstore West</text>
+<circle cx="18048" cy="3264" r="36" fill="#64748b"/><text x="18120" y="3298" font-size="100" text-anchor="start" fill="#334155">InputTriggerUp</text>
+<circle cx="18048" cy="3456" r="36" fill="#64748b"/><text x="18120" y="3490" font-size="100" text-anchor="start" fill="#334155">InputTriggerDown</text>
+<circle cx="18048" cy="3648" r="36" fill="#64748b"/><text x="18120" y="3682" font-size="100" text-anchor="start" fill="#334155">AutoShade</text>
+<circle cx="18048" cy="3840" r="36" fill="#64748b"/><text x="18120" y="3874" font-size="100" text-anchor="start" fill="#334155">Safety</text>
+<circle cx="20736" cy="3264" r="36" fill="#64748b"/><text x="20664" y="3298" font-size="100" text-anchor="end" fill="#334155">OutputUp</text>
+<circle cx="20736" cy="3456" r="36" fill="#64748b"/><text x="20664" y="3490" font-size="100" text-anchor="end" fill="#334155">OutputDown</text>
+<rect x="21696" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Raffstore Süd ab (OutputRef)</title></rect>
+<text x="21792" y="1772" font-size="120" fill="#0f172a">Raffstore Süd ab</text>
+<rect x="21696" y="3168" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Raffstore West auf (OutputRef)</title></rect>
+<text x="21792" y="3308" font-size="120" fill="#0f172a">Raffstore West auf</text>
+<rect x="21696" y="3360" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Raffstore West ab (OutputRef)</title></rect>
+<text x="21792" y="3500" font-size="120" fill="#0f172a">Raffstore West ab</text>
+<rect x="21696" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Raffstore Süd auf (OutputRef)</title></rect>
+<text x="21792" y="1580" font-size="120" fill="#0f172a">Raffstore Süd auf</text>
+</svg>

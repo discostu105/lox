@@ -678,7 +678,10 @@ groups) and the house config, Config 12 – 17.
   the separator of several access codes (one config of the old `V="126"`
   generation has a single 96-digit `CodeArr=`, three codes' worth without
   a separator) and what `iBtnArr="0"` (9 users) means. Lox Logic splits on
-  `;` and reads a value without one as one entry.
+  `;` and reads a value without one as one entry. Loxone Config 17.2
+  writes an access code as 32 upper-case hex digits that are neither the
+  plain MD5 nor the SHA-1 of the code; the algorithm is unknown (oracle
+  session 33).
 - **Passwords are `<HP>` children**, two per user: the first is the
   password, the second the visualization password — the `Sc=` score of
   each matched `scorePWD`/`scoreVisuPWD` of the user management API on
@@ -948,7 +951,10 @@ to the program's `Date=`; and two pushes to the same Miniserver
   setting or connector explains, such as the irrigation's
   `maxExpectedPrecipitation` naming a connector the block does not
   write), a light controller minted from source (no `NameAI<n>=`, no
-  circuits, until a save), analog day timers,
+  circuits; a plain save does not add them either, even with an
+  `OutputRef` on the output: Loxone Config writes `NameAI<n>=`,
+  `CapAI<n>=`, `PresM<n>=` and `COName="1"` when its mood editor is
+  confirmed, oracle session 33), analog day timers,
   display texts of an object's own, other `StatsType` values, whether Loxone Config drops an entry when the room is removed,
   and where it puts a new entry (Lox Logic appends it).
 
