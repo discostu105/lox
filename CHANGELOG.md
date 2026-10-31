@@ -10,6 +10,24 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-10-31
+
+### Added
+- **`lox logic`: a PulseAt's fire time in the source** — `At: 19:00` (or `06:58:30`) on a `PulseAt` sets the time of
+  day it fires, which used to come only from Loxone Config (#248)
+  - `adopt` and `decompile` write it out, `fmt` normalizes it (`6:58` → `06:58`), `lox logic types PulseAt` lists it,
+    and `diff` shows a change as `At: 18:58 -> 06:58`; `drift` now sees a changed fire time too
+  - Without `At:` the time is carried from the base as before, so existing sources compile unchanged. A block set to
+    a time function (sunrise, hour pulse) in Loxone Config refuses `At:`
+- **`lox logic coverage`** lists, per managed block type, the attributes the compile still carries from the base
+  instead of writing them from source, with the parameter that claims one where Lox Logic has it
+- **loxone-client 0.1.3** (on crates.io): `loxone_client::system::code_of()` reads the `Code` of a parsed `LL` answer
+  in both forms (Gen 1 string, Gen 2 number); `lox`'s commands, MCP server, user management and NFC learning
+  use it instead of their own copies.
+
+### Fixed
+- **`lox set`**: a Gen 2 Miniserver's answer (`"Code": 200` as a number) is no longer reported as `Error ?`.
+
 ## [0.54.0] — 2026-10-31
 
 ### Added
