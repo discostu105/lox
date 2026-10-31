@@ -1,1 +1,0 @@
-- **`lox ir compile` / `lxir compile`**: a managed virtual input is rebuilt in its place in the "Virtual Inputs" folder, so it no longer moves to the end of the folder.

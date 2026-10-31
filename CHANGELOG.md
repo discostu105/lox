@@ -10,6 +10,21 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-10-31 — the whole house under source
+
+Rules can be deleted from source (`removed`), app-made rules and existing virtual inputs can be adopted, and a push no longer stops on the custom change of a rule deleted in the app. On the test house, all page logic and all virtual inputs are now managed.
+
+### Added
+- **`lox ir` / `lxir`**: `removed <slug>` deletes a named Automatic Designer rule from the program, the way it deletes a block. A rule deleted in the app thus stays deleted after the next push.
+- **`lox ir adopt` / `lxir adopt`**: `--uuid <rule>` takes over one Automatic Designer rule as `rule <slug> "Name"`, and an extern rule of the project is promoted. Decompile and adopt declare rules by name when no other rule shares it.
+- **`lox ir adopt` / `lxir adopt`**: `--uuid <virtual input>` takes over an existing VirtualIn and promotes an extern on it. Its place in the folder stays as it was.
+
+### Changed
+- **`lox config push`**: a custom change to an object that the upload deletes (`removed` in the source, a rule deleted in the app, for example) goes with the object. It no longer stops `--force`, and the JSON marks it `"removed": true`.
+
+### Fixed
+- **`lox ir compile` / `lxir compile`**: a managed virtual input is rebuilt in its place in the "Virtual Inputs" folder, so it no longer moves to the end of the folder.
+
 ## [0.38.0] — 2026-10-31 — tests without lox-cli
 
 `lox ir test` simulates the logic itself, built only on what Loxone documents: a test passes on documented

@@ -1,3 +1,0 @@
-- **`lox ir` / `lxir`**: `removed <slug>` deletes a named Automatic Designer rule from the program, the way it deletes a block. A rule deleted in the app thus stays deleted after the next push.
-- **`lox ir adopt` / `lxir adopt`**: `--uuid <rule>` takes over one Automatic Designer rule as `rule <slug> "Name"`, and an extern rule of the project is promoted. Decompile and adopt declare rules by name when no other rule shares it.
-- **`lox ir adopt` / `lxir adopt`**: `--uuid <virtual input>` takes over an existing VirtualIn and promotes an extern on it. Its place in the folder stays as it was.
