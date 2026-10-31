@@ -40,7 +40,8 @@ config never notices.
   screenshot of a diagram.
 - **Reuse** (roadmap): templates instantiate the same logic for N windows.
 - **Testing** (roadmap): compile against a base config, run the result
-  through a simulator (`lox-cli sim`) before it ever reaches the house.
+  through lxir's simulator (`lxir test`, D68) before it ever reaches the
+  house.
 - **Agents**: an AI agent can read the IR, propose a change, compile, show a
   semantic diff, and never touch the fragile XML directly. See
   [agents.md](agents.md).
@@ -77,8 +78,9 @@ big-bang.
 - Transport. Talking to the Miniserver (FTP/HTTP, LoxCC compression,
   credentials) belongs to the `lox` / `lox-cli` CLIs, which consume this
   crate. The library stays pure: bytes in, bytes out.
-- Simulating Loxone semantics. The crate models the *file*, not block
-  runtime behavior; simulation belongs to `lox-cli sim`.
+- Simulating what Loxone does not document. `lxir test` simulates the
+  blocks whose behavior Loxone documents (D68, [simulator.md](simulator.md))
+  and refuses the rest by name; it does not reimplement the Miniserver.
 
 ## Where this came from
 

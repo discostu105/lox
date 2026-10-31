@@ -264,8 +264,9 @@ touched a managed block, bring the module up to date first (or `lox ir adopt --u
 ## Tests, CI and editors
 
 - **Tests:** `test "…" … end` blocks in a module set inputs, advance time and `expect` outputs. `lox ir test` runs
-  them against the compiled config through [lox-cli](https://github.com/eisber/lox-cli)'s simulator (`--lox <path>`
-  or `$LOX`).
+  them against the compiled config in lxir's simulator, which models the blocks Loxone documents and names any
+  other block a test depends on
+  ([simulator.md](https://github.com/discostu105/lox/blob/main/crates/lxir/docs/simulator.md)).
 - **CI:** [examples/ci.sh](https://github.com/discostu105/lox/blob/main/crates/lxir/examples/ci.sh) checks
   parsing, formatting, lock currency and byte-determinism; `--sync` also requires the sources to match the deployed
   config.
