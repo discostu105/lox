@@ -199,9 +199,11 @@ USAGE:
         against the observed keys) and reports agreements, conflicts,
         and coverage gaps per type.
 
-  lxir types [<Type>] [--json]
-        The builtin block types the compiler mints, and per type its
-        ports: key, direction, and — where Loxone documents them (D52) —
+  lxir types [<Type> | --search <text>] [--json]
+        The builtin block types the compiler mints, each with what it is
+        for; --search lists the types whose name or purpose mentions the
+        text (`--search hysteresis`). Per type its purpose, the Loxone
+        knowledge-base page where known, and its ports: key, direction, and — where Loxone documents them (D52) —
         the unit a value is in (a suffixed value scales into it: `2h` is
         `120` on a minutes port), the canvas label (`Tr` for
         `InputTrigger`), the documented range (checked by `lxir lint`)
@@ -1988,7 +1990,17 @@ fn cmd_templates(name: Option<&str>) -> Result<ExitCode, AnyError> {
 fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
     use lxir::connectors;
     let json = args.contains(&"--json");
-    let names: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    let mut names: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
+    // `--search <text>`: the types whose name or purpose mentions it.
+    let search = match names.iter().position(|a| *a == "--search") {
+        Some(i) if i + 1 < names.len() => {
+            let q = names.remove(i + 1);
+            names.remove(i);
+            Some(q)
+        }
+        Some(_) => return Err("usage: lxir types --search <text> [--json]".into()),
+        None => None,
+    };
     let dir = |d: connectors::PortDir| match d {
         connectors::PortDir::Input => "input",
         connectors::PortDir::Output => "output",
@@ -2014,20 +2026,23 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             .collect();
         Some(serde_json::json!({
             "type": t,
+            "summary": lxir::blockdoc::summary(t),
+            "docs": lxir::blockdoc::kb_url(t),
             "ports": ports,
             "attr_params": connectors::attr_params(t),
         }))
     };
     match names.as_slice() {
         [] => {
+            let types: Vec<&str> = match search {
+                Some(q) => lxir::blockdoc::search(q),
+                None => connectors::BUILTIN_TYPES.to_vec(),
+            };
             if json {
-                let all: Vec<_> = connectors::BUILTIN_TYPES
-                    .iter()
-                    .filter_map(|t| describe(t))
-                    .collect();
+                let all: Vec<_> = types.iter().filter_map(|t| describe(t)).collect();
                 println!("{}", serde_json::to_string_pretty(&all)?);
             } else {
-                for t in connectors::BUILTIN_TYPES {
+                for t in &types {
                     let ports = connectors::builtin(t).unwrap_or_default();
                     let count = |d| ports.iter().filter(|p| p.dir == d).count();
                     println!(
@@ -2036,6 +2051,13 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                         count(connectors::PortDir::Output),
                         count(connectors::PortDir::Param),
                     );
+                    if let Some(s) = lxir::blockdoc::summary(t) {
+                        println!("    {s}");
+                    }
+                }
+                if types.is_empty() {
+                    eprintln!("no type mentions `{}`", search.unwrap_or_default());
+                    return Ok(ExitCode::FAILURE);
                 }
             }
             Ok(ExitCode::SUCCESS)
@@ -2056,6 +2078,12 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 return Ok(ExitCode::SUCCESS);
             }
             println!("{t}");
+            if let Some(summary) = lxir::blockdoc::summary(t) {
+                println!("  {summary}");
+            }
+            if let Some(url) = lxir::blockdoc::kb_url(t) {
+                println!("  {url}");
+            }
             let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
             for port in desc["ports"].as_array().into_iter().flatten() {
                 let range = match (port["min"].as_str(), port["max"].as_str()) {
@@ -2088,7 +2116,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        _ => Err("usage: lxir types [<Type>] [--json]".into()),
+        _ => Err("usage: lxir types [<Type> | --search <text>] [--json]".into()),
     }
 }
 

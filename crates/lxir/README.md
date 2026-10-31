@@ -204,7 +204,8 @@ lxir adopt current.Loxone --out-module modules/haus.lxir \
 lxir adopt current.Loxone --uuid <uuid> --as <slug> --module modules/ \
      --lock modules/haus.lock.json  # adopt one freshly drawn block
 lxir observe current.Loxone          # port-direction evidence (JSON)
-lxir types [<Type>]                  # mintable types: ports, units, labels, ranges
+lxir types [<Type>]                  # mintable types: purpose, ports, units, labels, ranges
+lxir types --search hysteresis       # the types whose name or purpose mentions it
 lxir templates [<name>]              # the template library; a name prints its file
 lxir roundtrip current.Loxone        # byte-fidelity self-check
 lxir repair current.Loxone --out fixed.Loxone  # `&#xA;` text from a foreign

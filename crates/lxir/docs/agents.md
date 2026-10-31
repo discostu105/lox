@@ -49,7 +49,8 @@ keeps its example module valid.
 lxir decompile current.Loxone            # full IR view, `page` sections
 lxir decompile --out-dir view/ current.Loxone   # one module per page
 lxir observe current.Loxone              # port evidence per block type
-lxir types Monoflop                       # ports, units, labels of a mintable type
+lxir types --search delay                 # which type does what (name or purpose)
+lxir types Monoflop                       # purpose, ports, units, labels of a mintable type
 lxir templates                            # the template library (lxir templates <name> prints one)
 
 # 1. Edit the module (.lxir). Whole-line # comments are preserved.

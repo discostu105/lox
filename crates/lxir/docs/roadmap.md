@@ -93,6 +93,10 @@ types) contradict each other. Results and methodology:
       blocks graded in lxir's simulator, a reference solution each
       (`cargo test` checks them); `run.py` runs Claude Code on them.
       Inputs of blocks without a simulator model now follow their wires.
+- [x] Block reference (2026-10-31, #207): one line per mintable type on
+      what it is for (`src/blockdoc.rs`, written for lxir), the
+      knowledge-base page where this repo documents it; `lxir types`,
+      `lxir types --search` and the LSP hover show them.
 - [x] Template library (2026-10-31, `templates/`, `lxir templates`,
       #203): 13 templates for light, climate, safety and shading, each
       tested in the simulator; object parameters typed `any`. Open:

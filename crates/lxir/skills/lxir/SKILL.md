@@ -18,7 +18,8 @@ lockfile pins every UUID the compiler minted. The full guide is
 - Upload to a Miniserver. Compiling produces a file; pushing it is the
   human's step.
 - Invent block types or port names. `lxir types` lists what can be
-  minted, `lxir types <Type>` its ports, units, labels and ranges.
+  minted and what each type is for (`lxir types --search delay`),
+  `lxir types <Type>` its ports, units, labels and ranges.
   An extern's ports are whatever the base config has: the error lists them.
 - Commit a real config. `lxir scan <file|dir>` exits 1 when one carries
   personal data (it says where, never what).
