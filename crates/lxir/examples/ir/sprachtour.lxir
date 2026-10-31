@@ -182,11 +182,11 @@ klimasensor.room = "Garten"
 klima_temp.category = "Klima"
 
 # --- test (D36): clock, dt-Schritte, ~= --------------------------------
-# `lxir test` kompiliert im Speicher und spielt jedes Szenario mit
-# `lox sim` durch; Referenzen zeigen auf das flache Modul (Templates
-# expandiert, Ausdrücke desugart). Injizierte Signale tragen hier
-# eindeutige Titel — der Simulator adressiert per Titel, und ein Titel,
-# den auch ein Spiegel trägt, ist keine stabile Adresse.
+# `lxir test` kompiliert im Speicher und spielt jedes Szenario im
+# eingebauten Simulator durch; Referenzen zeigen auf das flache Modul
+# (Templates expandiert, Ausdrücke desugart). Injizierte Signale tragen
+# hier eindeutige Titel — so laufen die Szenarien auch in lox-cli
+# (`--lox`), das per Titel adressiert.
 
 test "Hitzewarnung mit Hysterese"
 	clock "2026-07-15 14:00" # simulierte Uhrzeit, für Zeitlogik

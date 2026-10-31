@@ -1133,8 +1133,8 @@ current tree (~301 commits since 2026-04; last commit 2026-09-08):
   `ws.rs` have diverged heavily. Nothing there is ahead of lox for runtime use.
 - **Runtime reuse for the TUI: none.** No per-type action mapping, no state decoding, no binary event parsing.
 - **Config model vs. lxir.** Heavy overlap with lxir's `doc`. lxir is the more rigorous one (byte-faithful
-  round-trip, UUID identity) and is already what we'd use. lxir itself already uses lox-cli as its simulation
-  transport (`ir/simtest.rs`), so the two ecosystems are linked on the *authoring* side, not the runtime side.
+  round-trip, UUID identity) and is already what we'd use. lxir's `lxir test` used lox-cli as its simulation
+  transport until it got a simulator of its own (lxir D68); `--lox` still runs lox-cli's.
 - **The simulator (`lox-sim`)** is the one genuinely interesting part: `.Loxone` → `SimGraph` → topological
   tick engine, `set_input`/`get_output`/`trace`, snapshot/restore, 224 registered block types (logic, timer, math
   solid; big controllers like `LightController2` only approximated; many stubs), ~500 tests. Signals are `f64`

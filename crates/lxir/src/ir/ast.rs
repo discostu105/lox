@@ -44,7 +44,7 @@ pub enum Item {
     Page(PageDecl),
     /// `test "Name"` … `end` — a simulator-backed scenario (D36).
     /// `compile` ignores it entirely; `lxir test` compiles the module in
-    /// memory and replays the body against `lox sim run` (lox-cli).
+    /// memory and replays the body in the simulator (D68).
     Test(TestDecl),
     /// `tiles <name>` … `end` — a named set of Touch Pure Flex tile
     /// programs (D41).
@@ -894,7 +894,7 @@ impl fmt::Display for TemplateParam {
 /// body reads top to bottom: port assignments inject signals, `tick`
 /// advances simulated time, `expect` asserts a port's value, `clock` sets
 /// the simulated wall-clock. `lxir test` groups the statements into
-/// `lox sim` steps at the `tick` boundaries.
+/// steps at the `tick` boundaries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestDecl {
     /// Display name, quoted in source. Unique across the module.

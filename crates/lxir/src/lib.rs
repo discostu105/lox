@@ -25,6 +25,8 @@
 //!   page as SVG with layout metrics.
 //! - [`moods`] — LightController2 moods: the read model and the circuit
 //!   value codec.
+//! - [`sim`] — the logic simulator behind `lxir test`: block models
+//!   written from Loxone's documentation, run cycle by cycle.
 //! - [`project`] — `lox.toml` project files: one directory, one deployment
 //!   target, zero flags.
 //!
@@ -59,6 +61,7 @@ pub mod project;
 pub mod render;
 pub mod scan;
 pub mod settings;
+pub mod sim;
 pub mod uuid;
 pub mod xml;
 

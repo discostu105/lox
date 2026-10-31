@@ -1,19 +1,22 @@
-//! `lxir test` planning (D36): translate `test` bodies into `lox sim run`
-//! scenario specs against the compiled config, and read the simulator's
-//! JSON verdict back onto the source `expect` statements.
+//! `lxir test` (D36, D68): plan the `test` bodies against the compiled
+//! config, run them in the built-in simulator ([`crate::sim`]), and map
+//! the outcome back onto the source `expect` statements.
 //!
-//! The simulator (lox-cli) addresses signals as `"<Title>.<Port>"`, so the
-//! plan maps every referenced slug to its compiled object's title and
-//! refuses titles another object shares — unless the holders carry one
-//! signal (Input/OutputRefs mirroring the same target, possibly alongside
-//! that target itself), where injecting into all of them at once is
-//! exactly right. Running the external binary is the CLI's job; this
-//! module is pure translation.
+//! A test addresses ports by slug; the plan resolves each one through the
+//! lock to its object's UUID, so titles never need to be unique. The
+//! optional lox-cli backend (`lxir test --lox`) still speaks
+//! title-addressed `lox sim run` scenario JSON ([`lox_specs`]): it maps
+//! every object to its title and refuses titles another object shares —
+//! unless the holders carry one signal (Input/OutputRefs mirroring the
+//! same target, possibly alongside that target itself), where injecting
+//! into all of them at once is exactly right. Running the external
+//! binary is the CLI's job; this module is pure.
 
 use super::ast::{Item, Module, PortRef, TestCmp, TestItem, Value};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
 use crate::lock::Lockfile;
+use crate::sim::{Simulator, clock::Clock};
 use serde_json::{Map, Value as Json, json};
 use std::collections::BTreeMap;
 
@@ -22,34 +25,38 @@ pub struct TestPlan {
     pub runs: Vec<TestRun>,
 }
 
-impl TestPlan {
-    /// The `--sim-file` payload: one JSON array of scenario specs.
-    pub fn specs_json(&self) -> String {
-        let arr = Json::Array(self.runs.iter().map(|r| r.spec.clone()).collect());
-        serde_json::to_string_pretty(&arr).expect("specs serialize")
-    }
-}
-
 #[derive(Debug)]
 pub struct TestRun {
     pub name: String,
-    /// Step shape for attributing the flattened result checks.
     pub steps: Vec<PlannedStep>,
-    pub spec: Json,
 }
 
+/// What one `tick` executes: the assignments and `clock` before it, the
+/// ticks, and the `expect`s that follow.
 #[derive(Debug)]
 pub struct PlannedStep {
+    pub sets: Vec<(Signal, f64)>,
+    pub clock: Option<String>,
+    pub ticks: u64,
+    pub dt: f64,
     pub expects: Vec<PlannedExpect>,
+}
+
+/// A port a test names, resolved to its object.
+#[derive(Debug, Clone)]
+pub struct Signal {
+    /// As written (`jal.AutoShade`).
+    pub port: PortRef,
+    /// The compiled object's UUID.
+    pub object: String,
 }
 
 #[derive(Debug)]
 pub struct PlannedExpect {
     /// The statement as written (`expect jal.AutoShade == 1`), for reports.
     pub line: String,
-    /// The simulator signal key (`"<Title>.<Port>"`).
-    pub key: String,
-    pub cmp: &'static str,
+    pub signal: Signal,
+    pub cmp: TestCmp,
     pub expected: f64,
 }
 
@@ -59,18 +66,48 @@ pub struct TestResult {
     pub pass: bool,
     /// One line per failed expectation: statement, actual value, step.
     pub failures: Vec<String>,
+    /// The test could not run: a port outside the simulated logic, a
+    /// block whose behavior is not documented enough to simulate.
+    pub error: Option<String>,
 }
 
-/// Build the sim plan for every `test` in the module (post-expansion,
-/// post-desugaring), resolving slugs through the lock into the compiled
-/// config's titles. `filter` selects tests by substring of their name.
+/// Build the plan for every `test` in the module (post-expansion,
+/// post-desugaring), resolving slugs through the lock to the compiled
+/// config's objects. `filter` selects tests by substring of their name.
 pub fn plan_tests(
     module: &Module,
     lock: &Lockfile,
     compiled: &LoxoneDoc,
     filter: Option<&str>,
 ) -> Result<TestPlan> {
-    let titles = TitleTable::build(lock, compiled);
+    let mut uuid_of = BTreeMap::new();
+    for (slug, o) in &lock.objects {
+        uuid_of.insert(slug.as_str(), o.uuid.as_str());
+    }
+    for (slug, e) in &lock.externals {
+        uuid_of.insert(slug.as_str(), e.uuid.as_str());
+    }
+    let present: std::collections::BTreeSet<String> =
+        compiled.objects().into_iter().map(|o| o.uuid).collect();
+    let resolve = |port: &PortRef, test: &str| -> Result<Signal> {
+        let compile_err = |msg: String| Error::Compile(format!("test \"{test}\": {msg}"));
+        let uuid = uuid_of.get(port.slug.as_str()).ok_or_else(|| {
+            compile_err(format!(
+                "`{port}` — slug `{}` is not in the lockfile; only managed blocks \
+                 and pinned externs are addressable in the simulator",
+                port.slug
+            ))
+        })?;
+        if !present.contains(*uuid) {
+            return Err(compile_err(format!(
+                "`{port}` — object {uuid} is not in the compiled config"
+            )));
+        }
+        Ok(Signal {
+            port: port.clone(),
+            object: uuid.to_string(),
+        })
+    };
     let mut runs = Vec::new();
     for item in &module.items {
         let Item::Test(t) = item else { continue };
@@ -79,15 +116,274 @@ pub fn plan_tests(
         {
             continue;
         }
-        runs.push(plan_one(module, t, &titles)?);
+        runs.push(plan_one(module, t, &resolve)?);
     }
     Ok(TestPlan { runs })
 }
 
-/// Slug → title resolution against the compiled config.
+fn plan_one(
+    module: &Module,
+    t: &super::ast::TestDecl,
+    resolve: &dyn Fn(&PortRef, &str) -> Result<Signal>,
+) -> Result<TestRun> {
+    let compile_err = |msg: String| Err(Error::Compile(format!("test \"{}\": {msg}", t.name)));
+    let numeric = |v: &Value| -> Result<f64> {
+        let lit = module.resolve_value(v)?;
+        lit.parse::<f64>().map_err(|_| {
+            Error::Compile(format!(
+                "test \"{}\": value `{lit}` is not a number",
+                t.name
+            ))
+        })
+    };
+
+    // One step per `tick`: assignments and `clock` gather until a tick
+    // executes them; the expects that follow assert on its outcome.
+    #[derive(Default)]
+    struct StepBuild {
+        sets: Vec<(Signal, f64)>,
+        clock: Option<String>,
+        ticks: Option<(u64, f64)>,
+        expects: Vec<PlannedExpect>,
+    }
+    impl StepBuild {
+        fn is_empty(&self) -> bool {
+            self.sets.is_empty() && self.clock.is_none() && self.ticks.is_none()
+        }
+    }
+
+    let mut steps: Vec<StepBuild> = Vec::new();
+    let mut cur = StepBuild::default();
+    for stmt in &t.body {
+        match stmt {
+            TestItem::Inject(s) => {
+                if cur.ticks.is_some() {
+                    steps.push(std::mem::take(&mut cur));
+                }
+                cur.sets
+                    .push((resolve(&s.target, &t.name)?, numeric(&s.value)?));
+            }
+            TestItem::Clock(c) => {
+                if cur.ticks.is_some() {
+                    steps.push(std::mem::take(&mut cur));
+                }
+                if let Err(e) = Clock::default().set(&c.spec) {
+                    return compile_err(e);
+                }
+                cur.clock = Some(c.spec.clone());
+            }
+            TestItem::Tick(tick) => {
+                if cur.ticks.is_some() {
+                    steps.push(std::mem::take(&mut cur));
+                }
+                let dt = match &tick.dt {
+                    Some(v) => numeric(v)?,
+                    None => 1.0,
+                };
+                if dt <= 0.0 {
+                    return compile_err(format!("`tick {} dt {dt}` — dt must be positive", tick.n));
+                }
+                cur.ticks = Some((tick.n, dt));
+            }
+            TestItem::Expect(e) => {
+                if cur.ticks.is_none() {
+                    return compile_err(format!(
+                        "`expect {} {} {}` has no preceding `tick` — assertions read \
+                         the state after simulated time has advanced",
+                        e.port, e.cmp, e.value
+                    ));
+                }
+                cur.expects.push(PlannedExpect {
+                    line: format!("expect {} {} {}", e.port, e.cmp, e.value),
+                    signal: resolve(&e.port, &t.name)?,
+                    cmp: e.cmp,
+                    expected: numeric(&e.value)?,
+                });
+            }
+            TestItem::Comment(_) => {}
+        }
+    }
+    if !cur.is_empty() {
+        steps.push(cur);
+    }
+
+    if !steps.iter().any(|s| !s.expects.is_empty()) {
+        return compile_err("no `expect` — the test asserts nothing".into());
+    }
+    if let Some(dangling) = steps.last()
+        && dangling.ticks.is_none()
+    {
+        return compile_err(
+            "the final assignments are never executed — add a `tick` (and an \
+             `expect`) after them"
+                .into(),
+        );
+    }
+    let steps = steps
+        .into_iter()
+        .map(|s| {
+            let (ticks, dt) = s
+                .ticks
+                .expect("stepped only at ticks; dangling refused above");
+            PlannedStep {
+                sets: s.sets,
+                clock: s.clock,
+                ticks,
+                dt,
+                expects: s.expects,
+            }
+        })
+        .collect();
+    Ok(TestRun {
+        name: t.name.clone(),
+        steps,
+    })
+}
+
+/// Run every planned test in the built-in simulator, each from a fresh
+/// start (D68).
+pub fn run_tests(plan: &TestPlan, compiled: &LoxoneDoc) -> Vec<TestResult> {
+    plan.runs
+        .iter()
+        .map(|run| {
+            let mut failures = Vec::new();
+            let error = run_one(run, &mut Simulator::new(compiled), &mut failures).err();
+            TestResult {
+                name: run.name.clone(),
+                pass: failures.is_empty() && error.is_none(),
+                failures,
+                error,
+            }
+        })
+        .collect()
+}
+
+fn run_one(
+    run: &TestRun,
+    sim: &mut Simulator,
+    failures: &mut Vec<String>,
+) -> std::result::Result<(), String> {
+    let port_of = |sim: &Simulator, s: &Signal| {
+        sim.port(&s.object, &s.port.port)
+            .map_err(|e| format!("`{}`: {e}", s.port))
+    };
+    for (step_no, step) in run.steps.iter().enumerate() {
+        let step_err = |e: String| format!("step {}: {e}", step_no + 1);
+        for (signal, v) in &step.sets {
+            let port = port_of(sim, signal).map_err(step_err)?;
+            sim.set(&port, *v);
+        }
+        if let Some(spec) = &step.clock {
+            sim.set_clock(spec).map_err(step_err)?;
+        }
+        for _ in 0..step.ticks {
+            sim.tick(step.dt);
+        }
+        for e in &step.expects {
+            let port = port_of(sim, &e.signal).map_err(step_err)?;
+            sim.check(&port).map_err(|why| {
+                step_err(format!("`{}` cannot be simulated: {why}", e.signal.port))
+            })?;
+            let actual = sim.read(&port);
+            if !holds(e.cmp, actual, e.expected) {
+                failures.push(format!(
+                    "step {}: {} — actual {}",
+                    step_no + 1,
+                    e.line,
+                    trim_float(actual)
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `==` with the slack of decimal arithmetic; `~=` within 5 % of the
+/// expected value.
+fn holds(cmp: TestCmp, actual: f64, expected: f64) -> bool {
+    let close = (actual - expected).abs() <= 1e-9 * expected.abs().max(1.0);
+    match cmp {
+        TestCmp::Eq => close,
+        TestCmp::Ge => actual >= expected || close,
+        TestCmp::Gt => actual > expected && !close,
+        TestCmp::Le => actual <= expected || close,
+        TestCmp::Lt => actual < expected && !close,
+        TestCmp::Approx => close || (actual - expected).abs() <= 0.05 * expected.abs(),
+    }
+}
+
+/// The plan as lox-cli `lox sim run` scenarios (`lxir test --lox`), with
+/// the title-addressed key of every `expect` for [`read_results`].
+pub struct LoxSpecs {
+    /// The `--sim-file` payload: one JSON array of scenario specs.
+    pub json: String,
+    /// Per run, per step, per expect: the simulator signal key.
+    keys: Vec<Vec<Vec<String>>>,
+}
+
+/// Translate the plan for lox-cli, which addresses signals as
+/// `"<Title>.<Port>"` (or `"<Title> [<Room>].<Port>"`).
+pub fn lox_specs(plan: &TestPlan, compiled: &LoxoneDoc) -> Result<LoxSpecs> {
+    let titles = TitleTable::build(compiled);
+    let mut specs = Vec::new();
+    let mut keys = Vec::new();
+    for run in &plan.runs {
+        let mut json_steps = Vec::new();
+        let mut run_keys = Vec::new();
+        for step in &run.steps {
+            let mut inputs = Map::new();
+            for (signal, v) in &step.sets {
+                inputs.insert(titles.key(signal, &run.name)?, json!(v));
+            }
+            let mut expected: Map<String, Json> = Map::new();
+            let mut step_keys = Vec::new();
+            for e in &step.expects {
+                let key = titles.key(&e.signal, &run.name)?;
+                let per_key = expected
+                    .entry(key.clone())
+                    .or_insert_with(|| Json::Object(Map::new()))
+                    .as_object_mut()
+                    .expect("built as object");
+                if per_key.contains_key(e.cmp.symbol()) {
+                    return Err(Error::Compile(format!(
+                        "test \"{}\": two `expect {} {} …` in the same step — lox-cli \
+                         keeps one comparator per port and step; split them with a \
+                         `tick`",
+                        run.name,
+                        e.signal.port,
+                        e.cmp.symbol()
+                    )));
+                }
+                per_key.insert(e.cmp.symbol().to_string(), json!(e.expected));
+                step_keys.push(key);
+            }
+            let mut s = Map::new();
+            s.insert("inputs".into(), Json::Object(inputs));
+            s.insert("ticks".into(), json!(step.ticks));
+            s.insert("dt".into(), json!(step.dt));
+            if let Some(clock) = &step.clock {
+                s.insert("clock".into(), clock_json(clock));
+            }
+            s.insert("expected_outputs".into(), Json::Object(expected));
+            json_steps.push(Json::Object(s));
+            run_keys.push(step_keys);
+        }
+        // Everything lives in steps; the spec's own phase runs zero ticks.
+        specs.push(json!({
+            "name": run.name,
+            "ticks": 0,
+            "steps": json_steps,
+        }));
+        keys.push(run_keys);
+    }
+    Ok(LoxSpecs {
+        json: serde_json::to_string_pretty(&Json::Array(specs)).expect("specs serialize"),
+        keys,
+    })
+}
+
+/// Object → title resolution for lox-cli.
 struct TitleTable {
-    /// slug → object uuid (managed blocks and externs alike).
-    uuid_of: BTreeMap<String, String>,
     /// uuid → (title, block type, `Ref=` target).
     info_of: BTreeMap<String, (Option<String>, String, Option<String>)>,
     /// uuid → the enclosing page's title (the simulator's `[Room]`
@@ -98,14 +394,7 @@ struct TitleTable {
 }
 
 impl TitleTable {
-    fn build(lock: &Lockfile, compiled: &LoxoneDoc) -> TitleTable {
-        let mut uuid_of = BTreeMap::new();
-        for (slug, o) in &lock.objects {
-            uuid_of.insert(slug.clone(), o.uuid.clone());
-        }
-        for (slug, e) in &lock.externals {
-            uuid_of.insert(slug.clone(), e.uuid.clone());
-        }
+    fn build(compiled: &LoxoneDoc) -> TitleTable {
         let objects = compiled.objects();
         let mut info_of = BTreeMap::new();
         let mut room_of = BTreeMap::new();
@@ -139,33 +428,25 @@ impl TitleTable {
             info_of.insert(obj.uuid.clone(), (obj.title, obj.block_type, refs));
         }
         TitleTable {
-            uuid_of,
             info_of,
             room_of,
             by_title,
         }
     }
 
-    /// The simulator key for a port reference, or a pointed error when the
-    /// title cannot address the object unambiguously.
-    fn key(&self, port: &PortRef, test_name: &str) -> Result<String> {
+    /// The simulator key for a signal, or a pointed error when the title
+    /// cannot address the object unambiguously.
+    fn key(&self, signal: &Signal, test_name: &str) -> Result<String> {
         let compile_err = |msg: String| Err(Error::Compile(format!("test \"{test_name}\": {msg}")));
-        let Some(uuid) = self.uuid_of.get(&port.slug) else {
-            return compile_err(format!(
-                "`{port}` — slug `{}` is not in the lockfile; only managed blocks \
-                 and pinned externs are addressable in the simulator",
-                port.slug
-            ));
-        };
+        let (port, uuid) = (&signal.port, &signal.object);
         let Some((title, block_type, _)) = self.info_of.get(uuid) else {
             return compile_err(format!(
-                "`{port}` — object {uuid} is not in the compiled config",
-                uuid = uuid
+                "`{port}` — object {uuid} is not in the compiled config"
             ));
         };
         let Some(title) = title else {
             return compile_err(format!(
-                "`{port}` — the {block_type} object has no title; the simulator \
+                "`{port}` — the {block_type} object has no title; lox-cli \
                  addresses blocks by title"
             ));
         };
@@ -189,8 +470,9 @@ impl TitleTable {
                 _ => {
                     return compile_err(format!(
                         "`{port}` — title \"{title}\" names {} different objects in \
-                         the compiled config, so the simulator cannot address this \
-                         one; give the block a unique title or room",
+                         the compiled config, so lox-cli cannot address this one; \
+                         give the block a unique title or room, or run the \
+                         built-in simulator (no --lox)",
                         holders.len()
                     ));
                 }
@@ -239,216 +521,22 @@ impl TitleTable {
     }
 }
 
-fn plan_one(module: &Module, t: &super::ast::TestDecl, titles: &TitleTable) -> Result<TestRun> {
-    let compile_err = |msg: String| Err(Error::Compile(format!("test \"{}\": {msg}", t.name)));
-    let numeric = |v: &Value| -> Result<f64> {
-        let lit = module.resolve_value(v)?;
-        lit.parse::<f64>().map_err(|_| {
-            Error::Compile(format!(
-                "test \"{}\": value `{lit}` is not a number",
-                t.name
-            ))
-        })
-    };
-
-    // One step per `tick`: assignments and `clock` gather until a tick
-    // executes them; the expects that follow assert on its outcome.
-    struct StepBuild {
-        inputs: Map<String, Json>,
-        clock: Option<Json>,
-        ticks: Option<(u64, f64)>,
-        expected: Map<String, Json>,
-        expects: Vec<PlannedExpect>,
+/// `"HH:MM[:SS]"` or `"YYYY-MM-DD HH:MM[:SS]"` (validated while planning)
+/// into lox-cli's clock spec.
+fn clock_json(spec: &str) -> Json {
+    match spec.split_once(' ') {
+        Some((date, time)) => json!({ "time": time, "date": date }),
+        None => json!({ "time": spec }),
     }
-    impl StepBuild {
-        fn new() -> StepBuild {
-            StepBuild {
-                inputs: Map::new(),
-                clock: None,
-                ticks: None,
-                expected: Map::new(),
-                expects: Vec::new(),
-            }
-        }
-        fn is_empty(&self) -> bool {
-            self.inputs.is_empty() && self.clock.is_none() && self.ticks.is_none()
-        }
-    }
-
-    let mut steps: Vec<StepBuild> = Vec::new();
-    let mut cur = StepBuild::new();
-    for stmt in &t.body {
-        match stmt {
-            TestItem::Inject(s) => {
-                if cur.ticks.is_some() {
-                    steps.push(std::mem::replace(&mut cur, StepBuild::new()));
-                }
-                let key = titles.key(&s.target, &t.name)?;
-                cur.inputs.insert(key, json!(numeric(&s.value)?));
-            }
-            TestItem::Clock(c) => {
-                if cur.ticks.is_some() {
-                    steps.push(std::mem::replace(&mut cur, StepBuild::new()));
-                }
-                cur.clock = Some(clock_json(&c.spec, &t.name)?);
-            }
-            TestItem::Tick(tick) => {
-                if cur.ticks.is_some() {
-                    steps.push(std::mem::replace(&mut cur, StepBuild::new()));
-                }
-                let dt = match &tick.dt {
-                    Some(v) => numeric(v)?,
-                    None => 1.0,
-                };
-                if dt <= 0.0 {
-                    return compile_err(format!("`tick {} dt {dt}` — dt must be positive", tick.n));
-                }
-                cur.ticks = Some((tick.n, dt));
-            }
-            TestItem::Expect(e) => {
-                if cur.ticks.is_none() {
-                    return compile_err(format!(
-                        "`expect {} {} {}` has no preceding `tick` — assertions read \
-                         the state after simulated time has advanced",
-                        e.port, e.cmp, e.value
-                    ));
-                }
-                let key = titles.key(&e.port, &t.name)?;
-                let cmp = sim_cmp(e.cmp);
-                let expected = numeric(&e.value)?;
-                let per_key = cur
-                    .expected
-                    .entry(key.clone())
-                    .or_insert_with(|| Json::Object(Map::new()));
-                let per_key = per_key.as_object_mut().expect("built as object");
-                if per_key.contains_key(cmp) {
-                    return compile_err(format!(
-                        "two `expect {} {cmp} …` in the same step — the simulator \
-                         keeps one comparator per port and step; split them with a \
-                         `tick`",
-                        e.port
-                    ));
-                }
-                per_key.insert(cmp.to_string(), json!(expected));
-                cur.expects.push(PlannedExpect {
-                    line: format!("expect {} {} {}", e.port, e.cmp, e.value),
-                    key,
-                    cmp,
-                    expected,
-                });
-            }
-            TestItem::Comment(_) => {}
-        }
-    }
-    if !cur.is_empty() {
-        steps.push(cur);
-    }
-
-    if !steps.iter().any(|s| !s.expects.is_empty()) {
-        return compile_err("no `expect` — the test asserts nothing".into());
-    }
-    if let Some(dangling) = steps.last()
-        && dangling.ticks.is_none()
-    {
-        return compile_err(
-            "the final assignments are never executed — add a `tick` (and an \
-             `expect`) after them"
-                .into(),
-        );
-    }
-
-    let mut json_steps = Vec::new();
-    let mut planned = Vec::new();
-    for s in &steps {
-        let (n, dt) = s
-            .ticks
-            .expect("stepped only at ticks; dangling refused above");
-        let mut step = Map::new();
-        step.insert("inputs".into(), Json::Object(s.inputs.clone()));
-        step.insert("ticks".into(), json!(n));
-        step.insert("dt".into(), json!(dt));
-        if let Some(clock) = &s.clock {
-            step.insert("clock".into(), clock.clone());
-        }
-        step.insert("expected_outputs".into(), Json::Object(s.expected.clone()));
-        json_steps.push(Json::Object(step));
-        planned.push(PlannedStep {
-            expects: s
-                .expects
-                .iter()
-                .map(|e| PlannedExpect {
-                    line: e.line.clone(),
-                    key: e.key.clone(),
-                    cmp: e.cmp,
-                    expected: e.expected,
-                })
-                .collect(),
-        });
-    }
-
-    // Everything lives in steps; the spec's own phase runs zero ticks.
-    let spec = json!({
-        "name": t.name,
-        "ticks": 0,
-        "steps": json_steps,
-    });
-    Ok(TestRun {
-        name: t.name.clone(),
-        steps: planned,
-        spec,
-    })
-}
-
-fn sim_cmp(cmp: TestCmp) -> &'static str {
-    match cmp {
-        TestCmp::Eq => "==",
-        TestCmp::Ge => ">=",
-        TestCmp::Gt => ">",
-        TestCmp::Le => "<=",
-        TestCmp::Lt => "<",
-        TestCmp::Approx => "~=",
-    }
-}
-
-/// `"HH:MM[:SS]"` or `"YYYY-MM-DD HH:MM[:SS]"` into the sim's clock spec.
-fn clock_json(spec: &str, test_name: &str) -> Result<Json> {
-    let compile_err = |msg: String| Err(Error::Compile(format!("test \"{test_name}\": {msg}")));
-    let (date, time) = match spec.split_once(' ') {
-        Some((d, t)) => (Some(d), t),
-        None => (None, spec),
-    };
-    if let Some(d) = date
-        && d.split('-').count() != 3
-    {
-        return compile_err(format!(
-            "clock \"{spec}\" — expected a `YYYY-MM-DD` date before the time"
-        ));
-    }
-    let time_ok = matches!(time.split(':').count(), 2 | 3)
-        && time
-            .split(':')
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
-    if !time_ok {
-        return compile_err(format!(
-            "clock \"{spec}\" — expected `HH:MM` or `HH:MM:SS` (optionally after a \
-             `YYYY-MM-DD` date)"
-        ));
-    }
-    let mut obj = Map::new();
-    obj.insert("time".into(), json!(time));
-    if let Some(d) = date {
-        obj.insert("date".into(), json!(d));
-    }
-    Ok(Json::Object(obj))
 }
 
 /// Read `lox sim run --output json` output back onto the plan. The
 /// simulator flattens every step's checks into one array per scenario, in
 /// step order; within a step (a JSON map, unordered) a check is
-/// identified by (signal key, comparator) — planning refused duplicates.
-/// On failing scenarios the CLI appends a second JSON object (the error
-/// summary) to stdout — only the first value is the result.
-pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
+/// identified by (signal key, comparator) — [`lox_specs`] refused
+/// duplicates. On failing scenarios the CLI appends a second JSON object
+/// (the error summary) to stdout — only the first value is the result.
+pub fn read_results(stdout: &str, plan: &TestPlan, specs: &LoxSpecs) -> Result<Vec<TestResult>> {
     let sim_err = |msg: String| Err(Error::Compile(format!("sim result: {msg}")));
     let root: Json = serde_json::Deserializer::from_str(stdout.trim())
         .into_iter::<Json>()
@@ -460,7 +548,7 @@ pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
         None => return sim_err(format!("no `scenarios` array in {root}")),
     };
     let mut results = Vec::new();
-    for run in &plan.runs {
+    for (run, run_keys) in plan.runs.iter().zip(&specs.keys) {
         let Some(scenario) = scenarios
             .iter()
             .find(|s| s.get("name").and_then(Json::as_str) == Some(run.name.as_str()))
@@ -481,20 +569,19 @@ pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
         }
         let mut failures = Vec::new();
         let mut offset = 0;
-        for (step_no, step) in run.steps.iter().enumerate() {
+        for (step_no, (step, step_keys)) in run.steps.iter().zip(run_keys).enumerate() {
             let slice = &checks[offset..offset + step.expects.len()];
             offset += step.expects.len();
-            for expect in &step.expects {
+            for (expect, key) in step.expects.iter().zip(step_keys) {
+                let cmp = expect.cmp.symbol();
                 let Some(check) = slice.iter().find(|c| {
-                    c.get("output").and_then(Json::as_str) == Some(expect.key.as_str())
-                        && c.get("comparator").and_then(Json::as_str) == Some(expect.cmp)
+                    c.get("output").and_then(Json::as_str) == Some(key.as_str())
+                        && c.get("comparator").and_then(Json::as_str) == Some(cmp)
                 }) else {
                     return sim_err(format!(
-                        "scenario \"{}\" step {}: no check for `{}` {}",
+                        "scenario \"{}\" step {}: no check for `{key}` {cmp}",
                         run.name,
                         step_no + 1,
-                        expect.key,
-                        expect.cmp
                     ));
                 };
                 if check.get("pass").and_then(Json::as_bool) != Some(true) {
@@ -503,10 +590,9 @@ pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
                         .and_then(Json::as_f64)
                         .map_or("?".to_string(), trim_float);
                     failures.push(format!(
-                        "step {}: {} — actual {actual} ({})",
+                        "step {}: {} — actual {actual} ({key})",
                         step_no + 1,
                         expect.line,
-                        expect.key
                     ));
                 }
             }
@@ -515,6 +601,7 @@ pub fn read_results(stdout: &str, plan: &TestPlan) -> Result<Vec<TestResult>> {
             name: run.name.clone(),
             pass: failures.is_empty(),
             failures,
+            error: None,
         });
     }
     Ok(results)
@@ -587,9 +674,10 @@ mod tests {
         let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
         let plan = plan_tests(&module, &lock, &doc, None).unwrap();
         assert_eq!(plan.runs.len(), 1);
-        let run = &plan.runs[0];
-        assert_eq!(run.steps.len(), 2);
-        let spec = &run.spec;
+        assert_eq!(plan.runs[0].steps.len(), 2);
+        let specs = lox_specs(&plan, &doc).unwrap();
+        let all: Json = serde_json::from_str(&specs.json).unwrap();
+        let spec = &all[0];
         assert_eq!(spec["ticks"], 0);
         assert_eq!(spec["steps"][0]["inputs"]["Gate A.I1"], 1.0);
         assert_eq!(spec["steps"][0]["ticks"], 3);
@@ -629,9 +717,11 @@ mod tests {
              \t\t\t<C Type=\"Or\" V=\"175\" U=\"00000004-0000-0000-ffff000000000001\" Title=\"Dup\" Nio=\"3\"/>\r\n",
         );
         let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
-        let err = plan_tests(&module, &lock, &doc, None)
-            .unwrap_err()
-            .to_string();
+        // The plan addresses by UUID: the shared title is no problem for
+        // the built-in simulator.
+        let plan = plan_tests(&module, &lock, &doc, None).unwrap();
+        // lox-cli addresses by title.
+        let err = lox_specs(&plan, &doc).err().unwrap().to_string();
         assert!(err.contains("names 2 different objects"), "{err}");
     }
 
@@ -649,7 +739,8 @@ mod tests {
              \t\t\t<C Type=\"InputRef\" V=\"175\" U=\"00000006-0000-0000-ffff000000000001\" Title=\"Sig\" Ref=\"00000009-0000-0000-ffff000000000001\" Nio=\"3\"/>\r\n",
         );
         let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
-        plan_tests(&module, &lock, &doc, None).unwrap();
+        let plan = plan_tests(&module, &lock, &doc, None).unwrap();
+        lox_specs(&plan, &doc).unwrap();
     }
 
     #[test]
@@ -667,7 +758,8 @@ mod tests {
              \t\t\t<C Type=\"InputRef\" V=\"175\" U=\"00000006-0000-0000-ffff000000000001\" Title=\"Sig\" Ref=\"00000003-0000-0000-ffff000000000001\" Nio=\"3\"/>\r\n",
         );
         let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
-        plan_tests(&module, &lock, &doc, None).unwrap();
+        let plan = plan_tests(&module, &lock, &doc, None).unwrap();
+        lox_specs(&plan, &doc).unwrap();
 
         // But a ref pointing somewhere ELSE than the co-titled source is
         // a different signal — refused.
@@ -675,14 +767,14 @@ mod tests {
             "\t\t\t<C Type=\"Memory\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Sig\" Nio=\"3\"/>\r\n\
              \t\t\t<C Type=\"InputRef\" V=\"175\" U=\"00000005-0000-0000-ffff000000000001\" Title=\"Sig\" Ref=\"00000009-0000-0000-ffff000000000001\" Nio=\"3\"/>\r\n",
         );
-        let err = plan_tests(
+        let plan = plan_tests(
             &module,
             &lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]),
             &doc,
             None,
         )
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+        let err = lox_specs(&plan, &doc).err().unwrap().to_string();
         assert!(err.contains("names 2 different objects"), "{err}");
     }
 
@@ -710,7 +802,8 @@ mod tests {
                 {"output":"Gate A.Q","comparator":"==","expected":1.0,"actual":1.0,"pass":true},
                 {"output":"Gate A.Q","comparator":"==","expected":0.0,"actual":1.0,"pass":false}
             ]}]}"#;
-        let results = read_results(stdout, &plan).unwrap();
+        let specs = lox_specs(&plan, &doc).unwrap();
+        let results = read_results(stdout, &plan, &specs).unwrap();
         assert_eq!(results.len(), 1);
         assert!(!results[0].pass);
         assert_eq!(results[0].failures.len(), 1);
@@ -719,5 +812,51 @@ mod tests {
             "{}",
             results[0].failures[0]
         );
+    }
+
+    #[test]
+    fn built_in_run_reports_failures_and_unsimulated_logic() {
+        let module = Module::parse(
+            "a = And(\"Gate A\")\n\
+             \n\
+             test \"basic\"\n\
+             \ta.I1 = 1\n\
+             \ta.I2 = 1\n\
+             \ttick 1\n\
+             \texpect a.Q == 1\n\
+             \ta.I2 = 0\n\
+             \ttick 1\n\
+             \texpect a.Q == 1\n\
+             end\n\
+             \n\
+             test \"bad port\"\n\
+             \ttick 1\n\
+             \texpect a.Nope == 1\n\
+             end\n",
+        )
+        .unwrap();
+        let doc = doc_with(
+            "\t\t\t<C Type=\"And\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Gate A\" Nio=\"3\">\r\n\
+             \t\t\t\t<Co K=\"I1\" U=\"00000003-0000-0001-ffff000000000001\"/>\r\n\
+             \t\t\t\t<Co K=\"I2\" U=\"00000003-0000-0002-ffff000000000001\"/>\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"00000003-0000-0003-ffff000000000001\"/>\r\n\
+             \t\t\t</C>\r\n",
+        );
+        let lock = lock_with(&[("a", "00000003-0000-0000-ffff000000000001")]);
+        let plan = plan_tests(&module, &lock, &doc, None).unwrap();
+        let results = run_tests(&plan, &doc);
+        assert!(!results[0].pass);
+        assert_eq!(results[0].failures, ["step 2: expect a.Q == 1 — actual 0"]);
+        let err = results[1].error.as_deref().unwrap();
+        assert!(err.contains("has no port `Nope`"), "{err}");
+    }
+
+    #[test]
+    fn comparators_allow_decimal_slack_and_five_percent() {
+        assert!(holds(TestCmp::Eq, 0.1 + 0.2, 0.3));
+        assert!(!holds(TestCmp::Lt, 0.1 + 0.2, 0.3));
+        assert!(holds(TestCmp::Approx, 20.9, 20.0));
+        assert!(!holds(TestCmp::Approx, 21.1, 20.0));
+        assert!(!holds(TestCmp::Approx, 0.01, 0.0));
     }
 }

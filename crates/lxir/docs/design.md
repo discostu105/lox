@@ -798,7 +798,7 @@ Anything unverified is an error, not a heuristic:
     string parameter remains available verbatim on an explicit block.
 
 - **D36 — tests live in the module and run through `lox sim`**
-  (2026-08-26). `test "Name" … end` is a top-level item whose body is
+  (2026-08-26; the simulator is lxir's own since D68). `test "Name" … end` is a top-level item whose body is
   line-oriented like everything else: injections (`slug.Port = value`),
   `tick <n> [dt <v>]`, `expect slug.Port <cmp> <value>`, and
   `clock "…"`. Statements group into simulator steps at `tick`
@@ -2081,3 +2081,43 @@ Anything unverified is an error, not a heuristic:
   with the object. Validated live 2026-10-31 on the house: the test
   rule of #181, deleted in the app, deleted by the push with its
   switch; `/sys/custom` empty afterwards, the program running.
+- **D68 — `lxir test` runs in a simulator of its own** (2026-10-31).
+  Supersedes D36's "owning a simulator is out of scope": the tests now
+  run in `lxir::sim`, the external `lox sim` stays an option
+  (`--lox <path>`, `--show-spec`). Three reasons: lox-cli is AGPL and a
+  separate install, so no CI and no agent could rely on it; its title
+  addressing refused tests whenever two blocks share a title; and it
+  answers for a block it does not know with a value, so a passing test
+  could rest on a guess. The simulator inverts that last point, which
+  is the decision's core: **a test only passes on documented behavior.**
+  - Every model is written from Loxone's documentation of the block —
+    the KB page and its timing diagram — or from a format fact in
+    loxone-format.md (`Inv=`, `Def=` defaults, InputRef mirroring), and
+    [simulator.md](simulator.md) lists each with its source and what it
+    leaves out. No code or behavior was taken from lox-sim (clean room).
+  - Reading a port checks the logic it depends on, given what the test
+    sets at that moment. A block without a model, an output the model
+    does not compute, several wires into one input of a block whose
+    fan-in is undocumented (only And is documented AND-linked, Or/Xor
+    OR-linked), an operating mode switched by logic, a timer with two
+    of its modes active at once: each is an error naming the object,
+    and the test reports `ERROR`, not a pass or a failure. Setting a
+    port between such a block and the expectation makes the test
+    independent of it. A failing block elsewhere in the program never
+    touches a test that does not depend on it.
+  - Addressing is by UUID through the lock, so titles need not be
+    unique. Each test starts fresh: all values 0, clock 2026-01-01
+    00:00 (a Thursday); one `tick` advances clock and time by `dt`, then
+    evaluates the operating modes, then the blocks in wiring order
+    (feedback loops in document order, reading the previous cycle).
+    Weekday modes follow the clock; other modes are off unless set.
+    `==` allows the slack of decimal arithmetic, `~=` 5 %.
+  - Validated: the shipped examples' tests (`tests/simulate.rs`, also
+    in CI through `examples/ci.sh`) and the house's two scenarios, both
+    of which ran in lox-cli before. The house's alarm test is refused
+    until it sets `heimkommen` from the start: before, the simulator
+    read the NFC Code Touch behind it as 0.
+  - Rejected: modelling the remaining blocks from forum posts or from
+    lox-sim's behavior (unverifiable; a wrong model makes a test pass
+    that the house fails); keeping lox-cli as the default (an optional
+    external binary cannot gate CI).

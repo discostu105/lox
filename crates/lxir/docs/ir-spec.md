@@ -777,7 +777,7 @@ truth. Declaring a slug that collides with an expression's synthetic
 namespace is an error. Inside a template body, desugaring runs after
 expansion, so the synthetic prefix uses the instance's actual sink.
 
-### `test` — a simulated scenario (D36)
+### `test` — a simulated scenario (D36, D68)
 
 ```text
 test "Frostwächter schlägt an"
@@ -793,41 +793,44 @@ end
 A `test` block is a top-level item (not allowed inside templates) and
 never affects compilation — `lxir compile` ignores tests entirely.
 `lxir test` runs them: it compiles the module in memory against the
-lockfile, translates each test into a
-[lox-cli](https://github.com/eisber/lox-cli) SimSpec, shells out to
-`lox sim run` (binary found via `--lox`, the `LOX` environment
-variable, or `lox` on PATH), and maps each check in the result back to
-its `expect` line.
+lockfile and runs each test in lxir's simulator, from a fresh start
+(every value 0, the clock at 2026-01-01 00:00, a Thursday). The
+simulator models the blocks Loxone documents well enough —
+[simulator.md](simulator.md) lists them with their sources. A test whose
+expectation depends on any other block reports `ERROR` and names it:
+set a port between that block and the expectation to cut it out.
 
 Statements, in file order:
 
 - **Injection** `slug.Port = value` — sets that signal for the rest of
-  the test (a persistent override, the simulator's injection model).
+  the test (a persistent override).
   Any declared extern or block port can be driven, including outputs
   (that is the normal case: drive a sensor's `Q`/`AQ`). Values are
   numbers (with units) or `let` references; strings are rejected.
-- **`tick <n> [dt <v>]`** — advance the simulation `n` steps of `dt`
-  seconds (default 1). Injections since the previous `tick` take
-  effect for these steps.
+- **`tick <n> [dt <v>]`** — advance the simulation `n` program cycles
+  of `dt` seconds (default 1). Injections since the previous `tick`
+  take effect for these cycles.
 - **`expect slug.Port <cmp> <value>`** — assert after the preceding
   `tick`. Comparators: `==`, `>`, `>=`, `<`, `<=`, and `~=`
-  (approximately, 5 % tolerance). There is no `!=` (the simulator has
-  none). An `expect` before any `tick` is an error, as is a trailing
-  injection no `tick` ever applies.
+  (approximately, 5 % tolerance); `==` allows the rounding of decimal
+  arithmetic. There is no `!=`. An `expect` before any `tick` is an
+  error, as is a trailing injection no `tick` ever applies.
 - **`clock "HH:MM[:SS]"` / `clock "YYYY-MM-DD HH:MM[:SS]"`** — set the
   simulated wall clock before the following `tick`, for time-dependent
-  logic (`DayTimer` etc.).
+  logic: the weekday operating modes and the `DayTimer`s follow it.
 
 References resolve on the **flattened** module (templates expanded,
 expressions desugared), so tests can name template-produced slugs
 (`frost_alarm`) and expression-synthetic slugs
-(`pv_kw_input__f1.AQ`) — exactly what the simulator sees. The
-simulator addresses signals by object **title**; `lxir test` derives
-titles from the lockfile and refuses ambiguity unless the duplicates
-are same-signal mirrors or a room qualifier separates them.
+(`pv_kw_input__f1.AQ`) — exactly what the simulator sees. Each slug
+resolves through the lockfile to its object's UUID.
 
-`lxir test --filter <substring>` runs a subset; `--show-spec` prints
-the generated SimSpec JSON instead of running.
+`lxir test --filter <substring>` runs a subset. `--lox <path>` runs the
+tests in [lox-cli](https://github.com/eisber/lox-cli)'s `lox sim`
+instead, which addresses signals by object **title**: lxir derives the
+titles from the lockfile and refuses ambiguity unless the duplicates
+are same-signal mirrors or a room qualifier separates them;
+`--show-spec` prints the scenario JSON it would run.
 
 ### `tiles` — program the tiles of a Touch Pure Flex (D41)
 

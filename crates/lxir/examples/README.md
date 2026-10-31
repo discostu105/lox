@@ -51,10 +51,11 @@ re-checks all invariants in CI
 
 ## Simulated tests
 
-`lxir test` runs the `test … end` scenarios through
-[lox-cli](https://github.com/eisber/lox-cli)'s simulator (`lox` ≥ 0.12.0
-on PATH, or `LOX=` / `--lox`). One practical rule, learned against the
-real simulator: inject only signals whose title is unique in the
-compiled document — a title that a mirror ref shares with its target is
-not a stable address for the simulator's name table. The examples'
-scenarios follow that rule and pass against lox-cli 0.12.0.
+`lxir test` runs the `test … end` scenarios in lxir's simulator
+([docs/simulator.md](../docs/simulator.md)); `tests/simulate.rs` runs the
+examples' scenarios in `cargo test`, and `ci.sh` runs a module's tests on
+every check. With `LOX=` / `--lox` they run in
+[lox-cli](https://github.com/eisber/lox-cli)'s simulator instead
+(`lox` ≥ 0.12.0), which addresses signals by title: there, inject only
+signals whose title is unique in the compiled document. The examples'
+scenarios follow that rule and pass against lox-cli 0.12.0 too.
