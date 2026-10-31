@@ -1,4 +1,4 @@
-//! The `:` palette (§4.6): fuzzy "go to" plus `lox` command lines parsed with
+//! The `:` palette: fuzzy "go to" plus `lox` command lines parsed with
 //! the CLI's own clap definitions.
 
 use clap::Parser;
@@ -249,7 +249,7 @@ fn one(
     }]))
 }
 
-/// Map a parsed CLI command to plans (§4.6). Mirrors `commands/control.rs`.
+/// Map a parsed CLI command to plans. Mirrors `commands/control.rs`.
 pub fn plan_cmd(app: &App, cmd: Cmd) -> Result<Parsed, String> {
     match cmd {
         Cmd::On {

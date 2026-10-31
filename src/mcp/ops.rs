@@ -846,7 +846,7 @@ pub fn access_check(
         tool_error(
             "config_unavailable",
             format!(
-                "{:#} — the access rights are in the Loxone Config program; {}",
+                "{:#}. The access rights are in the Loxone Config program: {}",
                 e,
                 if cached {
                     "pass cached=false to download it from the Miniserver (read-only FTP)"

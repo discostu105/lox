@@ -1,4 +1,4 @@
-//! The inspector: type-specific visual, history graph, raw states, CLI (§5.3).
+//! The inspector: type-specific visual, history graph, raw states, CLI.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

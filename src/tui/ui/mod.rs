@@ -1,4 +1,4 @@
-//! Rendering (§5, §6). Pure functions of `&App` into a ratatui `Buffer`; the
+//! Rendering. Pure functions of `&App` into a ratatui `Buffer`; the
 //! only thing written back is the hit-test / scroll cache in `app.ui`.
 
 pub mod chart;

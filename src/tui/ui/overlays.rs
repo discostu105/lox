@@ -1,5 +1,5 @@
-//! Overlays (§5.8): help, palette, menu, picker, confirm, input, contexts,
-//! message log, wiring (§5.9) and the compact inspector.
+//! Overlays: help, palette, menu, picker, confirm, input, contexts,
+//! message log, wiring and the compact inspector.
 
 use std::collections::HashSet;
 
@@ -1109,7 +1109,7 @@ fn msglog(app: &App, body: Rect, buf: &mut Buffer, scroll: usize) {
     }
 }
 
-// ── Wiring (§5.9) ───────────────────────────────────────────────────────────
+// ── Wiring ───────────────────────────────────────────────────────────
 
 fn val_text(app: &App, uuid: &str) -> Option<String> {
     if let Some(v) = app.store.num(uuid) {

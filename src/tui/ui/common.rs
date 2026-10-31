@@ -272,7 +272,7 @@ pub fn ctrl_row(app: &App, buf: &mut Buffer, area: Rect, y: u16, cid: Cid, o: &R
     }
 }
 
-/// Hint notches for a control (computed from the live state, §5.1).
+/// Hint notches for a control (computed from the live state).
 pub fn item_hints(app: &App, cid: Cid) -> Vec<Hint> {
     let s = &app.store;
     let h = &app.house;
@@ -411,7 +411,7 @@ pub fn empty(app: &App, buf: &mut Buffer, area: Rect, lines: &[&str]) {
     }
 }
 
-/// Age text for polled values older than two intervals (§6.3).
+/// Age text for polled values older than two intervals.
 pub fn age(app: &App, t: f64, interval: f64) -> Option<String> {
     let a = app.now - t;
     (a > interval * 2.0).then(|| format!("{} ago", crate::tui::text::fmt_age(a as u64)))

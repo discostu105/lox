@@ -1,4 +1,4 @@
-//! Themes, gradients and terminal color capability handling (§6.1).
+//! Themes, gradients and terminal color capability handling.
 //!
 //! Widgets never hard-code colors: they ask the theme for a semantic slot
 //! (`text`, `dim`, `accent`, …) or a gradient lookup (`grad(Grad::Load, 0.8)`).
@@ -35,7 +35,7 @@ impl ThemeName {
     }
 }
 
-/// Named gradients (§6.1).
+/// Named gradients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grad {
     Load,
@@ -485,7 +485,7 @@ fn rgb_to_ansi16(c: Rgb) -> Color {
         .unwrap_or(Color::Reset)
 }
 
-/// Where the theme choice came from, for §6.1's resolution order.
+/// Where the theme choice came from, for the resolution order.
 pub struct ColorChoice {
     pub theme: ThemeName,
     pub depth: Depth,

@@ -1,4 +1,4 @@
-//! History chart math (§5.10): time buckets, summaries, energy integrals.
+//! History chart math: time buckets, summaries, energy integrals.
 //! Pure functions over `(unix seconds, value)` points sorted by time.
 
 /// One plot column: average and range of the values in its time slice.

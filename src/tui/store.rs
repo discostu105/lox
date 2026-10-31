@@ -1,7 +1,7 @@
 //! Live state store: state UUID → value, the in-memory event ring, session
 //! history for sparklines, and the event rate.
 //!
-//! Nothing here is persisted (§5.4): events live only as long as the TUI runs.
+//! Nothing here is persisted: events live only as long as the TUI runs.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

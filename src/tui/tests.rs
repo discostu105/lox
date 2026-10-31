@@ -1,4 +1,4 @@
-//! End-to-end tests of the TUI core (§10): the user journeys J1–J12 driven
+//! End-to-end tests of the TUI core: the user journeys J1–J12 driven
 //! through `update()` with the demo house, rendering at several sizes and
 //! themes, scale, hostile text and the robustness rules.
 
@@ -1753,7 +1753,7 @@ fn failed_info_poll_is_retried() {
     );
 }
 
-/// Facets (§4.5a): `f ⏎` keeps the selected control's room; values of a
+/// Facets: `f ⏎` keeps the selected control's room; values of a
 /// dimension OR, dimensions AND; Esc on the list clears them.
 #[test]
 fn facets_rooms_this_room_or_and() {
@@ -1911,7 +1911,7 @@ fn chart_polls(fx: &[Effect]) -> Vec<ChartKey> {
         .collect()
 }
 
-/// §5.10: `c` opens the history chart; timeframes, periods, compare, cursor
+/// `c` opens the history chart; timeframes, periods, compare, cursor
 /// and the CLI equivalent.
 #[test]
 fn chart_timeframes_periods_compare() {

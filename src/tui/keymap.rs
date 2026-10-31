@@ -1,4 +1,4 @@
-//! The one keymap table (§4.1 rule 6): dispatch, border hints and the `?`
+//! The one keymap table: dispatch, border hints and the `?`
 //! overlay are all generated from [`BINDINGS`].
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -106,7 +106,7 @@ macro_rules! b {
 }
 
 pub static BINDINGS: &[Binding] = &[
-    // Global — navigation never changes the house (§4.1 rule 1)
+    // Global — navigation never changes the house
     b!(Global, ["1"], Cmd::Screen(1), "Home"),
     b!(Global, ["2"], Cmd::Screen(2), "Rooms"),
     b!(Global, ["3"], Cmd::Screen(3), "Events"),
@@ -161,7 +161,7 @@ pub static BINDINGS: &[Binding] = &[
         Cmd::Quit,
         "close the popup; on a screen: quit"
     ),
-    // The action vocabulary (§4.3)
+    // The action vocabulary
     b!(Item, ["Space"], Cmd::Verb(Verb::Primary), "primary action"),
     b!(Item, ["+"], Cmd::Verb(Verb::Plus), "step up", repeat),
     b!(Item, ["-"], Cmd::Verb(Verb::Minus), "step down", repeat),
@@ -180,7 +180,7 @@ pub static BINDINGS: &[Binding] = &[
     b!(Item, ["Y"], Cmd::YankUuid, "copy UUID"),
     b!(Item, ["v"], Cmd::Mark, "mark"),
     b!(Item, ["V"], Cmd::MarkAll, "mark all visible"),
-    // Screen-specific (§4.5)
+    // Screen-specific
     b!(
         Rooms,
         ["b"],

@@ -1,49 +1,15 @@
-//! `lox config push` — deploy a Lox Logic project to the Miniserver, verified end
-//! to end.
+//! `lox config push`: deploy a Lox Logic project to the Miniserver. Each step stops the push when it fails:
 //!
-//! Each step stops the push when it fails:
+//! 1. Download the live config (kept under `backups/`); refuse to discard custom changes without a flag.
+//! 2. Drift check: the live config must still match the project's base.
+//! 3. Compile the module against the live download, keeping what the module does not own.
+//! 4. Show what the push changes.
+//! 5. Stage the upload: the live ZIP with the compiled `sps0.LoxCC`, catalogue and permissions.
+//! 6. Upload it as `sps_new.zip` and restart the program (`--reboot`: the Miniserver).
+//! 7. Download again and verify the Miniserver runs the compiled file.
+//! 8. Move lock, out file and `base` to the verified state.
 //!
-//! 1. Download the config the Miniserver runs now (kept under `backups/`).
-//!    Its custom changes (what the app, the web UI or the API changed and
-//!    Loxone Config has not saved) are not in that download, and loading an
-//!    upload deletes them: with any present, `--force` refuses unless
-//!    `--discard-custom-changes` says to delete them.
-//! 2. Drift check: the live config must still be the project's base, at least
-//!    semantically (`lox logic diff` would show no logic changes). A change saved
-//!    from Loxone Config or the app since then is never overwritten. Users,
-//!    groups and access rights may differ: the report lists them as kept.
-//! 3. Compile the module against the live download, with a scratch copy of the
-//!    lock. What the module does not own — users, their passwords and access
-//!    rights, layout, visualization — stays as it is live instead of reverting
-//!    to the base.
-//! 4. Show what the push changes. Nothing to push ends here.
-//! 5. Stage the upload: the downloaded ZIP with `sps0.LoxCC` replaced,
-//!    verified to extract to exactly the compiled file. Its app catalogue
-//!    (`LoxAPP3.json`, Loxone Config's from before) gets what the push changes
-//!    about the app's controls (`loxone_config::catalogue`: names, rooms, categories,
-//!    deleted and hidden controls, new push buttons and virtual inputs) and a
-//!    new `lastModified`; what it cannot carry over is named, for a save from
-//!    Loxone Config. `permissions.bin` is
-//!    regenerated for the compiled config when Lox Logic reproduces the live one
-//!    byte for byte; otherwise the live file stays, and the report says when
-//!    it no longer matches the compiled access rights. Without `--force` the
-//!    push ends here.
-//! 6. Upload it as `sps_new.zip` and restart the program (`/jdev/sps/restart`,
-//!    what Loxone Config's save does): the Miniserver loads the file within
-//!    seconds, renames it to its next program file and runs it — no reboot.
-//!    `--reboot` restarts the whole Miniserver instead, which loads it on
-//!    start. Loading it drops the Miniserver's
-//!    custom changes, users edited in the app among them: when the live users
-//!    differ from the program file's, staging reports it and `--force`
-//!    refuses unless `--discard-custom-changes` (see `push_users`).
-//! 7. Download again: the Miniserver must now run exactly the compiled file.
-//!    With app controls changed, check that it serves the uploaded catalogue.
-//! 8. Move the project forward: lock, out file and `base` in lox.toml point at
-//!    the verified state.
-//!
-//! With `--patched-from DOWNLOAD` the base is a byte patch of an earlier
-//! download (GUI-owned edits Lox Logic cannot express): the live config must be
-//! byte-identical to DOWNLOAD, and the compile uses the patched base.
+//! With `--patched-from DOWNLOAD` the base is a byte patch of an earlier download.
 
 use crate::app_catalogue::{self, StaleEntry};
 use crate::config::Config;
@@ -151,10 +117,9 @@ impl Miniserver for LiveMiniserver {
             }
             if Instant::now() > deadline {
                 bail!(
-                    "The Miniserver did not run the upload within a minute of the program \
-                     restart (its newest program file is still {before}). Check it, then \
-                     compare what it runs with the compiled file (`lox config download \
-                     --extract`, `lox logic diff`), or push again with --reboot."
+                    "The Miniserver did not load the upload within a minute (its newest \
+                     program file is still {before}). Compare what it runs with \
+                     `lox config download --extract` and `lox logic diff`, or push again with --reboot."
                 );
             }
         }
@@ -274,8 +239,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     };
     let project_file = Project::find(&opts.project).ok_or_else(|| {
         anyhow!(
-            "No lox.toml in {} — `lox config push` deploys a Lox Logic project \
-             (a directory with lox.toml naming base, module and lock; see `lox logic help`)",
+            "No lox.toml in {}. `lox config push` deploys a Lox Logic project: see `lox logic help`.",
             opts.project.display()
         )
     })?;
@@ -329,10 +293,9 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
                 let drift = loxone_config::diff::diff(&parse(&base_xml)?, &parse(&live_xml)?);
                 if !drift.logic_is_empty() {
                     bail!(
-                        "The live config changed since the base: {}. Someone saved from \
-                         Loxone Config or the app. See what with `lox logic diff {} {}`, \
-                         bring the module up to date, and make the download the new base \
-                         (`base` in lox.toml) before pushing.",
+                        "The live config changed since the base, saved from Loxone Config or \
+                         the app: {}. Review it with `lox logic diff {} {}`, update the module, \
+                         and set the download as `base` in lox.toml.",
                         summary(&drift),
                         project.base.display(),
                         live_path.display()
@@ -447,8 +410,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         (Some(_), _) => say("permissions.bin: regenerated for the compiled access rights."),
         (None, Some(why)) if permissions.stale => eprintln!(
             "WARNING: permissions.bin stays as live ({why}), but the compiled config assigns \
-             users and groups differently: the file is stale. Whether the Miniserver rebuilds \
-             it on start is unverified; after the push, check `lox access perms <control>` \
+             users and groups differently. After the push, check `lox access perms <control>` \
              and the door itself."
         ),
         (None, Some(why)) => say(&format!(
@@ -554,14 +516,12 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     Ok(report)
 }
 
-/// The custom changes an upload would delete. Those that belong to the app
-/// (`custom_changes::fold_app_owned`: the push settings of registered phones)
-/// are carried into `compiled` and returned second, as kept. With `--force`
-/// any others stop the push, unless `--discard-custom-changes`; a staging run
-/// only warns.
-/// A failed check counts as changes present: it stops `--force` too. A change
-/// to an object the upload deletes (`removed` in the source: a rule deleted
-/// in the app, say) goes with the object and stops nothing.
+/// Check the custom changes an upload would delete. Returns the pending ones
+/// and, second, the app-owned ones carried into `compiled` (phone push settings).
+///
+/// - With `--force`, pending changes stop the push unless `--discard-custom-changes`;
+///   a staging run only warns. A failed check counts as changes present.
+/// - A change to an object the upload deletes goes with it and stops nothing.
 fn check_custom_changes(
     ms: &dyn Miniserver,
     opts: &PushOptions,
@@ -842,8 +802,8 @@ fn user_changes(
     say(if opts.force {
         "Deleting these user changes (--discard-custom-changes):"
     } else {
-        "Users changed on the Miniserver since its program file was saved; loading the upload \
-         would delete that (--force refuses unless --discard-custom-changes):"
+        "Loading the upload would delete these user changes made on the Miniserver. \
+         --force refuses unless --discard-custom-changes:"
     });
     for p in &pending {
         say(&format!("  {}: {}", p.user, p.changes.join("; ")));
@@ -992,9 +952,8 @@ mod tests {
         fn live_users(&self) -> Result<Vec<crate::usermgmt::User>> {
             self.users.clone().ok_or_else(|| {
                 anyhow!(
-                    "the Miniserver refused to show its user management — the user lox \
-                     connects with needs the right to manage users (an admin); change it \
-                     with `lox setup set --user <admin>`"
+                    "the Miniserver refused to show its user management. Connect as a user \
+                     with the right to manage users: `lox setup set --user <admin>`"
                 )
             })
         }

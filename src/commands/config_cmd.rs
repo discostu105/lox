@@ -450,7 +450,6 @@ pub fn cmd_token(ctx: &RunContext, action: TokenCmd) -> Result<()> {
             let hash = token::hash_token(&ts.token, &ts.key);
             let resp = lox.get_json(&format!("/jdev/sys/killtoken/{}/{}", hash, cfg.user))?;
             check_ll("killtoken", &resp).context("Token revoke failed")?;
-            // Remove local token
             let path = cfg.token_path();
             if path.exists() {
                 fs::remove_file(&path)?;
@@ -1126,7 +1125,6 @@ fn config_init(path: &str) -> Result<()> {
         std::env::current_dir()?.join(path)
     };
     let repo = gitops::init(&abs_path, &cfg)?;
-    // Save the repo path in config
     let mut cfg = Config::load().unwrap_or_default();
     cfg.config_repo = Some(repo.to_string_lossy().to_string());
     let saved = cfg.save()?;
