@@ -172,6 +172,32 @@ pub fn off_sheet(doc: &LoxoneDoc, uuids: &BTreeSet<&str>) -> BTreeMap<String, Ve
     out
 }
 
+/// Of the objects with these UUIDs, those `out` places other than `base`
+/// does (new ones included): what a compile put where it is. One that
+/// keeps its place was put there in Loxone Config.
+pub fn placed<'a>(
+    base: &LoxoneDoc,
+    out: &LoxoneDoc,
+    uuids: &BTreeSet<&'a str>,
+) -> BTreeSet<&'a str> {
+    let at = |doc: &LoxoneDoc| -> BTreeMap<String, (String, String)> {
+        doc.objects()
+            .into_iter()
+            .filter_map(|o| {
+                let el = doc.element_at(&o.path)?;
+                let xy = (el.attr("Px")?.to_string(), el.attr("Py")?.to_string());
+                Some((o.uuid.clone(), xy))
+            })
+            .collect()
+    };
+    let (before, after) = (at(base), at(out));
+    uuids
+        .iter()
+        .copied()
+        .filter(|u| before.get(*u).is_none_or(|b| after.get(*u) != Some(b)))
+        .collect()
+}
+
 /// Whether `tag` sits beside `block` the way the GUI sets a ref next to
 /// the port it serves: level with the block, at most two gaps off its
 /// edge. A ref drawn there was arranged with the block.

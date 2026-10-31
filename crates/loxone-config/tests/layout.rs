@@ -465,6 +465,10 @@ fn a_relayout_brings_blocks_back_onto_the_sheet() {
     // A plain compile takes the drag over; a relayout brings it back.
     let kept = compile(&dragged, &module(), &mut lock, &opts()).unwrap();
     assert_eq!(rect(&kept, &and).px, 28800);
+    // The compile left it where the GUI put it: not the compile's to report.
+    let all: std::collections::BTreeSet<&str> = [and.as_str()].into_iter().collect();
+    assert!(loxone_config::layout::placed(&dragged, &kept, &all).is_empty());
+    assert_eq!(loxone_config::layout::placed(&base(), &out, &all), all);
     let laid = compile(&dragged, &module(), &mut lock, &relayout()).unwrap();
     let managed: std::collections::BTreeSet<&str> =
         lock.objects.values().map(|o| o.uuid.as_str()).collect();

@@ -214,7 +214,7 @@ impl Rule {
         });
         let targets = self.actions.iter().filter_map(|a| match a {
             Action::Control { target, .. } => Some(target.as_str()),
-            Action::Mode { .. } => None,
+            _ => None,
         });
         watched.chain(targets).collect()
     }
@@ -244,6 +244,27 @@ pub enum Event {
         op: u8,
         value: String,
     },
+    /// A weather value (`type` 2): the condition `desc` the table offers
+    /// for the field, `field` its `weatherFieldTypes` id, compared by `op`
+    /// with `value` (a JSON number, as text; 0/1 for a digital field).
+    Weather {
+        field: i64,
+        desc: i64,
+        op: u8,
+        value: String,
+    },
+    /// One of the clock's other values (`type` 3, `id` = the table's
+    /// `intType`): the day of the month (269), daylight (281), the
+    /// sunrise, sunset, dawn and dusk pulses (294, 295, 298, 299).
+    Clock {
+        desc: i64,
+        id: i64,
+        op: u8,
+        value: i64,
+    },
+    /// A date (`type` 4, `descID` 233001): the Unix time of its local
+    /// midnight, as the app's date picker stores it.
+    Date(i64),
 }
 
 /// An action of a rule.
@@ -253,7 +274,59 @@ pub enum Action {
     Control { target: String, command: String },
     /// Switch an operating mode on or off (`type` 1, `descID` 21101).
     Mode { mode: i64, on: bool },
+    /// A push notification (`type` 4, `descID` 96001).
+    Notify { subject: String, text: String },
+    /// A mail through the cloud mailer (`type` 2, `descID` 92001).
+    Mail {
+        to: String,
+        subject: String,
+        text: String,
+    },
+    /// Wait before the next action, in milliseconds (`type` 5, `descID`
+    /// 341801: the app stores seconds times the table's factor 1000).
+    Pause(i64),
+    /// A system message (`type` 7, `descID` 98101): severity 1 info … 4
+    /// critical, `visibility` 2 all users or 4 administrators.
+    Message {
+        severity: u8,
+        subject: String,
+        text: String,
+        visibility: u8,
+    },
 }
+
+/// The clock conditions besides time and weekday (`type` 3): code, `id`,
+/// whether the value is digital.
+pub const CLOCK_EVENTS: &[(i64, i64, bool)] = &[
+    (269_001, 269, false),
+    (281_001, 281, true),
+    (294_001, 294, true),
+    (295_001, 295, true),
+    (298_001, 298, true),
+    (299_001, 299, true),
+];
+/// The date condition.
+pub const DATE: (i64, i64, i64) = (4, 233_001, 233);
+/// The weather fields the app offers (its sections file): id, name, the
+/// condition code (the capability table's entry for the id), digital.
+pub const WEATHER_FIELDS: &[(i64, &str, i64, bool)] = &[
+    (1, "temperature", 37_001, false),
+    (2, "dewpoint", 37_001, false),
+    (4, "wind", 37_002, false),
+    (5, "wind_direction", 37_006, false),
+    (6, "gusts", 37_002, false),
+    (7, "irradiance", 37_007, false),
+    (8, "relative_irradiance", 37_004, false),
+    (9, "precipitation", 37_008, false),
+    (11, "pressure", 37_009, false),
+    (26, "felt_temperature", 37_001, false),
+    (27, "solar_irradiance", 37_005, false),
+    (34, "sunshine", 37_003, true),
+];
+pub const NOTIFY: i64 = 96_001;
+pub const MAIL: i64 = 92_001;
+pub const PAUSE: i64 = 341_801;
+pub const MESSAGE: i64 = 98_101;
 
 const TIME: (i64, i64, i64) = (5, 272_001, 272);
 const WEEKDAY: (i64, i64, i64) = (3, 270_001, 270);
@@ -395,6 +468,38 @@ pub fn interpret_event(e: &Value) -> Result<Event, String> {
             value: value.to_string(),
         });
     }
+    if ty == 2 {
+        let field = int("id").ok_or_else(|| format!("{} without a field `id`", what()))?;
+        let Some(&(_, _, code, digital)) = WEATHER_FIELDS.iter().find(|f| f.0 == field) else {
+            return Err(format!("{} on weather field {field}", what()));
+        };
+        let Some(Value::Number(value)) = e.get("value") else {
+            return Err(format!("{} without a number `value`", what()));
+        };
+        if code != desc || e.get("arrValues").is_some() || (digital && op != 1) {
+            return Err(format!("{} on weather field {field}", what()));
+        }
+        return Ok(Event::Weather {
+            field,
+            desc,
+            op,
+            value: value.to_string(),
+        });
+    }
+    if ty == 3
+        && let Some(&(_, id, digital)) = CLOCK_EVENTS.iter().find(|c| c.0 == desc)
+    {
+        let value = int("value").ok_or_else(|| format!("{} without a whole `value`", what()))?;
+        if int("id") != Some(id) || e.get("arrValues").is_some() || (digital && op != 1) {
+            return Err(format!("{} (not documented)", what()));
+        }
+        return Ok(Event::Clock {
+            desc,
+            id,
+            op,
+            value,
+        });
+    }
     if op != 1 {
         return Err(format!(
             "{} with operator {op} (only 1 is documented)",
@@ -402,6 +507,9 @@ pub fn interpret_event(e: &Value) -> Result<Event, String> {
         ));
     }
     let value = int("value").ok_or_else(|| format!("{} without a whole `value`", what()))?;
+    if (ty, desc, int("id").unwrap_or(-1)) == DATE && e.get("arrValues").is_none() {
+        return Ok(Event::Date(value));
+    }
     if (ty, desc) == (1, MODE_EVENT) {
         let mode = int("id").ok_or_else(|| format!("{} without a mode number `id`", what()))?;
         return match value {
@@ -467,7 +575,90 @@ pub fn interpret_action(a: &Value) -> Result<Action, String> {
                 )),
             }
         }
-        _ => Err(format!("action type {}", show(a.get("type")))),
+        _ => {
+            let texts = |n: usize| -> Option<Vec<String>> {
+                let arr = a.get("arrValues")?.as_array()?;
+                (arr.len() == n)
+                    .then(|| arr.iter().map(|v| v.as_str().map(str::to_string)).collect())
+                    .flatten()
+            };
+            let bad = || {
+                format!(
+                    "action type {}, descID {}",
+                    show(a.get("type")),
+                    show(a.get("descID"))
+                )
+            };
+            match (ty, desc) {
+                (Some(4), Some(NOTIFY)) if command.is_none() => {
+                    let [subject, text] =
+                        <[String; 2]>::try_from(texts(2).ok_or_else(bad)?).map_err(|_| bad())?;
+                    Ok(Action::Notify { subject, text })
+                }
+                (Some(2), Some(MAIL)) if command.is_none() => {
+                    let [to, subject, text] =
+                        <[String; 3]>::try_from(texts(3).ok_or_else(bad)?).map_err(|_| bad())?;
+                    Ok(Action::Mail { to, subject, text })
+                }
+                (Some(5), Some(PAUSE)) => {
+                    let ms = a
+                        .get("arrValues")
+                        .and_then(Value::as_array)
+                        .and_then(|v| match v.as_slice() {
+                            [n] => n.as_i64(),
+                            _ => None,
+                        })
+                        .filter(|ms| command == Some(ms.to_string().as_str()))
+                        .ok_or_else(bad)?;
+                    Ok(Action::Pause(ms))
+                }
+                (Some(7), Some(MESSAGE)) => {
+                    let arr = a
+                        .get("arrValues")
+                        .and_then(Value::as_array)
+                        .ok_or_else(bad)?;
+                    let num = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok());
+                    let txt = |v: &Value| v.as_str().map(str::to_string);
+                    let [sev, sub, txt_v, vis] = arr.as_slice() else {
+                        return Err(bad());
+                    };
+                    let (Some(severity), Some(subject), Some(text), Some(visibility)) =
+                        (num(sev), txt(sub), txt(txt_v), num(vis))
+                    else {
+                        return Err(bad());
+                    };
+                    let m = Action::Message {
+                        severity,
+                        subject,
+                        text,
+                        visibility,
+                    };
+                    if (1..=4).contains(&severity)
+                        && matches!(visibility, 2 | 4)
+                        && command == Some(message_command(&m).as_str())
+                    {
+                        Ok(m)
+                    } else {
+                        Err(bad())
+                    }
+                }
+                _ => Err(bad()),
+            }
+        }
+    }
+}
+
+/// A system message's command: the table's `autopilotMessage/<val0>/
+/// <val1>/<val2>` filled as the app fills it (plain text, no escaping).
+fn message_command(m: &Action) -> String {
+    match m {
+        Action::Message {
+            severity,
+            subject,
+            text,
+            ..
+        } => format!("autopilotMessage/{severity}/{subject}/{text}"),
+        _ => String::new(),
     }
 }
 
@@ -510,7 +701,58 @@ pub fn new_event(e: &Event) -> Value {
             "value": serde_json::from_str::<Value>(value).unwrap_or(Value::Null),
             "operator": op, "forceEdge": false,
         }),
+        Event::Weather {
+            field,
+            desc,
+            op,
+            value,
+        } => serde_json::json!({
+            "type": 2, "descID": desc, "id": field,
+            "value": serde_json::from_str::<Value>(value).unwrap_or(Value::Null),
+            "operator": op, "forceEdge": false,
+        }),
+        Event::Clock {
+            desc,
+            id,
+            op,
+            value,
+        } => serde_json::json!({
+            "type": 3, "descID": desc, "id": id, "value": value,
+            "operator": op, "forceEdge": false,
+        }),
+        Event::Date(t) => serde_json::json!({
+            "type": DATE.0, "descID": DATE.1, "id": DATE.2, "value": t,
+            "operator": 1, "forceEdge": false,
+        }),
     }
+}
+
+/// A new action of the kinds that name no block: the fields the app's
+/// `_applyActionToRule` writes (`arrValues`, and `command` where the
+/// table's entry has an `action` template).
+pub fn new_action(a: &Action) -> Option<Value> {
+    Some(match a {
+        Action::Notify { subject, text } => serde_json::json!({
+            "type": 4, "descID": NOTIFY, "arrValues": [subject, text],
+        }),
+        Action::Mail { to, subject, text } => serde_json::json!({
+            "type": 2, "descID": MAIL, "arrValues": [to, subject, text],
+        }),
+        Action::Pause(ms) => serde_json::json!({
+            "type": 5, "descID": PAUSE, "command": ms.to_string(), "arrValues": [ms],
+        }),
+        Action::Message {
+            severity,
+            subject,
+            text,
+            visibility,
+        } => serde_json::json!({
+            "type": 7, "descID": MESSAGE, "command": message_command(a),
+            "arrValues": [severity, subject, text, visibility],
+        }),
+        Action::Mode { mode, on } => mode_action(*mode, *on),
+        Action::Control { .. } => return None,
+    })
 }
 
 /// A new operating mode action, as the app's `_applyActionToRule` builds

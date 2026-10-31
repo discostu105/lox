@@ -1487,6 +1487,40 @@ pub enum RuleStmtKind {
     Mode { mode: ModeName, on: bool },
     /// `then mode <mode> on|off` — switch an operating mode (D73).
     ThenMode { mode: ModeName, on: bool },
+    /// `when weather <field> <op> <value>` — a weather value (D76).
+    Weather {
+        field: String,
+        op: CmpOp,
+        value: String,
+    },
+    /// `when day <op> <n>` — the day of the month (D76).
+    Day { op: CmpOp, value: String },
+    /// `when daylight` / `when daylight off` (D76).
+    Daylight(bool),
+    /// `when sunrise|sunset|dawn|dusk` — the clock's pulse (D76).
+    Sun(String),
+    /// `when date "YYYY-MM-DD"` — that day (D76).
+    Date(String),
+    /// `then notify "<subject>" "<text>"` — a push notification (D76).
+    Notify { subject: String, text: String },
+    /// `then mail "<to>" "<subject>" "<text>"` — through the cloud
+    /// mailer (D76).
+    Mail {
+        to: String,
+        subject: String,
+        text: String,
+    },
+    /// `then wait <duration>` — the duration as written (`5s`, `500ms`,
+    /// `2min`, D76).
+    Wait(String),
+    /// `then message <severity> "<subject>" "<text>" [admins]` — a
+    /// system message (D76).
+    Message {
+        severity: String,
+        subject: String,
+        text: String,
+        admins: bool,
+    },
     /// `or` — the conditions after it are another group: the rule runs
     /// when all conditions of one group hold (D73).
     Or,
@@ -1531,6 +1565,44 @@ impl fmt::Display for RuleStmtKind {
                 write!(f, "then mode {mode} {}", if *on { "on" } else { "off" })
             }
             RuleStmtKind::Or => f.write_str("or"),
+            RuleStmtKind::Weather { field, op, value } => {
+                write!(f, "when weather {field} {} {value}", op.symbol())
+            }
+            RuleStmtKind::Day { op, value } => write!(f, "when day {} {value}", op.symbol()),
+            RuleStmtKind::Daylight(true) => f.write_str("when daylight"),
+            RuleStmtKind::Daylight(false) => f.write_str("when daylight off"),
+            RuleStmtKind::Sun(w) => write!(f, "when {w}"),
+            RuleStmtKind::Date(d) => write!(f, "when date {}", quote(d)),
+            RuleStmtKind::Notify { subject, text } => {
+                write!(f, "then notify {} {}", quote(subject), quote(text))
+            }
+            RuleStmtKind::Mail { to, subject, text } => {
+                write!(
+                    f,
+                    "then mail {} {} {}",
+                    quote(to),
+                    quote(subject),
+                    quote(text)
+                )
+            }
+            RuleStmtKind::Wait(d) => write!(f, "then wait {d}"),
+            RuleStmtKind::Message {
+                severity,
+                subject,
+                text,
+                admins,
+            } => {
+                write!(
+                    f,
+                    "then message {severity} {} {}",
+                    quote(subject),
+                    quote(text)
+                )?;
+                if *admins {
+                    f.write_str(" admins")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -2802,7 +2874,16 @@ impl Module {
                                 }
                                 when = 0;
                             }
-                            RuleStmtKind::Time(_) => when += 1,
+                            RuleStmtKind::Time(_)
+                            | RuleStmtKind::Weather { .. }
+                            | RuleStmtKind::Day { .. }
+                            | RuleStmtKind::Daylight(_)
+                            | RuleStmtKind::Sun(_)
+                            | RuleStmtKind::Date(_) => when += 1,
+                            RuleStmtKind::Notify { .. }
+                            | RuleStmtKind::Mail { .. }
+                            | RuleStmtKind::Wait(_)
+                            | RuleStmtKind::Message { .. } => then += 1,
                             RuleStmtKind::State { target, .. } => {
                                 when += 1;
                                 object(target, &st.kind, "a condition watches a block")?;

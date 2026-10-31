@@ -68,7 +68,8 @@ types) contradict each other. Results and methodology:
 - [x] Operating modes from source (2026-10-31, D69): schedule lines
       name any mode by title, `heating`/`cooling`; user-defined modes
       minted with `Mode("…")` (oracle session 29, byte-identical).
-      Open: adopting existing user modes.
+      `adopt --uuid` takes over existing user modes (byte-identical on
+      r50, 2026-10-31).
 - [x] Calendar entries 2026-10-31 (D74, #211): `CalendarEntry(…)`
       minted, adopted and edited; the four kinds of the corpus (oracle
       session 31, live on the house).
@@ -518,8 +519,10 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
       block the app offers, from the Miniserver's own capability table.
       All corpus rules are byte fixpoints. The AutoPilot container's
       inputs follow the rules (oracle session 31).
-- [ ] Rule conditions on weather, dates and text values; notification,
-      mailer, caller and pause actions.
+- [x] Rule conditions on weather, day of month, daylight, sun times and
+      dates; notification, mailer, pause and message-center actions
+      2026-10-31 (D76). Open: text values, the weather type, the
+      caller and speech output (the house has neither).
 - [x] Creating rules from source 2026-10-30 (D60): `rule <slug>
       "Name"` takes the config's rule of that name or creates one below
       the last rule, filed like it; the lock pins its UUID (v7 `rules`).

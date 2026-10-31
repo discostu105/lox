@@ -1126,16 +1126,19 @@ fn mode_name(tok: &Tok, lineno: usize, usage: &str) -> Result<ModeName> {
     }
 }
 
-/// One statement of a `rule` body (D57, D73): `active`/`inactive`,
+/// One statement of a `rule` body (D57, D73, D76): `active`/`inactive`,
 /// `when time HH:MM`, `when weekday <days>`, `when mode <mode> [off]`,
-/// `when <slug>.<state> <op> <value>`, `or`, `then <slug> "<command>"` or
-/// `then mode <mode> on|off`.
+/// `when <slug>.<state> <op> <value>`, the weather, day, daylight, sun
+/// and date conditions, `or`, `then <slug> "<command>"`,
+/// `then mode <mode> on|off`, `then notify|mail|wait|message`.
 fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let usage = "a rule line is `active`, `inactive`, `when time HH:MM`, \
                  `when weekday <days>`, `when mode <mode> [off]`, \
-                 `when <slug>.<state> <op> <value>`, `or`, `then <slug> \"<command>\"`, \
-                 `then mode <mode> on|off` or `end`";
+                 `when <slug>.<state> <op> <value>`, `when weather …`, `when day …`, \
+                 `when daylight`, `when sunset`, `when date …`, `or`, \
+                 `then <slug> \"<command>\"`, `then mode <mode> on|off`, `then notify …`, \
+                 `then mail …`, `then wait <duration>`, `then message …` or `end`";
     let kind = match toks {
         [Tok::Ident(w)] if w == "active" => RuleStmtKind::Active(true),
         [Tok::Ident(w)] if w == "inactive" => RuleStmtKind::Active(false),
@@ -1218,11 +1221,126 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 value,
             }
         }
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Ident(field),
+            Tok::Cmp(op),
+            value,
+        ] if w == "when" && k == "weather" => {
+            let value = match value {
+                Tok::Num(n) => n.clone(),
+                Tok::Ident(v) if v == "on" || v == "off" => v.clone(),
+                _ => {
+                    return Err(err(format!(
+                        "`when weather {field} {}` compares with a number, `on` or `off`",
+                        op.symbol()
+                    )));
+                }
+            };
+            RuleStmtKind::Weather {
+                field: field.clone(),
+                op: *op,
+                value,
+            }
+        }
+        [Tok::Ident(w), Tok::Ident(k), Tok::Cmp(op), Tok::Num(n)] if w == "when" && k == "day" => {
+            RuleStmtKind::Day {
+                op: *op,
+                value: n.clone(),
+            }
+        }
+        [Tok::Ident(w), Tok::Ident(k), rest @ ..] if w == "when" && k == "daylight" => match rest {
+            [] => RuleStmtKind::Daylight(true),
+            [Tok::Ident(v)] if v == "on" => RuleStmtKind::Daylight(true),
+            [Tok::Ident(v)] if v == "off" => RuleStmtKind::Daylight(false),
+            _ => {
+                return Err(err(format!(
+                    "`when daylight` ends with nothing, `on` or `off`; {usage}"
+                )));
+            }
+        },
+        [Tok::Ident(w), Tok::Ident(k)]
+            if w == "when" && matches!(k.as_str(), "sunrise" | "sunset" | "dawn" | "dusk") =>
+        {
+            RuleStmtKind::Sun(k.clone())
+        }
+        [Tok::Ident(w), Tok::Ident(k), Tok::Str(d)] if w == "when" && k == "date" => {
+            if crate::logic::rule::parse_date(d).is_none() {
+                return Err(err(format!("`{d}` is not a date (YYYY-MM-DD)")));
+            }
+            RuleStmtKind::Date(d.clone())
+        }
         [Tok::Ident(w), ..] if w == "when" => {
             return Err(err(format!(
-                "Lox Logic knows the conditions `when time`, `when weekday`, `when mode` and \
-                 `when <slug>.<state> <op> <value>`; {usage}"
+                "Lox Logic knows the conditions `when time`, `when weekday`, `when mode`, \
+                 `when <slug>.<state> <op> <value>`, `when weather <field> <op> <value>`, \
+                 `when day <op> <n>`, `when daylight`, `when sunrise|sunset|dawn|dusk` and \
+                 `when date \"YYYY-MM-DD\"`; {usage}"
             )));
+        }
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Str(subject),
+            Tok::Str(text),
+        ] if w == "then" && k == "notify" => RuleStmtKind::Notify {
+            subject: subject.clone(),
+            text: text.clone(),
+        },
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Str(to),
+            Tok::Str(subject),
+            Tok::Str(text),
+        ] if w == "then" && k == "mail" => RuleStmtKind::Mail {
+            to: to.clone(),
+            subject: subject.clone(),
+            text: text.clone(),
+        },
+        [Tok::Ident(w), Tok::Ident(k), d] if w == "then" && k == "wait" => {
+            let text = match d {
+                Tok::UnitNum(n, u) if matches!(u, Unit::Ms | Unit::S | Unit::Min | Unit::H) => {
+                    format!("{n}{}", u.suffix())
+                }
+                _ => {
+                    return Err(err(
+                        "`then wait` takes a duration: `5s`, `500ms`, `2min`, `1h`".into(),
+                    ));
+                }
+            };
+            if crate::logic::rule::wait_ms(&text).is_none() {
+                return Err(err(format!(
+                    "`then wait {text}`: the app waits 0.1 s to 24 h, in whole milliseconds"
+                )));
+            }
+            RuleStmtKind::Wait(text)
+        }
+        [
+            Tok::Ident(w),
+            Tok::Ident(k),
+            Tok::Ident(sev),
+            Tok::Str(subject),
+            Tok::Str(text),
+            rest @ ..,
+        ] if w == "then" && k == "message" => {
+            if crate::logic::rule::severity(sev).is_none() {
+                return Err(err(format!(
+                    "`{sev}` is no severity: `info`, `warning`, `important` or `critical`"
+                )));
+            }
+            let admins = match rest {
+                [] => false,
+                [Tok::Ident(a)] if a == "admins" => true,
+                _ => return Err(err("`then message` ends with nothing or `admins`".into())),
+            };
+            RuleStmtKind::Message {
+                severity: sev.clone(),
+                subject: subject.clone(),
+                text: text.clone(),
+                admins,
+            }
         }
         [Tok::Ident(w), Tok::Ident(k), mode, Tok::Ident(v)]
             if w == "then" && k == "mode" && (v == "on" || v == "off") =>
