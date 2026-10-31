@@ -2061,8 +2061,8 @@ impl Module {
                                 }
                                 if !params_seen.insert(&binding.port) {
                                     return compile_err(format!(
-                                        "duplicate parameter `{}` in `{} = {}(…)`",
-                                        binding.port, b.slug, b.block_type
+                                        "block `{}`: duplicate parameter `{}` in `{} = {}(…)`",
+                                        b.slug, binding.port, b.slug, b.block_type
                                     ));
                                 }
                             }
@@ -2070,8 +2070,8 @@ impl Module {
                                 object_ref(src)?;
                                 if !wires_seen.insert((&binding.port, src)) {
                                     return compile_err(format!(
-                                        "duplicate wire `{}: {src}` in `{} = {}(…)`",
-                                        binding.port, b.slug, b.block_type
+                                        "block `{}`: duplicate wire `{}: {src}` in `{} = {}(…)`",
+                                        b.slug, binding.port, b.slug, b.block_type
                                     ));
                                 }
                             }
@@ -2079,11 +2079,35 @@ impl Module {
                                 check_expr_operands(e, &format!("{}.{}", b.slug, binding.port))?;
                                 if !exprs_seen.insert((&binding.port, e.to_string())) {
                                     return compile_err(format!(
-                                        "duplicate expression `{}: {e}` in `{} = {}(…)`",
-                                        binding.port, b.slug, b.block_type
+                                        "block `{}`: duplicate expression `{}: {e}` in `{} = {}(…)`",
+                                        b.slug, binding.port, b.slug, b.block_type
                                     ));
                                 }
                             }
+                        }
+                    }
+                    // A value next to a wire on one port (D77): the wire
+                    // wins and the value is inert, so writing both is a
+                    // mistake — or a decompiled stale constant restated.
+                    for binding in b.bindings() {
+                        let BindingKind::Param(v) = &binding.kind else {
+                            continue;
+                        };
+                        if let Some(w) = b.bindings().find(|w| {
+                            w.port == binding.port
+                                && matches!(w.kind, BindingKind::Wire(_) | BindingKind::Expr(_))
+                        }) {
+                            return compile_err(format!(
+                                "block `{slug}`: port `{port}` takes both a value \
+                                 (`{port}: {v}`) and a wire (`{port}: {wire}`) in \
+                                 `{slug} = {ty}(…)` — a wired input ignores its value; \
+                                 keep one (a constant Loxone Config keeps under the wire \
+                                 is carried from the base, D77)",
+                                slug = b.slug,
+                                port = binding.port,
+                                wire = w.kind,
+                                ty = b.block_type,
+                            ));
                         }
                     }
                 }

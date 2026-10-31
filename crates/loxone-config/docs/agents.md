@@ -230,6 +230,7 @@ it only when it matches what you intended.
 | `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
 | `is v0 syntax` | `block`/`wire`/`set`/`match` keyword from the old grammar | the error shows the v1 spelling — rewrite the line |
 | `duplicate parameter` / `duplicate wire` | same argument twice in one argument list | delete one (fan-in with *different* sources is allowed) |
+| `takes both a value … and a wire` | a port bound to a constant and to a wire in one argument list | keep one: a wired input ignores its value. A stale constant under a wire in the base stays there without a binding (D77) |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
 | `is an attribute parameter, not a connector` | wire aimed at e.g. `Formula:` | pass a value instead: `Formula: "I1+I2"` |

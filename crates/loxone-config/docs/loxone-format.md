@@ -146,7 +146,12 @@ inline (`<Key>2B35</Key>`).
   by the sixth oracle run ([oracle-wine.md](oracle-wine.md)).
 - `Nc` — number of incoming wires (= count of `<In>` children); omitted
   when zero.
-- `Def` — the port's parameter value; omitted at type default.
+- `Def` — the port's parameter value; omitted at type default. A wired
+  `<Co>` can carry one too (the Loxcall library entry: an `Equal`'s
+  `Input1` with `Def="2"` and an `<In>`): Loxone Config keeps the value
+  when a wire is drawn onto the port. The wire supplies the input; the
+  constant is what the port reads again once the wire is removed. Lox
+  Logic carries it (design decision D77).
 - Attribute order: `K, Def, Nc, U` (an oracle save 2026-08-25 rewrote a
   compiler-emitted `K, Nc, Def, U` into this order).
 - An `<In>` may carry `FLG="1"` (rarely `"2"`) — Miniserver/app-created

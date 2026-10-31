@@ -210,6 +210,35 @@ fn errors_land_on_the_name_they_are_about() {
     let (l, c) = pos(&undeclared, "pumpi");
     assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
 
+    // A value next to a wire on one port (D77): the port key in the call.
+    let both = src.replace("\tInput1: wasser.Q,", "\tInput1: 3,\n\tInput1: wasser.Q,");
+    let out = session(&[open(&pool, &both)]);
+    let d = diagnostics(&out, &pool);
+    assert_eq!(d.len(), 1, "{d:?}");
+    let (l, c) = pos(&both, "Input1: 3");
+    assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
+    assert!(
+        d[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("takes both a value (`Input1: 3`) and a wire (`Input1: wasser.Q`)"),
+        "{d:?}"
+    );
+
+    // A duplicate argument: the same.
+    let dup = src.replace("\tInput2: solltemp,", "\tInput2: solltemp,\n\tInput2: 4,");
+    let out = session(&[open(&pool, &dup)]);
+    let d = diagnostics(&out, &pool);
+    let (l, c) = pos(&dup, "Input2: solltemp");
+    assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
+    assert!(
+        d[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("duplicate parameter `Input2`"),
+        "{d:?}"
+    );
+
     // A syntax error: its line.
     let syntax = src.replace("pumpe.On <- heizen.Q", "pumpe.On <- <- heizen.Q");
     let out = session(&[open(&pool, &syntax)]);

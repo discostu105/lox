@@ -99,6 +99,12 @@ struct Residue {
     /// [`apply_def`] and the param guard in the build loop), so carrying
     /// them can never contradict what the source expresses.
     gui_ports: BTreeMap<String, Element>,
+    /// Stale constants (design decision D77): the raw `Def=` of every
+    /// wired connector, keyed by `K`. Inert while the wire exists; Loxone
+    /// Config keeps it so the value returns when the wire is removed. The
+    /// source never states it (a value next to a wire is refused), so the
+    /// rebuild carries it onto a port the source still wires.
+    stale_defs: BTreeMap<String, String>,
     /// `FLG=` wire flags, keyed by (sink port UUID, source port UUID).
     /// Miniserver/app-created wire metadata: the oracle probe (2026-08-25)
     /// showed Loxone Config round-trips the flag verbatim, never
@@ -190,6 +196,16 @@ fn harvest_residue(el: &Element) -> Residue {
             .child_elements()
             .filter(|c| c.name == "Co" && c.attr("Inv").is_some())
             .filter_map(|co| Some((co.attr_decoded("K")?.into_owned(), co.clone())))
+            .collect(),
+        stale_defs: el
+            .child_elements()
+            .filter(|c| c.name == "Co" && c.child_elements().any(|i| i.name == "In"))
+            .filter_map(|co| {
+                Some((
+                    co.attr_decoded("K")?.into_owned(),
+                    co.attr("Def")?.to_string(),
+                ))
+            })
             .collect(),
     }
 }
@@ -1296,6 +1312,17 @@ pub fn compile(
             co.set_attr("K", key);
             if let Some(def) = managed_defs.get(&(block.slug.clone(), key.clone())) {
                 co.set_attr("Def", def);
+            } else if let Some(stale) = res.and_then(|r| r.stale_defs.get(key))
+                && block.bindings().any(|b| {
+                    b.port == *key
+                        && matches!(
+                            b.kind,
+                            super::ast::BindingKind::Wire(_) | super::ast::BindingKind::Expr(_)
+                        )
+                })
+            {
+                // A stale constant under a wire the source keeps (D77).
+                co.set_attr_raw("Def", stale);
             }
             co.set_attr("U", &plan.ports[key]);
             el.push_child(co);
