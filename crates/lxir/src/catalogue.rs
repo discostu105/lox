@@ -269,7 +269,7 @@ pub fn update(
             }
             continue;
         }
-        match entry(el) {
+        match entry(el, &now) {
             Some(json) if trusted.contains(ty) => {
                 added.push(',');
                 added.push_str(&json_str(&format!("U:{}", el.attr("U").unwrap_or(uuid))));
@@ -283,6 +283,9 @@ pub fn update(
             None if el.child_elements().any(|c| c.attr("IconV").is_some()) => {
                 left.push(change("not added: its icon"))
             }
+            None if KNOWN.contains(&ty) => left.push(change(&format!(
+                "not added: lxir does not write this kind of {ty} entry"
+            ))),
             None => left.push(change(&format!(
                 "not added: lxir does not write {ty} entries"
             ))),
@@ -358,7 +361,7 @@ fn trusted_types(
         }
         // A variant `entry` does not write (an icon of its own, say) says
         // nothing about the others.
-        let Some(json) = entry(el) else {
+        let Some(json) = entry(el, live) else {
             continue;
         };
         let same = match (object(&json, 0), object(body, e.value.start)) {
@@ -387,7 +390,7 @@ fn trusted_types(
 }
 
 /// The block types [`entry`] knows.
-pub const KNOWN: [&str; 21] = [
+pub const KNOWN: [&str; 22] = [
     "PButtonT",
     "PushButton",
     "VirtualIn",
@@ -409,17 +412,19 @@ pub const KNOWN: [&str; 21] = [
     "MeterAbsUni",
     "MeterAbsBi",
     "MeterAbsSt",
+    "LightController2",
 ];
 
 /// The members of an entry the self-check compares (the rest come from
 /// [`view`]).
-const SELF_CHECKED: [&str; 6] = [
+const SELF_CHECKED: [&str; 7] = [
     "type",
     "details",
     "states",
     "statistic",
     "statisticV2",
     "defaultIcon",
+    "subControls",
 ];
 
 /// Objects shown as a digital info display (`InfoOnlyDigital`): their
@@ -441,7 +446,7 @@ const ON_OFF: &str = r##"{"jLockable":false,"text":{"off":"Aus","on":"Ein"},"col
 /// order; `None` for a type (or variant) whose entry is not known, and for
 /// an object with an icon of its own (`IconV=`), whose file name the
 /// program does not carry.
-fn entry(el: &Element) -> Option<String> {
+fn entry(el: &Element, objs: &Objects) -> Option<String> {
     let io = el.child_elements().find(|c| c.name == "IoData")?;
     if io.attr("IconV").is_some() {
         return None;
@@ -658,6 +663,12 @@ fn entry(el: &Element) -> Option<String> {
                 _ => return None,
             }
         }
+        "LightController2" => {
+            let (details, states, subs) = light_controller(el, &co, objs)?;
+            icon = false;
+            tail = format!(r#","subControls":{{{subs}}}"#);
+            ("LightControllerV2", details, states)
+        }
         t if t.starts_with("Meter") => {
             let (details, states, groups) = meter(el, &co)?;
             tail = format!(r#","statisticV2":{{"groups":[{groups}]}}"#);
@@ -709,6 +720,196 @@ fn entry(el: &Element) -> Option<String> {
         v.rating,
         v.favorite,
     ))
+}
+
+/// What drives a light controller's circuit, as its catalogue entry has it.
+#[derive(Clone, Copy, PartialEq)]
+enum Circuit {
+    Switch,
+    /// A colour picker: `Rgb` or `TunableWhite`, the actuator's range.
+    Color(&'static str, (u32, u32)),
+}
+
+/// A light controller's details, states and sub-controls: a circuit per
+/// named output (`NameAI<i>` is `AQ<i+1>`), its kind from the actuator's
+/// capability Loxone Config copies onto the block (`CapAI<i>`, the
+/// actuator's `CCap=`: `31` RGB, `80` tunable white) and the colour
+/// range from the actuator itself (`TWMIN`/`TWMAX`, else 2200–6500 K);
+/// without a capability a switch, when its moods only switch it (`0`/`1`)
+/// and nothing analog takes the output. With two circuits or more a
+/// master: a switch over switches, else a dimmer, and a master colour
+/// when every circuit is a colour. Unknown and not written: other
+/// capabilities, a circuit whose moods carry colour values without one (a
+/// Lumitech output), a controller without its special states.
+fn light_controller(
+    el: &Element,
+    co: &dyn Fn(&str) -> Option<String>,
+    objs: &Objects,
+) -> Option<(String, String, String)> {
+    let uuid = el.attr("U")?;
+    let sp: Vec<&str> = el.attr("SpStates")?.split(',').collect();
+    let seq: Vec<&str> = el.attr("uuidSeqencing")?.split(',').collect();
+    let seq_ix: Vec<&str> = el.attr("uuidSeqenceIx")?.split(',').collect();
+    if sp.len() < 13 || seq.len() < 19 || seq_ix.len() < 19 {
+        return None;
+    }
+    let moods: Vec<&Element> = el
+        .child_elements()
+        .find(|c| c.name == "LightscenesC")?
+        .child_elements()
+        .filter(|c| c.name == "LightsceneC")
+        .collect();
+    // The mood the movement switches on, by its place in the list.
+    let movement = moods.iter().position(|m| m.attr("Move") == Some("true"))? + 1;
+    let history = el
+        .child_elements()
+        .find(|c| c.name == "COHist")?
+        .attr("TRK_NE")?
+        .parse::<u32>()
+        .ok()?;
+
+    let mut circuits: Vec<(usize, String, Circuit)> = Vec::new();
+    for i in 0..18 {
+        let Some(name) = el.attr_decoded(&format!("NameAI{i}")) else {
+            continue;
+        };
+        let output = co(&format!("AQ{}", i + 1))?;
+        let range = objs.tw.get(&output.to_ascii_lowercase()).copied();
+        let kind = match el.attr(&format!("CapAI{i}")) {
+            Some("31") => Circuit::Color("Rgb", range.unwrap_or((2200, 6500))),
+            Some("80") => Circuit::Color("TunableWhite", range.unwrap_or((2200, 6500))),
+            Some(_) => return None,
+            None => {
+                let q = format!("Q{}", i + 1);
+                let switched = moods
+                    .iter()
+                    .all(|m| m.attr(&q).is_none_or(|v| v == "0" || v == "1"));
+                if !switched || objs.analog_sink.contains(&output.to_ascii_lowercase()) {
+                    return None;
+                }
+                Circuit::Switch
+            }
+        };
+        circuits.push((i, name.into_owned(), kind));
+    }
+    if circuits.is_empty() {
+        return None;
+    }
+
+    let sub = |key: &str, name: &str, ty: &str, details: Option<String>, states: String| {
+        let action = format!("{uuid}/{key}");
+        let details = details.map_or_else(String::new, |d| format!(r#""details":{d},"#));
+        format!(
+            r#"{}:{{"name":{},"type":"{ty}","uuidAction":{},"defaultRating":0,"isFavorite":false,"isSecured":false,"restrictions":0,{details}"states":{states}}}"#,
+            json_str(&action),
+            json_str(name),
+            json_str(&action),
+        )
+    };
+    let picker = |kind: &str, (min, max): (u32, u32)| {
+        format!(r#"{{"pickerType":"{kind}","TWMin":{min},"TWMax":{max}}}"#)
+    };
+    let color = |output: String, i: usize| {
+        format!(
+            r#"{{"color":{},"sequence":{},"sequenceColorIdx":{}}}"#,
+            json_str(&output),
+            json_str(seq[i]),
+            json_str(seq_ix[i])
+        )
+    };
+
+    let mut details = format!(
+        r#"{{"jLockable":true,"controlHistory":true,"hasHistory":{history},"movementScene":{movement}"#
+    );
+    let mut subs = Vec::new();
+    if circuits.len() > 1 {
+        details.push_str(&format!(
+            r#","masterValue":{}"#,
+            json_str(&format!("{uuid}/masterValue"))
+        ));
+        let master = co("AQ20")?;
+        if circuits.iter().all(|c| c.2 == Circuit::Switch) {
+            subs.push(sub(
+                "masterValue",
+                "Master-Schalter",
+                "Switch",
+                None,
+                format!(r#"{{"active":{}}}"#, json_str(&master)),
+            ));
+        } else {
+            subs.push(sub(
+                "masterValue",
+                "Master-Helligkeit",
+                "Dimmer",
+                None,
+                format!(
+                    r#"{{"position":{},"min":{},"max":{},"step":{}}}"#,
+                    json_str(&master),
+                    json_str(sp[7]),
+                    json_str(sp[8]),
+                    json_str(&co("Step")?)
+                ),
+            ));
+        }
+        let ranges: Option<Vec<(u32, u32)>> = circuits
+            .iter()
+            .map(|c| match c.2 {
+                Circuit::Color(_, r) => Some(r),
+                Circuit::Switch => None,
+            })
+            .collect();
+        if let Some(ranges) = ranges {
+            details.push_str(&format!(
+                r#","masterColor":{}"#,
+                json_str(&format!("{uuid}/masterColor"))
+            ));
+            let range = (
+                ranges.iter().map(|r| r.0).min()?,
+                ranges.iter().map(|r| r.1).max()?,
+            );
+            subs.push(sub(
+                "masterColor",
+                "Master-Farbe",
+                "ColorPickerV2",
+                Some(picker("Rgb", range)),
+                color(co("AQ19")?, 18),
+            ));
+        }
+    }
+    details.push('}');
+    for (i, name, kind) in &circuits {
+        let output = co(&format!("AQ{}", i + 1))?;
+        let key = format!("AI{}", i + 1);
+        subs.push(match *kind {
+            Circuit::Switch => sub(
+                &key,
+                name,
+                "Switch",
+                None,
+                format!(r#"{{"active":{}}}"#, json_str(&output)),
+            ),
+            Circuit::Color(kind, range) => sub(
+                &key,
+                name,
+                "ColorPickerV2",
+                Some(picker(kind, range)),
+                color(output, *i),
+            ),
+        });
+    }
+    let states = format!(
+        r#"{{"jLocked":{},"activeMoods":{},"moodList":{},"activeMoodsNum":{},"favoriteMoods":{},"additionalMoods":{},"circuitNames":{},"daylightConfig":{},"presence":{}}}"#,
+        json_str(&locked(&co("Reset")?)?),
+        json_str(sp[2]),
+        json_str(sp[3]),
+        json_str(sp[10]),
+        json_str(sp[4]),
+        json_str(sp[5]),
+        json_str(sp[9]),
+        json_str(sp[11]),
+        json_str(sp[12]),
+    );
+    Some((details, states, subs.join(",")))
 }
 
 /// A meter's details, states and statistic groups. Known for the units
@@ -923,6 +1124,11 @@ struct Objects<'d> {
     all: BTreeSet<String>,
     /// The UUIDs an `InputRef` names (`Ref=`): virtual inputs a page uses.
     referenced: BTreeSet<String>,
+    /// Lowercase output UUID → the colour range (`TWMIN`, `TWMAX`) of the
+    /// actuator an `OutputRef` on it drives.
+    tw: BTreeMap<String, (u32, u32)>,
+    /// The outputs an analog `OutputRef` takes.
+    analog_sink: BTreeSet<String>,
 }
 
 impl<'d> Objects<'d> {
@@ -932,7 +1138,11 @@ impl<'d> Objects<'d> {
             shown: BTreeMap::new(),
             all: BTreeSet::new(),
             referenced: BTreeSet::new(),
+            tw: BTreeMap::new(),
+            analog_sink: BTreeSet::new(),
         };
+        let mut by_uuid: BTreeMap<String, &'d Element> = BTreeMap::new();
+        let mut output_refs: Vec<&'d Element> = Vec::new();
         let mut seen = BTreeSet::new();
         for o in doc.objects() {
             let uuid = o.uuid.to_ascii_lowercase();
@@ -940,6 +1150,10 @@ impl<'d> Objects<'d> {
             let Some(el) = doc.element_at(&o.path) else {
                 continue;
             };
+            by_uuid.entry(uuid.clone()).or_insert(el);
+            if o.block_type == "OutputRef" {
+                output_refs.push(el);
+            }
             if o.block_type == "InputRef"
                 && let Some(r) = el.attr("Ref")
             {
@@ -954,6 +1168,32 @@ impl<'d> Objects<'d> {
             if io.attr("Visu") == Some("true") {
                 out.shown.insert(uuid.clone(), out.shown_in_order.len());
                 out.shown_in_order.push((uuid, el));
+            }
+        }
+        for r in output_refs {
+            let target = r
+                .attr("Ref")
+                .and_then(|t| by_uuid.get(&t.to_ascii_lowercase()));
+            let range = target.and_then(|t| {
+                Some((
+                    t.attr("TWMIN")?.parse().ok()?,
+                    t.attr("TWMAX")?.parse().ok()?,
+                ))
+            });
+            let analog = r.attr("Analog") == Some("true");
+            for input in r
+                .child_elements()
+                .filter(|c| c.name == "Co")
+                .flat_map(|c| c.child_elements().filter(|i| i.name == "In"))
+                .filter_map(|i| i.attr("Input"))
+            {
+                let input = input.to_ascii_lowercase();
+                if let Some(range) = range {
+                    out.tw.entry(input.clone()).or_insert(range);
+                }
+                if analog {
+                    out.analog_sink.insert(input);
+                }
             }
         }
         out
@@ -1227,7 +1467,7 @@ mod tests {
     fn entry_of(ty: &str, xml: &str) -> Option<String> {
         let d = doc("Licht", ROOM, xml);
         let o = d.objects().into_iter().find(|o| o.block_type == ty)?;
-        entry(d.element_at(&o.path)?)
+        entry(d.element_at(&o.path)?, &Objects::of(&d))
     }
 
     /// The tail of an entry after `restrictions` (what the type decides).
@@ -1342,6 +1582,80 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn light_controllers_list_their_circuits_and_masters() {
+        let io = format!(r#"<IoData Visu="true" Pr="{ROOM}" Cr="{CAT}"/>"#);
+        let list = |tag: &str, n: usize| {
+            (0..n)
+                .map(|i| format!("{tag}0000000-0000-00{i:02x}-ffff000000000000"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        // An RGB circuit on a tunable white actuator and a switched one;
+        // the movement switches on the second mood.
+        let lc = |names: &str, q2: &str, extra: &str| {
+            entry_of(
+                "LightController2",
+                &format!(
+                    r#"<C Type="LightController2" U="{NEW}" Title="Licht" {names} SpStates="{}" uuidSeqencing="{}" uuidSeqenceIx="{}">{}<COHist TRK_NE="20"/><LightscenesC><LightsceneC Title="Aus" Q1="0" Q2="0"/><LightsceneC Title="Bewegung" Move="true" Q1="0" Q2="{q2}"/></LightscenesC>{io}</C>
+                    <C Type="TreeAactor" U="2f000000-0000-0000-ffff000000000000" TWMIN="2000" TWMAX="6000" CCap="31"/>
+                    <C Type="OutputRef" U="2f000000-0000-0001-ffff000000000000" Ref="2f000000-0000-0000-ffff000000000000"><Co K="AI" U="2f000000-0000-0002-00ff000000000000"><In Input="1f000000-0000-0002-02ff000000000000"/></Co></C>{extra}"#,
+                    list("e", 13),
+                    list("a", 20),
+                    list("b", 20),
+                    cos(&["Reset", "Step", "AQ1", "AQ2", "AQ19", "AQ20"]),
+                ),
+            )
+        };
+        let both = lc(r#"NameAI0="Farbe" CapAI0="31" NameAI1="Spots""#, "1", "").unwrap();
+        assert!(both.contains(r#""type":"LightControllerV2""#));
+        assert!(!both.contains("defaultIcon"));
+        assert!(both.contains(
+            r#""details":{"jLockable":true,"controlHistory":true,"hasHistory":20,"movementScene":2,"masterValue":"0f000000-0000-0004-ffff000000000000/masterValue"},"states":{"jLocked":"9f000000-0000-0000-00ff000000000000","activeMoods":"e0000000-0000-0002-ffff000000000000","moodList":"e0000000-0000-0003-ffff000000000000","activeMoodsNum":"e0000000-0000-000a-ffff000000000000","#
+        ));
+        assert!(both.contains(
+            r#""0f000000-0000-0004-ffff000000000000/masterValue":{"name":"Master-Helligkeit","type":"Dimmer","uuidAction":"0f000000-0000-0004-ffff000000000000/masterValue","defaultRating":0,"isFavorite":false,"isSecured":false,"restrictions":0,"states":{"position":"1f000000-0000-0005-05ff000000000000","min":"e0000000-0000-0007-ffff000000000000","max":"e0000000-0000-0008-ffff000000000000","step":"1f000000-0000-0001-01ff000000000000"}}"#
+        ));
+        assert!(both.contains(
+            r#""details":{"pickerType":"Rgb","TWMin":2000,"TWMax":6000},"states":{"color":"1f000000-0000-0002-02ff000000000000","sequence":"a0000000-0000-0000-ffff000000000000","sequenceColorIdx":"b0000000-0000-0000-ffff000000000000"}}"#
+        ));
+        assert!(both.ends_with(
+            r#""0f000000-0000-0004-ffff000000000000/AI2":{"name":"Spots","type":"Switch","uuidAction":"0f000000-0000-0004-ffff000000000000/AI2","defaultRating":0,"isFavorite":false,"isSecured":false,"restrictions":0,"states":{"active":"1f000000-0000-0003-03ff000000000000"}}}}"#
+        ));
+        assert!(!both.contains("masterColor"));
+
+        // Two colours: a master colour over their range too (2200 K without
+        // an actuator); two switches: a master switch.
+        let colours = lc(
+            r#"NameAI0="A" CapAI0="31" NameAI1="B" CapAI1="80""#,
+            "1",
+            "",
+        )
+        .unwrap();
+        assert!(colours.contains(
+            r#""name":"Master-Farbe","type":"ColorPickerV2","uuidAction":"0f000000-0000-0004-ffff000000000000/masterColor","defaultRating":0,"isFavorite":false,"isSecured":false,"restrictions":0,"details":{"pickerType":"Rgb","TWMin":2000,"TWMax":6500},"states":{"color":"1f000000-0000-0004-04ff000000000000","sequence":"a0000000-0000-0012-ffff000000000000""#
+        ));
+        assert!(colours.contains(r#""pickerType":"TunableWhite","TWMin":2200,"TWMax":6500"#));
+        let switches = lc(r#"NameAI0="A" NameAI1="B""#, "1", "").unwrap();
+        assert!(switches.contains(r#""name":"Master-Schalter","type":"Switch""#));
+        // One circuit: no master.
+        let one = lc(r#"NameAI1="B""#, "1", "").unwrap();
+        assert!(!one.contains("master"));
+
+        // Not known: a mood giving a switched output a colour (Lumitech),
+        // an analog output on a switched circuit, another capability.
+        assert_eq!(lc(r#"NameAI1="B""#, "50", ""), None);
+        assert_eq!(
+            lc(
+                r#"NameAI1="B""#,
+                "1",
+                r#"<C Type="OutputRef" U="2f000000-0000-0003-ffff000000000000" Analog="true"><Co K="AI" U="2f000000-0000-0004-00ff000000000000"><In Input="1f000000-0000-0003-03ff000000000000"/></Co></C>"#
+            ),
+            None
+        );
+        assert_eq!(lc(r#"NameAI0="A" CapAI0="7""#, "1", ""), None);
     }
 
     #[test]
@@ -1497,7 +1811,7 @@ mod tests {
         );
         let el = |d: &LoxoneDoc| {
             let o = d.objects().into_iter().find(|o| o.uuid == NEW).unwrap();
-            entry(d.element_at(&o.path).unwrap()).unwrap()
+            entry(d.element_at(&o.path).unwrap(), &Objects::of(d)).unwrap()
         };
         let cat = catalogue(&format!(",\"U:{NEW}\":{}", el(&was)));
         let u = update(&cat, &was, &now, NOW).unwrap();
@@ -1578,7 +1892,7 @@ mod tests {
         let u = update(&catalogue(""), &live, &doc("Licht", ROOM, &memory), NOW).unwrap();
         assert_eq!(
             whats(&u).1,
-            ["not added: lxir does not write Memory entries"]
+            ["not added: lxir does not write this kind of Memory entry"]
         );
     }
 

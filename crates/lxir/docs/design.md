@@ -2231,3 +2231,19 @@ Anything unverified is an error, not a heuristic:
   - Validated: oracle session 30 (description, place and board on an
     Air relay and a Tree dimmer, description and place on a Tree room
     sensor: empty diff, a recompile of the save byte-identical).
+- **D72 — Light controllers in the app catalogue** (2026-10-31; #184).
+  The push writes a `LightControllerV2` entry for a light controller
+  the source shows (D61, D66): details, states and a sub-control per
+  named circuit, plus the masters, read off the block's circuit
+  settings (`NameAI<i>=`, `CapAI<i>=`), its special states and
+  sequence lists, its moods (the movement mood's place, whether a
+  circuit only switches) and the actuators its outputs drive (the
+  colour range, through an `OutputRef`). Format: loxone-format.md.
+  Reproduced byte for byte: 22 of the house's 23 controllers in each of
+  the three saves; the 23rd drives Lumitech outputs, whose kind the
+  block does not carry, and stays for a save ("lxir does not write
+  this kind of LightController2 entry"). A controller minted from
+  source has no named circuits until a save, so it is not listed
+  either. Not derived, one sample each in the corpus with fields no
+  setting explains: the alarm, smoke alarm, irrigation and room
+  controller entries (#190).
