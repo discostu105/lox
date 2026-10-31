@@ -2,13 +2,15 @@
 
 A Rust client for the [Loxone](https://www.loxone.com) Miniserver (Gen 1 and Gen 2): the HTTP API, token auth,
 the WebSocket state stream, FTP backups and statistics. It is the transport of the
-[lox](https://github.com/discostu105/lox) CLI, which runs it against real Miniservers every day.
+[lox](https://github.com/discostu105/lox) CLI.
 
 | Module | What |
 |:-------|:-----|
 | `LoxClient` | HTTP API: commands to controls, their states, the structure file (`LoxApp3.json`, cached 24 h), name resolution (`"Light [Kitchen]"`), retries |
 | `token` | Token auth over the WebSocket: RSA key exchange, HMAC credential hash (SHA-1 or SHA-256), `gettoken`; stored and reused |
 | `stream` | The state stream: binary event tables (values, texts, daytimers, weather) decoded to `StateEvent`s, keepalives, reconnect-friendly sessions |
+| `system` | System state: firmware, PLC state, heap, CPU, diagnostic counters, network settings, CAN bus and LAN counters, the system log |
+| `ws` | The WebSocket connector (TLS without certificate checks) |
 | `ftp` | Backups (`/prog/sps_*.zip`), the program upload (`sps_new.zip`), custom changes |
 | `statv2`, `stats` | Statistics V2 (energy flow monitor meters), statistics and weather files |
 | `sdtest`, `time` | The SD card self-test, Loxone timestamps (seconds since 2009) |

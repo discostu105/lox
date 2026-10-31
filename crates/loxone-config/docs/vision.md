@@ -26,69 +26,52 @@ Treat the config the way Terraform treats infrastructure:
 | `terraform.tfstate` | the lockfile (`*.lock.json`) |
 | `terraform plan` / `apply` | `loxl diff` / `loxl compile` |
 | `terraform state rm` | `Lockfile::remove_object` |
-| `terraform import` | `loxl decompile` |
+| `terraform import` | `loxl adopt` |
 
-The Lox Logic describes **only the logic you choose to manage**. Everything else —
-hardware, rooms, users, visualization, other people's logic — passes through
-the compiler byte-for-byte untouched. This is what makes the approach safe to
-adopt incrementally: manage one shading rule today, and the rest of the
-config never notices.
+Lox Logic describes **only the logic you choose to manage**. Hardware, rooms, users, visualization and
+other people's logic pass through the compiler byte for byte. That makes it safe to adopt step by
+step: manage one shading rule, and the rest of the config stays as it is.
 
 ## What this unlocks
 
 - **Review**: a wire change is a one-line diff in a pull request, not a
   screenshot of a diagram.
-- **Reuse** (roadmap): templates instantiate the same logic for N windows.
-- **Testing** (roadmap): compile against a base config, run the result
-  through the Lox Logic simulator (`loxl test`, D68) before it ever reaches the
+- **Reuse**: templates create the same logic for N windows.
+- **Testing**: `loxl test` runs the compiled result in the Lox Logic simulator before it reaches the
   house.
-- **Agents**: an AI agent can read the Lox Logic, propose a change, compile, show a
-  semantic diff, and never touch the fragile XML directly. See
-  [agents.md](agents.md).
-- **Locale immunity**: identity is pinned by UUID in the lockfile, so the
-  111-renames-per-save locale churn that plagues title-based tooling is
-  irrelevant.
+- **Agents**: an AI agent can read the source, propose a change, compile and show a semantic diff
+  without touching the XML. See [agents.md](agents.md).
+- **Locale changes don't matter**: the lockfile pins identity by UUID, so a save that renames 111
+  built-in objects into another language changes nothing.
 
 ## Living with two masters
 
-Loxone Config remains a legitimate writer — hardware, visualization, the
-occasional manual edit. Drift is not prevented; it becomes an explicit,
-reviewable step:
+Loxone Config stays a legitimate writer: hardware, visualization, the occasional manual edit. Drift
+is not prevented; it becomes an explicit step you review (`loxl drift`):
 
 ```text
 everyday:             edit .loxl → check → compile → diff → upload
 after a GUI session:  download → decompile
     ├─ managed logic changed?    → review it as a source diff, commit
     ├─ only layout or hardware?  → lockfile update, source untouched
-    └─ new unknown objects?      → stay unmanaged, pass through untouched;
-                                   adoptable into source later (roadmap)
+    └─ new unknown objects?      → stay unmanaged and pass through;
+                                   `loxl adopt` takes them over later
 ```
 
-Gradual adoption is also the migration path for existing installations: a
-real config moves block-by-block from unmanaged to managed — never
-big-bang.
+An existing installation moves to source the same way, block by block. `loxl coverage` shows how far
+it has come.
 
 ## Non-goals
 
-- Replacing Loxone Config. Hardware setup, device pairing, creating rooms
-  and categories, and visualization stay in the GUI. Lox Logic manages *logic
-  blocks and their wiring* — the part that benefits from being code — plus
-  the *assignment* of existing objects: an extern's title, room and
-  category are plain facts a source file can hold (D39).
-- Transport. Talking to the Miniserver (FTP/HTTP, credentials) belongs to the `lox` / `lox-cli` CLIs, which consume this
-  crate. The library stays pure: bytes in, bytes out.
-- Simulating what Loxone does not document. `loxl test` simulates the
-  blocks whose behavior Loxone documents (D68, [simulator.md](simulator.md))
-  and refuses the rest by name; it does not reimplement the Miniserver.
+- Replacing Loxone Config. Hardware setup, device pairing, creating rooms and categories, and
+  visualization stay there. Lox Logic manages logic blocks and their wiring, plus the assignment of
+  existing objects: an extern's title, room and category are facts a source file can hold.
+- Transport. Talking to the Miniserver (FTP, HTTP, credentials) belongs to `lox`. The library stays
+  pure: bytes in, bytes out.
+- Simulating what Loxone does not document. `loxl test` simulates the blocks whose behavior Loxone
+  documents ([simulator.md](simulator.md)) and refuses the rest by name.
 
-## Where this came from
+## Further reading
 
-The concept began as a German design sketch ("lox-ir — Design-Skizze",
-preserved in this repo's git history) proposing the Lox Logic, the
-lockfile-as-tfstate idea, templates, expression sugar, and sim-backed
-tests. A live investigation against a real Miniserver (2026-08-24, config
-v273, ~1900 objects, six config generations spanning two years) validated
-its core assumptions and sharpened the identity model. The findings are
-condensed in [loxone-format.md](loxone-format.md); the resulting
-architecture in [design.md](design.md); the sketch ideas not yet
-implemented live on in [roadmap.md](roadmap.md).
+The verified format facts are in [loxone-format.md](loxone-format.md), the architecture in
+[design.md](design.md), and the direction in [roadmap.md](roadmap.md).
