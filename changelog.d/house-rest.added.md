@@ -1,3 +1,0 @@
-- **lxir**: `(a, b, c).MinTime = 600` sets a setting, title, room or category on several objects in one statement, and `fmt` keeps the one line (#199).
-- **lxir**: an Air or Tree device's own description, installation place and switch board can be owned from source (`Desc`, `Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos`), and `device:` matches Air devices and their I/Os by serial (#197).
-- **lox config push**: a light controller shown from source gets its app entry, with its circuits, masters and colour ranges (#184).

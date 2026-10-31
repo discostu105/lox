@@ -1,1 +1,0 @@
-- **`lxir types`**: each block type says what it is for (purpose, main inputs and outputs, the Loxone knowledge-base page where known), `lxir types --search <text>` finds types by name or purpose, and the LSP hover on a type shows the same

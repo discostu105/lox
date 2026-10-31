@@ -1,2 +1,0 @@
-- **`lxir templates`**: a template library — motion and staircase light, push-button, heating and humidity hysteresis, frost protection, CO2 ventilation, door hint, water and intrusion alarm, awning and sun protection — each tested in the simulator; `lxir templates <name>` prints the file to copy into a module, and one line calls a template
-  - Template object parameters may be typed `any`, so a template takes a virtual or a physical sensor alike

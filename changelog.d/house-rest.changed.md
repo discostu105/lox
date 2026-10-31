@@ -1,1 +1,0 @@
-- **lxir drift**: the fingerprint is v9 and also compares device settings; a lock with a v8 fingerprint still reads as in sync.

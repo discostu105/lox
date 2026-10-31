@@ -10,6 +10,21 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-10-31 — device settings, bulk statements, light controllers in the app
+
+Air and Tree devices get their own settings from source, one statement can set many objects, and light controllers shown from source appear in the app with their circuits.
+
+### Added
+- **`lxir templates`**: a template library — motion and staircase light, push-button, heating and humidity hysteresis, frost protection, CO2 ventilation, door hint, water and intrusion alarm, awning and sun protection — each tested in the simulator; `lxir templates <name>` prints the file to copy into a module, and one line calls a template
+  - Template object parameters may be typed `any`, so a template takes a virtual or a physical sensor alike
+- **`lxir types`**: each block type says what it is for (purpose, main inputs and outputs, the Loxone knowledge-base page where known), `lxir types --search <text>` finds types by name or purpose, and the LSP hover on a type shows the same
+- **lxir**: `(a, b, c).MinTime = 600` sets a setting, title, room or category on several objects in one statement, and `fmt` keeps the one line (#199).
+- **lxir**: an Air or Tree device's own description, installation place and switch board can be owned from source (`Desc`, `Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos`), and `device:` matches Air devices and their I/Os by serial (#197).
+- **lox config push**: a light controller shown from source gets its app entry, with its circuits, masters and colour ranges (#184).
+
+### Changed
+- **lxir drift**: the fingerprint is v9 and also compares device settings; a lock with a v8 fingerprint still reads as in sync.
+
 ## [0.41.0] — 2026-10-31 — operating modes as code
 
 Schedules can name any operating mode of the config, and a module can create its own modes; who lives in the house stays with the Miniserver.
