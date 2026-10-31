@@ -5,6 +5,7 @@
 use crate::error::{Error, Result};
 use crate::xml::{Element, Node, XmlDocument};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 /// The `Next*` counters on the `<ControlList>` root. Loxone Config bumps
@@ -282,12 +283,13 @@ impl LoxoneDoc {
     }
 
     /// Serial number of the hardware the object at `path` belongs to: the
-    /// `Serial=` of its nearest enclosing element that carries one (a
-    /// Tree device, an extension, a Miniserver).
-    pub fn device_serial(&self, path: &[usize]) -> Option<&str> {
-        (0..path.len())
+    /// `Serial=` of the nearest element that carries one, the object
+    /// itself or one enclosing it (a Tree device, an extension, a
+    /// Miniserver), or an Air device's.
+    pub fn device_serial(&self, path: &[usize]) -> Option<Cow<'_, str>> {
+        (0..=path.len())
             .rev()
-            .filter_map(|k| self.element_at(&path[..k])?.attr("Serial"))
+            .filter_map(|k| element_serial(self.element_at(&path[..k])?))
             .find(|s| !s.is_empty())
     }
 
@@ -604,6 +606,40 @@ fn repair_raw(raw: &str) -> (String, usize) {
     }
     out.push_str(rest);
     (out, replaced)
+}
+
+/// The serial an element carries. An Air device has no `Serial=`: its
+/// serial is the MAC its link-local `IP=` is formed from (EUI-64, the
+/// universal/local bit flipped back): `IP="FE80000000000000524F94FFFEBA1F0E"`
+/// is the device the Miniserver's `/data/status` lists as
+/// `Serial="50:4F:94:FF:FE:BA:1F:0E"`.
+pub fn element_serial(el: &Element) -> Option<Cow<'_, str>> {
+    if let Some(s) = el.attr("Serial") {
+        return Some(Cow::Borrowed(s));
+    }
+    let ip = el
+        .attr("IP")
+        .filter(|_| el.attr("Type") == Some("LoxAIRDevice"))?;
+    if ip.len() != 32 || !ip.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let first = u8::from_str_radix(&ip[16..18], 16).ok()? ^ 0x02;
+    Some(Cow::Owned(format!(
+        "{first:02X}{}",
+        ip[18..].to_ascii_uppercase()
+    )))
+}
+
+/// Whether two serials name the same device: case and the `:` of the
+/// form `/data/status` prints do not count.
+pub fn same_serial(a: &str, b: &str) -> bool {
+    let digits = |s: &str| {
+        s.bytes()
+            .filter(|b| *b != b':')
+            .map(|b| b.to_ascii_uppercase())
+            .collect::<Vec<_>>()
+    };
+    digits(a) == digits(b)
 }
 
 #[cfg(test)]

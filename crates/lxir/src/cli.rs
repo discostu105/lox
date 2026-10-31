@@ -1855,6 +1855,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
         Ok(ExitCode::SUCCESS)
+    } else if lxir::diff::semantic_fingerprint_v8(&doc) == *recorded {
+        // Recorded before Air and Tree device settings joined (#197).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older lxir, blind to Air and Tree device settings — the next \
+             compile records the current form)"
+        );
+        Ok(ExitCode::SUCCESS)
     } else if lxir::diff::semantic_fingerprint_v7(&doc) == *recorded {
         // Recorded before device settings joined the projection (D64/D65).
         println!(

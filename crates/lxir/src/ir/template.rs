@@ -323,6 +323,7 @@ impl Module {
                     target: map_ref(&s.target),
                     value: map_value(&s.value)?,
                     comment: s.comment.clone(),
+                    bulk: s.bulk,
                 })),
                 // A mood claim (D58) on a body block: the set is named
                 // directly, or by a value parameter so each instance can

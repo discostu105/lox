@@ -1739,6 +1739,17 @@ pub fn compile(
         )
         .map_err(
             |err| match module.externs().find(|e| e.slug == s.target.slug) {
+                // A device's port that is none: name its settings.
+                Some(e) if crate::settings::DEVICE_TYPES.contains(&e.block_type.as_str()) => {
+                    Error::Compile(format!(
+                        "`{}.{}`: neither a port nor a setting of a {} the source can \
+                         own ({})",
+                        s.target.slug,
+                        s.target.port,
+                        e.block_type,
+                        crate::settings::names(&e.block_type).join(", ")
+                    ))
+                }
                 Some(e)
                     if crate::settings::is_setting(&s.target.port)
                         && crate::settings::setting(&e.block_type, &s.target.port).is_none() =>
@@ -1749,7 +1760,12 @@ pub fn compile(
                         s.target.slug,
                         s.target.port,
                         e.block_type,
-                        crate::settings::SETTING_TYPES.join(", ")
+                        crate::settings::SETTING_TYPES
+                            .iter()
+                            .chain(crate::settings::DEVICE_TYPES)
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ))
                 }
                 _ => err,
@@ -2216,7 +2232,7 @@ fn resolve_externs(
                     })
                     && ext.device.as_ref().is_none_or(|want| {
                         doc.device_serial(&o.path)
-                            .is_some_and(|s| s.eq_ignore_ascii_case(want))
+                            .is_some_and(|s| crate::doc::same_serial(&s, want))
                     })
             })
             .collect();

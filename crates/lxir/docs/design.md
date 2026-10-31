@@ -1692,7 +1692,8 @@ Anything unverified is an error, not a heuristic:
     Miniserver (call and virtual commands), which neither resolves.
     Air devices carry no `Serial=` (their `IP=` holds a 32-digit hex id
     not verified to be the printed serial), so their I/Os narrow only
-    to the Air base Extension; they are out for now.
+    to the Air base Extension; they are out for now (since D71 they
+    narrow by the serial their `IP=` encodes).
   - **Decompile** emits `title:` plus `device:` where the title is
     unique within its device but not overall, ahead of the `uuid:`
     fallback (27 externs across the corpus's wired views).
@@ -2196,3 +2197,37 @@ Anything unverified is an error, not a heuristic:
     environment (the push guard and the app would still disagree about
     who owns a change); users declared without secrets (a user whose
     password the source cannot set is a half-owned object).
+
+- **D71 — Several objects in one statement, the devices' own settings,
+  Air serials** (2026-10-31; #199, #197).
+  - `(a, b, c).MinTime = 600` is the setting (or `title`/`room`/
+    `category`) on each object: the parser writes one statement per
+    object, each remembering its line, so compile, lint, adopt and
+    rename see the single form and `fmt` writes the run back as the
+    one line (`SetDecl::bulk`, `AttrDecl::bulk`). A slug listed twice is
+    an error; `tiles`/`schedule`/`moods` take one object.
+  - An Air or Tree device's own settings (`settings::DEVICE_TYPES`):
+    `Desc` (added after `Type`, as on an input) and where it is
+    installed — `Installation`, `SwitchBoard`, `SwitchBoardRow`,
+    `SwitchBoardPos`, rewritten, never added. A Tree device carries the
+    board only where it is mounted in one (31 of 111 in the corpus, the
+    same type both with and without); a board added to a room device is
+    dropped by the save (oracle session 30). Not claimable:
+    `PWMFrequency`, `UseDimmer`, `UseRGBDimmer` — 103 of 103 Air devices
+    in the corpus carry `123`/`true`, so what another value does is not
+    known. Pairing and firmware stay in Loxone Config. The semantic diff
+    compares them; the fingerprint is v9, a lock written with v8 still
+    reads as in sync.
+  - An Air device's serial is the MAC its link-local `IP=` is formed
+    from (EUI-64 with the universal/local bit flipped back): the
+    Miniserver's `/data/status` lists the device with
+    `IP="FE80000000000000524F94FFFEBA1F0E"` as
+    `Serial="50:4F:94:FF:FE:BA:1F:0E"` (checked live on the house, 38 of
+    38). `device:` (D55) now narrows Air I/Os by it, and takes the
+    object's own serial too, so a device itself matches by `device:`;
+    serials compare without case and `:`. Before, Air I/Os narrowed
+    only to the Air base; no source could rely on that, since its I/Os
+    were all alike.
+  - Validated: oracle session 30 (description, place and board on an
+    Air relay and a Tree dimmer, description and place on a Tree room
+    sensor: empty diff, a recompile of the save byte-identical).

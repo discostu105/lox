@@ -1032,7 +1032,8 @@ pub fn parse(src: &str) -> Result<Module> {
                         .into(),
                 ));
             }
-            Tok::Ident(_) => {
+            // `(a, b).Setting = value` (#199) shares the claim forms' parser.
+            Tok::Ident(_) | Tok::LParen => {
                 let in_template = open_template.is_some();
                 parse_ident_statement(
                     &toks,
@@ -1488,6 +1489,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 },
                 value: value_of(val, lineno)?,
                 comment,
+                bulk: None,
             }))
         }
         [
@@ -1691,6 +1693,68 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
+        // (a, b, …).Setting = value — one setting or attribute for several
+        // objects (#199): a statement per object, each remembering the line.
+        [
+            Tok::LParen,
+            inner @ ..,
+            Tok::RParen,
+            Tok::Dot,
+            Tok::Ident(tp),
+            Tok::Eq,
+            val,
+        ] => {
+            let mut slugs: Vec<&String> = Vec::new();
+            for (k, t) in inner.iter().enumerate() {
+                match t {
+                    Tok::Ident(s) if k % 2 == 0 => {
+                        if slugs.contains(&s) {
+                            return Err(err(format!("`{s}` is listed twice")));
+                        }
+                        slugs.push(s);
+                    }
+                    Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
+                    _ => {
+                        return Err(err(format!(
+                            "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                        )));
+                    }
+                }
+            }
+            if slugs.is_empty() {
+                return Err(err(format!(
+                    "expected `(<slug>, <slug>, …).{tp} = <value>`"
+                )));
+            }
+            if matches!(tp.as_str(), "tiles" | "schedule" | "moods") {
+                return Err(err(format!(
+                    "`.{tp}` takes one object; write a statement per object"
+                )));
+            }
+            let value = value_of(val, lineno)?;
+            for (k, s) in slugs.into_iter().enumerate() {
+                let comment = if k == 0 { comment.clone() } else { None };
+                items.push(match Attr::parse(tp) {
+                    Some(attr) => Item::Attr(AttrDecl {
+                        slug: s.clone(),
+                        attr,
+                        value: value.clone(),
+                        comment,
+                        bulk: Some(lineno),
+                    }),
+                    None => Item::Set(SetDecl {
+                        target: PortRef {
+                            slug: s.clone(),
+                            port: tp.clone(),
+                        },
+                        value: value.clone(),
+                        comment,
+                        bulk: Some(lineno),
+                    }),
+                });
+            }
+            Ok(())
+        }
         // slug.title|room|category = value — an attribute claim (D39).
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] if Attr::parse(tp).is_some() => {
             items.push(Item::Attr(AttrDecl {
@@ -1698,6 +1762,7 @@ fn parse_ident_statement(
                 attr: Attr::parse(tp).expect("guarded"),
                 value: value_of(val, lineno)?,
                 comment,
+                bulk: None,
             }));
             Ok(())
         }
@@ -1709,6 +1774,7 @@ fn parse_ident_statement(
                 },
                 value: value_of(val, lineno)?,
                 comment,
+                bulk: None,
             }));
             Ok(())
         }

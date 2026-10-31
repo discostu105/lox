@@ -759,7 +759,7 @@ fn extern_matching_narrows_by_device_serial() {
     )
     .unwrap();
     assert_eq!(
-        base.device_serial(&base.objects()[4].path),
+        base.device_serial(&base.objects()[4].path).as_deref(),
         Some("B0A1B2C3"),
         "nearest enclosing Serial=, not the Tree branch or the Miniserver"
     );
@@ -4217,4 +4217,63 @@ fn the_off_mood_keeps_its_place_in_the_list() {
         })
         .collect();
     assert_eq!(names, ["Name=Kino", "Name=Aus", "Name=Viel Licht"]);
+}
+
+#[test]
+fn extern_matching_narrows_by_air_device_serial() {
+    // Air devices carry no `Serial=`: the serial is the interface id of
+    // their link-local `IP=`, written the way `/data/status` prints it or
+    // as plain hex.
+    let device = |dev: u32, ip: &str| {
+        format!(
+            "\t\t\t<C Type=\"LoxAIRDevice\" U=\"0000000{dev}-0000-0000-ffff000000000001\" \
+             Title=\"Raumklima\" IP=\"{ip}\">\r\n\
+             \t\t\t\t<C Type=\"LoxAIRAsensor\" U=\"0000001{dev}-0000-0000-ffff000000000001\" \
+             Title=\"Temperatur\">\r\n\
+             \t\t\t\t\t<Co K=\"AQ\" U=\"0000001{dev}-0000-0001-ffff000000000001\"/>\r\n\
+             \t\t\t\t</C>\r\n\
+             \t\t\t</C>\r\n"
+        )
+    };
+    let base = LoxoneDoc::parse(
+        format!(
+            "<ControlList Version=\"1\" NextObj=\"20\">\r\n\
+             \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\">\r\n\
+             \t\t<C Type=\"LoxAIR\" U=\"00000002-0000-0000-ffff000000000001\" Serial=\"0CDA9D5A\">\r\n\
+             {}{}\
+             \t\t</C>\r\n\
+             \t</C>\r\n\
+             </ControlList>\r\n",
+            device(4, "FE80000000000000524F94FFFEB9BA3D"),
+            device(5, "FE80000000000000524F94FFFEB9BA7C")
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    let sensor = base
+        .objects()
+        .into_iter()
+        .find(|o| o.uuid == "00000015-0000-0000-ffff000000000001")
+        .unwrap();
+    assert_eq!(
+        base.device_serial(&sensor.path).as_deref(),
+        Some("504F94FFFEB9BA7C")
+    );
+    let resolve = |device: &str| {
+        let m = Module::parse(&format!(
+            "extern t = LoxAIRAsensor(title: \"Temperatur\", device: \"{device}\")\n"
+        ))?;
+        let mut lock = Lockfile::new();
+        compile(&base, &m, &mut lock, &opts())?;
+        Ok::<_, Box<dyn std::error::Error>>(lock.externals["t"].uuid.clone())
+    };
+    for form in ["50:4F:94:FF:FE:B9:BA:7C", "504f94fffeb9ba7c"] {
+        assert_eq!(
+            resolve(form).unwrap(),
+            "00000015-0000-0000-ffff000000000001",
+            "{form}"
+        );
+    }
+    // The Air base's own serial no longer stands for its devices' I/Os.
+    assert!(resolve("0CDA9D5A").is_err());
 }

@@ -35,11 +35,13 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
         } else {
             attr_params(block_type)
         };
-    let settings = if version >= 8 {
-        crate::settings::names(block_type)
-    } else {
-        Vec::new()
-    };
+    // Device settings (#197) joined in v9.
+    let settings =
+        if version >= 9 || (version == 8 && !crate::settings::DEVICE_TYPES.contains(&block_type)) {
+            crate::settings::names(block_type)
+        } else {
+            Vec::new()
+        };
     params
         .iter()
         .copied()
@@ -47,7 +49,7 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
         .chain((block_type == "AutopilotRule").then_some("APC"))
 }
 
-const FINGERPRINT_VERSION: u8 = 8;
+const FINGERPRINT_VERSION: u8 = 9;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output (D65).
@@ -558,6 +560,14 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
+/// The fingerprint as lxir wrote it before the settings of Air and Tree
+/// devices (#197) joined the projection. `lxir drift` accepts it so an
+/// upgrade alone does not read as drift; the next compile records the
+/// current form.
+pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 8)
+}
+
 /// The fingerprint as lxir wrote it before the settings of virtual and
 /// Modbus devices (D64) and of physical inputs and outputs (D65) joined
 /// the projection. `lxir drift` accepts it so an upgrade alone does not
@@ -628,7 +638,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         5 => b"lxir-fingerprint-v5".to_vec(),
         6 => b"lxir-fingerprint-v6".to_vec(),
         7 => b"lxir-fingerprint-v7".to_vec(),
-        _ => b"lxir-fingerprint-v8".to_vec(),
+        8 => b"lxir-fingerprint-v8".to_vec(),
+        _ => b"lxir-fingerprint-v9".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));

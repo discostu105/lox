@@ -507,8 +507,23 @@ inside its Tree Extension inside the Miniserver, each with its own
 serial, the I/O objects as children of the innermost. An empty
 `Serial=` occurs (`LoxDMXdevice`) and means none. Air devices
 (`LoxAIRDevice`) have no `Serial=`; a 32-digit hex `IP=` identifies
-them. lxir reads `Serial=` for `device:` extern matching (D55) and
-`lxir scan` reports it as personal data.
+them: the link-local IPv6 address formed from the device's MAC (EUI-64),
+and that MAC is its serial — `/data/status` on the Miniserver lists
+`IP="FE80000000000000524F94FFFEBA1F0E"` as
+`Serial="50:4F:94:FF:FE:BA:1F:0E"` (the universal/local bit of the first
+byte flipped back, `52` → `50`; checked on the house, 38 of 38). lxir
+reads `Serial=`, and an Air device's serial from its `IP=`, for
+`device:` extern matching (D55, D71); `lxir scan` reports both as
+personal data.
+
+A device's own attributes: an Air device always carries `Installation`,
+`SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` (103 of 103 in the
+corpus); a Tree device `Installation`, the board only where it is
+mounted in one — a save drops a board written onto a room device
+(oracle session 30). Every Air device in the corpus has
+`PWMFrequency="123"`, `UseDimmer="true"` and (99 of 103)
+`UseRGBDimmer="true"`. A save writes `TId=` (`NanoIO`,
+`RoomsensorTree`) right after a `Desc` it finds on a device.
 
 ## Time functions: per-project singletons
 

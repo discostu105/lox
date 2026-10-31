@@ -715,6 +715,10 @@ pub struct SetDecl {
     pub value: Value,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
+    /// The line of the `(a, b, …).Port = value` statement this one was
+    /// written in (#199): one statement per object everywhere, written
+    /// back as the one line by [`Module::to_text`].
+    pub bulk: Option<usize>,
 }
 
 /// An object attribute an extern assignment can claim (D39). Lowercase
@@ -771,6 +775,8 @@ pub struct AttrDecl {
     pub value: Value,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
+    /// As [`SetDecl::bulk`]: `(a, b).room = "…"`.
+    pub bulk: Option<usize>,
 }
 
 impl fmt::Display for AttrDecl {
@@ -2880,7 +2886,12 @@ impl Module {
         // A multi-line call is visually dense; separate it from the next
         // item even when the kind does not change.
         let mut prev_multiline = false;
-        for item in &self.items {
+        let mut skip = 0;
+        for (i, item) in self.items.iter().enumerate() {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
             let disc = family(item);
             if prev.is_some_and(|p| p != disc) || prev_multiline {
                 out.push('\n');
@@ -2938,6 +2949,47 @@ impl Module {
                 }
                 Item::ExprWire(w) => {
                     out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
+                }
+                // The statements of one bulk line go back to that line.
+                Item::Set(SetDecl {
+                    bulk: Some(line),
+                    target,
+                    value,
+                    comment,
+                }) => {
+                    let slugs = bulk_run(&self.items[i..], *line, |x| match x {
+                        Item::Set(s) if s.target.port == target.port && s.value == *value => {
+                            Some((s.bulk, s.target.slug.as_str()))
+                        }
+                        _ => None,
+                    });
+                    skip = slugs.len() - 1;
+                    out.push_str(&format!(
+                        "({}).{} = {value}{}\n",
+                        slugs.join(", "),
+                        target.port,
+                        tail(comment)
+                    ));
+                }
+                Item::Attr(AttrDecl {
+                    bulk: Some(line),
+                    attr,
+                    value,
+                    comment,
+                    ..
+                }) => {
+                    let slugs = bulk_run(&self.items[i..], *line, |x| match x {
+                        Item::Attr(a) if a.attr == *attr && a.value == *value => {
+                            Some((a.bulk, a.slug.as_str()))
+                        }
+                        _ => None,
+                    });
+                    skip = slugs.len() - 1;
+                    out.push_str(&format!(
+                        "({}).{attr} = {value}{}\n",
+                        slugs.join(", "),
+                        tail(comment)
+                    ));
                 }
                 Item::Set(s) => {
                     out.push_str(&format!("{} = {}{}\n", s.target, s.value, tail(&s.comment)));
@@ -3145,6 +3197,19 @@ fn quote(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// The slugs of the bulk statement (#199) that starts `items`: the run of
+/// statements carrying its line and the same setting and value.
+fn bulk_run<'a>(
+    items: &'a [Item],
+    line: usize,
+    member: impl Fn(&'a Item) -> Option<(Option<usize>, &'a str)>,
+) -> Vec<&'a str> {
+    items
+        .iter()
+        .map_while(|x| member(x).filter(|(l, _)| *l == Some(line)).map(|(_, s)| s))
+        .collect()
 }
 
 #[cfg(test)]
