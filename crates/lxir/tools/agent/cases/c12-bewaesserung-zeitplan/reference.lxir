@@ -1,0 +1,23 @@
+extern regen = VirtualIn(title: "Regensensor")
+extern bewaesserung = VirtualOutCmd(title: "Bewässerung Garten")
+
+page "Logik"
+
+schedule morgens
+	daily 06:00-06:20
+end
+
+zeit = DayTimer("Bewässerung Garten")
+
+zeit.schedule = morgens
+
+trocken = Not(
+	I: regen.Q,
+)
+
+giessen = And(
+	I1: zeit.AQ,
+	I2: trocken.Q,
+)
+
+bewaesserung.I <- giessen.Q

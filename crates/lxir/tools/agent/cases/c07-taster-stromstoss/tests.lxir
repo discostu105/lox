@@ -1,0 +1,22 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_taster = VirtualIn(title: "Taster Flur")
+extern t_licht = VirtualOutCmd(title: "Licht Flur")
+
+test "Taster schaltet das Flurlicht um"
+	tick 2
+	expect t_licht.I == 0
+	t_taster.Q = 1
+	tick 1
+	t_taster.Q = 0
+	tick 2
+	expect t_licht.I == 1
+	tick 60
+	expect t_licht.I == 1 # bleibt an
+	t_taster.Q = 1
+	tick 1
+	t_taster.Q = 0
+	tick 2
+	expect t_licht.I == 0
+end

@@ -1,0 +1,62 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ControlList Version="1" NextObj="300" NextConst="1" NextNote="1" NextMem="1">
+	<C Type="Document" V="17010727" U="40000000-0000-0001-ffff504f94112233" Title="Haus" ConfigVersion="17010727">
+		<C Type="PlaceCaption" V="175" U="40000000-0000-0002-ffff504f94112233" Title="Räume">
+			<C Type="Place" V="175" U="40000000-0000-0003-ffff504f94112233" Title="Flur"/>
+			<C Type="Place" V="175" U="40000000-0000-0004-ffff504f94112233" Title="Bad"/>
+			<C Type="Place" V="175" U="40000000-0000-0005-ffff504f94112233" Title="Büro"/>
+			<C Type="Place" V="175" U="40000000-0000-0006-ffff504f94112233" Title="Garten"/>
+			<C Type="Place" V="175" U="40000000-0000-0007-ffff504f94112233" Title="Keller"/>
+		</C>
+		<C Type="CategoryCaption" V="175" U="40000000-0000-0008-ffff504f94112233" Title="Kategorien">
+			<C Type="Category" V="175" U="40000000-0000-0009-ffff504f94112233" Title="Beleuchtung"/>
+			<C Type="Category" V="175" U="40000000-0000-000a-ffff504f94112233" Title="Klima"/>
+			<C Type="Category" V="175" U="40000000-0000-000b-ffff504f94112233" Title="Sicherheit"/>
+		</C>
+		<C Type="ModeCaption" V="175" U="40000000-0000-000f-ffff504f94112233" Title="Betriebszeiten">
+			<C Type="Mode" V="175" U="00000000-0000-0001-1500000000000000" Title="Feiertag">
+				<Co K="I" U="40000010-0000-0001-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0001-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0002-1500000000000000" Title="Urlaub" Mode="1">
+				<Co K="I" U="40000010-0000-0002-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0002-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0003-1500000000000000" Title="Freier Tag" Mode="2">
+				<Co K="I" U="40000010-0000-0003-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0003-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0004-1500000000000000" Title="Montag" Mode="3">
+				<Co K="I" U="40000010-0000-0004-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0004-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0005-1500000000000000" Title="Dienstag" Mode="4">
+				<Co K="I" U="40000010-0000-0005-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0005-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0006-1500000000000000" Title="Mittwoch" Mode="5">
+				<Co K="I" U="40000010-0000-0006-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0006-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0007-1500000000000000" Title="Donnerstag" Mode="6">
+				<Co K="I" U="40000010-0000-0007-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0007-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0008-1500000000000000" Title="Freitag" Mode="7">
+				<Co K="I" U="40000010-0000-0008-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0008-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-0009-1500000000000000" Title="Samstag" Mode="8">
+				<Co K="I" U="40000010-0000-0009-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-0009-01ff504f94112233"/>
+			</C>
+			<C Type="Mode" V="175" U="00000000-0000-000a-1500000000000000" Title="Sonntag" Mode="9">
+				<Co K="I" U="40000010-0000-000a-00ff504f94112233"/>
+				<Co K="Q" U="40000010-0000-000a-01ff504f94112233"/>
+			</C>
+		</C>
+		<C Type="VirtualInCaption" V="175" U="40000000-0000-000c-ffff504f94112233" Title="Virtuelle Eingänge"></C>
+		<C Type="VirtualOutCaption" V="175" U="40000000-0000-000d-ffff504f94112233" Title="Virtuelle Ausgänge"></C>
+		<C Type="Page" V="175" U="40000000-0000-000e-ffff504f94112233" Title="Logik"></C>
+	</C>
+</ControlList>

@@ -1,0 +1,34 @@
+extern taster = VirtualIn(title: "Taster Flur")
+extern bewegung = VirtualIn(title: "Bewegung Flur")
+extern helligkeit = VirtualIn(title: "Helligkeit außen")
+extern licht = VirtualOutCmd(title: "Licht Flur")
+
+page "Logik"
+
+schalter = PushButton(
+	"Flurlicht",
+	InputTrigger: taster.Q,
+)
+
+dunkel = Less(
+	Input1: helligkeit.Q,
+	Input2: 50,
+)
+
+bewegung_dunkel = And(
+	I1: bewegung.Q,
+	I2: dunkel.Q,
+)
+
+nachlauf = OffDelay(
+	"Flurlicht Bewegung",
+	InputTrigger: bewegung_dunkel.Q,
+	Time: 3min,
+)
+
+an = Or(
+	I1: schalter.Q,
+	I2: nachlauf.Q,
+)
+
+licht.I <- an.Q

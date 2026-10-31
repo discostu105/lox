@@ -1,0 +1,23 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_feuchte = VirtualIn(title: "Luftfeuchte Keller")
+extern t_entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
+
+test "Entfeuchter mit Hysterese 65/55 %"
+	t_feuchte.Q = 60
+	tick 2
+	expect t_entfeuchter.I == 0
+	t_feuchte.Q = 70
+	tick 2
+	expect t_entfeuchter.I == 1
+	t_feuchte.Q = 60
+	tick 2
+	expect t_entfeuchter.I == 1
+	t_feuchte.Q = 50
+	tick 2
+	expect t_entfeuchter.I == 0
+	t_feuchte.Q = 60
+	tick 2
+	expect t_entfeuchter.I == 0
+end

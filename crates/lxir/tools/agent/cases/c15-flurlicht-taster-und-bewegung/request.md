@@ -1,0 +1,1 @@
+Der Taster im Flur schaltet das Flurlicht bei jedem Druck ein bzw. aus. Zusätzlich soll das Licht bei Bewegung im Flur für 3 Minuten angehen, aber nur, wenn es draußen dunkel ist (unter 50 Lux). Ist das Licht per Taster eingeschaltet, bleibt es an, bis wieder gedrückt wird.

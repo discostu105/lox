@@ -1,0 +1,43 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_tuer = VirtualIn(title: "Haustür offen")
+extern t_abwesend = VirtualIn(title: "Abwesend")
+extern t_sirene = VirtualOutCmd(title: "Sirene")
+
+test "Alarm nach 30 Sekunden, höchstens 3 Minuten"
+	t_abwesend.Q = 1
+	tick 2
+	t_tuer.Q = 1
+	tick 2
+	t_tuer.Q = 0
+	tick 20
+	expect t_sirene.I == 0
+	tick 15
+	expect t_sirene.I == 1
+	tick 150
+	expect t_sirene.I == 1
+	tick 40
+	expect t_sirene.I == 0
+end
+
+test "Rechtzeitig entschärft: kein Alarm"
+	t_abwesend.Q = 1
+	tick 2
+	t_tuer.Q = 1
+	tick 10
+	t_abwesend.Q = 0
+	tick 60
+	expect t_sirene.I == 0
+end
+
+test "Ausschalten beendet den Alarm"
+	t_abwesend.Q = 1
+	tick 2
+	t_tuer.Q = 1
+	tick 40
+	expect t_sirene.I == 1
+	t_abwesend.Q = 0
+	tick 2
+	expect t_sirene.I == 0
+end

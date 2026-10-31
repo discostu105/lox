@@ -1,0 +1,23 @@
+extern wind = VirtualIn(title: "Windgeschwindigkeit")
+extern regen = VirtualIn(title: "Regensensor")
+extern markise = VirtualOutCmd(title: "Markise einfahren")
+
+page "Logik"
+
+windig = Greater(
+	Input1: wind.Q,
+	Input2: 40,
+)
+
+gefahr = Or(
+	I1: windig.Q,
+	I2: regen.Q,
+)
+
+sperre = OffDelay(
+	"Markise Sperre 10 Minuten",
+	InputTrigger: gefahr.Q,
+	Time: 10min,
+)
+
+markise.I <- sperre.Q

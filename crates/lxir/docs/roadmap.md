@@ -82,6 +82,11 @@ types) contradict each other. Results and methodology:
       never quoted; CI fails on any finding in a committed `.Loxone`.
 - [x] Agent skill (2026-10-29, `skills/lxir/SKILL.md`): agents.md
       condensed for Claude Code; its example module is under test.
+- [x] Agent cases of our own (2026-10-31, `tools/agent/`, #204): 16
+      requests in German against a fixture house, hidden `lxir test`
+      blocks graded in lxir's simulator, a reference solution each
+      (`cargo test` checks them); `run.py` runs Claude Code on them.
+      Inputs of blocks without a simulator model now follow their wires.
 - [x] `lxir diff --summary` (2026-10-29): the semantic diff as a commit
       message — subject counting the changes per page, body by title and
       port name.

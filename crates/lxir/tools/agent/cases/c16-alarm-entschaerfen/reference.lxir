@@ -1,0 +1,35 @@
+extern tuer = VirtualIn(title: "Haustür offen")
+extern abwesend = VirtualIn(title: "Abwesend")
+extern sirene = VirtualOutCmd(title: "Sirene")
+
+page "Logik"
+
+einbruch = And(
+	I1: tuer.Q,
+	I2: abwesend.Q,
+)
+
+zuhause = Not(
+	I: abwesend.Q,
+)
+
+ausgeloest = SRFlipFlop(
+	"Einbruch erkannt",
+	InputS: einbruch.Q,
+	InputR: zuhause.Q,
+)
+
+frist = OnDelay(
+	"Entschärfzeit 30 s",
+	InputTrigger: ausgeloest.Q,
+	Time: 30s,
+)
+
+alarm = Monoflop(
+	"Sirene höchstens 3 Minuten",
+	InputTrigger: frist.Q,
+	Reset: zuhause.Q,
+	Time: 3min,
+)
+
+sirene.I <- alarm.Q

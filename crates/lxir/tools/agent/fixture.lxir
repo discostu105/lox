@@ -1,0 +1,113 @@
+# The house the agent cases run in: sensors as virtual inputs, actuators
+# as virtual output commands. Compiled against examples/configs/rohbau.Loxone
+# into the base the agent works on; the agent sees only that config.
+
+bewegung_flur = VirtualIn("Bewegung Flur")
+taster_flur = VirtualIn("Taster Flur")
+helligkeit = VirtualIn(
+	"Helligkeit außen",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 100000,
+)
+
+aussentemp = VirtualIn(
+	"Außentemperatur",
+	Analog: "true",
+	MinVal: -40,
+	MaxVal: 60,
+)
+
+raumtemp_bad = VirtualIn(
+	"Raumtemperatur Bad",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 40,
+)
+
+co2_buero = VirtualIn(
+	"CO2 Büro",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 5000,
+)
+
+fenster_buero = VirtualIn("Fenster Büro offen")
+regen = VirtualIn("Regensensor")
+wind = VirtualIn(
+	"Windgeschwindigkeit",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 200,
+)
+
+haustuer = VirtualIn("Haustür offen")
+abwesend = VirtualIn("Abwesend")
+wassermelder = VirtualIn("Wassermelder Keller")
+feuchte_keller = VirtualIn(
+	"Luftfeuchte Keller",
+	Analog: "true",
+	MinVal: 0,
+	MaxVal: 100,
+)
+
+aktoren = VirtualOut(
+	"Aktoren",
+	Address: "http://192.0.2.20",
+)
+
+licht_flur = VirtualOutCmd(
+	"Licht Flur",
+	device: aktoren,
+	CmdOn: "/licht_flur/1",
+	CmdOff: "/licht_flur/0",
+)
+
+lueftung_buero = VirtualOutCmd(
+	"Lüftung Büro",
+	device: aktoren,
+	CmdOn: "/lueftung/1",
+	CmdOff: "/lueftung/0",
+)
+
+heizung_bad = VirtualOutCmd(
+	"Heizung Bad",
+	device: aktoren,
+	CmdOn: "/heizung_bad/1",
+	CmdOff: "/heizung_bad/0",
+)
+
+bewaesserung = VirtualOutCmd(
+	"Bewässerung Garten",
+	device: aktoren,
+	CmdOn: "/bewaesserung/1",
+	CmdOff: "/bewaesserung/0",
+)
+
+markise = VirtualOutCmd(
+	"Markise einfahren",
+	device: aktoren,
+	CmdOn: "/markise/1",
+	CmdOff: "/markise/0",
+)
+
+sirene = VirtualOutCmd(
+	"Sirene",
+	device: aktoren,
+	CmdOn: "/sirene/1",
+	CmdOff: "/sirene/0",
+)
+
+entfeuchter = VirtualOutCmd(
+	"Entfeuchter Keller",
+	device: aktoren,
+	CmdOn: "/entfeuchter/1",
+	CmdOff: "/entfeuchter/0",
+)
+
+hinweis_tuer = VirtualOutCmd(
+	"Hinweis Haustür",
+	device: aktoren,
+	CmdOn: "/hinweis/1",
+	CmdOff: "/hinweis/0",
+)

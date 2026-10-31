@@ -1,0 +1,1 @@
+Die Heizung im Bad soll werktags von 5:30 bis 7:00 und von 18:00 bis 22:00 Uhr laufen, am Wochenende von 7:00 bis 22:00 Uhr. Unabhängig vom Zeitplan soll sie immer einschalten, wenn die Raumtemperatur im Bad unter 10 °C fällt.

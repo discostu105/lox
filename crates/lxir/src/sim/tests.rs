@@ -451,3 +451,18 @@ fn feedback_loops_read_the_previous_cycle() {
     let mut sim = Simulator::new(&d);
     assert_eq!(trace(&mut sim, "p1-Q", 1.0, 3), [1.0, 0.0, 1.0]);
 }
+
+#[test]
+fn an_unmodelled_blocks_input_reads_its_wires() {
+    // An actuator's command input: the block has no model, the value is
+    // what its wire carries.
+    let d = doc(&(vin(1)
+        + &obj(2, "Not", &["I<p1-AQ", "Q"])
+        + &obj(3, "VirtualOutCmd", &["I<p2-Q"])
+        + &obj(4, "VirtualOutCmd", &["I"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p3-I").unwrap();
+    sim.check("p4-I").unwrap();
+    sim.tick(1.0);
+    assert_eq!((sim.read("p3-I"), sim.read("p4-I")), (1.0, 0.0));
+}

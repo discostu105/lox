@@ -1,0 +1,28 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_regen = VirtualIn(title: "Regensensor")
+extern t_bewaesserung = VirtualOutCmd(title: "Bewässerung Garten")
+
+test "Bewässerung an einem Mittwoch"
+	clock "2026-07-15 05:58"
+	tick 60
+	expect t_bewaesserung.I == 0
+	tick 180
+	expect t_bewaesserung.I == 1
+	t_regen.Q = 1
+	tick 2
+	expect t_bewaesserung.I == 0
+	t_regen.Q = 0
+	tick 2
+	expect t_bewaesserung.I == 1
+	clock "2026-07-15 06:25"
+	tick 2
+	expect t_bewaesserung.I == 0
+end
+
+test "Bewässerung auch am Samstag"
+	clock "2026-07-18 06:05"
+	tick 2
+	expect t_bewaesserung.I == 1
+end

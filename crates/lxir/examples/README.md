@@ -33,7 +33,10 @@ committed). `pool.Loxone` carries two pages, rooms, categories, five
 virtual inputs, one GUI-style mirror ref, and an Air device with three
 children (two in the device's room, one elsewhere), so the matcher,
 mirror and attribute-claim constructs have something real to resolve
-against.
+against. `rohbau.Loxone` is an empty house to build on: rooms,
+categories, the built-in operating modes, empty folders for virtual
+inputs and outputs and one page; the agent cases (`tools/agent`) mint
+their fixture into it.
 
 ## How they are kept honest
 

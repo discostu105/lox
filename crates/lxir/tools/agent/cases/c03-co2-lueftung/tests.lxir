@@ -1,0 +1,29 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_co2 = VirtualIn(title: "CO2 Büro")
+extern t_fenster = VirtualIn(title: "Fenster Büro offen")
+extern t_lueftung = VirtualOutCmd(title: "Lüftung Büro")
+
+test "Lüftung nach 5 Minuten CO2 über 1000 ppm"
+	t_co2.Q = 1200
+	tick 200
+	expect t_lueftung.I == 0
+	tick 120
+	expect t_lueftung.I == 1
+	t_co2.Q = 800
+	tick 2
+	expect t_lueftung.I == 0
+end
+
+test "Offenes Fenster sperrt die Lüftung"
+	t_co2.Q = 1500
+	tick 400
+	expect t_lueftung.I == 1
+	t_fenster.Q = 1
+	tick 2
+	expect t_lueftung.I == 0
+	t_fenster.Q = 0
+	tick 2
+	expect t_lueftung.I == 1
+end

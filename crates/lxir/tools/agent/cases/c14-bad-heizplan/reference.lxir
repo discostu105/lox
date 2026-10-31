@@ -1,0 +1,25 @@
+extern raumtemp = VirtualIn(title: "Raumtemperatur Bad")
+extern heizung = VirtualOutCmd(title: "Heizung Bad")
+
+page "Logik"
+
+schedule bad_heizzeiten
+	weekdays 05:30-07:00, 18:00-22:00
+	weekend 07:00-22:00
+end
+
+heizzeit = DayTimer("Heizzeiten Bad")
+
+heizzeit.schedule = bad_heizzeiten
+
+frost = Less(
+	Input1: raumtemp.Q,
+	Input2: 10,
+)
+
+heizen = Or(
+	I1: heizzeit.AQ,
+	I2: frost.Q,
+)
+
+heizung.I <- heizen.Q

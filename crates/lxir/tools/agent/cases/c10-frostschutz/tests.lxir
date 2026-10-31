@@ -1,0 +1,23 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_aussentemp = VirtualIn(title: "Außentemperatur")
+extern t_raumtemp = VirtualIn(title: "Raumtemperatur Bad")
+extern t_heizung = VirtualOutCmd(title: "Heizung Bad")
+
+test "Frostschutz Bad"
+	t_aussentemp.Q = 10
+	t_raumtemp.Q = 15
+	tick 2
+	expect t_heizung.I == 0
+	t_aussentemp.Q = -2
+	tick 2
+	expect t_heizung.I == 1
+	t_aussentemp.Q = 10
+	t_raumtemp.Q = 8
+	tick 2
+	expect t_heizung.I == 1
+	t_raumtemp.Q = 15
+	tick 2
+	expect t_heizung.I == 0
+end

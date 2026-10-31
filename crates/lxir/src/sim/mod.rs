@@ -320,16 +320,30 @@ impl Simulator {
         let Some((ix, key)) = self.port_owner.get(port) else {
             return 0.0;
         };
-        let obj = &self.objects[*ix];
-        let is_input = !obj.ports[key].inputs.is_empty()
-            || obj
-                .model()
-                .is_some_and(|m| m.reads().contains(&key.as_str()));
-        if is_input {
+        if self.is_input(*ix, key) {
             self.input(*ix, key).v
         } else {
             self.port_value(port)
         }
+    }
+
+    /// An input or parameter: wired (wires are stored at the sink), read
+    /// by the block's model, or an input in the verified connector table.
+    /// Its value depends on its wires only, so it can be read on any
+    /// block, a block without a model too (an actuator's command input).
+    fn is_input(&self, ix: usize, key: &str) -> bool {
+        let obj = &self.objects[ix];
+        !obj.ports[key].inputs.is_empty()
+            || obj.model().is_some_and(|m| m.reads().contains(&key))
+            || crate::connectors::builtin(&obj.block_type).is_some_and(|ports| {
+                ports.iter().any(|p| {
+                    p.key == key
+                        && matches!(
+                            p.dir,
+                            crate::connectors::PortDir::Input | crate::connectors::PortDir::Param
+                        )
+                })
+            })
     }
 
     /// Whether the logic behind a port is simulated, given what the test
@@ -349,11 +363,17 @@ impl Simulator {
             ));
         };
         let obj = &self.objects[*ix];
+        if matches!(obj.support, Support::Source) {
+            return Ok(());
+        }
+        if self.is_input(*ix, key) {
+            return self.need_input(obj, &obj.ports[key], seen);
+        }
         if let Some(fault) = self.faults.get(ix) {
             return Err(format!("{} failed {fault}", obj.describe()));
         }
         let m = match &obj.support {
-            Support::Source => return Ok(()),
+            Support::Source => unreachable!("returned above"),
             Support::Unsupported(why) => {
                 return Err(format!(
                     "{} is not simulated: {why} — set a port between it and the \
@@ -363,10 +383,6 @@ impl Simulator {
             }
             Support::Model(m) => m,
         };
-        let p = &obj.ports[key];
-        if !p.inputs.is_empty() || m.reads().contains(&key.as_str()) {
-            return self.need_input(obj, m, p, seen);
-        }
         if !m.writes().contains(&key.as_str()) {
             return Err(format!(
                 "{}: output `{key}` is not simulated (the model computes {})",
@@ -394,14 +410,14 @@ impl Simulator {
     fn need_input(
         &self,
         obj: &Object,
-        m: &Model,
         p: &PortView,
         seen: &mut HashSet<String>,
     ) -> Result<(), String> {
         if self.overrides.contains_key(&p.uuid) {
             return Ok(());
         }
-        if p.inputs.len() > 1 && m.fan_in() == FanIn::Single {
+        let fan_in = obj.model().map_or(FanIn::Single, Model::fan_in);
+        if p.inputs.len() > 1 && fan_in == FanIn::Single {
             return Err(format!(
                 "{}: {} wires meet at `{}`; how this block combines them is not \
                  documented",
