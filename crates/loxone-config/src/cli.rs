@@ -16,237 +16,308 @@ use loxone_config::{Lockfile, LoxoneDoc, Project};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "\
-loxl — Lox Logic, Loxone config as code
+/// One command's help: [`Command::usage`] lines, a one-line summary (also
+/// its line in the overview), then the options and notes.
+struct Command {
+    name: &'static str,
+    usage: &'static [&'static str],
+    summary: &'static str,
+    details: &'static str,
+}
 
-USAGE:
-  loxl check [--json] [<module.loxl | module-dir>]
-        Parse and validate a Lox Logic module: syntax, references, and managed
-        block types/ports/directions against the builtin table (no base
-        config needed; parse errors carry line numbers). --json prints a
-        machine-readable result on stdout and still exits 1 on errors.
-        With no path: the module of the lox.toml project in the current
-        directory.
+const COMMANDS: &[Command] = &[
+    Command {
+        name: "check",
+        usage: &["loxl check [--json] [<module.loxl | module-dir>]"],
+        summary: "Check a module for errors",
+        details: r#"Options:
+  --json  Print the result as JSON. The exit code is still 1 on errors.
 
-  loxl fmt [--write | --check] [<module.loxl | module-dir>]
-        Print the canonical form. --write rewrites the file(s) in place;
-        --check exits 1 if a file is not already canonical. With no
-        path: the module of the lox.toml project in the current
-        directory.
+Checks syntax, references, block types, ports and wire directions. No base config is needed.
+Parse errors carry line numbers.
+With no path, checks the module of the lox.toml project in the current directory.
+"#,
+    },
+    Command {
+        name: "fmt",
+        usage: &["loxl fmt [--write | --check] [<module.loxl | module-dir>]"],
+        summary: "Format a module",
+        details: r#"Options:
+  --write  Rewrite the files in place
+  --check  Exit 1 if a file is not formatted
 
-  loxl lsp [--stdio]
-        Language server for .loxl files on stdin/stdout, for editors:
-        diagnostics (check + lints; in a lox.toml project, opening or
-        saving also compiles against the base in memory), go to
-        definition, hover with the object an extern resolves to, port
-        and type completion, formatting, outline.
+Without --write or --check, prints the formatted module. A module directory needs one of them.
+With --write or --check and no path, formats the module of the lox.toml project.
+"#,
+    },
+    Command {
+        name: "lsp",
+        usage: &["loxl lsp [--stdio]"],
+        summary: "Run the language server for editors",
+        details: r#"Speaks LSP on stdin and stdout. It offers check and lint diagnostics, go to definition,
+hover, completion, formatting and an outline.
+In a lox.toml project, opening or saving a file also compiles the module in memory.
+"#,
+    },
+    Command {
+        name: "compile",
+        usage: &["loxl compile [<project-dir>] [<options>]"],
+        summary: "Compile a module into a config and update the lockfile",
+        details: r#"Options:
+  --base <cfg.Loxone>      Config to compile into
+  --module <m.loxl | dir>  Module file, or a directory of .loxl files
+  --lock <lock.json>       Lockfile to read and update. Created if missing.
+  --out <out.Loxone>       Where to write the compiled config
+  --serial <12-hex>        Miniserver serial (default: lox.toml, then the lockfile)
+  --time <unix-seconds>    Creation time for new UUIDs (default: now)
+  --page <title>           Page for blocks before the first `page` statement
+                           (default: lox.toml, then the config's first page)
+  --allow-removals         Delete managed blocks that are missing from the module
+  --accept-version <v>     Accept a base saved by a different Loxone Config release
+  --relayout <page>        Re-place this page's managed blocks (repeatable)
 
-  loxl compile [<project-dir>]
-              [--base <cfg.Loxone>] [--module <m.loxl | module-dir>]
-              [--lock <lock.json>] [--out <out.Loxone>]
-              [--serial <12-hex>] [--time <unix-seconds>] [--page <title>]
-              [--allow-removals] [--accept-version <v>] [--relayout <page>]...
-        Compile Lox Logic against a base config, updating the lockfile. Inside
-        a lox.toml project (see below) every path flag is optional and
-        flags override the file; otherwise --base, --module, --lock,
-        and --out are required.
-        --serial defaults to the project file, then to the lockfile's
-        recorded Miniserver serial;
-        --time defaults to now (only affects newly minted UUIDs — the
-        lockfile pins everything minted before);
-        --page defaults to the project file, then to the document's
-        first page; a `page \"<Title>\"` statement in the module overrides
-        it for the blocks that follow.
-        A module directory stands for a multi-file module: all *.loxl
-        files inside — subdirectories included — merged in path order
-        (one file per page is the convention; a fragment may reference
-        sibling-file slugs).
-        A base written by a different Loxone release than the lock's
-        ConfigVersion pin is refused; after qualifying the release
-        (one oracle open+save run), --accept-version <v> re-pins it.
-        Placement (D42): a new block goes where its wires want it on its
-        page; a placed block keeps its position, and a move made in
-        Loxone Config is taken over into the lockfile. --relayout <page>
-        (repeatable) places that page's managed blocks afresh — except
-        those wired to refs another writer owns, which stay with them.
+In a lox.toml project the paths come from the project file, and flags override it.
+Outside a project, --base, --module, --lock and --out are required.
+A module directory merges all .loxl files in it and its subdirectories, in path order.
+Blocks keep their place between compiles. A move made in Loxone Config is kept.
 
-  loxl test [<project-dir>] [--filter <substr>] [--trace] [--lox <path>]
-            [--show-spec] [--base <cfg.Loxone>] [--module <m.loxl | module-dir>]
-            [--lock <lock.json>] [--serial <12-hex>] [--page <title>]
-        Run the module's `test \"…\"` … `end` scenarios (D36, D68):
-        compile in memory (the lockfile is never written) and run each
-        test in Lox Logic's simulator. A test depending on a block the
-        simulator does not model reports ERROR and names it. --filter
-        selects tests whose name contains the substring. --trace prints
-        each test cycle by cycle: what it sets, every change of the ports
-        its expectations depend on (by slug), and each expectation's
-        outcome. --lox runs them
-        in lox-cli's `lox sim` instead; --show-spec (with --lox) prints
-        its scenario JSON. Exit 1 when a test fails.
+Examples:
+  loxl compile
+  loxl compile --relayout "Beschattung"
+  loxl compile --base haus.Loxone --module logic/ --lock logic.lock.json --out out.Loxone
+"#,
+    },
+    Command {
+        name: "test",
+        usage: &["loxl test [<project-dir>] [<options>]"],
+        summary: "Run the module's test scenarios in the simulator",
+        details: r#"Options:
+  --filter <text>  Run only the tests whose name contains the text
+  --trace          Print each test cycle by cycle: what it sets, port changes, each check
+  --lox <path>     Run the tests with `lox sim`, using the lox binary at <path>
+  --show-spec      With --lox, print the scenario JSON instead of running it
+  --base, --module, --lock, --serial, --page
+                   As for compile (default: from lox.toml)
 
-  loxl rename <old-slug> <new-slug> [<project-dir>]
-        Rename a module-level name — extern, block, constant, template,
-        or instance — across every module file (comments included) and
-        rekey the lockfile so every pinned identity survives, synthetic
-        slugs from templates and expressions too. Verified before
-        anything is written: the baseline lock must be current, and the
-        recompiled output must be byte-identical except for Title labels
-        the slug itself feeds (auto-labeled blocks, D24 expression
-        labels). Needs a lox.toml project (module, lock, base); also
-        refreshes the project's out file.
+The module is compiled in memory. The lockfile is not written.
+A test that uses a block the simulator does not model reports ERROR and names the block.
+Exit 1 when a test fails.
+"#,
+    },
+    Command {
+        name: "rename",
+        usage: &["loxl rename <old-slug> <new-slug> [<project-dir>]"],
+        summary: "Rename a name across the module and the lockfile",
+        details: r#"Renames an extern, block, constant, template or instance in every module file, comments included.
+The lockfile keeps every identity, so the compiled config only changes in labels that show the name.
+Nothing is written unless the lockfile is current and the recompiled config matches.
+Needs a lox.toml project. Also rewrites the project's out file.
+"#,
+    },
+    Command {
+        name: "lint",
+        usage: &["loxl lint [<module.loxl | module-dir | project-dir>]"],
+        summary: "Report unused and dead parts of a module",
+        details: r#"On any module, reports unused externs and constants, and templates nothing uses.
+In a lox.toml project it also reports:
+  - managed blocks whose outputs feed nothing in the compiled config
+  - Touch Pure Flex commands that reach several blocks, or none
+  - users whose NFC tag or access code opens no NFC Code Touch
 
-  loxl lint [<module.loxl | module-dir | project-dir>]
-        Advisory findings a compile has no business rejecting: unused
-        externs and constants, uninstantiated templates — and, inside a
-        lox.toml project, managed blocks whose outputs feed nothing in
-        the *compiled* config (GUI-drawn wires count as consumers; a
-        block that reaches only dead ref plumbing is still dead), and
-        Touch Pure Flex commands on any device that reach several
-        API-linked blocks because they name none (tile-broadcast) or
-        reach none (tile-dead-command), and users whose NFC tag or access
-        code opens no NFC Code Touch (no-access-right). Never
-        modifies anything; exit 1 when there are findings — they can be
-        deliberate (reference externs kept as documentation, app-visible
-        state blocks), so lint is not part of the compile path.
+The path defaults to the current directory. lint never changes a file.
+Exit 1 when there are findings. Some can be deliberate, so compile does not run lint.
+"#,
+    },
+    Command {
+        name: "decompile",
+        usage: &["loxl decompile [--managed-only] [--all-params] [--out-dir <dir>] <cfg.Loxone>"],
+        summary: "Print a config as Lox Logic",
+        details: r#"Options:
+  --managed-only   Show only the blocks Lox Logic manages and what they touch, with every parameter
+  --all-params     Also show parameters left at their default
+  --out-dir <dir>  Write one module file per page instead of printing
 
-  loxl decompile [--managed-only] [--all-params] [--out-dir <dir>] <cfg.Loxone>
-        Print the Lox Logic view of a config, grouped into sections headed by
-        `page \"<Title>\"` statements (report on stderr). The default
-        full view shows every page block and wire — it is for reading,
-        not compiling — and elides parameters at their corpus-observed
-        GUI default (--all-params shows them; the report counts them).
-        --managed-only restricts the view to managed-type blocks and
-        what they touch (the adoption subset), keeps every parameter,
-        and folds nothing. --out-dir writes one module per logic page
-        instead of printing.
+The output has a `page "<Title>"` section per page. A report goes to stderr.
+The full view is for reading. To put blocks under source control, use `loxl adopt`.
+"#,
+    },
+    Command {
+        name: "adopt",
+        usage: &[
+            "loxl adopt <cfg.Loxone> (--out-module <m.loxl> | --out-dir <dir>) --out-lock <lock.json>",
+            "loxl adopt <cfg.Loxone> --uuid <uuid> --as <slug> --module <m.loxl | dir> --lock <lock.json>",
+        ],
+        summary: "Put existing blocks of a config under source control",
+        details: r#"The first form adopts every block in the config that Lox Logic can manage:
+  --out-module <m.loxl>    Write the module to one file
+  --out-dir <dir>          Write the module as one file per page, device externs in _periphery.loxl
+  --out-lock <lock.json>   Write the lockfile with each block's UUIDs, layout and page
 
-  loxl adopt <cfg.Loxone> (--out-module <m.loxl> | --out-dir <dir>) --out-lock <lock.json>
-        Move every managed-type block in the config under source control:
-        writes the managed-only module plus a lockfile pinning each block's
-        existing identity (object/port UUIDs, layout, page), so compiling
-        the pair rebuilds the blocks in place instead of minting
-        duplicates. --out-dir writes the module as a directory of
-        fragments, one file per page (periphery externs in
-        _periphery.loxl) — the layout `compile --module <dir>` reads.
-        Blocks the rebuild could not reproduce faithfully are skipped
-        with a warning and stay unmanaged. Never modifies the config;
-        refuses existing outputs.
+Compiling the pair rebuilds the blocks in place, without duplicates.
+Blocks that cannot be rebuilt exactly are skipped with a warning.
+adopt never changes the config and does not overwrite existing files.
 
-  loxl adopt <cfg.Loxone> --uuid <uuid> --as <slug> --module <m.loxl | module-dir> --lock <lock.json>
-        Incremental form: adopt one existing block (e.g. freshly drawn in
-        Loxone Config) into an existing module/lock pair. Appends the
-        block's declaration — plus externs for wired neighbors the lock
-        does not already pin — to the module (in a directory, to its
-        page's fragment) and extends the lockfile. Verified before
-        writing: rebuilding with the updated pair must be a semantic
-        no-op against the config. A wire into a managed block must
-        already be declared in that block's argument list — the error
-        says exactly which line to add.
+The second form adds one block, for example one just drawn in Loxone Config:
+  --uuid <uuid>            The block to adopt
+  --as <slug>              Its name in the module
+  --module <m.loxl | dir>  Module to add it to (in a directory, to its page's file)
+  --lock <lock.json>       Lockfile to extend
 
-  loxl diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>
-        Semantic diff: objects, parameters, rooms/categories, DayTimer
-        schedules, wires, and a users/access section (users and groups, membership, NFC tags,
-        codes, passwords, last edit, access and UI rights). Credentials
-        show as names, counts and short fingerprints, never as the stored
-        hash. --exit-code exits 1 when the docs differ, users/access
-        included. --json prints the diff as one JSON object. --summary
-        writes it as a commit message instead: a subject line counting
-        the changes (prefixed with the page if they all sit on one), then
-        the changes by type, title and port name.
+Externs for its wired neighbors are added too.
+Nothing is written unless the rebuilt config is unchanged.
+A wire into a managed block must already be in that block's arguments.
+The error names the line to add.
+"#,
+    },
+    Command {
+        name: "diff",
+        usage: &["loxl diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>"],
+        summary: "Show what changed between two configs",
+        details: r#"Options:
+  --exit-code  Exit 1 when the configs differ
+  --json       Print the diff as one JSON object
+  --summary    Print the diff as a commit message: a subject line, then the changes
 
-  loxl coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]
-        How much of the config the source governs: every object by type
-        — logic on pages, and the periphery (devices, virtual I/O) —
-        counted managed, extern, or untouched against the lockfile, with
-        what Lox Logic can do with the type (managed, adopt-only for blocks
-        Loxone Config creates when pairing a device, reference for types
-        without a verified connector table). Lists the page blocks a
-        `loxl adopt --uuid` could take over next, and per managed type
-        the attributes the compile carries from the base instead of
-        writing them from source — with the parameter that claims one
-        where Lox Logic has it (`At:` on PulseAt); in a project, blocks
-        whose source claims it are not counted. Without a lock or
-        project, everything counts as untouched.
+Compares objects, parameters, rooms and categories, schedules, wires, users and access rights.
+Passwords and codes show as names, counts and short hashes, never as stored.
+"#,
+    },
+    Command {
+        name: "drift",
+        usage: &["loxl drift <cfg.Loxone> [--lock <lock.json>]"],
+        summary: "Check whether a config changed since the last compile",
+        details: r#"Options:
+  --lock <lock.json>  Lockfile to compare against (default: the lox.toml project's)
 
-  loxl drift <cfg.Loxone> [--lock <lock.json>]
-        Check a config (typically a fresh download) against the semantic
-        fingerprint the lockfile recorded at the last adopt/compile.
-        Exit 0 = in sync; 1 = another writer changed something since
-        (position moves, save noise, and locale renames don't count).
-        One parse, no reference config needed — `loxl diff` tells you
-        *what* changed, this tells you *whether* cheaply. --lock
-        defaults to the lox.toml project's lockfile.
+Exit 0 when in sync. Exit 1 when the config changed since the last adopt or compile.
+Moved blocks and the changes Loxone Config makes on every save don't count.
+Run `loxl diff` to see what changed.
+"#,
+    },
+    Command {
+        name: "coverage",
+        usage: &["loxl coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]"],
+        summary: "Show how much of a config the module manages",
+        details: r#"Options:
+  --json              Print the report as JSON
+  --lock <lock.json>  Lockfile to count against. Without one, every object counts as untouched.
 
-  loxl repair <cfg.Loxone> --out <out.Loxone>
-        Write a copy of the config with numeric character references
-        (`&#xA;`, also as `&amp;#xA;`) replaced by the characters they
-        name, written as Loxone writes them: line breaks raw, `& < > \" '`
-        as named entities. Loxone reads such references as literal text,
-        so they only come from a foreign XML writer and leave programs,
-        rule payloads and descriptions without their line breaks — the
-        attributes `drift` notes. Lists every attribute it rewrote; every
-        other byte is copied unchanged. Recompile against the repaired
-        base before pushing it.
+Counts the objects of each type, on pages and in the periphery, as managed, extern or untouched.
+For each type it says whether Lox Logic can manage it, only adopt it, or only reference it.
+It lists the blocks `loxl adopt --uuid` could take over next.
+For managed types it lists the attributes the compile copies from the base, not the source.
+The default is the lox.toml project in the current directory.
+"#,
+    },
+    Command {
+        name: "repair",
+        usage: &["loxl repair <cfg.Loxone> --out <out.Loxone>"],
+        summary: "Restore line breaks that another tool escaped",
+        details: r#"Options:
+  --out <out.Loxone>  Where to write the repaired copy
 
-  loxl scan [--json] <cfg.Loxone | dir>...
-        List the personal data in configs (directories are searched for
-        *.Loxone): installation address and coordinates, the project's
-        creator and phone number, users' names, mail addresses, phone
-        numbers and access codes, credentials, the remote-access address,
-        MAC and public IP addresses, hardware serials. Shows where each
-        sits, never the value. Exits 1 when it finds any: a guard against
-        committing a real config.
+Replaces numeric character references such as `&#xA;` with the characters they stand for.
+Loxone reads such references as literal text, so programs and descriptions lose their line breaks.
+Lists every attribute it changed. All other bytes stay the same.
+Recompile against the repaired base before you push it.
+"#,
+    },
+    Command {
+        name: "scan",
+        usage: &[
+            "loxl scan [--json] <cfg.Loxone | dir>...",
+            "loxl scan --redact <cfg.Loxone> --out <copy.Loxone>",
+        ],
+        summary: "Find personal data in configs, or redact it",
+        details: r#"Options:
+  --json                 Print the findings as JSON
+  --redact <cfg.Loxone>  Write a redacted copy instead of scanning
+  --out <copy.Loxone>    Where --redact writes the copy
 
-  loxl scan --redact <cfg.Loxone> --out <copy.Loxone>
-        Write a copy with every finding replaced by a placeholder of its
-        kind and the hardware serials by a counter (inside UUIDs too), to
-        share in an issue or a fixture. Exits 1 when a finding is left.
-        The copy is for reading, never for uploading.
+Finds addresses, coordinates, names, mail addresses, phone numbers, access codes, credentials,
+the remote-access address, MAC and public IP addresses, and hardware serials.
+It shows where each one is, never the value. Directories are searched for *.Loxone files.
+Exit 1 when it finds any, so it can guard against committing a real config.
 
-  loxl observe <cfg.Loxone>... [--crosscheck <legacy.json>]...
-        Port-direction evidence per block type, as JSON. Multiple configs
-        merge into one corpus-level view. --crosscheck compares the
-        evidence against a legacy connector database (connector-map.json
-        shape: type -> {c: [keys], t: {key: \"I\"|\"O\"}}) or against
-        Loxone's documented connectors (loxone-block-types-full.json
-        shape: type -> {connectors: [{name, type}]}, `%d` names expanded
-        against the observed keys) and reports agreements, conflicts,
-        and coverage gaps per type.
+--redact replaces each finding with a placeholder, and hardware serials with a counter.
+Serials inside UUIDs are replaced too.
+The copy is for sharing in an issue or a test, never for uploading. Exit 1 when a finding is left.
+"#,
+    },
+    Command {
+        name: "observe",
+        usage: &["loxl observe <cfg.Loxone>... [--crosscheck <file>]..."],
+        summary: "Collect the port directions of each block type from configs",
+        details: r#"Options:
+  --crosscheck <file>  Compare against a connector database (repeatable)
 
-  loxl types [<Type> | --search <text>] [--json]
-        The builtin block types the compiler mints, each with what it is
-        for; --search lists the types whose name or purpose mentions the
-        text (`--search hysteresis`). Per type its purpose, the Loxone
-        knowledge-base page where known, and its ports: key, direction, and — where Loxone documents them (D52) —
-        the unit a value is in (a suffixed value scales into it: `2h` is
-        `120` on a minutes port), the canvas label (`Tr` for
-        `InputTrigger`), the documented range (checked by `loxl lint`)
-        and default, plus the corpus-observed GUI default (D30) and the
-        attribute parameters. Without a type: one line per type.
+Prints JSON. Several configs merge into one view.
+--crosscheck reports agreements, conflicts and gaps per type. The file is either:
+  - a connector map: type -> {c: [keys], t: {key: "I" | "O"}}
+  - Loxone's documented connectors: type -> {connectors: [{name, type}]}
+"#,
+    },
+    Command {
+        name: "types",
+        usage: &["loxl types [<Type> | --search <text>] [--json]"],
+        summary: "List the block types Lox Logic can create",
+        details: r#"Options:
+  --search <text>  List the types whose name or purpose mentions the text
+  --json           Print as JSON
 
-  loxl templates [<file | template>]
-        The template library: per template its parameters and what it
-        does (lights, climate, safety, shading; each tested in the
-        simulator). With a name: the library file's source, to copy into
-        the module directory and call with one line.
+Without a type, prints one line per type.
+With a type, prints its purpose, its Loxone documentation page and its ports.
+For each port: direction, unit, canvas label, documented range and default, and the default
+Loxone Config sets. A value with a unit is converted: `2h` is `120` on a minutes port.
 
-  loxl roundtrip <cfg.Loxone>
-        Verify the file re-serializes byte-identically (exit 1 if not).
-  loxl render <cfg.Loxone> --page <title> [--lock <lock.json>] [--out <page.svg>]
-        Layout metrics of one page — overlaps, backward and long wires,
-        crossings, wire length — and, with --out, the page drawn as SVG
-        (wires orthogonal, off-page connections as labels; with --lock,
-        the lockfile's managed blocks in the compiler's color). Read-only.
+Examples:
+  loxl types --search hysteresis
+  loxl types PulseAt
+"#,
+    },
+    Command {
+        name: "templates",
+        usage: &["loxl templates [<file | template>]"],
+        summary: "List the template library, or print one file of it",
+        details: r#"Without a name, lists each template with its parameters and what it does.
+With a name, prints the library file to copy into the module directory.
+"#,
+    },
+    Command {
+        name: "roundtrip",
+        usage: &["loxl roundtrip <cfg.Loxone>"],
+        summary: "Check that a config is written back byte for byte",
+        details: "Exit 1 if the output differs from the file.\n",
+    },
+    Command {
+        name: "render",
+        usage: &["loxl render <cfg.Loxone> --page <title> [--lock <lock.json>] [--out <page.svg>]"],
+        summary: "Show the layout metrics of a page, or draw it as SVG",
+        details: r#"Options:
+  --page <title>      The page to show (required)
+  --out <page.svg>    Also draw the page as SVG
+  --lock <lock.json>  Color the lockfile's managed blocks in the drawing
 
-PROJECT FILE (lox.toml):
-        A directory with a lox.toml is a project — one deployment
-        target. Flat `key = \"value\"` lines and # comments; keys:
-        base (the deployed .Loxone, required), module (file or
-        directory, required), lock (default logic.lock.json), out
-        (default out.Loxone), serial, page. Paths are relative to the
-        file. Inside the directory, `loxl compile` needs no flags, and
-        check / fmt / drift default to the project's module and lock.
-";
+The metrics are overlaps, backward and long wires, crossings and wire length.
+"#,
+    },
+];
+
+const PROJECT_HELP: &str = r#"lox.toml: the project file
+
+A directory with a lox.toml is a project: one Miniserver config to deploy.
+The file has `key = "value"` lines and # comments. Paths are relative to the file.
+
+  base    The deployed .Loxone config (required)
+  module  Module file or directory (required)
+  lock    Lockfile (default: logic.lock.json)
+  out     Compiled config (default: out.Loxone)
+  serial  Miniserver serial
+  page    Default page for new blocks
+
+In a project, `loxl compile` and `loxl test` need no flags.
+check, fmt, lint, drift, coverage and rename use the project's files by default.
+"#;
 
 type AnyError = Box<dyn std::error::Error>;
 
@@ -258,17 +329,87 @@ fn prog() -> &'static str {
     PROG.get().map_or("loxl", String::as_str)
 }
 
-/// The usage text, spelled for [`prog`].
-fn usage() -> String {
+/// `text` with each `loxl` command spelled as [`prog`]. A `.loxl` file
+/// name stays as it is.
+fn spell(text: &str) -> String {
+    spell_as(text, prog())
+}
+
+fn spell_as(text: &str, p: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for (i, _) in text.match_indices("loxl ") {
+        let starts_word = text[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| matches!(c, ' ' | '`' | '\n' | '('));
+        if starts_word {
+            out.push_str(&text[last..i]);
+            out.push_str(p);
+            out.push(' ');
+            last = i + "loxl ".len();
+        }
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
+fn command(name: &str) -> Option<&'static Command> {
+    COMMANDS.iter().find(|c| c.name == name)
+}
+
+/// The usage lines, the first after `prefix`, the others aligned under it.
+fn usage_lines(c: &Command, prefix: &str) -> String {
+    let indent = " ".repeat(prefix.len());
+    let lines: Vec<String> = c
+        .usage
+        .iter()
+        .enumerate()
+        .map(|(i, u)| format!("{}{u}", if i == 0 { prefix } else { &indent }))
+        .collect();
+    spell(&lines.join("\n"))
+}
+
+/// `loxl help`: one line per command.
+fn overview() -> String {
     let p = prog();
-    USAGE
-        .replacen("loxl —", &format!("{p} —"), 1)
-        .replace(
-            "
-  loxl ",
-            &format!("\n  {p} "),
-        )
-        .replace("`loxl ", &format!("`{p} "))
+    let mut s = format!(
+        "{p}: Lox Logic, Loxone config as code\n\nUsage: {p} <command> [<args>]\n\nCommands:\n"
+    );
+    for c in COMMANDS {
+        s.push_str(&format!("  {:<11} {}\n", c.name, c.summary));
+    }
+    s.push_str(&spell(
+        "\nRun `loxl <command> --help` for a command's options.\n\
+         Run `loxl help project` for the lox.toml project file.\n",
+    ));
+    s
+}
+
+/// `loxl <command> --help`.
+fn command_help(c: &Command) -> String {
+    format!(
+        "{}\n\n{}.\n\n{}",
+        usage_lines(c, "Usage: "),
+        c.summary,
+        spell(c.details)
+    )
+}
+
+/// The error for arguments `name` does not accept: its usage and where
+/// the help is.
+fn usage_error(name: &str) -> AnyError {
+    let c = command(name).expect("a known command");
+    format!(
+        "{}\nRun `{} {name} --help` for the options.",
+        usage_lines(c, "usage: "),
+        prog()
+    )
+    .into()
+}
+
+fn unknown_flag(name: &str, flag: &str) -> AnyError {
+    format!("unknown flag `{flag}`. Run `{} {name} --help`.", prog()).into()
 }
 
 /// Run one command line (without the program name) and return its exit
@@ -289,10 +430,35 @@ pub fn main_with(prog: &str, args: &[String]) -> ExitCode {
 
 fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
     match args {
-        [] | ["help"] | ["--help"] | ["-h"] => {
-            print!("{}", usage());
-            Ok(ExitCode::from(if args.is_empty() { 2 } else { 0 }))
+        [] => {
+            print!("{}", overview());
+            return Ok(ExitCode::from(2));
         }
+        ["help"] | ["--help"] | ["-h"] => {
+            print!("{}", overview());
+            return Ok(ExitCode::SUCCESS);
+        }
+        ["help", "project"] => {
+            print!("{}", spell(PROJECT_HELP));
+            return Ok(ExitCode::SUCCESS);
+        }
+        ["help", name] => {
+            let Some(c) = command(name) else {
+                eprintln!("unknown command `{name}`. Run `{} help`.", prog());
+                return Ok(ExitCode::from(2));
+            };
+            print!("{}", command_help(c));
+            return Ok(ExitCode::SUCCESS);
+        }
+        [name, rest @ ..] if rest.iter().any(|a| matches!(*a, "--help" | "-h")) => {
+            if let Some(c) = command(name) {
+                print!("{}", command_help(c));
+                return Ok(ExitCode::SUCCESS);
+            }
+        }
+        _ => {}
+    }
+    match args {
         ["check", rest @ ..] => cmd_check(rest),
         ["fmt", rest @ ..] => cmd_fmt(rest),
         ["compile", rest @ ..] => cmd_compile(rest),
@@ -310,19 +476,20 @@ fn run(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["types", rest @ ..] => cmd_types(rest),
         ["templates"] => cmd_templates(None),
         ["templates", name] => cmd_templates(Some(name)),
+        ["templates", ..] => Err(usage_error("templates")),
         ["roundtrip", path] => cmd_roundtrip(path),
+        ["roundtrip", ..] => Err(usage_error("roundtrip")),
         ["render", rest @ ..] => cmd_render(rest),
         ["lsp"] | ["lsp", "--stdio"] => {
             loxone_config::lsp::run_stdio()?;
             Ok(ExitCode::SUCCESS)
         }
+        ["lsp", ..] => Err(usage_error("lsp")),
         [cmd, ..] => {
-            eprintln!(
-                "unknown or malformed command `{cmd}` — run `{} help`",
-                prog()
-            );
+            eprintln!("unknown command `{cmd}`. Run `{} help`.", prog());
             Ok(ExitCode::from(2))
         }
+        [] => unreachable!("handled above"),
     }
 }
 
@@ -420,8 +587,8 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
     }
 }
 
-/// The directory `file("…")` paths in a `.loxl` file resolve against
-/// (D40): the file's own directory.
+/// The directory `file("…")` paths in a `.loxl` file resolve against:
+/// the file's own directory.
 fn fragment_dir(file: &Path) -> &Path {
     file.parent().unwrap_or(Path::new("."))
 }
@@ -470,7 +637,7 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
         ["--json"] => (true, project_module()?),
         [path] => (false, path.to_string()),
         ["--json", path] | [path, "--json"] => (true, path.to_string()),
-        _ => return Err("usage: loxl check [--json] [<module.loxl | module-dir>]".into()),
+        _ => return Err(usage_error("check")),
     };
     let path = path.as_str();
     // Full static validation: parse (syntax + references), then template
@@ -562,9 +729,7 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
         [path] => ("print", path.to_string()),
         ["--write", path] => ("write", path.to_string()),
         ["--check", path] => ("check", path.to_string()),
-        _ => {
-            return Err("usage: loxl fmt [--write | --check] [<module.loxl | module-dir>]".into());
-        }
+        _ => return Err(usage_error("fmt")),
     };
     let path = path.as_str();
     // Formatting is per file and needs no name resolution (a fragment of
@@ -645,7 +810,7 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
-            other => return Err(format!("unknown flag `{other}` — run `{} help`", prog()).into()),
+            other => return Err(unknown_flag("compile", other)),
         }
     }
     // Project resolution: an explicit <project-dir> must hold a lox.toml;
@@ -674,8 +839,8 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
                 (base, module, lock_path, out)
             else {
                 return Err(format!(
-                    "compile requires --base, --module, --lock, and --out \
-                     (or a lox.toml project — run `{} help`)",
+                    "compile needs --base, --module, --lock and --out, or a lox.toml project. \
+                     Run `{} compile --help`.",
                     prog()
                 )
                 .into());
@@ -774,7 +939,7 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
             dir if !dir.starts_with('-') && project_dir.is_none() => {
                 project_dir = Some(PathBuf::from(dir));
             }
-            other => return Err(format!("unknown flag `{other}` — run `{} help`", prog()).into()),
+            other => return Err(unknown_flag("test", other)),
         }
     }
     let project = match &project_dir {
@@ -796,8 +961,8 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
         None => {
             let (Some(base), Some(module), Some(lock_path)) = (base, module, lock_path) else {
                 return Err(format!(
-                    "test requires --base, --module, and --lock \
-                     (or a lox.toml project — run `{} help`)",
+                    "test needs --base, --module and --lock, or a lox.toml project. \
+                     Run `{} test --help`.",
                     prog()
                 )
                 .into());
@@ -947,7 +1112,7 @@ fn cmd_rename(args: &[&str]) -> Result<ExitCode, AnyError> {
     let (old, new, dir) = match args {
         [old, new] => (*old, *new, "."),
         [old, new, dir] if !dir.starts_with('-') => (*old, *new, *dir),
-        _ => return Err("usage: loxl rename <old-slug> <new-slug> [<project-dir>]".into()),
+        _ => return Err(usage_error("rename")),
     };
     let project_file = Project::find(Path::new(dir)).ok_or_else(|| {
         format!("no lox.toml in `{dir}` — rename needs a project (module, lock, base)")
@@ -1159,7 +1324,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     let path = match args {
         [] => ".".to_string(),
         [p] if !p.starts_with('-') => p.to_string(),
-        _ => return Err("usage: loxl lint [<module.loxl | module-dir | project-dir>]".into()),
+        _ => return Err(usage_error("lint")),
     };
     // A project directory gets the full treatment (dead-output analysis
     // needs base + lock); a bare module gets the source-only lints.
@@ -1268,22 +1433,14 @@ fn cmd_decompile(args: &[&str]) -> Result<ExitCode, AnyError> {
                 ));
             }
             flag if flag.starts_with("--") => {
-                return Err(format!("unknown flag `{flag}` — run `{} help`", prog()).into());
+                return Err(unknown_flag("decompile", flag));
             }
             p if path.is_none() => path = Some(p),
-            _ => {
-                return Err("usage: loxl decompile [--managed-only] [--all-params] \
-                            [--out-dir <dir>] <cfg.Loxone>"
-                    .into());
-            }
+            _ => return Err(usage_error("decompile")),
         }
     }
     let Some(path) = path else {
-        return Err(
-            "usage: loxl decompile [--managed-only] [--all-params] [--out-dir <dir>] \
-                    <cfg.Loxone>"
-                .into(),
-        );
+        return Err(usage_error("decompile"));
     };
     let doc = read_doc(path)?;
     let opts = DecompileOptions {
@@ -1339,10 +1496,6 @@ fn cmd_decompile(args: &[&str]) -> Result<ExitCode, AnyError> {
 }
 
 fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str = "usage: loxl adopt <cfg.Loxone> \
-         (--out-module <m.loxl> | --out-dir <dir>) --out-lock <lock.json>\n\
-       loxl adopt <cfg.Loxone> --uuid <uuid> --as <slug> \
-         --module <m.loxl | module-dir> --lock <lock.json>";
     let mut path = None;
     let mut out_module: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
@@ -1367,28 +1520,28 @@ fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
             "--module" => module_path = Some(value()?),
             "--lock" => lock_path = Some(value()?),
             flag if flag.starts_with("--") => {
-                return Err(format!("unknown flag `{flag}` — run `{} help`", prog()).into());
+                return Err(unknown_flag("adopt", flag));
             }
             p if path.is_none() => path = Some(p),
-            _ => return Err(USAGE.into()),
+            _ => return Err(usage_error("adopt")),
         }
     }
     if uuid.is_some() || as_slug.is_some() || module_path.is_some() || lock_path.is_some() {
         let (Some(path), Some(uuid), Some(slug), Some(module_path), Some(lock_path)) =
             (path, uuid, as_slug, module_path, lock_path)
         else {
-            return Err(USAGE.into());
+            return Err(usage_error("adopt"));
         };
         if out_module.is_some() || out_dir.is_some() || out_lock.is_some() {
-            return Err(USAGE.into());
+            return Err(usage_error("adopt"));
         }
         return cmd_adopt_one(path, uuid, slug, module_path, lock_path);
     }
     let (Some(path), Some(out_lock)) = (path, out_lock) else {
-        return Err(USAGE.into());
+        return Err(usage_error("adopt"));
     };
     if out_module.is_some() == out_dir.is_some() {
-        return Err(USAGE.into());
+        return Err(usage_error("adopt"));
     }
     // Adoption is a one-time claim of identity; overwriting an existing
     // module or lock would silently discard identities already pinned.
@@ -1638,8 +1791,6 @@ fn cmd_adopt_one(
 }
 
 fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str =
-        "usage: loxl diff [--exit-code] [--json | --summary] <old.Loxone> <new.Loxone>";
     let (flags, files): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| a.starts_with("--"));
     let (exit_code, json, summary) = (
         flags.contains(&"--exit-code"),
@@ -1654,7 +1805,7 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
             && !(json && summary),
     ) {
         ([old, new], true) => (*old, *new),
-        _ => return Err(USAGE.into()),
+        _ => return Err(usage_error("diff")),
     };
     let a = read_doc(old)?;
     let b = read_doc(new)?;
@@ -1825,8 +1976,6 @@ fn cmd_diff(args: &[&str]) -> Result<ExitCode, AnyError> {
 }
 
 fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
-    const USAGE: &str =
-        "usage: loxl coverage [--json] [<project-dir> | <cfg.Loxone> [--lock <lock.json>]]";
     let json = args.contains(&"--json");
     let rest: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
     let (config, lock_path) = match rest.as_slice() {
@@ -1836,7 +1985,7 @@ fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
         [config, "--lock", lock] | ["--lock", lock, config] => {
             (Some(config.to_string()), Some(*lock))
         }
-        _ => return Err(USAGE.into()),
+        _ => return Err(usage_error("coverage")),
     };
     let (config, lock, module) = match (config, lock_path) {
         (Some(c), Some(l)) => (c, Lockfile::load(Path::new(l))?, None),
@@ -1846,7 +1995,7 @@ fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
         (None, dir) => {
             let dir = dir.unwrap_or(".");
             let f = Project::find(Path::new(dir))
-                .ok_or_else(|| format!("no lox.toml in `{dir}` — {USAGE}"))?;
+                .ok_or_else(|| format!("no lox.toml in `{dir}`. {}", usage_error("coverage")))?;
             let p = Project::load(&f)?;
             // The module tells a claimed attribute from a carried one.
             let module = read_module(&p.module.display().to_string())?;
@@ -1871,21 +2020,23 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         [config, "--lock", lock] | ["--lock", lock, config] => (*config, lock.to_string()),
         [config] => {
             let Some(f) = Project::find(Path::new(".")) else {
-                return Err("no --lock given and no lox.toml in the current directory \
-                     (usage: loxl drift <cfg.Loxone> [--lock <lock.json>])"
-                    .into());
+                return Err(format!(
+                    "no --lock given and no lox.toml in the current directory. \
+                     Pass --lock <lock.json>, or run `{} drift` in a project.",
+                    prog()
+                )
+                .into());
             };
             (*config, Project::load(&f)?.lock.display().to_string())
         }
-        _ => return Err("usage: loxl drift <cfg.Loxone> [--lock <lock.json>]".into()),
+        _ => return Err(usage_error("drift")),
     };
     let lock_path = lock_path.as_str();
     let doc = read_doc(config)?;
     let lock = Lockfile::load(Path::new(lock_path))?;
     let Some(recorded) = &lock.target.semantic_fingerprint else {
         return Err(format!(
-            "{lock_path} records no semantic fingerprint (it predates the \
-             feature) — one adopt or compile establishes the baseline"
+            "{lock_path} has no record to compare against. Run adopt or compile once to create it."
         )
         .into());
     };
@@ -1905,94 +2056,42 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         let more = refs.len().saturating_sub(shown.len());
         println!(
             "note: {config} has numeric character references as literal text in \
-             {} attribute(s) ({}{}) — Loxone reads them verbatim, so the \
-             line breaks there are gone; `loxl repair` writes them back \
-             (docs/loxone-format.md)",
+             {} attribute(s) ({}{}). Loxone reads them as they are, so their line \
+             breaks are lost. `{p} repair` restores them.",
             refs.len(),
             shown.join(", "),
             if more > 0 {
                 format!(", +{more} more")
             } else {
                 String::new()
-            }
+            },
+            p = prog()
         );
     }
     let current = loxone_config::diff::semantic_fingerprint(&doc);
     if &current == recorded {
-        println!("in sync: {config} matches the fingerprint in {lock_path}");
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v9(&doc) == *recorded {
-        // Recorded before a PulseAt's fire time joined the projection (#248).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to PulseAt fire times — the next \
-             compile records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v8(&doc) == *recorded {
-        // Recorded before Air and Tree device settings joined (#197).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to Air and Tree device settings — the next \
-             compile records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v7(&doc) == *recorded {
-        // Recorded before device settings joined the projection (D64/D65).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to device settings — the next compile \
-             records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v6(&doc) == *recorded {
-        // Recorded before LightController2 moods joined the projection (D58).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to light moods — the next compile records \
-             the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v5(&doc) == *recorded {
-        // Recorded before DayTimer schedules joined the projection (D53).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to DayTimer schedules — the next compile \
-             records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v4(&doc) == *recorded {
-        // Recorded before messages joined the projection (D51).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to notification messages — the next \
-             compile records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v3(&doc) == *recorded {
-        // Recorded before tile programs joined the projection (D41).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to Touch Pure Flex tile programs — the next \
-             compile records the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v2(&doc) == *recorded {
-        // Recorded before program text joined the projection (D40).
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to program code — the next compile records \
-             the current form)"
-        );
-        Ok(ExitCode::SUCCESS)
-    } else if loxone_config::diff::semantic_fingerprint_v1(&doc) == *recorded {
-        // Recorded before room/category bindings joined the projection
-        // (D39): in sync as far as that form can tell.
-        println!(
-            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
-             by an older version of Lox Logic, blind to room/category bindings — the next compile \
-             records the current form)"
-        );
+        println!("in sync: {config} matches {lock_path}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    // A lock written by an older Lox Logic records an older form, blind
+    // to what later joined the comparison. A match in that form is in
+    // sync as far as it can tell, and the next compile records the
+    // current one.
+    use loxone_config::diff as d;
+    type Form = fn(&LoxoneDoc) -> String;
+    let older: [(Form, &str); 9] = [
+        (d::semantic_fingerprint_v9, "PulseAt fire times"),
+        (d::semantic_fingerprint_v8, "Air and Tree device settings"),
+        (d::semantic_fingerprint_v7, "device settings"),
+        (d::semantic_fingerprint_v6, "light moods"),
+        (d::semantic_fingerprint_v5, "DayTimer schedules"),
+        (d::semantic_fingerprint_v4, "notification messages"),
+        (d::semantic_fingerprint_v3, "Touch Pure Flex tile programs"),
+        (d::semantic_fingerprint_v2, "program code"),
+        (d::semantic_fingerprint_v1, "room and category bindings"),
+    ];
+    if let Some((_, blind_to)) = older.iter().find(|(form, _)| form(&doc) == *recorded) {
+        println!("{}", in_sync_older(config, lock_path, blind_to));
         Ok(ExitCode::SUCCESS)
     } else {
         // Distinguish "another writer changed something" from "the last
@@ -2013,31 +2112,37 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         let dups = doc.duplicate_uuids();
         if !dups.is_empty() {
             println!(
-                "note: {config} carries {} duplicate UUID(s), which Lox Logic never \
-                 emits — see docs/loxone-format.md for the known producer",
+                "note: {config} has {} duplicate UUID(s). Lox Logic never writes \
+                 them, so another tool changed the file.",
                 dups.len()
             );
         }
         if pending.is_empty() {
             println!(
-                "drift: {config} no longer matches the fingerprint recorded in \
-                 {lock_path} — another writer changed something since the last \
-                 adopt/compile; run `{p} diff <last-compiled.Loxone> {config}` \
-                 to see what",
+                "drift: {config} changed since the last adopt or compile ({lock_path}). \
+                 Run `{p} diff <last-compiled.Loxone> {config}` to see what changed.",
                 p = prog()
             );
         } else {
             println!(
-                "drift: {config} no longer matches the fingerprint recorded in \
-                 {lock_path} — pending removal of {} not yet deployed (push the \
-                 compiled output, then download); if the config also changed \
-                 elsewhere, `{p} diff <last-compiled.Loxone> {config}` shows it",
+                "drift: {config} still has {}, removed by the last compile ({lock_path}). \
+                 Push the compiled config, then download it again. \
+                 `{p} diff <last-compiled.Loxone> {config}` shows any other change.",
                 pending.join(", "),
                 p = prog()
             );
         }
         Ok(ExitCode::FAILURE)
     }
+}
+
+/// The `drift` result for a lock whose record has an older form, which
+/// does not compare `blind_to`.
+fn in_sync_older(config: &str, lock_path: &str, blind_to: &str) -> String {
+    format!(
+        "in sync: {config} matches {lock_path}, which an older version of Lox Logic wrote. \
+         It does not compare {blind_to}. The next compile updates it."
+    )
 }
 
 /// `loxl types`: the builtin table with its documented port facts — the
@@ -2054,7 +2159,10 @@ fn cmd_templates(name: Option<&str>) -> Result<ExitCode, AnyError> {
             println!("  {}({})", e.name, e.params);
             println!("      {}", e.description);
         }
-        println!("\n`loxl templates <file | template>` prints a file to copy into the module.");
+        println!(
+            "\n`{} templates <file | template>` prints a file to copy into the module.",
+            prog()
+        );
         return Ok(ExitCode::SUCCESS);
     };
     let Some((_, source)) = library::source(name) else {
@@ -2080,7 +2188,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             names.remove(i);
             Some(q)
         }
-        Some(_) => return Err("usage: loxl types --search <text> [--json]".into()),
+        Some(_) => return Err(usage_error("types")),
         None => None,
     };
     let dir = |d: connectors::PortDir| match d {
@@ -2151,9 +2259,11 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                     .find(|b| b.eq_ignore_ascii_case(t))
                     .map(|b| format!(" — did you mean `{b}`?"))
                     .unwrap_or_default();
-                return Err(
-                    format!("`{t}` is not a builtin type{hint} (`loxl types` lists them)").into(),
-                );
+                return Err(format!(
+                    "`{t}` is not a builtin type{hint}. `{} types` lists them.",
+                    prog()
+                )
+                .into());
             };
             if json {
                 println!("{}", serde_json::to_string_pretty(&desc)?);
@@ -2208,7 +2318,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        _ => Err("usage: loxl types [<Type> | --search <text>] [--json]".into()),
+        _ => Err(usage_error("types")),
     }
 }
 
@@ -2226,7 +2336,7 @@ fn cmd_observe(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
     }
     if paths.is_empty() {
-        return Err("usage: loxl observe <cfg.Loxone>... [--crosscheck <legacy.json>]...".into());
+        return Err(usage_error("observe"));
     }
 
     let mut obs = Observations::new();
@@ -2274,7 +2384,7 @@ fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
     let json = args.contains(&"--json");
     let paths: Vec<&str> = args.iter().copied().filter(|a| *a != "--json").collect();
     if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
-        return Err("usage: loxl scan [--json] <cfg.Loxone | dir>... | loxl scan --redact <cfg> --out <copy>".into());
+        return Err(usage_error("scan"));
     }
     let mut files = Vec::new();
     for p in &paths {
@@ -2336,21 +2446,20 @@ fn cmd_scan(args: &[&str]) -> Result<ExitCode, AnyError> {
 /// `loxl scan --redact <cfg> --out <copy>`: a shareable copy, every
 /// finding replaced by a placeholder.
 fn cmd_scan_redact(args: &[&str]) -> Result<ExitCode, AnyError> {
-    let usage = "usage: loxl scan --redact <cfg.Loxone> --out <copy.Loxone>";
     let mut input = None;
     let mut out = None;
     let mut it = args.iter().copied();
     while let Some(a) = it.next() {
         match a {
             "--redact" => {}
-            "--out" => out = Some(it.next().ok_or(usage)?),
-            a if a.starts_with("--") => return Err(usage.into()),
+            "--out" => out = Some(it.next().ok_or_else(|| usage_error("scan"))?),
+            a if a.starts_with("--") => return Err(usage_error("scan")),
             a if input.is_none() => input = Some(a),
-            _ => return Err(usage.into()),
+            _ => return Err(usage_error("scan")),
         }
     }
     let (Some(input), Some(out)) = (input, out) else {
-        return Err(usage.into());
+        return Err(usage_error("scan"));
     };
     if std::path::Path::new(input) == std::path::Path::new(out) {
         return Err("--out must name another file than the config".into());
@@ -2393,7 +2502,7 @@ fn collect_configs(
 fn cmd_repair(args: &[&str]) -> Result<ExitCode, AnyError> {
     let (config, out) = match args {
         [config, "--out", out] | ["--out", out, config] => (*config, *out),
-        _ => return Err("usage: loxl repair <cfg.Loxone> --out <out.Loxone>".into()),
+        _ => return Err(usage_error("repair")),
     };
     let input = std::fs::read(config).map_err(|e| format!("{config}: {e}"))?;
     let mut doc = LoxoneDoc::parse(&input).map_err(|e| format!("{config}: {e}"))?;
@@ -2444,7 +2553,7 @@ fn cmd_render(args: &[&str]) -> Result<ExitCode, AnyError> {
             "--lock" => lock_path = Some(value()?.to_string()),
             "--out" => out = Some(value()?.to_string()),
             path if !path.starts_with('-') && config.is_none() => config = Some(path.to_string()),
-            other => return Err(format!("unknown flag `{other}` — run `loxl help`").into()),
+            other => return Err(unknown_flag("render", other)),
         }
     }
     let (Some(config), Some(page)) = (config, page) else {
@@ -2506,4 +2615,66 @@ fn autopilot_input(doc: &LoxoneDoc) -> Option<String> {
                 .attr("U")
                 .map(str::to_string)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_command_has_help_in_both_forms() {
+        for c in COMMANDS {
+            assert_eq!(run(&[c.name, "--help"]).unwrap(), ExitCode::SUCCESS);
+            assert_eq!(run(&["help", c.name]).unwrap(), ExitCode::SUCCESS);
+            assert!(
+                c.usage[0].starts_with(&format!("loxl {} ", c.name))
+                    || c.usage[0] == format!("loxl {}", c.name)
+            );
+            let help = command_help(c);
+            for line in help.lines() {
+                assert!(
+                    line.chars().count() <= 100,
+                    "{}: line too long: {line}",
+                    c.name
+                );
+            }
+        }
+        assert_eq!(run(&["help", "nope"]).unwrap(), ExitCode::from(2));
+    }
+
+    #[test]
+    fn help_text_has_no_decision_ids() {
+        let all: String = COMMANDS
+            .iter()
+            .map(|c| format!("{}{}{}", c.usage.join("\n"), c.summary, c.details))
+            .collect::<String>()
+            + PROJECT_HELP;
+        let ids = all
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|w| {
+                w.len() > 1 && w.starts_with('D') && w[1..].chars().all(|c| c.is_ascii_digit())
+            })
+            .collect::<Vec<_>>();
+        assert!(ids.is_empty(), "decision IDs in help: {ids:?}");
+    }
+
+    #[test]
+    fn spell_keeps_file_names() {
+        assert_eq!(
+            spell_as(
+                "loxl check m.loxl, `loxl fmt` and _periphery.loxl x",
+                "lox logic"
+            ),
+            "lox logic check m.loxl, `lox logic fmt` and _periphery.loxl x"
+        );
+    }
+
+    #[test]
+    fn drift_names_what_an_older_lock_does_not_compare() {
+        assert_eq!(
+            in_sync_older("live.Loxone", "logic.lock.json", "light moods"),
+            "in sync: live.Loxone matches logic.lock.json, which an older version of Lox Logic \
+             wrote. It does not compare light moods. The next compile updates it."
+        );
+    }
 }
