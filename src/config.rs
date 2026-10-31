@@ -288,7 +288,9 @@ impl Config {
         }
     }
 
-    /// Save this config as a flat file (for project-local or legacy configs).
+    /// Save this config as a flat file (for project-local or legacy configs),
+    /// to the file [`load`](Self::load) reads: `LOX_CONFIG` when it is set,
+    /// never the global config behind its back.
     pub fn save(&self) -> Result<PathBuf> {
         // If this config is part of a multi-context global config, save there
         if let Some(ref ctx_name) = self.context_name
@@ -302,9 +304,11 @@ impl Config {
             return Ok(Self::path());
         }
 
-        // Otherwise save as flat config
+        // Otherwise save as flat config: where `load()` reads it from
         let path = if self.is_local {
             self.data_dir.join("config.yaml")
+        } else if let Some(env_path) = std::env::var_os("LOX_CONFIG") {
+            PathBuf::from(env_path)
         } else {
             Self::path()
         };
@@ -524,6 +528,25 @@ mod tests {
         assert_eq!(loaded.pass, "testpass");
         assert_eq!(loaded.serial, "00:11:22:33:44:55");
         assert_eq!(loaded.aliases.get("light"), Some(&"some-uuid".to_string()));
+    }
+
+    /// With `LOX_CONFIG` set, `save()` writes that file, not `~/.lox/config.yaml`
+    /// (it used to overwrite the global config).
+    #[test]
+    fn save_writes_to_lox_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("env.yaml");
+        unsafe { std::env::set_var("LOX_CONFIG", cfg_path.to_str().unwrap()) };
+        let cfg = Config {
+            host: "https://192.0.2.7".to_string(),
+            ..Default::default()
+        };
+        let saved = cfg.save();
+        let loaded = Config::load();
+        unsafe { std::env::remove_var("LOX_CONFIG") };
+        assert_eq!(saved.unwrap(), cfg_path);
+        assert_eq!(loaded.unwrap().host, "https://192.0.2.7");
     }
 
     #[test]
