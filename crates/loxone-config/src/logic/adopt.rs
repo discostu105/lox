@@ -34,7 +34,7 @@ use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
 use crate::logic::ast::{
     ArgItem, Binding, BindingKind, Item, MatchSpec, Module, PortRef, RULE_BLOCK_TYPE, WireDecl,
 };
-use crate::logic::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED};
+use crate::logic::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED, owned_by_block};
 use crate::logic::validate::validate_ports;
 use crate::periphery::periphery;
 use crate::xml::{Element, Node};
@@ -157,6 +157,12 @@ pub fn adopt_one(
     );
     if o.block_type == RULE_BLOCK_TYPE {
         return adopt_rule(doc, o, &ident, slug, module, lock);
+    }
+    if owned_by_block(doc, o) {
+        return Err(fail(format!(
+            "cannot adopt {ident}: it belongs to the block it is nested in (an energy flow \
+             monitor's own meter) and rides along with it — adopt that block instead"
+        )));
     }
     if builtin(&o.block_type).is_none() {
         return Err(fail(format!(
