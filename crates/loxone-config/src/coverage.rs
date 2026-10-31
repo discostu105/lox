@@ -325,13 +325,13 @@ impl Coverage {
             _ => r.total,
         });
         s.push_str(&format!(
-            "\npage logic: {managed} of {total} blocks managed; {manageable} of {total} are \
-             of a type Lox Logic can manage\n"
+            "\npage logic: {managed} of {total} blocks managed, {manageable} of {total} of a type \
+             Lox Logic can manage\n"
         ));
         let todo: Vec<&Adoptable> = self.pages.iter().flat_map(|r| &r.adoptable).collect();
         if !todo.is_empty() {
             s.push_str(&format!(
-                "not managed yet ({}) — `loxl adopt <cfg> --uuid <uuid> --as <slug> …` \
+                "not managed yet ({}), adopt with `loxl adopt <cfg> --uuid <uuid> --as <slug> …` \
                  (an extern keeps its slug):\n",
                 todo.len()
             ));
@@ -350,8 +350,8 @@ impl Coverage {
         let devices: Vec<&Adoptable> = self.periphery.iter().flat_map(|r| &r.adoptable).collect();
         if !devices.is_empty() {
             s.push_str(&format!(
-                "virtual and Modbus devices not managed yet ({}) — `loxl adopt <cfg> \
-                 --uuid <uuid> --as <slug> …` takes the I/O below along:\n",
+                "virtual and Modbus devices not managed yet ({}). `loxl adopt <cfg> \
+                 --uuid <uuid> --as <slug> …` adopts a device with its I/O:\n",
                 devices.len()
             ));
             for a in devices {
@@ -368,12 +368,12 @@ impl Coverage {
         }
         if !self.carried.is_empty() {
             s.push_str(
-                "attributes of managed blocks carried from the base — set in Loxone Config, \
-                 not in the source (type, attribute, blocks):\n",
+                "attributes of managed blocks set in Loxone Config, not in the source \
+                 (type, attribute, blocks):\n",
             );
             for c in &self.carried {
                 let claim = match c.param {
-                    Some(p) => format!("  — claim with `{p}:`"),
+                    Some(p) => format!("  claim with `{p}:`"),
                     None => String::new(),
                 };
                 s.push_str(&format!(
@@ -392,8 +392,7 @@ impl Coverage {
             .collect();
         if !reference.is_empty() {
             s.push_str(&format!(
-                "reference-only types on pages (no verified connector table yet, \
-                 docs/connector-db.md): {}\n",
+                "reference-only types on pages (Lox Logic does not know their connectors yet): {}\n",
                 reference.join(", ")
             ));
         }

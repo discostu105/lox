@@ -97,14 +97,13 @@ pub fn plan_tests(
         let compile_err = |msg: String| Error::Compile(format!("test \"{test}\": {msg}"));
         let uuid = uuid_of.get(port.slug.as_str()).ok_or_else(|| {
             compile_err(format!(
-                "`{port}` — slug `{}` is not in the lockfile; only managed blocks \
-                 and pinned externs are addressable in the simulator",
+                "`{port}`: slug `{}` is not in the lockfile. The simulator reaches only managed blocks and pinned externs.",
                 port.slug
             ))
         })?;
         if !present.contains(*uuid) {
             return Err(compile_err(format!(
-                "`{port}` — object {uuid} is not in the compiled config"
+                "`{port}`: object {uuid} is not in the compiled config"
             )));
         }
         Ok(Signal {
@@ -185,15 +184,14 @@ fn plan_one(
                     None => 1.0,
                 };
                 if dt <= 0.0 {
-                    return compile_err(format!("`tick {} dt {dt}` — dt must be positive", tick.n));
+                    return compile_err(format!("`tick {} dt {dt}`: dt must be positive", tick.n));
                 }
                 cur.ticks = Some((tick.n, dt));
             }
             TestItem::Expect(e) => {
                 if cur.ticks.is_none() {
                     return compile_err(format!(
-                        "`expect {} {} {}` has no preceding `tick` — assertions read \
-                         the state after simulated time has advanced",
+                        "`expect {} {} {}` has no preceding `tick`. Add a `tick` before it, since assertions read the state after time advances.",
                         e.port, e.cmp, e.value
                     ));
                 }
@@ -212,14 +210,13 @@ fn plan_one(
     }
 
     if !steps.iter().any(|s| !s.expects.is_empty()) {
-        return compile_err("no `expect` — the test asserts nothing".into());
+        return compile_err("the test has no `expect`, so it asserts nothing".into());
     }
     if let Some(dangling) = steps.last()
         && dangling.ticks.is_none()
     {
         return compile_err(
-            "the final assignments are never executed — add a `tick` (and an \
-             `expect`) after them"
+            "the final assignments are never executed. Add a `tick` (and an `expect`) after them."
                 .into(),
         );
     }
@@ -504,8 +501,7 @@ pub fn lox_specs(plan: &TestPlan, compiled: &LoxoneDoc) -> Result<LoxSpecs> {
             for e in &step.expects {
                 if e.cmp == TestCmp::Ne {
                     return Err(Error::Compile(format!(
-                        "test \"{}\": `{}` — lox-cli's `lox sim` has no `!=`; run it in \
-                         the built-in simulator (`loxl test` without `--lox`)",
+                        "test \"{}\": `{}` uses `!=`, which lox-cli's `lox sim` lacks. Run it in the built-in simulator (`loxl test` without `--lox`).",
                         run.name, e.line
                     )));
                 }
@@ -517,9 +513,7 @@ pub fn lox_specs(plan: &TestPlan, compiled: &LoxoneDoc) -> Result<LoxSpecs> {
                     .expect("built as object");
                 if per_key.contains_key(e.cmp.symbol()) {
                     return Err(Error::Compile(format!(
-                        "test \"{}\": two `expect {} {} …` in the same step — lox-cli \
-                         keeps one comparator per port and step; split them with a \
-                         `tick`",
+                        "test \"{}\": two `expect {} {} …` in the same step, but lox-cli keeps one per port and step. Split them with a `tick`.",
                         run.name,
                         e.signal.port,
                         e.cmp.symbol()
@@ -612,13 +606,12 @@ impl TitleTable {
         let (port, uuid) = (&signal.port, &signal.object);
         let Some((title, block_type, _)) = self.info_of.get(uuid) else {
             return compile_err(format!(
-                "`{port}` — object {uuid} is not in the compiled config"
+                "`{port}`: object {uuid} is not in the compiled config"
             ));
         };
         let Some(title) = title else {
             return compile_err(format!(
-                "`{port}` — the {block_type} object has no title; lox-cli \
-                 addresses blocks by title"
+                "`{port}`: the {block_type} object has no title, and lox-cli addresses blocks by title. Give it a title."
             ));
         };
         let holders = self.by_title.get(title).map_or(&[][..], |v| v.as_slice());
@@ -640,10 +633,7 @@ impl TitleTable {
                 }
                 _ => {
                     return compile_err(format!(
-                        "`{port}` — title \"{title}\" names {} different objects in \
-                         the compiled config, so lox-cli cannot address this one; \
-                         give the block a unique title or room, or run the \
-                         built-in simulator (no --lox)",
+                        "`{port}`: title \"{title}\" names {} objects, so lox-cli cannot address this one. Give the block a unique title or room, or run the built-in simulator (no --lox).",
                         holders.len()
                     ));
                 }
@@ -905,7 +895,7 @@ mod tests {
         assert!(holds(TestCmp::Ne, 1.0, 0.0) && !holds(TestCmp::Ne, 0.1 + 0.2, 0.3));
         // lox-cli's scenarios know no `!=`.
         let err = lox_specs(&plan, &doc).err().unwrap().to_string();
-        assert!(err.contains("has no `!=`"), "{err}");
+        assert!(err.contains("lox sim` lacks"), "{err}");
     }
 
     #[test]
@@ -924,7 +914,7 @@ mod tests {
         let plan = plan_tests(&module, &lock, &doc, None).unwrap();
         // lox-cli addresses by title.
         let err = lox_specs(&plan, &doc).err().unwrap().to_string();
-        assert!(err.contains("names 2 different objects"), "{err}");
+        assert!(err.contains("names 2 objects"), "{err}");
     }
 
     #[test]
@@ -977,7 +967,7 @@ mod tests {
         )
         .unwrap();
         let err = lox_specs(&plan, &doc).err().unwrap().to_string();
-        assert!(err.contains("names 2 different objects"), "{err}");
+        assert!(err.contains("names 2 objects"), "{err}");
     }
 
     #[test]

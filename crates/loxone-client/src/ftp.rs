@@ -76,10 +76,14 @@ pub fn parse_backup_name(name: &str, size: u64) -> Option<BackupInfo> {
 pub fn list_backups(conn: &Connection) -> Result<Vec<BackupInfo>> {
     let host = ftp_host(conn);
     let listing = ftp_with_retry(|| {
-        let mut ftp = FtpStream::connect(format!("{}:21", host))
-            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        let mut ftp = FtpStream::connect(format!("{}:21", host)).with_context(|| {
+            format!(
+                "Could not connect to {}:21. Check that FTP is enabled on the Miniserver.",
+                host
+            )
+        })?;
         ftp.login(&conn.user, &conn.pass)
-            .context("FTP login failed — check your admin credentials")?;
+            .context("FTP login failed. Check your admin credentials.")?;
         let listing = ftp.list(Some("/prog")).unwrap_or_default();
         ftp.quit().ok();
         Ok(listing)
@@ -115,10 +119,14 @@ pub fn download_backup(conn: &Connection, filename: &str) -> Result<Vec<u8>> {
     let host = ftp_host(conn);
     let path = format!("/prog/{}", filename);
     ftp_with_retry(|| {
-        let mut ftp = FtpStream::connect(format!("{}:21", host))
-            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        let mut ftp = FtpStream::connect(format!("{}:21", host)).with_context(|| {
+            format!(
+                "Could not connect to {}:21. Check that FTP is enabled on the Miniserver.",
+                host
+            )
+        })?;
         ftp.login(&conn.user, &conn.pass)
-            .context("FTP login failed — check your admin credentials")?;
+            .context("FTP login failed. Check your admin credentials.")?;
         ftp.transfer_type(suppaftp::types::FileType::Binary)
             .context("Failed to set binary transfer mode")?;
         let cursor = ftp
@@ -140,10 +148,14 @@ pub fn upload_config(conn: &Connection, data: &[u8]) -> Result<()> {
     let host = ftp_host(conn);
     let path = format!("/prog/{}", CONFIG_UPLOAD_NAME);
     ftp_with_retry(|| {
-        let mut ftp = FtpStream::connect(format!("{}:21", host))
-            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        let mut ftp = FtpStream::connect(format!("{}:21", host)).with_context(|| {
+            format!(
+                "Could not connect to {}:21. Check that FTP is enabled on the Miniserver.",
+                host
+            )
+        })?;
         ftp.login(&conn.user, &conn.pass)
-            .context("FTP login failed — check your admin credentials")?;
+            .context("FTP login failed. Check your admin credentials.")?;
         ftp.transfer_type(suppaftp::types::FileType::Binary)
             .context("Failed to set binary transfer mode")?;
         let mut reader = std::io::Cursor::new(data);
@@ -165,10 +177,14 @@ pub fn download_custom_changes(conn: &Connection) -> Result<Vec<(String, Vec<u8>
     use suppaftp::Status;
     let host = ftp_host(conn);
     ftp_with_retry(|| {
-        let mut ftp = FtpStream::connect(format!("{}:21", host))
-            .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
+        let mut ftp = FtpStream::connect(format!("{}:21", host)).with_context(|| {
+            format!(
+                "Could not connect to {}:21. Check that FTP is enabled on the Miniserver.",
+                host
+            )
+        })?;
         ftp.login(&conn.user, &conn.pass)
-            .context("FTP login failed — check your admin credentials")?;
+            .context("FTP login failed. Check your admin credentials.")?;
         let names = match ftp.nlst(Some(CUSTOM_CHANGES_DIR)) {
             Ok(names) => names,
             Err(FtpError::UnexpectedResponse(r)) if r.status == Status::FileUnavailable => {

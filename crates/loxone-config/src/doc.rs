@@ -434,11 +434,8 @@ impl LoxoneDoc {
             return Ok(());
         }
         Err(Error::Structure(format!(
-            "{role} carries {} duplicate UUID(s) ({}{}) — two objects or \
-             connectors share one identity, so wiring to either is \
-             ambiguous. Open and save the config once in Loxone Config \
-             (it keeps the first occurrence and re-mints the rest), then use \
-             that save; docs/loxone-format.md names the known cause",
+            "{role} has {} duplicate UUIDs ({}{}), so wiring to them is ambiguous. \
+             Open and save the config once in Loxone Config, which gives the duplicates new UUIDs, then use that save.",
             dups.len(),
             dups.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
             if dups.len() > 3 { ", …" } else { "" }

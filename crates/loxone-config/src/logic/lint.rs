@@ -361,7 +361,7 @@ pub fn lint_dead_outputs(
             "feeds only ref plumbing that itself feeds nothing".to_string()
         };
         if has_iodata[start] {
-            detail.push_str(" — carries IoData, may be app-visible");
+            detail.push_str(" (carries IoData, may be visible in the app)");
         }
         findings.push(LintFinding {
             kind: LintKind::DeadOutputs,

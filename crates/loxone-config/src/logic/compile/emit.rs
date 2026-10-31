@@ -287,8 +287,8 @@ fn element_attrs(
     {
         return Err(Error::Compile(format!(
             "block `{}`: `At:` sets a fixed time of day, but the block fires on a \
-             time function (`Typ=\"{}\"`, set in Loxone Config) — remove `At:` or \
-             switch the block to a fixed time in Loxone Config",
+             time function (`Typ=\"{}\"`, set in Loxone Config). Remove `At:`, or \
+             switch the block to a fixed time in Loxone Config.",
             block.slug, typ.1
         )));
     }
@@ -354,9 +354,8 @@ fn push_connectors(
         if let Some(carried) = res.and_then(|r| r.gui_ports.get(key)) {
             if managed_defs.contains_key(&(block.slug.clone(), key.clone())) {
                 return Err(Error::Compile(format!(
-                    "block `{}`: connector `{key}` carries the GUI's input \
-                         inversion (`Inv=`) and is GUI-owned — its value cannot \
-                         be set from source; change it in Loxone Config instead",
+                    "block `{}`: connector `{key}` is inverted in Loxone Config, \
+                         so its value cannot be set from source. Change it in Loxone Config instead.",
                     block.slug
                 )));
             }

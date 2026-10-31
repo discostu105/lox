@@ -154,8 +154,7 @@ impl Module {
                             || matches!(i, Item::Template(other) if other.name == *s)
                     }) {
                         return Err(fail(format!(
-                            "`{s}` is a template or instance, not an object — pass one \
-                             of an instance's blocks by its expanded name (`{s}_<block>`)"
+                            "`{s}` is a template or instance, not an object. Pass one of an instance's blocks by its expanded name (`{s}_<block>`)."
                         )));
                     }
                     objects.insert(name, s);
@@ -214,8 +213,7 @@ impl Module {
                 }
                 if objects.contains_key(n.as_str()) {
                     return Err(fail(format!(
-                        "object parameter `{n}` used as a value — reference one of its \
-                         ports (`{n}.<Port>`) or a value parameter instead"
+                        "object parameter `{n}` is used as a value. Reference one of its ports (`{n}.<Port>`) or use a value parameter."
                     )));
                 }
             }

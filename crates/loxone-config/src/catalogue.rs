@@ -125,7 +125,7 @@ pub fn update(
                 .iter()
                 .any(|t| t.to_ascii_lowercase().contains(&uuid))
             {
-                left.push(change(format!("{what}; other entries refer to it")));
+                left.push(change(format!("{what}: other entries refer to it")));
             } else {
                 removed.insert(idx);
                 applied.push(change(what.to_string()));
@@ -1987,7 +1987,7 @@ mod tests {
         );
         let cat = catalogue(&central);
         let u = update(&cat, &live, &compiled, NOW).unwrap();
-        assert_eq!(whats(&u).1, ["deleted; other entries refer to it"]);
+        assert_eq!(whats(&u).1, ["deleted: other entries refer to it"]);
         assert_eq!(u.text, cat);
     }
 

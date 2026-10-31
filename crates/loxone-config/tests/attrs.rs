@@ -77,7 +77,7 @@ fn attribute_assignments_are_canonical_and_never_wired() {
 
     let err = Module::parse("extern v = VirtualIn(iname: \"VI1\")\nv.room <- v.Q\n").unwrap_err();
     assert!(
-        err.to_string().contains("object attribute, not a port"),
+        err.to_string().contains("is an attribute, not a port"),
         "{err}"
     );
 }
@@ -131,13 +131,13 @@ fn attribute_misuse_is_refused() {
     };
 
     // Managed blocks: the label is the title.
-    fails("b = Not(\"Nicht\")\nb.title = \"x\"\n", "give it a label");
+    fails("b = Not(\"Nicht\")\nb.title = \"x\"\n", "Give it a label");
     fails("b = Not(\"Nicht\")\nb.room = \"Keller\"\n", "Keller");
     fails("klima.room = \"Pool\"\n", "klima");
     // Rewriting what the extern is matched by would break the match.
     fails(
         "extern s = Switch(title: \"Störmeldung\")\ns.title = \"Alarm\"\n",
-        "pin it by `uuid:`",
+        "Pin the extern by `uuid:`",
     );
     fails(
         "extern w = Switch(title: \"Freigabe\", room: \"Technikraum\")\nw.room = \"Pool\"\n",
@@ -150,7 +150,7 @@ fn attribute_misuse_is_refused() {
     fails(&format!("{EXTERNS}klima.title = 5s\n"), "not a unit value");
     fails(
         "template t(x: LoxAIRDevice)\n\tx.room = \"Pool\"\nend\n",
-        "top-level statements, D39",
+        "to the top level",
     );
 
     // Compile-time: rooms are named by title and must exist, once.
@@ -165,11 +165,11 @@ fn attribute_misuse_is_refused() {
     // An attribute the object does not carry is never added.
     fails(
         "extern vi = VirtualIn(iname: \"VI1\")\nvi.room = \"Pool\"\n",
-        "carries no room binding",
+        "has no room binding",
     );
     fails(
         &format!("{EXTERNS}klima.category = \"Klima\"\n"),
-        "set it once",
+        "Set it once",
     );
     // Two slugs resolving to one object must not both claim it.
     fails(

@@ -345,9 +345,9 @@ fn route_through_mirrors(
     let route_err = |which: &str, endpoint: String, refs: Vec<String>| {
         Error::Compile(format!(
             "wire `{to_ref} <- {from_ref}`: several mirrors of {which} \
-                     `{endpoint}` sit on the consumer's page ({}) — declare the \
-                     intended one explicitly (`extern … = \
-                     InputRef(mirrors: …)` or a `uuid:` pin) and wire through it",
+                     `{endpoint}` are on the consumer's page ({}). Declare the \
+                     one you mean (`extern … = \
+                     InputRef(mirrors: …)` or a `uuid:` pin) and wire through it.",
             refs.join(", ")
         ))
     };

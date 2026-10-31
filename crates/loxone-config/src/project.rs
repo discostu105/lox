@@ -82,7 +82,7 @@ impl Project {
             if line.starts_with('[') {
                 return Err(err(
                     lineno,
-                    "tables are not part of the project format — flat `key = \"value\"` lines only",
+                    "tables are not part of the project format. Use flat `key = \"value\"` lines.",
                 ));
             }
             let Some((key, rest)) = line.split_once('=') else {

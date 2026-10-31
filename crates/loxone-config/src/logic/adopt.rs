@@ -161,19 +161,18 @@ pub fn adopt_one(
     if owned_by_block(doc, o) {
         return Err(fail(format!(
             "cannot adopt {ident}: it belongs to the block it is nested in (an energy flow \
-             monitor's own meter) and rides along with it — adopt that block instead"
+             monitor's own meter). Adopt that block instead."
         )));
     }
     if builtin(&o.block_type).is_none() {
         return Err(fail(format!(
-            "cannot adopt {ident}: `{}` is not in the verified builtin table — only \
-             evidence-verified types can be managed (docs/connector-db.md)",
+            "cannot adopt {ident}: `{}` is not a type loxl can manage yet. Keep it as an extern.",
             o.block_type
         )));
     }
     if let Some((s, _)) = lock.objects.iter().find(|(_, lo)| lo.uuid == uuid) {
         return Err(fail(format!(
-            "{ident} is already managed as `{s}` — nothing to adopt"
+            "{ident} is already managed as `{s}`. There is nothing to adopt."
         )));
     }
     // Promotion: the object is an extern of the module. It keeps its
@@ -187,9 +186,7 @@ pub fn adopt_one(
     if let Some(x) = &promoted {
         if x != slug {
             return Err(fail(format!(
-                "{ident} is extern `{x}` of this module — promoting it keeps the slug \
-                 every statement already uses: adopt it `--as {x}` (rename it \
-                 afterwards with `loxl rename`)"
+                "{ident} is extern `{x}` of this module. Adopt it with `--as {x}`, and rename it afterwards with `loxl rename` if needed."
             )));
         }
         check_promotable(doc, x, uuid, raw, module, lock).map_err(fail)?;
@@ -198,9 +195,7 @@ pub fn adopt_one(
         && doc.config_version().as_deref() != Some(pin)
     {
         return Err(fail(format!(
-            "the config's ConfigVersion {} differs from the lock's pin {pin} — qualify \
-             the release first (docs/design.md D22): one oracle open+save, then \
-             `loxl compile --accept-version`",
+            "Config saved by Loxone Config {}, but the lockfile expects {pin}. Run `loxl compile --accept-version` first.",
             doc.config_version().as_deref().unwrap_or("(none)")
         )));
     }
@@ -231,7 +226,7 @@ pub fn adopt_one(
         .collect();
     if promoted.is_none() && taken.contains(slug) {
         return Err(fail(format!(
-            "slug `{slug}` is already taken in this module/lock — pick another"
+            "slug `{slug}` is already taken in this module or lockfile. Pick another."
         )));
     }
     taken.insert(slug.to_string());
@@ -338,11 +333,9 @@ pub fn adopt_one(
             if !declared {
                 return Err(fail(format!(
                     "the config wires {slug}.{fk} into managed block `{to_slug}` port \
-                     {tk}, which `{to_slug}`'s declaration does not state — the next \
-                     compile would tear that wire down. Add `{tk}: {slug}.{fk},` to the \
-                     argument list of `{to_slug}` and rerun the adoption (the reference \
-                     to `{slug}` is fine before it is declared: fragments validate as a \
-                     whole after the append)",
+                     {tk}, which the declaration of `{to_slug}` does not state, so the next \
+                     compile would remove it. Add `{tk}: {slug}.{fk},` to the \
+                     argument list of `{to_slug}` and run the adoption again.",
                     fk = w.from.port,
                     tk = w.to.port,
                 )));
@@ -536,8 +529,7 @@ pub(super) fn check_promotable(
     // agree unless a template instance adds statements.
     if count(expanded) != count(raw) {
         return Err(format!(
-            "a template instance writes onto `{x}` — move those statements out of the \
-             template first, then promote it"
+            "a template instance sets `{x}`. Move those statements out of the template, then adopt it."
         ));
     }
     // `.room`/`.category` (D63) and a DayTimer's `schedule` claim hold on
@@ -564,8 +556,7 @@ pub(super) fn check_promotable(
         || lock.removed_attrs.contains_key(uuid)
     {
         return Err(format!(
-            "a withdrawn statement on `{x}` has not reached the Miniserver yet — push \
-             first, then promote it from the fresh download"
+            "a removed statement on `{x}` has not reached the Miniserver yet. Push first, then adopt it from a fresh download."
         ));
     }
     Ok(())
@@ -691,10 +682,7 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
     }
     if !VERIFIED_BLOCK_VERSIONS.contains(&el.attr("V").unwrap_or("")) {
         return Err(format!(
-            "block version V=\"{}\" is not one the connector table is verified \
-             for ({}) — connector indexes are verified per version, so this \
-             needs a save-oracle run for your Loxone Config version first \
-             (docs/connector-db.md, \"Admit a type yourself\")",
+            "block version V=\"{}\" is not supported (supported: {}). Keep the block as an extern.",
             el.attr("V").unwrap_or(""),
             VERIFIED_BLOCK_VERSIONS.join(", ")
         ));
@@ -817,12 +805,12 @@ fn adopt_rule(
     let fail = |m: String| Error::Compile(m);
     if let Some((s, _)) = lock.rules.iter().find(|(_, u)| **u == o.uuid) {
         return Err(fail(format!(
-            "{ident} is already rule `{s}` — nothing to adopt"
+            "{ident} is already rule `{s}`. There is nothing to adopt."
         )));
     }
     let Some(title) = o.title.clone().filter(|t| !t.is_empty()) else {
         return Err(fail(format!(
-            "cannot adopt {ident}: a rule without a name — name it in the app first"
+            "cannot adopt {ident}: the rule has no name. Name it in the app first."
         )));
     };
     let objects = doc.objects();
@@ -832,8 +820,7 @@ fn adopt_rule(
         .count();
     if same_name > 1 {
         return Err(fail(format!(
-            "cannot adopt {ident}: the config has {same_name} rules of this name — rename \
-             all but one in the app"
+            "cannot adopt {ident}: the config has {same_name} rules of this name. Rename all but one in the app."
         )));
     }
     let promoted = lock
@@ -844,7 +831,7 @@ fn adopt_rule(
     match &promoted {
         Some(x) if x != slug => {
             return Err(fail(format!(
-                "{ident} is extern `{x}` of this module — adopt it `--as {x}`"
+                "{ident} is extern `{x}` of this module. Adopt it with `--as {x}`."
             )));
         }
         Some(_) => {}
@@ -861,7 +848,7 @@ fn adopt_rule(
                 || module.blocks().any(|b| b.slug == slug);
             if !valid || taken {
                 return Err(fail(format!(
-                    "`{slug}` is not a free, valid slug ([a-z][a-z0-9_]*) — pick another"
+                    "`{slug}` is taken or not a valid slug ([a-z][a-z0-9_]*). Pick another."
                 )));
             }
         }

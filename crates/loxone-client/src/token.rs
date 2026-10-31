@@ -365,7 +365,7 @@ pub async fn authenticate_ws(ws: &mut WsStream, conn: &Connection) -> Result<()>
             Ok(None) => {
                 TOKEN_REUSE_REJECTED.store(true, Ordering::Relaxed);
                 if crate::client::verbose() >= 1 {
-                    eprintln!("stored token rejected by the Miniserver; requesting a new one");
+                    eprintln!("Miniserver rejected the stored token, requesting a new one");
                 }
             }
             // The socket is likely unusable; the caller reconnects and, with
