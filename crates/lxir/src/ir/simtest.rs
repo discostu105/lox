@@ -558,6 +558,7 @@ mod tests {
                     superseded_layout: None,
                     page_uuid: None,
                     expr_owned: false,
+                    states: Vec::new(),
                 },
             );
         }

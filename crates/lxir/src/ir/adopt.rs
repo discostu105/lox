@@ -487,6 +487,7 @@ pub fn adopt_one(
             superseded_layout: None,
             page_uuid: Some(lift.page_uuids[page].clone()),
             expr_owned: false,
+            states: Vec::new(),
         },
     );
     // The adopted-from config is the new drift baseline: nothing changed
@@ -621,6 +622,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 superseded_layout: None,
                 page_uuid: Some(lift.page_uuids[page].clone()),
                 expr_owned: false,
+                states: Vec::new(),
             },
         );
     }

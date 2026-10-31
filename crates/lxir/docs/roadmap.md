@@ -495,9 +495,13 @@ docs 2026-08-26); the schema is corpus-derived from 10 real rules.
 - [x] Catalogue entries for memory flags, pulses at a time, digital day
       timers and the info displays of sensors (`InfoOnlyAnalog`/
       `InfoOnlyDigital`, with statistics), 2026-10-30 (#184).
-- [ ] Catalogue entries for light controllers, shading and meters, and
-      the notification question of #155 — each from Config saves that
-      list them (#184).
+- [x] Catalogue entries for jalousies, central light and shading blocks
+      and meters; a minted jalousie gets the states a save would give it
+      (D66), 2026-10-31 (#190, #184).
+- [ ] Catalogue entries for light controllers (circuits as
+      `subControls`), the single-instance types (alarm, smoke alarm,
+      irrigation, room controller) and the notification question of
+      #155 — each from Config saves that list them.
 
 ## Tooling & ecosystem
 

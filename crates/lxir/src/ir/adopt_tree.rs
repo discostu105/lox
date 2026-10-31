@@ -383,6 +383,7 @@ pub(super) fn adopt_device(
                 superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
+                states: Vec::new(),
             },
         );
     }

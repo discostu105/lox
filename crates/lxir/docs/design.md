@@ -2024,3 +2024,28 @@ Anything unverified is an error, not a heuristic:
   the house Miniserver: description and unit of a garden sensor pushed
   (the Miniserver formatted the value as `8.2 °C`, the app served
   `%.1f °C`) and withdrawn (element byte-identical to before, `8.2°`).
+
+- **D66 — Blocks minted from source in the app** (2026-10-31). The
+  push writes the app catalogue (D61) and lists a new control only when
+  lxir reproduces the entry Loxone Config writes for its type. Most
+  entries name states a save adds to the block — a jalousie's seven
+  special states (`SpStates=`) — so a block minted from source first gets
+  what that save would give it (`connectors::save_defaults`): the states,
+  minted once with the block and pinned in the lock (`states`, lockfile
+  v8), `<IoData Visu="true">` and the history settings `<COHist>`. Once
+  the base carries the block they are the GUI's (D19), like every
+  `SpStates=`. New entry types, each reproduced byte for byte from the
+  corpus of three saves (98 entries hidden and written again): the
+  automatic jalousie (`Jalousie`), the central light and shading blocks
+  (`CentralLightController`, `CentralJalousie`, their members from
+  `rec=`), and the four meters (`Meter`, details and `statisticV2` from
+  the units, the power name and the `<statGrp>` groups). `defaultRating`
+  is `<IoData Rating=>`. A new control of a known type without a room
+  or a category is named by the push: the app does not list it. Not
+  derived: a light controller's circuits (`subControls`, from its
+  circuit settings and the actuators it drives), a central block without
+  members, a meter with a unit of its own for the total, the
+  single-instance types (alarm, smoke alarm, irrigation, room
+  controller) — their entries wait for a save. Validated: oracle
+  session 28 (a minted jalousie: the save kept its states, `<IoData>`
+  and `<COHist>`, a recompile of the save byte-identical).

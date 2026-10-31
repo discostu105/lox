@@ -1192,6 +1192,30 @@ pub fn carried_children(block_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// What a Loxone Config save gives a block minted from source whose app
+/// entry names it (D66, oracle session 28): the number of special states
+/// (`SpStates=`, minted once and pinned in the lock) and the child
+/// elements after the connectors, in the save's order. A block the base
+/// carries keeps its own (D19).
+pub fn save_defaults(block_type: &str) -> Option<SaveDefaults> {
+    match block_type {
+        "AutoJalousie" => Some((
+            7,
+            &[
+                ("IoData", &[("Visu", "true")]),
+                ("COHist", &[("TRK_NE", "20"), ("TRK_MAX", "100")]),
+            ],
+        )),
+        _ => None,
+    }
+}
+
+/// The special-state count and child elements of [`save_defaults`].
+pub type SaveDefaults = (
+    usize,
+    &'static [(&'static str, &'static [(&'static str, &'static str)])],
+);
+
 /// Builtin types that are adopted but never minted: a block a device
 /// carries — the Code Touch's and the Intercom's (bound by `Ref=`), and
 /// the Touch Pure Flex's controller — exists because Loxone Config paired

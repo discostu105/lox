@@ -33,11 +33,13 @@ use std::path::Path;
 /// v2 adds the `removed` tombstone map (D31); v3 the attribute claims on
 /// externs (`attr_claims`/`removed_attrs`, D39); v4 `superseded_layout`
 /// (D42); v5 the pages the compiler created (`pages`, D56); v6 the light
-/// moods it minted (`moods`, D58); v7 the named rules (`rules`, D60). Older locks load fine (the maps default to empty); saving always
+/// moods it minted (`moods`, D58); v7 the named rules (`rules`, D60); v8
+/// the special states of a minted block (`states`, D66). Older locks
+/// load fine (the maps default to empty); saving always
 /// writes the current version, so an old binary — whose version check
 /// refuses the newer number — can never silently drop state it does not
 /// know about.
-pub const LOCKFILE_VERSION: u32 = 7;
+pub const LOCKFILE_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -194,6 +196,13 @@ pub struct LockedObject {
     /// statement: no hand ever wrote it, the expression is the sole owner.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expr_owned: bool,
+    /// The special states (`SpStates=`) the compiler minted for a block
+    /// whose app entry names them (D66): what a Loxone Config save would
+    /// give the new block. A recompile against a base from before the
+    /// deployment writes the same UUIDs; once the base carries the block,
+    /// its own `SpStates=` is the GUI's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<String>,
 }
 
 /// What a removal tombstone remembers: enough to recognize the object in
@@ -332,6 +341,7 @@ mod tests {
                 superseded_layout: None,
                 page_uuid: Some("00000002-0000-0000-ffff504f94112233".into()),
                 expr_owned: false,
+                states: Vec::new(),
             },
         );
         let json = lock.to_json();
@@ -392,6 +402,7 @@ mod tests {
                 superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
+                states: Vec::new(),
             },
         );
         assert!(!lock.to_json().contains("superseded_layout"));
@@ -420,6 +431,7 @@ mod tests {
                 superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
+                states: Vec::new(),
             },
         );
         lock.rename_object("a", "b").unwrap();

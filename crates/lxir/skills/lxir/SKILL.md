@@ -93,6 +93,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   `lxir coverage` lists what is not managed yet; adopting an extern
   `--as` its own slug promotes it (its wires move into the declaration).
   A managed block takes `.room`/`.category`, never `.title` (its label).
+  The app lists a control only with both; the push adds the entry for
+  the types lxir knows (switches, inputs, jalousies, central blocks,
+  meters, …) and names the rest, which a save from Loxone Config lists.
   The decompile view is for reading and does not compile.
 
 ## When the compiler refuses

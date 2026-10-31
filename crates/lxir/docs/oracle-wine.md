@@ -630,6 +630,28 @@ input an added `Desc`.
   already) — GUI bookkeeping, carried. A recompile against the saved
   file was byte-identical.
 
+## Blocks minted for the app (session 28, D66) — passed
+
+Ran 2026-10-31 against a copy of the house config (Loxone Config
+17.2.8.28). First thirteen blocks minted bare (light controller,
+jalousie, the four meters, central light and shading, alarm, smoke
+alarm, irrigation, room controller, an analog virtual input) to see what
+a save adds: `WF` 147456 → 16384 on all; the special states on all but
+the meters; `<IoData Visu="true">` (with `Rating="1"` on the light
+controller, the central blocks and the irrigation); a jalousie's and a
+light controller's `<COHist>`; the light controller's stock moods,
+`<LSConfig>`, `<PSD>`, `<HCL>` and its `uuidSeqencing`/`uuidSeqenceIx`
+lists; a meter's `Rec=""` and `<statGrp>` groups; `<Display>` on the
+central blocks and the smoke alarm; `Entries="40"` on the alarms; the
+irrigation's zones and the room controller's schedule.
+
+Then a jalousie minted with seven special states, `<IoData>` and
+`<COHist>`, a room and a category:
+
+- **Pass:** the semantic diff was empty. The save kept the states,
+  `<IoData Visu Cr Pr>` and `<COHist>` as lxir wrote them and set `WF`
+  to 16384. A recompile against the saved file was byte-identical.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):
