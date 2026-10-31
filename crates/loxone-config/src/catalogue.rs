@@ -349,7 +349,7 @@ fn modes(
     };
     let (members, close) = object(body, section.value.start)?;
     let by_number = |doc: &LoxoneDoc| -> BTreeMap<String, (String, String)> {
-        crate::logic::schedule::config_modes(doc)
+        crate::doc::config_modes(doc)
             .into_iter()
             .map(|(uuid, title, n)| (n.to_string(), (uuid, title)))
             .collect()
@@ -383,7 +383,7 @@ fn modes(
     // also when an older push left it out.
     let listed: BTreeSet<&str> = members.iter().map(|m| m.key.as_str()).collect();
     let mut added = String::new();
-    for (uuid, title, n) in crate::logic::schedule::config_modes(compiled) {
+    for (uuid, title, n) in crate::doc::config_modes(compiled) {
         let key = n.to_string();
         if listed.contains(key.as_str()) {
             continue;

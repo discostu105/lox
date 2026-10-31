@@ -642,6 +642,20 @@ pub fn same_serial(a: &str, b: &str) -> bool {
     digits(a) == digits(b)
 }
 
+/// The config's operating modes: UUID, title and `Mode=` number (absent
+/// is 0, the holiday mode's).
+pub(crate) fn config_modes(doc: &LoxoneDoc) -> Vec<(String, String, i64)> {
+    doc.objects()
+        .iter()
+        .filter(|o| o.block_type == "Mode")
+        .filter_map(|o| {
+            let el = doc.element_at(&o.path)?;
+            let number = el.attr("Mode").and_then(|v| v.parse().ok()).unwrap_or(0);
+            Some((o.uuid.clone(), o.title.clone().unwrap_or_default(), number))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

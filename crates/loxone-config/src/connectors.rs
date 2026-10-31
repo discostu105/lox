@@ -1251,7 +1251,7 @@ pub fn file_params(block_type: &str) -> &'static [&'static str] {
 
 /// The unit a port's value is in, as far as a suffixed value is concerned
 /// (D52). Known only where Loxone's documentation states one
-/// ([`crate::port_meta`]); an undocumented port keeps the D27 behavior
+/// (`port_meta`); an undocumented port keeps the D27 behavior
 /// (time suffixes scale into seconds, `%`/`K` are annotations).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortUnit {

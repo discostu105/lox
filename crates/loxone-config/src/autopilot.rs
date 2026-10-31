@@ -19,7 +19,7 @@
 
 use serde_json::Value;
 
-pub use crate::autopilot_caps::{ActionCap, CAPABILITIES, Capability, EventCap, Kind};
+pub use crate::autopilot_caps::{CAPABILITIES, Capability, EventCap, Kind};
 
 /// Parse a decoded `APC=` attribute value. `None` if it is not JSON —
 /// callers fall back to showing the raw text.

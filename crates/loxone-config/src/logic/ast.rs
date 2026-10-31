@@ -721,45 +721,7 @@ pub struct SetDecl {
     pub bulk: Option<usize>,
 }
 
-/// An object attribute an extern assignment can claim (D39). Lowercase
-/// names after the dot: no connector in the corpus carries these keys, and
-/// a port of that name could not be wired or set anyway (`=`/`<-` on it
-/// always mean the attribute).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Attr {
-    /// The object's `Title=`.
-    Title,
-    /// The room binding: `Pr=` on the object's `<IoData>` (a `Place` UUID).
-    Room,
-    /// The category binding: `Cr=` on the object's `<IoData>` (a
-    /// `Category` UUID).
-    Category,
-}
-
-impl Attr {
-    pub const ALL: [Attr; 3] = [Attr::Title, Attr::Room, Attr::Category];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Attr::Title => "title",
-            Attr::Room => "room",
-            Attr::Category => "category",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Attr> {
-        Attr::ALL.into_iter().find(|a| a.name() == s)
-    }
-}
-
-impl fmt::Display for Attr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
+pub use crate::lock::Attr;
 
 /// `target.title = "…"`, `target.room = "…"`, `target.category = "…"` —
 /// claim one attribute of an *extern* object (D39): its title, or its

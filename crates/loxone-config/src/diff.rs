@@ -564,6 +564,7 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
 /// devices (#197) joined the projection. `loxl drift` accepts it so an
 /// upgrade alone does not read as drift; the next compile records the
 /// current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 8)
 }
@@ -572,6 +573,7 @@ pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
 /// Modbus devices (D64) and of physical inputs and outputs (D65) joined
 /// the projection. `loxl drift` accepts it so an upgrade alone does not
 /// read as drift; the next compile records the current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 7)
 }
@@ -580,6 +582,7 @@ pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
 /// (`<LightscenesC>`) joined the projection (D58). `loxl drift` accepts
 /// it so an upgrade alone does not read as drift; the next compile
 /// records the current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 6)
 }
@@ -588,6 +591,7 @@ pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
 /// and the `<Entry>` list) joined the projection (D53, lox#162). `loxl
 /// drift` accepts it so an upgrade alone does not read as drift; the next
 /// compile records the current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v5(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 5)
 }
@@ -596,6 +600,7 @@ pub fn semantic_fingerprint_v5(doc: &LoxoneDoc) -> String {
 /// joined the projection (D51). `loxl drift` accepts it so an upgrade
 /// alone does not read as drift; the next compile records the current
 /// form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v4(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 4)
 }
@@ -604,6 +609,7 @@ pub fn semantic_fingerprint_v4(doc: &LoxoneDoc) -> String {
 /// joined the projection (D41). `loxl drift` accepts it so an upgrade
 /// alone does not read as drift; the next compile records the current
 /// form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v3(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 3)
 }
@@ -612,6 +618,7 @@ pub fn semantic_fingerprint_v3(doc: &LoxoneDoc) -> String {
 /// Code16) joined the projection (D40). `loxl drift` accepts it so an
 /// upgrade alone does not read as drift; the next compile records the
 /// current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v2(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 2)
 }
@@ -619,6 +626,7 @@ pub fn semantic_fingerprint_v2(doc: &LoxoneDoc) -> String {
 /// The fingerprint as Lox Logic wrote it before room/category bindings joined
 /// the projection (D39) — recorded in every lock compiled until then.
 /// Accepted by `loxl drift` like [`semantic_fingerprint_v2`].
+#[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v1(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 1)
 }
