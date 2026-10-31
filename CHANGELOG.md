@@ -10,6 +10,24 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-10-31 — rules with weather, dates and messages
+
+Automatic Designer rules can react to the weather, the day of the month, daylight, sunrise and sunset and a date, and send push notifications, mails and message-center entries with pauses in between. Existing user operating modes are taken over with `adopt --uuid`.
+
+### Added
+- **lox logic rules**: conditions `when weather temperature > 25` (and the other fields of the weather service), `when day >= 15`, `when daylight [off]`, `when sunrise|sunset|dawn|dusk` and `when date "2026-12-24"`; actions `then notify "<subject>" "<text>"`, `then mail "<to>" "<subject>" "<text>"`, `then wait 2.5s` and `then message warning "<subject>" "<text>" [admins]`. Compiles wire the weather, day and daylight blocks into the AutoPilot container as Loxone Config does.
+
+### Changed
+- **loxone-config 0.4.0** (on crates.io): a smaller public API. Internal modules (`autopilot`, `blockdoc`,
+  `coverage`, `periphery`, `port_meta`, `scan`, `settings`) are private now, the ones only `loxl`, lox and the
+  tests use (`cli`, `lsp`, `library`, `observed_defaults`, the older `semantic_fingerprint_v*` forms) are hidden
+  from the docs, and `Module`, `CompileOptions` and `DocDiff` are re-exported at the top. The program-file
+  modules no longer depend on the Lox Logic ones (`lock::Attr`, formerly `logic::Attr`, which still re-exports it).
+- **lox logic adopt --uuid**: documented for user operating modes made in Loxone Config: the mode keeps its uuid and `Mode=` number, a new title renames it.
+
+### Fixed
+- **lox logic compile**: the "past the edge of the A3 sheet" warning lists only objects the compile placed, not ones laid out that way in Loxone Config (whose `--relayout` would rearrange the page).
+
 ## [0.46.0] — 2026-10-31
 
 ### Added
