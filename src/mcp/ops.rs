@@ -673,8 +673,80 @@ pub struct Wiring {
     /// The app control this block is, if it is visualized
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control: Option<ControlRef>,
+    /// With `live`: the app control's main value now (its `value`, `active`
+    /// or `position` state), formatted as the app shows it
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<crate::logic::LiveValue>,
+    /// With `live`: why the live values are missing (the WebSocket failed);
+    /// the wiring itself is still the config's
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_error: Option<String>,
     #[serde(flatten)]
     pub wiring: crate::logic::WiringView,
+}
+
+/// What `get_wiring` with `live` reads: the streamed states among the wire
+/// sources (and the center control's main value). Wires whose source is no
+/// streamed state (an unvisualized block, a hardware input) get no value.
+pub struct LivePlan {
+    owners: std::collections::HashMap<String, crate::logic::StateOwner>,
+    /// The center control's main state UUID
+    main: Option<String>,
+    /// The state UUIDs to read, each once
+    pub uuids: Vec<String>,
+}
+
+pub fn live_plan(structure: &Value, w: &Wiring) -> LivePlan {
+    let owners = crate::logic::state_owners(structure);
+    let states = &structure["controls"][&w.wiring.block.uuid]["states"];
+    let main = ["value", "active", "position"]
+        .iter()
+        .find_map(|k| states[*k].as_str())
+        .map(str::to_string);
+    let v = &w.wiring;
+    let mut uuids: Vec<String> = Vec::new();
+    let sources = main
+        .iter()
+        .chain(v.inputs.iter().chain(&v.outputs).map(|x| &x.source))
+        .chain(
+            v.upstream
+                .iter()
+                .chain(&v.downstream)
+                .flatten()
+                .map(|t| &t.source),
+        );
+    for s in sources {
+        if owners.contains_key(s) && !uuids.contains(s) {
+            uuids.push(s.clone());
+        }
+    }
+    LivePlan {
+        owners,
+        main,
+        uuids,
+    }
+}
+
+/// Fill in the values read for `plan` (one WebSocket state dump).
+pub fn apply_live_plan(
+    w: &mut Wiring,
+    plan: &LivePlan,
+    values: &std::collections::HashMap<String, Value>,
+) {
+    let live = |source: &str| crate::logic::live_value(&plan.owners, values, source);
+    w.value = plan.main.as_deref().and_then(live);
+    let v = &mut w.wiring;
+    for x in v.inputs.iter_mut().chain(v.outputs.iter_mut()) {
+        x.live = live(&x.source);
+    }
+    for t in v
+        .upstream
+        .iter_mut()
+        .chain(v.downstream.iter_mut())
+        .flatten()
+    {
+        t.live = live(&t.source);
+    }
 }
 
 /// What is wired to a control or logic block: inputs, outputs, parameters,
@@ -728,6 +800,8 @@ pub fn get_wiring(
     Ok(Wiring {
         config: snap.label,
         control,
+        value: None,
+        live_error: None,
         wiring,
     })
 }
@@ -1036,6 +1110,81 @@ mod tests {
         assert_eq!(state.outputs.get("Spots"), Some(&json!(40)));
         assert_eq!(state.outputs.get("Rot (3)"), Some(&Value::Null));
         assert_eq!(state.states.get("activeMoods"), Some(&json!([778])));
+    }
+
+    #[test]
+    fn live_wiring_reads_streamed_sources_once_and_never_guesses() {
+        use crate::logic::{BlockRef, TraceView, WireView, WiringView};
+        let block = |title: &str| BlockRef {
+            uuid: title.into(),
+            title: title.into(),
+            typ: String::new(),
+            key: None,
+            page: None,
+            room: None,
+            device: None,
+        };
+        let wire = |key: &str, source: &str| WireView {
+            key: key.into(),
+            block: block(key),
+            also: vec![],
+            source: source.into(),
+            live: None,
+        };
+        let mut w = Wiring {
+            config: "cached".into(),
+            control: None,
+            value: None,
+            live_error: None,
+            wiring: WiringView {
+                block: block("light"),
+                iname: None,
+                params: vec![],
+                // the lux sensor; a hardware input nobody streams
+                inputs: vec![wire("Lx", "lux-v"), wire("Tr", "hw-input")],
+                // a circuit (a subcontrol's state) the Miniserver sent nothing for
+                outputs: vec![wire("AQ1", "spots-pos")],
+                upstream: Some(vec![TraceView {
+                    depth: 1,
+                    parent_key: "Lx".into(),
+                    block: block("Helligkeit"),
+                    cycle: false,
+                    source: "lux-v".into(),
+                    live: None,
+                }]),
+                downstream: None,
+            },
+        };
+        let structure = json!({ "controls": {
+            "light": { "name": "Licht", "type": "LightControllerV2",
+                       "states": { "activeMoods": "moods" },
+                       "subControls": { "light/AI1": { "name": "Spots", "type": "Dimmer",
+                                                       "states": { "position": "spots-pos" } } } },
+            "lux": { "name": "Helligkeit", "type": "InfoOnlyAnalog",
+                     "details": { "format": "%.0flx" }, "states": { "value": "lux-v" } }
+        }});
+        let plan = live_plan(&structure, &w);
+        // each streamed source once, the hardware input not at all
+        assert_eq!(plan.uuids, ["lux-v", "spots-pos"]);
+        let values = std::collections::HashMap::from([("lux-v".to_string(), json!(22000))]);
+        apply_live_plan(&mut w, &plan, &values);
+        let lx = w.wiring.inputs[0].live.as_ref().unwrap();
+        assert_eq!(lx.value, json!(22000));
+        assert_eq!(lx.text.as_deref(), Some("22000lx"));
+        assert_eq!(lx.control, "Helligkeit");
+        assert!(w.wiring.inputs[1].live.is_none());
+        let spots = w.wiring.outputs[0].live.as_ref().unwrap();
+        assert_eq!(spots.value, Value::Null);
+        assert_eq!(spots.control, "Licht / Spots");
+        assert_eq!(spots.state, "position");
+        let up = &w.wiring.upstream.as_ref().unwrap()[0];
+        assert_eq!(up.live.as_ref().unwrap().value, json!(22000));
+        // a lighting controller has no main value
+        assert!(w.value.is_none());
+        let out = serde_json::to_value(&w).unwrap();
+        assert_eq!(out["inputs"][0]["live"]["text"], "22000lx");
+        assert!(out["inputs"][1].get("live").is_none());
+        assert!(out["inputs"][1].get("source").is_none());
     }
 
     #[test]

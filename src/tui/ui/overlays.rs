@@ -1115,10 +1115,10 @@ fn val_text(app: &App, uuid: &str) -> Option<String> {
     if let Some(v) = app.store.num(uuid) {
         // a control's main value in its own format (`21.5°`, `40 %`)
         if let Some((cid, st)) = app.house.state_owner.get(uuid)
-            && st == "value"
-            && let Some(f) = &app.house.ctrls[*cid].format
+            && let Some(text) =
+                crate::util::state_text(app.house.ctrls[*cid].format.as_deref(), st, v)
         {
-            return Some(crate::tui::text::lox_format(f, v));
+            return Some(text);
         }
         return Some(fmt_val(&Some(Val::Num(v))));
     }

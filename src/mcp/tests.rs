@@ -1461,6 +1461,69 @@ async fn get_wiring_explains_a_control_from_the_config() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn live_wiring_without_a_streamed_source_opens_no_websocket() {
+    let ms = miniserver().await;
+    let dir = tempfile::tempdir().unwrap();
+    wiring_config(dir.path());
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    // the test structure streams none of the wire sources: nothing to read,
+    // no value guessed, no error
+    let (out, err) = call(
+        &client,
+        "get_wiring",
+        json!({ "name": "Licht Wohnzimmer", "live": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["inputs"][0]["block"]["title"], "Präsenz");
+    assert!(out["inputs"][0].get("live").is_none(), "{}", out);
+    assert!(out.get("live_error").is_none(), "{}", out);
+    assert!(out.get("value").is_none(), "{}", out);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_wiring_keeps_the_config_when_the_websocket_fails() {
+    // the presence detector is an app control streaming its Q connector
+    let mut s = structure();
+    s["controls"]["2e000000-0000-0000-ffff0000000000b1"] = json!({
+        "name": "Präsenz", "type": "PresenceDetector", "room": "r1",
+        "states": { "active": "2e000000-0000-0000-ffff0000000000b2" }
+    });
+    let ms = MockServer::start_async().await;
+    ms.mock_async(|when, then| {
+        when.method(GET).path("/data/LoxApp3.json");
+        then.status(200).json_body(s);
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    wiring_config(dir.path());
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    // the mock speaks no WebSocket: the wiring comes back without values
+    let (out, err) = call(
+        &client,
+        "get_wiring",
+        json!({ "name": "Licht Wohnzimmer", "live": true }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["inputs"][0]["block"]["title"], "Präsenz");
+    assert!(out["inputs"][0].get("live").is_none(), "{}", out);
+    assert!(out["live_error"].is_string(), "{}", out);
+    // without `live` nothing is read
+    let (out, err) = call(&client, "get_wiring", json!({ "name": "Licht Wohnzimmer" })).await;
+    assert!(!err, "{}", out);
+    assert!(out.get("live_error").is_none(), "{}", out);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn get_wiring_without_a_config_says_how_to_get_one() {
     let ms = miniserver().await;
     let dir = tempfile::tempdir().unwrap();

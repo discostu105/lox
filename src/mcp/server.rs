@@ -213,6 +213,9 @@ pub struct WiringQuery {
     /// Download the current config from the Miniserver first (read-only FTP, a few seconds)
     #[serde(default)]
     pub download: bool,
+    /// Also read the current value on each wire whose source is a state the app streams, and the control's own value (`22000lx`); one WebSocket state read
+    #[serde(default)]
+    pub live: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1083,7 +1086,7 @@ impl LoxMcp {
 
     #[tool(
         title = "Get wiring",
-        description = "Why does a control behave the way it does? Shows the Loxone Config logic around a control or logic block: what is wired to its inputs and outputs (sensors, other blocks, hardware), its non-default parameters, and with `trace` the whole path up to the sensors or down to the actuators. Read-only; reads the config program, not live values (use get_control for those).",
+        description = "Why does a control behave the way it does? Shows the Loxone Config logic around a control or logic block: what is wired to its inputs and outputs (sensors, other blocks, hardware), its non-default parameters, and with `trace` the whole path up to the sensors or down to the actuators. With `live` it also fills in the current value on every wire whose source is a state the app streams (and the control's own formatted value), so one call answers \"why is this light on?\"; wires without such a source have no value. Read-only.",
         output_schema = schema_for_output::<ops::Wiring>(),
         annotations(read_only_hint = true, open_world_hint = false)
     )]
@@ -1093,9 +1096,10 @@ impl LoxMcp {
             TraceDirection::Down => ops::Trace::Down,
             TraceDirection::Both => ops::Trace::Both,
         });
-        respond(
-            self.blocking(move |lox| {
-                ops::get_wiring(
+        let live = q.live;
+        let read = self
+            .blocking(move |lox| {
+                let wiring = ops::get_wiring(
                     lox,
                     &q.name,
                     q.room.as_deref(),
@@ -1103,10 +1107,27 @@ impl LoxMcp {
                     q.depth.unwrap_or(4),
                     q.all_params,
                     q.download,
-                )
+                )?;
+                let plan = match live {
+                    true => Some(ops::live_plan(lox.get_structure()?, &wiring)),
+                    false => None,
+                };
+                Ok((wiring, plan, lox.cfg.clone()))
             })
-            .await,
-        )
+            .await;
+        let (mut wiring, plan, cfg) = match read {
+            Ok(r) => r,
+            Err(e) => return fail(e),
+        };
+        if let Some(plan) = plan.filter(|p| !p.uuids.is_empty()) {
+            let wait = std::time::Duration::from_secs(10);
+            match loxone_client::stream::initial_states(&cfg.connection(), &plan.uuids, wait).await
+            {
+                Ok(values) => ops::apply_live_plan(&mut wiring, &plan, &values),
+                Err(e) => wiring.live_error = Some(format!("{:#}", anyhow::Error::from(e))),
+            }
+        }
+        respond(Ok(wiring))
     }
 
     #[tool(
