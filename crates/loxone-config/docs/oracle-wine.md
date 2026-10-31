@@ -837,12 +837,65 @@ Results (M is output `Scene`):
   0.35 s) acted as two single clicks, not off + 2C. The simulator
   refuses a second click within Tdc.
 - **Finding — Alarm flashes at about 1.2 s**, not at Afi (4 s); still
-  refused.
+  refused. *Corrected in session 36:* the controller had no `Def=` on Afi
+  and flashed fast; screenshots aliased that to about 1.2 s.
 - A constant on Mood (`Select:` 2, 777, 99, 0, 5, 778, 1, one controller
   each) left M at 0 on all of them: a constant selects nothing. The
   analog virtual input could not be set from the GUI, so Mood stays
   refused. A T5 hold ended with nothing on the falling edge; mixing (Mmd)
   stays unverified.
+
+## LightController2 in the simulation, continued (session 36, #257) — passed, five findings
+
+Ran 2026-10-31, same rig and method as session 35, on three more probes
+compiled onto session 35's saved file (its virtual inputs keep their
+canvas boxes). New tricks:
+
+- **Mood** takes the result of a `Formula` over digital virtual inputs
+  (`I1*2+I2*99+I3*777+I4*1`, then `I1*4+I2*50+I3*98+I4*1`), so toggling
+  one input steps the value.
+- A `Formula` (`I1`) on an output shows its value as a number. A
+  `Memory` shows only Ein/Aus.
+- Alarm timing came from about 390 screenshots in 24 s, reading the colour
+  of each M pill.
+
+Results:
+
+- **Mood selects by ID when the value changes.** 0 and 778 select off.
+  2, 1 and 3 select their moods. 99 and 777 select "Viel Licht", and so
+  does every other value: 4, 50 and 51 (no such mood), 98 (no alarm-clock
+  mood), 100, 102, 779, 876 and 877. Session 35's constants selected
+  nothing.
+- **Finding — M+, M− and T5 act when the input falls.** M+ held for 1 s
+  and T5/1 held for 2 s changed nothing until release. On and Buzzer act
+  when they rise.
+- **Finding — no long click.** T5/2 held for 2.6 s (Mmd 1 s) with mood 1
+  showing selected mood 2 on release, a plain click; M never showed −3.
+  The KB says it mixes in the mood or steps on, so the case stays
+  refused.
+- **No double click, again.** Four toggles 110–150 ms apart (presses
+  220–300 ms apart, Tdc 0.35 s) stepped twice from 99 to 2. Off would
+  have shown 0.
+- **Finding — manual moods and motion.** With Met 20 s and Moet 10 s:
+  - A mood chosen by T5 stayed for 32 s without motion.
+  - Motion during that mood left the mood alone; the lights went off
+    18–22 s after motion ended (Met, not Moet).
+  - A T5 click while the motion mood showed (Mo held) selected its mood,
+    which also went off Met after motion ended.
+- **Pto counts from the end of motion.** After Off, motion pulses 2 s
+  and 10 s later were ignored, and so was one at 19 s (Pto 15 s). After
+  Off, motion held from 2 s to 12 s kept the next pulse at 20 s ignored.
+  T5 stepping to the off mood held the automatic back too: motion 2 s
+  later was ignored, but motion 11 s after motion ended was not. That
+  fits neither rule, so it stays refused.
+- **Finding — Alarm flashes at Afi**, on first. Afi 10 s gave 5 s on
+  and 5 s off, Afi 1 s gave 0.5 s each, and M showed 99 and 0 in step.
+  Every wired circuit flashed, including one that no mood uses. The mood
+  returned when Alarm ended. Without `Def=` on Afi it flashed much faster
+  than the documented 4 s. Unconfigured circuits show only Ein/Aus, so
+  the flashing value (MaxAbr) is the KB's.
+- **Lc1** toggled its circuit with M staying 0. The KB says −1 for a
+  user-defined mood, so Lc stays refused.
 
 ## The rig, one command
 
