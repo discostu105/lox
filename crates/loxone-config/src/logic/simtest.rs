@@ -69,6 +69,10 @@ pub struct TestResult {
     /// The test could not run: a port outside the simulated logic, a
     /// block whose behavior is not documented enough to simulate.
     pub error: Option<String>,
+    /// With [`trace_tests`]: the run cycle by cycle — what each step
+    /// sets, every value change of the ports the expectations depend
+    /// on, and each expectation's outcome. Empty otherwise.
+    pub trace: Vec<String>,
 }
 
 /// Build the plan for every `test` in the module (post-expansion,
@@ -243,16 +247,41 @@ fn plan_one(
 /// Run every planned test in the built-in simulator, each from a fresh
 /// start (D68).
 pub fn run_tests(plan: &TestPlan, compiled: &LoxoneDoc) -> Vec<TestResult> {
+    run_all(plan, compiled, None)
+}
+
+/// [`run_tests`], recording a trace of each run (`loxl test --trace`).
+/// The lock names the managed blocks and externs by slug; any other
+/// object goes by its title.
+pub fn trace_tests(plan: &TestPlan, compiled: &LoxoneDoc, lock: &Lockfile) -> Vec<TestResult> {
+    let mut slugs = BTreeMap::new();
+    for (slug, o) in &lock.objects {
+        slugs.insert(o.uuid.clone(), slug.clone());
+    }
+    for (slug, e) in &lock.externals {
+        slugs.insert(e.uuid.clone(), slug.clone());
+    }
+    run_all(plan, compiled, Some(&slugs))
+}
+
+fn run_all(
+    plan: &TestPlan,
+    compiled: &LoxoneDoc,
+    slugs: Option<&BTreeMap<String, String>>,
+) -> Vec<TestResult> {
     plan.runs
         .iter()
         .map(|run| {
             let mut failures = Vec::new();
-            let error = run_one(run, &mut Simulator::new(compiled), &mut failures).err();
+            let mut sim = Simulator::new(compiled);
+            let mut tracer = slugs.map(|slugs| Tracer::new(run, &sim, slugs));
+            let error = run_one(run, &mut sim, &mut failures, tracer.as_mut()).err();
             TestResult {
                 name: run.name.clone(),
                 pass: failures.is_empty() && error.is_none(),
                 failures,
                 error,
+                trace: tracer.map(Tracer::finish).unwrap_or_default(),
             }
         })
         .collect()
@@ -262,6 +291,7 @@ fn run_one(
     run: &TestRun,
     sim: &mut Simulator,
     failures: &mut Vec<String>,
+    mut tracer: Option<&mut Tracer>,
 ) -> std::result::Result<(), String> {
     let port_of = |sim: &Simulator, s: &Signal| {
         sim.port(&s.object, &s.port.port)
@@ -272,12 +302,26 @@ fn run_one(
         for (signal, v) in &step.sets {
             let port = port_of(sim, signal).map_err(step_err)?;
             sim.set(&port, *v);
+            if let Some(t) = tracer.as_deref_mut() {
+                t.note(format!(
+                    "step {}: set {} = {}",
+                    step_no + 1,
+                    signal.port,
+                    trim_float(*v)
+                ));
+            }
         }
         if let Some(spec) = &step.clock {
             sim.set_clock(spec).map_err(step_err)?;
+            if let Some(t) = tracer.as_deref_mut() {
+                t.note(format!("step {}: clock \"{spec}\"", step_no + 1));
+            }
         }
         for _ in 0..step.ticks {
             sim.tick(step.dt);
+            if let Some(t) = tracer.as_deref_mut() {
+                t.cycle(sim);
+            }
         }
         for e in &step.expects {
             let port = port_of(sim, &e.signal).map_err(step_err)?;
@@ -285,7 +329,17 @@ fn run_one(
                 step_err(format!("`{}` cannot be simulated: {why}", e.signal.port))
             })?;
             let actual = sim.read(&port);
-            if !holds(e.cmp, actual, e.expected) {
+            let ok = holds(e.cmp, actual, e.expected);
+            if let Some(t) = tracer.as_deref_mut() {
+                let verdict = if ok { "ok" } else { "FAILED" };
+                t.note(format!(
+                    "step {}: {} — actual {} {verdict}",
+                    step_no + 1,
+                    e.line,
+                    trim_float(actual)
+                ));
+            }
+            if !ok {
                 failures.push(format!(
                     "step {}: {} — actual {}",
                     step_no + 1,
@@ -296,6 +350,115 @@ fn run_one(
         }
     }
     Ok(())
+}
+
+/// Records a run for `loxl test --trace`: the watched ports are every
+/// port a set or an expectation of the test touches and the logic they
+/// are computed from. The first cycle lists them all, later cycles only
+/// the ports whose value changed.
+struct Tracer {
+    /// (port UUID, label) in evaluation order.
+    ports: Vec<(String, String)>,
+    last: Option<Vec<f64>>,
+    lines: Vec<String>,
+    /// Cycle lines written; past [`Tracer::MAX_CYCLES`] the trace stops.
+    cycles: usize,
+    dropped: usize,
+}
+
+impl Tracer {
+    const MAX_CYCLES: usize = 500;
+
+    fn new(run: &TestRun, sim: &Simulator, slugs: &BTreeMap<String, String>) -> Tracer {
+        let mut roots = Vec::new();
+        for step in &run.steps {
+            let signals = step
+                .sets
+                .iter()
+                .map(|(s, _)| s)
+                .chain(step.expects.iter().map(|e| &e.signal));
+            for s in signals {
+                if let Ok(p) = sim.port(&s.object, &s.port.port) {
+                    roots.push(p);
+                }
+            }
+        }
+        let ports = sim.upstream(&roots);
+        let ports = ports
+            .into_iter()
+            .map(|p| {
+                let label = match sim.port_owner(&p) {
+                    Some((uuid, title, ty, key)) => match (slugs.get(uuid), title) {
+                        (Some(slug), _) => format!("{slug}.{key}"),
+                        (None, Some(t)) => format!("\"{t}\".{key}"),
+                        (None, None) => format!("{ty}.{key}"),
+                    },
+                    None => p.clone(),
+                };
+                (p, label)
+            })
+            .collect();
+        Tracer {
+            ports,
+            last: None,
+            lines: Vec::new(),
+            cycles: 0,
+            dropped: 0,
+        }
+    }
+
+    fn note(&mut self, line: String) {
+        self.flush_dropped();
+        self.lines.push(line);
+    }
+
+    fn cycle(&mut self, sim: &Simulator) {
+        let now: Vec<f64> = self.ports.iter().map(|(p, _)| sim.read(p)).collect();
+        let changes: Vec<String> = match &self.last {
+            None => self
+                .ports
+                .iter()
+                .zip(&now)
+                .map(|((_, label), v)| format!("{label} = {}", trim_float(*v)))
+                .collect(),
+            Some(last) => self
+                .ports
+                .iter()
+                .zip(now.iter().zip(last))
+                .filter(|(_, (v, was))| v != was)
+                .map(|((_, label), (v, was))| {
+                    format!("{label} {} → {}", trim_float(*was), trim_float(*v))
+                })
+                .collect(),
+        };
+        self.last = Some(now);
+        if changes.is_empty() {
+            return;
+        }
+        if self.cycles >= Self::MAX_CYCLES {
+            self.dropped += 1;
+            return;
+        }
+        self.cycles += 1;
+        self.lines
+            .push(format!("{}  {}", sim.clock_text(), changes.join(", ")));
+    }
+
+    fn finish(mut self) -> Vec<String> {
+        self.flush_dropped();
+        self.lines
+    }
+
+    fn flush_dropped(&mut self) {
+        if self.dropped > 0 {
+            self.lines.push(format!(
+                "… {} more cycles with changes (the trace keeps {})",
+                self.dropped,
+                Self::MAX_CYCLES
+            ));
+            self.dropped = 0;
+        }
+    }
 }
 
 /// `==` with the slack of decimal arithmetic; `~=` within 5 % of the
@@ -602,6 +765,7 @@ pub fn read_results(stdout: &str, plan: &TestPlan, specs: &LoxSpecs) -> Result<V
             pass: failures.is_empty(),
             failures,
             error: None,
+            trace: Vec::new(),
         });
     }
     Ok(results)

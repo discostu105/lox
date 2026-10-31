@@ -214,7 +214,8 @@ impl Simulator {
         }
     }
 
-    fn clock_text(&self) -> String {
+    /// The simulated time for reports: `t=12.5s, 00:00:12`.
+    pub fn clock_text(&self) -> String {
         let secs = self.clock.secs - self.clock.day() as f64 * 86_400.0;
         let secs = secs as u64;
         let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
@@ -405,6 +406,70 @@ impl Simulator {
             }
         }
         Ok(())
+    }
+
+    /// The ports the given ports' values are computed from, themselves
+    /// included, in evaluation order: sources first, then the modelled
+    /// blocks, then the blocks without a model. The walk follows wires
+    /// into inputs, the inputs a modelled block reads behind its outputs
+    /// and the operating modes a schedule follows; sources and blocks
+    /// without a model end it. What `loxl test --trace` watches.
+    pub fn upstream(&self, roots: &[String]) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut stack = roots.to_vec();
+        while let Some(p) = stack.pop() {
+            let Some((ix, key)) = self.port_owner.get(&p) else {
+                continue;
+            };
+            if !seen.insert(p.clone()) {
+                continue;
+            }
+            let obj = &self.objects[*ix];
+            if self.is_input(*ix, key) {
+                stack.extend(obj.ports[key].inputs.iter().cloned());
+            } else if let Some(m) = obj.model() {
+                for k in m.reads() {
+                    if let Some(p) = obj.ports.get(*k) {
+                        stack.push(p.uuid.clone());
+                    }
+                }
+                for mode in m.mode_deps() {
+                    if let Some(q) = self
+                        .by_uuid
+                        .get(mode)
+                        .and_then(|&j| self.objects[j].ports.get("Q"))
+                    {
+                        stack.push(q.uuid.clone());
+                    }
+                }
+            }
+        }
+        let pos: HashMap<usize, usize> = self
+            .order
+            .iter()
+            .enumerate()
+            .map(|(pos, &ix)| (ix, pos + 1))
+            .collect();
+        let mut ports: Vec<String> = seen.into_iter().collect();
+        ports.sort_by_key(|p| {
+            let (ix, key) = &self.port_owner[p];
+            let rank = match self.objects[*ix].support {
+                Support::Source => 0,
+                Support::Model(_) => pos[ix],
+                Support::Unsupported(_) => usize::MAX,
+            };
+            let input_first = !self.is_input(*ix, key);
+            (rank, *ix, input_first, key.clone())
+        });
+        ports
+    }
+
+    /// The owner of a port: its object's UUID, title and type, and the
+    /// port key.
+    pub fn port_owner(&self, port: &str) -> Option<(&str, Option<&str>, &str, &str)> {
+        let (ix, key) = self.port_owner.get(port)?;
+        let obj = &self.objects[*ix];
+        Some((&obj.uuid, obj.title.as_deref(), &obj.block_type, key))
     }
 
     fn need_input(

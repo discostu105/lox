@@ -37,6 +37,7 @@ loxl compile                                 # in a lox.toml project; else
                                              #   --base --module --lock --out
 loxl diff --summary current.Loxone out.Loxone   # show this to the human
 loxl test                                    # the module's `test … end` blocks, simulated
+loxl test --filter <name> --trace            # a failing test cycle by cycle: every value change
 ```
 
 `loxl diff --summary` names every added block, changed parameter and wire

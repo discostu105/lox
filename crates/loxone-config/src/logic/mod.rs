@@ -95,7 +95,7 @@ pub use lint::{LintFinding, LintKind, lint_dead_outputs, lint_source};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,
-    plan_tests, read_results, run_tests,
+    plan_tests, read_results, run_tests, trace_tests,
 };
 pub use tiles::{TileFunction, TileProgram, abbreviations, lint_tiles, program as tile_program};
 pub use validate::validate_ports;

@@ -466,3 +466,18 @@ fn an_unmodelled_blocks_input_reads_its_wires() {
     sim.tick(1.0);
     assert_eq!((sim.read("p3-I"), sim.read("p4-I")), (1.0, 0.0));
 }
+
+#[test]
+fn upstream_walks_wires_and_models_in_evaluation_order() {
+    let d = doc(&(obj(3, "VirtualOutCmd", &["I<p2-Q"])
+        + &obj(2, "Not", &["I<p1-AQ", "Q"])
+        + &vin(1)
+        + &vin(4)));
+    let sim = Simulator::new(&d);
+    // Source, then the model (inputs before outputs), then the sink;
+    // the unrelated input is not watched.
+    assert_eq!(
+        sim.upstream(&["p3-I".to_string()]),
+        ["p1-AQ", "p2-I", "p2-Q", "p3-I"]
+    );
+}
