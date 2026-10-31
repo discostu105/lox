@@ -4337,3 +4337,84 @@ fn a_promoted_extern_keeps_its_room_claim() {
     let d = loxone_config::diff::diff(&base, &out);
     assert!(d.is_empty(), "{d:#?}");
 }
+
+#[test]
+fn a_stale_constant_under_a_wire_survives_adopt_and_compile() {
+    // D77 (#226): Loxone Config keeps a connector's `Def=` when a wire is
+    // drawn onto it — inert while the wire exists, back when it is
+    // removed. The view shows it as a comment on the wire (never as a
+    // second `Input1:` argument), and the rebuild carries it from the base.
+    let mut existing = adopted_config();
+    let path = existing
+        .objects()
+        .iter()
+        .find(|o| o.block_type == "GreaterEqual")
+        .unwrap()
+        .path
+        .clone();
+    let co = existing
+        .element_at_mut(&path)
+        .unwrap()
+        .child_elements_mut()
+        .find(|c| c.name == "Co" && c.attr("K") == Some("Input1"))
+        .unwrap();
+    assert_eq!(co.attr("Nc"), Some("1"), "the wire from summe.AQ");
+    // Canonical attribute order `K, Def, Nc, U`.
+    co.attrs.insert(
+        1,
+        Attr {
+            name: "Def".into(),
+            value: "20".into(),
+        },
+    );
+
+    let (module, mut lock, report) = adopt(&existing).unwrap();
+    assert_eq!(report.blocks, 2);
+    let text = module.to_text();
+    assert!(
+        text.contains("\tInput1: summe.AQ, # stale constant 20 kept under the wire\n"),
+        "{text}"
+    );
+    assert_eq!(text.matches("Input1:").count(), 2, "one per block:\n{text}");
+    let out = compile(&existing, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.to_bytes()),
+        String::from_utf8_lossy(&existing.to_bytes())
+    );
+
+    // The full view says the same.
+    let (view, _) = decompile(&existing, &DecompileOptions::default()).unwrap();
+    assert!(
+        view.to_text()
+            .contains("Input1: summe.AQ, # stale constant 20 kept under the wire"),
+        "{}",
+        view.to_text()
+    );
+
+    // Restating the constant as a second argument is refused.
+    let e =
+        Module::parse(&text.replace("\tInput1: summe.AQ,", "\tInput1: 20,\n\tInput1: summe.AQ,"))
+            .unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("block `heiss`: port `Input1` takes both a value (`Input1: 20`) and a wire"),
+        "{e}"
+    );
+
+    // Unwiring the port in source drops the constant with the wire: the
+    // source states what the port carries.
+    let unwired = Module::parse(&text.replace(
+        "\tInput1: summe.AQ, # stale constant 20 kept under the wire\n",
+        "",
+    ))
+    .unwrap();
+    let out = compile(&existing, &unwired, &mut lock.clone(), &opts()).unwrap();
+    let co = out
+        .element_at(&path)
+        .unwrap()
+        .child_elements()
+        .find(|c| c.name == "Co" && c.attr("K") == Some("Input1"))
+        .unwrap();
+    assert_eq!(co.attr("Def"), None);
+    assert_eq!(co.attr("Nc"), None);
+}

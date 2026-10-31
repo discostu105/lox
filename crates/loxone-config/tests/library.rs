@@ -132,3 +132,37 @@ fn page_renderings_are_current() {
         }
     }
 }
+
+#[test]
+fn views_check_and_adoptions_rebuild_byte_identical() {
+    // The views are what people copy from: each must pass `loxl check`
+    // (#226: a stale constant under a wire once printed as a duplicate
+    // argument). Adopting the config and compiling the pair must give the
+    // config back byte for byte — the stale constant included (D77).
+    use loxone_config::logic::{CompileOptions, adopt, compile};
+    use loxone_config::uuid::parse_serial;
+    for entry in entries() {
+        for module in files(&entry.join("logic"), "loxl") {
+            let m = module.to_string_lossy().into_owned();
+            loxl(&entry, &["check", &m]);
+        }
+        let path = entry.join(config(&entry));
+        let bytes = std::fs::read(&path).unwrap();
+        let base = loxone_config::LoxoneDoc::parse(&bytes).unwrap();
+        let (module, mut lock, _) = adopt(&base).unwrap();
+        let opts = CompileOptions {
+            machine: parse_serial("504F94112233").unwrap(),
+            mint_time_unix: 1_767_225_600,
+            page_title: None,
+            allow_removals: false,
+            accept_version: None,
+            relayout: Vec::new(),
+        };
+        let out = compile(&base, &module, &mut lock, &opts).unwrap();
+        assert!(
+            out.to_bytes() == base.to_bytes(),
+            "{}: the adopted rebuild is not byte-identical",
+            path.display()
+        );
+    }
+}

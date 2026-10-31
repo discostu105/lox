@@ -2318,3 +2318,23 @@ Anything unverified is an error, not a heuristic:
   the payload and wires the weather field's `WeatherData` block, the
   `Day` and the `Daylight` block into the AutoPilot container; the
   compile does the same.
+- **D77 — A stale constant under a wire** (2026-10-31; #226). Loxone
+  Config keeps a connector's `Def=` when a wire is drawn onto it: the
+  wire feeds the input, and the constant comes back when the wire is
+  removed (the Loxcall library entry carries one). The decompiled view
+  printed it as a second argument, `Input1: 2, Input1: x.AQ`, which read
+  as a fan-in or an override and passed `loxl check`. Now:
+  - decompile and adopt print the wire only, with the constant as a
+    comment on it: `Input1: x.AQ, # stale constant 2 kept under the
+    wire` (a constant at the observed GUI default is elided like any
+    other, D30);
+  - the compile carries the base's `Def=` onto a port the source still
+    wires (read from the base with the block's other GUI residue, D19),
+    so an adoption rebuilds byte-identically. Unwiring the port in source
+    drops it with the wire: the source states what the port carries, and
+    a value it wants is written as `Input1: 2`;
+  - a value next to a wire on one port (`Input1: 2, Input1: x.AQ`, also
+    with an expression) is an error, like a duplicate parameter. Fan-in
+    (several different wires) stays allowed. The messages of the
+    duplicate family name the block first (`` block `b`: … ``), so the
+    language server puts them on the port key in the call.

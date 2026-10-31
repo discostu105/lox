@@ -19,6 +19,10 @@
 //! the view to managed-type objects and what is wired to them — the
 //! starting point for adopting existing logic.
 //!
+//! A `Def=` under a wire (a stale constant, D77) is never a second
+//! argument for the port: it rides as a comment on the wire binding, and
+//! the compile carries it from the base.
+//!
 //! Honest limits of the view: parameters (`Def=`) of extern objects are
 //! never lifted (a `target.Port = value` statement would claim ownership
 //! of the value); wires between two unlifted periphery objects stay raw
@@ -744,25 +748,7 @@ impl Lift {
                     // source — the Inv flag would silently invert them.
                     continue;
                 }
-                if let Some(def) = &p.def {
-                    // A value at the corpus-observed GUI default is noise
-                    // to a reader — elided from the full view (D30,
-                    // `--all-params` shows it). The adoptable view keeps
-                    // every parameter: rebuilding writes `Def=` back.
-                    if opts.scope == DecompileScope::Full
-                        && !opts.all_params
-                        && crate::observed_defaults::observed_default(&o.block_type, &p.key)
-                            == Some(def.as_str())
-                    {
-                        default_params_elided += 1;
-                    } else {
-                        args.push(ArgItem::Binding(Binding {
-                            port: p.key.clone(),
-                            kind: BindingKind::Param(Value::from_literal(def)),
-                            comment: None,
-                        }));
-                    }
-                }
+                let mut wires = Vec::new();
                 for input in &p.inputs {
                     let Some((src_obj, src_key)) = idx.port_owner.get(input) else {
                         continue; // dangling <In> — not representable, stays raw
@@ -779,15 +765,45 @@ impl Lift {
                     if !is_ident(src_key) {
                         continue;
                     }
-                    args.push(ArgItem::Binding(Binding {
+                    wires.push(Binding {
                         port: p.key.clone(),
                         kind: BindingKind::Wire(PortRef {
                             slug: src_slug.clone(),
                             port: src_key.clone(),
                         }),
                         comment: None,
-                    }));
+                    });
                 }
+                if let Some(def) = &p.def {
+                    // A value at the corpus-observed GUI default is noise
+                    // to a reader — elided from the full view (D30,
+                    // `--all-params` shows it). The adoptable view keeps
+                    // every parameter: rebuilding writes `Def=` back.
+                    if opts.scope == DecompileScope::Full
+                        && !opts.all_params
+                        && crate::observed_defaults::observed_default(&o.block_type, &p.key)
+                            == Some(def.as_str())
+                    {
+                        default_params_elided += 1;
+                    } else if let Some(first) = wires.first_mut() {
+                        // A `Def=` under a wire is a stale constant (D77):
+                        // inert while the wire exists, kept by Loxone
+                        // Config so it returns when the wire is removed.
+                        // Never a second argument for the same port — the
+                        // compile carries it from the base.
+                        first.comment = Some(format!(
+                            " stale constant {} kept under the wire",
+                            Value::from_literal(def)
+                        ));
+                    } else {
+                        args.push(ArgItem::Binding(Binding {
+                            port: p.key.clone(),
+                            kind: BindingKind::Param(Value::from_literal(def)),
+                            comment: None,
+                        }));
+                    }
+                }
+                args.extend(wires.into_iter().map(ArgItem::Binding));
             }
             let slug = slug_of[&o.uuid].clone();
             block_decls.insert(

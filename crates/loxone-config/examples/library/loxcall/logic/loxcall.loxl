@@ -9,8 +9,7 @@ program = Code16(
 )
 
 start = Equal(
-	Input1: 2,
-	Input1: callstateoutput_2.AQ,
+	Input1: callstateoutput_2.AQ, # stale constant 2 kept under the wire
 	Input2: 2,
 )
 

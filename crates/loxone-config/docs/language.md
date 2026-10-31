@@ -346,7 +346,13 @@ hue = Code16("Philipps Hue Steuerung", Code: file("hue.c"), AI1: rgb.AQ)
 Rules:
 
 - At most one parameter binding per port; multiple wire bindings on the
-  same port are allowed when the sources differ (fan-in).
+  same port are allowed when the sources differ (fan-in). A port takes a
+  value *or* wires, never both: a wired input ignores its value, so
+  `Input1: 2, Input1: x.AQ` is an error (D77). A constant Loxone Config
+  keeps under a wire (it comes back when the wire is removed) is not
+  written in source: decompile and adopt show it as a comment on the
+  wire, `Input1: x.AQ, # stale constant 2 kept under the wire`, and the
+  compile carries it from the base while the source keeps the port wired.
 - The type must be in the verified builtin table
   (gates `And`/`Or`/`Not`, the comparator family `Equal`/`NotEqual`/
   `Greater`/`GreaterEqual`/`Less`/`LessEqual`, `Formula`, `Monoflop`,
@@ -1331,8 +1337,9 @@ recipients, and leaves `OutputRefLM` blocks with the GUI.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block; every bare-identifier value must name a declared `let`.
 - `<-`, port-`=` and attribute-`=` targets must be externs (see above).
-- Duplicate parameter bindings, and duplicate identical wire bindings, in
-  one argument list are errors.
+- Duplicate parameter bindings, duplicate identical wire bindings, and a
+  parameter next to a wire on the same port, in one argument list are
+  errors.
 - `removed`/`moved` must not contradict declarations or each other
   (details under the statements).
 - Statement order is free; the conventional order is lets, externs,
