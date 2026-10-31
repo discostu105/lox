@@ -9,6 +9,7 @@ is visible in a committed, test-pinned example. Where to look:
 | [logic/pool.loxl](logic/pool.loxl) | the narrative showcase: a template with an instance, an expression argument, a `min` unit value, an expression wire, arithmetic folded into a `Formula` block (D35), two sim scenarios |
 | [logic/sprachtour.loxl](logic/sprachtour.loxl) | the systematic language tour — every construct the two above do not cover (see below) |
 | [logic/lifecycle/](logic/lifecycle/) | `moved` and `removed`, in three staged modules — the two transient statements no permanent module can carry; narrated by `cargo run --example lifecycle` |
+| [library/](library/) | real third-party configs we may redistribute, redacted, each with its source, license, decompiled view and page drawings |
 | [project/](project/) | a `lox.toml` project: fragment directory with one file per page (D25/D28), committed lockfile and output |
 
 The tour covers, in order: string and numeric `let` constants; the full

@@ -58,7 +58,10 @@ fn corpus_roundtrips_byte_identical() {
     let mut n = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_some_and(|e| e == "Loxone") {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("loxone"))
+        {
             assert_roundtrip(&path);
             n += 1;
         }

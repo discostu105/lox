@@ -12,7 +12,7 @@ toolchain (the loop, hard rules, error remedies).
 cargo test -p loxone-config               # unit, pipeline, roundtrip
 cargo clippy -p loxone-config --all-targets   # must be warning-free
 cargo fmt --check
-LOXL_CORPUS=<dir> cargo test -p loxone-config --test roundtrip   # opt-in: real configs
+tools/fetch-corpus.py && LOXL_CORPUS=corpus/web cargo test --release -p loxone-config --test corpus --test roundtrip   # opt-in: the public corpus
 cargo run --bin loxl -- help     # the CLI (also: lox logic help)
 ```
 
@@ -22,7 +22,10 @@ cargo run --bin loxl -- help     # the CLI (also: lox logic help)
   Never hand-edit `*.lock.json` beyond the documented operations.
 - **Never commit real Miniserver configs** (personal data). Synthetic
   fixtures live in `examples/configs/`; real ones go in an untracked corpus
-  dir referenced via `LOXL_CORPUS`.
+  dir referenced via `LOXL_CORPUS` (the public one: `tools/fetch-corpus.py`,
+  pinned by `tools/corpus-manifest.json`). The only real configs in the
+  repository are the redistributable, redacted ones of `examples/library/`,
+  each with its `SOURCE.md` and `LICENSE`.
 - The builtin connector table (`src/connectors.rs`) only accepts
   **live-verified** entries — the growth workflow is in
   [docs/implementation.md](docs/implementation.md).

@@ -48,7 +48,7 @@ Three layers, all run by `cargo test`:
    configs, plus an opt-in corpus:
 
    ```sh
-   LXC_CORPUS=~/loxone-backups cargo test --test roundtrip
+   LOXL_CORPUS=~/loxone-backups cargo test --test roundtrip
    ```
 
    Real configs contain personal data (addresses, key hashes) — **never
@@ -56,6 +56,21 @@ Three layers, all run by `cargo test`:
    over every committed `.Loxone`, failing on any finding (run it before
    adding a fixture). Every new real config is a
    free test case: drop it in the corpus dir and run the suite.
+
+   The public corpus (~150 configs from Loxone's KB samples, LoxWiki and
+   GitHub) is reproducible from its committed manifest,
+   [`tools/corpus-manifest.json`](../tools/corpus-manifest.json): every
+   file with its source (GitHub pinned to a commit), sha256 and license.
+
+   ```sh
+   tools/fetch-corpus.py              # download into corpus/web, verify hashes
+   LOXL_CORPUS=corpus/web cargo test --release --test corpus --test roundtrip
+   tools/fetch-corpus.py --discover   # search the sources afresh, rewrite the manifest
+   ```
+
+   The *Corpus* workflow runs the same weekly and on demand. Configs whose
+   license allows redistributing them also go into the browsable
+   [example library](../examples/library/README.md).
 
 QA bar for changes: `cargo test && cargo clippy --all-targets && cargo fmt
 --check`, all clean.

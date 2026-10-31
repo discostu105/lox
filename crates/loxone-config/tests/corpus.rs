@@ -29,7 +29,10 @@ fn corpus() -> Option<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("LOXL_CORPUS={dir}: {e}"))
         .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|e| e == "Loxone"))
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("loxone"))
+        })
         .collect();
     files.sort();
     assert!(!files.is_empty(), "no .Loxone files in {dir}");
@@ -182,7 +185,7 @@ fn corpus_rule_declarations_are_byte_fixpoints() {
     // reproduce the bytes: what reads as source writes as the payload it
     // came from.
     let Some(files) = corpus() else {
-        eprintln!("LXIR_CORPUS not set — skipping corpus rule fixpoints");
+        eprintln!("LOXL_CORPUS not set — skipping corpus rule fixpoints");
         return;
     };
     let (mut configs, mut decls, mut total) = (0usize, 0usize, 0usize);

@@ -1,1 +1,5 @@
 /target
+
+# External references, downloaded by tools/fetch-refs.py (links only, never committed)
+/refs
+__pycache__/

@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2400 -3600 28608 22032" width="2384" height="1836" font-family="sans-serif">
+<rect x="-2400" y="-3600" width="28608" height="22032" fill="#ffffff"/>
+<rect x="0" y="0" width="23808" height="16032" fill="none" stroke="#94a3b8" stroke-width="48" stroke-dasharray="240 120"/>
+<text x="0" y="-2400" font-size="360" fill="#0f172a">Heizung</text>
+<text x="0" y="-2040" font-size="200" fill="#475569">overlaps 0 · backward 6 · long 3 · crossings 10 · length 125568</text>
+<polyline points="19872,12576 20112,12576 20112,7968 1776,7968 1776,3360 2016,3360" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="20256,10464 20496,10464 20496,5904 5520,5904 5520,1344 5760,1344" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="7392,10080 7776,10080 7776,11040 8160,11040" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="7296,11232 7728,11232 7728,11232 8160,11232" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4512,11232 5232,11232 5232,11232 5952,11232" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4512,11424 5232,11424 5232,11424 5952,11424" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="7872,1344 8352,1344 8352,1344 8832,1344" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="7872,1536 8352,1536 8352,1536 8832,1536" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="10272,3072 10992,3072 10992,3456 11712,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6624,2400 7104,2400 7104,3072 7584,3072" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6624,3360 7104,3360 7104,3264 7584,3264" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6624,4128 7104,4128 7104,3456 7584,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="6624,5184 7104,5184 7104,3456 7584,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11520,7104 11760,7104 11760,6336 8592,6336 8592,5472 8832,5472" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="11520,5472 11760,5472 11760,6336 8592,6336 8592,7104 8832,7104" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="11520,5664 11760,5664 11760,6336 8592,6336 8592,7296 8832,7296" fill="none" stroke="#dc2626" stroke-width="20"/>
+<polyline points="4128,3360 4704,3360 4704,2400 5280,2400" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4320,4320 4800,4320 4800,2592 5280,2592" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4128,3360 4704,3360 4704,4128 5280,4128" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4320,4320 4800,4320 4800,4320 5280,4320" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4320,4320 4800,4320 4800,3360 5280,3360" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="4320,4320 4800,4320 4800,5184 5280,5184" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11520,1344 12144,1344 12144,1440 12768,1440" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="14400,3456 14880,3456 14880,3456 15360,3456" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11520,5472 11856,5472 11856,5472 12192,5472" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="11520,5664 11856,5664 11856,5856 12192,5856" fill="none" stroke="#475569" stroke-width="20"/>
+<polyline points="20352,11616 20592,11616 20592,6576 5520,6576 5520,1536 5760,1536" fill="none" stroke="#dc2626" stroke-width="20"/>
+<rect x="2400" y="11136" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Außentemperatur (gemittelt) (InputRef)</title></rect>
+<text x="2496" y="11276" font-size="120" fill="#0f172a">Außentemperatur (gemittelt)</text>
+<rect x="2400" y="11328" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Heizungsstop (InputRef)</title></rect>
+<text x="2496" y="11468" font-size="120" fill="#0f172a">Heizungsstop</text>
+<rect x="18048" y="1056" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Brauchwasserbereitung (InputRef)</title></rect>
+<text x="18144" y="1196" font-size="120" fill="#0f172a">Brauchwasserbereitung</text>
+<rect x="18048" y="1248" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Außentemperatur (InputRef)</title></rect>
+<text x="18144" y="1388" font-size="120" fill="#0f172a">Außentemperatur</text>
+<rect x="18048" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Brauchwasser oben (InputRef)</title></rect>
+<text x="18144" y="1580" font-size="120" fill="#0f172a">Brauchwasser oben</text>
+<rect x="18048" y="1632" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Gradminuten (InputRef)</title></rect>
+<text x="18144" y="1772" font-size="120" fill="#0f172a">Gradminuten</text>
+<rect x="18048" y="2400" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Mittlere Raumtemperatur (Soll-Wert) (InputRef)</title></rect>
+<text x="18144" y="2540" font-size="120" fill="#0f172a">Mittlere Raumtemperatur (Soll-Wert)</text>
+<rect x="18048" y="2592" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Mittlere Raumtemperatur (Ist-Wert) (InputRef)</title></rect>
+<text x="18144" y="2732" font-size="120" fill="#0f172a">Mittlere Raumtemperatur (Ist-Wert)</text>
+<rect x="18048" y="2784" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>berechn. Vorlauftemperatur (InputRef)</title></rect>
+<text x="18144" y="2924" font-size="120" fill="#0f172a">berechn. Vorlauftemperatur</text>
+<rect x="18048" y="2976" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Rücklauftemperatur (InputRef)</title></rect>
+<text x="18144" y="3116" font-size="120" fill="#0f172a">Rücklauftemperatur</text>
+<rect x="18048" y="3168" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Vorlauftemperatur (InputRef)</title></rect>
+<text x="18144" y="3308" font-size="120" fill="#0f172a">Vorlauftemperatur</text>
+<rect x="18048" y="3744" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Volumenstrom (InputRef)</title></rect>
+<text x="18144" y="3884" font-size="120" fill="#0f172a">Volumenstrom</text>
+<rect x="18048" y="3936" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>BW, inkl. int. ZH (InputRef)</title></rect>
+<text x="18144" y="4076" font-size="120" fill="#0f172a">BW, inkl. int. ZH</text>
+<rect x="18048" y="4128" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>BW, nur Verd. (InputRef)</title></rect>
+<text x="18144" y="4268" font-size="120" fill="#0f172a">BW, nur Verd.</text>
+<rect x="18048" y="4320" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Heizung, nur Verd. (InputRef)</title></rect>
+<text x="18144" y="4460" font-size="120" fill="#0f172a">Heizung, nur Verd.</text>
+<rect x="18048" y="4512" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Wärme, inkl. int. Zusatz (InputRef)</title></rect>
+<text x="18144" y="4652" font-size="120" fill="#0f172a">Wärme, inkl. int. Zusatz</text>
+<rect x="18048" y="5088" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Flüssigkeitsleitung (InputRef)</title></rect>
+<text x="18144" y="5228" font-size="120" fill="#0f172a">Flüssigkeitsleitung</text>
+<rect x="18048" y="5280" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Betriebszeit Verdichter Brauchwasser (InputRef)</title></rect>
+<text x="18144" y="5420" font-size="120" fill="#0f172a">Betriebszeit Verdichter Brauchwasser</text>
+<rect x="18048" y="5472" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Betriebszeit Verdichter (InputRef)</title></rect>
+<text x="18144" y="5612" font-size="120" fill="#0f172a">Betriebszeit Verdichter</text>
+<rect x="18048" y="5664" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Pumpengeschwindigkeit WQ (InputRef)</title></rect>
+<text x="18144" y="5804" font-size="120" fill="#0f172a">Pumpengeschwindigkeit WQ</text>
+<rect x="18048" y="5856" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Verdichter blockiert (InputRef)</title></rect>
+<text x="18144" y="5996" font-size="120" fill="#0f172a">Verdichter blockiert</text>
+<rect x="18048" y="6048" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Heißgas (InputRef)</title></rect>
+<text x="18144" y="6188" font-size="120" fill="#0f172a">Heißgas</text>
+<rect x="18048" y="6240" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Kond.vorlauf (InputRef)</title></rect>
+<text x="18144" y="6380" font-size="120" fill="#0f172a">Kond.vorlauf</text>
+<rect x="18048" y="6432" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Kältetriebmittel ausgehend (InputRef)</title></rect>
+<text x="18144" y="6572" font-size="120" fill="#0f172a">Kältetriebmittel ausgehend</text>
+<rect x="18048" y="6624" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Kältetriebmittel eingehend (InputRef)</title></rect>
+<text x="18144" y="6764" font-size="120" fill="#0f172a">Kältetriebmittel eingehend</text>
+<rect x="18048" y="6816" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Pumpengeschwindigkeit  Wärmetr. (InputRef)</title></rect>
+<text x="18144" y="6956" font-size="120" fill="#0f172a">Pumpengeschwindigkeit  Wärmetr.</text>
+<rect x="18048" y="7008" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Sauggas (InputRef)</title></rect>
+<text x="18144" y="7148" font-size="120" fill="#0f172a">Sauggas</text>
+<rect x="18048" y="7200" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Verdichterstarts (InputRef)</title></rect>
+<text x="18144" y="7340" font-size="120" fill="#0f172a">Verdichterstarts</text>
+<rect x="18048" y="7584" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Alarm (InputRef)</title></rect>
+<text x="18144" y="7724" font-size="120" fill="#0f172a">Alarm</text>
+<rect x="18048" y="7968" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>ZH elektrische Leistung (InputRef)</title></rect>
+<text x="18144" y="8108" font-size="120" fill="#0f172a">ZH elektrische Leistung</text>
+<rect x="18048" y="8160" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Zuheizung blockiert (InputRef)</title></rect>
+<text x="18144" y="8300" font-size="120" fill="#0f172a">Zuheizung blockiert</text>
+<rect x="18048" y="8352" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>ZH max. eingest. Stromfluss (InputRef)</title></rect>
+<text x="18144" y="8492" font-size="120" fill="#0f172a">ZH max. eingest. Stromfluss</text>
+<rect x="18048" y="8544" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>ZH Zeitfaktor (InputRef)</title></rect>
+<text x="18144" y="8684" font-size="120" fill="#0f172a">ZH Zeitfaktor</text>
+<rect x="2208" y="4224" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Urlaub (InputRef)</title></rect>
+<text x="2304" y="4364" font-size="120" fill="#0f172a">Urlaub</text>
+<rect x="2016" y="3264" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Alle sind zu Hause (InputRef)</title></rect>
+<text x="2112" y="3404" font-size="120" fill="#0f172a">Alle sind zu Hause</text>
+<rect x="5760" y="1248" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Bad Temperatur (InputRef)</title></rect>
+<text x="5856" y="1388" font-size="120" fill="#0f172a">Bad Temperatur</text>
+<rect x="4704" y="9504" width="2688" height="1248" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Heizungsmodus (Radio)</title></rect>
+<text x="4800" y="9684" font-size="140" fill="#0f172a">Heizungsmodus</text>
+<circle cx="7392" cy="10080" r="36" fill="#64748b"/><text x="7320" y="10114" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<rect x="8160" y="10464" width="2688" height="1272" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Betriebsmodus Heizung (State)</title></rect>
+<text x="8256" y="10644" font-size="140" fill="#0f172a">Betriebsmodus Heizung</text>
+<circle cx="8160" cy="11040" r="36" fill="#64748b"/><text x="8232" y="11074" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="8160" cy="11232" r="36" fill="#64748b"/><text x="8232" y="11266" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="8160" cy="11424" r="36" fill="#64748b"/><text x="8232" y="11458" font-size="100" text-anchor="start" fill="#334155">I3</text>
+<circle cx="8160" cy="11616" r="36" fill="#64748b"/><text x="8232" y="11650" font-size="100" text-anchor="start" fill="#334155">I4</text>
+<circle cx="10848" cy="11040" r="36" fill="#64748b"/><text x="10776" y="11074" font-size="100" text-anchor="end" fill="#334155">TQ</text>
+<circle cx="10848" cy="11232" r="36" fill="#64748b"/><text x="10776" y="11266" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<rect x="5952" y="10848" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>O752 (LessEqual)</title></rect>
+<text x="6048" y="11028" font-size="140" fill="#0f172a">O752</text>
+<circle cx="5952" cy="11232" r="36" fill="#64748b"/><text x="6024" y="11266" font-size="100" text-anchor="start" fill="#334155">Input1</text>
+<circle cx="5952" cy="11424" r="36" fill="#64748b"/><text x="6024" y="11458" font-size="100" text-anchor="start" fill="#334155">Input2</text>
+<circle cx="7296" cy="11232" r="36" fill="#64748b"/><text x="7224" y="11266" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="8832" y="768" width="2688" height="1272" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Loxone 2 Nibe Temp (State)</title></rect>
+<text x="8928" y="948" font-size="140" fill="#0f172a">Loxone 2 Nibe Temp</text>
+<circle cx="8832" cy="1344" r="36" fill="#64748b"/><text x="8904" y="1378" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="8832" cy="1536" r="36" fill="#64748b"/><text x="8904" y="1570" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="8832" cy="1728" r="36" fill="#64748b"/><text x="8904" y="1762" font-size="100" text-anchor="start" fill="#334155">I3</text>
+<circle cx="8832" cy="1920" r="36" fill="#64748b"/><text x="8904" y="1954" font-size="100" text-anchor="start" fill="#334155">I4</text>
+<circle cx="11520" cy="1344" r="36" fill="#64748b"/><text x="11448" y="1378" font-size="100" text-anchor="end" fill="#334155">TQ</text>
+<circle cx="11520" cy="1536" r="36" fill="#64748b"/><text x="11448" y="1570" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<rect x="11712" y="2880" width="2688" height="1272" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Loxone 2 Nibe Mode (State)</title></rect>
+<text x="11808" y="3060" font-size="140" fill="#0f172a">Loxone 2 Nibe Mode</text>
+<circle cx="11712" cy="3456" r="36" fill="#64748b"/><text x="11784" y="3490" font-size="100" text-anchor="start" fill="#334155">I1</text>
+<circle cx="11712" cy="3648" r="36" fill="#64748b"/><text x="11784" y="3682" font-size="100" text-anchor="start" fill="#334155">I2</text>
+<circle cx="11712" cy="3840" r="36" fill="#64748b"/><text x="11784" y="3874" font-size="100" text-anchor="start" fill="#334155">I3</text>
+<circle cx="11712" cy="4032" r="36" fill="#64748b"/><text x="11784" y="4066" font-size="100" text-anchor="start" fill="#334155">I4</text>
+<circle cx="14400" cy="3456" r="36" fill="#64748b"/><text x="14328" y="3490" font-size="100" text-anchor="end" fill="#334155">TQ</text>
+<circle cx="14400" cy="3648" r="36" fill="#64748b"/><text x="14328" y="3682" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<rect x="7584" y="2496" width="2688" height="1248" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Anwesenheitsmodus Heizung (Radio)</title></rect>
+<text x="7680" y="2676" font-size="140" fill="#0f172a">Anwesenheitsmodus Heizung</text>
+<circle cx="7584" cy="3072" r="36" fill="#64748b"/><text x="7656" y="3106" font-size="100" text-anchor="start" fill="#334155">InputTrigger 1</text>
+<circle cx="7584" cy="3264" r="36" fill="#64748b"/><text x="7656" y="3298" font-size="100" text-anchor="start" fill="#334155">InputTrigger 2</text>
+<circle cx="7584" cy="3456" r="36" fill="#64748b"/><text x="7656" y="3490" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="10272" cy="3072" r="36" fill="#64748b"/><text x="10200" y="3106" font-size="100" text-anchor="end" fill="#334155">AQ</text>
+<rect x="8832" y="4704" width="2688" height="1440" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Heißwasser-Boost (PushButton)</title></rect>
+<text x="8928" y="4884" font-size="140" fill="#0f172a">Heißwasser-Boost</text>
+<circle cx="8832" cy="5280" r="36" fill="#64748b"/><text x="8904" y="5314" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="8832" cy="5472" r="36" fill="#64748b"/><text x="8904" y="5506" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="8832" cy="5664" r="36" fill="#64748b"/><text x="8904" y="5698" font-size="100" text-anchor="start" fill="#334155">On</text>
+<circle cx="8832" cy="5856" r="36" fill="#64748b"/><text x="8904" y="5890" font-size="100" text-anchor="start" fill="#334155">InputDisable</text>
+<circle cx="11520" cy="5280" r="36" fill="#64748b"/><text x="11448" y="5314" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<circle cx="11520" cy="5472" r="36" fill="#64748b"/><text x="11448" y="5506" font-size="100" text-anchor="end" fill="#334155">Qon</text>
+<circle cx="11520" cy="5664" r="36" fill="#64748b"/><text x="11448" y="5698" font-size="100" text-anchor="end" fill="#334155">Qoff</text>
+<rect x="8832" y="6528" width="2688" height="1272" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>Autoreset nach 3h (OnPulseDelay)</title></rect>
+<text x="8928" y="6708" font-size="140" fill="#0f172a">Autoreset nach 3h</text>
+<circle cx="8832" cy="7104" r="36" fill="#64748b"/><text x="8904" y="7138" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="8832" cy="7296" r="36" fill="#64748b"/><text x="8904" y="7330" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="8832" cy="7488" r="36" fill="#64748b"/><text x="8904" y="7522" font-size="100" text-anchor="start" fill="#334155">Delay</text>
+<circle cx="8832" cy="7680" r="36" fill="#64748b"/><text x="8904" y="7714" font-size="100" text-anchor="start" fill="#334155">Time</text>
+<circle cx="11520" cy="7104" r="36" fill="#64748b"/><text x="11448" y="7138" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="5280" y="2016" width="1344" height="864" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>O17795 (Monoflop)</title></rect>
+<text x="5376" y="2196" font-size="140" fill="#0f172a">O17795</text>
+<circle cx="5280" cy="2400" r="36" fill="#64748b"/><text x="5352" y="2434" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="5280" cy="2592" r="36" fill="#64748b"/><text x="5352" y="2626" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="6624" cy="2400" r="36" fill="#64748b"/><text x="6552" y="2434" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="5280" y="3744" width="1344" height="864" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>O17795 (Monoflop)</title></rect>
+<text x="5376" y="3924" font-size="140" fill="#0f172a">O17795</text>
+<circle cx="5280" cy="4128" r="36" fill="#64748b"/><text x="5352" y="4162" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="5280" cy="4320" r="36" fill="#64748b"/><text x="5352" y="4354" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="6624" cy="4128" r="36" fill="#64748b"/><text x="6552" y="4162" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="5280" y="2976" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>O17795 (Monoflop)</title></rect>
+<text x="5376" y="3156" font-size="140" fill="#0f172a">O17795</text>
+<circle cx="5280" cy="3360" r="36" fill="#64748b"/><text x="5352" y="3394" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="5280" cy="3552" r="36" fill="#64748b"/><text x="5352" y="3586" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="6624" cy="3360" r="36" fill="#64748b"/><text x="6552" y="3394" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="5280" y="4800" width="1344" height="696" rx="48" fill="#f8fafc" stroke="#64748b" stroke-width="24"><title>O17795 (Monoflop)</title></rect>
+<text x="5376" y="4980" font-size="140" fill="#0f172a">O17795</text>
+<circle cx="5280" cy="5184" r="36" fill="#64748b"/><text x="5352" y="5218" font-size="100" text-anchor="start" fill="#334155">InputTrigger</text>
+<circle cx="5280" cy="5376" r="36" fill="#64748b"/><text x="5352" y="5410" font-size="100" text-anchor="start" fill="#334155">Reset</text>
+<circle cx="6624" cy="5184" r="36" fill="#64748b"/><text x="6552" y="5218" font-size="100" text-anchor="end" fill="#334155">Q</text>
+<rect x="17760" y="12480" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Alle sind zu Hause (Memory)</title></rect>
+<text x="17856" y="12620" font-size="120" fill="#0f172a">Alle sind zu Hause</text>
+<rect x="18144" y="10368" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Bad Temperatur (Memory)</title></rect>
+<text x="18240" y="10508" font-size="120" fill="#0f172a">Bad Temperatur</text>
+<rect x="18240" y="11520" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Bad Zieltemperatur (Memory)</title></rect>
+<text x="18336" y="11660" font-size="120" fill="#0f172a">Bad Zieltemperatur</text>
+<rect x="12768" y="1344" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>setTemperature (OutputRef)</title></rect>
+<text x="12864" y="1484" font-size="120" fill="#0f172a">setTemperature</text>
+<rect x="15360" y="3360" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>setSmartHomeMode (OutputRef)</title></rect>
+<text x="15456" y="3500" font-size="120" fill="#0f172a">setSmartHomeMode</text>
+<rect x="12192" y="5376" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>startHotWaterBoost (OutputRef)</title></rect>
+<text x="12288" y="5516" font-size="120" fill="#0f172a">startHotWaterBoost</text>
+<rect x="12192" y="5760" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>stopHotWaterBoost (OutputRef)</title></rect>
+<text x="12288" y="5900" font-size="120" fill="#0f172a">stopHotWaterBoost</text>
+<rect x="5760" y="1440" width="2112" height="192" rx="48" fill="#e2e8f0" stroke="#64748b" stroke-width="24"><title>Bad Zieltemperatur (InputRef)</title></rect>
+<text x="5856" y="1580" font-size="120" fill="#0f172a">Bad Zieltemperatur</text>
+</svg>

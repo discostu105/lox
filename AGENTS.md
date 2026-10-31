@@ -226,6 +226,15 @@ Other commands that may prompt: `scp`/`ssh` — use `-o BatchMode=yes`; `apt-get
    ```
 5. Verify all changes committed and pushed before ending the session
 
+## External references
+
+The official Loxone documents (Communicating with the Miniserver, Structure File, User Management, ...) and
+the community sources are listed in [docs/references.json](docs/references.json): links only, never the
+files. `tools/fetch-refs.py` downloads them into `refs/` (gitignored) and checks each pinned sha256, so a
+silently republished document shows up as `DRIFT`. Read a protocol fact there before guessing it; write it
+into our docs in our own words, citing the reference id and section. The public test corpus of real configs
+is `crates/loxone-config/tools/fetch-corpus.py` (see that crate's AGENTS.md).
+
 ## Issue Tracking
 
 Issues live in GitHub Issues (`gh issue list`, `gh issue create`). Do not keep TODO lists in markdown files.
