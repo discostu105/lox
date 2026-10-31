@@ -44,6 +44,7 @@ use crate::lock::{
     AttrClaim, Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex,
 };
 use crate::logic::ast::{Attr, BlockDecl, Item, MatchSpec, Module, Value};
+use crate::logic::desugar::DesugarInfo;
 use crate::logic::validate::{api_mirror_entry, is_ref_type, suggest, validate_ports};
 use crate::uuid::{Minter, entity_for_slug};
 use crate::xml::Element;
@@ -238,7 +239,7 @@ pub fn compile(
     //     repeat would have each lookup silently pick one twin.
     base.require_unique_uuids("base")?;
 
-    apply_moved(module, lock)?;
+    apply_moved(module, &desugar_info, lock)?;
     let src_slugs = check_removals(base, module, lock, opts)?;
 
     let mut doc = base.clone();
@@ -420,13 +421,32 @@ fn check_config_version(base: &LoxoneDoc, lock: &Lockfile, opts: &CompileOptions
 
 /// Applies `moved` statements to the lock (identity surgery, in source).
 /// Idempotent: once the new slug carries the entry, the statement is done.
-fn apply_moved(module: &Module, lock: &mut Lockfile) -> Result<()> {
+fn apply_moved(module: &Module, desugar_info: &DesugarInfo, lock: &mut Lockfile) -> Result<()> {
     for mv in module.moved() {
         match (
             lock.objects.contains_key(&mv.from),
             lock.objects.contains_key(&mv.to),
         ) {
-            (true, false) => lock.rename_object(&mv.from, &mv.to)?,
+            (true, false) => {
+                lock.rename_object(&mv.from, &mv.to)?;
+                // A renamed named signal (D81) takes its expression-owned
+                // sub-blocks along: `old__and1` becomes `new__and1`.
+                if desugar_info.signals.contains(&mv.to) {
+                    let prefix = format!("{}__", mv.from);
+                    let subs: Vec<String> = lock
+                        .objects
+                        .iter()
+                        .filter(|(k, o)| o.expr_owned && k.starts_with(&prefix))
+                        .map(|(k, _)| k.clone())
+                        .collect();
+                    for old in subs {
+                        let new = format!("{}__{}", mv.to, &old[prefix.len()..]);
+                        if !lock.objects.contains_key(&new) {
+                            lock.rename_object(&old, &new)?;
+                        }
+                    }
+                }
+            }
             (true, true) => {
                 return Err(Error::Compile(format!(
                     "moved `{from} -> {to}`: both slugs are in the lockfile — \

@@ -52,7 +52,7 @@ extern taster = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
 party = VirtualIn("Partymodus")                    # new app switch (Virtual Inputs folder)
 soll = VirtualIn("Sollwert", Analog: on)           # on/off: the boolean literals
 warm = GreaterEqual("Warm", Input1: sonne.Q, Input2: 28)
-licht = And(I1: warm.Q, I2: party.Q)
+licht = warm.Q and party.Q                         # named signal: an And named licht
 extern jal = AutoJalousie(title: "Beschattung Süd")
 jal.AutoShade <- licht.Q                           # wire onto an extern
 
@@ -70,6 +70,11 @@ end
 
 - A managed block's argument list is its whole input side: `Port: x.Q`
   wires, anything else sets the parameter.
+- `name = <expression>` (`and`/`or`/`not`, comparisons, `+ - * /`) is a
+  named signal (D81): its top block is `name` (`name.Q`; arithmetic is a
+  Formula, `name.AQ`), sub-blocks `name__<op><n>`. Reference it in tests
+  instead of an inline expression's synthetic slug. It is a declared
+  block: deleting it needs `removed name`. `name = a.Q` alone is refused.
 - Match externs by `iname:` or `uuid:` where you can. Titles are
   locale-volatile; narrow a repeated title with `room:`, `category:` or
   `device: "<serial>"`.
