@@ -6,11 +6,11 @@ is visible in a committed, test-pinned example. Where to look:
 | Example | Shows |
 |---|---|
 | [logic/beschattung.loxl](logic/beschattung.loxl) | the starter module: `page`, `let`, externs (`iname:` / `title:`), comparator and gate blocks, wires onto extern ports, an extern parameter write (`=`) |
-| [logic/pool.loxl](logic/pool.loxl) | the narrative showcase: a template with an instance, an expression argument, a `min` unit value, an expression wire, arithmetic folded into a `Formula` block (D35), two sim scenarios |
+| [logic/pool.loxl](logic/pool.loxl) | the narrative showcase: a template with an instance, an expression argument, a `min` unit value, an expression wire, arithmetic folded into a `Formula` block, two sim scenarios |
 | [logic/sprachtour.loxl](logic/sprachtour.loxl) | the systematic language tour — every construct the two above do not cover (see below) |
 | [logic/lifecycle/](logic/lifecycle/) | `moved` and `removed`, in three staged modules — the two transient statements no permanent module can carry; narrated by `cargo run --example lifecycle` |
 | [library/](library/) | real third-party configs we may redistribute, redacted, each with its source, license, decompiled view and page drawings |
-| [project/](project/) | a `lox.toml` project: fragment directory with one file per page (D25/D28), committed lockfile and output |
+| [project/](project/) | a `lox.toml` project: fragment directory with one file per page, committed lockfile and output |
 
 The tour covers, in order: string and numeric `let` constants; the full
 extern matcher palette (`uuid:`, `iname:`, `title:` narrowed by `room:`
@@ -20,10 +20,10 @@ and by `category:`); block labels; fan-in (two wires on one port); the
 (`"{titel}: …"`, overridden with a string `let`), value-parameter
 overrides and port forwarding; an expression wire with `or`, `and` and
 meaning-bearing parentheses; both mirror forms — a `mirrors:` extern on
-a GUI-drawn ref (D32) and a minted `InputRef(mirrors: …)` with its feed
-wire (D33); mirror routing (D34); a second `page` section; attribute
+a GUI-drawn ref and a new `InputRef(mirrors: …)` with its feed
+wire; mirror routing; a second `page` section; attribute
 claims on externs — `.title`, `.room` with followers, `.category` on
-an Air device and one of its inputs (D39); and `test` scenarios with
+an Air device and one of its inputs; and `test` scenarios with
 `clock`, per-step `dt`, and `~=`.
 
 ## Base configs
@@ -51,7 +51,7 @@ regenerated when compiler output changes: `cargo run --example compile`
 for `out/`, and `loxl compile --time 1767225600` inside
 `examples/project/` for the project's lock and output. [ci.sh](ci.sh)
 re-checks all invariants in CI
-([workflow](../.github/workflows/ci.yml)).
+([workflow](../../../.github/workflows/ci.yml)).
 
 ## Simulated tests
 

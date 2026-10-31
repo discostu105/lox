@@ -502,6 +502,7 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
                         "lets": m.lets().count(), "removed": m.removed().count(),
                         "moved": m.moved().count(),
                         "templates": templates, "instances": instances,
+                        "signals": m.signals().count(),
                         "expressions": d.expressions,
                         "expanded_blocks": x.blocks().count(),
                     }})

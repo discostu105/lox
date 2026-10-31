@@ -140,6 +140,8 @@ beschatten = And(                    # gates are fixed 2-input
 )
 
 jal.AutoShade <- beschatten.Q        # wire onto an extern port
+heiss = sonne.Q >= 30 and not party.Q  # a named signal: gate blocks,
+                                     # the top one is `heiss` (`heiss.Q`)
 jal.TargetPos = 70                   # Def= on an extern port; original
                                      # auto-restored when the line is removed
 extern sensor = LoxAIRDevice(uuid: "…")  # a device (created in Loxone Config)
@@ -189,6 +191,11 @@ moved beschatten -> schatten_gate    # slug rename, UUIDs survive
 The value decides what an argument means: `Port: slug.Port` wires that source in, anything else sets
 the port's parameter. `<-` and port-`=` work only on externs; everything about a managed block is in
 its own argument list.
+
+A named signal `x = <expr>` names an expression's result. Its top block is `x` (`x.Q`; an arithmetic
+one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it instead of spelling an
+inline expression's synthetic slug (`jal_autoshade__and1`) in a test or a second consumer. `x` counts as
+a declared block, so deleting the line needs `removed x`.
 
 Removing a block declaration makes the next compile **fail on purpose**. When deletion is intended,
 add `removed <slug>`: it covers that one block and shows the intent in the diff. For a slug rename,
@@ -277,6 +284,9 @@ it only when it matches what you intended.
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
 | `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
+| `targets named signal` | `<-`, port-`=` or an attribute on an `x = <expr>` signal | change the expression; its inputs are its operands |
+| `an alias is not a block` | `x = a.Q`: a named signal needs an expression | use `a.Q` directly where `x.Q` would go |
+| `changed its top operator` | a named signal's top `and`/`or`/comparison changed, and with it its block type | give the signal a new name and add `removed <old>` |
 | `is old syntax` | a `block`/`wire`/`set`/`match`/`use` keyword from the old grammar | rewrite the line in the spelling the error shows |
 | `duplicate parameter` / `duplicate wire` | same argument twice in one argument list | delete one (fan-in with *different* sources is allowed) |
 | `has both a value … and a wire` | a port bound to a constant and to a wire in one argument list | keep one, since a wired input ignores its value |

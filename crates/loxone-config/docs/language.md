@@ -12,7 +12,7 @@ Lox Logic is the text language for managed Loxone logic.
 
 ```ebnf
 module     = { line } ;
-line       = comment | let | extern | block-head | arg-line
+line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
            | page | test | tiles | tiles-claim | access | schedule
            | schedule-claim | rule | blank ;
@@ -35,6 +35,9 @@ binding    = value                                 (* Def= parameter *)
            | expr ;                                (* expression sugar:
                                                       desugars into gate blocks *)
 
+signal     = slug "=" expr [ comment ] ;            (* named signal: not a
+                                                      bare operand; the top
+                                                      block is `slug` *)
 wire       = slug "." port "<-" ( slug "." port | expr ) [ comment ] ;
                                     (* extern target; an expression RHS
                                        desugars into gate blocks *)
@@ -61,7 +64,7 @@ page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
 page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
 template   = "template" slug "(" [ params ] ")" [ comment ]
-             { comment | block-head | arg-line | wire | set }
+             { comment | block-head | arg-line | signal | wire | set }
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
@@ -818,10 +821,9 @@ The template library (`templates/`, listed by `loxl templates`)
 ships tested templates for common automations; copy a file into the
 module directory to call them.
 
-The body may contain only block declarations, wires, sets and comments —
-no nesting, no template-local `let`/`extern`. `template`
-and `end` are reserved words; `use` is reserved for the v0 migration
-error.
+The body may contain only block declarations, named signals, wires, sets and comments. No nesting,
+no template-local `let`/`extern`. `template`
+and `end` are reserved words; `use` is reserved for the old-syntax error.
 
 ### Expressions — sugar over the discrete blocks
 
@@ -875,7 +877,7 @@ A whole arithmetic tree desugars into one `Formula` block. Here that is `verbrau
 - The label is the expression text. Identity works as for the gate blocks (slug operator `f`,
   expression-owned lock entry).
 - Arithmetic inside gates or comparisons (`a.Q and x.AQ + 1`, `x.AQ + 1 >= 5`) is not supported.
-  Declare a `Formula` block and use its `AQ`.
+  Name the arithmetic as a signal (below) and compare its `AQ`.
 
 **Identity.** The generated blocks get synthetic slugs `<sink>_<port>__<op><n>`: a post-order walk with
 one counter per operator. The sink is the extern port on `<-`, or the managed block's port for an
@@ -887,6 +889,49 @@ argument binding. Here: `jal_sued_autoshade__ge1`, `jal_sued_autoshade__and1` an
   entries without a `removed` statement.
 - Declaring a slug inside an expression's synthetic namespace is an error.
 - In a template body, desugaring runs after expansion, so the prefix uses the instance's sink.
+
+### Named signals: `slug = <expr>`
+
+```text
+let wunschtemp = 26
+
+wp_bedarf = wasser.Q < wunschtemp and pv.Q >= 1500 and not abdeckung.Q
+wp.On <- wp_bedarf.Q
+
+pv_kw = pv.Q / 1000                  # arithmetic: one Formula, read at AQ
+pv_hoch = pv_kw.AQ >= 1.5
+```
+
+A line `<slug> = <expression>` names an expression's result. It desugars exactly like an inline
+expression: the same blocks, the same labels (the expression text), the same rules. Only the names
+differ:
+
+- The **top block is `<slug>` itself**; the sub-blocks are `<slug>__<op><n>`.
+- The signal's output is the top block's: `<slug>.Q` for a gate or comparator, `<slug>.AQ` for the
+  `Formula` of an arithmetic signal. `<slug>.Q` on a Formula is an unknown-port error.
+- It is referenced like any block: from arguments, `<-`, tests, tile `to:` and rules.
+- Arithmetic under a comparison, which an inline expression cannot hold, is two signals
+  (`pv_kw = pv.Q / 1000`, then `pv_hoch = pv_kw.AQ >= 1.5`).
+
+The right side must be an expression:
+
+- A bare port (`x = a.Q`) is an error, since an alias is not a block. Write `a.Q` where `x.Q` would go.
+- A bare value (`x = 5`, `x = on`) is a constant; write `let x = 5`.
+- A signal's inputs are its expression. `<-`, port-`=` and attribute statements on a signal are
+  errors, and a template body's only signal takes no call-site port forwards.
+
+**Identity.** The top slug is written by hand, so it is **hand-owned**:
+
+- It keeps its UUID while the expression below it changes.
+- Deleting the statement needs `removed <slug>`, like any block.
+- A rename is `moved <old> -> <new>` or `loxl rename`. `moved` takes the expression-owned sub-blocks
+  along (`old__ge1` → `new__ge1`).
+- Changing the top operator (`and` → `or`) changes the top block's type, which a pinned block never
+  does. The compile refuses and names the way out: a new slug plus `removed <old>`.
+
+The sub-blocks are **expression-owned**, as inline: derived from the text, orphans removed
+automatically. A declared name in the `<slug>__` namespace is an error. In a template body a signal is
+body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `sued_warm__ge1`.
 
 ### `test` — a simulated scenario
 
@@ -1362,8 +1407,8 @@ recipients, and leaves `OutputRefLM` blocks with the GUI.
 
 ## Name resolution and validation
 
-- Externs, blocks, `let` constants, templates, `tiles` sets and
-  schedules share one namespace per module; duplicates are an error. An
+- Externs, blocks, named signals, `let` constants, templates, `tiles`
+  sets and schedules share one namespace per module; duplicates are an error. An
   `access` or `recipients` declaration names an extern and declares
   nothing.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
@@ -1468,6 +1513,8 @@ compile output of a migrated file is byte-identical.
   quoted one is canonicalized, not refused); **`when date`** is bare
   (`when date 2026-12-24`, was quoted).
 - The "expected a statement" error lists every statement kind.
+- **Named signals**: `wp_bedarf = a.Q and b.AQ >= 5` names an expression's result (see
+  [Named signals](#named-signals-slug--expr)). New syntax only; no v1 file changes.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, then `loxl fmt`

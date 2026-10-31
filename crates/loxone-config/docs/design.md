@@ -149,7 +149,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D21 | [The drift baseline is a fingerprint of what the diff compares](decisions/0021-drift-baseline.md) | accepted |
 | D22 | [The Loxone Config release is a qualification pin](decisions/0022-config-version-pin.md) | accepted, amended by [D46](decisions/0046-block-version.md) |
 | D23 | [Templates are macro expansion with locked identities](decisions/0023-templates.md) | accepted |
-| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md) and [D35](decisions/0035-arithmetic-formula.md) |
+| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md) and [D81](decisions/0081-named-signals.md) |
 | D25 | [Projects are a `lox.toml`, and there is no `import`](decisions/0025-projects-lox-toml.md) | accepted |
 | D26 | [Expressions bind in argument lists too](decisions/0026-expressions-in-arguments.md) | accepted |
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
@@ -206,3 +206,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D78 | [A block's own blocks stay with it](decisions/0078-owned-sub-blocks.md) | accepted |
 | D79 | [A PulseAt's fire time from source; what the compile carries](decisions/0079-pulseat-fire-time.md) | accepted |
 | D80 | [Language v2, one spelling per value](decisions/0080-v2-one-spelling.md) | accepted |
+| D81 | [Named signals](decisions/0081-named-signals.md) | accepted |

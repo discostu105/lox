@@ -330,7 +330,8 @@ fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item
 /// line that starts with none of them.
 const STATEMENTS: &str = "expected a statement: `let <name> = <value>`, \
      `extern <slug> = <Type>(…)`, `<slug> = <Type>(…)` (a block), \
-     `<slug> = <template>(…)` (an instance), `<slug>.<Port> <- <source>`, \
+     `<slug> = <template>(…)` (an instance), `<slug> = <expression>` (a named \
+     signal), `<slug>.<Port> <- <source>`, \
      `<slug>.<Port> = <value>`, `<slug>.title|room|category = <value>`, \
      `(<slug>, …).<Port> = <value>`, `<slug>.tiles|schedule|moods = <name>`, \
      `page \"<title>\"`, `template <name>(…)`, `test \"<name>\"`, `tiles <name>`, \
@@ -653,7 +654,7 @@ impl Parser {
         {
             return Err(err(format!(
                 "`{kw}` is not allowed inside a template body — only block \
-                 declarations, wires, port assignments, and comments (D23)"
+                 declarations, named signals, wires, port assignments, and comments (D23)"
             )));
         }
         Ok(())
@@ -1919,7 +1920,7 @@ fn parse_ident_statement(
             Tok::Ident(ty),
             Tok::LParen,
             rest @ ..,
-        ] => {
+        ] if ty != "not" => {
             let callee = if ty.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
                 check_slug(ty, lineno)?
             } else {
@@ -1944,17 +1945,27 @@ fn parse_ident_statement(
             }
             Ok(())
         }
-        [Tok::Ident(slug), Tok::Eq, Tok::Ident(ty)] => Err(err(format!(
-            "expected `(` after the type — a block declaration is `{slug} = {ty}(…)` \
-             (a constant is `let {slug} = …`)"
-        ))),
+        [Tok::Ident(slug), Tok::Eq, Tok::Ident(ty)]
+            if ty.starts_with(|c: char| c.is_ascii_uppercase()) =>
+        {
+            Err(err(format!(
+                "expected `(` after the type — a block declaration is `{slug} = {ty}(…)` \
+                 (a constant is `let {slug} = …`)"
+            )))
+        }
         [Tok::Ident(slug), Tok::Eq, Tok::Num(v)] => Err(err(format!(
             "`{slug} = {v}` — did you mean `let {slug} = {v}`? (a bare name on the \
-             left is a constant or block declaration; an extern port is `{slug}.<Port> = {v}`)"
+             left is a constant, block or signal declaration; an extern port is \
+             `{slug}.<Port> = {v}`)"
         ))),
         [Tok::Ident(slug), Tok::Eq, Tok::Str(_)] => Err(err(format!(
             "`{slug} = \"…\"` — did you mean `let {slug} = \"…\"`?"
         ))),
+        // slug = <expr> — a named signal (D81).
+        [Tok::Ident(slug), Tok::Eq, rest @ ..] if !rest.is_empty() => {
+            items.push(parse_signal(slug, rest, comment, lineno)?);
+            Ok(())
+        }
         // slug.Port <- … — a plain wire (`slug.Port` RHS) or an
         // expression that desugars into gate/comparator blocks (D24).
         [
@@ -2131,6 +2142,28 @@ fn parse_wire(
              use `{to} = {v}`"
         ))),
         expr => Ok(Item::ExprWire(ExprWireDecl { to, expr, comment })),
+    }
+}
+
+/// `slug = <expr>`: a named signal (D81). The expression must be one —
+/// a bare port or value names no block of its own.
+fn parse_signal(slug: &str, rest: &[Tok], comment: Option<String>, lineno: usize) -> Result<Item> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let slug = check_slug(slug, lineno)?;
+    match parse_expr(rest, lineno)? {
+        Expr::Atom(Operand::Port(p)) => Err(err(format!(
+            "`{slug} = {p}` is a bare port: an alias is not a block. Write `{p}` \
+             where you would write `{slug}.{port}`.",
+            port = p.port,
+        ))),
+        Expr::Atom(Operand::Value(v)) => Err(err(format!(
+            "`{slug} = {v}` is a value, not a signal. Did you mean `let {slug} = {v}`?"
+        ))),
+        expr => Ok(Item::Signal(SignalDecl {
+            slug,
+            expr,
+            comment,
+        })),
     }
 }
 

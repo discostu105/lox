@@ -47,7 +47,7 @@ first line is a commit subject. Show it before anyone pushes.
 extern sonne = VirtualIn(iname: "VI3")            # existing object: reference it
 party = VirtualIn("Partymodus")                    # new app switch (Virtual Inputs folder)
 warm = GreaterEqual("Warm", Input1: sonne.Q, Input2: 28)
-licht = And(I1: warm.Q, I2: party.Q)
+licht = warm.Q and party.Q                         # named signal: an And named licht
 extern jal = AutoJalousie(title: "Beschattung Süd")
 jal.AutoShade <- licht.Q                           # wire onto an extern
 
@@ -61,6 +61,9 @@ end
 
 - A managed block's argument list is its whole input side: `Port: x.Q` wires, anything else sets the
   parameter.
+- `name = <expression>` (`and`/`or`/`not`, comparisons, `+ - * /`) is a named signal. Its top block
+  is `name` (`name.Q`; arithmetic is a Formula, `name.AQ`). Reference it in tests instead of an inline
+  expression's synthetic slug. Deleting it needs `removed name`. `name = a.Q` alone is refused.
 - Deleting a block needs `removed <slug>`; renaming a slug needs `loxl rename` or
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
 - To take over logic drawn in Loxone Config, use `loxl adopt`, then check with
