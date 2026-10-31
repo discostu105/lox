@@ -35,7 +35,7 @@
 use crate::connectors::{
     MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_params,
     builtin, carried_attrs, carried_children, container_type, message_params, object_tree,
-    ref_link_type,
+    ref_link_type, save_defaults,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
 use crate::error::{Error, Result};
@@ -585,6 +585,9 @@ pub fn compile(
     }
     for o in lock.objects.values() {
         minter.avoid(&o.uuid);
+        for s in &o.states {
+            minter.avoid(s);
+        }
         for p in o.ports.values() {
             minter.avoid(p);
         }
@@ -679,6 +682,7 @@ pub fn compile(
                 superseded_layout: None,
                 page_uuid: None,
                 expr_owned: false,
+                states: Vec::new(),
             });
         // Ownership follows the current source: a slug the desugarer
         // produced is expression-owned; one it no longer produces (but a
@@ -710,6 +714,11 @@ pub fn compile(
         if entry.uuid.is_empty() {
             entry.uuid = minter.mint_object().to_string();
             lock.counters.next_obj += 1;
+            // D66: the special states a save would give it, for its entry
+            // in the app.
+            if let Some((n, _)) = save_defaults(&block.block_type) {
+                entry.states = (0..n).map(|_| minter.mint_object().to_string()).collect();
+            }
         }
         // D54: an object of the object tree (a VirtualIn) is appended to
         // its container, which the base has exactly once — never pinned,
@@ -1156,6 +1165,12 @@ pub fn compile(
             (None, _) if message_ref || wf.is_empty() => {}
             (None, _) => el.set_attr("WF", wf),
         }
+        if res.is_none()
+            && let Some(o) = lock.objects.get(&block.slug)
+            && !o.states.is_empty()
+        {
+            el.set_attr("SpStates", &o.states.join(","));
+        }
         if let Some(m) = mirror_of.get(&block.slug) {
             match m.value {
                 RefValue::Digital => {}
@@ -1278,6 +1293,14 @@ pub fn compile(
                     c.set_attr(k, v);
                 }
                 c.self_closing = !open;
+                el.push_child(c);
+            }
+        } else if let Some((_, children)) = save_defaults(&block.block_type) {
+            for (name, attrs) in children {
+                let mut c = Element::new(*name);
+                for (k, v) in *attrs {
+                    c.set_attr(k, v);
+                }
                 el.push_child(c);
             }
         } else if block.block_type == "VirtualIn" {

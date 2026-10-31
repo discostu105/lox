@@ -34,10 +34,19 @@ fn hidden_and_shown_again_gives_loxone_configs_entries() {
         assert_eq!(same.text, cat, "{}", d.display());
         assert!(same.applied.is_empty() && same.left.is_empty());
 
+        // The controls the catalogue lists: an energy flow monitor's own
+        // meters are shown, never listed.
+        let listed = serde_json::from_str::<serde_json::Value>(cat.trim_start_matches('\u{feff}'))
+            .unwrap()["controls"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter_map(|e| Some(e["uuidAction"].as_str()?.to_ascii_lowercase()))
+            .collect::<std::collections::BTreeSet<_>>();
         let mut hidden = doc.clone();
         let mut n = 0;
         for o in doc.objects() {
-            if !KNOWN.contains(&o.block_type.as_str()) {
+            if !KNOWN.contains(&o.block_type.as_str()) || !listed.contains(&o.uuid) {
                 continue;
             }
             let el = hidden.element_at_mut(&o.path).unwrap();
@@ -49,8 +58,20 @@ fn hidden_and_shown_again_gives_loxone_configs_entries() {
             }
         }
         let stripped = update(&cat, &doc, &hidden, "2000-01-01 00:00:00").unwrap();
-        assert!(stripped.left.is_empty(), "{:?}", stripped.left);
-        let back = update(&stripped.text, &hidden, &doc, "2000-01-01 00:00:00").unwrap();
+        // A control another entry names (a jalousie a central block
+        // moves, a meter of the energy flow monitor) keeps its entry; the
+        // test drops those by hand to see them written again.
+        let referred: Vec<_> = stripped
+            .left
+            .iter()
+            .filter(|c| c.what.ends_with("other entries refer to it"))
+            .collect();
+        assert_eq!(referred.len(), stripped.left.len(), "{:?}", stripped.left);
+        let mut text = stripped.text.clone();
+        for c in &referred {
+            text = without_entry(&text, &format!("\"U:{}\":", c.uuid));
+        }
+        let back = update(&text, &hidden, &doc, "2000-01-01 00:00:00").unwrap();
         let entries = |t: &str| -> Vec<String> {
             let v: serde_json::Value =
                 serde_json::from_str(t.trim_start_matches('\u{feff}')).unwrap();
@@ -75,9 +96,11 @@ fn hidden_and_shown_again_gives_loxone_configs_entries() {
             assert_eq!(got, want, "{}", d.display());
         }
         eprintln!(
-            "{}: {n} hidden, {} removed, {} added back, {with_icons} with an icon left",
+            "{}: {n} hidden, {} removed, {} dropped by hand, {} added back, \
+             {with_icons} with an icon left",
             d.display(),
             stripped.applied.len(),
+            referred.len(),
             back.applied.len()
         );
         // Byte for byte: every entry added back is the one Loxone Config
@@ -101,4 +124,17 @@ fn entry_text<'t>(text: &'t str, key: &str) -> &'t str {
     let mut values = serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>();
     values.next().unwrap().unwrap();
     &rest[..values.byte_offset()]
+}
+
+/// `text` without the entry behind `key` and its separating comma.
+fn without_entry(text: &str, key: &str) -> String {
+    let start = text.find(key).unwrap();
+    let end = start + key.len() + entry_text(text, key).len();
+    let before = text[..start].trim_end();
+    if let Some(b) = before.strip_suffix(',') {
+        format!("{b}{}", &text[end..])
+    } else {
+        let after = text[end..].trim_start();
+        format!("{before}{}", after.strip_prefix(',').unwrap_or(after))
+    }
 }

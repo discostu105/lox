@@ -702,11 +702,14 @@ to the program's `Date=`; and two pushes to the same Miniserver
 - **Which objects are listed.** Not every `Visu="true"` object: a
   `VirtualIn` no `InputRef` uses (2 in each save), a `PushButton` with
   neither room nor category (1), the weather server, the device monitor,
-  a `TreeActor`, `MeterAbsBi` blocks are not.
+  a `TreeActor`, the meters an energy flow monitor holds (nested
+  `MeterAbsBi`) are not.
 - **Entries by block type.** Key order `name, type, uuidAction, room,
-  cat, defaultRating (0), isFavorite, isSecured (false),
+  cat, defaultRating, isFavorite, isSecured (false),
   [hasControlNotes], defaultIcon, restrictions (0), details, states,
-  [statistic]`. `hasControlNotes` (`true`) is there when the object has
+  [statistic | statisticV2]`. `defaultRating` is `<IoData Rating=>`
+  (0 without). A jalousie's and a central block's entry have no
+  `defaultIcon`. `hasControlNotes` (`true`) is there when the object has
   notes (`NTXT=`, one object; the documentation `NDOC=` adds nothing).
   `defaultIcon` is `null` without `IconV=`; with one it is a file name
   (`IconsFilled/login-key.svg`) the program does not carry.
@@ -750,8 +753,41 @@ to the program's `Date=`; and two pushes to the same Miniserver
     (`AQmt`), `value` (`AQ`), `needsActivation` and `modeList` (the two
     `SpStates=`), `entriesAndDefaultValue` (the object's UUID),
     `resetActive` (`Reset`).
-  Hiding these objects per save (67) and showing them again gives back
-  Loxone Config's entries byte for byte, but for the two with an icon
+  - `AutoJalousie` → `Jalousie`, details
+    `{"jLockable":true,"controlHistory":true,"hasHistory":H,"isAutomatic":true,"animation":0,"type":348}`
+    (`H` the `<COHist TRK_NE>`; 16 of 16 alike), states `jLocked`
+    (`Stop`, top bit set), `infoText` (`SpStates[0]`), `up`, `down`,
+    `position`, `shadePosition`, `safetyActive` (`OutputUp`,
+    `OutputDown`, `OutputPos`, `OutputLPos`, `OutputSafety`),
+    `autoAllowed` (`EnAutoShade`), `autoActive` (`OutputAutoShade`),
+    `locked` (`OutputLock`), then `autoInfoText`, `autoState`,
+    `deviceState`, `targetPosition`, `targetPositionLamelle`,
+    `adjustingEndPos` (`SpStates[1..7]`).
+  - `CentralLight` → `CentralLightController`, `CentralShade` →
+    `CentralJalousie`: details
+    `{"jLockable":true,"controls":[{"id":i,"uuid":U}…],"parameterConnections":0}`,
+    the members in the order of `rec=`; states `jLocked` (`Reset`
+    resp. `Stop`, top bit set), `events` (`SpStates[0]`), the shading's
+    `safetyActive` (`SpStates[1]`).
+  - `MeterDig`, `MeterAbsUni` (`unidirectional`), `MeterAbsBi`
+    (`bidirectional`), `MeterAbsSt` (`storage`) → `Meter`, details
+    `{"jLockable":false,"type":T,"displayType":0,"actualFormat":F,"totalFormat":"","powerName":P}`
+    (`F` from `Un1=` as above, `P` the `PwrN=`; the storage adds
+    `storageFormat` from `UnSt=` and `storageMax`, `MaxLvl=` as a
+    float); states `jLocked` (`R`, top bit set), `actual` (`OPf`),
+    `total` (`OMr`) or `total`/`totalNeg` (`OMr1`/`OMr2`), the storage's
+    `storage` (`Slvl`), then the day/week/month/year readings (`ORd`,
+    `ORw`, `ORm`, `ORy`; `…1` and `…2` for the bidirectional ones as
+    `total…` and `totalNeg…`). `statisticV2` after `states`: one group
+    per `<statGrp id m [acc]>` (`{"id":"1","mode":m,[ "accumulated":true,]"dataPoints":[…]}`):
+    group 1 the power (title `P`, format `0.000kW` for `<v.3>kW`),
+    group 2 the reading(s) (title `Zählerstand`, format `""`), group 3
+    the storage level (`Speicherstand`, `0%`). Seen only with
+    `StatsType="8"` and no `Un2=`.
+  Hiding these objects per save (117, of them 41 a central block or the
+  energy flow monitor names, dropped by hand) and showing them again
+  gives back
+  Loxone Config's entries byte for byte (98), but for the 19 with an icon
   (`LXIR_CATALOGUE_CORPUS=<dir> cargo test -p lxir --test catalogue`).
   The corpus holds catalogues Loxone Config wrote; a catalogue from an
   older push is stale against its program and no evidence.
@@ -764,8 +800,13 @@ to the program's `Date=`; and two pushes to the same Miniserver
   input and set `lastModified` to the push time (2026-10-30): the
   Miniserver served the new name, and `LoxAPPversion3` answered the new
   time. `permissions.bin` follows the catalogue's control order (above).
+- **A minted block lacks what a save adds.** Loxone Config gives a new
+  block its special states on the first save (oracle session 28: seven
+  on a jalousie, fourteen and the sequence lists on a light controller,
+  `Rec=""` and two `<statGrp>` on a meter); lxir mints a jalousie's (D66),
+  which the save keeps.
 - **Unknown:** the entries of the other block types (taken over as they
-  are: light controllers, shading, meters, the energy flow monitor,
+  are: light controllers, the energy flow monitor,
   intercom, alarms, irrigation, room controllers), analog day timers,
   display texts of an object's own, other `StatsType` values, whether Loxone Config drops an entry when the room is removed,
   and where it puts a new entry (lxir appends it).

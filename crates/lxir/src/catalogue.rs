@@ -7,8 +7,9 @@
 //! the catalogue of the config it compiled against: the name, room,
 //! category and favourite flag of the controls it lists, the controls the
 //! compile deletes or hides, and new entries for the block types whose
-//! entries are known (push buttons, switches, digital virtual inputs). The
-//! rules and their evidence are in docs/loxone-format.md (*LoxAPP3.json*).
+//! entries are known (switches, inputs and info displays, jalousies, central
+//! blocks, meters: [`KNOWN`]). The rules and their evidence are in
+//! docs/loxone-format.md (*LoxAPP3.json*).
 //! What it cannot carry over it names, so that a save from Loxone Config
 //! can.
 //!
@@ -246,7 +247,7 @@ pub fn update(
         };
         // Loxone Config does not list a virtual input no page uses, nor an
         // object without a room and a category.
-        if !eligible(&now, el) || was.shown(uuid).is_some_and(|w| eligible(&was, w)) {
+        if was.shown(uuid).is_some_and(|w| eligible(&was, w)) {
             continue;
         }
         let ty = el.attr("Type").unwrap_or("");
@@ -256,6 +257,18 @@ pub fn update(
             name: name.clone(),
             what: what.to_string(),
         };
+        if !eligible(&now, el) {
+            // A new control of a known type: say why the app lacks it.
+            let v = view(el);
+            if was.shown(uuid).is_none()
+                && KNOWN.contains(&ty)
+                && ty != "VirtualIn"
+                && (v.room.is_none() || v.cat.is_none())
+            {
+                left.push(change("not in the app: it needs a room and a category"));
+            }
+            continue;
+        }
         match entry(el) {
             Some(json) if trusted.contains(ty) => {
                 added.push(',');
@@ -374,7 +387,7 @@ fn trusted_types(
 }
 
 /// The block types [`entry`] knows.
-pub const KNOWN: [&str; 14] = [
+pub const KNOWN: [&str; 21] = [
     "PButtonT",
     "PushButton",
     "VirtualIn",
@@ -389,11 +402,25 @@ pub const KNOWN: [&str; 14] = [
     "PulseAt",
     "DayTimer",
     "LoxAIRactor",
+    "AutoJalousie",
+    "CentralLight",
+    "CentralShade",
+    "MeterDig",
+    "MeterAbsUni",
+    "MeterAbsBi",
+    "MeterAbsSt",
 ];
 
 /// The members of an entry the self-check compares (the rest come from
 /// [`view`]).
-const SELF_CHECKED: [&str; 4] = ["type", "details", "states", "statistic"];
+const SELF_CHECKED: [&str; 6] = [
+    "type",
+    "details",
+    "states",
+    "statistic",
+    "statisticV2",
+    "defaultIcon",
+];
 
 /// Objects shown as a digital info display (`InfoOnlyDigital`): their
 /// state is their own UUID.
@@ -430,6 +457,14 @@ fn entry(el: &Element) -> Option<String> {
     // only is an info display.
     let display = el.child_elements().filter(|c| c.name == "Display").last();
     let uuid = el.attr("U")?;
+    // Most entries carry `"defaultIcon":null`; a jalousie's and a central
+    // block's have no such key. What follows `states`: a statistic.
+    let mut icon = true;
+    let mut tail = String::new();
+    let sp = || -> Vec<&str> {
+        el.attr("SpStates")
+            .map_or_else(Vec::new, |s| s.split(',').collect())
+    };
     let (ty, details, states) = match el.attr("Type")? {
         "PButtonT" => (
             "Pushbutton",
@@ -536,11 +571,105 @@ fn entry(el: &Element) -> Option<String> {
                 ),
             )
         }
+        // The automatic jalousie: its outputs and seven special states.
+        "AutoJalousie" => {
+            let sp = sp();
+            let [
+                info,
+                auto_info,
+                auto_state,
+                device,
+                target,
+                target_lamelle,
+                end_pos,
+            ] = sp[..]
+            else {
+                return None;
+            };
+            let history = el
+                .child_elements()
+                .find(|c| c.name == "COHist")?
+                .attr("TRK_NE")?
+                .parse::<u32>()
+                .ok()?;
+            icon = false;
+            (
+                "Jalousie",
+                format!(
+                    r#"{{"jLockable":true,"controlHistory":true,"hasHistory":{history},"isAutomatic":true,"animation":0,"type":348}}"#
+                ),
+                format!(
+                    r#"{{"jLocked":{},"infoText":{},"up":{},"down":{},"position":{},"shadePosition":{},"safetyActive":{},"autoAllowed":{},"autoActive":{},"locked":{},"autoInfoText":{},"autoState":{},"deviceState":{},"targetPosition":{},"targetPositionLamelle":{},"adjustingEndPos":{}}}"#,
+                    json_str(&locked(&co("Stop")?)?),
+                    json_str(info),
+                    json_str(&co("OutputUp")?),
+                    json_str(&co("OutputDown")?),
+                    json_str(&co("OutputPos")?),
+                    json_str(&co("OutputLPos")?),
+                    json_str(&co("OutputSafety")?),
+                    json_str(&co("EnAutoShade")?),
+                    json_str(&co("OutputAutoShade")?),
+                    json_str(&co("OutputLock")?),
+                    json_str(auto_info),
+                    json_str(auto_state),
+                    json_str(device),
+                    json_str(target),
+                    json_str(target_lamelle),
+                    json_str(end_pos),
+                ),
+            )
+        }
+        // A central block lists its members (`rec=`, in order); one
+        // without members is not known.
+        t @ ("CentralLight" | "CentralShade") => {
+            let members: Vec<String> = el
+                .attr("rec")
+                .filter(|r| !r.is_empty())?
+                .split(',')
+                .enumerate()
+                .map(|(i, u)| format!(r#"{{"id":{i},"uuid":{}}}"#, json_str(u)))
+                .collect();
+            let sp = sp();
+            let details = format!(
+                r#"{{"jLockable":true,"controls":[{}],"parameterConnections":0}}"#,
+                members.join(",")
+            );
+            icon = false;
+            match (t, &sp[..]) {
+                ("CentralLight", [events]) => (
+                    "CentralLightController",
+                    details,
+                    format!(
+                        r#"{{"jLocked":{},"events":{}}}"#,
+                        json_str(&locked(&co("Reset")?)?),
+                        json_str(events)
+                    ),
+                ),
+                ("CentralShade", [events, safety]) => (
+                    "CentralJalousie",
+                    details,
+                    format!(
+                        r#"{{"jLocked":{},"events":{},"safetyActive":{}}}"#,
+                        json_str(&locked(&co("Stop")?)?),
+                        json_str(events),
+                        json_str(safety)
+                    ),
+                ),
+                _ => return None,
+            }
+        }
+        t if t.starts_with("Meter") => {
+            let (details, states, groups) = meter(el, &co)?;
+            tail = format!(r#","statisticV2":{{"groups":[{groups}]}}"#);
+            ("Meter", details, states)
+        }
         _ => return None,
     };
     let v = view(el);
+    // A meter's statistic is its `statisticV2`.
     let statistic = match el.attr("StatsType") {
         None => String::new(),
+        Some(_) if ty == "Meter" => String::new(),
         Some(stats) => {
             // The first connector is the one recorded.
             let recorded = el.child_elements().find(|c| c.name == "Co")?.attr("U")?;
@@ -570,13 +699,135 @@ fn entry(el: &Element) -> Option<String> {
     } else {
         ""
     };
+    let icon = if icon { r#""defaultIcon":null,"# } else { "" };
     Some(format!(
-        r#"{{"name":{},"type":"{ty}","uuidAction":{},"room":{},"cat":{},"defaultRating":0,"isFavorite":{},"isSecured":false,{notes}"defaultIcon":null,"restrictions":0,"details":{details},"states":{states}{statistic}}}"#,
+        r#"{{"name":{},"type":"{ty}","uuidAction":{},"room":{},"cat":{},"defaultRating":{},"isFavorite":{},"isSecured":false,{notes}{icon}"restrictions":0,"details":{details},"states":{states}{statistic}{tail}}}"#,
         json_str(&v.name),
         json_str(uuid),
         json_str(v.room.as_deref()?),
         json_str(v.cat.as_deref()?),
+        v.rating,
         v.favorite,
+    ))
+}
+
+/// A meter's details, states and statistic groups. Known for the units
+/// the corpus shows: a power unit (`Un1=`) and name (`PwrN=`), no unit of
+/// its own for the total (`Un2=`), recorded (`StatsType="8"`).
+fn meter(el: &Element, co: &dyn Fn(&str) -> Option<String>) -> Option<(String, String, String)> {
+    if el.attr("Un2").is_some() || el.attr("StatsType") != Some("8") {
+        return None;
+    }
+    let power = el.attr_decoded("PwrN")?;
+    let (actual, actual_stat) = value_format(&el.attr_decoded("Un1")?)?;
+    let kind = match el.attr("Type")? {
+        "MeterDig" | "MeterAbsUni" => "unidirectional",
+        "MeterAbsBi" => "bidirectional",
+        "MeterAbsSt" => "storage",
+        _ => return None,
+    };
+    let mut details = format!(
+        r#"{{"jLockable":false,"type":"{kind}","displayType":0,"actualFormat":{},"totalFormat":"","powerName":{}"#,
+        json_str(&actual),
+        json_str(&power)
+    );
+    // State name → connector, in Loxone Config's order.
+    let mut states: Vec<(&str, &str)> = vec![("jLocked", "R"), ("actual", "OPf")];
+    let mut storage = None;
+    if kind == "unidirectional" {
+        states.extend([
+            ("total", "OMr"),
+            ("totalDay", "ORd"),
+            ("totalWeek", "ORw"),
+            ("totalMonth", "ORm"),
+            ("totalYear", "ORy"),
+        ]);
+    } else {
+        states.extend([("total", "OMr1"), ("totalNeg", "OMr2")]);
+        if kind == "storage" {
+            let (format, stat) = value_format(&el.attr_decoded("UnSt")?)?;
+            let max: f64 = el.attr("MaxLvl")?.parse().ok()?;
+            details.push_str(&format!(
+                r#","storageFormat":{},"storageMax":{}"#,
+                json_str(&format),
+                serde_json::to_string(&max).ok()?
+            ));
+            states.push(("storage", "Slvl"));
+            storage = Some(stat);
+        }
+        states.extend([
+            ("totalDay", "ORd1"),
+            ("totalWeek", "ORw1"),
+            ("totalMonth", "ORm1"),
+            ("totalYear", "ORy1"),
+            ("totalNegDay", "ORd2"),
+            ("totalNegWeek", "ORw2"),
+            ("totalNegMonth", "ORm2"),
+            ("totalNegYear", "ORy2"),
+        ]);
+    }
+    details.push('}');
+    let mut out = Vec::new();
+    for (name, k) in states {
+        let u = co(k)?;
+        let u = if name == "jLocked" { locked(&u)? } else { u };
+        out.push(format!("{}:{}", json_str(name), json_str(&u)));
+    }
+    // The groups the meter records into (`<statGrp id m acc>`): power,
+    // the meter reading(s), the storage level.
+    let point = |title: &str, format: &str, output: &str| {
+        format!(
+            r#"{{"title":{},"format":{},"output":"{output}"}}"#,
+            json_str(title),
+            json_str(format)
+        )
+    };
+    let mut groups = Vec::new();
+    for g in el.child_elements().filter(|c| c.name == "statGrp") {
+        let id = g.attr("id")?;
+        let mode: u32 = g.attr("m")?.parse().ok()?;
+        let points = match id {
+            "1" => point(&power, &stat_format(&actual_stat)?, "actual"),
+            "2" if kind == "unidirectional" => point("Zählerstand", "", "total"),
+            "2" => format!(
+                "{},{}",
+                point("Zählerstand", "", "total"),
+                point("Zählerstand", "", "totalNeg")
+            ),
+            "3" => point(
+                "Speicherstand",
+                &stat_format(storage.as_deref()?)?,
+                "storageLevel",
+            ),
+            _ => return None,
+        };
+        let acc = match g.attr("acc") {
+            None => "",
+            Some("true") => r#","accumulated":true"#,
+            Some(_) => return None,
+        };
+        groups.push(format!(
+            r#"{{"id":{},"mode":{mode}{acc},"dataPoints":[{points}]}}"#,
+            json_str(id)
+        ));
+    }
+    Some((details, format!("{{{}}}", out.join(",")), groups.join(",")))
+}
+
+/// A statistic's number format from a printf one: `%.3fkW` is `0.000kW`.
+fn stat_format(printf: &str) -> Option<String> {
+    let open = printf.find("%.")?;
+    let close = open + printf[open..].find('f')?;
+    let digits: usize = printf[open + 2..close].parse().ok()?;
+    let number = if digits == 0 {
+        "0".to_string()
+    } else {
+        format!("0.{}", "0".repeat(digits))
+    };
+    Some(format!(
+        "{}{number}{}",
+        &printf[..open],
+        &printf[close + 1..]
     ))
 }
 
@@ -632,6 +883,8 @@ struct AppView {
     room: Option<String>,
     cat: Option<String>,
     favorite: bool,
+    /// `<IoData Rating=…>`, the stars in the app
+    rating: u32,
 }
 
 fn view(el: &Element) -> AppView {
@@ -652,6 +905,10 @@ fn view(el: &Element) -> AppView {
         room: io_attr("Pr"),
         cat: io_attr("Cr"),
         favorite: io.and_then(|io| io.attr("UseInFav")) == Some("true"),
+        rating: io
+            .and_then(|io| io.attr("Rating"))
+            .and_then(|r| r.parse().ok())
+            .unwrap_or(0),
     }
 }
 
@@ -978,6 +1235,115 @@ mod tests {
         &e[e.find("\"details\"").unwrap()..]
     }
 
+    /// Connectors `K` with UUIDs `1f000000-0000-00NN-NNff000000000000`.
+    fn cos(keys: &[&str]) -> String {
+        keys.iter()
+            .enumerate()
+            .map(|(i, k)| {
+                format!(r#"<Co K="{k}" U="1f000000-0000-00{i:02x}-{i:02x}ff000000000000"/>"#)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn meters_and_central_blocks_follow_loxone_config() {
+        let io = format!(r#"<IoData Visu="true" Pr="{ROOM}" Cr="{CAT}" Rating="2"/>"#);
+        let meter = |ty: &str, attrs: &str, keys: &[&str], groups: &str| {
+            entry_of(
+                ty,
+                &format!(
+                    r#"<C Type="{ty}" U="{NEW}" Title="Zähler" PwrN="Leistung" Un1="&lt;v.3&gt;kW"{attrs} StatsType="8">{}{io}{groups}</C>"#,
+                    cos(keys)
+                ),
+            )
+        };
+        let uni = meter(
+            "MeterDig",
+            "",
+            &["A", "R", "OPf", "OMr", "ORd", "ORw", "ORm", "ORy"],
+            r#"<statGrp id="1" m="1"/><statGrp id="2" m="11" acc="true"/>"#,
+        )
+        .unwrap();
+        assert!(uni.contains(r#""type":"Meter""#));
+        assert!(uni.contains(r#""defaultRating":2,"#));
+        assert!(uni.contains(r#""defaultIcon":null,"#));
+        assert!(uni.ends_with(
+            r#""details":{"jLockable":false,"type":"unidirectional","displayType":0,"actualFormat":"%.3fkW","totalFormat":"","powerName":"Leistung"},"states":{"jLocked":"9f000000-0000-0001-01ff000000000000","actual":"1f000000-0000-0002-02ff000000000000","total":"1f000000-0000-0003-03ff000000000000","totalDay":"1f000000-0000-0004-04ff000000000000","totalWeek":"1f000000-0000-0005-05ff000000000000","totalMonth":"1f000000-0000-0006-06ff000000000000","totalYear":"1f000000-0000-0007-07ff000000000000"},"statisticV2":{"groups":[{"id":"1","mode":1,"dataPoints":[{"title":"Leistung","format":"0.000kW","output":"actual"}]},{"id":"2","mode":11,"accumulated":true,"dataPoints":[{"title":"Zählerstand","format":"","output":"total"}]}]}}"#
+        ));
+        let bi_keys = [
+            "R", "OPf", "OMr1", "OMr2", "Slvl", "ORd1", "ORw1", "ORm1", "ORy1", "ORd2", "ORw2",
+            "ORm2", "ORy2",
+        ];
+        let st = meter(
+            "MeterAbsSt",
+            r#" UnSt="&lt;v&gt;%" MaxLvl="100""#,
+            &bi_keys,
+            r#"<statGrp id="1" m="12"/><statGrp id="2" m="11" acc="true"/><statGrp id="3" m="11"/>"#,
+        )
+        .unwrap();
+        assert!(st.contains(r#""type":"storage","#));
+        assert!(st.contains(r#""storageFormat":"%.0f%%","storageMax":100.0}"#));
+        assert!(st.contains(r#""storage":"1f000000-0000-0004-04ff000000000000","totalDay""#));
+        assert!(st.contains(r#"{"title":"Zählerstand","format":"","output":"totalNeg"}"#));
+        assert!(st.contains(
+            r#"{"id":"3","mode":11,"dataPoints":[{"title":"Speicherstand","format":"0%","output":"storageLevel"}]}"#
+        ));
+        let bi = meter(
+            "MeterAbsBi",
+            "",
+            &bi_keys,
+            r#"<statGrp id="1" m="12"/><statGrp id="2" m="11" acc="true"/>"#,
+        )
+        .unwrap();
+        assert!(bi.contains(r#""type":"bidirectional","#));
+        assert!(bi.contains(r#""totalNegYear":"1f000000-0000-000c-0cff000000000000""#));
+        // A unit of its own for the total is not known.
+        assert_eq!(
+            meter("MeterDig", r#" Un2="&lt;v&gt;kWh""#, &["R"], ""),
+            None
+        );
+        assert_eq!(stat_format("%.0f%"), Some("0%".to_string()));
+
+        // A central block lists its members; one without is not known.
+        let central = |ty: &str, rec: &str, sp: &str, keys: &[&str]| {
+            entry_of(
+                ty,
+                &format!(
+                    r#"<C Type="{ty}" U="{NEW}" Title="Zentral"{rec} SpStates="{sp}">{}{io}</C>"#,
+                    cos(keys)
+                ),
+            )
+        };
+        let shade = central(
+            "CentralShade",
+            r#" rec="aa000000-0000-0000-ffff000000000000,bb000000-0000-0000-ffff000000000000""#,
+            "e0000000-0000-0000-ffff000000000000,e1000000-0000-0000-ffff000000000000",
+            &["Stop"],
+        )
+        .unwrap();
+        assert!(!shade.contains("defaultIcon"));
+        assert!(shade.ends_with(
+            r#""details":{"jLockable":true,"controls":[{"id":0,"uuid":"aa000000-0000-0000-ffff000000000000"},{"id":1,"uuid":"bb000000-0000-0000-ffff000000000000"}],"parameterConnections":0},"states":{"jLocked":"9f000000-0000-0000-00ff000000000000","events":"e0000000-0000-0000-ffff000000000000","safetyActive":"e1000000-0000-0000-ffff000000000000"}}"#
+        ));
+        let light = central(
+            "CentralLight",
+            r#" rec="aa000000-0000-0000-ffff000000000000""#,
+            "e0000000-0000-0000-ffff000000000000",
+            &["Reset"],
+        )
+        .unwrap();
+        assert!(light.contains(r#""type":"CentralLightController""#));
+        assert_eq!(
+            central(
+                "CentralLight",
+                "",
+                "e0000000-0000-0000-ffff000000000000",
+                &["Reset"]
+            ),
+            None
+        );
+    }
+
     #[test]
     fn info_displays_pulses_and_day_timers_follow_loxone_config() {
         // A memory flag with statistics and notes: an info display; the
@@ -1195,10 +1561,15 @@ mod tests {
         )));
         assert!(u.text.contains(&format!("\"lastModified\":\"{NOW}\"")));
 
-        // Without a room, Loxone Config does not list it: nothing to do.
+        // Without a room, Loxone Config does not list it: nothing to
+        // write, and the push says why the app lacks it.
         let no_room = doc("Licht", ROOM, &button(NEW, r#"<IoData Visu="true"/>"#));
         let u = update(&catalogue(""), &live, &no_room, NOW).unwrap();
-        assert_eq!((u.applied.len(), u.left.len()), (0, 0));
+        assert_eq!(u.text, catalogue(""));
+        assert_eq!(
+            whats(&u).1,
+            ["not in the app: it needs a room and a category"]
+        );
 
         // A block type lxir does not write an entry for is named.
         let memory = format!(
