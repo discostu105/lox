@@ -37,18 +37,23 @@ use crate::connectors::{
     builtin, carried_attrs, carried_children, container_type, message_params, object_tree,
     ref_link_type, save_defaults,
 };
-use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ports};
+use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, WireView, ports};
 use crate::error::{Error, Result};
 use crate::layout::{PageGeometry, beside};
 use crate::lock::{
     AttrClaim, Layout, LockedExternal, LockedObject, LockedWire, Lockfile, sha256_hex,
 };
-use crate::logic::ast::{Attr, Item, MatchSpec, Module, Value};
+use crate::logic::ast::{Attr, BlockDecl, Item, MatchSpec, Module, Value};
 use crate::logic::validate::{api_mirror_entry, is_ref_type, suggest, validate_ports};
 use crate::uuid::{Minter, entity_for_slug};
 use crate::xml::Element;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod claims;
+mod emit;
+mod plan;
+mod teardown;
+mod wires;
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
     /// 6-byte machine id stamped into minted object UUIDs — conventionally
@@ -228,9 +233,169 @@ pub fn compile(
     module.validate()?;
     validate_ports(module)?;
 
-    // --- ConfigVersion pin: a base written by a different Loxone release
-    //     than the one this project is qualified for is refused until the
-    //     new release is accepted explicitly.
+    check_config_version(base, lock, opts)?;
+    // --- Identity: everything below keys on UUIDs, so a base whose UUIDs
+    //     repeat would have each lookup silently pick one twin.
+    base.require_unique_uuids("base")?;
+
+    apply_moved(module, lock)?;
+    let src_slugs = check_removals(base, module, lock, opts)?;
+
+    let mut doc = base.clone();
+    lock.absorb_counters(doc.counters());
+
+    // --- Resolve externs (against the untouched base).
+    let extern_uuid = resolve_externs(&doc, module, lock)?;
+    check_externs_unmanaged(&extern_uuid, module, lock)?;
+    let snap = teardown::snapshot_base(&doc, lock);
+
+    // --- Tear down our previous output: managed objects, extern wires,
+    //     extern sets. What remains is exactly the Loxone-Config-owned state.
+    //     Each removed element hands back its GUI-owned residue (D19) so
+    //     the rebuild carries it forward verbatim.
+    let (residue, in_torn_down) = teardown::tear_down_managed(&mut doc, lock, &snap.base_page);
+    teardown::sweep_tombstones(&mut doc, lock, &src_slugs, &residue, in_torn_down);
+    let prior = teardown::tear_down_extern_edits(&mut doc, lock);
+
+    let mut minter = seeded_minter(lock, opts);
+    let mint_base = minter.counter();
+
+    // --- Pages the source asks for and the base lacks are created (D56),
+    //     before anything is pinned to them.
+    create_pages(&mut doc, module, lock, &mut minter)?;
+
+    let mut managed = plan::plan_blocks(
+        &doc,
+        module,
+        lock,
+        opts,
+        &mut minter,
+        &desugar_info,
+        &residue,
+    )?;
+    plan::place_ios_in_devices(module, &mut managed, &extern_uuid, &snap.base_parent)?;
+
+    // Record the mint high-water mark — only when something was minted, so
+    // a mint-free compile leaves the lock byte-identical.
+    if minter.counter() != mint_base {
+        lock.counters.next_mint = minter.counter();
+    }
+
+    let params = plan::collect_params(module)?;
+
+    let mirror_of =
+        plan::resolve_mirrors(&doc, module, &managed, &extern_uuid, &snap.type_by_uuid)?;
+    let cx = Rebuild {
+        module,
+        managed: &managed,
+        extern_uuid: &extern_uuid,
+        residue: &residue,
+        snap: &snap,
+        mirror_of: &mirror_of,
+    };
+
+    emit::emit_blocks(&mut doc, lock, &cx, &params)?;
+
+    wires::draw_wires(&mut doc, lock, &cx, &prior)?;
+
+    claims::apply_sets(&mut doc, lock, &cx)?;
+    claims::retire_sets(lock, &prior);
+
+    claims::apply_claims(&mut doc, lock, &cx)?;
+    claims::retire_claims(lock, &prior);
+
+    apply_features(&mut doc, base, lock, &mut minter, &cx)?;
+
+    place_blocks(&mut doc, lock, &cx);
+
+    finish(&mut doc, base, lock, opts)?;
+    Ok(doc)
+}
+
+/// What the base carried before teardown, read once from the untouched
+/// base: the rebuild puts wires, blocks and I/Os back where they were.
+struct BaseSnapshot {
+    /// XML type and title per object, for `mirrors:` targets (D33).
+    type_by_uuid: BTreeMap<String, (String, Option<String>)>,
+    /// Every wire the base carried: the D34 routing pin and the out-routes.
+    all_base_wires: Vec<WireView>,
+    /// The same wires as (source port, sink port).
+    base_wires: BTreeSet<(String, String)>,
+    /// Each sink's `<In>` sources in base order (D45).
+    base_in_order: BTreeMap<String, Vec<String>>,
+    /// Each page's objects in base order (D47).
+    base_page_order: BTreeMap<String, Vec<String>>,
+    /// The page each managed object is drawn on.
+    base_page: BTreeMap<String, String>,
+    /// Parent and grandparent of each managed object of the object tree (D64).
+    base_parent: BTreeMap<String, (String, Option<String>)>,
+    /// Each such parent's objects in base order.
+    base_tree_order: BTreeMap<String, Vec<String>>,
+}
+
+/// The previous compile's edits on externs, taken back by teardown: what
+/// the base still carried of them decides which withdrawn ones leave a
+/// tombstone (D31) once the rebuild has redone the rest.
+struct PriorEdits {
+    /// The lock's extern wires before this compile.
+    old_wires: Vec<LockedWire>,
+    /// Those of them this base actually carried.
+    wires_present: BTreeSet<LockedWire>,
+    /// The GUI's `FLG=` on them, keyed by (sink port, source port).
+    extern_wire_flags: BTreeMap<(String, String), String>,
+    /// The lock's port and setting originals before this compile.
+    old_originals: BTreeMap<String, Option<String>>,
+    /// What each of those ports carried before the restore.
+    defs_written: BTreeMap<String, String>,
+    /// The lock's attribute claims (D39) before this compile.
+    old_claims: BTreeMap<String, BTreeMap<Attr, AttrClaim>>,
+    /// What each claimed object carried before the restore.
+    claims_written: BTreeMap<(String, Attr), String>,
+}
+
+/// Values of the managed blocks' parameter bindings, keyed by (slug, name).
+struct Params {
+    /// `Def=` of a connector.
+    managed_defs: BTreeMap<(String, String), String>,
+    /// An element attribute ([`attr_params`]).
+    managed_attrs: BTreeMap<(String, String), String>,
+    /// Message parameters of an `OutputRefLM` (D51), written onto its
+    /// `<LoggerMailer>` child.
+    managed_msgs: BTreeMap<(String, String), String>,
+}
+
+/// A minted ref's mirrored object (D33) and the identity attributes its
+/// element carries.
+struct Mirror {
+    ref_uuid: String,
+    /// `None` on a message ref (D51), which carries no code.
+    link_type: Option<u32>,
+    value: RefValue,
+    /// The GUI derives a ref's `Title=` from its target (oracle
+    /// session 11: a save rewrites whatever else stands there) — the
+    /// compiler emits the derived title so the file converges.
+    title: String,
+    /// The mirrored object's XML type.
+    target_type: String,
+}
+
+/// What the rebuild phases (emit, wires, sets, claims, placement) share
+/// once the blocks are planned. Read-only; the document and the lock are
+/// passed alongside.
+#[derive(Clone, Copy)]
+struct Rebuild<'a> {
+    module: &'a Module,
+    managed: &'a BTreeMap<String, PlannedBlock>,
+    extern_uuid: &'a BTreeMap<String, String>,
+    residue: &'a BTreeMap<String, Residue>,
+    snap: &'a BaseSnapshot,
+    mirror_of: &'a BTreeMap<String, Mirror>,
+}
+
+/// The ConfigVersion pin: a base written by a different Loxone release
+/// than the one this project is qualified for is refused until the new
+/// release is accepted explicitly.
+fn check_config_version(base: &LoxoneDoc, lock: &Lockfile, opts: &CompileOptions) -> Result<()> {
     let base_version = base.config_version();
     if let Some(accept) = &opts.accept_version {
         if base_version.as_ref() != Some(accept) {
@@ -250,13 +415,12 @@ pub fn compile(
             base_version.as_deref().unwrap_or("<version>")
         )));
     }
-    // --- Identity: everything below keys on UUIDs, so a base whose UUIDs
-    //     repeat would have each lookup silently pick one twin.
-    base.require_unique_uuids("base")?;
+    Ok(())
+}
 
-    // --- Apply `moved` statements to the lock (identity surgery, in
-    //     source). Idempotent: once the new slug carries the entry, the
-    //     statement is done.
+/// Applies `moved` statements to the lock (identity surgery, in source).
+/// Idempotent: once the new slug carries the entry, the statement is done.
+fn apply_moved(module: &Module, lock: &mut Lockfile) -> Result<()> {
     for mv in module.moved() {
         match (
             lock.objects.contains_key(&mv.from),
@@ -281,11 +445,19 @@ pub fn compile(
             }
         }
     }
+    Ok(())
+}
 
-    // --- Sync check: the lock must not know managed blocks the source
-    //     lost, unless the removal is authorized (per-slug via `removed`,
-    //     globally via allow_removals, or implicitly for expression-owned
-    //     blocks — editing the expression IS the removal authorization).
+/// Sync check: the lock must not know managed blocks the source lost,
+/// unless the removal is authorized (per-slug via `removed`, globally via
+/// allow_removals, or implicitly for expression-owned blocks — editing the
+/// expression IS the removal authorization). Returns the source's slugs.
+fn check_removals(
+    base: &LoxoneDoc,
+    module: &Module,
+    lock: &mut Lockfile,
+    opts: &CompileOptions,
+) -> Result<BTreeSet<String>> {
     let src_slugs: BTreeSet<String> = module.blocks().map(|b| b.slug.clone()).collect();
     let removed_slugs: BTreeSet<&str> = module.removed().map(|r| r.slug.as_str()).collect();
     // D67: `removed <rule>` deletes a named rule the lock pins (D60): its
@@ -339,16 +511,18 @@ pub fn compile(
              for a rename, or Lockfile::remove_object(\"{slug}\") to orphan it"
         )));
     }
+    Ok(src_slugs)
+}
 
-    let mut doc = base.clone();
-    lock.absorb_counters(doc.counters());
-
-    // --- Resolve externs (against the untouched base).
-    let extern_uuid = resolve_externs(&doc, module, lock)?;
-    // An extern is the GUI's object: one the source manages is rebuilt
-    // from its declaration, and a statement on it would be lost (D64 —
-    // an adopted device takes its I/O along).
-    for (x, u) in &extern_uuid {
+/// An extern is the GUI's object: one the source manages is rebuilt from
+/// its declaration, and a statement on it would be lost (D64 — an adopted
+/// device takes its I/O along).
+fn check_externs_unmanaged(
+    extern_uuid: &BTreeMap<String, String>,
+    module: &Module,
+    lock: &Lockfile,
+) -> Result<()> {
+    for (x, u) in extern_uuid {
         if let Some((s, _)) = lock
             .objects
             .iter()
@@ -360,255 +534,12 @@ pub fn compile(
             )));
         }
     }
-    // XML type and title per object, for `mirrors:` targets (D33) — taken
-    // before teardown so it covers everything the base knows.
-    let type_by_uuid: BTreeMap<String, (String, Option<String>)> = doc
-        .objects()
-        .iter()
-        .map(|o| (o.uuid.clone(), (o.block_type.clone(), o.title.clone())))
-        .collect();
+    Ok(())
+}
 
-    // Every wire the base carried, pre-teardown: the D34 routing pin.
-    // It remembers which mirror a consumer wire went through — the lock's
-    // extern_wires can't, since wires into managed sinks vanish with their
-    // block and are never recorded there.
-    let all_base_wires = doc.wires();
-    let base_wires: BTreeSet<(String, String)> = all_base_wires
-        .iter()
-        .map(|w| (w.from_port.clone(), w.to_port.clone()))
-        .collect();
-    // Each sink's `<In>` sources in base order (D45): a wire the rebuild
-    // adds back returns to its place among them, so whichever writer last
-    // ordered a connector — Loxone Config sorts on save — keeps its order.
-    let mut base_in_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for w in all_base_wires.clone() {
-        base_in_order
-            .entry(w.to_port)
-            .or_default()
-            .push(w.from_port);
-    }
-
-    // --- Tear down our previous output: managed objects, extern wires,
-    //     extern sets. What remains is exactly the Loxone-Config-owned state.
-    //     Each removed element hands back its GUI-owned residue (D19) so
-    //     the rebuild carries it forward verbatim.
-    let mut residue: BTreeMap<String, Residue> = BTreeMap::new();
-    // Each page's objects in base order (D47): a rebuilt block goes back
-    // to its place among them.
-    let base_page_order: BTreeMap<String, Vec<String>> = doc
-        .objects()
-        .iter()
-        .filter(|o| o.block_type == "Page")
-        .filter_map(|o| {
-            let page = doc.element_at(&o.path)?;
-            let objects = page
-                .child_elements()
-                .filter(|c| c.name == "C")
-                .filter_map(|c| c.attr("U").map(str::to_string))
-                .collect();
-            Some((o.uuid.clone(), objects))
-        })
-        .collect();
-    let base_page: BTreeMap<String, String> = {
-        let idx = doc.index();
-        lock.objects
-            .values()
-            .filter_map(|o| Some((o.uuid.clone(), page_of(&doc, idx.by_uuid.get(&o.uuid)?)?)))
-            .collect()
-    };
-    // The element each managed object of the object tree sits in (D64): an
-    // I/O goes back into the caption of its device it was in.
-    // Parent and grandparent, and each such parent's objects in base order.
-    let mut base_parent: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
-    let mut base_tree_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    {
-        let idx = doc.index();
-        for o in lock.objects.values().filter(|o| object_tree(&o.block_type)) {
-            let Some(path) = idx.by_uuid.get(&o.uuid) else {
-                continue;
-            };
-            let Some(parent) = doc.element_at(&path[..path.len() - 1]) else {
-                continue;
-            };
-            let Some(pu) = parent.attr("U") else { continue };
-            let grand = doc
-                .element_at(&path[..path.len() - 2])
-                .and_then(|g| g.attr("U"))
-                .map(str::to_string);
-            base_parent.insert(o.uuid.clone(), (pu.to_string(), grand));
-            base_tree_order.entry(pu.to_string()).or_insert_with(|| {
-                parent
-                    .child_elements()
-                    .filter(|c| c.name == "C")
-                    .filter_map(|c| c.attr("U").map(str::to_string))
-                    .collect()
-            });
-        }
-    }
-    // Innermost first: a managed I/O leaves its managed device before the
-    // device goes, so neither carries the other.
-    let mut teardown: Vec<&LockedObject> = lock.objects.values().collect();
-    {
-        let idx = doc.index();
-        let depth = |o: &LockedObject| idx.by_uuid.get(&o.uuid).map_or(0, Vec::len);
-        teardown.sort_by_key(|o| std::cmp::Reverse(depth(o)));
-    }
-    // Tombstoned objects that went with a torn-down device: still in
-    // this base, so their tombstones stay.
-    let mut in_torn_down: BTreeSet<String> = BTreeSet::new();
-    for obj in teardown {
-        if let Some(el) = doc.remove_by_uuid(&obj.uuid) {
-            let mut r = harvest_residue(&el);
-            // A device carries the I/O the GUI added to it, never one
-            // the source withdrew (its tombstone, D31) — also inside the
-            // captions a device groups its I/O in.
-            fn withdrawn(
-                c: &Element,
-                removed: &BTreeMap<String, crate::lock::Tombstone>,
-                found: &mut BTreeSet<String>,
-            ) -> bool {
-                let u = c
-                    .attr("U")
-                    .filter(|u| c.name == "C" && removed.contains_key(*u));
-                if let Some(u) = u {
-                    found.insert(u.to_string());
-                }
-                u.is_some()
-            }
-            fn drop_withdrawn(
-                el: &mut Element,
-                removed: &BTreeMap<String, crate::lock::Tombstone>,
-                found: &mut BTreeSet<String>,
-            ) {
-                el.children.retain(|n| match n {
-                    crate::xml::Node::Element(c) => !withdrawn(c, removed, found),
-                    _ => true,
-                });
-                for n in el.children.iter_mut() {
-                    if let crate::xml::Node::Element(c) = n {
-                        drop_withdrawn(c, removed, found);
-                    }
-                }
-            }
-            r.children
-                .retain(|c| !withdrawn(c, &lock.removed, &mut in_torn_down));
-            for c in r.children.iter_mut() {
-                drop_withdrawn(c, &lock.removed, &mut in_torn_down);
-            }
-            r.page = base_page.get(&obj.uuid).cloned();
-            residue.insert(obj.uuid.clone(), r);
-        }
-    }
-    // Tombstone sweep (D31): a pending removal whose object still exists
-    // in this base is deleted again (the base predates the deployment of
-    // the removal); one the base no longer contains has reached the
-    // Miniserver — its tombstone is done.
-    // A withdrawn device takes its withdrawn I/O along (D64).
-    let pending: Vec<String> = lock.removed.keys().cloned().collect();
-    let mut present: BTreeSet<String> = in_torn_down;
-    for uuid in &pending {
-        if let Some(el) = doc.remove_by_uuid(uuid) {
-            present.insert(uuid.clone());
-            let mut stack: Vec<&Element> = el.child_elements().collect();
-            while let Some(c) = stack.pop() {
-                if let Some(u) = c.attr("U").filter(|_| c.name == "C") {
-                    present.insert(u.to_string());
-                }
-                stack.extend(c.child_elements());
-            }
-        }
-    }
-    lock.removed.retain(|uuid, _| present.contains(uuid));
-    // Vanished slugs (authorized via `removed`, allow_removals, or
-    // expression ownership) are deleted from this output and leave a
-    // tombstone so every later compile against an older base deletes them
-    // too instead of passing them through unmanaged. Only blocks this base
-    // actually contained (their teardown harvested residue) are
-    // tombstoned — one minted and dropped between deployments was never
-    // in any config a tombstone could still meet.
-    for (slug, o) in &lock.objects {
-        if !src_slugs.contains(slug) && residue.contains_key(&o.uuid) {
-            lock.removed.insert(
-                o.uuid.clone(),
-                crate::lock::Tombstone {
-                    slug: slug.clone(),
-                    block_type: o.block_type.clone(),
-                },
-            );
-        }
-    }
-    lock.objects.retain(|slug, _| src_slugs.contains(slug));
-    // Withdrawn-wire sweep (D31): same lifecycle as object tombstones —
-    // still in this base → delete again and keep; gone → retired.
-    lock.removed_wires
-        .retain(|w| remove_wire(&mut doc, &w.from, &w.to));
-    // Withdrawn-set sweep (D31): a port still carrying the value we wrote
-    // predates the deployment — restore the original again. A port already
-    // showing the original is deployed; any third value means another
-    // writer took the port over (drift will surface it). Both retire.
-    lock.removed_sets.retain(|port_uuid, rs| {
-        let def = current_def(&mut doc, port_uuid);
-        if def == rs.original {
-            return false;
-        }
-        if def.as_deref() == Some(rs.written.as_str()) {
-            restore_def(&mut doc, port_uuid, rs.original.as_deref());
-            return true;
-        }
-        false
-    });
-    let old_wires = std::mem::take(&mut lock.extern_wires);
-    // Remember which of our wires this base actually carried — only those
-    // can leave a tombstone if they vanish from source (the rebuild below
-    // re-records the ones that stay).
-    let mut wires_present: BTreeSet<LockedWire> = BTreeSet::new();
-    // The GUI's flag on a wire (`FLG=`) is its own; one the base carried
-    // on a wire of ours goes back on with the rebuilt wire.
-    let mut extern_wire_flags: BTreeMap<(String, String), String> = BTreeMap::new();
-    for w in &old_wires {
-        if let Some(flg) = wire_flag(&mut doc, &w.from, &w.to) {
-            extern_wire_flags.insert((w.to.clone(), w.from.clone()), flg);
-        }
-        if remove_wire(&mut doc, &w.from, &w.to) {
-            wires_present.insert(w.clone());
-        }
-    }
-    let old_originals = std::mem::take(&mut lock.set_originals);
-    // Same for Def writes: capture what each port carried before the
-    // restore — the "written" marker of a potential tombstone.
-    let mut defs_written: BTreeMap<String, String> = BTreeMap::new();
-    for (port_uuid, original) in &old_originals {
-        if let Some(v) = current_def(&mut doc, port_uuid) {
-            defs_written.insert(port_uuid.clone(), v);
-        }
-        restore_def(&mut doc, port_uuid, original.as_deref());
-    }
-    // Attribute claims (D39), the same two steps. Withdrawn first: an
-    // object still showing the value we wrote predates the deployment —
-    // restore again and keep the tombstone; any other value retires it.
-    for (uuid, claims) in lock.removed_attrs.iter_mut() {
-        claims.retain(|attr, c| {
-            if read_claimed(&doc, uuid, *attr).as_deref() == Some(c.written.as_str()) {
-                restore_claim(&mut doc, uuid, *attr, c);
-                return true;
-            }
-            false
-        });
-    }
-    lock.removed_attrs.retain(|_, claims| !claims.is_empty());
-    // Live claims: the object itself is source-owned and always restored;
-    // its followers only while they still carry the written value.
-    let old_claims = std::mem::take(&mut lock.attr_claims);
-    let mut claims_written: BTreeMap<(String, Attr), String> = BTreeMap::new();
-    for (uuid, claims) in &old_claims {
-        for (attr, c) in claims {
-            if let Some(v) = read_claimed(&doc, uuid, *attr) {
-                claims_written.insert((uuid.clone(), *attr), v);
-            }
-            restore_claim(&mut doc, uuid, *attr, c);
-        }
-    }
-
+/// The compile's UUID minter, seeded past everything a previous compile
+/// handed out.
+fn seeded_minter(lock: &Lockfile, opts: &CompileOptions) -> Minter {
     let mut minter = Minter::new(opts.machine, opts.mint_time_unix);
     // Never reuse a (time, sequence) pair a previous compile session
     // handed out: seed past the recorded high-water mark and every locked
@@ -631,1348 +562,68 @@ pub fn compile(
             minter.avoid(p);
         }
     }
-    let mint_base = minter.counter();
+    minter
+}
 
-    // --- Pages the source asks for and the base lacks are created (D56),
-    //     before anything is pinned to them.
-    create_pages(&mut doc, module, lock, &mut minter)?;
-
-    // --- Plan managed blocks: the builtin port list is the full port list
-    //     and pinned identity for every one of them. Each block is pinned
-    //     to a page: adopted blocks to the page they were drawn on, new
-    //     blocks to the options' page (resolved lazily so a block-free
-    //     module compiles against a page-less config).
-    let default_page_uuid: Option<String> =
-        doc.page_path(opts.page_title.as_deref()).and_then(|p| {
-            doc.element_at(&p)
-                .and_then(|el| el.attr("U"))
-                .map(String::from)
-        });
-    // `page "Title"` statements govern the blocks that follow them (D28).
-    // The statement is authoritative: the named page must exist in the
-    // base, and a governed block whose pin no longer matches a page with
-    // that title moves. Placement is positional, so synthetic expression
-    // blocks land on the page their expression is written under.
-    let mut declared_page: BTreeMap<&str, &str> = BTreeMap::new();
-    {
-        let mut current: Option<&str> = None;
-        for item in &module.items {
-            match item {
-                Item::Page(p) => current = Some(p.title.as_str()),
-                Item::Block(b) => {
-                    if let Some(t) = current {
-                        declared_page.insert(b.slug.as_str(), t);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    // Title → page UUIDs in document order. Titles need not be unique; a
-    // kept pin only has to match one of them.
-    let mut pages_by_title: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    // Object-tree containers (D54), first of each type in document order.
-    let mut containers: BTreeMap<String, String> = BTreeMap::new();
-    for o in doc.objects() {
-        if o.block_type == "VirtualInCaption"
-            || crate::periphery::PERIPHERY
-                .iter()
-                .any(|p| matches!(p.home, crate::periphery::Home::Folder(f) if f == o.block_type))
-        {
-            containers
-                .entry(o.block_type.clone())
-                .or_insert(o.uuid.clone());
-        }
-        if o.block_type == "Page" {
-            pages_by_title
-                .entry(o.title.clone().unwrap_or_default())
-                .or_default()
-                .push(o.uuid);
-        }
-    }
-    let mut managed: BTreeMap<String, PlannedBlock> = BTreeMap::new();
-    // Pages to lay out afresh (D42), by UUID.
-    let mut relayout_pages: BTreeSet<&str> = BTreeSet::new();
-    for title in &opts.relayout {
-        let uuids = pages_by_title.get(title.as_str()).ok_or_else(|| {
-            Error::Compile(format!(
-                "relayout: the base config has no <C Type=\"Page\"> titled `{title}`"
-            ))
-        })?;
-        relayout_pages.extend(uuids.iter().map(String::as_str));
-    }
-    for block in module.blocks() {
-        // Type, port names, and directions were checked by validate_ports.
-        let specs = builtin(&block.block_type).expect("validate_ports admitted the type");
-        let keys: Vec<String> = specs.iter().map(|s| s.key.to_string()).collect();
-
-        // Pin identity: reuse the lock entry, minting only what is missing.
-        // For a brand-new block, ports are minted before the object —
-        // matching the counter order observed in Loxone Config output.
-        let entity = entity_for_slug(&block.slug);
-        let entry = lock
-            .objects
-            .entry(block.slug.clone())
-            .or_insert_with(|| LockedObject {
-                uuid: String::new(),
-                block_type: block.block_type.clone(),
-                ports: BTreeMap::new(),
-                layout: None,
-                superseded_layout: None,
-                page_uuid: None,
-                expr_owned: false,
-                states: Vec::new(),
-            });
-        // Ownership follows the current source: a slug the desugarer
-        // produced is expression-owned; one it no longer produces (but a
-        // hand now declares) is hand-owned again.
-        entry.expr_owned = desugar_info.synthetic.contains(&block.slug);
-        if entry.uuid.is_empty() {
-            entry.block_type = block.block_type.clone();
-        } else if entry.block_type != block.block_type {
-            return Err(Error::Compile(format!(
-                "block `{}` changed type from `{}` to `{}`; remove it from the lock first \
-                 (Lockfile::remove_object) to accept new identity",
-                block.slug, entry.block_type, block.block_type
-            )));
-        }
-        for (index, key) in keys.iter().enumerate() {
-            entry
-                .ports
-                .entry(key.clone())
-                .or_insert_with(|| minter.mint_port(index as u8, entity).to_string());
-        }
-        if entry.uuid.is_empty() && adopt_only(&block.block_type) {
-            return Err(Error::Compile(format!(
-                "block `{}`: a {} is created by Loxone Config when it pairs the \
-                 device — adopt the existing one (`loxl adopt <cfg> --uuid …`) \
-                 instead of declaring a new one",
-                block.slug, block.block_type
-            )));
-        }
-        if entry.uuid.is_empty() {
-            entry.uuid = minter.mint_object().to_string();
-            lock.counters.next_obj += 1;
-            // D66: the special states a save would give it, for its entry
-            // in the app.
-            if let Some((n, _)) = save_defaults(&block.block_type) {
-                entry.states = (0..n).map(|_| minter.mint_object().to_string()).collect();
-            }
-        }
-        // D54: an object of the object tree (a VirtualIn) is appended to
-        // its container, which the base has exactly once — never pinned,
-        // placed, or governed by `page`. An I/O (D64) goes into its device,
-        // resolved once every block has its UUID.
-        if object_tree(&block.block_type) {
-            let uuid = match container_type(&block.block_type) {
-                Some(container) => containers.get(container).cloned().ok_or_else(|| {
-                    Error::Compile(format!(
-                        "block `{}`: the base config has no <C Type=\"{container}\"> to \
-                         hold a minted {}",
-                        block.slug, block.block_type
-                    ))
-                })?,
-                None => String::new(),
-            };
-            entry.page_uuid = None;
-            entry.layout = None;
-            entry.superseded_layout = None;
-            managed.insert(
-                block.slug.clone(),
-                PlannedBlock {
-                    uuid: entry.uuid.clone(),
-                    block_type: block.block_type.clone(),
-                    keys,
-                    ports: entry.ports.clone(),
-                    layout: None,
-                    relayout: false,
-                    page_uuid: uuid,
-                    placed: false,
-                },
-            );
-            continue;
-        }
-        let pinned_before = entry.page_uuid.clone();
-        let page_uuid = match declared_page.get(block.slug.as_str()) {
-            // Governed by a `page` statement (D28): keep a pin that still
-            // matches a page with the declared title, otherwise (re)pin to
-            // the first matching page in document order.
-            Some(&title) => {
-                let candidates = pages_by_title.get(title).map_or(&[][..], Vec::as_slice);
-                match &entry.page_uuid {
-                    Some(u) if candidates.contains(u) => u.clone(),
-                    _ => {
-                        let u = candidates.first().cloned().ok_or_else(|| {
-                            Error::Compile(format!(
-                                "block `{}` is placed with `page \"{title}\"`, but the \
-                                 base config has no <C Type=\"Page\"> titled `{title}` — \
-                                 to create it, name its room: `page \"{title}\" \
-                                 (room: \"…\")` (D56)",
-                                block.slug
-                            ))
-                        })?;
-                        entry.page_uuid = Some(u.clone());
-                        u
-                    }
-                }
-            }
-            None => match &entry.page_uuid {
-                Some(u) => u.clone(),
-                None => {
-                    let u = default_page_uuid.clone().ok_or_else(|| {
-                        Error::Compile(match &opts.page_title {
-                            Some(t) => {
-                                format!("no <C Type=\"Page\"> titled `{t}` in the base config")
-                            }
-                            None => "the base config has no <C Type=\"Page\"> to place blocks on"
-                                .to_string(),
-                        })
-                    })?;
-                    entry.page_uuid = Some(u.clone());
-                    u
-                }
-            },
-        };
-        // D42: the position is shared with Loxone Config. A block that
-        // changed pages is placed afresh. Where the base draws the block on
-        // its page is the GUI's: its extents and grid snap always, its
-        // position after a drag — unless the base still shows the position
-        // a placement replaced (the base predates that placement). New
-        // blocks are placed after wiring.
-        if pinned_before.is_some_and(|p| p != page_uuid) {
-            entry.layout = None;
-        }
-        let base_layout = residue
-            .get(&entry.uuid)
-            .and_then(|r| r.layout_on(&page_uuid));
-        if let (Some(l), Some(b)) = (entry.layout, base_layout) {
-            let stale =
-                !l.same_spot(&b) && entry.superseded_layout.is_some_and(|s| s.same_spot(&b));
-            if !stale {
-                entry.layout = Some(b);
-                entry.superseded_layout = None;
-            }
-        }
-        managed.insert(
-            block.slug.clone(),
-            PlannedBlock {
-                uuid: entry.uuid.clone(),
-                block_type: block.block_type.clone(),
-                keys,
-                ports: entry.ports.clone(),
-                layout: entry.layout,
-                relayout: relayout_pages.contains(page_uuid.as_str()),
-                page_uuid,
-                placed: true,
-            },
-        );
-    }
-    // D64: an I/O goes into the device its `device:` names — into the
-    // caption of that device it sat in, if the base had it in one.
-    for block in module.blocks() {
-        if crate::periphery::device_types(&block.block_type).is_empty() {
-            continue;
-        }
-        let target = block
-            .params()
-            .find_map(|(k, v)| match (k, v) {
-                ("device", Value::Ref(t)) => Some(t.as_str()),
-                _ => None,
-            })
-            .expect("validate_ports requires device: on an I/O");
-        let device = match managed.get(target) {
-            Some(p) => p.uuid.clone(),
-            None => extern_uuid.get(target).cloned().ok_or_else(|| {
-                Error::Compile(format!(
-                    "block `{}`: its device `{target}` did not resolve",
-                    block.slug
-                ))
-            })?,
-        };
-        let plan = managed.get_mut(&block.slug).expect("planned above");
-        plan.page_uuid = match base_parent.get(&plan.uuid) {
-            Some((parent, Some(grand))) if *grand == device => parent.clone(),
-            _ => device,
-        };
-    }
-
-    // Record the mint high-water mark — only when something was minted, so
-    // a mint-free compile leaves the lock byte-identical.
-    if minter.counter() != mint_base {
-        lock.counters.next_mint = minter.counter();
-    }
-
-    // --- Def values on managed ports come from the blocks' parameter
-    //     bindings (port assignment statements are for extern ports only —
-    //     enforced by validate). `let` references resolve to their literal
-    //     here.
-    let resolve = |v: &Value| -> Result<String> { Ok(module.resolve_value(v)?.to_string()) };
-    let mut managed_defs: BTreeMap<(String, String), String> = BTreeMap::new();
-    let mut managed_attrs: BTreeMap<(String, String), String> = BTreeMap::new();
-    // Message parameters of an `OutputRefLM` (D51), written onto its
-    // `<LoggerMailer>` child.
-    let mut managed_msgs: BTreeMap<(String, String), String> = BTreeMap::new();
-    for block in module.blocks() {
-        let attrs = attr_params(&block.block_type);
-        for (k, v) in block.params() {
-            // `mirrors:` is an identity binding, not a value (D33) —
-            // resolved separately below.
-            if (is_ref_type(&block.block_type) && k == "mirrors")
-                || crate::periphery::is_device_binding(&block.block_type, k)
-            {
-                continue;
-            }
-            if message_params(&block.block_type).contains(&k) {
-                let value = resolve(v)?;
-                let value = if k == "MinimumTime" {
-                    seconds_to_ms(&value).ok_or_else(|| {
-                        Error::Compile(format!(
-                            "block `{}`: `MinimumTime: {v}` is not a duration",
-                            block.slug
-                        ))
-                    })?
-                } else {
-                    value
-                };
-                managed_msgs.insert((block.slug.clone(), k.to_string()), value);
-                continue;
-            }
-            let target = if attrs.contains(&k) {
-                &mut managed_attrs // element attribute, not a connector Def
-            } else {
-                &mut managed_defs
-            };
-            let value = module.resolve_value_for(v, &block.block_type, &block.slug, k)?;
-            target.insert((block.slug.clone(), k.to_string()), value.into_owned());
-        }
-    }
-
-    // --- `mirrors:` on minted refs (D33): resolve the mirrored object and
-    //     precompute the identity attributes its element carries (`Ref=`,
-    //     `LinkRefType=`, `Analog=`). The target is any managed block of
-    //     this module (a block minted this very compile included — the ref
-    //     is ours to create) or any resolved extern; the target's XML type
-    //     picks the GUI's type-registry code.
-    struct Mirror {
-        ref_uuid: String,
-        /// `None` on a message ref (D51), which carries no code.
-        link_type: Option<u32>,
-        value: RefValue,
-        /// The GUI derives a ref's `Title=` from its target (oracle
-        /// session 11: a save rewrites whatever else stands there) — the
-        /// compiler emits the derived title so the file converges.
-        title: String,
-        /// The mirrored object's XML type.
-        target_type: String,
-    }
-    let mut mirror_of: BTreeMap<String, Mirror> = BTreeMap::new();
-    for block in module.blocks() {
-        if !is_ref_type(&block.block_type) {
-            continue;
-        }
-        let target = block
-            .params()
-            .find_map(|(k, v)| match (k, v) {
-                ("mirrors", Value::Ref(t)) => Some(t.as_str()),
-                _ => None,
-            })
-            .expect("validate_ports requires mirrors: on ref blocks");
-        let (uuid, target_type, target_title) = if let Some(plan) = managed.get(target) {
-            let title = module
-                .blocks()
-                .find(|b| b.slug == target)
-                .and_then(|b| b.title.clone())
-                .unwrap_or_else(|| target.to_string());
-            (plan.uuid.clone(), plan.block_type.clone(), title)
-        } else if let Some(u) = extern_uuid.get(target) {
-            let (t, title) = type_by_uuid.get(u).cloned().ok_or_else(|| {
-                Error::Compile(format!(
-                    "block `{}` mirrors extern `{target}`, whose resolved object \
-                     {u} is not in the base config",
-                    block.slug
-                ))
-            })?;
-            // The title the target ends up with: its own title claim, else
-            // the torn-down one — the base may still show a withdrawn claim
-            // (D43).
-            let title = match module
-                .attrs()
-                .find(|a| a.slug == target && a.attr == Attr::Title)
-            {
-                Some(a) => resolve(&a.value)?,
-                None => read_claimed(&doc, u, Attr::Title)
-                    .or(title)
-                    .unwrap_or_else(|| target.to_string()),
-            };
-            (u.clone(), t, title)
-        } else {
-            return Err(Error::Compile(format!(
-                "block `{}` mirrors `{target}`, but `{target}` is neither a \
-                 managed block nor an extern of this module",
-                block.slug
-            )));
-        };
-        let (code, value) = if block.block_type == "OutputRefLM" {
-            if target_type != MESSAGE_REF_TARGET {
-                return Err(Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}` — an \
-                     OutputRefLM mirrors a `{MESSAGE_REF_TARGET}`",
-                    block.slug
-                )));
-            }
-            (None, RefValue::Digital)
-        } else {
-            let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
-                Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}`, which has \
-                     no verified `LinkRefType=` code yet — extend \
-                     connectors::ref_link_type from corpus evidence before minting \
-                     a ref of it",
-                    block.slug
-                ))
-            })?;
-            (Some(code), value)
-        };
-        mirror_of.insert(
-            block.slug.clone(),
-            Mirror {
-                ref_uuid: uuid,
-                link_type: code,
-                value,
-                title: target_title,
-                target_type,
-            },
-        );
-    }
-
-    // --- Build the managed <C> elements and insert each into its pinned
-    //     page, where the base had it (D47). The index is taken once after
-    //     teardown; inserting into a page never shifts the page paths.
-    let page_index = doc.index();
-    // D46: managed blocks carry the document's block version, so a GUI
-    // save has none to restamp — when the builtin table is verified for
-    // it. Otherwise they keep the version the table was first verified
-    // for, and Loxone Config migrates them on load.
-    let block_version = doc
-        .block_version()
-        .filter(|v| VERIFIED_BLOCK_VERSIONS.contains(&v.as_str()))
-        .unwrap_or_else(|| VERIFIED_BLOCK_VERSIONS[0].to_string());
-    // A fresh VirtualIn gets the next free `VI<n>` designation (D54), a
-    // fresh virtual or Modbus object the next of its prefix (D64) — past
-    // every one the torn-down base and the carried residue hold.
-    let inames: Vec<String> = doc
-        .objects()
-        .iter()
-        .filter_map(|o| doc.element_at(&o.path)?.attr("IName").map(String::from))
-        .chain(residue.values().flat_map(|r| {
-            r.attrs
-                .iter()
-                .filter(|(n, _)| n == "IName")
-                .map(|(_, v)| v.clone())
-        }))
-        .collect();
-    let mut next_iname: BTreeMap<&str, u32> = BTreeMap::new();
-    for prefix in
-        std::iter::once("VI").chain(crate::periphery::PERIPHERY.iter().filter_map(|p| p.iname))
-    {
-        let n = inames
-            .iter()
-            .filter_map(|n| n.strip_prefix(prefix)?.parse::<u32>().ok())
-            .max()
-            .unwrap_or(0);
-        next_iname.insert(prefix, n + 1);
-    }
-    // A fresh user-defined operating mode (D69) gets the next `Mode=`
-    // number: one below the lowest the document or the residue holds (the
-    // GUI numbers them -1, -2, … — built-in ones are 0 and up).
-    let mut next_mode: i64 = doc
-        .objects()
-        .iter()
-        .filter(|o| o.block_type == "Mode")
-        .filter_map(|o| doc.element_at(&o.path)?.attr("Mode")?.parse::<i64>().ok())
-        .chain(residue.values().flat_map(|r| {
-            r.attrs
-                .iter()
-                .filter(|(n, _)| n == "Mode")
-                .filter_map(|(_, v)| v.parse::<i64>().ok())
-        }))
-        .min()
-        .unwrap_or(0)
-        .min(0)
-        - 1;
-    // Devices before what hangs below them (D64), so a minted I/O finds
-    // its minted device.
-    let rank = |t: &str| {
-        if crate::periphery::device_types(t).is_empty() {
-            0
-        } else if crate::periphery::PERIPHERY
-            .iter()
-            .any(|p| crate::periphery::device_types(p.block_type).contains(&t))
-        {
-            1
-        } else {
-            2
-        }
-    };
-    let mut build_order: Vec<_> = module.blocks().collect();
-    build_order.sort_by_key(|b| rank(&b.block_type));
-    for block in build_order {
-        let pt = crate::periphery::periphery(&block.block_type);
-        let plan = &managed[&block.slug];
-        let res = residue.get(&plan.uuid);
-        let carried = |name: &str| {
-            res.and_then(|r| r.attrs.iter().find(|(n, _)| n == name))
-                .map(|(_, v)| v.as_str())
-        };
-        let mut el = Element::new("C");
-        el.set_attr("Type", &block.block_type);
-        let iname_prefix = if block.block_type == "VirtualIn" {
-            Some("VI")
-        } else {
-            pt.and_then(|p| p.iname)
-        };
-        if let Some(prefix) = iname_prefix {
-            match carried("IName") {
-                Some(v) => el.set_attr_raw("IName", v),
-                None => {
-                    let n = next_iname.get_mut(prefix).expect("every prefix counted");
-                    el.set_attr("IName", &format!("{prefix}{n}"));
-                    *n += 1;
-                }
-            }
-        }
-        if res.is_none()
-            && let Some(p) = pt
-            && let Some(missing) = p
-                .required
-                .iter()
-                .find(|a| !managed_attrs.contains_key(&(block.slug.clone(), (**a).to_string())))
-        {
-            return Err(Error::Compile(format!(
-                "block `{}`: a new {} needs `{missing}:` ({})",
-                block.slug,
-                block.block_type,
-                p.required.join(", ")
-            )));
-        }
-        el.set_attr("V", &block_version);
-        el.set_attr("U", &plan.uuid);
-        // A ref block's title is GUI-derived from its mirror target
-        // (oracle session 11) — emit the derived value so a save is a
-        // no-op; validate refuses an explicit label on ref blocks.
-        match mirror_of.get(&block.slug) {
-            Some(m) => el.set_attr("Title", &m.title),
-            None => el.set_attr("Title", block.title.as_deref().unwrap_or(&block.slug)),
-        }
-        // Blocks without a position get theirs once the wires are drawn;
-        // objects of the object tree have none (D54).
-        if plan.placed {
-            let at = plan.layout.unwrap_or(Layout::at(0, 0, 0, 0));
-            el.set_attr("Px", &at.px.to_string());
-            el.set_attr("Py", &at.py.to_string());
-            el.set_attr("Px2", &at.px2.to_string());
-            el.set_attr("Py2", &at.py2.to_string());
-        }
-        // D19: a block that existed in the base re-emits its GUI-owned
-        // display state verbatim — including *absence* (some types lose
-        // `WF` on a GUI save). Only a fresh mint writes the defaults; a
-        // virtual input has the folder's grey (corpus) and the same `WF`
-        // a save gives a page block (oracle session 18).
-        let mint_attr = |name: &str| {
-            pt.and_then(|p| p.mint_attrs.iter().find(|(n, _)| *n == name))
-                .map(|(_, v)| *v)
-        };
-        let wf = match mint_attr("WF") {
-            Some(v) => v.unwrap_or_default(),
-            None if pt.is_some() => "",
-            None => "147456",
-        };
-        let cl = match mint_attr("Cl") {
-            Some(v) => v.unwrap_or_default(),
-            None if pt.is_some() => "",
-            None if plan.placed => "141,255,112",
-            None => "238,238,238",
-        };
-        // A fresh message ref (D51) gets what Loxone Config gives one:
-        // black, and no `WF=`.
-        let message_ref = block.block_type == "OutputRefLM";
-        match (res, carried("Cl")) {
-            (Some(_), Some(v)) => el.set_attr_raw("Cl", v),
-            (Some(_), None) => {}
-            (None, _) if message_ref => el.set_attr("Cl", "0,0,0"),
-            (None, _) if cl.is_empty() => {}
-            (None, _) => el.set_attr("Cl", cl),
-        }
-        // A device without connectors has no `Nio=` (D64).
-        if !plan.keys.is_empty() || pt.is_none() {
-            el.set_attr("Nio", &plan.keys.len().to_string());
-        }
-        // Minted-ref identity (D33), in the GUI's observed attribute
-        // order: `Ref=` after `Nio=`; `Analog=` or `Text=` (D48), then
-        // `LinkRefType=`, after `WF=`.
-        if let Some(m) = mirror_of.get(&block.slug) {
-            el.set_attr("Ref", &m.ref_uuid);
-        }
-        if let Some(v) = carried("LtE") {
-            el.set_attr_raw("LtE", v);
-        }
-        match (res, carried("WF")) {
-            (Some(_), Some(v)) => el.set_attr_raw("WF", v),
-            (Some(_), None) => {}
-            (None, _) if message_ref || wf.is_empty() => {}
-            (None, _) => el.set_attr("WF", wf),
-        }
-        if res.is_none()
-            && let Some(o) = lock.objects.get(&block.slug)
-            && !o.states.is_empty()
-        {
-            el.set_attr("SpStates", &o.states.join(","));
-        }
-        if let Some(m) = mirror_of.get(&block.slug) {
-            match m.value {
-                RefValue::Digital => {}
-                RefValue::Analog => el.set_attr("Analog", "true"),
-                RefValue::Text => el.set_attr("Text", "true"),
-            }
-            if let Some(code) = m.link_type {
-                el.set_attr("LinkRefType", &code.to_string());
-            }
-        }
-        if block.block_type == "VirtualIn" {
-            virtual_in_attrs(&mut el, &block.slug, &managed_attrs, res)?;
-        }
-        // A fresh virtual or Modbus object (D64): its settings and the
-        // defaults a save gives one, in the order the save writes them.
-        if res.is_none()
-            && let Some(p) = pt
-        {
-            for (name, default) in p.mint_attrs {
-                if matches!(*name, "Cl" | "Nio" | "WF") {
-                    continue;
-                }
-                match managed_attrs.get(&(block.slug.clone(), (*name).to_string())) {
-                    Some(v) => el.set_attr(name, v),
-                    None => {
-                        if let Some(d) = default {
-                            el.set_attr(name, d);
-                        }
-                    }
-                }
-            }
-        }
-        if block.block_type == "Mode" && res.is_none() {
-            el.set_attr("Mode", &next_mode.to_string());
-            next_mode -= 1;
-        }
-        for name in attr_params(&block.block_type) {
-            if let Some(v) = managed_attrs.get(&(block.slug.clone(), (*name).to_string())) {
-                el.set_attr(name, v);
-            }
-        }
-        // Every observed Formula= attribute travels with Valid="false"
-        // (the GUI revalidates the expression on load).
-        if block.block_type == "Formula"
-            && managed_attrs.contains_key(&(block.slug.clone(), "Formula".to_string()))
-        {
-            el.set_attr("Valid", "false");
-        }
-        if let Some(r) = res {
-            for (n, v) in &r.attrs {
-                // On a ref block the mirror identity is compiler-owned
-                // (recomputed from `mirrors:` above) — carrying the base's
-                // copy verbatim would clobber a retarget. A GUI-owned
-                // attribute the source binds (`Code:`, D40) was written
-                // above; the claim wins over the carried copy.
-                let compiler_owned = matches!(n.as_str(), "Cl" | "LtE" | "WF" | "IName")
-                    || (is_ref_type(&block.block_type)
-                        && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog" | "Text"))
-                    || managed_attrs.contains_key(&(block.slug.clone(), n.clone()));
-                if !compiler_owned {
-                    el.set_attr_raw(n, v);
-                }
-            }
-        }
-        for key in &plan.keys {
-            // A GUI-owned (`Inv=`) connector is re-emitted verbatim at its
-            // spec position (D20); a parameter binding on it would be
-            // silently overridden, so it is refused instead.
-            if let Some(carried) = res.and_then(|r| r.gui_ports.get(key)) {
-                if managed_defs.contains_key(&(block.slug.clone(), key.clone())) {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: connector `{key}` carries the GUI's input \
-                         inversion (`Inv=`) and is GUI-owned — its value cannot \
-                         be set from source; change it in Loxone Config instead",
-                        block.slug
-                    )));
-                }
-                el.push_child(carried.clone());
-                continue;
-            }
-            let mut co = Element::new("Co");
-            co.set_attr("K", key);
-            if let Some(def) = managed_defs.get(&(block.slug.clone(), key.clone())) {
-                co.set_attr("Def", def);
-            } else if let Some(stale) = res.and_then(|r| r.stale_defs.get(key))
-                && block.bindings().any(|b| {
-                    b.port == *key
-                        && matches!(
-                            b.kind,
-                            super::ast::BindingKind::Wire(_) | super::ast::BindingKind::Expr(_)
-                        )
-                })
-            {
-                // A stale constant under a wire the source keeps (D77).
-                co.set_attr_raw("Def", stale);
-            }
-            co.set_attr("U", &plan.ports[key]);
-            el.push_child(co);
-        }
-        // The message of a message ref (D51) follows its connectors, as
-        // Loxone Config writes it: the notification, the texts it sends on
-        // and off (an empty one is left out), the least time between two
-        // messages, and `NL="1"`, which every notification carries.
-        if message_ref && let Some(m) = mirror_of.get(&block.slug) {
-            let msg = |k: &str| managed_msgs.get(&(block.slug.clone(), k.to_string()));
-            let mut lm = Element::new("LoggerMailer");
-            lm.set_attr("RefNotification", &m.ref_uuid);
-            for k in ["On", "Off"] {
-                if let Some(text) = msg(k).filter(|t| !t.is_empty()) {
-                    lm.set_attr(k, text);
-                }
-            }
-            lm.set_attr(
-                "MinimumTime",
-                msg("MinimumTime").map_or(DEFAULT_MINIMUM_TIME_MS, String::as_str),
-            );
-            lm.set_attr("NL", "1");
-            el.push_child(lm);
-        }
-        if let Some(r) = res {
-            for c in &r.children {
-                el.push_child(c.clone());
-            }
-            // D47: attributes and connectors in the order the base wrote
-            // them; Loxone Config's order differs from ours (it writes
-            // `Desc=` right after `Type=`, 17.2 moves a connector).
-            el.attrs = in_base_order(std::mem::take(&mut el.attrs), |a| {
-                r.attr_order.iter().position(|n| *n == a.name)
-            });
-            order_connectors(&mut el, &r.co_order);
-        } else if let Some(p) = pt {
-            for (name, attrs, open) in p.mint_children {
-                let mut c = Element::new(*name);
-                for (k, v) in *attrs {
-                    c.set_attr(k, v);
-                }
-                c.self_closing = !open;
-                el.push_child(c);
-            }
-        } else if let Some((_, children)) = save_defaults(&block.block_type) {
-            for (name, attrs) in children {
-                let mut c = Element::new(*name);
-                for (k, v) in *attrs {
-                    c.set_attr(k, v);
-                }
-                el.push_child(c);
-            }
-        } else if block.block_type == "VirtualIn" {
-            // What a save gives a fresh virtual input (oracle session
-            // 18): shown in the app, one decimal — the GUI's from then on.
-            let mut io = Element::new("IoData");
-            io.set_attr("Visu", "true");
-            io.set_attr("St", "2");
-            el.push_child(io);
-            let mut display = Element::new("Display");
-            display.set_attr("Type", "1");
-            display.set_attr("Unit", "<v.1>");
-            display.set_attr("StateOnly", "true");
-            el.push_child(display);
-        }
-        // The object tree (D64): a device or I/O goes into its folder or
-        // device by UUID — inserting a device shifts its siblings' paths.
-        if pt.is_some() {
-            let order = base_tree_order.get(&plan.page_uuid);
-            let container = find_c_mut(&mut doc.xml.root, &plan.page_uuid).ok_or_else(|| {
-                Error::Compile(format!(
-                    "block `{}`: the object `{}` it goes into is not in the config",
-                    block.slug, plan.page_uuid
-                ))
-            })?;
-            if let Some(f) = container_type(&block.block_type)
-                && container.attr("Type") != Some(f)
-            {
-                return Err(Error::Compile(format!(
-                    "block `{}`: object `{}` is a `{}`, not a {f}",
-                    block.slug,
-                    plan.page_uuid,
-                    container.attr("Type").unwrap_or("?")
-                )));
-            }
-            insert_in_page(container, el, order.map_or(&[], Vec::as_slice));
-            continue;
-        }
-        let page_path = page_index.by_uuid.get(&plan.page_uuid).ok_or_else(|| {
-            Error::Compile(format!(
-                "the page `{}` recorded for block `{}` no longer exists in the \
-                 base config; re-pin it by editing the lockfile entry's page_uuid \
-                 (or remove the block from the lock to place it afresh)",
-                plan.page_uuid, block.slug
-            ))
-        })?;
-        let page = doc.element_at_mut(page_path).expect("indexed path");
-        let want = container_type(&block.block_type).unwrap_or("Page");
-        if page.attr("Type") != Some(want) {
-            return Err(Error::Compile(format!(
-                "object `{}` recorded as the page for block `{}` is a `{}`, not a {want}",
-                plan.page_uuid,
-                block.slug,
-                page.attr("Type").unwrap_or("?")
-            )));
-        }
-        // A VirtualIn's folder (D54) is no page: its order is the tree's.
-        let order = base_page_order
-            .get(&plan.page_uuid)
-            .or_else(|| base_tree_order.get(&plan.page_uuid));
-        insert_in_page(page, el, order.map_or(&[], Vec::as_slice));
-    }
-
-    // --- Mirror routing (D34): a wire may name the mirrored object
-    //     directly; when the consumer's *own page* carries a ref of it fed
-    //     from exactly that port, the wire is drawn through the ref — an
-    //     `AI`-fed mirror serves `AQ`, an `I`-fed mirror serves `Q`.
-    //     Reuse-only and page-local: no same-page ref, no rerouting (a
-    //     direct wire is legal, oracle session 6); a ref on another page
-    //     is someone else's visual. Symmetric for actors: a wire into an
-    //     extern port that the base feeds from an OutputRef's `AQ` lands
-    //     on that ref's `AI` instead — the ref on the *writer's* page.
-    #[derive(Clone)]
-    struct MirrorRoute {
-        /// Port the rerouted wire uses instead of the named one.
-        port: String,
-        /// The ref object itself (owner of `port`).
-        ref_uuid: String,
-        page: Option<String>,
-        /// An OutputRef's `AQ`, which feeds the sink it mirrors.
-        feeds: Option<String>,
-    }
-    let routed_objects = doc.objects();
-    let managed_uuids: BTreeSet<&str> = managed.values().map(|p| p.uuid.as_str()).collect();
-    let pages_idx: Vec<(&[usize], &str)> = routed_objects
-        .iter()
-        .filter(|o| o.block_type == "Page")
-        .map(|o| (o.path.as_slice(), o.uuid.as_str()))
-        .collect();
-    let page_uuid_of = |path: &[usize]| -> Option<String> {
-        pages_idx
-            .iter()
-            .filter(|(p, _)| path.len() > p.len() && path.starts_with(p))
-            .max_by_key(|(p, _)| p.len())
-            .map(|(_, u)| (*u).to_string())
-    };
-    let path_by_uuid: BTreeMap<&str, &[usize]> = routed_objects
-        .iter()
-        .map(|o| (o.uuid.as_str(), o.path.as_slice()))
-        .collect();
-    let mut in_routes: BTreeMap<String, Vec<MirrorRoute>> = BTreeMap::new();
-    let mut aq_of_outputref: BTreeMap<String, MirrorRoute> = BTreeMap::new();
-    for o in &routed_objects {
-        if managed_uuids.contains(o.uuid.as_str())
-            || !matches!(
-                o.block_type.as_str(),
-                "InputRef" | "OutputRef" | "OutputRefLM"
-            )
-        {
-            continue;
-        }
-        let el = doc.element_at(&o.path).expect("path from objects()");
-        let ps = ports(el);
-        let port = |k: &str| ps.iter().find(|p| p.key == k);
-        let page = page_uuid_of(&o.path);
-        if o.block_type == "InputRef" {
-            for (fed, serves) in [("AI", "AQ"), ("I", "Q")] {
-                if let (Some(f), Some(s)) = (port(fed), port(serves)) {
-                    for src in &f.inputs {
-                        in_routes.entry(src.clone()).or_default().push(MirrorRoute {
-                            port: s.uuid.clone(),
-                            ref_uuid: o.uuid.clone(),
-                            page: page.clone(),
-                            feeds: None,
-                        });
-                    }
-                }
-            }
-        } else if let (Some(aq), Some(ai)) = (port("AQ"), port("AI")) {
-            aq_of_outputref.insert(
-                aq.uuid.clone(),
-                MirrorRoute {
-                    port: ai.uuid.clone(),
-                    ref_uuid: o.uuid.clone(),
-                    page,
-                    feeds: Some(aq.uuid.clone()),
-                },
-            );
-        }
-    }
-    // From the base's wires: a managed sink (a Modbus actuator, D64) lost
-    // its `<In>` from the ref with the teardown.
-    let mut out_routes: BTreeMap<String, Vec<MirrorRoute>> = BTreeMap::new();
-    for w in &all_base_wires {
-        if let Some(r) = aq_of_outputref.get(&w.from_port) {
-            out_routes
-                .entry(w.to_port.clone())
-                .or_default()
-                .push(r.clone());
-        }
-    }
-    // Same-page candidates only; several on one page fall back to the
-    // previous compile's recorded wire, then refuse.
-    let pick_route = |cands: &[MirrorRoute],
-                      ctx_page: Option<&String>,
-                      pinned: &dyn Fn(&MirrorRoute) -> bool|
-     -> std::result::Result<Option<MirrorRoute>, Vec<String>> {
-        let local: Vec<&MirrorRoute> = cands
-            .iter()
-            .filter(|c| c.page.as_ref() == ctx_page && ctx_page.is_some())
-            .collect();
-        match local.as_slice() {
-            [] => Ok(None),
-            [one] => Ok(Some((*one).clone())),
-            many => {
-                // Each mirror carries its own output ports (a base where
-                // twins share them is refused up front), so several
-                // candidates are a real choice.
-                let hits: Vec<&&MirrorRoute> = many.iter().filter(|c| pinned(c)).collect();
-                match hits.as_slice() {
-                    [one] => Ok(Some((**one).clone())),
-                    _ => Err(many.iter().map(|c| c.ref_uuid.clone()).collect()),
-                }
-            }
-        }
-    };
-
-    // --- Wires: block argument bindings (sink = the declaring block) and
-    //     `<-` statements (sink = an extern port), in source order.
-    for (from_ref, to_ref) in module.wire_pairs() {
-        // The reverse half of an API link through a minted `OutputRef`
-        // names the ref's `AI` as its source (`api_mirror_entry`); it
-        // lands on the block's API connector, `OutputAPI` — never one the
-        // builtin table proves output-only.
-        let sink_type = managed
-            .get(&to_ref.slug)
-            .map(|p| p.block_type.as_str())
-            .or_else(|| {
-                extern_uuid
-                    .get(&to_ref.slug)
-                    .and_then(|u| type_by_uuid.get(u))
-                    .map(|(t, _)| t.as_str())
-            });
-        let api_sink = to_ref.port == "OutputAPI"
-            && !sink_type
-                .and_then(builtin)
-                .and_then(|specs| specs.iter().find(|s| s.key == "OutputAPI"))
-                .is_some_and(|s| s.dir == PortDir::Output);
-        let reverse_api = api_sink
-            && managed.get(&from_ref.slug).is_some_and(|p| {
-                api_mirror_entry(
-                    &p.block_type,
-                    &from_ref.port,
-                    mirror_of
-                        .get(&from_ref.slug)
-                        .map(|m| m.target_type.as_str()),
-                )
-            });
-        let mut from = resolve_port(
-            &doc,
-            &managed,
-            &extern_uuid,
-            &from_ref.slug,
-            &from_ref.port,
-            if reverse_api {
-                PortDir::Input
-            } else {
-                PortDir::Output
-            },
-        )?;
-        let mut to = resolve_port(
-            &doc,
-            &managed,
-            &extern_uuid,
-            &to_ref.slug,
-            &to_ref.port,
-            PortDir::Input,
-        )?;
-        // Ref-typed endpoints wire literally (feed wires, explicit ref
-        // externs); routing is for wires naming the mirrored object.
-        let endpoint_type = |slug: &str, owner_uuid: &str| -> Option<&str> {
-            managed
-                .get(slug)
-                .map(|p| p.block_type.as_str())
-                .or_else(|| type_by_uuid.get(owner_uuid).map(|(t, _)| t.as_str()))
-        };
-        let page_of_endpoint = |slug: &str, owner_uuid: &str| -> Option<String> {
-            match managed.get(slug) {
-                Some(p) => p.placed.then(|| p.page_uuid.clone()),
-                None => path_by_uuid.get(owner_uuid).and_then(|p| page_uuid_of(p)),
-            }
-        };
-        let from_is_ref = endpoint_type(&from_ref.slug, &from.owner_uuid).is_some_and(is_ref_type);
-        let to_is_ref = endpoint_type(&to_ref.slug, &to.owner_uuid).is_some_and(is_ref_type);
-        if !from_is_ref && !to_is_ref {
-            let route_err = |which: &str, endpoint: String, refs: Vec<String>| {
-                Error::Compile(format!(
-                    "wire `{to_ref} <- {from_ref}`: several mirrors of {which} \
-                     `{endpoint}` sit on the consumer's page ({}) — declare the \
-                     intended one explicitly (`extern … = \
-                     InputRef(mirrors: …)` or a `uuid:` pin) and wire through it",
-                    refs.join(", ")
-                ))
-            };
-            if let Some(cands) = in_routes.get(&from.port_uuid) {
-                let sink_page = page_of_endpoint(&to_ref.slug, &to.owner_uuid);
-                let pin =
-                    |c: &MirrorRoute| base_wires.contains(&(c.port.clone(), to.port_uuid.clone()));
-                match pick_route(cands, sink_page.as_ref(), &pin) {
-                    Ok(Some(r)) => {
-                        from.owner_uuid = r.ref_uuid;
-                        from.port_uuid = r.port;
-                    }
-                    Ok(None) => {}
-                    Err(refs) => {
-                        return Err(route_err("source", from_ref.to_string(), refs));
-                    }
-                }
-            }
-            if let Some(cands) = out_routes.get(&to.port_uuid) {
-                let from_page = page_of_endpoint(&from_ref.slug, &from.owner_uuid);
-                let pin = |c: &MirrorRoute| {
-                    base_wires.contains(&(from.port_uuid.clone(), c.port.clone()))
-                };
-                match pick_route(cands, from_page.as_ref(), &pin) {
-                    Ok(Some(r)) => {
-                        // A managed sink is fed by the ref again.
-                        if let Some(aq) = r.feeds.as_ref().filter(|_| !to.is_extern) {
-                            let key = (to.port_uuid.clone(), aq.clone());
-                            add_wire(
-                                &mut doc,
-                                &to.owner_uuid,
-                                &to.port_uuid,
-                                aq,
-                                residue
-                                    .get(&to.owner_uuid)
-                                    .and_then(|r| r.wire_flags.get(&key))
-                                    .map(String::as_str),
-                                base_in_order.get(&to.port_uuid).map_or(&[], Vec::as_slice),
-                            )?;
-                        }
-                        to.owner_uuid = r.ref_uuid;
-                        to.port_uuid = r.port;
-                        to.is_extern = true;
-                    }
-                    Ok(None) => {}
-                    Err(refs) => {
-                        return Err(route_err("sink", to_ref.to_string(), refs));
-                    }
-                }
-            }
-            // Reverse-recorded distributions (API connectors): there the
-            // extern input is the wire's *from* and the managed output its
-            // *to* — the OutputRef redirect applies to the source side,
-            // still on the writer's page.
-            if let Some(cands) = out_routes.get(&from.port_uuid) {
-                let writer_page = page_of_endpoint(&to_ref.slug, &to.owner_uuid);
-                let pin =
-                    |c: &MirrorRoute| base_wires.contains(&(c.port.clone(), to.port_uuid.clone()));
-                match pick_route(cands, writer_page.as_ref(), &pin) {
-                    Ok(Some(r)) => {
-                        from.owner_uuid = r.ref_uuid;
-                        from.port_uuid = r.port;
-                    }
-                    Ok(None) => {}
-                    Err(refs) => {
-                        return Err(route_err("source", from_ref.to_string(), refs));
-                    }
-                }
-            }
-        }
-        let key = (to.port_uuid.clone(), from.port_uuid.clone());
-        let flg = residue
-            .get(&to.owner_uuid)
-            .and_then(|r| r.wire_flags.get(&key))
-            .or_else(|| extern_wire_flags.get(&key));
-        add_wire(
-            &mut doc,
-            &to.owner_uuid,
-            &to.port_uuid,
-            &from.port_uuid,
-            flg.map(String::as_str),
-            base_in_order.get(&to.port_uuid).map_or(&[], Vec::as_slice),
-        )?;
-        if to.is_extern {
-            lock.extern_wires.push(LockedWire {
-                from: from.port_uuid,
-                to: to.port_uuid,
-            });
-        }
-    }
-    lock.extern_wires.sort();
-    lock.extern_wires.dedup();
-    // A wire this base carried that the source no longer draws was
-    // withdrawn — tombstone it (D31) so pre-deployment bases keep losing
-    // it instead of passing it through.
-    for w in &old_wires {
-        if wires_present.contains(w) && !lock.extern_wires.contains(w) {
-            lock.removed_wires.insert(w.clone());
-        }
-    }
-
-    // --- Port assignments (always extern ports — validate rejects managed
-    //     targets).
-    for s in module.sets() {
-        // A setting of a physical input or output (D65): an attribute of
-        // the extern object, with the port assignments' lifecycle.
-        if let Some(e) = module.externs().find(|e| e.slug == s.target.slug)
-            && let Some(addable) = crate::settings::setting(&e.block_type, &s.target.port)
-            && let Some(owner) = extern_uuid.get(&s.target.slug)
-            && find_c(&doc.xml.root, owner).is_some_and(|c| {
-                !c.child_elements()
-                    .any(|co| co.name == "Co" && co.attr("K") == Some(s.target.port.as_str()))
-            })
-        {
-            let value = module
-                .resolve_value_for(&s.value, &e.block_type, &s.target.slug, &s.target.port)?
-                .into_owned();
-            let original = read_setting(&doc, owner, &s.target.port);
-            if original.is_none() && !addable {
-                return Err(Error::Compile(format!(
-                    "`{}.{}`: the object ({owner}) carries no `{}` — Lox Logic rewrites \
-                     this setting, it never adds one (it belongs to another kind \
-                     of input or output)",
-                    s.target.slug, s.target.port, s.target.port
-                )));
-            }
-            write_setting(&mut doc, owner, &s.target.port, Some(&value));
-            lock.set_originals
-                .entry(crate::settings::key(owner, &s.target.port))
-                .or_insert(original);
-            continue;
-        }
-        let target = resolve_port(
-            &doc,
-            &managed,
-            &extern_uuid,
-            &s.target.slug,
-            &s.target.port,
-            PortDir::Param,
-        )
-        .map_err(
-            |err| match module.externs().find(|e| e.slug == s.target.slug) {
-                // A device's port that is none: name its settings.
-                Some(e) if crate::settings::DEVICE_TYPES.contains(&e.block_type.as_str()) => {
-                    Error::Compile(format!(
-                        "`{}.{}`: neither a port nor a setting of a {} the source can \
-                         own ({})",
-                        s.target.slug,
-                        s.target.port,
-                        e.block_type,
-                        crate::settings::names(&e.block_type).join(", ")
-                    ))
-                }
-                Some(e)
-                    if crate::settings::is_setting(&s.target.port)
-                        && crate::settings::setting(&e.block_type, &s.target.port).is_none() =>
-                {
-                    Error::Compile(format!(
-                        "`{}.{}`: {} is not a physical input or output whose settings \
-                     the source can own ({})",
-                        s.target.slug,
-                        s.target.port,
-                        e.block_type,
-                        crate::settings::SETTING_TYPES
-                            .iter()
-                            .chain(crate::settings::DEVICE_TYPES)
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ))
-                }
-                _ => err,
-            },
-        )?;
-        let extern_type = module
-            .externs()
-            .find(|e| e.slug == s.target.slug)
-            .map_or("", |e| e.block_type.as_str());
-        let value = module
-            .resolve_value_for(&s.value, extern_type, &s.target.slug, &s.target.port)?
-            .into_owned();
-        let original = apply_def(&mut doc, &target.owner_uuid, &target.port_uuid, &value)?;
-        lock.set_originals
-            .entry(target.port_uuid)
-            .or_insert(original);
-    }
-    // A Def write that vanished from source was withdrawn — tombstone it
-    // (D31) unless it never changed the port's bytes in the first place.
-    for (port_uuid, original) in &old_originals {
-        if lock.set_originals.contains_key(port_uuid) {
-            continue; // still set from source
-        }
-        if let Some(written) = defs_written.get(port_uuid)
-            && original.as_deref() != Some(written.as_str())
-        {
-            lock.removed_sets.insert(
-                port_uuid.clone(),
-                crate::lock::RetiredSet {
-                    original: original.clone(),
-                    written: written.clone(),
-                },
-            );
-        }
-    }
-
-    // --- Attribute claims on externs (D39). Planned against the torn-down
-    //     document before anything is written, so nested claims (a device
-    //     and one of its outputs) never record each other's write as their
-    //     original, and an explicitly claimed descendant is never a
-    //     follower.
-    let managed_uuids: BTreeSet<&str> = managed.values().map(|b| b.uuid.as_str()).collect();
-    let mut claimed: BTreeMap<(String, Attr), &str> = BTreeMap::new();
-    // A managed block's room and category (D63): written onto the rebuilt
-    // block on every compile, no lock state — the block is the source's.
-    let mut managed_claims: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
-    for a in module.attrs().filter(|a| managed.contains_key(&a.slug)) {
-        let value = resolve(&a.value)?;
-        let entry = managed_claims
-            .entry(managed[&a.slug].uuid.clone())
-            .or_default();
-        match a.attr {
-            Attr::Room => entry.0 = Some(taxonomy_uuid(&doc, "Place", "room", &value)?),
-            Attr::Category => {
-                entry.1 = Some(taxonomy_uuid(&doc, "Category", "category", &value)?);
-            }
-            Attr::Title => unreachable!("validate refuses a managed block's `.title`"),
-        }
-    }
-    for (uuid, (room, category)) in &managed_claims {
-        write_binding(&mut doc, uuid, room.as_deref(), category.as_deref());
-    }
-    for a in module.attrs().filter(|a| !managed.contains_key(&a.slug)) {
-        let uuid = extern_uuid
-            .get(&a.slug)
-            .expect("validate admitted only extern targets");
-        if let Some(other) = claimed.insert((uuid.clone(), a.attr), &a.slug) {
-            return Err(Error::Compile(format!(
-                "`{}.{attr}` and `{other}.{attr}` claim the {attr} of the same \
-                 object ({uuid}) — keep one assignment",
-                a.slug,
-                attr = a.attr
-            )));
-        }
-    }
-    let mut planned_claims: Vec<(String, Attr, AttrClaim)> = Vec::new();
-    for a in module.attrs().filter(|a| !managed.contains_key(&a.slug)) {
-        let uuid = extern_uuid[&a.slug].clone();
-        let value = resolve(&a.value)?;
-        let written = match a.attr {
-            Attr::Title => value,
-            Attr::Room => taxonomy_uuid(&doc, "Place", "room", &value)?,
-            Attr::Category => taxonomy_uuid(&doc, "Category", "category", &value)?,
-        };
-        let original = read_claimed(&doc, &uuid, a.attr).ok_or_else(|| {
-            Error::Compile(format!(
-                "`{}.{}`: the object ({uuid}) carries no {} — Lox Logic rewrites an \
-                 existing {}, it never adds one; set it once in Loxone Config",
-                a.slug,
-                a.attr,
-                claim_slot(a.attr),
-                claim_slot(a.attr)
-            ))
-        })?;
-        let stop =
-            |u: &str| managed_uuids.contains(u) || claimed.contains_key(&(u.to_string(), a.attr));
-        let followers = match a.attr {
-            Attr::Title => ref_followers(&doc, &uuid, &stop),
-            Attr::Room | Attr::Category => followers_of(&doc, &uuid, a.attr, &original, &stop),
-        };
-        planned_claims.push((
-            uuid,
-            a.attr,
-            AttrClaim {
-                original,
-                written,
-                followers,
-            },
-        ));
-    }
-    for (uuid, attr, c) in planned_claims {
-        write_claimed(&mut doc, &uuid, attr, &c.written);
-        for f in &c.followers {
-            write_claimed(&mut doc, f, attr, &c.written);
-        }
-        lock.attr_claims.entry(uuid).or_default().insert(attr, c);
-    }
-    // A claim that vanished from source was withdrawn — tombstone it (D31)
-    // unless it never changed the object's bytes in the first place.
-    for (uuid, claims) in &old_claims {
-        for (attr, c) in claims {
-            if lock
-                .attr_claims
-                .get(uuid)
-                .is_some_and(|m| m.contains_key(attr))
-            {
-                continue; // still claimed from source
-            }
-            if let Some(written) = claims_written.get(&(uuid.clone(), *attr))
-                && *written != c.original
-            {
-                lock.removed_attrs.entry(uuid.clone()).or_default().insert(
-                    *attr,
-                    AttrClaim {
-                        original: c.original.clone(),
-                        written: written.clone(),
-                        followers: c.followers.clone(),
-                    },
-                );
-            }
-        }
-    }
-
-    // --- Touch Pure Flex tiles (D41). Last of the writes: a `to:` target
-    //     must be API-linked to the device, and that link may be a wire
-    //     this compile just drew. Like `Code:` (D40) the claim keeps no
-    //     lock state — a withdrawn claim leaves the pushed programs.
+/// The writes kept in their own modules, last of all: Touch Pure Flex
+/// tiles (D41), DayTimer schedules (D53), access rights (D49), Automatic
+/// Designer rules (D57, D60) and LightController2 moods (D58).
+fn apply_features(
+    doc: &mut LoxoneDoc,
+    base: &LoxoneDoc,
+    lock: &mut Lockfile,
+    minter: &mut Minter,
+    cx: &Rebuild,
+) -> Result<()> {
+    let Rebuild {
+        module,
+        managed,
+        extern_uuid,
+        ..
+    } = *cx;
     let mut uuid_of: BTreeMap<String, String> = extern_uuid
         .iter()
         .map(|(s, u)| (s.clone(), u.clone()))
         .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
         .collect();
-    super::tiles::apply(&mut doc, module, &uuid_of)?;
+    super::tiles::apply(doc, module, &uuid_of)?;
     // DayTimer schedules (D53): the claimed `Modes=`/`N=`/`<Entry>` set,
     //     on extern and managed timers alike; no lock state either.
-    super::schedule::apply(&mut doc, module, &uuid_of)?;
+    super::schedule::apply(doc, module, &uuid_of)?;
 
     // --- Access rights on NFC Code Touch blocks (D49): users, groups and
     //     schedules are the base's; no lock state, like tiles.
-    super::access::apply(&mut doc, module, &uuid_of)?;
+    super::access::apply(doc, module, &uuid_of)?;
     // Automatic Designer rules (D57); a named one (D60) is found or
     //     created first, its UUID pinned in the lock while it is declared.
     //     A rule or mood minted here moves the mint mark.
     let mint_mark = minter.counter();
-    lock.rules = super::rule::create(&mut doc, module, &uuid_of, &lock.rules, &mut minter)?;
+    lock.rules = super::rule::create(doc, module, &uuid_of, &lock.rules, minter)?;
     uuid_of.extend(lock.rules.iter().map(|(s, u)| (s.clone(), u.clone())));
-    super::rule::apply(&mut doc, module, &uuid_of)?;
-    super::rule::watch(base, &mut doc);
+    super::rule::apply(doc, module, &uuid_of)?;
+    super::rule::watch(base, doc);
     // LightController2 moods (D58): the claimed `<LightscenesC>` list; a
     //     new mood mints its UUID (pinned in the lock until the base has
     //     it).
     let minted_moods = std::mem::take(&mut lock.moods);
-    lock.moods = super::moods::apply(&mut doc, module, &uuid_of, &minted_moods, &mut minter)?;
+    lock.moods = super::moods::apply(doc, module, &uuid_of, &minted_moods, minter)?;
     if minter.counter() != mint_mark {
         lock.counters.next_mint = minter.counter();
     }
+    Ok(())
+}
 
-    // --- Placement (D42), once every wire is drawn: blocks without a
-    //     position, and those on pages laid out afresh, go where their
-    //     wires want them on the page as it now stands.
+/// Placement (D42), once every wire is drawn: blocks without a position,
+/// and those on pages laid out afresh, go where their wires want them on
+/// the page as it now stands.
+fn place_blocks(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild) {
+    let Rebuild {
+        module,
+        managed,
+        residue,
+        ..
+    } = *cx;
+    let managed_uuids: BTreeSet<&str> = managed.values().map(|b| b.uuid.as_str()).collect();
     let mut to_place: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for block in module.blocks() {
         let plan = &managed[&block.slug];
@@ -1984,7 +635,7 @@ pub fn compile(
         }
     }
     for (page_uuid, slugs) in &to_place {
-        let geo = PageGeometry::of(&doc, page_uuid).expect("blocks were appended to this page");
+        let geo = PageGeometry::of(doc, page_uuid).expect("blocks were appended to this page");
         let foreign_ref = |j: usize| {
             is_ref_type(&geo.objects[j].block_type)
                 && !managed_uuids.contains(geo.objects[j].uuid.as_str())
@@ -2040,8 +691,15 @@ pub fn compile(
             entry.superseded_layout = base.filter(|b| !b.same_spot(&at));
         }
     }
+}
 
-    // --- Counters and target metadata.
+/// Counters and target metadata, then the self-check on the output.
+fn finish(
+    doc: &mut LoxoneDoc,
+    base: &LoxoneDoc,
+    lock: &mut Lockfile,
+    opts: &CompileOptions,
+) -> Result<()> {
     doc.set_counters(Counters {
         next_obj: lock.counters.next_obj,
         next_const: lock.counters.next_const,
@@ -2056,7 +714,7 @@ pub fn compile(
             .collect::<String>(),
     );
     lock.target.source_config_sha256 = Some(sha256_hex(&base.to_bytes()));
-    lock.target.semantic_fingerprint = Some(crate::diff::semantic_fingerprint(&doc));
+    lock.target.semantic_fingerprint = Some(crate::diff::semantic_fingerprint(doc));
     // Self-check: the base was unique, so a repeat here was introduced by
     // this compile — a mint that hit a UUID the base already carries (the
     // minter is time + counter + serial: another lock's output, minted in
@@ -2071,63 +729,6 @@ pub fn compile(
              lockfile maps two identities onto one UUID; nothing was written",
             dups.join(", ")
         )));
-    }
-    Ok(doc)
-}
-
-/// A VirtualIn's input-dialog attributes (D54) in the order a Loxone
-/// Config save writes them. Each is the source's binding, else the base's
-/// value, else — on a fresh mint only — what a save fills in (oracle
-/// session 18): an analog input gets `EnVal="true"`, a digital one the
-/// 0/1 range and its change filter.
-fn virtual_in_attrs(
-    el: &mut Element,
-    slug: &str,
-    bound: &BTreeMap<(String, String), String>,
-    res: Option<&Residue>,
-) -> Result<()> {
-    let bound = |n: &str| bound.get(&(slug.to_string(), n.to_string()));
-    let carried = |n: &str| {
-        res.and_then(|r| r.attrs.iter().find(|(a, _)| a == n))
-            .map(|(_, v)| v.as_str())
-    };
-    let analog = match bound("Analog") {
-        Some(v) if v == "true" || v == "false" => v.as_str(),
-        Some(v) => {
-            return Err(Error::Compile(format!(
-                "block `{slug}`: `Analog:` is \"true\" or \"false\", not `{v}`"
-            )));
-        }
-        None => carried("Analog").unwrap_or("false"),
-    };
-    let fresh: &[(&str, &str)] = if analog == "true" {
-        &[("Analog", "true"), ("EnVal", "true")]
-    } else {
-        &[
-            ("Analog", "false"),
-            ("MaxVal", "1"),
-            ("MinChange", "0.5"),
-            ("MinTime", "10"),
-        ]
-    };
-    for name in [
-        "Analog",
-        "EnVal",
-        "DefVal",
-        "MinVal",
-        "MaxVal",
-        "MinChange",
-        "MinTime",
-    ] {
-        if let Some(v) = bound(name) {
-            el.set_attr(name, v);
-        } else if let Some(v) = carried(name) {
-            el.set_attr_raw(name, v);
-        } else if res.is_none()
-            && let Some((_, v)) = fresh.iter().find(|(n, _)| *n == name)
-        {
-            el.set_attr(name, v);
-        }
     }
     Ok(())
 }
