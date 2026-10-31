@@ -28,8 +28,11 @@ of a guessed value.
   The value holds until the test sets it again and overrides whatever
   the block computes.
 - Reading a port for an `expect` first walks the logic it depends on,
-  given what the test sets at that moment, and refuses:
-  - a block without a model;
+  given what the test sets at that moment. An input or parameter reads
+  what its wires carry on any block, one without a model too: an
+  actuator's command input (`VirtualOutCmd.I`, an output's `I`) can be
+  expected on. It refuses:
+  - an output of a block without a model;
   - an output the model does not compute (a Monoflop's remaining time,
     say);
   - several wires into one input of a block whose fan-in is

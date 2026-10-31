@@ -1,0 +1,22 @@
+extern aussentemp = VirtualIn(title: "Außentemperatur")
+extern raumtemp = VirtualIn(title: "Raumtemperatur Bad")
+extern heizung = VirtualOutCmd(title: "Heizung Bad")
+
+page "Logik"
+
+frost_aussen = Less(
+	Input1: aussentemp.Q,
+	Input2: 3,
+)
+
+frost_bad = Less(
+	Input1: raumtemp.Q,
+	Input2: 10,
+)
+
+frost = Or(
+	I1: frost_aussen.Q,
+	I2: frost_bad.Q,
+)
+
+heizung.I <- frost.Q

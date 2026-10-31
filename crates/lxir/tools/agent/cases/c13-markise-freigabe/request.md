@@ -1,0 +1,1 @@
+Die Markise soll sofort einfahren, wenn der Wind stärker als 40 km/h ist oder es regnet. Freigegeben (also „Markise einfahren“ wieder aus) wird sie erst, wenn 10 Minuten lang weder zu viel Wind noch Regen war.

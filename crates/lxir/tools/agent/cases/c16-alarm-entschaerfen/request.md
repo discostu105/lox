@@ -1,0 +1,1 @@
+Alarmanlage: Wird die Haustür geöffnet, während „Abwesend“ aktiv ist, bleiben 30 Sekunden Zeit, um „Abwesend“ auszuschalten. Geschieht das nicht, ertönt die Sirene, auch wenn die Tür inzwischen wieder zu ist, höchstens aber 3 Minuten lang. Das Ausschalten von „Abwesend“ beendet den Alarm jederzeit.

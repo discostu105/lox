@@ -1,0 +1,19 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_tuer = VirtualIn(title: "Haustür offen")
+extern t_hinweis = VirtualOutCmd(title: "Hinweis Haustür")
+
+test "Hinweis nach 3 Minuten offener Haustür"
+	t_tuer.Q = 1
+	tick 170
+	expect t_hinweis.I == 0
+	tick 20
+	expect t_hinweis.I == 1
+	t_tuer.Q = 0
+	tick 2
+	expect t_hinweis.I == 0
+	t_tuer.Q = 1
+	tick 60
+	expect t_hinweis.I == 0 # die Zeit läuft neu
+end

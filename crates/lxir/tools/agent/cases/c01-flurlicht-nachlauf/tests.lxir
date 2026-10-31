@@ -1,0 +1,18 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_bewegung = VirtualIn(title: "Bewegung Flur")
+extern t_licht = VirtualOutCmd(title: "Licht Flur")
+
+test "Licht an bei Bewegung, aus 2 Minuten danach"
+	t_bewegung.Q = 1
+	tick 2
+	expect t_licht.I == 1
+	tick 300
+	expect t_licht.I == 1 # Dauerbewegung hält das Licht
+	t_bewegung.Q = 0
+	tick 100
+	expect t_licht.I == 1
+	tick 25
+	expect t_licht.I == 0
+end

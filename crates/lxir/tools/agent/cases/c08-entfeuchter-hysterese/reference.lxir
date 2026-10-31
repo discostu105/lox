@@ -1,0 +1,13 @@
+extern feuchte = VirtualIn(title: "Luftfeuchte Keller")
+extern entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
+
+page "Logik"
+
+feucht = AnalogThresholdTrigger(
+	"Keller feucht",
+	Input: feuchte.Q,
+	On: 65,
+	Off: 55,
+)
+
+entfeuchter.I <- feucht.Q

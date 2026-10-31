@@ -1,0 +1,40 @@
+# Hidden from the agent. The t_ externs name the fixture objects
+# by title, independent of the slugs a solution chooses.
+
+extern t_taster = VirtualIn(title: "Taster Flur")
+extern t_bewegung = VirtualIn(title: "Bewegung Flur")
+extern t_helligkeit = VirtualIn(title: "Helligkeit außen")
+extern t_licht = VirtualOutCmd(title: "Licht Flur")
+
+test "Bewegung im Dunkeln: 3 Minuten"
+	t_helligkeit.Q = 10
+	t_bewegung.Q = 1
+	tick 2
+	expect t_licht.I == 1
+	t_bewegung.Q = 0
+	tick 170
+	expect t_licht.I == 1
+	tick 20
+	expect t_licht.I == 0
+end
+
+test "Bewegung bei Tag: aus"
+	t_helligkeit.Q = 5000
+	t_bewegung.Q = 1
+	tick 2
+	expect t_licht.I == 0
+end
+
+test "Taster hält das Licht"
+	t_helligkeit.Q = 5000
+	t_taster.Q = 1
+	tick 1
+	t_taster.Q = 0
+	tick 600
+	expect t_licht.I == 1
+	t_taster.Q = 1
+	tick 1
+	t_taster.Q = 0
+	tick 2
+	expect t_licht.I == 0
+end

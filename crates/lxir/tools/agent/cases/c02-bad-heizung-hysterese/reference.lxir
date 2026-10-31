@@ -1,0 +1,22 @@
+extern raumtemp = VirtualIn(title: "Raumtemperatur Bad")
+extern heizung = VirtualOutCmd(title: "Heizung Bad")
+
+page "Logik"
+
+kalt = Less(
+	Input1: raumtemp.Q,
+	Input2: 20,
+)
+
+warm = GreaterEqual(
+	Input1: raumtemp.Q,
+	Input2: 22,
+)
+
+regler = SRFlipFlop(
+	"Heizung Bad Hysterese",
+	InputS: kalt.Q,
+	InputR: warm.Q,
+)
+
+heizung.I <- regler.Q

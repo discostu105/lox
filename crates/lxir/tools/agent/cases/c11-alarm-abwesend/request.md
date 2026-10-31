@@ -1,0 +1,1 @@
+Wird die Haustür geöffnet, während „Abwesend“ aktiv ist, soll die Sirene einschalten und eingeschaltet bleiben, auch wenn die Tür wieder zugeht, bis „Abwesend“ ausgeschaltet wird. Ist „Abwesend“ aus, passiert nichts.
