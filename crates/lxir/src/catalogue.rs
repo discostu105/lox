@@ -1235,6 +1235,115 @@ mod tests {
         &e[e.find("\"details\"").unwrap()..]
     }
 
+    /// Connectors `K` with UUIDs `1f000000-0000-00NN-NNff000000000000`.
+    fn cos(keys: &[&str]) -> String {
+        keys.iter()
+            .enumerate()
+            .map(|(i, k)| {
+                format!(r#"<Co K="{k}" U="1f000000-0000-00{i:02x}-{i:02x}ff000000000000"/>"#)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn meters_and_central_blocks_follow_loxone_config() {
+        let io = format!(r#"<IoData Visu="true" Pr="{ROOM}" Cr="{CAT}" Rating="2"/>"#);
+        let meter = |ty: &str, attrs: &str, keys: &[&str], groups: &str| {
+            entry_of(
+                ty,
+                &format!(
+                    r#"<C Type="{ty}" U="{NEW}" Title="Zähler" PwrN="Leistung" Un1="&lt;v.3&gt;kW"{attrs} StatsType="8">{}{io}{groups}</C>"#,
+                    cos(keys)
+                ),
+            )
+        };
+        let uni = meter(
+            "MeterDig",
+            "",
+            &["A", "R", "OPf", "OMr", "ORd", "ORw", "ORm", "ORy"],
+            r#"<statGrp id="1" m="1"/><statGrp id="2" m="11" acc="true"/>"#,
+        )
+        .unwrap();
+        assert!(uni.contains(r#""type":"Meter""#));
+        assert!(uni.contains(r#""defaultRating":2,"#));
+        assert!(uni.contains(r#""defaultIcon":null,"#));
+        assert!(uni.ends_with(
+            r#""details":{"jLockable":false,"type":"unidirectional","displayType":0,"actualFormat":"%.3fkW","totalFormat":"","powerName":"Leistung"},"states":{"jLocked":"9f000000-0000-0001-01ff000000000000","actual":"1f000000-0000-0002-02ff000000000000","total":"1f000000-0000-0003-03ff000000000000","totalDay":"1f000000-0000-0004-04ff000000000000","totalWeek":"1f000000-0000-0005-05ff000000000000","totalMonth":"1f000000-0000-0006-06ff000000000000","totalYear":"1f000000-0000-0007-07ff000000000000"},"statisticV2":{"groups":[{"id":"1","mode":1,"dataPoints":[{"title":"Leistung","format":"0.000kW","output":"actual"}]},{"id":"2","mode":11,"accumulated":true,"dataPoints":[{"title":"Zählerstand","format":"","output":"total"}]}]}}"#
+        ));
+        let bi_keys = [
+            "R", "OPf", "OMr1", "OMr2", "Slvl", "ORd1", "ORw1", "ORm1", "ORy1", "ORd2", "ORw2",
+            "ORm2", "ORy2",
+        ];
+        let st = meter(
+            "MeterAbsSt",
+            r#" UnSt="&lt;v&gt;%" MaxLvl="100""#,
+            &bi_keys,
+            r#"<statGrp id="1" m="12"/><statGrp id="2" m="11" acc="true"/><statGrp id="3" m="11"/>"#,
+        )
+        .unwrap();
+        assert!(st.contains(r#""type":"storage","#));
+        assert!(st.contains(r#""storageFormat":"%.0f%%","storageMax":100.0}"#));
+        assert!(st.contains(r#""storage":"1f000000-0000-0004-04ff000000000000","totalDay""#));
+        assert!(st.contains(r#"{"title":"Zählerstand","format":"","output":"totalNeg"}"#));
+        assert!(st.contains(
+            r#"{"id":"3","mode":11,"dataPoints":[{"title":"Speicherstand","format":"0%","output":"storageLevel"}]}"#
+        ));
+        let bi = meter(
+            "MeterAbsBi",
+            "",
+            &bi_keys,
+            r#"<statGrp id="1" m="12"/><statGrp id="2" m="11" acc="true"/>"#,
+        )
+        .unwrap();
+        assert!(bi.contains(r#""type":"bidirectional","#));
+        assert!(bi.contains(r#""totalNegYear":"1f000000-0000-000c-0cff000000000000""#));
+        // A unit of its own for the total is not known.
+        assert_eq!(
+            meter("MeterDig", r#" Un2="&lt;v&gt;kWh""#, &["R"], ""),
+            None
+        );
+        assert_eq!(stat_format("%.0f%"), Some("0%".to_string()));
+
+        // A central block lists its members; one without is not known.
+        let central = |ty: &str, rec: &str, sp: &str, keys: &[&str]| {
+            entry_of(
+                ty,
+                &format!(
+                    r#"<C Type="{ty}" U="{NEW}" Title="Zentral"{rec} SpStates="{sp}">{}{io}</C>"#,
+                    cos(keys)
+                ),
+            )
+        };
+        let shade = central(
+            "CentralShade",
+            r#" rec="aa000000-0000-0000-ffff000000000000,bb000000-0000-0000-ffff000000000000""#,
+            "e0000000-0000-0000-ffff000000000000,e1000000-0000-0000-ffff000000000000",
+            &["Stop"],
+        )
+        .unwrap();
+        assert!(!shade.contains("defaultIcon"));
+        assert!(shade.ends_with(
+            r#""details":{"jLockable":true,"controls":[{"id":0,"uuid":"aa000000-0000-0000-ffff000000000000"},{"id":1,"uuid":"bb000000-0000-0000-ffff000000000000"}],"parameterConnections":0},"states":{"jLocked":"9f000000-0000-0000-00ff000000000000","events":"e0000000-0000-0000-ffff000000000000","safetyActive":"e1000000-0000-0000-ffff000000000000"}}"#
+        ));
+        let light = central(
+            "CentralLight",
+            r#" rec="aa000000-0000-0000-ffff000000000000""#,
+            "e0000000-0000-0000-ffff000000000000",
+            &["Reset"],
+        )
+        .unwrap();
+        assert!(light.contains(r#""type":"CentralLightController""#));
+        assert_eq!(
+            central(
+                "CentralLight",
+                "",
+                "e0000000-0000-0000-ffff000000000000",
+                &["Reset"]
+            ),
+            None
+        );
+    }
+
     #[test]
     fn info_displays_pulses_and_day_timers_follow_loxone_config() {
         // A memory flag with statistics and notes: an info display; the
