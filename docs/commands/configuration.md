@@ -168,7 +168,7 @@ lox logic compile                            # base + module + lock → out.Loxo
 lox config diff base.Loxone out.Loxone    # review the change by name
 lox config push                           # drift check, compile, stage (dry run)
 lox config push --force                   # upload, restart the program, verify, move base
-lox logic help                               # every Lox Logic command and flag
+lox logic help                               # one line per command; `lox logic <cmd> --help` for its flags
 ```
 
 See the [Config as Code guide](/lox/guides/config-as-code).

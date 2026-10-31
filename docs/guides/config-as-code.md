@@ -37,7 +37,7 @@ byte for byte. Nothing in `lox logic` talks to the Miniserver; `lox config push`
 
 {: .note }
 `lox logic …` and the standalone `loxl …` binary are the same CLI, so Lox Logic's docs apply word for word.
-`lox logic help` lists every command and flag.
+`lox logic help` lists the commands, and `lox logic <command> --help` shows one command's flags.
 
 ## The language in one example
 
