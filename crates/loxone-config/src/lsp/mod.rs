@@ -349,9 +349,6 @@ impl<W: Write> Server<'_, W> {
             .flatten()
         {
             let msg = d["message"].as_str().unwrap_or("");
-            let Some(fix) = analysis::suggestion(msg) else {
-                continue;
-            };
             let (start, end) = (&d["range"]["start"], &d["range"]["end"]);
             let line = start["line"].as_u64().unwrap_or(0) as usize;
             if end["line"].as_u64() != Some(line as u64) {
@@ -364,6 +361,28 @@ impl<W: Write> Server<'_, W> {
             let e = self
                 .enc
                 .byte(l, end["character"].as_u64().unwrap_or(0) as u32);
+            // A v1 spelling whose error names its replacement (D80):
+            // "write `clock 07:30` instead of `clock \"07:30\"`".
+            if let Some((new, old)) = analysis::replacement(msg)
+                && let Some(at) = l.get(s..e).and_then(|r| r.find(old))
+            {
+                let (from, to) = (s + at, s + at + old.len());
+                let range = json!({
+                    "start": { "line": line, "character": self.enc.column(l, from) },
+                    "end": { "line": line, "character": self.enc.column(l, to) },
+                });
+                out.push(json!({
+                    "title": format!("Change to `{new}`"),
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                    "isPreferred": true,
+                    "edit": { "changes": { uri.clone(): [{ "range": range, "newText": new }] } },
+                }));
+                continue;
+            }
+            let Some(fix) = analysis::suggestion(msg) else {
+                continue;
+            };
             if !analysis::is_name(&l[s..e]) {
                 continue;
             }

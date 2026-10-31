@@ -815,7 +815,7 @@ Anything unverified is an error, not a heuristic:
   (2026-08-26; the simulator is Lox Logic's own since D68). `test "Name" … end` is a top-level item whose body is
   line-oriented like everything else: injections (`slug.Port = value`),
   `tick <n> [dt <v>]`, `expect slug.Port <cmp> <value>`, and
-  `clock "…"`. Statements group into simulator steps at `tick`
+  `clock …` (bare since D80). Statements group into simulator steps at `tick`
   boundaries; `expect`s attach to the preceding `tick`. Compilation
   ignores tests entirely — they change no bytes, so a module with tests
   compiles identically to one without.
@@ -1658,7 +1658,7 @@ Anything unverified is an error, not a heuristic:
     as one past the highest number in the base and in carried residue,
     then carried verbatim like the other input-dialog attributes
     (`connectors::carried_attrs`).
-  - **Parameters.** `Analog:` (`"true"`/`"false"`), `MinVal:`,
+  - **Parameters.** `Analog:` (`on`/`off` since D80), `MinVal:`,
     `MaxVal:`, `DefVal:` are attribute parameters with claim semantics
     (D40): written while bound, the GUI's otherwise. The `<IoData>`
     room/category binding and `<Display>` stay GUI-owned.
@@ -2307,7 +2307,7 @@ Anything unverified is an error, not a heuristic:
   for reading, never for uploading.
 - **D76 — Weather, dates and messages in rules** (2026-10-31; #208).
   `rule` takes `when weather <field> <op> <v>`, `when day`, `when
-  daylight`, `when sunrise|sunset|dawn|dusk`, `when date "Y-M-D"` and
+  daylight`, `when sunrise|sunset|dawn|dusk`, `when date Y-M-D` (bare since D80) and
   `then notify`, `then mail`, `then wait`, `then message`. The codes
   are the Miniserver's own (capability `sections`, the web app's rule
   builder; loxone-format.md), not guessed. A date is the Unix time of
@@ -2377,3 +2377,40 @@ Anything unverified is an error, not a heuristic:
   parameter that claims one where the language has it and minus the
   blocks whose source claims it: the remaining inventory of behaviour
   that lives in Loxone Config rather than in the source (#253).
+- **D80 — v2: one spelling per value** (2026-10-31). v1 spelled the
+  same thing several ways — a digital value as `1`, an attribute's
+  `"true"`, a test clock as a string, a one-word rule command quoted —
+  and left gaps (no `!=` in tests, ticks only as counts). v2 makes the
+  value forms uniform; every change keeps the compile byte-identical,
+  and each dropped spelling is an error that states the exact
+  replacement ("write `X` instead of `Y`"), which the language server
+  offers as a quick fix.
+  - **`on`/`off` are reserved literals** (`Value::Bool`), valid in every
+    value position. They compile to `1`/`0`, except on a *text-boolean
+    attribute* — `connectors::bool_params`: `VirtualIn`/`VirtualOutCmd`
+    `Analog`, `VirtualHttpInCmd`/`VirtualUdpInCmd` `Signed`/`Analog`,
+    `VirtualOut` `CloseAfterSend`, the attributes the corpus (149 files)
+    shows only as `"true"`/`"false"` — where they compile to that text
+    (`resolve_value_for`, the one port-dependent resolution). There
+    `"true"`/`"false"` strings are refused; elsewhere a quoted `"true"`
+    stays a string (a `Formula:` text). Numbers are not canonicalized
+    to `on`/`off`: `I2: 1` stays `1` — a numeric port's `1` may be an
+    analog value, and the source should say what the author wrote.
+    Decompile and adopt lift the text-boolean attributes as `on`/`off`.
+    The formula backend refuses them (it computes on numbers).
+  - **`tick <duration>`** advances by a time: the count is the
+    duration over `dt`, and a duration that is no whole number of steps
+    is an error rather than a rounding. The AST keeps the spelling
+    (`TickDecl::duration`), so `fmt` round-trips `tick 5min`.
+  - **`clock` and `when date` are bare**, lexed like `At: 19:00` (D79)
+    and canonicalized the same way (two-digit hours, no zero seconds).
+    The quoted v1 form is an error, not a silent canonicalization: a
+    string there was the only spelling, so every v1 file names it, and
+    the error is the migration.
+  - **`expect … != …`** (`TestCmp::Ne`), the negation of `==` with its
+    tolerance. lox-cli's `lox sim` has none: `--lox` refuses it.
+  - **One-word rule commands are bare** (`then pumpe on`); a quoted
+    one-word command canonicalizes at parse time like `"28"` → `28`,
+    so v1 files still parse, and `fmt` migrates them. Multi-word or
+    non-identifier commands (`"Mood 2"`, `"+"`) stay quoted.
+  - The "expected a statement" error lists every statement kind.

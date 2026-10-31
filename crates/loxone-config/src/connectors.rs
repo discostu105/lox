@@ -1124,6 +1124,19 @@ pub fn clock_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// Attribute parameters stored as the text `true`/`false` (D80): written
+/// `on`/`off` in source, they take nothing else. The corpus (149 configs
+/// and the house) holds no other value on any of them; a save leaves
+/// `Signed=`/`Analog=` out on a command whose box is unticked.
+pub fn bool_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "VirtualIn" | "VirtualOutCmd" => &["Analog"],
+        "VirtualHttpInCmd" | "VirtualUdpInCmd" => &["Signed", "Analog"],
+        "VirtualOut" => &["CloseAfterSend"],
+        _ => &[],
+    }
+}
+
 /// The container a block type lives in when it is not drawn on a page
 /// (D54): a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.

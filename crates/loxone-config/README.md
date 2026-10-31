@@ -291,7 +291,7 @@ end
 
 `loxl test` compiles in memory, runs each scenario in Lox Logic's own
 simulator, and reports each `expect` with its actual value on failure.
-Comparators: `== > >= < <= ~=` (approximately); `clock "06:30"` sets the
+Comparators: `== != > >= < <= ~=` (approximately); `clock 06:30` sets the
 simulated time for `DayTimer`-style logic. The simulator models the
 blocks Loxone documents ([docs/simulator.md](docs/simulator.md)); a test
 that depends on any other block reports an error naming it, never a
@@ -325,7 +325,7 @@ crate.
 |---|---|
 | [docs/vision.md](docs/vision.md) | Why config-as-code for Loxone; the Terraform analogy; the two-masters workflow |
 | [docs/design.md](docs/design.md) | Architecture, ownership model, compile strategy, decisions D1–D45 |
-| [docs/language.md](docs/language.md) | Normative spec of the `.loxl` language (v1) |
+| [docs/language.md](docs/language.md) | Normative spec of the `.loxl` language (v2) |
 | [docs/lockfile-spec.md](docs/lockfile-spec.md) | The lockfile format (v4) and its invariants |
 | [docs/loxone-format.md](docs/loxone-format.md) | Validated reverse-engineering notes on the `.Loxone` format |
 | [docs/implementation.md](docs/implementation.md) | Module map, testing strategy, how to extend |

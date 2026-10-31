@@ -3595,7 +3595,7 @@ fn virtual_inputs_are_minted_into_their_folder() {
     // position, and wired across to the page like any extern source.
     let src = "page \"Beschattung\"\n\
                party = VirtualIn(\"Partymodus\")\n\
-               soll = VirtualIn(\"Sollwert\", Analog: \"true\", MinVal: 5, MaxVal: 30, DefVal: 21)\n\
+               soll = VirtualIn(\"Sollwert\", Analog: on, MinVal: 5, MaxVal: 30, DefVal: 21)\n\
                licht = And(I1: party.Q)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
@@ -3696,7 +3696,21 @@ fn virtual_inputs_are_minted_into_their_folder() {
 
     let bad = Module::parse("x = VirtualIn(Analog: \"ja\")\n").unwrap();
     let err = compile(&base(), &bad, &mut Lockfile::new(), &opts()).unwrap_err();
-    assert!(err.to_string().contains("\"true\" or \"false\""), "{err}");
+    assert!(
+        err.to_string().contains("`Analog: on` or `Analog: off`"),
+        "{err}"
+    );
+    // v1's quoted spelling names its replacement (D80), at parse time and
+    // through a `let`.
+    let err = Module::parse("x = VirtualIn(Analog: \"true\")\n").unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("write `Analog: on` instead of `Analog: \"true\"`"),
+        "{err}"
+    );
+    let via_let = Module::parse("let a = \"false\"\nx = VirtualIn(Analog: a)\n").unwrap();
+    let err = compile(&base(), &via_let, &mut Lockfile::new(), &opts()).unwrap_err();
+    assert!(err.to_string().contains("write `Analog: off`"), "{err}");
 }
 
 #[test]

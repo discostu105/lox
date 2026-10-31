@@ -6,28 +6,28 @@ bewegung_flur = VirtualIn("Bewegung Flur")
 taster_flur = VirtualIn("Taster Flur")
 helligkeit = VirtualIn(
 	"Helligkeit außen",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 100000,
 )
 
 aussentemp = VirtualIn(
 	"Außentemperatur",
-	Analog: "true",
+	Analog: on,
 	MinVal: -40,
 	MaxVal: 60,
 )
 
 raumtemp_bad = VirtualIn(
 	"Raumtemperatur Bad",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 40,
 )
 
 co2_buero = VirtualIn(
 	"CO2 Büro",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 5000,
 )
@@ -36,7 +36,7 @@ fenster_buero = VirtualIn("Fenster Büro offen")
 regen = VirtualIn("Regensensor")
 wind = VirtualIn(
 	"Windgeschwindigkeit",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 200,
 )
@@ -46,7 +46,7 @@ abwesend = VirtualIn("Abwesend")
 wassermelder = VirtualIn("Wassermelder Keller")
 feuchte_keller = VirtualIn(
 	"Luftfeuchte Keller",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 100,
 )
@@ -56,7 +56,7 @@ taster_rollladen_ab = VirtualIn("Taster Rollladen ab")
 bewegung_diele = VirtualIn("Bewegung Diele")
 helligkeit_diele = VirtualIn(
 	"Helligkeit Diele",
-	Analog: "true",
+	Analog: on,
 	MinVal: 0,
 	MaxVal: 2000,
 )
@@ -143,7 +143,7 @@ licht_diele = VirtualOutCmd(
 	"Licht Diele",
 	device: aktoren,
 	CmdOn: "/licht_diele/<v>",
-	Analog: "true",
+	Analog: on,
 )
 
 hinweis_energie = VirtualOutCmd(

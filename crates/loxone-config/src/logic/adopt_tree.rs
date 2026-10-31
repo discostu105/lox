@@ -303,7 +303,15 @@ pub(super) fn adopt_device(
             if let Some(v) = el.attr_decoded(name) {
                 args.push(ArgItem::Binding(Binding {
                     port: (*name).to_string(),
-                    kind: BindingKind::Param(value_of(&v)),
+                    kind: BindingKind::Param(
+                        if crate::connectors::bool_params(&o.block_type).contains(name)
+                            && (v == "true" || v == "false")
+                        {
+                            Value::Bool(v == "true") // `on`/`off` (D80)
+                        } else {
+                            value_of(&v)
+                        },
+                    ),
                     comment: None,
                 }));
             }

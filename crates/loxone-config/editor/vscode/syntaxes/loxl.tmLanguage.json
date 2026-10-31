@@ -25,6 +25,7 @@
     { "include": "#exprops" },
     { "include": "#portref" },
     { "include": "#string" },
+    { "include": "#bool" },
     { "include": "#number" }
   ],
   "repository": {
@@ -42,6 +43,11 @@
           "match": "\\\\[\"\\\\n]"
         }
       ]
+    },
+    "bool": {
+      "comment": "on/off, the boolean literals (D80)",
+      "name": "constant.language.boolean.loxl",
+      "match": "(?<![\\w.])(on|off)(?![\\w.])"
     },
     "number": {
       "match": "(?<![\\w.])(-?[0-9]+(?:\\.[0-9]+)?)(ms|min|h|s|K|%)?(?![\\w.])",
@@ -124,11 +130,12 @@
           }
         },
         {
-          "match": "^\\s*(tick)\\s+([0-9]+)(?:\\s+(dt)\\b)?",
+          "match": "^\\s*(tick)\\s+([0-9]+(?:\\.[0-9]+)?)(ms|min|h|s)?(?:\\s+(dt)\\b)?",
           "captures": {
             "1": { "name": "keyword.control.tick.loxl" },
             "2": { "name": "constant.numeric.loxl" },
-            "3": { "name": "keyword.control.dt.loxl" }
+            "3": { "name": "keyword.other.unit.loxl" },
+            "4": { "name": "keyword.control.dt.loxl" }
           }
         },
         {
@@ -138,15 +145,16 @@
           }
         },
         {
-          "match": "^\\s*(clock)\\s+(?=\")",
+          "match": "^\\s*(clock)\\s+((?:[0-9]{4}-[0-9]{2}-[0-9]{2}\\s+)?[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)",
           "captures": {
-            "1": { "name": "keyword.control.clock.loxl" }
+            "1": { "name": "keyword.control.clock.loxl" },
+            "2": { "name": "constant.numeric.time.loxl" }
           }
         }
       ]
     },
     "rule": {
-      "comment": "rule <slug> [\"Name\"] \u2026 end with active/inactive, when time HH:MM, when weekday <days>, then <slug> \"<command>\" lines (D57)",
+      "comment": "rule <slug> [\"Name\"] \u2026 end with active/inactive, when time HH:MM, when weekday <days>, then <slug> <command> lines (D57; one-word commands bare, D80)",
       "begin": "^\\s*(rule)\\s+([a-z][a-z0-9_]*)(?:\\s+(?=\"))?",
       "beginCaptures": {
         "1": { "name": "keyword.control.rule.loxl" },
@@ -157,6 +165,7 @@
       "patterns": [
         { "include": "#comment" },
         { "include": "#string" },
+        { "include": "#bool" },
         {
           "match": "^\\s*(active|inactive)\\s*(?=$|#)",
           "captures": { "1": { "name": "constant.language.loxl" } }

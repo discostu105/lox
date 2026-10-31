@@ -31,15 +31,15 @@ impl Clock {
             Some(d) => {
                 let parts: Vec<&str> = d.split('-').collect();
                 let [y, m, dd] = parts.as_slice() else {
-                    return Err(format!("clock \"{spec}\": expected YYYY-MM-DD"));
+                    return Err(format!("clock {spec}: expected YYYY-MM-DD"));
                 };
                 let num = |s: &str| {
                     s.parse::<i64>()
-                        .map_err(|_| format!("clock \"{spec}\": `{s}` is not a number"))
+                        .map_err(|_| format!("clock {spec}: `{s}` is not a number"))
                 };
                 let (y, m, dd) = (num(y)?, num(m)?, num(dd)?);
                 if !(1..=12).contains(&m) || !(1..=31).contains(&dd) {
-                    return Err(format!("clock \"{spec}\": no such date"));
+                    return Err(format!("clock {spec}: no such date"));
                 }
                 days_from_civil(y, m, dd)
             }
@@ -47,16 +47,16 @@ impl Clock {
         };
         let fields: Vec<&str> = time.split(':').collect();
         if !matches!(fields.len(), 2 | 3) {
-            return Err(format!("clock \"{spec}\": expected HH:MM or HH:MM:SS"));
+            return Err(format!("clock {spec}: expected HH:MM or HH:MM:SS"));
         }
         let mut hms = [0i64; 3];
         for (slot, f) in hms.iter_mut().zip(&fields) {
             *slot = f
                 .parse()
-                .map_err(|_| format!("clock \"{spec}\": `{f}` is not a number"))?;
+                .map_err(|_| format!("clock {spec}: `{f}` is not a number"))?;
         }
         if hms[0] > 23 || hms[1] > 59 || hms[2] > 59 {
-            return Err(format!("clock \"{spec}\": no such time of day"));
+            return Err(format!("clock {spec}: no such time of day"));
         }
         self.secs = (day * 86_400 + hms[0] * 3600 + hms[1] * 60 + hms[2]) as f64;
         Ok(())

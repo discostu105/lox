@@ -44,7 +44,8 @@
 //! else `title` when unique, else the exact `uuid`.
 
 use crate::connectors::{
-    BUILTIN_TYPES, attr_name, attr_params, carried_children, clock_params, container_type,
+    BUILTIN_TYPES, attr_name, attr_params, bool_params, carried_children, clock_params,
+    container_type,
 };
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
@@ -1291,6 +1292,11 @@ impl Scan<'_> {
                         Some(t) if el.attr("Typ").is_none_or(|t| t == "0") => Value::Clock(t),
                         _ => continue,
                     }
+                } else if bool_params(&o.block_type).contains(param)
+                    && (v == "true" || v == "false")
+                {
+                    // A text-boolean attribute reads `on`/`off` (D80).
+                    Value::Bool(v == "true")
                 } else {
                     Value::from_literal(&v)
                 };
@@ -1567,6 +1573,7 @@ fn is_ident(s: &str) -> bool {
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
     "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule", "moods",
+    "on", "off",
 ];
 
 /// Slug generation with umlaut transliteration and `_2`-style

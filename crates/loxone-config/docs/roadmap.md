@@ -302,7 +302,8 @@ types) contradict each other. Results and methodology:
 - [x] `loxl test` shipped 2026-08-26 (D36): `test "Name" … end` blocks
       in the module itself — injections (`slug.Port = value`),
       `tick <n> [dt <s>]`, `expect slug.Port <cmp> <value>` (`==`, `>`,
-      `>=`, `<`, `<=`, `~=`), `clock "HH:MM"` / `"YYYY-MM-DD HH:MM"`.
+      `>=`, `<`, `<=`, `~=`; `!=` since D80), `clock HH:MM` /
+      `YYYY-MM-DD HH:MM` (quoted until D80).
       The command compiles in memory against the lockfile, maps slugs to
       simulator addresses ("Title.Port", room-qualified on duplicate
       titles), generates SimSpec JSON and shells out to `lox sim run`

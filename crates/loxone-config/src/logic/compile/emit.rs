@@ -550,7 +550,7 @@ fn virtual_in_attrs(
         Some(v) if v == "true" || v == "false" => v.as_str(),
         Some(v) => {
             return Err(Error::Compile(format!(
-                "block `{slug}`: `Analog:` is \"true\" or \"false\", not `{v}`"
+                "block `{slug}`: `Analog:` is `on` or `off`, not `{v}`"
             )));
         }
         None => carried("Analog").unwrap_or("false"),

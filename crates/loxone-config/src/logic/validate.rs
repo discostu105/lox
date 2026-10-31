@@ -8,8 +8,8 @@
 
 use super::ast::{Module, Value};
 use crate::connectors::{
-    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, builtin, clock_params, file_params,
-    message_params,
+    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, bool_params, builtin, clock_params,
+    file_params, message_params,
 };
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
@@ -94,6 +94,27 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                     )));
                 }
                 _ => {}
+            }
+            // A text-boolean attribute (`Analog:` on VirtualIn) is `on` or
+            // `off` and nothing else (D80).
+            if bool_params(&block.block_type).contains(&key) {
+                match resolved {
+                    Some(Value::Bool(_)) | None => {}
+                    Some(Value::Str(t)) if t == "true" || t == "false" => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: {}",
+                            block.slug,
+                            super::parser::bool_hint(key, t)
+                        )));
+                    }
+                    Some(_) => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: `{key}: {v}` — `{key}:` is on or off: \
+                             `{key}: on` or `{key}: off`",
+                            block.slug
+                        )));
+                    }
+                }
             }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.

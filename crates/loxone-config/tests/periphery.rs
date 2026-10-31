@@ -223,6 +223,8 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
         text.contains("leistung = VirtualHttpInCmd(\n\t\"Leistung\",\n\tdevice: zaehler,"),
         "{text}"
     );
+    // Text-boolean settings read `on`/`off` (D80).
+    assert!(text.contains("\tSigned: on,\n\tAnalog: on,\n"), "{text}");
     let out = compile(&base1, &module, &mut lock2, &opts()).unwrap();
     assert_eq!(out.to_bytes(), base1.to_bytes());
 
