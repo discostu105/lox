@@ -94,7 +94,7 @@ fn file_binds_only_program_text() {
     ] {
         let err = compile(&base(), &module(src, &dir), &mut Lockfile::new(), &opts()).unwrap_err();
         assert!(
-            err.to_string().contains("binds only program text"),
+            err.to_string().contains("only program text"),
             "{src}: {err}"
         );
     }

@@ -177,7 +177,7 @@ impl Desugar<'_> {
                 if !matches!(lhs, Operand::Port(_)) && !matches!(rhs, Operand::Port(_)) {
                     return Err(Error::Compile(format!(
                         "`{lhs} {} {rhs}` in the expression on `{}` compares two \
-                         constants — fold it by hand",
+                         constants. Fold it by hand",
                         op.symbol(),
                         self.sink,
                     )));
@@ -201,8 +201,8 @@ impl Desugar<'_> {
             Expr::Arith { .. } => self.formula(e),
             Expr::Atom(Operand::Port(p)) => Ok(p.clone()),
             Expr::Atom(Operand::Value(v)) => Err(Error::Compile(format!(
-                "`{v}` in the expression on `{}` cannot drive a gate input — gates \
-                 take boolean ports; write a comparison like `x.AQ >= {v}`",
+                "`{v}` in the expression on `{}` cannot drive a gate input, since gates \
+                 take boolean ports. Write a comparison like `x.AQ >= {v}`",
                 self.sink,
             ))),
         }
@@ -220,15 +220,15 @@ impl Desugar<'_> {
         }
         if inputs.is_empty() {
             return Err(Error::Compile(format!(
-                "`{e}` in the expression on `{}` computes on constants only — \
-                 fold it by hand",
+                "`{e}` in the expression on `{}` computes on constants only. \
+                 Fold it by hand",
                 self.sink,
             )));
         }
         if inputs.len() > 4 {
             return Err(Error::Compile(format!(
-                "`{e}` on `{}` reads {} distinct ports — a `Formula` block takes \
-                 at most 4 inputs; split the expression or declare the block by \
+                "`{e}` on `{}` reads {} distinct ports, but a `Formula` block takes \
+                 at most 4 inputs. Split the expression or declare the block by \
                  hand",
                 self.sink,
                 inputs.len(),
@@ -270,8 +270,8 @@ impl Desugar<'_> {
             }
             other => {
                 return Err(Error::Compile(format!(
-                    "`{other}` mixes boolean logic into the arithmetic on `{}` — \
-                     deferred (v1)",
+                    "`{other}` mixes boolean logic into the arithmetic on `{}`, which Lox Logic \
+                     does not support yet. Compute the boolean part in its own block",
                     self.sink,
                 )));
             }
@@ -304,7 +304,7 @@ impl Desugar<'_> {
             Value::Ref(name) => match self.lets.get(name.as_str()) {
                 Some(Value::Number(n)) => Ok(n.clone()),
                 Some(other) => Err(Error::Compile(format!(
-                    "`{name}` in the arithmetic on `{}` is `{other}` — formulas \
+                    "`{name}` in the arithmetic on `{}` is `{other}`. Formulas \
                      compute on plain numbers",
                     self.sink,
                 ))),
@@ -314,29 +314,29 @@ impl Desugar<'_> {
                 ))),
             },
             Value::Unit { .. } => Err(Error::Compile(format!(
-                "`{v}` in the arithmetic on `{}` carries a unit — formulas \
-                 compute on plain numbers; write the value in the port's base \
+                "`{v}` in the arithmetic on `{}` carries a unit, but formulas \
+                 compute on plain numbers. Write the value in the port's base \
                  unit instead",
                 self.sink,
             ))),
             Value::Str(s) => Err(Error::Compile(format!(
-                "`\"{s}\"` in the arithmetic on `{}` is a string — formulas \
+                "`\"{s}\"` in the arithmetic on `{}` is a string. Formulas \
                  compute on plain numbers",
                 self.sink,
             ))),
             Value::File { .. } => Err(Error::Compile(format!(
-                "`{v}` in the arithmetic on `{}` is a file — formulas compute \
+                "`{v}` in the arithmetic on `{}` is a file. Formulas compute \
                  on plain numbers",
                 self.sink,
             ))),
             Value::Clock(_) => Err(Error::Compile(format!(
-                "`{v}` in the arithmetic on `{}` is a time of day — formulas \
+                "`{v}` in the arithmetic on `{}` is a time of day. Formulas \
                  compute on plain numbers",
                 self.sink,
             ))),
             Value::Bool(_) => Err(Error::Compile(format!(
-                "`{v}` in the arithmetic on `{}` is a digital value — formulas \
-                 compute on plain numbers (write `1` or `0`)",
+                "`{v}` in the arithmetic on `{}` is a digital value, but formulas \
+                 compute on plain numbers. Write `1` or `0`",
                 self.sink,
             ))),
         }
@@ -356,7 +356,7 @@ impl Desugar<'_> {
         if self.taken.contains(slug.as_str()) || self.minted.contains(&slug) {
             return Err(Error::Compile(format!(
                 "`{slug}` is claimed by the expression on `{}` (its blocks are named \
-                 `{}<op><n>`) — rename the declared `{slug}`",
+                 `{}<op><n>`). Rename the declared `{slug}`",
                 self.sink, self.prefix,
             )));
         }

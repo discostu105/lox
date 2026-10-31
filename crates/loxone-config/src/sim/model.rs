@@ -403,8 +403,7 @@ impl Model {
             "Mode" => {
                 if wired("I") {
                     return Support::Unsupported(
-                        "an operating mode switched by logic (its `I` is wired) — \
-                         how that input acts is undocumented"
+                        "an operating mode switched by logic (its `I` is wired), and how that input acts is undocumented"
                             .into(),
                     );
                 }
@@ -1985,8 +1984,7 @@ fn day_timer(
         [c] => *c,
         _ => {
             return Err(format!(
-                "{} of its operating modes are active at once; which one a timer \
-                 uses is not documented — set the other modes to 0 in the test",
+                "{} of its operating modes are active at once, and which one a timer uses is not documented. Set the other modes to 0 in the test.",
                 active.len()
             ));
         }

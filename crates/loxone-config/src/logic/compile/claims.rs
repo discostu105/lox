@@ -29,9 +29,8 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
             let original = read_setting(doc, owner, &s.target.port);
             if original.is_none() && !addable {
                 return Err(Error::Compile(format!(
-                    "`{}.{}`: the object ({owner}) carries no `{}` — Lox Logic rewrites \
-                     this setting, it never adds one (it belongs to another kind \
-                     of input or output)",
+                    "`{}.{}`: the object ({owner}) has no `{}` setting. Lox Logic changes \
+                     this setting but never adds it.",
                     s.target.slug, s.target.port, s.target.port
                 )));
             }
@@ -165,7 +164,7 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
         if let Some(other) = claimed.insert((uuid.clone(), a.attr), &a.slug) {
             return Err(Error::Compile(format!(
                 "`{}.{attr}` and `{other}.{attr}` claim the {attr} of the same \
-                 object ({uuid}) — keep one assignment",
+                 object ({uuid}). Keep one assignment.",
                 a.slug,
                 attr = a.attr
             )));
@@ -182,11 +181,10 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
         };
         let original = read_claimed(doc, &uuid, a.attr).ok_or_else(|| {
             Error::Compile(format!(
-                "`{}.{}`: the object ({uuid}) carries no {} — Lox Logic rewrites an \
-                 existing {}, it never adds one; set it once in Loxone Config",
+                "`{}.{}`: the object ({uuid}) has no {}. Set it once in \
+                 Loxone Config, since Lox Logic changes it but never adds it.",
                 a.slug,
                 a.attr,
-                claim_slot(a.attr),
                 claim_slot(a.attr)
             ))
         })?;

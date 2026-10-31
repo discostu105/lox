@@ -64,7 +64,7 @@ pub(crate) fn apply(
         if let Some(other) = claimed.insert(uuid, &c.slug) {
             return Err(Error::Compile(format!(
                 "`{c}` and `{other}.moods = …` claim the moods of the same controller \
-                 ({uuid}) — keep one"
+                 ({uuid}). Keep one."
             )));
         }
         let set = module
@@ -187,8 +187,7 @@ fn values<'a>(
         .map(|m| {
             if let Some(off) = off.filter(|o| o.name == m.name) {
                 return Err(format!(
-                    "mood \"{}\" is the controller's built-in off mood — it is always there \
-                     and always off; leave it out of the set",
+                    "mood \"{}\" is the controller's built-in off mood, which is always there. Leave it out of the set.",
                     off.name
                 ));
             }
@@ -285,8 +284,7 @@ fn rewrite(
             continue;
         };
         return Err(format!(
-            "mood \"{}\" is {why} (SID {sid}) and cannot be dropped — keep it in the set \
-             (its values are yours to set)",
+            "mood \"{}\" is {why} (SID {sid}) and cannot be dropped. Keep it in the set, with any values you like.",
             name_of(e)
         ));
     }
@@ -392,7 +390,7 @@ pub(super) fn lift(el: &Element) -> Option<std::result::Result<Vec<MoodLine>, St
                     .into_iter()
                     .map(|(circuit, value)| {
                         let circuit = circuit.map(u8::try_from).transpose().map_err(|_| {
-                            format!("{} circuits — more than source can name", have.outputs)
+                            format!("{} circuits, more than source can name", have.outputs)
                         })?;
                         Ok(MoodSetting { circuit, value })
                     })

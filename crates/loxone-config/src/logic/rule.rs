@@ -279,8 +279,8 @@ pub(crate) fn create(
             && o.block_type != RULE_BLOCK_TYPE
         {
             return Err(Error::Compile(format!(
-                "{ctx}: the lock pins the rule to {}, which this config has as a `{}` — drop \
-                 the lock entry `rules.{}` to create the rule afresh",
+                "{ctx}: the lockfile maps the rule to {}, which is a `{}` in this config. Remove \
+                 the lockfile entry `rules.{}` to create the rule anew",
                 o.uuid, o.block_type, decl.slug
             )));
         }
@@ -300,7 +300,7 @@ pub(crate) fn create(
                 [] => build(&ctx, doc, title, pin, minter)?,
                 _ => {
                     return Err(Error::Compile(format!(
-                        "{ctx}: the config has {} rules of this name — rename all but one \
+                        "{ctx}: the config has {} rules of this name. Rename all but one \
                          in the app, or address one by its extern",
                         named.len()
                     )));
@@ -355,8 +355,8 @@ fn build(
         .max_by_key(|o| o.path.clone())
     else {
         return Err(Error::Compile(format!(
-            "{ctx}: the config has no Automatic Designer rule yet — create one in the app \
-             once, then the compile adds new ones next to it"
+            "{ctx}: the config has no Automatic Designer rule yet. Create one in the app \
+             once, then compile again"
         )));
     };
     let template = doc
@@ -593,12 +593,12 @@ impl Context {
                     .map(|(_, t, _)| format!("\"{t}\""))
                     .collect();
                 Err(Error::Compile(format!(
-                    "{ctx}: `{mode}` is no operating mode of the config — it has {}",
+                    "{ctx}: `{mode}` is no operating mode of the config. It has {}",
                     titles.join(", ")
                 )))
             }
             _ => Err(Error::Compile(format!(
-                "{ctx}: {} operating modes are titled {mode} — rename one",
+                "{ctx}: {} operating modes are titled {mode}. Rename one",
                 found.len()
             ))),
         }
@@ -665,14 +665,14 @@ pub(crate) fn apply(
         let raw = el.attr_decoded("APC").unwrap_or_default().into_owned();
         let old = autopilot::parse(&raw).ok_or_else(|| {
             Error::Compile(format!(
-                "{ctx}: the rule has no readable payload (`APC=`) — create it in the app \
+                "{ctx}: the rule has no readable payload (`APC=`). Create it in the app \
                  or Loxone Config first"
             ))
         })?;
         let have = autopilot::interpret(&old).map_err(|why| {
             Error::Compile(format!(
-                "{ctx}: the rule has {why} — Lox Logic writes only the documented shapes; keep \
-                 this rule in the app and drop the declaration"
+                "{ctx}: the rule has {why}, which Lox Logic cannot write. Keep \
+                 this rule in the app and remove the declaration"
             ))
         })?;
         let want = wanted(&ctx, decl, uuid_of, &cx)?;
@@ -878,7 +878,7 @@ fn state_event(
     value: &str,
     cx: &Context,
 ) -> Result<Event> {
-    let fail = |m: String| Err(Error::Compile(format!("{ctx}: `{line}` — {m}")));
+    let fail = |m: String| Err(Error::Compile(format!("{ctx}: `{line}`: {m}")));
     let Some(cap) = cx.capability(control) else {
         return fail(if cx.app(control).is_some() {
             format!(
@@ -886,9 +886,8 @@ fn state_event(
                 cx.type_name(control)
             )
         } else {
-            "Lox Logic does not know this block's app view (its type and states) — only blocks \
-             shown in the app whose catalogue entry Lox Logic derives, or that a rule of the \
-             config already watches, can be watched"
+            "Lox Logic does not know this block's states in the app. Watch a block that \
+             Lox Logic's catalogue covers or that a rule of the config already watches"
                 .into()
         });
     };
@@ -944,7 +943,7 @@ fn state_event(
         (None, _) => {
             return fail(format!(
                 "the app offers {} conditions on `{state}` of a `{ty}` that Lox Logic cannot tell \
-                 apart — keep this rule in the app",
+                 apart. Keep this rule in the app",
                 analog.len()
             ));
         }
@@ -978,7 +977,7 @@ fn wanted(
     let resolve = |st: &RuleStmt, slug: &str| {
         uuid_of.get(slug).cloned().ok_or_else(|| {
             Error::Compile(format!(
-                "{ctx}: `{}` — `{slug}` resolves to no block",
+                "{ctx}: `{}`: `{slug}` resolves to no block",
                 st.kind
             ))
         })
@@ -1276,12 +1275,12 @@ fn rewrite(
                     });
                     return Err(Error::Compile(match offered {
                         Some(list) if !list.is_empty() => format!(
-                            "{ctx}: the app has no action `{command}` for this `{ty}` — it \
+                            "{ctx}: the app has no action `{command}` for this `{ty}`. It \
                              offers {list} (`<val0>` a number)"
                         ),
                         _ => format!(
                             "{ctx}: Lox Logic knows no action code (`descID`) for `{command}` on a \
-                             `{ty}` — create one such action in the app once, then the \
+                             `{ty}`. Create one such action in the app once, then the \
                              compile can copy it"
                         ),
                     }));

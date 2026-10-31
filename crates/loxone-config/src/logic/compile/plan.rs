@@ -136,7 +136,7 @@ fn plan_block(
             Some(container) => containers.get(container).cloned().ok_or_else(|| {
                 Error::Compile(format!(
                     "block `{}`: the base config has no <C Type=\"{container}\"> to \
-                         hold a minted {}",
+                         hold a new {}",
                     block.slug, block.block_type
                 ))
             })?,
@@ -168,10 +168,7 @@ fn plan_block(
                 _ => {
                     let u = candidates.first().cloned().ok_or_else(|| {
                         Error::Compile(format!(
-                            "block `{}` is placed with `page \"{title}\"`, but the \
-                                 base config has no <C Type=\"Page\"> titled `{title}` — \
-                                 to create it, name its room: `page \"{title}\" \
-                                 (room: \"…\")` (D56)",
+                            "block `{}` is placed on page `{title}`, which the base config does not have. To create the page, name its room: `page \"{title}\" (room: \"…\")`.",
                             block.slug
                         ))
                     })?;
@@ -260,8 +257,8 @@ fn pin_identity<'a>(
         entry.block_type = block.block_type.clone();
     } else if entry.block_type != block.block_type {
         return Err(Error::Compile(format!(
-            "block `{}` changed type from `{}` to `{}`; remove it from the lock first \
-                 (Lockfile::remove_object) to accept new identity",
+            "block `{}` changed type from `{}` to `{}`. Delete its lockfile entry first \
+                 to give it a new identity.",
             block.slug, entry.block_type, block.block_type
         )));
     }
@@ -274,8 +271,8 @@ fn pin_identity<'a>(
     if entry.uuid.is_empty() && adopt_only(&block.block_type) {
         return Err(Error::Compile(format!(
             "block `{}`: a {} is created by Loxone Config when it pairs the \
-                 device — adopt the existing one (`loxl adopt <cfg> --uuid …`) \
-                 instead of declaring a new one",
+                 device. Adopt the existing one (`loxl adopt <cfg> --uuid …`) \
+                 instead of declaring a new one.",
             block.slug, block.block_type
         )));
     }
@@ -444,8 +441,8 @@ pub(super) fn resolve_mirrors(
         let (code, value) = if block.block_type == "OutputRefLM" {
             if target_type != MESSAGE_REF_TARGET {
                 return Err(Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}` — an \
-                     OutputRefLM mirrors a `{MESSAGE_REF_TARGET}`",
+                    "block `{}` mirrors `{target}` of type `{target_type}`, but an \
+                     OutputRefLM mirrors only a `{MESSAGE_REF_TARGET}`",
                     block.slug
                 )));
             }
@@ -453,10 +450,7 @@ pub(super) fn resolve_mirrors(
         } else {
             let (code, value) = ref_link_type(&target_type).ok_or_else(|| {
                 Error::Compile(format!(
-                    "block `{}` mirrors `{target}` of type `{target_type}`, which has \
-                     no verified `LinkRefType=` code yet — extend \
-                     connectors::ref_link_type from corpus evidence before minting \
-                     a ref of it",
+                    "block `{}` mirrors `{target}` of type `{target_type}`, which loxl cannot mirror yet. Mirror a block of another type, or report the type as a loxl issue.",
                     block.slug
                 ))
             })?;

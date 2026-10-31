@@ -83,7 +83,7 @@ pub fn encode(prefix: u32, value: MoodValue) -> Result<u32, String> {
     let packed = |payload: u32| (prefix << 28) | payload;
     let refuse = |what: &str| {
         Err(format!(
-            "{what} does not fit {} — {}",
+            "{what} does not fit {}: {}",
             kind(prefix),
             match prefix {
                 0 => "it takes `on`, `off` or a percentage",
@@ -214,9 +214,8 @@ impl Moods {
                 match out[i] {
                     Some(seen) if seen != p => {
                         return Err(format!(
-                            "circuit AQ{} carries two value kinds in its moods (prefixes \
-                             {seen} and {p}) — a config Lox Logic has not seen; edit its moods \
-                             in Loxone Config",
+                            "circuit AQ{} has two value kinds in its moods (prefixes {seen} and {p}), which \
+                             Lox Logic does not support. Edit its moods in Loxone Config.",
                             i + 1
                         ));
                     }

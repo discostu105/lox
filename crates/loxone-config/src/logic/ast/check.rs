@@ -44,13 +44,13 @@ fn object_ref(names: &Names, r: &PortRef) -> Result<()> {
             r.slug
         )),
         Some(NameKind::Template) => compile_err(format!(
-            "`{slug}` is a template, not an object — instantiate it first \
+            "`{slug}` is a template, not an object. Instantiate it first \
                      (`<slug> = {slug}(…)`) (in `{r}`)",
             slug = r.slug
         )),
         Some(NameKind::Instance) => compile_err(format!(
-            "`{slug}` is a template instance and names no object itself — \
-                     reference one of its blocks by its expanded name \
+            "`{slug}` is a template instance and names no object itself. \
+                     Reference one of its blocks by its expanded name \
                      (`{slug}_<block>`) (in `{r}`)",
             slug = r.slug
         )),
@@ -156,8 +156,8 @@ impl Module {
                 Operand::Port(p) => object_ref(names, p)?,
                 Operand::Value(Value::Str(s)) => {
                     return compile_err(format!(
-                        "string {} in the expression on `{sink}` — \
-                             expressions compare numbers and ports only",
+                        "string {} in the expression on `{sink}`. \
+                             Expressions compare numbers and ports only",
                         quote(s),
                     ));
                 }
@@ -217,9 +217,8 @@ impl Module {
                         // checked by `validate_ports`.
                         if crate::periphery::device_types(&b.block_type).is_empty() {
                             return compile_err(format!(
-                                "`device:` names the device an I/O of a virtual \
-                                             or Modbus device hangs below; {} has none (in \
-                                             `{} = {}(…)`)",
+                                "`device:` names the virtual or Modbus device an I/O hangs below, \
+                                             but {} has no device (in `{} = {}(…)`)",
                                 b.block_type, b.slug, b.block_type
                             ));
                         }
@@ -277,11 +276,7 @@ impl Module {
                     && matches!(w.kind, BindingKind::Wire(_) | BindingKind::Expr(_))
             }) {
                 return compile_err(format!(
-                    "block `{slug}`: port `{port}` takes both a value \
-                                 (`{port}: {v}`) and a wire (`{port}: {wire}`) in \
-                                 `{slug} = {ty}(…)` — a wired input ignores its value; \
-                                 keep one (a constant Loxone Config keeps under the wire \
-                                 is carried from the base, D77)",
+                    "block `{slug}`: port `{port}` has both a value (`{port}: {v}`) and a wire (`{port}: {wire}`) in `{slug} = {ty}(…)`. Keep one, since a wired input ignores its value.",
                     slug = b.slug,
                     port = binding.port,
                     wire = w.kind,
@@ -298,9 +293,9 @@ impl Module {
         object_ref(names, &w.from)?;
         if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
-                "`{to} <- {from}` targets managed block `{slug}` — wire it \
-                             in the argument list instead (`{port}: {from}` inside \
-                             `{slug} = {ty}(…)`); `<-` is for extern ports only",
+                "`{to} <- {from}` targets managed block `{slug}`, but `<-` is for extern ports only. \
+                             Wire it in the argument list instead: `{port}: {from}` inside \
+                             `{slug} = {ty}(…)`",
                 to = w.to,
                 from = w.from,
                 slug = w.to.slug,
@@ -316,9 +311,8 @@ impl Module {
         object_ref(names, &w.to)?;
         if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
-                "`{to} <- …` targets managed block `{slug}` — wire the \
-                             expression's result in the argument list instead; `<-` \
-                             is for extern ports only",
+                "`{to} <- …` targets managed block `{slug}`, but `<-` is for extern ports only. \
+                             Wire the expression's result in the argument list instead",
                 to = w.to,
                 slug = w.to.slug,
             ));
@@ -332,9 +326,9 @@ impl Module {
         object_ref(names, &s.target)?;
         if names.get(s.target.slug.as_str()) == Some(&NameKind::Block) {
             return compile_err(format!(
-                "`{target} = …` targets managed block `{slug}` — bind the \
-                             parameter in the argument list instead (`{port}: …` inside \
-                             `{slug} = {ty}(…)`); port assignment is for extern ports only",
+                "`{target} = …` targets managed block `{slug}`, but port assignment is for extern ports only. \
+                             Bind the parameter in the argument list instead: `{port}: …` inside \
+                             `{slug} = {ty}(…)`",
                 target = s.target,
                 slug = s.target.slug,
                 port = s.target.port,
@@ -357,7 +351,7 @@ impl Module {
             Some(NameKind::Block) if a.attr != Attr::Title => {}
             Some(NameKind::Block) => {
                 return compile_err(format!(
-                    "`{target} = …` targets managed block `{}` — give it a \
+                    "`{target} = …` targets managed block `{}`. Give it a \
                                  label instead (`{} = {}(\"…\", …)`)",
                     a.slug,
                     a.slug,
@@ -383,9 +377,8 @@ impl Module {
             };
             if matched_by_it {
                 return compile_err(format!(
-                    "`{target} = …` rewrites what extern `{}` is matched by \
-                                 (`{}`) — after the push the match would no longer find \
-                                 the object; pin it by `uuid:` (or `iname:`) instead",
+                    "`{target} = …` changes what extern `{}` is matched by (`{}`), so the match \
+                                 would fail after the push. Pin the extern by `uuid:` or `iname:` instead",
                     a.slug,
                     e.spec()
                 ));
@@ -395,7 +388,7 @@ impl Module {
             return compile_err(format!("duplicate assignment `{target} = …`"));
         }
         if let Value::Unit { .. } = a.value {
-            return compile_err(format!("`{a}` — a {} is text, not a unit value", a.attr));
+            return compile_err(format!("`{a}`: a {} is text, not a unit value", a.attr));
         }
         self.value_refs(names, &a.value)?;
         Ok(())
@@ -414,7 +407,7 @@ impl Module {
             let numeric = |target: &dyn fmt::Display, v: &Value| -> Result<()> {
                 if let Value::Str(s) = v {
                     return compile_err(format!(
-                        "`{target}` gets string {} in test {} — the \
+                        "`{target}` gets string {} in test {}. The \
                                      simulator handles numbers only",
                         quote(s),
                         quote(&t.name)
@@ -463,8 +456,8 @@ impl Module {
         };
         if call.title.is_some() {
             return compile_err(format!(
-                "`{} = {}(…)`: an instantiation takes no label string — \
-                             titles belong on the template's blocks",
+                "`{} = {}(…)`: an instantiation takes no label string. \
+                             Titles belong on the template's blocks",
                 call.slug, call.block_type
             ));
         }
@@ -522,7 +515,7 @@ impl Module {
                 ) => {
                     return compile_err(format!(
                         "`{} = {}(…)`: value parameter `{name}` takes a \
-                                     number, string, or constant — not a port or \
+                                     number, string, or constant, not a port or \
                                      expression",
                         call.slug, call.block_type
                     ));
@@ -575,8 +568,8 @@ impl Module {
                     }
                     Some(NameKind::Instance) => {
                         return compile_err(format!(
-                            "{ctx}: `to: {slug}` names a template instance — \
-                                         name the block that receives the command by its \
+                            "{ctx}: `to: {slug}` names a template instance. \
+                                         Name the block that receives the command by its \
                                          expanded name (`{slug}_<block>`)"
                         ));
                     }
@@ -609,14 +602,14 @@ impl Module {
                 if ty != "TreeDevice" {
                     return compile_err(format!(
                         "`{c}`: tiles belong to a Touch Pure Flex, a \
-                                     `TreeDevice` — `{}` is declared as `{ty}`",
+                                     `TreeDevice`, but `{}` is declared as `{ty}`",
                         c.slug
                     ));
                 }
             }
             Some(kind) => {
                 return compile_err(format!(
-                    "`{c}`: `{}` is {} — tiles are claimed on an extern \
+                    "`{c}`: `{}` is {}. Tiles are claimed on an extern \
                                  Touch Pure Flex (`extern {} = TreeDevice(uuid: \"…\")`)",
                     c.slug,
                     kind.describe(),
@@ -625,7 +618,7 @@ impl Module {
             }
             None => {
                 return compile_err(format!(
-                    "`{c}`: undeclared slug `{}` — declare the device as \
+                    "`{c}`: undeclared slug `{}`. Declare the device as \
                                  `extern {} = TreeDevice(uuid: \"…\")`",
                     c.slug, c.slug
                 ));
@@ -653,7 +646,7 @@ impl Module {
         }
         if !tiles_claimed.insert(&c.slug) {
             return compile_err(format!(
-                "duplicate assignment `{}.tiles = …` — a device takes one \
+                "duplicate assignment `{}.tiles = …`. A device takes one \
                              tiles set",
                 c.slug
             ));
@@ -694,7 +687,7 @@ impl Module {
                 };
                 if ty != ty_want {
                     return compile_err(format!(
-                        "{ctx}: {what} {noun}, a `{ty_want}` — `{}` is declared \
+                        "{ctx}: {what} {noun}, a `{ty_want}`, but `{}` is declared \
                                      as `{ty}`",
                         a.slug
                     ));
@@ -702,8 +695,7 @@ impl Module {
             }
             Some(kind) => {
                 return compile_err(format!(
-                    "{ctx}: `{}` is {} — {kw} is declared on an extern \
-                                 (`extern {} = {ty_want}(…)`)",
+                    "{ctx}: `{}` is {}. Declare {kw} on an extern: `extern {} = {ty_want}(…)`",
                     a.slug,
                     kind.describe(),
                     a.slug
@@ -715,7 +707,7 @@ impl Module {
                     self.externs().map(|e| e.slug.as_str()),
                 );
                 return compile_err(format!(
-                    "{ctx}: undeclared slug `{}`{hint} — declare the block as \
+                    "{ctx}: undeclared slug `{}`{hint}. Declare the block as \
                                  `extern {} = {ty_want}(…)`",
                     a.slug, a.slug
                 ));
@@ -723,7 +715,7 @@ impl Module {
         }
         if !access_declared.insert(&a.slug) {
             return compile_err(format!(
-                "{ctx} is declared twice — one declaration holds all {} of \
+                "{ctx} is declared twice. One declaration holds all {} of \
                              the block",
                 match a.right {
                     RightKind::Access => "access rights",
@@ -737,7 +729,7 @@ impl Module {
                 (RightKind::Access, Some(s)) if !g.principal.is_empty() && !s.is_empty() => {}
                 (RightKind::Access, _) => {
                     return compile_err(format!(
-                        "{ctx}: `{g}` — name the {} and the access schedule by \
+                        "{ctx}: `{g}`. Name the {} and the access schedule by \
                                      their titles (`{} \"<title>\": \"<schedule>\"`)",
                         g.kind.as_str(),
                         g.kind.as_str()
@@ -746,13 +738,13 @@ impl Module {
                 (RightKind::Recipients, None) if !g.principal.is_empty() => {}
                 (RightKind::Recipients, None) => {
                     return compile_err(format!(
-                        "{ctx}: `{g}` — name the {} by its title",
+                        "{ctx}: `{g}`. Name the {} by its title",
                         g.kind.as_str()
                     ));
                 }
                 (RightKind::Recipients, Some(_)) => {
                     return compile_err(format!(
-                        "{ctx}: `{g}` — a recipient takes no schedule; write \
+                        "{ctx}: `{g}`: a recipient takes no schedule. Write \
                                      `{} {}`",
                         g.kind.as_str(),
                         quote(&g.principal)
@@ -787,7 +779,7 @@ impl Module {
                     .map_or("", |e| e.block_type.as_str());
                 if ty != "DayTimer" {
                     return compile_err(format!(
-                        "`{c}`: a schedule belongs to a `DayTimer` — `{}` is \
+                        "`{c}`: a schedule belongs to a `DayTimer`, but `{}` is \
                                      declared as `{ty}`",
                         c.slug
                     ));
@@ -797,7 +789,7 @@ impl Module {
                 let ty = self.block_type_of(&c.slug);
                 if ty != "DayTimer" {
                     return compile_err(format!(
-                        "`{c}`: a schedule belongs to a `DayTimer` — `{}` is \
+                        "`{c}`: a schedule belongs to a `DayTimer`, but `{}` is \
                                      a `{ty}`",
                         c.slug
                     ));
@@ -806,7 +798,7 @@ impl Module {
             None if !flattened => {}
             Some(kind) => {
                 return compile_err(format!(
-                    "`{c}`: `{}` is {} — a schedule is claimed on a DayTimer \
+                    "`{c}`: `{}` is {}. A schedule is claimed on a DayTimer \
                                  (an extern or a managed block)",
                     c.slug,
                     kind.describe()
@@ -814,7 +806,7 @@ impl Module {
             }
             None => {
                 return compile_err(format!(
-                    "`{c}`: undeclared slug `{}` — declare the timer as \
+                    "`{c}`: undeclared slug `{}`. Declare the timer as \
                                  `extern {} = DayTimer(…)` or as a block",
                     c.slug, c.slug
                 ));
@@ -842,7 +834,7 @@ impl Module {
         }
         if !schedules_claimed.insert(&c.slug) {
             return compile_err(format!(
-                "duplicate assignment `{}.schedule = …` — a timer takes one \
+                "duplicate assignment `{}.schedule = …`. A timer takes one \
                              schedule",
                 c.slug
             ));
@@ -868,7 +860,7 @@ impl Module {
             None if !flattened => "LightController2",
             Some(kind) => {
                 return compile_err(format!(
-                    "`{c}`: `{}` is {} — moods are claimed on a \
+                    "`{c}`: `{}` is {}. Moods are claimed on a \
                                  LightController2 (an extern or a managed block)",
                     c.slug,
                     kind.describe()
@@ -876,7 +868,7 @@ impl Module {
             }
             None => {
                 return compile_err(format!(
-                    "`{c}`: undeclared slug `{}` — declare the controller as \
+                    "`{c}`: undeclared slug `{}`. Declare the controller as \
                                  `extern {} = LightController2(…)` or as a block",
                     c.slug, c.slug
                 ));
@@ -884,7 +876,7 @@ impl Module {
         };
         if ty != "LightController2" {
             return compile_err(format!(
-                "`{c}`: moods belong to a `LightController2` — `{}` is a `{ty}`",
+                "`{c}`: moods belong to a `LightController2`, but `{}` is a `{ty}`",
                 c.slug
             ));
         }
@@ -907,7 +899,7 @@ impl Module {
         }
         if !moods_claimed.insert(&c.slug) {
             return compile_err(format!(
-                "duplicate assignment `{}.moods = …` — a controller takes one \
+                "duplicate assignment `{}.moods = …`. A controller takes one \
                              mood set",
                 c.slug
             ));
@@ -931,22 +923,21 @@ impl Module {
             (Some(title), None) => {
                 if title.trim().is_empty() {
                     return compile_err(format!(
-                        "{ctx}: the rule's name is empty — the app lists rules \
+                        "{ctx}: the rule's name is empty. The app lists rules \
                                      by name"
                     ));
                 }
                 if !rule_titles.insert(title.as_str()) {
                     return compile_err(format!(
-                        "{ctx}: another rule is named {title:?} — the name is the \
+                        "{ctx}: another rule is named {title:?}. The name is the \
                                      rule's identity"
                     ));
                 }
             }
             (Some(_), Some(kind)) => {
                 return compile_err(format!(
-                    "{ctx}: `{}` is already {} — a named rule (`rule {} \"…\"`) \
-                                 declares its own slug; for an existing rule's extern write \
-                                 `rule {}` without the name",
+                    "{ctx}: `{}` is already {}, and a named rule (`rule {} \"…\"`) declares its own slug. \
+                                 For an existing rule's extern, write `rule {}` without the name",
                     r.slug,
                     kind.describe(),
                     r.slug,
@@ -961,14 +952,14 @@ impl Module {
                 if ty != RULE_BLOCK_TYPE {
                     return compile_err(format!(
                         "{ctx}: a rule belongs to an Automatic Designer rule, a \
-                                     `{RULE_BLOCK_TYPE}` — `{}` is declared as `{ty}`",
+                                     `{RULE_BLOCK_TYPE}`, but `{}` is declared as `{ty}`",
                         r.slug
                     ));
                 }
             }
             (None, Some(kind)) => {
                 return compile_err(format!(
-                    "{ctx}: `{}` is {} — a rule is declared on an extern \
+                    "{ctx}: `{}` is {}. A rule is declared on an extern \
                                  (`extern {} = {RULE_BLOCK_TYPE}(…)`)",
                     r.slug,
                     kind.describe(),
@@ -981,7 +972,7 @@ impl Module {
                     self.externs().map(|e| e.slug.as_str()),
                 );
                 return compile_err(format!(
-                    "{ctx}: undeclared slug `{}`{hint} — declare the rule as \
+                    "{ctx}: undeclared slug `{}`{hint}. Declare the rule as \
                                  `extern {} = {RULE_BLOCK_TYPE}(title: \"…\")`, or name a \
                                  new one: `rule {} \"Name\"`",
                     r.slug, r.slug, r.slug
@@ -990,7 +981,7 @@ impl Module {
         }
         if !rules_declared.insert(&r.slug) {
             return compile_err(format!(
-                "{ctx} is declared twice — one declaration holds the whole rule"
+                "{ctx} is declared twice. One declaration holds the whole rule"
             ));
         }
         self.check_rule_body(sc, r, &ctx)
@@ -1008,10 +999,10 @@ impl Module {
                 Some(NameKind::Extern | NameKind::Block) => Ok(()),
                 None if !flattened => Ok(()),
                 Some(kind) => compile_err(format!(
-                    "{ctx}: `{line}` — `{slug}` is {}; {what}",
+                    "{ctx}: `{line}`: `{slug}` is {}, but {what}",
                     kind.describe()
                 )),
-                None => compile_err(format!("{ctx}: `{line}` — undeclared slug `{slug}`")),
+                None => compile_err(format!("{ctx}: `{line}`: undeclared slug `{slug}`")),
             }
         };
         for st in r.stmts() {
@@ -1020,7 +1011,7 @@ impl Module {
                 RuleStmtKind::Or => {
                     if when == 0 {
                         return compile_err(format!(
-                            "{ctx}: `or` needs conditions before it — it starts \
+                            "{ctx}: `or` needs conditions before it. It starts \
                                          another group of conditions"
                         ));
                     }
@@ -1058,7 +1049,7 @@ impl Module {
                     for d in days {
                         let Some(ix) = crate::logic::rule::weekdays(d) else {
                             return compile_err(format!(
-                                "{ctx}: unknown weekday `{d}` — days are mon, tue, \
+                                "{ctx}: unknown weekday `{d}`. Days are mon, tue, \
                                              wed, thu, fri, sat, sun, weekdays, weekend, daily"
                             ));
                         };
@@ -1071,7 +1062,7 @@ impl Module {
                     then += 1;
                     if command.is_empty() {
                         return compile_err(format!(
-                            "{ctx}: `{}` — the command is the app's command text \
+                            "{ctx}: `{}`. The command is the app's command text \
                                          (`on`, `off`, `pulse`, …)",
                             st.kind
                         ));
@@ -1081,7 +1072,7 @@ impl Module {
                         None if !flattened => {}
                         Some(kind) => {
                             return compile_err(format!(
-                                "{ctx}: `{}` — `{target}` is {}; a rule sends its \
+                                "{ctx}: `{}`: `{target}` is {}, but a rule sends its \
                                              command to a block (an extern or a managed one)",
                                 st.kind,
                                 kind.describe()
@@ -1089,7 +1080,7 @@ impl Module {
                         }
                         None => {
                             return compile_err(format!(
-                                "{ctx}: `{}` — undeclared slug `{target}`",
+                                "{ctx}: `{}`: undeclared slug `{target}`",
                                 st.kind
                             ));
                         }
@@ -1119,8 +1110,8 @@ impl Module {
         for r in self.removed() {
             if let Some(kind) = names.get(r.slug.as_str()) {
                 return compile_err(format!(
-                    "`removed {slug}` contradicts the declaration of {} `{slug}` — \
-                     delete the `removed` line or the declaration",
+                    "`removed {slug}` contradicts the declaration of {} `{slug}`. \
+                     Delete the `removed` line or the declaration",
                     kind.describe(),
                     slug = r.slug,
                 ));
@@ -1138,7 +1129,7 @@ impl Module {
             if let Some(kind) = names.get(m.from.as_str()) {
                 return compile_err(format!(
                     "`moved {from} -> {to}` conflicts with the declaration of {} \
-                     `{from}` — the old slug must no longer be declared",
+                     `{from}`. The old slug must no longer be declared",
                     kind.describe(),
                     from = m.from,
                     to = m.to,
@@ -1149,7 +1140,7 @@ impl Module {
                 Some(NameKind::Extern | NameKind::Let)
             ) {
                 return compile_err(format!(
-                    "`moved {} -> {to}` — `{to}` is not a managed block",
+                    "`moved {} -> {to}`: `{to}` is not a managed block",
                     m.from,
                     to = m.to,
                 ));
@@ -1173,7 +1164,7 @@ impl Module {
         for m in self.moved() {
             if moved_from.contains_key(m.to.as_str()) {
                 return compile_err(format!(
-                    "chained `moved` through `{}` — collapse into one `moved` statement",
+                    "chained `moved` through `{}`. Collapse into one `moved` statement",
                     m.to
                 ));
             }
@@ -1224,10 +1215,7 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::Comment(_) => {}
             _ => {
                 return compile_err(format!(
-                    "template `{}`: only block declarations, wires, port \
-                                     assignments, and comments are allowed in a body \
-                                     (attribute assignments like `x.room = …` are \
-                                     top-level statements, D39)",
+                    "template `{}`: a body holds only block declarations, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
                     t.name
                 ));
             }
@@ -1247,14 +1235,14 @@ fn check_moods(t: &MoodsDecl) -> Result<()> {
         }
         if !names.insert(&m.name) {
             return compile_err(format!(
-                "{ctx}: listed twice — a controller's mood names are unique"
+                "{ctx}: listed twice. A controller's mood names are unique"
             ));
         }
         let mut circuits: BTreeSet<Option<u8>> = BTreeSet::new();
         for (i, setting) in m.settings.iter().enumerate() {
             if setting.circuit.is_none() && i != 0 {
                 return compile_err(format!(
-                    "{ctx}: `{setting}` must come first — it sets every \
+                    "{ctx}: `{setting}` must come first. It sets every \
                                      circuit, and the settings after it name the exceptions"
                 ));
             }

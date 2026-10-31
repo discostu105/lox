@@ -102,11 +102,8 @@ fn at_takes_a_time_of_day_and_nothing_else_takes_one() {
         ("p = PulseAt(At: 68400)\n", "takes a time of day"),
         ("p = PulseAt(At: \"19:00\")\n", "takes a time of day"),
         ("let n = 5\np = PulseAt(At: n)\n", "takes a time of day"),
-        ("m = Monoflop(On: 19:00)\n", "binds only the fire time"),
-        (
-            "let t = 19:00\nm = Monoflop(On: t)\n",
-            "binds only the fire time",
-        ),
+        ("m = Monoflop(On: 19:00)\n", "only the fire time"),
+        ("let t = 19:00\nm = Monoflop(On: t)\n", "only the fire time"),
         ("a = And()\np = PulseAt(At: a.Q)\n", "never a wire"),
     ] {
         let err = compile(&base(), &module(src), &mut Lockfile::new(), &opts()).unwrap_err();

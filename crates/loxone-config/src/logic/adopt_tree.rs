@@ -160,8 +160,7 @@ pub(super) fn adopt_device(
         if let Some(x) = extern_slug.get(o.uuid.as_str()) {
             if o.uuid == root.uuid && *x != slug {
                 return Err(fail(format!(
-                    "{ident} is extern `{x}` of this module — promoting it keeps the \
-                     slug every statement already uses: adopt it `--as {x}`"
+                    "{ident} is extern `{x}` of this module. Adopt it `--as {x}` to keep the slug the statements already use."
                 )));
             }
             check_promotable(doc, x, &o.uuid, raw, expanded, lock)
@@ -356,8 +355,7 @@ pub(super) fn adopt_device(
                     },
                     Item::Set(st) if st.target.slug == s => {
                         return Err(fail(format!(
-                            "cannot promote `{s}`: `{s}.{} = …` sets a connector value, \
-                             which a {} does not take — remove it first",
+                            "cannot promote `{s}`: `{s}.{} = …` sets a connector value, which a {} does not take. Remove it first.",
                             st.target.port, o.block_type
                         )));
                     }

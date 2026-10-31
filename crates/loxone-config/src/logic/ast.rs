@@ -213,7 +213,7 @@ pub(crate) fn scale_for_port(
     let is_time = matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H);
     let mismatch = |pu: PortUnit| {
         Err(format!(
-            "`{number}{unit}` does not fit — the port is documented in {}",
+            "`{number}{unit}` does not fit. The port is documented in {}",
             pu.describe()
         ))
     };
@@ -224,8 +224,8 @@ pub(crate) fn scale_for_port(
             let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
             divide_exact(&seconds, 60).ok_or_else(|| {
                 format!(
-                    "`{number}{unit}` is no exact decimal number of minutes — \
-                     the port is documented in minutes; write it in `min`"
+                    "`{number}{unit}` is not an exact number of minutes, which the port takes. \
+                     Write it in `min`"
                 )
             })
         }
@@ -1925,8 +1925,8 @@ impl Module {
                 .and_then(|l| l.value.literal())
                 .ok_or_else(|| Error::Compile(format!("undeclared constant `{name}`"))),
             Value::File { path, text: None } => Err(Error::Compile(format!(
-                "`file({})` was not loaded — parse the module from its files \
-                 (`Module::load_files`), which reads it relative to the `.loxl` file",
+                "`file({})` was not loaded. Load the module from its `.loxl` files, \
+                 which resolve the path relative to the `.loxl` file",
                 quote(path)
             ))),
             other => other
@@ -2400,7 +2400,7 @@ mod tests {
         assert_eq!(scale_for_port("90", Unit::S, minutes).unwrap(), "1.5");
         assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
         let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
-        assert!(err.contains("documented in minutes"), "{err}");
+        assert!(err.contains("exact number of minutes"), "{err}");
 
         assert_eq!(
             scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),

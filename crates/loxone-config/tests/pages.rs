@@ -211,7 +211,11 @@ fn a_created_page_renamed_in_loxone_config_is_refused() {
     let renamed = text(&out).replace("Title=\"K\u{fc}che Logik\"", "Title=\"Logik\"");
     let renamed = LoxoneDoc::parse(renamed.as_bytes()).unwrap();
     let e = compile(&renamed, &module, &mut lock.clone(), &opts()).unwrap_err();
-    assert!(e.to_string().contains("titles it \"Logik\""), "{e}");
+    assert!(
+        e.to_string()
+            .contains("is titled \"Logik\" in the base config"),
+        "{e}"
+    );
 
     // Following the rename in source releases the page to Loxone Config.
     let followed = Module::parse(&SRC.replace(

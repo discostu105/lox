@@ -105,8 +105,7 @@ pub(crate) fn program(decl: &ScheduleDecl) -> std::result::Result<Program<'_>, S
         for iv in &line.intervals {
             if iv.from >= iv.to {
                 return Err(format!(
-                    "`{iv}` ends before it starts — split an interval across midnight \
-                     into two (`22:00-24:00` and `00:00-06:00` on the next day)"
+                    "`{iv}` ends before it starts. Split an interval across midnight into two (`22:00-24:00` and `00:00-06:00` on the next day)."
                 ));
             }
         }
@@ -179,14 +178,13 @@ fn resolve<'a>(
                         let titles: Vec<String> =
                             modes.iter().map(|(_, t, _)| format!("\"{t}\"")).collect();
                         return Err(format!(
-                            "the config has no operating mode titled \"{title}\" — it has {}",
+                            "the config has no operating mode titled \"{title}\". It has {}.",
                             titles.join(", ")
                         ));
                     }
                     _ => {
                         return Err(format!(
-                            "{} operating modes are titled \"{title}\" — rename one in \
-                             Loxone Config",
+                            "{} operating modes are titled \"{title}\". Rename one in Loxone Config.",
                             found.len()
                         ));
                     }
@@ -227,7 +225,7 @@ pub(crate) fn apply(
         if let Some(other) = claimed.insert(uuid, &c.slug) {
             return fail(format!(
                 "`{c}` and `{other}.schedule = …` claim the schedule of the same timer \
-                 ({uuid}) — keep one"
+                 ({uuid}). Keep one."
             ));
         }
         let decl = module
@@ -249,7 +247,7 @@ pub(crate) fn apply(
         let analog = el.attr("Analog") == Some("true");
         if analog && let Some(iv) = program.values().flatten().find(|iv| iv.value.is_none()) {
             return fail(format!(
-                "`{c}`: the timer is analog — `{iv}` needs a value (`{iv} = <value>`)"
+                "`{c}`: the timer is analog, so `{iv}` needs a value (`{iv} = <value>`)"
             ));
         }
         if !analog
@@ -259,8 +257,7 @@ pub(crate) fn apply(
                 .find(|iv| iv.value.as_deref().is_some_and(|v| v != "1"))
         {
             return fail(format!(
-                "`{c}`: the timer is digital — `{iv}` can only be on (drop the value); \
-                 values belong to an analog DayTimer"
+                "`{c}`: the timer is digital, so `{iv}` can only be on. Drop the value, or use an analog DayTimer."
             ));
         }
         write_schedule(el, &program);
@@ -402,7 +399,7 @@ mod tests {
         let d = decl("\t\"Partymodus\" 18:00-23:00\n");
         let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
         assert!(
-            err.contains("no operating mode titled \"Partymodus\" — it has \"Montag\", \"Party\""),
+            err.contains("no operating mode titled \"Partymodus\". It has \"Montag\", \"Party\""),
             "{err}"
         );
         let d = decl("\theating 00:00-24:00\n");

@@ -409,9 +409,7 @@ fn check_config_version(base: &LoxoneDoc, lock: &Lockfile, opts: &CompileOptions
         && base_version.as_ref() != Some(pinned)
     {
         return Err(Error::Compile(format!(
-            "base ConfigVersion {} differs from the project pin {pinned} — a new \
-             Loxone release must be qualified first (one oracle open+save run, \
-             docs/oracle-wine.md), then accepted with --accept-version {}",
+            "Base config saved by Loxone Config {}, but the lockfile expects {pinned}. Run `loxl compile --accept-version {}`.",
             base_version.as_deref().unwrap_or("<absent>"),
             base_version.as_deref().unwrap_or("<version>")
         )));
@@ -430,9 +428,8 @@ fn apply_moved(module: &Module, lock: &mut Lockfile) -> Result<()> {
             (true, false) => lock.rename_object(&mv.from, &mv.to)?,
             (true, true) => {
                 return Err(Error::Compile(format!(
-                    "moved `{from} -> {to}`: both slugs are in the lockfile — \
-                     `{to}` already has its own identity; remove one entry first \
-                     (Lockfile::remove_object)",
+                    "moved `{from} -> {to}`: both slugs are in the lockfile. \
+                     Delete the lockfile entry of `{to}` first.",
                     from = mv.from,
                     to = mv.to
                 )));
@@ -440,7 +437,7 @@ fn apply_moved(module: &Module, lock: &mut Lockfile) -> Result<()> {
             (false, true) => {} // already applied — the statement is done
             (false, false) => {
                 return Err(Error::Compile(format!(
-                    "moved `{} -> {}`: neither slug is in the lockfile — nothing to rename",
+                    "moved `{} -> {}`: neither slug is in the lockfile, so there is nothing to rename",
                     mv.from, mv.to
                 )));
             }
@@ -470,8 +467,8 @@ fn check_removals(
         };
         if let Some(target) = wired_from(base, &uuid) {
             return Err(Error::Compile(format!(
-                "`removed {}`: the rule {uuid} drives {target} — remove that wire in \
-                 Loxone Config or the source first",
+                "`removed {}`: the rule {uuid} drives {target}. Remove that wire in \
+                 Loxone Config or the source first.",
                 r.slug
             )));
         }
@@ -493,8 +490,8 @@ fn check_removals(
         if !lock.objects.contains_key(&r.slug) && !lock.removed.values().any(|t| t.slug == r.slug) {
             return Err(Error::Compile(format!(
                 "`removed {slug}`: no managed block or pending removal with \
-                 this slug in the lockfile — the removal is complete (delete \
-                 the `removed` line) or the slug never existed",
+                 this slug is in the lockfile. If the removal is done, \
+                 delete the `removed` line.",
                 slug = r.slug
             )));
         }
@@ -506,10 +503,9 @@ fn check_removals(
         })
     {
         return Err(Error::Compile(format!(
-            "managed block `{slug}` is in the lockfile but not in the source; \
-             if the removal is intended, add `removed {slug}` to the module \
-             (or compile with allow_removals); use `moved {slug} -> <new_slug>` \
-             for a rename, or Lockfile::remove_object(\"{slug}\") to orphan it"
+            "managed block `{slug}` is in the lockfile but not in the source. \
+             To delete it, add `removed {slug}` (or pass --allow-removals); \
+             to rename it, add `moved {slug} -> <new_slug>`."
         )));
     }
     Ok(src_slugs)
@@ -530,8 +526,8 @@ fn check_externs_unmanaged(
             .find(|(s, o)| o.uuid == *u && module.blocks().any(|b| &b.slug == *s))
         {
             return Err(Error::Compile(format!(
-                "extern `{x}` resolves to `{u}`, which the source manages as `{s}` — \
-                 reference `{s}` instead"
+                "extern `{x}` resolves to `{u}`, which the source manages as `{s}`. \
+                 Use `{s}` instead."
             )));
         }
     }
@@ -724,10 +720,7 @@ fn finish(
     let dups = doc.duplicate_uuids();
     if !dups.is_empty() {
         return Err(Error::Compile(format!(
-            "output would carry duplicate UUID(s) {} — either a freshly minted \
-             UUID collides with one the base already carries (same serial and \
-             mint second; compile again, or pass another --time), or the \
-             lockfile maps two identities onto one UUID; nothing was written",
+            "Output would contain duplicate UUIDs {}, so nothing was written. Compile again or pass another --time. If that does not help, the lockfile maps two blocks to one UUID.",
             dups.join(", ")
         )));
     }
@@ -902,8 +895,8 @@ fn resolve_externs(
                 if !confirms.iter().any(|o| o.uuid == locked.uuid) {
                     return Err(Error::Compile(format!(
                         "extern `{}`: matcher changed to {}({}), which does not match \
-                         the locked object {} — fix the matcher, or drop the lock \
-                         entry to accept a new identity",
+                         the locked object {}. Fix the matcher, or delete its lockfile \
+                         entry to match a new object.",
                         ext.slug,
                         ext.block_type,
                         ext.spec(),
@@ -1087,9 +1080,7 @@ fn resolve_port(
             is_extern: true,
         }),
         None => Err(Error::Compile(format!(
-            "extern `{slug}` has no port `{port}` in the base config; present ports: {}{}. \
-             (v0 cannot mint ports for unverified types — wire or set it once in Loxone \
-             Config so the connector exists.)",
+            "extern `{slug}` has no port `{port}` in the base config (ports: {}){}. Wire or set the port once in Loxone Config, then compile again.",
             known
                 .iter()
                 .map(|p| p.key.as_str())
@@ -1195,8 +1186,8 @@ fn create_pages(
             && prev != spec
         {
             return Err(Error::Compile(format!(
-                "`page {:?}` is created with two different room/category arguments — \
-                 give them once, or the same everywhere",
+                "`page {:?}` is created with two different room/category arguments. \
+                 Give them once, or the same everywhere.",
                 p.title
             )));
         }
@@ -1221,10 +1212,8 @@ fn create_pages(
             let now = o.title.as_deref().unwrap_or_default();
             if now != title {
                 return Err(Error::Compile(format!(
-                    "page {title:?} was created by the compiler as {uuid}; the base \
-                     titles it {now:?} — renamed in Loxone Config? Write \
-                     `page {now:?}` in the source (the page then belongs to Loxone \
-                     Config), or rename it back"
+                    "page {title:?} ({uuid}) is titled {now:?} in the base config. \
+                     Write `page {now:?}` in the source, or rename it back in Loxone Config."
                 )));
             }
             lock.pages.insert(title.to_string(), uuid.clone());
@@ -1244,8 +1233,8 @@ fn create_pages(
         };
         if first(&place) {
             return Err(Error::Compile(format!(
-                "`page {title:?} (room: {room:?})`: a page needs a real room — Loxone \
-                 Config does not accept the unassigned one"
+                "`page {title:?} (room: {room:?})`: Loxone Config needs a real \
+                 room for a page. Name a room other than the unassigned one."
             )));
         }
         let cat = match category {
@@ -1256,8 +1245,8 @@ fn create_pages(
                 .map(|o| o.uuid.clone())
                 .ok_or_else(|| {
                     Error::Compile(format!(
-                        "`page {title:?}`: the base has no unassigned category \
-                         (<C Type=\"Category\" First=\"true\">) — name one with `category:`"
+                        "`page {title:?}`: the base config has no unassigned category. \
+                         Name one with `category:`."
                     ))
                 })?,
         };
@@ -1374,9 +1363,8 @@ fn add_wire(
         .ok_or_else(|| Error::Compile(format!("wire sink port `{to_port}` not found")))?;
     if co.attr("Inv").is_some() {
         return Err(Error::Compile(format!(
-            "wire sink connector `{}` carries the GUI's input inversion \
-             (`Inv=`) and is GUI-owned — a declared wire into it would be \
-             silently inverted; remove the inversion in Loxone Config first",
+            "wire sink connector `{}` is inverted in Loxone Config, \
+             so a wire into it would be inverted too. Remove the inversion in Loxone Config first.",
             co.attr_decoded("K").unwrap_or_default()
         )));
     }
@@ -1484,9 +1472,8 @@ fn apply_def(
         .ok_or_else(|| Error::Compile(format!("set target port `{port_uuid}` not found")))?;
     if co.attr("Inv").is_some() {
         return Err(Error::Compile(format!(
-            "set target connector `{}` carries the GUI's input inversion \
-             (`Inv=`) and is GUI-owned — its value cannot be set from \
-             source; change it in Loxone Config instead",
+            "set target connector `{}` is inverted in Loxone Config, \
+             so its value cannot be set from source. Change it in Loxone Config instead.",
             co.attr_decoded("K").unwrap_or_default()
         )));
     }
@@ -1773,13 +1760,13 @@ fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<S
             known.sort_unstable();
             let hint = suggest(title, known.iter().copied());
             Err(Error::Compile(format!(
-                "no {what} titled {title:?} in the base{hint} — {what}s are created in \
-                 Loxone Config; known: {}",
+                "no {what} titled {title:?} in the base config{hint}. Create it in \
+                 Loxone Config first (known: {}).",
                 known.join(", ")
             )))
         }
         _ => Err(Error::Compile(format!(
-            "{} {what}s are titled {title:?} ({}) — rename one in Loxone Config",
+            "{} {what}s are titled {title:?} ({}). Rename one in Loxone Config.",
             hits.len(),
             hits.iter()
                 .map(|o| o.uuid.as_str())
