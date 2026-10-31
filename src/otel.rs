@@ -29,9 +29,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::client::LoxClient;
 use crate::config::Config;
-use crate::stream::{self, StateEvent, StateUuidInfo, WeatherEntry};
+use loxone_client::client::LoxClient;
+use loxone_client::stream::{self, StateEvent, StateUuidInfo, WeatherEntry};
 
 /// `otel serve` WebSocket reconnect backoff bounds.
 const RECONNECT_MIN_SECS: u64 = 1;
@@ -341,7 +341,7 @@ fn record_network_metrics(
 /// This endpoint performs a live read/write benchmark, so it's heavier than
 /// other diagnostic endpoints. Call it at a lower frequency if needed.
 fn record_sdtest_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) {
-    use crate::sdtest::parse_sdtest;
+    use loxone_client::sdtest::parse_sdtest;
 
     let text = match lox.get_text("/jdev/sys/sdtest") {
         Ok(t) => t,

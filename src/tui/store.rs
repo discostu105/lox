@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::model::{Cid, House, Kind};
-use crate::stream::StateEvent;
+use loxone_client::stream::StateEvent;
 
 pub const EVENT_CAP: usize = 10_000;
 /// Session history: one point per this many seconds per state

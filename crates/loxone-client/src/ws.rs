@@ -1,6 +1,6 @@
 //! Loxone WebSocket client — used for token auth key exchange
 
-use anyhow::Result;
+use crate::error::{Context, Result};
 use rustls::{ClientConfig, crypto::ring};
 use std::sync::Arc;
 use tokio_tungstenite::Connector;
@@ -113,10 +113,11 @@ impl LoxWsClient {
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
             .header("Sec-WebSocket-Key", generate_ws_key())
-            .body(())?;
+            .body(())
+            .map_err(|e| crate::error::err!("WS request: {}", e))?;
         connect_async_tls_with_config(req, None, false, Some(Connector::Rustls(tls_cfg)))
             .await
-            .map_err(|e| anyhow::anyhow!("WS connect: {}", e))
+            .context("WS connect")
     }
 }
 

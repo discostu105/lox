@@ -466,7 +466,7 @@ impl House {
             name = typ.clone();
         }
         let cid = self.ctrls.len();
-        let stat_v2 = crate::statv2::plot_point(c);
+        let stat_v2 = loxone_client::statv2::plot_point(c);
         for (sname, su) in &states {
             self.state_owner.insert(su.clone(), (cid, sname.clone()));
         }

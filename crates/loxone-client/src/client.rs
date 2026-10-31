@@ -1,6 +1,7 @@
 //! Loxone HTTP client, control resolution, and structure cache
 
-use anyhow::{Context, Result, bail};
+pub use crate::error::HttpStatusError;
+use crate::error::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -13,25 +14,25 @@ use std::time::Duration;
 const HTTP_TIMEOUT_SECS: u64 = 10;
 const RETRY_DELAYS_MS: [u64; 3] = [200, 400, 800];
 const CACHE_TTL_SECS: u64 = 86400;
-/// Loxone epoch: 2009-01-01T00:00:00Z as Unix timestamp.
-pub const LOXONE_EPOCH_SECS: u64 = 1_230_768_000;
+pub use crate::time::LOXONE_EPOCH_SECS;
 
 // ── Global verbosity ─────────────────────────────────────────────────────────
 
 static VERBOSE: AtomicU8 = AtomicU8::new(0);
 
-/// Set the global verbosity level (0 = off, 1 = -v, 2 = -vv).
+/// Set the global verbosity level: 0 = quiet, 1 = log requests to stderr,
+/// 2 = also their response bodies.
 pub fn set_verbose(level: u8) {
     VERBOSE.store(level, Ordering::Relaxed);
 }
 
-pub(crate) fn verbose() -> u8 {
+pub fn verbose() -> u8 {
     VERBOSE.load(Ordering::Relaxed)
 }
 
 /// Redact credentials from a URL string for safe logging.
 /// Removes basic-auth passwords and known sensitive query parameters.
-pub(crate) fn redact_url(url: &str) -> String {
+pub fn redact_url(url: &str) -> String {
     // Redact userinfo password (http://user:pass@host → http://user:***@host)
     let mut result = if let Ok(mut parsed) = reqwest::Url::parse(url) {
         if parsed.password().is_some() {
@@ -68,13 +69,6 @@ pub(crate) fn redact_url(url: &str) -> String {
     result
 }
 
-/// HTTP error with status code preserved for structured matching in retry logic.
-#[derive(Debug)]
-pub struct HttpStatusError {
-    pub status: u16,
-    pub path: String,
-}
-
 /// Log a response body at -vv level, truncating large responses.
 fn log_body(body: &str) {
     if body.len() > 500 {
@@ -86,17 +80,10 @@ fn log_body(body: &str) {
     }
 }
 
-impl std::fmt::Display for HttpStatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HTTP {}: {}", self.status, self.path)
-    }
-}
-
-impl std::error::Error for HttpStatusError {}
-
 use crate::connection::Connection;
 
-pub const USER_AGENT: &str = concat!("lox-cli/", env!("CARGO_PKG_VERSION"));
+/// The User-Agent of every HTTP request.
+pub const USER_AGENT: &str = concat!("loxone-client/", env!("CARGO_PKG_VERSION"));
 
 // ── Autopilot ───────────────────────────────────────────────────────────────
 
@@ -363,7 +350,7 @@ impl LoxClient {
                 Ok(val) => return Ok(val),
                 Err(e) => {
                     // Don't retry on 4xx client errors
-                    if let Some(http_err) = e.downcast_ref::<HttpStatusError>()
+                    if let Some(http_err) = e.http_status()
                         && (400..500).contains(&http_err.status)
                     {
                         return Err(e);
@@ -381,7 +368,7 @@ impl LoxClient {
         }
         self.structure
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("structure not loaded"))
+            .ok_or_else(|| crate::error::err!("structure not loaded"))
     }
 
     /// The structure file: from `conn.structure_cache` while it is younger

@@ -4,13 +4,13 @@ use std::thread;
 use std::time::Duration;
 
 use crate::actions::{self, Action, ThermoCmd};
-use crate::client::{LoxClient, USER_AGENT};
 use crate::commands::RunContext;
 use crate::config::Config;
 use crate::scene::Scene;
-use crate::stream::{self, StateEvent};
 use crate::util::{bar, encode_path_value, json_val_str, xml_attr};
 use crate::{InputCmd, LightCmd, MusicCmd, print_dry_run, print_resp, send_or_dry_run};
+use loxone_client::client::{LoxClient, USER_AGENT};
+use loxone_client::stream::{self, StateEvent};
 
 pub fn cmd_on(
     ctx: &RunContext,
@@ -170,7 +170,7 @@ fn run_action(
     name_or_uuid: &str,
     room: Option<&str>,
     action: &Action,
-) -> Result<(crate::client::Control, Option<serde_json::Value>)> {
+) -> Result<(loxone_client::client::Control, Option<serde_json::Value>)> {
     let uuid = lox.resolve_with_room(name_or_uuid, room)?;
     let ctrl = lox.find_control(&uuid)?;
     action.check_type(&ctrl.name, &ctrl.typ)?;
@@ -236,7 +236,7 @@ pub fn fetch_light_moods(
     lox: &mut LoxClient,
     name_or_uuid: &str,
     room: Option<&str>,
-) -> Result<(crate::client::Control, Vec<actions::MoodEntry>)> {
+) -> Result<(loxone_client::client::Control, Vec<actions::MoodEntry>)> {
     let (ctrl, mood_list_uuid) = resolve_mood_list(lox, name_or_uuid, room)?;
     let conn = lox.connection().clone();
     let rt = tokio::runtime::Runtime::new()?;
@@ -251,7 +251,7 @@ pub fn resolve_mood_list(
     lox: &mut LoxClient,
     name_or_uuid: &str,
     room: Option<&str>,
-) -> Result<(crate::client::Control, String)> {
+) -> Result<(loxone_client::client::Control, String)> {
     let uuid = lox.resolve_with_room(name_or_uuid, room)?;
     let ctrl = lox.find_control(&uuid)?;
     if !matches!(ctrl.typ.as_str(), "LightControllerV2" | "LightController") {
@@ -282,7 +282,7 @@ pub fn resolve_mood_list(
 
 /// Wait (max 10 s) for the `moodList` text state in the WebSocket state dump.
 pub async fn fetch_mood_list_json(
-    conn: &crate::connection::Connection,
+    conn: &loxone_client::connection::Connection,
     mood_list_uuid: &str,
 ) -> Result<String> {
     tokio::time::timeout(
@@ -296,7 +296,7 @@ pub async fn fetch_mood_list_json(
 /// Connect to the Miniserver WebSocket, subscribe to binary states,
 /// and return the text content of the moodList state UUID on first receipt.
 async fn fetch_mood_list_via_ws(
-    conn: &crate::connection::Connection,
+    conn: &loxone_client::connection::Connection,
     mood_list_uuid: &str,
 ) -> Result<String> {
     let target = mood_list_uuid.to_string();

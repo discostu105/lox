@@ -1,6 +1,6 @@
 //! FTP client wrapper for Loxone Miniserver backup access
 
-use anyhow::{Context, Result};
+use crate::error::{Context, Result};
 use suppaftp::FtpStream;
 
 use crate::connection::Connection;
@@ -24,7 +24,7 @@ where
     Err(last_err.expect("retry loop must execute at least once"))
 }
 
-/// Parsed backup filename: sps_<version>_<timestamp>.zip
+/// Parsed backup filename: `sps_<version>_<timestamp>.zip`
 #[derive(Debug, Clone)]
 pub struct BackupInfo {
     pub filename: String,
@@ -79,7 +79,7 @@ pub fn list_backups(conn: &Connection) -> Result<Vec<BackupInfo>> {
         let mut ftp = FtpStream::connect(format!("{}:21", host))
             .with_context(|| format!("Could not connect to {}:21 — is FTP enabled?", host))?;
         ftp.login(&conn.user, &conn.pass)
-            .context("FTP login failed — check your admin credentials in lox config")?;
+            .context("FTP login failed — check your admin credentials")?;
         let listing = ftp.list(Some("/prog")).unwrap_or_default();
         ftp.quit().ok();
         Ok(listing)

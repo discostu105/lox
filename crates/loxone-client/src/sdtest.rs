@@ -12,7 +12,7 @@
 /// MaxWriteCurrentVDDmin: 3, MaxWriteCurrentVDDmax: 1, Usage: 2.79%
 /// ```
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SdTestResult {
+pub struct SdTestResult {
     pub read_speed_kb: Option<f64>,
     pub write_speed_kb: Option<f64>,
     pub error_type: Option<u32>,
@@ -57,46 +57,10 @@ impl SdTestResult {
         }
         obj
     }
-
-    pub fn print_table(&self) {
-        if self.read_speed_kb.is_some() || self.write_speed_kb.is_some() {
-            let read = self
-                .read_speed_kb
-                .map(|v| format!("{:.0} kB/s", v))
-                .unwrap_or_else(|| "?".to_string());
-            let write = self
-                .write_speed_kb
-                .map(|v| format!("{:.0} kB/s", v))
-                .unwrap_or_else(|| "?".to_string());
-            println!("│  SD read:          {}", read);
-            println!("│  SD write:         {}", write);
-
-            let err_str = match (self.error_type, self.error_count) {
-                (Some(0), _) => "✓ No errors".to_string(),
-                (Some(t), Some(c)) => format!("⚠ type {} count {}", t, c),
-                _ => "?".to_string(),
-            };
-            println!("│  SD errors:        {}", err_str);
-
-            if let Some(usage) = self.usage_pct {
-                let warn = if usage > 60.0 { " ⚠" } else { "" };
-                println!("│  SD usage:         {:.1}%{}", usage, warn);
-            }
-            if let Some(ref date) = self.date {
-                let mfr = self
-                    .manufacturer_id
-                    .map(|id| format!(" (mfr {})", id))
-                    .unwrap_or_default();
-                println!("│  SD manufactured:  {}{}", date, mfr);
-            }
-        } else {
-            println!("│  SD card:          {}", self.raw);
-        }
-    }
 }
 
 /// Parse the raw value string from `/jdev/sys/sdtest` into structured fields.
-pub(crate) fn parse_sdtest(raw: &str) -> SdTestResult {
+pub fn parse_sdtest(raw: &str) -> SdTestResult {
     let mut result = SdTestResult {
         raw: raw.to_string(),
         ..Default::default()

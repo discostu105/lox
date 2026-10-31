@@ -530,7 +530,7 @@ fn energy_battery_discharging_feeds_home() {
         (st("Energy flow", "actual1"), 0.0),
         (st("Energy flow", "Ppwr"), 0.0),
     ] {
-        batch.push(crate::stream::StateEvent::ValueState { uuid: u, value: v });
+        batch.push(loxone_client::stream::StateEvent::ValueState { uuid: u, value: v });
     }
     let e = h.app.epoch;
     h.msg(Msg::States { epoch: e, batch });

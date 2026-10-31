@@ -74,7 +74,6 @@ pub fn groups(ctrl: &Value) -> Vec<Group> {
 
 /// The series worth plotting: the first recorded non-accumulated data point
 /// (a meter's `actual` power), as (group id, output).
-#[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub fn plot_point(ctrl: &Value) -> Option<(String, String)> {
     groups(ctrl)
         .into_iter()

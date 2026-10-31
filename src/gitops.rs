@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::config::Config;
-use crate::ftp;
 use crate::loxone_xml;
+use loxone_client::ftp;
 use lxir::archive;
 
 /// Build a git Command with consistent config for the managed repo.

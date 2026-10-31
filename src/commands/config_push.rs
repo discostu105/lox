@@ -121,11 +121,11 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn custom_changes(&self) -> Result<Vec<(String, Vec<u8>)>> {
-        ftp::download_custom_changes(&self.cfg.connection())
+        Ok(ftp::download_custom_changes(&self.cfg.connection())?)
     }
 
     fn upload(&self, zip: &[u8]) -> Result<()> {
-        ftp::upload_config(&self.cfg.connection(), zip)
+        Ok(ftp::upload_config(&self.cfg.connection(), zip)?)
     }
 
     fn restart_program(&self) -> Result<()> {
@@ -187,7 +187,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn app_catalogue(&self) -> Result<Vec<u8>> {
-        self.cfg.client()?.get_bytes("/data/LoxApp3.json")
+        Ok(self.cfg.client()?.get_bytes("/data/LoxApp3.json")?)
     }
 }
 

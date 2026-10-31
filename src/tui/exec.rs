@@ -22,10 +22,10 @@ use super::app::{
 use super::data::{self, BusLan, Diag, MsInfo, Series, SiteStatus};
 use super::demo;
 use super::model::{Cid, House, Role};
-use crate::client::LoxClient;
 use crate::config::{Config, GlobalConfig};
 use crate::logic::{DiffLine, Logic};
-use crate::stream::StateEvent;
+use loxone_client::client::LoxClient;
+use loxone_client::stream::StateEvent;
 
 static EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -240,7 +240,11 @@ impl Live {
                 self.rt.spawn_blocking(move || {
                     let mut result = Ok(());
                     for c in &cmds {
-                        if let Err(e) = client.send_cmd(&uuid, c).and_then(|v| check_code(&v)) {
+                        if let Err(e) = client
+                            .send_cmd(&uuid, c)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|v| check_code(&v))
+                        {
                             // transport errors quote the URL, PIN included
                             let mut msg = short_err(&e);
                             if let Some(s) = secret.as_deref().filter(|s| !s.is_empty()) {
@@ -301,7 +305,11 @@ impl Live {
                 let client = self.client.clone();
                 self.rt.spawn_blocking(move || {
                     for (uuid, cmd, delay, label) in steps {
-                        if let Err(e) = client.send_cmd(&uuid, &cmd).and_then(|v| check_code(&v)) {
+                        if let Err(e) = client
+                            .send_cmd(&uuid, &cmd)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|v| check_code(&v))
+                        {
                             let _ = tx.send(Msg::Log(LogMsg {
                                 t: now(),
                                 err: true,
@@ -608,7 +616,7 @@ async fn stream_loop_inner(
         let ep = epoch;
         let live_flag = Arc::new(Mutex::new(false));
         let lf = live_flag.clone();
-        let res = crate::stream::stream_session(
+        let res = loxone_client::stream::stream_session(
             &cfg.connection(),
             stop.clone(),
             move || {
@@ -629,7 +637,7 @@ async fn stream_loop_inner(
         }
         attempt += 1;
         let err = match res {
-            Err(e) => short_err(&e),
+            Err(e) => short_err(&e.into()),
             Ok(()) => "connection closed".into(),
         };
         let delay = (1u64 << (attempt - 1).min(5)).min(30) as f64;
@@ -995,14 +1003,14 @@ fn history_range(
     let outputs = match src {
         StatSrc::Files(n) => *n,
         StatSrc::V2(group, output) => {
-            let data = client.get_bytes(&crate::statv2::raw_path(
+            let data = client.get_bytes(&loxone_client::statv2::raw_path(
                 uuid,
                 from,
                 to,
                 group,
                 Some(output),
             ))?;
-            let points: Vec<(i64, f64)> = crate::statv2::parse(&data, 1)
+            let points: Vec<(i64, f64)> = loxone_client::statv2::parse(&data, 1)
                 .into_iter()
                 .filter_map(|(t, v)| v.first().copied().filter(|v| v.is_finite()).map(|v| (t, v)))
                 .collect();
@@ -1014,7 +1022,7 @@ fn history_range(
     let mut listing: Option<String> = None;
     let mut any = false;
     for p in months(from, to) {
-        let data = match client.get_bytes(&crate::stats::stats_file_path(uuid, &p)) {
+        let data = match client.get_bytes(&loxone_client::stats::stats_file_path(uuid, &p)) {
             Ok(d) if d.len() > 12 => vec![d],
             _ => {
                 // some firmware versions name the files differently: look them up
@@ -1024,7 +1032,7 @@ fn history_range(
                 let files: Vec<String> = listing
                     .as_deref()
                     .map(|l| {
-                        crate::stats::find_stats_files(l, uuid, &p)
+                        loxone_client::stats::find_stats_files(l, uuid, &p)
                             .into_iter()
                             .map(|s| s.to_string())
                             .collect()
@@ -1651,13 +1659,13 @@ mod live_probe {
                 tokio::time::sleep(std::time::Duration::from_secs(6)).await;
                 let _ = stop_tx.send(true);
             });
-            let r = crate::stream::stream_session(
+            let r = loxone_client::stream::stream_session(
                 &cfg.connection(),
                 stop_rx,
                 || {},
                 move |b| {
                     for e in b {
-                        if let crate::stream::StateEvent::ValueState { uuid, value } = e {
+                        if let loxone_client::stream::StateEvent::ValueState { uuid, value } = e {
                             s2.lock().unwrap().insert(uuid, value);
                         }
                     }

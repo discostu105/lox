@@ -14,7 +14,7 @@ use super::store::Store;
 use super::theme::Theme;
 use super::vm::{Choice, Plan, SetSpec};
 use crate::actions::Action;
-use crate::stream::StateEvent;
+use loxone_client::stream::StateEvent;
 
 // ── Screens and per-screen state ────────────────────────────────────────────
 

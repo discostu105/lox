@@ -208,7 +208,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
     }
     // -v request logging goes to stderr, which would draw over the screen
     // (and print URL paths such as an alarm PIN)
-    crate::client::set_verbose(0);
+    loxone_client::client::set_verbose(0);
     let prefs = load_prefs();
 
     // theme: flag → --no-color → tui.yaml → NO_COLOR → detection (§6.1)

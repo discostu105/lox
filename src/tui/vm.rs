@@ -970,8 +970,8 @@ pub fn menu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream::StateEvent;
     use crate::tui::demo;
+    use loxone_client::stream::StateEvent;
 
     fn setup() -> (House, Store) {
         let st = demo::structure();
