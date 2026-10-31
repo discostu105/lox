@@ -7,7 +7,7 @@
 //! semantic change. [`Rename::locale_suspect`] flags those.
 
 use crate::access::{AccessChange, AccessModel};
-use crate::connectors::{attr_params, file_params};
+use crate::connectors::{attr_name, attr_param, attr_params, clock_params, file_params};
 use crate::doc::{LoxoneDoc, ObjectSummary, WireView, ports};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,12 +29,15 @@ fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
 /// of virtual and Modbus devices (D64) and of physical inputs and
 /// outputs (D65; `Unit` is `<Display Unit=…>`, see [`setting_value`]).
 fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
-    let params: &'static [&'static str] =
-        if version < 8 && crate::periphery::periphery(block_type).is_some() {
-            &[]
-        } else {
-            attr_params(block_type)
-        };
+    let params: &'static [&'static str] = if (version < 8
+        && crate::periphery::periphery(block_type).is_some())
+        // A PulseAt's fire time (`At:` → `Sec=`, #248) joined in v10.
+        || (version < 10 && !clock_params(block_type).is_empty())
+    {
+        &[]
+    } else {
+        attr_params(block_type)
+    };
     // Device settings (#197) joined in v9.
     let settings =
         if version >= 9 || (version == 8 && !crate::settings::DEVICE_TYPES.contains(&block_type)) {
@@ -44,12 +47,12 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
         };
     params
         .iter()
-        .copied()
+        .map(move |p| attr_name(block_type, p))
         .chain(settings)
         .chain((block_type == "AutopilotRule").then_some("APC"))
 }
 
-const FINGERPRINT_VERSION: u8 = 9;
+const FINGERPRINT_VERSION: u8 = 10;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output (D65).
@@ -74,6 +77,21 @@ fn canonical_attr(name: &str, value: &Option<String>) -> Option<String> {
             Some(crate::autopilot::canonical(v).unwrap_or_else(|| v.clone()))
         }
         _ => value.clone(),
+    }
+}
+
+/// How a changed attribute reads in the diff: by its parameter name,
+/// and a fire time as a time of day (`At` `18:58` → `06:58`, #248).
+fn shown_attr(block_type: &str, attr: &str, value: Option<String>) -> (String, Option<String>) {
+    match attr_param(block_type, attr) {
+        Some(p) if clock_params(block_type).contains(&p) => {
+            let clock = value
+                .as_deref()
+                .and_then(|v| v.parse().ok().and_then(crate::logic::clock_text));
+            (p.to_string(), clock.or(value))
+        }
+        Some(p) => (p.to_string(), value),
+        None => (attr.to_string(), value),
     }
 }
 
@@ -512,12 +530,14 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                 for name in diff_attrs(&ob.block_type) {
                     let (va, vb) = (setting_value(a, oa, name), setting_value(b, ob, name));
                     if canonical_attr(name, &va) != canonical_attr(name, &vb) {
+                        let (port_key, from) = shown_attr(&ob.block_type, name, va);
+                        let (_, to) = shown_attr(&ob.block_type, name, vb);
                         out.param_changes.push(ParamChange {
                             object_uuid: uuid.clone(),
                             block_type: ob.block_type.clone(),
-                            port_key: name.to_string(),
-                            from: va,
-                            to: vb,
+                            port_key,
+                            from,
+                            to,
                         });
                     }
                 }
@@ -558,6 +578,15 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
 /// reference config needed.
 pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
+}
+
+/// The fingerprint as Lox Logic wrote it before a PulseAt's fire time
+/// (`Sec=`, #248) joined the projection. `loxl drift` accepts it so an
+/// upgrade alone does not read as drift; the next compile records the
+/// current form.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v9(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 9)
 }
 
 /// The fingerprint as Lox Logic wrote it before the settings of Air and Tree
@@ -648,7 +677,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         6 => b"lxir-fingerprint-v6".to_vec(),
         7 => b"lxir-fingerprint-v7".to_vec(),
         8 => b"lxir-fingerprint-v8".to_vec(),
-        _ => b"lxir-fingerprint-v9".to_vec(),
+        9 => b"lxir-fingerprint-v9".to_vec(),
+        _ => b"lxir-fingerprint-v10".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));

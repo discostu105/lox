@@ -102,6 +102,42 @@ pub enum Value {
     /// [`Module::load_files`] (CRLF normalized to LF) and stays `None`
     /// for a module parsed from a string alone.
     File { path: String, text: Option<String> },
+    /// A time of day, `HH:MM` or `HH:MM:SS`, kept as written (two-digit
+    /// minutes and seconds, hours 0–23); it resolves to seconds since
+    /// midnight (`19:00` → `68400`). Binds only time-of-day parameters
+    /// (`connectors::clock_params`, `At:` on PulseAt).
+    Clock(String),
+}
+
+/// Seconds since midnight of a `HH:MM[:SS]` time of day, `None` unless
+/// it is one (00:00 … 23:59:59, minutes and seconds two digits).
+pub fn clock_seconds(s: &str) -> Option<u32> {
+    let mut parts = s.split(':');
+    let (h, m, sec) = (parts.next()?, parts.next()?, parts.next());
+    if parts.next().is_some() || h.is_empty() || h.len() > 2 || m.len() != 2 {
+        return None;
+    }
+    let digits = |p: &str| p.bytes().all(|b| b.is_ascii_digit());
+    if !digits(h) || !digits(m) || sec.is_some_and(|x| x.len() != 2 || !digits(x)) {
+        return None;
+    }
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    let sec: u32 = sec.map_or(Some(0), |x| x.parse().ok())?;
+    (h < 24 && m < 60 && sec < 60).then_some(h * 3600 + m * 60 + sec)
+}
+
+/// The canonical spelling of seconds since midnight: `HH:MM`, or
+/// `HH:MM:SS` when the seconds are not zero. `None` beyond a day.
+pub fn clock_text(seconds: u32) -> Option<String> {
+    if seconds >= 86_400 {
+        return None;
+    }
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    Some(if s == 0 {
+        format!("{h:02}:{m:02}")
+    } else {
+        format!("{h:02}:{m:02}:{s:02}")
+    })
 }
 
 /// A value's unit suffix (D27). Time units scale to Loxone's base unit,
@@ -298,7 +334,8 @@ impl Value {
     }
 
     /// The literal content this value resolves to: `Number`/`Str` verbatim,
-    /// `Unit` scaled into its base unit, `File` its loaded text; `None` for
+    /// `Unit` scaled into its base unit, `File` its loaded text, `Clock`
+    /// its seconds since midnight; `None` for
     /// a `Ref` (resolve it through [`Module::resolve_value`]) and for a
     /// `File` that was never loaded.
     pub fn literal(&self) -> Option<Cow<'_, str>> {
@@ -307,6 +344,7 @@ impl Value {
             Value::Ref(_) => None,
             Value::Unit { number, unit } => scale_by_unit(number, *unit).map(Cow::Owned),
             Value::File { text, .. } => text.as_deref().map(Cow::Borrowed),
+            Value::Clock(t) => clock_seconds(t).map(|s| Cow::Owned(s.to_string())),
         }
     }
 }
@@ -319,6 +357,7 @@ impl fmt::Display for Value {
             Value::Ref(r) => f.write_str(r),
             Value::Unit { number, unit } => write!(f, "{number}{unit}"),
             Value::File { path, .. } => write!(f, "file({})", quote(path)),
+            Value::Clock(t) => f.write_str(t),
         }
     }
 }

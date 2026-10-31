@@ -1088,8 +1088,39 @@ pub fn attr_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "Formula" => &["Formula"],
         "Code16" => &["Code"],
+        "PulseAt" => &["At"],
         "VirtualIn" => &["Analog", "MinVal", "MaxVal", "DefVal"],
         t => crate::periphery::periphery(t).map_or(&[], |p| p.settings),
+    }
+}
+
+/// The element attribute an attribute parameter is stored in: the
+/// parameter's own name, except where the attribute's name says nothing —
+/// `At:` on `PulseAt` is `Sec=`, the fire time in seconds since midnight
+/// (#248).
+pub fn attr_name<'a>(block_type: &str, param: &'a str) -> &'a str {
+    match (block_type, param) {
+        ("PulseAt", "At") => "Sec",
+        _ => param,
+    }
+}
+
+/// The attribute parameter stored in element attribute `attr`, the
+/// inverse of [`attr_name`].
+pub fn attr_param(block_type: &str, attr: &str) -> Option<&'static str> {
+    attr_params(block_type)
+        .iter()
+        .copied()
+        .find(|p| attr_name(block_type, p) == attr)
+}
+
+/// Attribute parameters whose value is a time of day (`At: 19:00`),
+/// stored as seconds since midnight. They take a time of day and nothing
+/// else.
+pub fn clock_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "PulseAt" => &["At"],
+        _ => &[],
     }
 }
 

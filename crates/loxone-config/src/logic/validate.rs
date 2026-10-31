@@ -8,7 +8,8 @@
 
 use super::ast::{Module, Value};
 use crate::connectors::{
-    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, builtin, file_params, message_params,
+    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, builtin, clock_params, file_params,
+    message_params,
 };
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
@@ -69,6 +70,30 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                      (`Code:` on a Code16 program block); write other values inline",
                     block.slug
                 )));
+            }
+            // A time of day (`At: 19:00`) binds a time-of-day parameter,
+            // and such a parameter takes nothing else (#248).
+            let clock = clock_params(&block.block_type).contains(&key);
+            let resolved = match v {
+                Value::Ref(name) => module.lets().find(|l| l.name == *name).map(|l| &l.value),
+                v => Some(v),
+            };
+            match resolved {
+                Some(Value::Clock(_)) if !clock => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` — a time of day binds only the fire \
+                         time of a timed block (`At:` on PulseAt)",
+                        block.slug
+                    )));
+                }
+                Some(other) if clock && !matches!(other, Value::Clock(_)) => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` takes a time of day, `{key}: 19:00` \
+                         or `{key}: 06:30:15`",
+                        block.slug
+                    )));
+                }
+                _ => {}
             }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.

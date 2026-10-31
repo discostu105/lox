@@ -220,8 +220,8 @@ that the source cannot express; per D19 it is carried forward verbatim:
 `Sec=`/`Typ=`/`AutP=` (PulseAt fire time and mode), the `<Entry>`
 schedule children with their `N=` count, `Analog=`/`DefValue=`/`On=`/
 `Off=` output behavior, `Modes=`/`UserModes=` operating-mode gating,
-`Desc=`. Decoding `Sec=` (seconds since midnight) far enough to author
-it as an attribute parameter is future work. A fresh **mint** of either
+`Desc=`. `Sec=` is authored since #248 as `At: HH:MM` (D79) on a block
+with `Typ="0"`; `Typ=` itself and the rest stay carried. A fresh **mint** of either
 type has not been oracle-proven yet — the adopted rebuilds are
 byte-identical to GUI-authored content, so only minting needs the
 Stufe-0 gate before first use.

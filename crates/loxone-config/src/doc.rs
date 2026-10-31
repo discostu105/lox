@@ -75,9 +75,10 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
     "StatsType",
     "StatsAutoDel",
     // PulseAt trigger config (2026-08-25 corpus): `Sec=` fire time in
-    // seconds since midnight, `Typ=`/`AutP=` mode flags. Understood well
-    // enough to carry, not yet to author — a future probe can promote
-    // `Sec` to an attribute parameter.
+    // seconds since midnight — carried until the source claims it with
+    // `At:` (D79, #248) — and `Typ=` the timing mode (`0` a fixed time;
+    // the time functions' codes are unknown). `AutP=` (also on Memory)
+    // is not understood.
     "Sec",
     "Typ",
     "AutP",

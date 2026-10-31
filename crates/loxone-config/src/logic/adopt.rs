@@ -26,7 +26,7 @@
 //! the rest of the house.
 
 use crate::connectors::{
-    VERIFIED_BLOCK_VERSIONS, attr_params, builtin, carried_attrs, carried_children, container_type,
+    VERIFIED_BLOCK_VERSIONS, attr_param, builtin, carried_attrs, carried_children, container_type,
 };
 use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, ports};
 use crate::error::{Error, Result};
@@ -674,11 +674,10 @@ const KNOWN_ATTRS: &[&str] = &[
 /// reproduces everything on the element (modulo the documented
 /// normalizations).
 fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<(), String> {
-    let attrs = attr_params(&o.block_type);
     for a in &el.attrs {
         let known = KNOWN_ATTRS.contains(&a.name.as_str())
             || GUI_OWNED_ATTRS.contains(&a.name.as_str())
-            || attrs.contains(&a.name.as_str())
+            || attr_param(&o.block_type, &a.name).is_some()
             || carried_attrs(&o.block_type).contains(&a.name.as_str())
             // Validity state travels with the formula (observed:
             // Valid="false" on every Formula=); the rebuild re-emits it.

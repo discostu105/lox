@@ -369,7 +369,10 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
                 &mut managed_defs
             };
             let value = module.resolve_value_for(v, &block.block_type, &block.slug, k)?;
-            target.insert((block.slug.clone(), k.to_string()), value.into_owned());
+            // An attribute parameter is keyed by the attribute it writes
+            // (`At:` → `Sec=`).
+            let name = attr_name(&block.block_type, k);
+            target.insert((block.slug.clone(), name.to_string()), value.into_owned());
         }
     }
     Ok(Params {

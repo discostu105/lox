@@ -120,7 +120,9 @@ jal.AutoShade <- licht.Q                           # wire onto an extern
   dimmers a percentage.
 - To take over logic someone drew in the GUI, use `loxl adopt`, then
   confirm with `loxl diff --exit-code` that the takeover changed nothing.
-  `loxl coverage` lists what is not managed yet; adopting an extern
+  `loxl coverage` lists what is not managed yet, including the
+  attributes of managed blocks carried from the base (a PulseAt's time
+  is `At: 19:00`); adopting an extern
   `--as` its own slug promotes it (its wires move into the declaration).
   A managed block takes `.room`/`.category`, never `.title` (its label).
   The app lists a control only with both; the push adds the entry for

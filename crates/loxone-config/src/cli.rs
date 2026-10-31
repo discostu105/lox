@@ -161,7 +161,11 @@ USAGE:
         what Lox Logic can do with the type (managed, adopt-only for blocks
         Loxone Config creates when pairing a device, reference for types
         without a verified connector table). Lists the page blocks a
-        `loxl adopt --uuid` could take over next. Without a lock or
+        `loxl adopt --uuid` could take over next, and per managed type
+        the attributes the compile carries from the base instead of
+        writing them from source — with the parameter that claims one
+        where Lox Logic has it (`At:` on PulseAt); in a project, blocks
+        whose source claims it are not counted. Without a lock or
         project, everything counts as untouched.
 
   loxl drift <cfg.Loxone> [--lock <lock.json>]
@@ -1834,20 +1838,26 @@ fn cmd_coverage(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
         _ => return Err(USAGE.into()),
     };
-    let (config, lock) = match (config, lock_path) {
-        (Some(c), Some(l)) => (c, Lockfile::load(Path::new(l))?),
+    let (config, lock, module) = match (config, lock_path) {
+        (Some(c), Some(l)) => (c, Lockfile::load(Path::new(l))?, None),
         // A bare config: nothing is source yet — the report is what an
         // adoption could take over.
-        (Some(c), None) => (c, Lockfile::new()),
+        (Some(c), None) => (c, Lockfile::new(), None),
         (None, dir) => {
             let dir = dir.unwrap_or(".");
             let f = Project::find(Path::new(dir))
                 .ok_or_else(|| format!("no lox.toml in `{dir}` — {USAGE}"))?;
             let p = Project::load(&f)?;
-            (p.base.display().to_string(), Lockfile::load(&p.lock)?)
+            // The module tells a claimed attribute from a carried one.
+            let module = read_module(&p.module.display().to_string())?;
+            (
+                p.base.display().to_string(),
+                Lockfile::load(&p.lock)?,
+                Some(module),
+            )
         }
     };
-    let report = loxone_config::coverage::coverage(&read_doc(&config)?, &lock);
+    let report = loxone_config::coverage::coverage(&read_doc(&config)?, &lock, module.as_ref());
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -1910,6 +1920,14 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = loxone_config::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches the fingerprint in {lock_path}");
+        Ok(ExitCode::SUCCESS)
+    } else if loxone_config::diff::semantic_fingerprint_v9(&doc) == *recorded {
+        // Recorded before a PulseAt's fire time joined the projection (#248).
+        println!(
+            "in sync: {config} matches the fingerprint in {lock_path} (recorded \
+             by an older version of Lox Logic, blind to PulseAt fire times — the next \
+             compile records the current form)"
+        );
         Ok(ExitCode::SUCCESS)
     } else if loxone_config::diff::semantic_fingerprint_v8(&doc) == *recorded {
         // Recorded before Air and Tree device settings joined (#197).
@@ -2176,7 +2194,17 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 println!("{}", line.trim_end());
             }
             for a in desc["attr_params"].as_array().into_iter().flatten() {
-                println!("  {:<18} attr", s(a));
+                let a = s(a);
+                if connectors::clock_params(t).contains(&a.as_str()) {
+                    // `At` on PulseAt: a time of day, stored as seconds
+                    // since midnight in `Sec=`.
+                    println!(
+                        "  {a:<18} attr   time of day (HH:MM[:SS]) → {}=",
+                        connectors::attr_name(t, &a)
+                    );
+                } else {
+                    println!("  {a:<18} attr");
+                }
             }
             Ok(ExitCode::SUCCESS)
         }

@@ -83,7 +83,7 @@ pub use ast::{
     MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind,
     RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem,
     ScheduleLine, SetDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
+    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{

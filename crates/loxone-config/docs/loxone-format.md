@@ -113,8 +113,14 @@ inline (`<Key>2B35</Key>`).
 - Complex blocks carry extra attributes (`LtE=`, `SpStates=`, `rec=`,
   UUID-list attributes…). All of it round-trips untouched through the
   lossless tree. Some of it is **block logic stored outside connectors**:
-  `PulseAt` keeps its fire time in `Sec=` (seconds since midnight, with
-  `Typ=`/`AutP=` mode flags); `DayTimer` keeps its schedule as `<Entry>`
+  `PulseAt` keeps its fire time in `Sec=` (seconds since midnight; a
+  corpus block titled "Pulse at 00:00" has `Sec="0"`, and every V172+
+  instance with a `Sec=` has `Typ="0"`, 11 of 11 — the fixed-time mode;
+  `At:` authors it, D79). Loxone's documentation offers time functions
+  (sunrise, dusk, hour and month pulses) in the same dialog; which `Typ=`
+  value means which is not observed yet, so a non-zero `Typ=` stays with
+  the GUI. `AutP=` also appears on `Memory` blocks and is not a PulseAt
+  flag; `DayTimer` keeps its schedule as `<Entry>`
   child elements after the `<Co>` list (`N=` holds their count) with
   `Analog=`/`DefValue=`/`On=`/`Off=` output behavior and `Modes=`/
   `UserModes=` operating-mode gating.
