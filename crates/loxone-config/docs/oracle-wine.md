@@ -897,6 +897,45 @@ Results:
 - **Lc1** toggled its circuit with M staying 0. The KB says −1 for a
   user-defined mood, so Lc stays refused.
 
+## LightController2 on a Miniserver (live, #261) — not an oracle session
+
+Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone
+Config. A test page with three controllers was compiled onto the house
+config and pushed. The inputs were driven over HTTP (virtual inputs, by
+name), and Formula blocks on the outputs were read by UUID. Settings:
+Tdc 0.35 s, Mmd 1 s, Met 20 s, Moet 10 s, Pto 15 s. The original
+program was restored afterwards (a byte-identical download). The
+circuits had no actuator (`NameAI<n>=` is written only by Config's
+mood editor). The details are in #261. Results:
+
+- **Circuits without an actuator are switches.** Moods of 20 %, 40 %
+  and 60 % all read 1.
+- **Double and triple click.** Two T5 or M+ presses within Tdc switched
+  off and pulsed 2C, from off and from a mood. Three pulsed 3C too.
+  Presses 0.6 s apart were two single clicks.
+- **Click timing.** A click acted at the later of press + Tdc and
+  release: a 50 ms tap acted about 0.38 s after the press. One 0.6 s
+  T5 hold did nothing; a rerun did not reproduce that.
+- **Long click** (T5 held for Mmd), acting while held:
+  - From off it selected the mood; the release did nothing more.
+  - With another mood on it mixed the mood in, and M read −3.
+  - On a mood already in the mix it took that mood out (back to the
+    other, or off).
+  - A short T5 click during a mix selected that mood alone.
+  - M+ has no long click: it acts on release.
+- **T5 and 30 s.** T5 steps through the list cyclically, off included.
+  Within 30 s of its last pulse it steps on. After that it steps on only
+  while its own mood shows, otherwise it selects that mood.
+- **A manual step to off** (M+, M− or T5) holds motion back like Off:
+  motion switched on only after Pto without motion.
+- **Lc1–8** toggled their circuit (on 1, off 0). The other circuits
+  stayed, and M read 0.
+- **MBr** acted only when its value changed, as a manual change with M
+  0: 0 switched everything off, 50 and 100 read 1. A mood selected while
+  MBr was 0 lit normally. A change while everything was off changed
+  nothing.
+- **DisP** (`EnMove`) 1 ignored motion; at 0 motion worked again.
+
 ## The rig, one command
 
 Everything below is wrapped in [`scripts/oracle.sh`](../scripts/oracle.sh):
