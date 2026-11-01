@@ -8,9 +8,10 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_circuits,
-    lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
-    rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
+    decompile_pages, finish_lint, fix_implicit_zeros, fix_unit_suffixes_text, implicit_zeros,
+    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source, lint_tiles,
+    lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify, trace_tests,
+    valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -132,6 +133,8 @@ In a lox.toml project it also reports:
     modes and blocks that send messages count as used; a device's unused inputs are one finding)
   - Touch Pure Flex commands that reach several blocks, or none
   - users whose NFC tag or access code opens no NFC Code Touch
+  - existing blocks with a port at 0 only because nothing sets it, where a new block would get
+    Loxone Config's default (`implicit-zero`: an adopted `Monoflop` without `Time` pulses 0 s)
 
 Findings are grouped by kind, each kind with its count.
 
@@ -140,9 +143,11 @@ block, extern, instance or device). Text after the kind is free. An allow that c
 reported (`unused-allow`).
 
 Options:
-  --fix       write the unit suffixes the `unit-suffix` findings name, in canonical form (as
-              `loxl fmt` writes it). The compile output does not change; in a project, lint
-              compiles before and after and writes nothing if the two differ.
+  --fix       write the unit suffixes the `unit-suffix` findings name, in place (the rest of
+              the file stays as written), and `Port: 0` for the `implicit-zero` findings (a
+              file that gets one is written in canonical form, as `loxl fmt` writes it). The
+              compile output does not change; in a project, lint compiles before and after
+              and writes nothing if the two differ.
   --summary   print only the count of each kind
 
 The path defaults to the current directory. Without --fix, lint never changes a file.
@@ -210,7 +215,8 @@ Passwords and codes show as names, counts and short hashes, never as stored.
         details: r#"Options:
   --lock <lock.json>  Lockfile to compare against (default: the lox.toml project's)
 
-Exit 0 when in sync. Exit 1 when the config changed since the last adopt or compile.
+Exit 0 when in sync, also for the config the last compile started from (its output is not
+pushed yet). Exit 1 when the config changed since the last adopt or compile.
 Moved blocks and the changes Loxone Config makes on every save don't count.
 Run `loxl diff` to see what changed.
 "#,
@@ -1546,24 +1552,55 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
 
     if fix {
         let mut fixed = Vec::new();
-        let mut count = 0;
+        let (mut count, mut suffix_files) = (0, 0);
+        let (mut zeros_written, mut zero_files) = (0, 0);
+        let mut sources = Vec::new();
+        // Existing blocks with ports at 0 that nothing sets: needs the
+        // compiled config, so only in a project.
+        let current = read_module(&module_path)?;
+        let zeros = match compile_project(&current)
+            .map_err(|e| format!("compile before the fix failed: {e}"))?
+        {
+            Some((compiled, _)) => {
+                let lock = &base.as_ref().expect("a project has a lockfile").1;
+                implicit_zeros(&current, lock, &compiled)?
+            }
+            None => Vec::new(),
+        };
         let mut parsed = Vec::new();
         for f in &files {
             let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
             parsed.push(Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?);
+            sources.push(src);
         }
         // Externs and templates may live in another file of the module.
-        let whole = Module::from_fragments(parsed.clone());
-        for (f, mut m) in files.iter().zip(parsed) {
-            let n = fix_unit_suffixes_in(&mut m, &whole).len();
-            if n > 0 {
+        let whole = Module::from_fragments(parsed);
+        for (f, src) in files.iter().zip(&sources) {
+            // Only the values change; the rest of the file stays as written.
+            let (found, mut text) =
+                fix_unit_suffixes_text(src, &whole).map_err(|e| format!("{}: {e}", f.display()))?;
+            let n = found.len();
+            let mut z = 0;
+            if !zeros.is_empty() {
+                let mut m =
+                    Module::parse_fragment(&text).map_err(|e| format!("{}: {e}", f.display()))?;
+                z = fix_implicit_zeros(&mut m, &zeros);
+                if z > 0 {
+                    text = m.to_text();
+                }
+            }
+            if n + z > 0 {
                 count += n;
-                fixed.push((f.clone(), m.to_text()));
+                zeros_written += z;
+                suffix_files += usize::from(n > 0);
+                zero_files += usize::from(z > 0);
+                fixed.push((f.clone(), text));
             }
         }
         if !fixed.is_empty() && project.is_some() {
-            // The fix only respells values: prove the compiled config and
-            // the lockfile stay byte-identical before writing.
+            // The fix only respells values and states the 0s a compile
+            // writes anyway: prove the compiled config and the lockfile
+            // stay byte-identical before writing.
             let module = read_module(&module_path)?;
             let mut fragments = Vec::new();
             for f in &files {
@@ -1601,12 +1638,19 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
         for (f, text) in &fixed {
             std::fs::write(f, text).map_err(|e| format!("{}: {e}", f.display()))?;
         }
+        let files_fixed = |n: usize| format!("{n} file{}", if n == 1 { "" } else { "s" });
         if count > 0 {
             println!(
-                "fixed: {count} unit-suffix value{} in {} file{}",
+                "fixed: {count} unit-suffix value{} in {}",
                 if count == 1 { "" } else { "s" },
-                fixed.len(),
-                if fixed.len() == 1 { "" } else { "s" }
+                files_fixed(suffix_files)
+            );
+        }
+        if zeros_written > 0 {
+            println!(
+                "fixed: wrote {zeros_written} implicit 0{} in {}",
+                if zeros_written == 1 { "" } else { "s" },
+                files_fixed(zero_files)
             );
         }
     }
@@ -1620,6 +1664,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             let lock = &base.as_ref().expect("a project has a lockfile").1;
             findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
             findings.extend(lint_circuits(&module, lock, &compiled)?);
+            findings.extend(lint_implicit_zero(&module, lock, &compiled)?);
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
             true
@@ -1694,7 +1739,10 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     }
     let fixable = findings
         .iter()
-        .filter(|f| f.kind == LintKind::UnitSuffix)
+        .filter(|f| {
+            f.kind == LintKind::UnitSuffix
+                || (f.kind == LintKind::ImplicitZero && f.detail.contains("lint --fix"))
+        })
         .count();
     println!(
         "lint: {} finding{}{}",
@@ -2366,6 +2414,17 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
         println!("in sync: {config} matches {lock_path}");
         return Ok(ExitCode::SUCCESS);
     }
+    // The config the last compile started from: nothing changed it since,
+    // its output is only not pushed yet.
+    if lock.target.source_config_sha256.as_deref()
+        == Some(loxone_config::lock::sha256_hex(&doc.to_bytes()).as_str())
+    {
+        println!(
+            "in sync: {config} is the config the last compile of {lock_path} started from. \
+             Its output is not pushed yet."
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
     // A lock written by an older Lox Logic records an older form, blind
     // to what later joined the comparison. A match in that form is in
     // sync as far as it can tell, and the next compile records the
@@ -2511,6 +2570,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                     "label": meta.and_then(|m| m.label),
                     "min": meta.and_then(|m| m.min),
                     "max": meta.and_then(|m| m.max),
+                    "gui_default": loxone_config::gui_defaults::gui_default(t, spec.key),
                     "documented_default": meta.and_then(|m| m.default),
                     "observed_default": loxone_config::observed_defaults::observed_default(t, spec.key),
                     "description": loxone_config::port_doc::describe(t, spec.key),
@@ -2585,7 +2645,12 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                     (None, None) => String::new(),
                     (lo, hi) => format!("{} … {}", lo.unwrap_or("−∞"), hi.unwrap_or("∞")),
                 };
-                let mut default = s(&port["documented_default"]);
+                // What a new block gets: the GUI default, else the
+                // documented one.
+                let mut default = port["gui_default"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| s(&port["documented_default"]));
                 if let Some(o) = port["observed_default"].as_str()
                     && o != default
                 {
@@ -2627,6 +2692,14 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 } else {
                     println!("  {a:<18} attr");
                 }
+            }
+            if !loxone_config::gui_defaults::gui_defaults(t).is_empty() {
+                println!(
+                    "\n  A new block gets the default for each port the source leaves out, as \
+                     Loxone Config places it.\n  A block that already exists has 0 there \
+                     unless it has a value (`{} lint` reports it as implicit-zero).",
+                    prog()
+                );
             }
             Ok(ExitCode::SUCCESS)
         }

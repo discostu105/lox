@@ -136,6 +136,7 @@ pub(crate) fn visit_refs(
         | Item::Instance(_)
         | Item::Page(_)
         | Item::FragmentEnd
+        | Item::Gap
         | Item::Owned(_)
         | Item::Access(_)
         | Item::Moods(_)
@@ -928,7 +929,7 @@ impl Module {
                     comment: c.comment.clone(),
                 })),
                 // Template-source commentary, not per-instance content.
-                Item::Comment(_) => {}
+                Item::Comment(_) | Item::Gap => {}
                 other => {
                     return Err(fail(format!(
                         "template `{}` carries an unexpected {other:?} in its body",

@@ -396,8 +396,12 @@ value decides the meaning:
 - `Port: 28`, `Port: "text"`, `Port: constant` — a **parameter**: the
   literal (or resolved `let` constant) becomes `Def=` on the port with key
   `Port`. A 0 writes no `Def=`: Loxone Config writes none at 0, and a
-  missing `Def=` is 0. A parameter the block does not state is therefore 0,
-  not the default Loxone Config gives a block it places.
+  missing `Def=` is 0. A port the source gives no value gets the default
+  Loxone Config places a block with (`loxl types` shows it), but only on a
+  block the compiler creates: the lock records that (`gui_defaults`), and
+  every later compile writes the same values. A block that existed before,
+  created by an older compiler or adopted, has 0 on such a port; `loxl lint`
+  reports it (`implicit-zero`) and `--fix` writes the `Port: 0`.
 - `Port: slug.Port` — a **wire**: the referenced source port is wired into
   this port. Sources may be extern or managed ports (including the block
   itself — feedback is representable) and are referenced before or after
@@ -1950,9 +1954,19 @@ the declaration below it: a block, extern, instance (all its blocks), device (al
 constant, template, signal or `defaults`. Inside a template body it covers that block in every
 instance. An allow that covers no finding, names no kind or stands above no declaration is reported
 as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
-`tile-broadcast`, `tile-dead-command`, `no-access-right`, `no-actuator`) are not judged. The language
-server offers both as quick fixes: on a finding it inserts the allow comment above the declaration (or
-adds the kind to the allow already there), and on an `unused-allow` it removes the comment.
+`tile-broadcast`, `tile-dead-command`, `no-access-right`, `no-actuator`, `implicit-zero`) are not
+judged.
+
+`implicit-zero` reports a block that already existed and has a port at 0 only because nothing sets it:
+the compiled config has no `Def=` and no wire there, the source no value, and Loxone Config places the
+block with another value (a `Monoflop` adopted without `Time` pulses for 0 s, not 2 s). `loxl lint --fix`
+writes `Port: 0` into the block, at the port's place, and the compiled config stays byte-identical.
+Write the value you want instead where 0 is not meant. A block a template creates is reported, not
+fixed.
+
+The language server offers both as quick fixes: on a finding it inserts the allow comment above the
+declaration (or adds the kind to the allow already there), and on an `unused-allow` it removes the
+comment.
 
 ## Canonical form
 
@@ -1964,13 +1978,16 @@ adds the kind to the allow already there), and on an `unused-allow` it removes t
 - an argument-free call on one line (`b = And()`, `c = Or("Oder")`);
 - a call on one line when it has at most three arguments (the label counts as one), no comments,
   and the line fits in 100 columns with its indentation (a tab counts four):
-  `b = And(I1: x.Q, I2: on)`;
+  `b = And(I1: x.Q, I2: on)`. Past three arguments the same holds when every argument but the label
+  is a number, a unit value, a time or `on`/`off`:
+  `s = ModbusASensor("Kompressor", ModbusAddress: 1100, ModbusDataType: 0, DestValHigh: 100)`;
 - any other call with the label and each argument on its own tab-indented line with a trailing
   comma, and the `)` on its own line;
 - a `tile` the same way one level deeper (`tile 2(click: "…", to: licht)` on one line, or a
   two-tab-indented list with the `)` on its own tab-indented line);
 - each grant of an `access` or `recipients` set on its own tab-indented line.
-- a `# lint: allow` comment directly above its statement, with no blank line between them.
+- a whole-line comment directly above the statement it was written above, with no blank line
+  between them. A blank line the source has below a comment stays (one, however many there were).
 
 Values keep their variant: numbers bare, strings quoted, constant references bare, port references
 dotted, unit values and `on`/`off` as written. Some values are canonicalized at parse time, so every
@@ -2056,8 +2073,10 @@ replacement. The compile output of a migrated file is byte-identical.
   `tiles`, `schedule` and `moods` were reserved in v1. `then wait|mode|notify|mail|message` is
   always the rule action; a block of that name as a `then` target is an error naming `loxl rename`.
 - **Short calls go on one line**: `fmt` writes a call with up to three arguments that fits in 100
-  columns on one line, and puts a blank line around every multi-line item. The compile output does
-  not change.
+  columns on one line, and puts a blank line around every multi-line item. A call of more arguments
+  goes on one line too when they are all numbers, unit values, times or `on`/`off`. A whole-line
+  comment stays attached to the statement below it unless a blank line separates them. The compile
+  output does not change.
 - **`tick` and `dt` take `let` constants** (`tick warten`, `tick 3 dt takt`).
 - **`when time`** reads the time like `clock` (`7:30` = `07:30`).
 - **Scoped names everywhere**: `(inst.block, x).room = …` and `mirrors: inst.block` (extern
@@ -2067,9 +2086,11 @@ replacement. The compile output of a migrated file is byte-identical.
   expression on `a.I1`) is an error naming both; v1 let them share block names.
 - **Tooling**: `loxl lint` groups its findings by kind with counts (`--summary`: counts only) and
   reports bare durations that read better with their unit (`unit-suffix`); `loxl lint --fix` writes
-  the suffixes. Module-check errors name the fragment and line. The language server hovers and
+  the suffixes. A new block gets Loxone Config's defaults on the ports the source leaves out;
+  `implicit-zero` reports an older block that has 0 there, and `--fix` writes the 0. Module-check errors name the fragment and line. The language server hovers and
   goes to the definition of `inst.block` and `inst.block.Port`, completes argument keys (in
-  `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
+  `defaults` too, leaving out the ones the call binds already) and signal names, shows the
+  defaults a template body's block takes, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
   statistics, energy flow, messages and modes as used and reports a device's unused inputs once;
   `# lint: allow <kind>` keeps a deliberate finding out (see [Lint](#lint)).
 - **One spelling per operating mode** in rules and schedules: a built-in mode in a schedule by its day

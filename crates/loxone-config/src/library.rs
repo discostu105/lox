@@ -32,7 +32,8 @@ pub fn entries() -> Vec<Entry> {
             let description = t
                 .body
                 .iter()
-                .map_while(|i| match i {
+                .take_while(|i| matches!(i, Item::Comment(_) | Item::Gap))
+                .filter_map(|i| match i {
                     Item::Comment(c) => Some(c.trim()),
                     _ => None,
                 })

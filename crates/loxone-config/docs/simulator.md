@@ -20,8 +20,10 @@ object.
 - An input gets, in this order: what the test set; its wires (negated
   when the connector carries `Inv=`); the constant 1 for an unwired
   `Inv=`; its `Def=` value; 0 when `Def=` is omitted, as in Loxone Config;
-  the documented default (`port_meta`) for a port the object has no
-  connector for.
+  for a port the object has no connector for, the GUI default a save would
+  add it with (`gui_defaults`), else the documented one (`port_meta`). A
+  new block from the compiler carries the GUI defaults as `Def=`, so the
+  simulation of a new block and of one drawn in Loxone Config agree.
 - A test may set any port: an input, a parameter or a block's output.
   The value holds until the test sets it again and overrides whatever
   the block computes.

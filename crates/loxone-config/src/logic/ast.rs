@@ -58,6 +58,10 @@ pub enum Item {
     /// fragments by [`Module::from_fragments`]. Never parsed or printed:
     /// it only ends the governance of the fragment's last `page`.
     FragmentEnd,
+    /// A blank line below a whole-line comment. `fmt` keeps it, so a comment
+    /// written apart from the next statement stays apart, and one written
+    /// right above it stays attached. Means nothing to the compile.
+    Gap,
     /// `test "Name"` … `end` — a simulator-backed scenario.
     /// `compile` ignores it entirely; `loxl test` compiles the module in
     /// memory and replays the body in the simulator.
@@ -2673,7 +2677,7 @@ impl Module {
                 // line on both sides comes from the family change.
                 Item::Page(_) => 10,
                 // Not printed (skipped below).
-                Item::FragmentEnd | Item::Owned(_) => 10,
+                Item::FragmentEnd | Item::Owned(_) | Item::Gap => 10,
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
@@ -2688,15 +2692,20 @@ impl Module {
         // A multi-line item is visually dense: a blank line separates it
         // from its neighbors even when the kind does not change.
         let mut prev_multiline = false;
-        let is_allow =
-            |item: &Item| matches!(item, Item::Comment(c) if super::lint::is_allow_comment(c));
+        let is_comment = |item: &Item| matches!(item, Item::Comment(_) | Item::Owned(_));
         let mut skip = 0;
-        // The previous line was a `# lint: allow` comment: it stays right
-        // above the statement it is for.
+        // The previous line was a whole-line comment: it stays right above
+        // the statement it is about.
         let mut attached = false;
+        // A blank line the source keeps below a comment.
+        let mut gap = false;
         for (i, item) in self.items.iter().enumerate() {
             if skip > 0 {
                 skip -= 1;
+                continue;
+            }
+            if matches!(item, Item::Gap) {
+                gap = prev.is_some();
                 continue;
             }
             if matches!(item, Item::FragmentEnd | Item::Owned(_)) {
@@ -2714,29 +2723,31 @@ impl Module {
             let mut text = String::new();
             skip = self.write_item(i, item, depth, &mut text);
             let mut multiline = text.trim_end_matches('\n').contains('\n');
-            let allow = is_allow(item);
-            if allow
+            let mut comment = false;
+            if matches!(item, Item::Comment(_))
                 && let Some((j, next)) = self
                     .items
                     .iter()
                     .enumerate()
                     .skip(i + 1)
-                    .find(|(_, x)| !is_allow(x))
-                && !matches!(next, Item::Comment(_) | Item::FragmentEnd)
+                    .find(|(_, x)| !is_comment(x))
+                && !matches!(next, Item::FragmentEnd | Item::Gap)
             {
+                comment = true;
                 // Spaced like the statement below it.
                 let mut next_text = String::new();
                 self.write_item(j, next, depth, &mut next_text);
                 disc = family(next);
                 multiline = next_text.trim_end_matches('\n').contains('\n');
             }
-            if !attached && prev.is_some_and(|p| p != disc || prev_multiline || multiline) {
+            if gap || !attached && prev.is_some_and(|p| p != disc || prev_multiline || multiline) {
                 out.push('\n');
             }
+            gap = false;
             out.push_str(&text);
             prev = Some(disc);
             prev_multiline = multiline;
-            attached = allow;
+            attached = comment;
         }
         out
     }
@@ -2748,7 +2759,7 @@ impl Module {
     fn write_item(&self, i: usize, item: &Item, depth: usize, out: &mut String) -> usize {
         let mut skip = 0;
         match item {
-            Item::FragmentEnd | Item::Owned(_) => {}
+            Item::FragmentEnd | Item::Owned(_) | Item::Gap => {}
             Item::Extern(e) => {
                 out.push_str(&format!(
                     "extern {} = {}({}){}\n",
@@ -2976,8 +2987,8 @@ const MAX_LINE: usize = 100;
 const MAX_INLINE_ARGS: usize = 3;
 
 /// `<head>(…)`, at `depth` tabs (the caller indents). On one line when it has at most
-/// three arguments (the label counts), no comment inside the argument list
-/// or after its `)`, and the line, indentation and trailing comment
+/// three arguments (the label counts) or binds only short values, no comment inside the
+/// argument list or after its `)`, and the line, indentation and trailing comment
 /// included, fits in 100 columns; otherwise one argument per line.
 fn write_call(
     head: &str,
@@ -3018,21 +3029,34 @@ fn inline_call(
     depth: usize,
 ) -> Option<String> {
     let mut parts: Vec<String> = title.map(quote).into_iter().collect();
+    let mut short = true;
     for arg in args {
         match arg {
             ArgItem::Binding(x) if x.comment.is_none() => {
                 parts.push(format!("{}: {}", x.port, x.kind));
+                short &= is_short(&x.kind);
             }
             _ => return None,
         }
     }
-    if parts.len() > MAX_INLINE_ARGS || close_comment.is_some() {
+    if (parts.len() > MAX_INLINE_ARGS && !short) || close_comment.is_some() {
         return None;
     }
     let line = format!("{head}({}){}", parts.join(", "), tail(comment));
     let width = depth * TAB_WIDTH + line.chars().count();
     // A call without arguments stays on one line whatever its length.
     (parts.is_empty() || width <= MAX_LINE).then_some(line)
+}
+
+/// A value a long call may still hold on one line: a number, a unit value, a time
+/// or `on`/`off`. Names, text, wires and expressions need a line each to be read.
+fn is_short(kind: &BindingKind) -> bool {
+    matches!(
+        kind,
+        BindingKind::Param(
+            Value::Number(_) | Value::Unit { .. } | Value::Clock(_) | Value::Bool(_)
+        )
+    )
 }
 
 /// Canonical text of a template: its head, the body indented one level, `end`.

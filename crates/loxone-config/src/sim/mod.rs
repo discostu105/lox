@@ -374,7 +374,8 @@ impl Simulator {
     /// *Connectors*): what a test set; else its wires, combined by the
     /// block's fan-in and negated by `Inv=`; else `Inv=` unwired is the
     /// constant 1; else the `Def=` value, 0 when `Def=` is omitted; the
-    /// documented default for a port the object has no connector for.
+    /// GUI default for a port the object has no connector for, which a
+    /// save adds at that value.
     fn input(&self, ix: usize, key: &str) -> Input {
         let obj = &self.objects[ix];
         let open = |v| Input {
@@ -382,7 +383,7 @@ impl Simulator {
             connected: false,
         };
         let Some(port) = obj.ports.get(key) else {
-            return open(documented_default(&obj.block_type, key));
+            return open(missing_default(&obj.block_type, key));
         };
         if let Some(&v) = self.overrides.get(&port.uuid) {
             return Input { v, connected: true };
@@ -654,11 +655,11 @@ fn trim(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// The documented default of a parameter (port_meta), else 0 — an open
-/// logic input.
-fn documented_default(block_type: &str, key: &str) -> f64 {
-    crate::port_meta::port_meta(block_type, key)
-        .and_then(|m| m.default)
+/// What a missing connector reads: its GUI default, else the documented
+/// default (port_meta), else 0 — an open logic input.
+fn missing_default(block_type: &str, key: &str) -> f64 {
+    crate::gui_defaults::gui_default(block_type, key)
+        .or_else(|| crate::port_meta::port_meta(block_type, key).and_then(|m| m.default))
         .and_then(model::parse_num)
         .unwrap_or(0.0)
 }

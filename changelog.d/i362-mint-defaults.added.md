@@ -1,0 +1,1 @@
+- **lox logic lint**: `implicit-zero` names an existing block whose port is 0 only because nothing sets it, while a new block would get a default (an adopted `Irrigation` without `Tv1`). `--fix` writes `Port: 0`, and the compile output stays the same.

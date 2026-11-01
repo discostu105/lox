@@ -264,3 +264,43 @@ fn a_signal_named_like_an_expression_sink_is_refused() {
     );
     assert!(e.contains("Rename one of them"), "{e}");
 }
+
+#[test]
+fn a_call_of_short_values_goes_on_one_line() {
+    let m = Module::parse(
+        "s = Monoflop(\n\tTime: 5min,\n\tOn: 1,\n\tOff: 0,\n\tReset: off,\n)\n\
+         w = Monoflop(\n\tInputTrigger: s.Q,\n\tOn: 1,\n\tOff: 0,\n\tReset: off,\n)\n",
+    )
+    .unwrap();
+    let text = m.to_text();
+    assert!(
+        text.starts_with("s = Monoflop(Time: 5min, On: 1, Off: 0, Reset: off)\n\nw = Monoflop(\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_comment_stays_where_it_was_written() {
+    let src = "\
+extern a = VirtualIn(iname: \"VI1\")
+
+# about b
+b = And(
+\tI1: a.Q,
+\tI2: a.Q,
+\tI3: a.Q,
+\tI4: a.Q,
+)
+
+# a section
+
+
+# its first block
+c = Not(I: a.Q)
+";
+    let m = Module::parse(src).unwrap();
+    let text = m.to_text();
+    // One blank line below `# a section`, none below the others.
+    assert_eq!(text, src.replace("\n\n\n", "\n\n"));
+    assert_eq!(Module::parse(&text).unwrap(), m, "parse ∘ to_text = id");
+}

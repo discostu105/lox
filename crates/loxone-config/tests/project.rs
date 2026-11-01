@@ -97,9 +97,17 @@ fn zero_flag_compile_inside_a_project() {
     assert_eq!(first, std::fs::read(dir.join("other.Loxone")).unwrap());
 
     // The compiled output matches the lock's fingerprint (drift, lock
-    // path from the project); the base no longer does.
+    // path from the project). The base is the config the compile started
+    // from: in sync, its output only not pushed yet. A base changed since
+    // drifts.
     assert_ok(&loxl(&dir, &["drift", "out.Loxone"]), "drift out");
-    assert!(!loxl(&dir, &["drift", "haus.Loxone"]).status.success());
+    let base = assert_ok(&loxl(&dir, &["drift", "haus.Loxone"]), "drift base");
+    assert!(base.contains("not pushed yet"), "stdout: {base}");
+    let changed = std::fs::read_to_string(dir.join("haus.Loxone"))
+        .unwrap()
+        .replace("Beschattung Süd", "Beschattung Nord");
+    std::fs::write(dir.join("changed.Loxone"), changed).unwrap();
+    assert!(!loxl(&dir, &["drift", "changed.Loxone"]).status.success());
 }
 
 #[test]
@@ -137,7 +145,7 @@ fn drift_accepts_a_fingerprint_recorded_by_an_older_loxl() {
             stdout.contains("an older version of Lox Logic"),
             "stdout: {stdout}"
         );
-        assert!(!loxl(&dir, &["drift", "haus.Loxone"]).status.success());
+        assert_ok(&loxl(&dir, &["drift", "haus.Loxone"]), "drift base");
 
         assert_ok(&loxl(&dir, &["compile"]), "recompile");
         assert!(

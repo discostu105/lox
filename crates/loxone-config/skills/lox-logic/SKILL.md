@@ -77,6 +77,8 @@ end
   recipients missing from a `recipients` set get no message.
 - Write time values with their unit (`Delay: 3h`, `Time: 500ms`). `loxl lint` names bare ones
   (`unit-suffix`), and `loxl lint --fix` writes the units without changing the compiled config.
+- A new block gets Loxone Config's defaults on the ports you leave out (`loxl types <Type>`). An
+  existing block has 0 there: `loxl lint` reports it (`implicit-zero`), `--fix` writes `Port: 0`.
 - Deleting a block needs `removed <slug>`; renaming a slug needs `loxl rename` or
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
 - To take over logic drawn in Loxone Config, use `loxl adopt`, then check with

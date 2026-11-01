@@ -156,6 +156,7 @@ fn plan_block(
             relayout: false,
             page_uuid: uuid,
             placed: false,
+            gui_defaults: entry.gui_defaults,
         });
     }
     let pinned_before = entry.page_uuid.clone();
@@ -224,6 +225,7 @@ fn plan_block(
         relayout: relayout_pages.contains(page_uuid.as_str()),
         page_uuid,
         placed: true,
+        gui_defaults: entry.gui_defaults,
     })
 }
 
@@ -250,6 +252,8 @@ fn pin_identity<'a>(
             page_uuid: None,
             expr_owned: false,
             states: Vec::new(),
+            // A new block gets the values Loxone Config places it with.
+            gui_defaults: !crate::gui_defaults::gui_defaults(&block.block_type).is_empty(),
         });
     // Ownership follows the current source: a slug the desugarer
     // produced is expression-owned; one it no longer produces (but a

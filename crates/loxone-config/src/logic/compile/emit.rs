@@ -397,6 +397,11 @@ fn push_connectors(
         {
             // A stale constant under a wire the source keeps.
             co.set_attr_raw("Def", stale);
+        } else if plan.gui_defaults
+            && let Some(def) = crate::gui_defaults::gui_default(&block.block_type, key)
+        {
+            // What Loxone Config places a new block with.
+            co.set_attr("Def", def);
         }
         co.set_attr("U", &plan.ports[key]);
         el.push_child(co);

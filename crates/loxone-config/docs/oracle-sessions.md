@@ -1029,6 +1029,24 @@ and edited them in the property panel.
   `MaxTime="-3000"`, `ValOT="2"` and `"-1"` and `DefVal="0.001"` stayed. **Heal:** compile refuses a
   value the save rewrites.
 
+## The defaults of a placed block (sessions 92 and 93, #362) — passed
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.
+The base was the redacted library config `examples/library/energy`.
+
+- Session 92 compiled one block of each of 54 builtin page types and removed every connector of them
+  without a `Def=` or a wire (672). The save added each one back, with the GUI default as `Def=` where
+  it is not 0: 162 values on 24 types. They agree with every default the documentation gives, also
+  `AutoJalousie.Dir` -1, which most corpus configs carry as 180. Ports the source usually wires have
+  defaults too: `StairwayLS.TimeHigh` 180, `LightController2.MoveOn` 900, `OnPulseDelay.Delay` 5.
+- Session 93 compiled the 54 blocks with those values, plus a `Monoflop` with `Time: 0`, a
+  `StairwayLS` with a wire on `TimeHigh` and a `LightController2` with `Max: 80, MoveTimeout: 0`. The
+  save changed no connector: every default stayed, the 0s stayed without `Def=`, and `Def="180"` stayed
+  under the wire. The rest of the diff was what a save gives a new block (moods, `Formula` text,
+  `PulseAt` time, `DayTimer` schedule).
+- **Heal:** a new block gets the GUI defaults, recorded in the lock; an older block keeps its 0s, and
+  `loxl lint` reports them as `implicit-zero` ([D130](decisions/0130-new-blocks-get-gui-defaults.md)).
+
 ## `Def="0"` on block connectors (sessions 90 and 91, #352) — passed, one finding
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.

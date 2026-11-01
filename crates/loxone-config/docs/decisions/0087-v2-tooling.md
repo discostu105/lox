@@ -1,6 +1,6 @@
 # D87: Tooling for v2: unit-suffix lint, lint --fix, scoped names in the language server
 
-Status: accepted (2026-11-01)
+Status: accepted (2026-11-01), amended by [D125](0125-fmt-short-values-comments-fix-in-place.md)
 
 ## Context
 

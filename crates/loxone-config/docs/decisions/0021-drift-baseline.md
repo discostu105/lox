@@ -21,5 +21,8 @@ fingerprint exactly when their diff is empty apart from such renames.
   are room and category bindings ([D39](0039-attribute-claims.md)), program text
   ([D40](0040-program-code.md)) and tile programs ([D41](0041-touch-pure-flex-tiles.md)). `loxl drift`
   accepts the previous version and notes it.
+- The config a compile started from is in sync too: its bytes match the lock's
+  `target.source_config_sha256`, so nothing changed it since; only the compiled output is not pushed
+  yet. `loxl drift` says so and exits 0 (2026-11-01).
 
 The corpus tests require every adopted rebuild to reproduce the fingerprint recorded at adoption exactly.

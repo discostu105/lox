@@ -270,7 +270,11 @@ rendered inline (`<Key>2B35</Key>`).
   connectors on 15 types), and Loxone Config shows 0 for a `Monoflop` without
   one, whose GUI default is 2 (session 91). The GUI writes every other
   default when it places a block; no real config holds `Def="0"` on a
-  connector ([D128](decisions/0128-no-def-at-zero.md)). A wired
+  connector ([D128](decisions/0128-no-def-at-zero.md)). A save that adds a
+  connector a block lacks gives it the GUI default: session 92 read the
+  defaults of 54 types that way (`src/gui_defaults.rs`), and they agree with
+  every documented one. A new block from Lox Logic gets them
+  ([D130](decisions/0130-new-blocks-get-gui-defaults.md)). A wired
   `<Co>` can carry one too (the Loxcall library entry: an `Equal`'s
   `Input1` with `Def="2"` and an `<In>`): Loxone Config keeps the value
   when a wire is drawn onto the port. The wire supplies the input; the
@@ -1485,7 +1489,7 @@ migration extending the type's descriptor, not from user action.
 
 **A save writes exactly the type's connector set, in the type's order.**
 Off-descriptor `<Co>`s are dropped without warning, wires included, and
-missing ones are added. Any tool inventing connectors silently loses logic
+missing ones are added, each with its GUI default as `Def=` (session 92). Any tool inventing connectors silently loses logic
 on the next GUI save.
 
 - **Gates do not grow.** `And`/`Or` in Loxone Config 17 are fixed

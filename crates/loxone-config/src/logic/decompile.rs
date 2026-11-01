@@ -1921,7 +1921,7 @@ impl Scan<'_> {
                         }));
                     }
                 } else if wires.is_empty()
-                    && crate::observed_defaults::observed_default(&o.block_type, &p.key)
+                    && crate::gui_defaults::gui_default(&o.block_type, &p.key)
                         .or_else(|| {
                             crate::port_meta::port_meta(&o.block_type, &p.key)
                                 .and_then(|m| m.default)

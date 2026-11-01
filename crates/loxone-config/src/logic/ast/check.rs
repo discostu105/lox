@@ -1681,7 +1681,8 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::ScheduleClaim(_)
             | Item::TilesClaim(_)
             | Item::AccessClaim(_)
-            | Item::Comment(_) => {}
+            | Item::Comment(_)
+            | Item::Gap => {}
             // A body signal's label.
             Item::Attr(a)
                 if a.attr == Attr::Title
