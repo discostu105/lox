@@ -338,7 +338,7 @@ it only when it matches what you intended.
 | `default-page` (from `lint`) | a fragment of a directory module without its own `page` line, while others have one | add the `page` line; the language server offers the previous file's page as a quick fix |
 | `dead-outputs` (from `lint`) | a block, extern or device whose outputs reach nothing in the compiled config: no wire, not shown in the app as a value, no statistic, no energy flow, no message | wire it, delete it, or keep it with `# lint: allow dead-outputs <reason>` on the line above |
 | `tile-dead-command` (from `lint`) | Touch Pure Flex commands for a block type that no block linked to the device has | link a block of that type, empty the tiles (`tile 2()`), or `# lint: allow tile-dead-command` above the extern |
-| `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration |
+| `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration; the language server offers "Remove this allow" |
 | `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |

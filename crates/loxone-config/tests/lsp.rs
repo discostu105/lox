@@ -693,7 +693,9 @@ fn a_bare_duration_offers_its_unit_suffix_as_a_quick_fix() {
         }}),
     ]);
     let actions = response(&out, 1).as_array().unwrap();
-    assert_eq!(actions.len(), 1, "{actions:?}");
+    // The fix first, then the allow comment that keeps the finding.
+    assert_eq!(actions.len(), 2, "{actions:?}");
+    assert!(actions[1]["title"].as_str().unwrap().starts_with("Allow"));
     assert_eq!(
         actions[0]["edit"]["changes"][uri(&pool)][0]["newText"],
         "Time: 5min"
@@ -725,7 +727,7 @@ fn a_file_on_the_default_page_offers_the_previous_page_as_a_quick_fix() {
         }}),
     ]);
     let actions = response(&out, 1).as_array().unwrap();
-    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions.len(), 2, "{actions:?}");
     let edit = &actions[0]["edit"]["changes"][uri(&technik)][0];
     assert_eq!(edit["newText"], "page \"Pool\"\n\n");
     // Below the comments that head the file.
@@ -736,5 +738,100 @@ fn a_file_on_the_default_page_offers_the_previous_page_as_a_quick_fix() {
     assert_eq!(
         edit["range"]["start"],
         json!({"line": first, "character": 0})
+    );
+}
+
+/// The code actions for diagnostic `d` of `file` holding `text`.
+fn actions_for(file: &Path, text: &str, d: &Value) -> Vec<Value> {
+    let out = session(&[
+        open(file, text),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(file)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    response(&out, 1).as_array().unwrap().clone()
+}
+
+/// The diagnostics of `file` after saving it with `text`.
+fn saved(file: &Path, src: &str, text: &str) -> Vec<Value> {
+    let out = session(&[open(file, src), change(file, text), save(file)]);
+    diagnostics(&out, file).clone()
+}
+
+fn with_prefix<'a>(diags: &'a [Value], prefix: &str) -> Option<&'a Value> {
+    diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().starts_with(prefix))
+}
+
+#[test]
+fn a_lint_finding_offers_an_allow_comment_above_its_declaration() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    // Without its wire `heizen` drives nothing.
+    let text = src.replace("pumpe.On <- heizen.Q\n", "");
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "dead-outputs").unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, _) = pos(&text, "heizen =");
+    assert_eq!(d["data"], json!({"allow": "dead-outputs", "line": l}));
+
+    let actions = actions_for(&pool, &text, d);
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(
+        actions[0]["title"],
+        "Allow this finding (`# lint: allow dead-outputs`)"
+    );
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], "# lint: allow dead-outputs\n");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": 0}));
+
+    // With the comment in place the finding is gone, and the comment is used.
+    let allowed = text.replace("heizen =", "# lint: allow dead-outputs\nheizen =");
+    let diags = saved(&pool, &src, &allowed);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn an_allow_comment_already_above_takes_the_new_kind() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = src.replace("pumpe.On <- heizen.Q\n", "").replace(
+        "heizen =",
+        "# lint: allow unit-suffix kept for later\nheizen =",
+    );
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "dead-outputs").unwrap_or_else(|| panic!("{diags:?}"));
+    let actions = actions_for(&pool, &text, d);
+    let allow = actions
+        .iter()
+        .find(|a| a["title"].as_str().unwrap().starts_with("Allow"))
+        .unwrap_or_else(|| panic!("{actions:?}"));
+    let edit = &allow["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], " dead-outputs");
+    let (l, c) = pos(&text, " unit-suffix kept");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
+fn an_unused_allow_shows_on_its_comment_and_offers_to_remove_it() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = src.replace("heizen = ", "# lint: allow dead-outputs\nheizen = ");
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "unused-allow").unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, _) = pos(&text, "# lint: allow");
+    assert_eq!(d["range"]["start"], json!({"line": l, "character": 0}));
+    assert!(d.get("data").is_none(), "{d:?}");
+
+    let actions = actions_for(&pool, &text, d);
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Remove this allow");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], "");
+    assert_eq!(
+        edit["range"],
+        json!({"start": {"line": l, "character": 0}, "end": {"line": l + 1, "character": 0}})
     );
 }
