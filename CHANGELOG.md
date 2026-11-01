@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.71.0] — 2026-11-01
+
+### Added
+- **`loxl lsp`** offers a quick fix on a lint finding that keeps it: `# lint: allow <kind>` above its declaration, indented like it, or the kind added to the allow already there. An `unused-allow` finding now shows on its comment and offers to remove it.
+
 ## [0.70.1] — 2026-11-01
 
 ### Fixed
