@@ -772,6 +772,39 @@ Lox Logic refuses a value a save would rewrite, and names the value the save wri
 ([D114](decisions/0114-refuse-what-a-save-rewrites.md)). Source: oracle sessions 61 to 64 (Loxone
 Config 17.2.8.28); corpus.
 
+### Titles a save rewrites
+
+A save puts some characters of a `Title=` into a fixed form, on minted objects and on existing ones
+alike (a `.title` claim on a base `Actor` was rewritten too):
+
+- `{` and `}` go, and so do a tab and a line break inside the title.
+- Then each space or tab at either end becomes `_`: `" V lead trail "` is written `"_V lead trail_"`,
+  `"a\t "` as `"a__"`, `"{ a}"` as `"_a"`. Two spaces inside stay.
+- `%`, `<` and `|` become `_` on every program block (all types of the builtin table), the virtual
+  inputs, outputs and their commands, `VirtualTextIn`, a Modbus device and its sensors and actuators,
+  and a physical output (`Actor`). `>` stays: `R Ana Max<Min` became `R Ana Max_Min`, `R Ana Def>Max`
+  was kept.
+- The types that differ:
+
+  | Type | Becomes `_` |
+  |---|---|
+  | `LightController2` | `%`, `\|` (`<` stays) |
+  | `Mode` | `%`, `,`, `:`, `;`, `=`, `\|` (`<` stays) |
+  | `CalendarEntry` | `%`, `/`, `<`, `\|` |
+  | `ModbusServer`, `Page` | nothing: any title stays, tabs and spaces at the ends included |
+
+- A title left empty by the save (`"{}"`) is written as no `Title=`. An empty `Title=""` is written as
+  `noname <UUID>`.
+- Every other printable ASCII character stays, and so do `ä`, `ß`, `€`, `°`, `µ`, `²`, `é` and an
+  emoji. A mood's name (`<Mood Name=…>`) keeps every character.
+
+`≤`, `＜` and `％` stay (session 83): an expression's block labels use them for `<=`, `<` and `%`.
+
+Not checked: rule names, the I/Os and devices of the Tree, Air and other hardware, and types the
+compiler cannot create. Lox Logic refuses a title a save would rewrite, and names the title the save
+writes ([D120](decisions/0120-refuse-titles-a-save-rewrites.md)). Source: oracle sessions 80 to 83
+(Loxone Config 17.2.8.28).
+
 ### Units of the settings
 
 The unit a setting's attribute is in, where a Loxone knowledge-base page states it. The table is

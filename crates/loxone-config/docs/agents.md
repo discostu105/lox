@@ -299,6 +299,7 @@ it only when it matches what you intended.
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
 | `is the canvas label of port` | a canvas label (`Tr`, `D`) used as a port name | use the port the error names (`InputTrigger`, `Time`) |
 | `a Loxone Config save turns it into` | Config would store the value differently (`Poll: 5` as 10, a digital input's `MaxVal: 5` as 1) | write the value the error names |
+| `a Loxone Config save writes it as` | Config would store the title differently (`Max<Min` as `Max_Min`, a space at the end as `_`) | write the title the error names |
 | `does not fit. The port is documented in …` | a unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`loxl types <Type>`) |
 | `is not an exact number of minutes` | a time on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a value that fits |
 | `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |

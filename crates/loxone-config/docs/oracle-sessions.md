@@ -958,6 +958,30 @@ default outside it. Session 64 minted twelve more HTTP inputs for rounding and t
 - **Heal:** compile refuses a value the save rewrites and names the value the save writes. Every value
   the save kept compiles as before.
 
+## Titles a save rewrites (sessions 80 to 83, #342) — passed, findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Session 80
+minted a digital `VirtualIn` and an `And` per printable ASCII punctuation character and per `ä`, `ß`,
+`€`, `°`, `µ`, `²`, `é` and an emoji, and one object with all of them in its title for every virtual,
+Modbus, calendar and mode type, a `Formula`, a created page and a `.title` claim on a base `Actor`.
+Session 81 did the same for every other block type the compiler creates, and a `Mode` and a
+`CalendarEntry` per character. Session 82 checked mood names, `LightController2` per character, tabs,
+line breaks, spaces at the ends and empty titles.
+
+- **Finding:** a save drops `{`, `}`, tabs and line breaks, and turns each space or tab at either end
+  into `_`. `"{ a}"` became `"_a"`, `"a\t "` became `"a__"`.
+- **Finding:** `%`, `<` and `|` become `_` on every block type and on the virtual and Modbus I/Os.
+  `LightController2` keeps `<`. `Mode` keeps `<` but turns `,`, `:`, `;` and `=` into `_`.
+  `CalendarEntry` also turns `/` into `_`.
+- **Finding:** a page, a Modbus server and a mood name keep every character.
+- **Finding:** an empty title comes back as `noname <UUID>`; one the save empties (`"{}"`) loses its
+  `Title=`.
+- **Heal:** compile and check refuse such a title and name the title the save writes.
+- Session 83 compiled expressions with `<`, `<=` and `%`, whose block labels now read `≤`, `＜` and
+  `％`. The save kept every label. It dropped a `Def="0"` on a `Less` block's `Input2` (`p1.Q < 0`),
+  filed separately.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

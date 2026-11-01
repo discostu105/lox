@@ -569,3 +569,39 @@ fn a_value_a_save_rewrites_is_refused() {
     )
     .unwrap();
 }
+
+#[test]
+fn a_title_a_save_rewrites_is_refused() {
+    // Loxone Config turns `%`, `<` and `|` into `_`, drops `{` and `}`,
+    // and marks spaces at either end (#342).
+    let run = |src: &str| {
+        Module::parse(src).map_err(|e| e.to_string()).and_then(|m| {
+            m.validate().map_err(|e| e.to_string())?;
+            loxone_config::logic::validate_ports(&m).map_err(|e| e.to_string())
+        })
+    };
+    for (src, want) in [
+        ("d = VirtualIn(\"R Ana Max<Min\")\n", "\"R Ana Max_Min\""),
+        ("g = And(\"Licht 100%\")\n", "\"Licht 100_\""),
+        ("g = And(\" Licht\")\n", "\"_Licht\""),
+        ("m = Mode(\"Urlaub: Juli\")\n", "\"Urlaub_ Juli\""),
+        (
+            "extern q = Actor(iname: \"Q1\")\nq.title = \"Pumpe {alt}\"\n",
+            "\"Pumpe alt\"",
+        ),
+    ] {
+        let err = run(src).unwrap_err();
+        assert!(err.contains(want), "{src}: {err}");
+        assert!(err.contains("a Loxone Config save writes it as"), "{err}");
+    }
+    let err = run("g = And(\"\")\n").unwrap_err();
+    assert!(err.contains("`noname <UUID>`"), "{err}");
+    for ok in [
+        "d = VirtualIn(\"R Ana Def>Max\")\n",
+        "lc = LightController2(\"Licht <EG>\")\n",
+        "m = Mode(\"Urlaub < Juli\")\n",
+        "mb = ModbusServer(\"Zähler 100%\", Address: \"192.0.2.12:502\")\n",
+    ] {
+        run(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+}
