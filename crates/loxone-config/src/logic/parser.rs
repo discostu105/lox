@@ -1292,7 +1292,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                     }
                     _ => {
                         return Err(err(
-                            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
+                            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
                                      | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
                                      [, device: \"…\"])`"
                                 .into(),
@@ -1320,9 +1320,10 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                 Some(("uuid", v, _)) => MatchSpec::Uuid(v),
                 Some(("iname", v, _)) => MatchSpec::IName(v),
                 Some(("title", v, _)) => MatchSpec::Title(v),
+                Some(("serial", v, _)) => MatchSpec::Serial(v),
                 Some((other, _, _)) => {
                     return Err(err(format!(
-                        "unknown matcher `{other}`. Start with uuid, iname, title or mirrors, then narrow with room, category or device."
+                        "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
                     )));
                 }
                 None => return Err(err("empty matcher list".into())),
@@ -1348,11 +1349,11 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                 }
             }
             let constrained = room.is_some() || category.is_some() || device.is_some();
-            if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
-                return Err(err(
-                    "`uuid:` matches exactly, so room, category and device are not allowed with it"
-                        .into(),
-                ));
+            if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
+                let k = if matches!(match_spec, MatchSpec::Uuid(_)) { "uuid" } else { "serial" };
+                return Err(err(format!(
+                    "`{k}:` matches exactly, so room, category and device are not allowed with it"
+                )));
             }
             if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
                 return Err(err(
@@ -1371,7 +1372,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             })
         }
         _ => Err(err(
-            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\")`".into(),
+            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\")`".into(),
         )),
     }
 }

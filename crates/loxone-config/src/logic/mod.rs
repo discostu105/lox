@@ -31,12 +31,14 @@
 
 mod access;
 mod adopt;
+mod adopt_hardware;
 mod adopt_tree;
 mod ast;
 mod compile;
 mod decompile;
 mod defaults;
 mod desugar;
+mod hardware;
 mod lint;
 mod moods;
 mod parser;

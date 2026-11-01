@@ -252,6 +252,11 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `fuehler.MinTime = 600`, `taster.Desc = "Klingel"`. The original returns when the line goes. `Desc`
   is the app's name for the control. Only `Desc`, the low ends of the correction, `MinVal`,
   `ResetTime` and `AverageTime` can be added; the rest must already be on the object.
+- **Hardware is declared to own it:** `taster = TreeDevice("Taster", serial: "B0A1B2C3")`,
+  `klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", Statistics: on)`.
+  The source owns title, room, category and the stated settings; nothing is restored when the line
+  goes, and the element is never deleted. Bind ports in the argument list. `loxl adopt --uuid
+  <device>` declares an existing device with all its I/O. Pairing stays in Loxone Config.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.

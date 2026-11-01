@@ -62,9 +62,9 @@ const ORDER: &[&str] = &[
     "Idx",
 ];
 
-/// The Air and Tree devices whose own settings can be claimed (#197): the
-/// description, the installation place, and the switch board with its row
-/// and position.
+/// The Air and Tree devices and extensions whose own settings can be
+/// claimed: the description, the installation place, and the switch board
+/// with its row and position.
 ///
 /// Not claimable: `PWMFrequency`, `UseDimmer` and `UseRGBDimmer`, since what
 /// a value other than `123`/`true` means is unknown (no real config carries
@@ -76,6 +76,9 @@ pub const DEVICE_TYPES: &[&str] = &[
     // (31 of 111). Loxone Config drops a board added to one without, so a
     // board is rewritten, never added.
     "TreeDevice",
+    // The Tree and Air extensions: the place and the board.
+    "LoxTree",
+    "LoxAIR",
 ];
 
 /// The claimable device settings and whether a missing one may be added.
@@ -90,6 +93,12 @@ fn device_settings(block_type: &str) -> &'static [(&'static str, bool)] {
         ],
         "TreeDevice" => &[
             ("Desc", true),
+            ("Installation", false),
+            ("SwitchBoard", false),
+            ("SwitchBoardRow", false),
+            ("SwitchBoardPos", false),
+        ],
+        "LoxTree" | "LoxAIR" => &[
             ("Installation", false),
             ("SwitchBoard", false),
             ("SwitchBoardRow", false),

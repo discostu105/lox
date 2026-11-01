@@ -283,6 +283,7 @@ extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 extern boiler = Switch(uuid: "1d844a67-0333-5301-ffffed57184a04d2")
 extern licht_buero = LightController2(title: "Deckenlicht", room: "Büro")
 extern taster_flur = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
+extern tree = LoxTree(serial: "13000003")
 extern status_alarm_ref = InputRef(mirrors: status_alarm)
 ```
 
@@ -302,7 +303,8 @@ match. Zero is a `NoMatch` error; several is an `AmbiguousMatch` error that list
   for its own I/Os and virtual folders. For a device, it is the device's own. An Air device's serial
   is the one the Miniserver's `/data/status` lists (`50:4F:94:FF:FE:BA:1F:0E`). Serials compare
   ignoring case and `:`.
-- These constraints never combine with `uuid:`, which pins exactly on its own.
+- **`serial:`** matches a device by its own serial, compared the same way.
+- These constraints never combine with `uuid:` or `serial:`, which pin exactly on their own.
 
 Once resolved, the UUID is pinned in the lockfile. Later compiles use the pin, even if the title has
 changed, as long as an object with that UUID and type still exists. Editing a `uuid:` value re-points
@@ -544,6 +546,50 @@ follows `page`.
 - `extern … (device: "<serial>")` is something else: an extern matched
   by the serial of a physical device.
 
+### Hardware — Tree and Air devices and what hangs below them
+
+```text
+taster = TreeDevice("Taster Bad", serial: "B0A1B2C3", Installation: "Neben der Tür")
+klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", Statistics: on)
+temp = TreeAsensor("Raum", device: taster, iname: "AI0", Unit: "<v.1> °C", MinTime: 600)
+led = TreeActor("Status", device: taster, iname: "Q0", I: klingel.Q)
+tree = LoxTree("Tree", serial: "13000003", SwitchBoard: "Verteiler 2")
+klingel.room = "Flur"
+```
+
+A hardware declaration takes over a device that Loxone Config paired, or
+an input or output below one. The element stays where it is; the source
+owns its title (the label), its room and category, and the settings it
+states. They are written on every compile.
+
+- **Devices:** `TreeDevice`, `LoxAIRDevice`, and the extensions `LoxTree`
+  and `LoxAIR`. A device is matched by `serial:` (an Air device's is
+  the one `/data/status` lists, from its `IP=`) or by `uuid:`.
+- **Inputs and outputs:** `TreeSensor`, `TreeAsensor`, `TreeActor` and
+  `TreeAactor` below a `TreeDevice`; `LoxAIRsensor`, `LoxAIRAsensor`,
+  `LoxAIRactor` and `LoxAIRAactor` below a `LoxAIRDevice`. `device:`
+  names the device's declaration. The I/O is matched by `iname:` inside
+  that device, which needs the device matched by `serial:`, or by
+  `uuid:`.
+- **Settings** are those of `=` on a setting (below), with the same
+  rules for adding one. The extensions have `Installation`,
+  `SwitchBoard`, `SwitchBoardRow` and `SwitchBoardPos`, rewritten only.
+- **`Statistics: on`** records the I/O's value: `StatsType="7"` on a
+  digital input or output, `11` on an analog sensor (TreeAsensor,
+  LoxAIRAsensor). `off` removes it. Left out, the statistics stay as
+  Loxone Config set them.
+- **Ports** are bound in the argument list (`I: klingel.Q`, `I: 30`).
+  `x.Port <- …`, `x.Port = …` and `x.title = …` on a declaration are
+  errors. `.room` and `.category` are allowed; they only rewrite a
+  binding the element has.
+- **Removing** a declaration from the source releases the hardware: the
+  element keeps the values the source wrote last, and its wires from
+  the argument list leave. Nothing is ever deleted.
+- `adopt --uuid <device>` declares the device with every I/O below it,
+  with the values the config holds. An extern among them keeps its
+  slug, and its statements move into its declaration. Adopting an I/O
+  alone is an error. Pairing a device stays in Loxone Config.
+
 ### Operating modes — minted into the "Betriebsmodi" folder
 
 ```text
@@ -653,7 +699,8 @@ An Air or Tree device (`LoxAIRDevice`, `TreeDevice`) has settings of its
 own: `Desc`, which may be added, and where it is installed —
 `Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` —
 which are rewritten only (a Tree device has a board only when it is
-mounted in one).
+mounted in one). The Tree and Air extensions (`LoxTree`, `LoxAIR`) have
+the place and the board.
 
 ```text
 extern relais = LoxAIRDevice(title: "Relais Jalousie", device: "50:4F:94:FF:FE:BA:1F:0E")

@@ -770,6 +770,27 @@ Lox Logic writes these settings ([D65](decisions/0065-physical-io-settings.md)).
 save kept description, unit, low end, averaging and time on two Air sensors); live check on the house
 Miniserver.
 
+### Statistics: `StatsType=`
+
+An input or output with statistics carries `StatsType=`, often with
+`StatsAutoDel="1"`; without statistics it has neither. The value is the
+recording kind. Every hardware I/O with statistics in the corpus and the
+house config uses one per type:
+
+| Type | `StatsType` |
+|---|---|
+| `TreeSensor`, `TreeActor`, `LoxAIRsensor`, `LoxAIRactor`, `DigitalIn` | `7` |
+| `TreeAsensor`, `LoxAIRAsensor` | `11` |
+| `Lox1wireAsensor` | `10` or `11` |
+| `VoltageIn` | `6` |
+
+The structure file's statistic `frequency` gives the meaning: 1 is every
+change, 2 to 6 averages (deprecated), 8 to 11 intervals. The app
+catalogue maps `7` to frequency 1 and `11` to frequency 11. A save keeps
+`StatsType` added or removed, with or without `StatsAutoDel` (oracle
+session 51). Lox Logic writes `7` and `11` only
+([D101](decisions/0101-hardware-declarations.md)).
+
 ## Hardware identity: `Serial=`
 
 Hardware elements carry their serial number in `Serial=`, written as
@@ -806,6 +827,10 @@ session 30). Every Air device in the corpus has
 `PWMFrequency="123"`, `UseDimmer="true"` and (99 of 103)
 `UseRGBDimmer="true"`. A save writes `TId=` (`NanoIO`,
 `RoomsensorTree`) right after a `Desc` it finds on a device.
+
+The Tree and Air extensions (`LoxTree`, `LoxAIR`) carry `Installation`
+and `SwitchBoard` too. A save keeps both rewritten, a board also from
+`""` (oracle session 51).
 
 ## Time functions: per-project singletons
 

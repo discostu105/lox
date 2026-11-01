@@ -508,5 +508,6 @@ pub fn zero_when_missing(block_type: &str, name: &str) -> bool {
 /// `device:` on a block names the device it hangs below — an
 /// identity binding like `mirrors:`, not a value.
 pub fn is_device_binding(block_type: &str, key: &str) -> bool {
-    key == "device" && !device_types(block_type).is_empty()
+    key == "device"
+        && (!device_types(block_type).is_empty() || crate::hardware::is_io(block_type))
 }

@@ -2257,7 +2257,8 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 9] = [
+    let older: [(Form, &str); 10] = [
+        (d::semantic_fingerprint_v10, "extension settings and statistics"),
         (d::semantic_fingerprint_v9, "PulseAt fire times"),
         (d::semantic_fingerprint_v8, "Air and Tree device settings"),
         (d::semantic_fingerprint_v7, "device settings"),

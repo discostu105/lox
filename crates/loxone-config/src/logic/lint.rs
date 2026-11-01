@@ -167,12 +167,30 @@ fn unused_defaults(module: &Module) -> Result<Vec<LintFinding>> {
     let mut out = Vec::new();
     for item in &module.items {
         let Item::Defaults(d) = item else { continue };
-        let blocks: Vec<_> = bare
+        // What each block of the type binds; a hardware declaration is
+        // lowered, its settings and port values apart.
+        let blocks: Vec<BTreeSet<&str>> = bare
             .blocks()
             .filter(|b| b.block_type == d.block_type)
+            .map(|b| b.bindings().map(|x| x.port.as_str()).collect())
+            .chain(
+                bare.owned()
+                    .filter(|o| o.block_type == d.block_type)
+                    .map(|o| {
+                        o.settings
+                            .iter()
+                            .map(|(k, _)| k.as_str())
+                            .chain(
+                                bare.sets()
+                                    .filter(|s| s.target.slug == o.slug)
+                                    .map(|s| s.target.port.as_str()),
+                            )
+                            .collect()
+                    }),
+            )
             .collect();
         for (port, v) in d.params() {
-            if blocks.iter().any(|b| !b.bindings().any(|x| x.port == port)) {
+            if blocks.iter().any(|b| !b.contains(port)) {
                 continue;
             }
             out.push(LintFinding {
@@ -323,7 +341,11 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
 
     for item in &flat.items {
         match item {
-            Item::Extern(e) if !object_refs.contains(e.slug.as_str()) => {
+            // A hardware declaration owns what it states; it needs no use.
+            Item::Extern(e)
+                if !object_refs.contains(e.slug.as_str())
+                    && !flat.owned().any(|o| o.slug == e.slug) =>
+            {
                 findings.push(LintFinding {
                     kind: LintKind::UnusedExtern,
                     slug: e.slug.clone(),
