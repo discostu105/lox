@@ -85,6 +85,10 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub(&mut b.slug);
             rename_block_args(b, old, new);
         }
+        // Its values may name `let` constants; the type is not a name.
+        Item::Defaults(d) => {
+            rename_args(&mut d.args, &mut d.comment, &mut d.close_comment, old, new)
+        }
         Item::Instance(call) => {
             sub(&mut call.slug);
             // The callee is a template name — same module namespace.
@@ -286,7 +290,17 @@ fn shadows(t: &TemplateDecl, name: &str) -> bool {
 }
 
 fn rename_block_args(b: &mut BlockDecl, old: &str, new: &str) {
-    for arg in &mut b.args {
+    rename_args(&mut b.args, &mut b.comment, &mut b.close_comment, old, new);
+}
+
+fn rename_args(
+    args: &mut [ArgItem],
+    comment: &mut Option<String>,
+    close_comment: &mut Option<String>,
+    old: &str,
+    new: &str,
+) {
+    for arg in args {
         match arg {
             ArgItem::Binding(binding) => {
                 // `binding.port` is a connector or template-parameter name
@@ -303,10 +317,10 @@ fn rename_block_args(b: &mut BlockDecl, old: &str, new: &str) {
             ArgItem::Comment(text) => sub_text(text, old, new),
         }
     }
-    if let Some(text) = &mut b.comment {
+    if let Some(text) = comment {
         sub_text(text, old, new);
     }
-    if let Some(text) = &mut b.close_comment {
+    if let Some(text) = close_comment {
         sub_text(text, old, new);
     }
 }

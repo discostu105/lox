@@ -358,6 +358,58 @@ fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
     })
 }
 
+/// A closed `defaults <Type>(…)` argument list: values only, each port
+/// once, at least one.
+fn finish_defaults(call: BlockDecl, lineno: usize) -> Result<DefaultsDecl> {
+    let ty = &call.block_type;
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    if call.title.is_some() {
+        return Err(err(format!(
+            "`defaults {ty}(…)` takes no label string: a label names one block."
+        )));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for b in call.bindings() {
+        let p = &b.port;
+        match &b.kind {
+            BindingKind::Param(Value::Ref(_))
+                if crate::periphery::is_device_binding(ty, p)
+                    || (p == "mirrors" && super::validate::is_ref_type(ty)) =>
+            {
+                return Err(err(format!(
+                    "`defaults {ty}(…)`: `{p}:` says which object a block is, not a value. \
+                     Write it on each block."
+                )));
+            }
+            BindingKind::Param(_) => {}
+            BindingKind::Wire(_) | BindingKind::Expr(_) => {
+                return Err(err(format!(
+                    "`defaults {ty}(…)`: `{p}: {}` is not a value. A default is a value \
+                     (a number, string, `on`/`off`, a duration or a constant); wire the port on \
+                     each block.",
+                    b.kind
+                )));
+            }
+        }
+        if !seen.insert(p.as_str()) {
+            return Err(err(format!(
+                "`defaults {ty}(…)` binds `{p}` twice. Keep one of them."
+            )));
+        }
+    }
+    if seen.is_empty() {
+        return Err(err(format!(
+            "`defaults {ty}()` sets nothing. Give it `<Port>: <value>` arguments, or delete it."
+        )));
+    }
+    Ok(DefaultsDecl {
+        block_type: call.block_type,
+        args: call.args,
+        comment: call.comment,
+        close_comment: call.close_comment,
+    })
+}
+
 /// A closed call becomes a block declaration, or a template instantiation
 /// when the callee is lowercase.
 fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
@@ -395,7 +447,8 @@ const STATEMENTS: &str = "expected a statement: `let <name> = <value>`, \
      `(<slug>, …).<Port> = <value>`, `<slug>.tiles|schedule|moods|access|recipients = <name>`, \
      `page \"<title>\"`, `template <name>(…)`, `test \"<name>\"`, `tiles <name>`, \
      `schedule <name>`, `moods <name>`, `rule <slug>`, `access <name>`, \
-     `recipients <name>`, `removed <slug>`, or `moved <old> -> <new>`";
+     `recipients <name>`, `defaults <Type>(…)`, `removed <slug>`, or \
+     `moved <old> -> <new>`";
 
 pub fn parse(src: &str) -> Result<Module> {
     let mut parser = Parser::default();
@@ -422,6 +475,8 @@ struct Parser {
     open_set: Option<OpenSet>,
     /// The index of the `tile` whose argument list `open_call` carries.
     open_tile: Option<u32>,
+    /// `open_call` carries a `defaults <Type>(…)` argument list.
+    open_defaults: bool,
     /// A `rule` whose body is still open (until `end`).
     open_rule: Option<RuleDecl>,
 }
@@ -560,6 +615,11 @@ impl Parser {
                     unreachable!("a tile is open only in a tiles set");
                 };
                 tiles.body.push(TilesItem::Tile(tile));
+                return Ok(());
+            }
+            if std::mem::take(&mut self.open_defaults) {
+                let d = finish_defaults(self.open_call.take().unwrap(), lineno)?;
+                self.items.push(Item::Defaults(d));
                 return Ok(());
             }
             let in_template = self.open_template.is_some();
@@ -754,8 +814,17 @@ impl Parser {
                     | "expect"
                     | "clock"
                     | "tile"
-            ) || (kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_)))))
+            ) || (matches!(kw.as_str(), "rule" | "defaults")
+                && matches!(toks.get(1), Some(Tok::Ident(_)))))
         {
+            if kw == "defaults" {
+                return Err(err(
+                    "`defaults` is a top-level statement: it applies to the blocks of the whole \
+                     module, template bodies included. Move it out of the template, or give the \
+                     template a parameter with a default value."
+                        .into(),
+                ));
+            }
             return Err(err(format!(
                 "`{kw}` is not allowed inside a template body. A body holds only block declarations, named signals, wires, port assignments and comments."
             )));
@@ -801,6 +870,35 @@ impl Parser {
             // `rule` is a keyword only in front of a slug, like the set kinds.
             Tok::Ident(kw) if kw == "rule" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
                 self.open_rule = Some(parse_rule_head(toks, comment, lineno)?);
+            }
+            // `defaults` is a keyword only in front of a type, like `rule`.
+            Tok::Ident(kw) if kw == "defaults" && matches!(toks.get(1), Some(Tok::Ident(_))) => {
+                let [_, Tok::Ident(ty), Tok::LParen, rest @ ..] = toks else {
+                    return Err(err("expected `defaults <Type>(<Port>: <value>, …)`".into()));
+                };
+                if ty.starts_with(|c: char| c.is_ascii_lowercase()) {
+                    return Err(err(format!(
+                        "`defaults {ty}(…)`: `defaults` takes a block type. A template's \
+                         defaults are its parameter defaults (`template {ty}(<param> = <value>)`)."
+                    )));
+                }
+                let mut call = BlockDecl {
+                    slug: "defaults".into(),
+                    block_type: check_type(ty, lineno)?,
+                    title: None,
+                    args: Vec::new(),
+                    comment: None,
+                    close_comment: None,
+                };
+                let outcome = parse_call_args(&mut call, rest, lineno)?;
+                call.comment = comment;
+                if outcome.closed {
+                    self.items
+                        .push(Item::Defaults(finish_defaults(call, lineno)?));
+                } else {
+                    self.open_call = Some(call);
+                    self.open_defaults = true;
+                }
             }
             Tok::Ident(kw) if kw == "tile" => {
                 return Err(err(
@@ -912,6 +1010,7 @@ impl Parser {
         if let Some(call) = self.open_call {
             let what = match self.open_tile {
                 Some(i) => format!("tile {i}(…"),
+                None if self.open_defaults => format!("defaults {}(…", call.block_type),
                 None => format!("{} = {}(…", call.slug, call.block_type),
             };
             return Err(Error::Parse {

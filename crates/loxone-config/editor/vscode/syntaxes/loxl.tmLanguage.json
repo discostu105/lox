@@ -17,6 +17,7 @@
     { "include": "#let" },
     { "include": "#removed" },
     { "include": "#moved" },
+    { "include": "#defaults" },
     { "include": "#block" },
     { "include": "#instance" },
     { "include": "#signal" },
@@ -323,6 +324,33 @@
         "6": { "name": "constant.language.matchkind.loxl" },
         "7": { "name": "punctuation.separator.loxl" }
       }
+    },
+    "defaults": {
+      "comment": "defaults <Type>(<Port>: <value>, …): values for every managed block of the type",
+      "begin": "^\\s*(defaults)\\s+([A-Z][A-Za-z0-9]*)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.defaults.loxl" },
+        "2": { "name": "entity.name.type.loxl" },
+        "3": { "name": "punctuation.definition.arguments.begin.loxl" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.arguments.end.loxl" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#file" },
+        { "include": "#string" },
+        {
+          "match": "([A-Za-z][A-Za-z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.parameter.loxl" },
+            "2": { "name": "punctuation.separator.loxl" }
+          }
+        },
+        { "include": "#bool" },
+        { "include": "#number" }
+      ]
     },
     "block": {
       "begin": "^\\s*([a-z][a-z0-9_]*)\\s*(=)\\s*([A-Z][A-Za-z0-9]*)\\s*(\\()",

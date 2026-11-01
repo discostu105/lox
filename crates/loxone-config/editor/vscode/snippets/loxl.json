@@ -4,6 +4,15 @@
     "body": "page \"${1:Title}\"",
     "description": "Place the following blocks on this page of the base config (positional, authoritative)"
   },
+  "defaults": {
+    "prefix": "defaults",
+    "body": [
+      "defaults ${1:ModbusASensor}(",
+      "\t${2:ModbusCmd}: ${3:4},",
+      ")"
+    ],
+    "description": "Parameter values for every managed block of a type that does not bind the port itself"
+  },
   "extern": {
     "prefix": "extern",
     "body": "extern ${1:slug} = ${2:VirtualIn}(${3|iname,title,uuid|}: \"${4:VI1}\")",

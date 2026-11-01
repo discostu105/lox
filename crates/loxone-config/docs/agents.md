@@ -233,6 +233,11 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`. On a block, `device:` names
   the device (by slug) the I/O hangs in. Write Loxone's `\v` as `"\\v"`. `loxl adopt --uuid <device>`
   takes over an existing device with its I/O.
+- **Shared parameters: `defaults <Type>(Port: value, …)`.** Every managed block of the type takes
+  these values for the ports it does not bind (`defaults ModbusASensor(ModbusPollingCycle: 60)`).
+  Values only, one statement per type, at the top level. A block's own binding wins. Decompile and
+  adopt write it for a type whose blocks sit on one page and mostly share a value; hovering a block
+  in the editor shows what it takes.
 - **Settings of a physical input or output** are claims on its extern: `fuehler.Unit = "<v.1> °C"`,
   `fuehler.MinTime = 600`, `taster.Desc = "Klingel"`. The original returns when the line goes. `Desc`
   is the app's name for the control. Only `Desc`, the low ends of the correction, `MinVal`,
@@ -303,6 +308,11 @@ it only when it matches what you intended.
 | `is old syntax` | a `block`/`wire`/`set`/`match`/`use` keyword from the old grammar | rewrite the line in the spelling the error shows |
 | `duplicate parameter` / `duplicate wire` | same argument twice in one argument list | delete one (fan-in with *different* sources is allowed) |
 | `has both a value … and a wire` | a port bound to a constant and to a wire in one argument list | keep one, since a wired input ignores its value |
+| `` two `defaults T(…)` statements `` | a type has two `defaults` statements | merge their arguments into one |
+| `` `defaults` … is not a value `` / `takes no label string` | a wire, expression or label in `defaults` | write it on each block; `defaults` takes values only |
+| `says which object a block is` | `device:`/`mirrors:` in `defaults` | write it on each block |
+| `cannot adopt` + `would set it to` (from `adopt --uuid`) | the adopted block leaves a defaulted port unset | take the port out of the `defaults` statement and bind it on the other blocks, or set the port on the block in Loxone Config |
+| `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
 | `is an attribute parameter, not a connector` | wire aimed at e.g. `Formula:` | pass a value instead: `Formula: "I1+I2"` |

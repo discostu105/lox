@@ -56,9 +56,9 @@ use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
-    BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, MoodLine, MoodsClaim, MoodsDecl,
-    MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, SetKind, Value, WireDecl,
-    clock_text,
+    BindingKind, BlockDecl, DefaultsDecl, ExternDecl, Item, MatchSpec, Module, MoodLine,
+    MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl,
+    SetKind, Value, WireDecl, clock_text, duration_value,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -210,6 +210,13 @@ pub(super) struct Lift {
     /// per-page view.
     pub(super) extern_decls: BTreeMap<usize, ExternDecl>,
     pub(super) block_decls: BTreeMap<usize, BlockDecl>,
+    /// `block_decls` with the values `defaults` carries factored out —
+    /// what the module views write. `block_decls` keeps every binding
+    /// for adopting one block into a module of its own.
+    factored: BTreeMap<usize, BlockDecl>,
+    /// The `defaults` statements factored from the managed blocks, each
+    /// with its home bucket: the one holding most blocks of its type.
+    defaults: Vec<HomedDefaults>,
     pub(super) match_specs: BTreeMap<usize, MatchSpec>,
     /// `device:` constraints for the title matches that need one.
     devices: BTreeMap<usize, String>,
@@ -308,6 +315,9 @@ impl Lift {
         let (block_decls, default_params_elided) = cx.block_decls(&slug_of, &managed);
         let wires = cx.extern_wires(&slug_of, &managed, touched);
         let rule_notes = cx.rule_notes(&externs);
+        let (factored, defaults) = factor_defaults(&block_decls, &managed, |i| {
+            page_of.get(&objects[i].uuid).copied()
+        });
 
         Lift {
             objects,
@@ -320,6 +330,8 @@ impl Lift {
             externs,
             extern_decls,
             block_decls,
+            factored,
+            defaults,
             match_specs,
             devices,
             wires,
@@ -508,6 +520,12 @@ impl Lift {
             }),
             None => Item::Comment(" periphery (not placed on a page)".to_string()),
         }];
+        // One namespace: each `defaults` once, in its home bucket.
+        for (d, home) in &self.defaults {
+            if *home == page {
+                items.push(Item::Defaults(d.clone()));
+            }
+        }
         for &i in &b.externs {
             if self.named_rule(i) {
                 continue;
@@ -516,7 +534,7 @@ impl Lift {
             items.push(Item::Extern(self.extern_decls[&i].clone()));
         }
         for &i in &b.blocks {
-            items.push(Item::Block(self.block_decls[&i].clone()));
+            items.push(Item::Block(self.factored[&i].clone()));
         }
         for &wi in &b.wires {
             items.push(Item::Wire(self.wires[wi].0.clone()));
@@ -576,6 +594,27 @@ impl Lift {
                 category: None,
                 comment: None,
             })];
+            // A self-contained module states the defaults its blocks take.
+            for (d, _) in &self.defaults {
+                let blocks: Vec<&BlockDecl> = b
+                    .blocks
+                    .iter()
+                    .map(|i| &self.factored[i])
+                    .filter(|x| x.block_type == d.block_type)
+                    .collect();
+                let mut d = d.clone();
+                d.args.retain(|a| {
+                    let ArgItem::Binding(arg) = a else {
+                        return false;
+                    };
+                    blocks
+                        .iter()
+                        .any(|x| !x.bindings().any(|y| y.port == arg.port))
+                });
+                if !d.args.is_empty() {
+                    items.push(Item::Defaults(d));
+                }
+            }
             for &i in &b.externs {
                 if self.named_rule(i) {
                     continue;
@@ -644,7 +683,7 @@ impl Lift {
             }
 
             for &i in &b.blocks {
-                items.push(Item::Block(self.block_decls[&i].clone()));
+                items.push(Item::Block(self.factored[&i].clone()));
             }
             for &wi in &b.wires {
                 items.push(Item::Wire(self.wires[wi].0.clone()));
@@ -679,6 +718,47 @@ impl Lift {
             default_params_elided: self.default_params_elided,
         }
     }
+}
+
+/// A `defaults` statement and the bucket it is written in: a page index,
+/// `None` for the periphery.
+type HomedDefaults = (DefaultsDecl, Option<usize>);
+
+/// The managed blocks with their shared values factored into `defaults`
+/// statements ([`super::defaults::factor`]), each with its home bucket
+/// (`page_of`). Only a type whose blocks all sit in one bucket — one page,
+/// or the periphery — is factored: the statement then stands in front of
+/// every block it reaches, in the same file of a directory module.
+fn factor_defaults(
+    block_decls: &BTreeMap<usize, BlockDecl>,
+    managed: &[usize],
+    page_of: impl Fn(usize) -> Option<usize>,
+) -> (BTreeMap<usize, BlockDecl>, Vec<HomedDefaults>) {
+    let mut home: BTreeMap<&str, Option<Option<usize>>> = BTreeMap::new();
+    for &i in managed {
+        let page = page_of(i);
+        home.entry(block_decls[&i].block_type.as_str())
+            .and_modify(|h| {
+                if *h != Some(page) {
+                    *h = None;
+                }
+            })
+            .or_insert(Some(page));
+    }
+    let mut factored = block_decls.clone();
+    let mut blocks: Vec<&mut BlockDecl> = factored
+        .values_mut()
+        .filter(|b| home.get(b.block_type.as_str()).is_some_and(Option::is_some))
+        .collect();
+    let found = super::defaults::factor(&mut blocks);
+    let defaults = found
+        .into_iter()
+        .map(|d| {
+            let page = home[d.block_type.as_str()].expect("one bucket");
+            (d, page)
+        })
+        .collect();
+    (factored, defaults)
 }
 
 /// Pages in document order (titles, uuids) and the page each object
@@ -1408,7 +1488,8 @@ impl Scan<'_> {
                     // A text-boolean attribute reads `on`/`off`.
                     Value::Bool(v == "true")
                 } else {
-                    Value::from_literal(&v)
+                    duration_value(&o.block_type, param, &v)
+                        .unwrap_or_else(|| Value::from_literal(&v))
                 };
                 args.push(ArgItem::Binding(Binding {
                     port: (*param).to_string(),
@@ -1474,9 +1555,12 @@ impl Scan<'_> {
                             Value::from_literal(def)
                         ));
                     } else {
+                        // A duration reads in its unit (`5min`, not `300`).
+                        let value = duration_value(&o.block_type, &p.key, def)
+                            .unwrap_or_else(|| Value::from_literal(def));
                         args.push(ArgItem::Binding(Binding {
                             port: p.key.clone(),
-                            kind: BindingKind::Param(Value::from_literal(def)),
+                            kind: BindingKind::Param(value),
                             comment: None,
                         }));
                     }
@@ -1540,6 +1624,25 @@ impl Scan<'_> {
                 ti,
                 fi,
             ));
+        }
+        // All wires onto one extern together, port by port, in the order
+        // each first appears. A sink's own wires keep their relative order
+        // (the compile keeps the base's `<In>` order either way).
+        {
+            let mut first: BTreeMap<(String, String), usize> = BTreeMap::new();
+            let mut first_slug: BTreeMap<String, usize> = BTreeMap::new();
+            for (k, (w, _, _)) in wires.iter().enumerate() {
+                first_slug.entry(w.to.slug.clone()).or_insert(k);
+                first
+                    .entry((w.to.slug.clone(), w.to.port.clone()))
+                    .or_insert(k);
+            }
+            wires.sort_by_key(|(w, _, _)| {
+                (
+                    first_slug[&w.to.slug],
+                    first[&(w.to.slug.clone(), w.to.port.clone())],
+                )
+            });
         }
         if opts.scope == DecompileScope::Full {
             // Big fan-ins pile up dozens of `<-` lines; sorted by sink,

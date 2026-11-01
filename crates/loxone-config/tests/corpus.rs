@@ -17,8 +17,8 @@ use loxone_config::Lockfile;
 use loxone_config::LoxoneDoc;
 use loxone_config::connectors::{BUILTIN_TYPES, PortDir, builtin, merge, observe};
 use loxone_config::logic::{
-    AccessDecl, CompileOptions, DecompileOptions, Item, Module, MoodsClaim, adopt, compile,
-    decompile,
+    AccessDecl, CompileOptions, DecompileOptions, Item, Module, MoodsClaim, adopt, adopt_pages,
+    compile, decompile,
 };
 use loxone_config::uuid::parse_serial;
 use std::collections::BTreeMap;
@@ -99,6 +99,35 @@ fn corpus_adoptions_rebuild_as_semantic_noops() {
             out.to_bytes(),
             out2.to_bytes(),
             "{}: recompile is not byte-identical",
+            path.display()
+        );
+        // The source as written: the text of the module and of its page
+        // fragments (with the `defaults` factored into them) parses back
+        // and compiles to the same bytes.
+        let text = Module::parse(&module.to_text())
+            .unwrap_or_else(|e| panic!("{}: adopted text does not parse: {e}", path.display()));
+        let mut lock2 = lock.clone();
+        let out3 = compile(&base, &text, &mut lock2, &opts())
+            .unwrap_or_else(|e| panic!("{}: text compile failed: {e}", path.display()));
+        assert_eq!(
+            out.to_bytes(),
+            out3.to_bytes(),
+            "{}: the adopted text compiles differently",
+            path.display()
+        );
+        let (fragments, _, _) = adopt_pages(&base)
+            .unwrap_or_else(|e| panic!("{}: adopt_pages failed: {e}", path.display()));
+        let merged = Module::from_fragments(fragments.iter().map(|(stem, m)| {
+            Module::parse_fragment(&m.to_text())
+                .unwrap_or_else(|e| panic!("{}: {stem}.loxl does not parse: {e}", path.display()))
+        }));
+        let mut lock3 = lock.clone();
+        let out4 = compile(&base, &merged, &mut lock3, &opts())
+            .unwrap_or_else(|e| panic!("{}: fragments compile failed: {e}", path.display()));
+        assert_eq!(
+            out.to_bytes(),
+            out4.to_bytes(),
+            "{}: the adopted fragments compile differently",
             path.display()
         );
     }

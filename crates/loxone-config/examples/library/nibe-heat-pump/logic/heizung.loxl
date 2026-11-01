@@ -1,5 +1,9 @@
 page "Heizung"
 
+defaults Monoflop(
+	Time: 2s,
+)
+
 extern heizungsmodus = Radio(title: "Heizungsmodus")
 extern anwesenheitsmodus_heizung = Radio(title: "Anwesenheitsmodus Heizung")
 extern bad_temperatur_2 = InputRef(mirrors: bad_temperatur)
@@ -35,33 +39,26 @@ heisswasser_boost = PushButton(
 autoreset_nach_3h = OnPulseDelay(
 	InputTrigger: heisswasser_boost.Qon,
 	Reset: heisswasser_boost.Qoff,
-	Delay: 10800,
-	Time: 0.5,
+	Delay: 3h,
+	Time: 500ms,
 )
 
 o17795 = Monoflop(
 	Reset: urlaub.AQ,
-	Time: 2,
 )
 
 o17795_2 = Monoflop(
 	"O17795",
 	InputTrigger: alle_sind_zu_hause_2.Q,
 	Reset: urlaub.AQ,
-	Time: 2,
 )
 
 o17795_3 = Monoflop(
 	"O17795",
 	InputTrigger: urlaub.AQ,
-	Time: 2,
 )
 
-o17795_4 = Monoflop(
-	"O17795",
-	Time: 2,
-)
-
+o17795_4 = Monoflop("O17795")
 alle_sind_zu_hause = Memory()
 bad_temperatur = Memory()
 bad_zieltemperatur = Memory()

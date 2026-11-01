@@ -16,7 +16,7 @@ line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
            | page | test | tiles | tiles-claim | access | access-claim
            | recipients | recipients-claim | schedule | schedule-claim
-           | moods-claim | rule | blank ;
+           | moods-claim | rule | defaults | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
@@ -27,6 +27,10 @@ matcher    = ( "uuid" | "iname" | "title" ) ":" string
 constraint = "room" | "category" ;  (* not with "uuid"/"mirrors"; each at most once *)
 
 block-head = slug "=" type "(" [ args ] [ ")" ] [ comment ] ;
+defaults   = "defaults" type "(" [ def-args ] [ ")" ] [ comment ] ;
+                                    (* top-level only; one per type; the
+                                       argument list may span lines *)
+def-args   = port ":" value { "," port ":" value } [ "," ] ;
 arg-line   = args [ ")" ] [ comment ] | comment ;  (* only inside an open call *)
 args       = arg { "," arg } [ "," ] ;
 arg        = string                                (* label; first argument only *)
@@ -201,6 +205,9 @@ Notes:
   - A suffixed `let` scales per use, into each port's unit.
   - The suffix is part of the canonical spelling: `1.5h` stays `1.5h` through `fmt`.
   - An unknown suffix is a parse error. A quoted `"40s"` stays a string.
+  - Decompile and adopt write the suffix on a port documented in seconds or minutes: the largest of
+    `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
+    and only when it compiles back to the same digits. Zero and the other ports stay bare.
 - The keywords `let`, `extern`, `removed`, `moved`, `template`, `end`,
   `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, `schedule`, the boolean
   literals `on` and `off`, and the expression
@@ -209,7 +216,8 @@ Notes:
   a name. `access` and `recipients` are keywords only where a line
   starts with `access <name>` or `recipients <name>`, and after the dot
   of a claim (`x.access = …`); elsewhere they stay ordinary slugs
-  (`access = Switch()`). `rule` likewise, only in front of a slug.
+  (`access = Switch()`). `rule` likewise, only in front of a slug, and
+  `defaults` only in front of a block type (`defaults = Monoflop()` is a block).
 - An instantiation is distinguished from a block declaration by the case
   of the callee: `sued = fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
@@ -865,6 +873,54 @@ The body may contain only block declarations, named signals, wires, sets, claims
 `.tiles`, `.access`, `.recipients`, through a set parameter) and comments. No nesting, no template-local
 `let`/`extern`. `template` and `end` are reserved words; `use` is reserved for the old-syntax error.
 
+### `defaults` — the parameters every block of a type shares
+
+```text
+defaults ModbusASensor(
+	ModbusPollingCycle: 60,
+	MinTime: 1000,
+	MaxTime: 300000,
+)
+
+vorlauf = ModbusASensor(
+	device: wp,
+	ModbusAddress: 1,
+)
+
+ruecklauf = ModbusASensor(
+	device: wp,
+	ModbusAddress: 2,
+	ModbusPollingCycle: 10,
+)
+```
+
+A `defaults` statement gives every managed block of a type the values it does not bind itself:
+`vorlauf` takes all three, `ruecklauf` keeps its own `ModbusPollingCycle: 10` and takes the other
+two. The source above compiles to the same bytes as writing the values on each block.
+
+- **Values only**: numbers (with a unit), strings, `on`/`off`, clock times and `let` constants. A
+  wire (`Reset: taster.Q`), an expression or a label string is an error; write it on the block.
+  `device:` and `mirrors:` say which object a block is, so they stay on each block too.
+- **One statement per type**, at the top level of the module, in any file. Two statements for one
+  type are an error; merge their arguments. In a template body it is an error.
+- **Every managed block of the type**: template body blocks too, after expansion, so an instance
+  takes the default unless the body or the call site binds the port. Blocks that an expression or a
+  named signal generates (`And`, `GreaterEqual`, …) take none: they bind what their operands say.
+- A block that binds the port in any way keeps its binding: a value, a constant, a wire or a
+  forwarded call-site argument.
+- `loxl lint` reports a statement that no block of the type takes (`unused-default`): no block of the
+  type, or every block binds the port itself.
+- In the language server, hovering a block lists the values it takes from its type's `defaults`.
+
+Decompile and adopt write `defaults` when it saves repetition. For a type with at least three managed
+blocks, all on one page (or all in the periphery), a port becomes a default when every block binds
+it to a value and more than half of them share one value. Those blocks drop the binding; the others
+keep theirs. The statement goes at the top of that page's file, after the `page` line. A type whose
+blocks spread over several pages keeps every value on its blocks, so a file never changes the meaning
+of another. `loxl adopt --uuid` (one block into an existing module) drops the bindings that equal the
+module's defaults, and refuses a block that leaves a defaulted port unset: the default would change
+it.
+
 ### Expressions — sugar over the discrete blocks
 
 ```text
@@ -1484,7 +1540,7 @@ the GUI.
   errors.
 - `removed`/`moved` must not contradict declarations or each other
   (details under the statements).
-- Statement order is free; the conventional order is lets, externs,
+- Statement order is free; the conventional order is `defaults`, lets, externs,
   blocks, extern wires, extern assignments (port and attribute), with
   lifecycle statements (`moved`, `removed`) last.
 
@@ -1599,6 +1655,11 @@ replacement. The compile output of a migrated file is byte-identical.
   it up to the next `page` or the end of its fragment. v1 carried it into the following files, so a
   file without its own `page` took the previous file's page. Such a file now takes the default page;
   `loxl lint` reports it (`default-page`). A single-file module does not change.
+- **`defaults <Type>(Port: value, …)`** gives every managed block of a type the values it does not
+  bind (see [`defaults`](#defaults--the-parameters-every-block-of-a-type-shares)). Decompile and adopt
+  factor shared values into it, write time values with a unit suffix (`Delay: 3h`) and keep the `<-`
+  wires into one extern together. New syntax only; no v1 file changes, and `defaults` stays usable
+  as a slug.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite

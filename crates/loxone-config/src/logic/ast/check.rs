@@ -103,6 +103,7 @@ impl Module {
             Item::Block(b) => b.bindings().any(|x| matches!(x.kind, BindingKind::Expr(_))),
             _ => false,
         });
+        crate::logic::defaults::by_type(&self.items)?;
         let sc = Scope { names, flattened };
         let mut seen = Seen::default();
         for item in &self.items {
@@ -219,6 +220,11 @@ impl Module {
             Item::Test(t) => self.check_test(sc, t)?,
             Item::Template(t) => check_template(t)?,
             Item::Instance(call) => self.check_instance(names, call)?,
+            Item::Defaults(d) => {
+                for (_, v) in d.params() {
+                    self.value_refs(names, v)?;
+                }
+            }
             Item::Tiles(t) => self.check_tiles(sc, t)?,
             Item::TilesClaim(c) => self.check_tiles_claim(names, c, seen)?,
             Item::Access(a) => self.check_access(a)?,

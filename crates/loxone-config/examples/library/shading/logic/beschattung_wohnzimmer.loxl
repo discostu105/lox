@@ -23,7 +23,7 @@ windalarm = Or(
 
 windalarm_halten = OffDelay(
 	InputTrigger: windalarm.Q,
-	Time: 600,
+	Time: 10min,
 )
 
 aussen_ueber_22_c = Greater(
@@ -42,8 +42,8 @@ raffstore_sued = AutoJalousie(
 	AutoShade: sonne_und_warm.Q,
 	Safety: windalarm_halten.Q,
 	Type: 1,
-	TimeEnd: 60,
-	TimeEndDown: 58,
+	TimeEnd: 1min,
+	TimeEndDown: 58s,
 )
 
 raffstore_west = AutoJalousie(
@@ -53,8 +53,8 @@ raffstore_west = AutoJalousie(
 	Safety: windalarm_halten.Q,
 	Type: 1,
 	Dir: 270,
-	TimeEnd: 60,
-	TimeEndDown: 58,
+	TimeEnd: 1min,
+	TimeEndDown: 58s,
 )
 
 raffstore_sued_ab.I <- raffstore_sued.OutputDown
