@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::connectors::{
-    adopt_only, attr_name, attr_param, attr_params, builtin, carried_attrs, container_type,
+    adopt_only, attr_name, attr_param, attr_params, attr_save_default, builtin, carried_attrs,
+    container_type,
 };
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc};
 use crate::lock::Lockfile;
@@ -118,6 +119,15 @@ pub struct CarriedAttr {
 /// block's special states, minted once and pinned, and a virtual
 /// input's `VI<n>` designation.
 const IDENTITY_ATTRS: &[&str] = &["SpStates", "IName"];
+
+/// A program block's `Task="1"`: every save writes it, and Loxone
+/// Config has no field for it, so there is nothing to claim.
+fn is_save_constant(block_type: &str, attr: &str) -> bool {
+    matches!(block_type, "Code16" | "Code8") && attr == "Task"
+}
+
+/// The attributes a `<timer>.schedule = <set>` claim writes.
+const SCHEDULE_ATTRS: &[&str] = &["Modes", "N", "UserModes"];
 
 /// Page furniture that is not logic of its own: the page, the mirrors
 /// (refs) the GUI draws for wires across pages, and comment boxes.
@@ -257,6 +267,13 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
                 }
             }
         }
+        for c in m.schedule_claims() {
+            if let Some(o) = lock.objects.get(&c.slug) {
+                for a in SCHEDULE_ATTRS {
+                    claims.insert((o.uuid.clone(), (*a).to_string()));
+                }
+            }
+        }
     }
     let index = doc.index();
     let mut out: BTreeMap<(String, String), CarriedAttr> = BTreeMap::new();
@@ -277,7 +294,13 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
                 o.block_type.as_str(),
                 "InputRef" | "OutputRef" | "OutputRefLM"
             ) && matches!(name, "Ref" | "LinkRefType" | "Analog" | "Text");
-            if !gui || mirror || IDENTITY_ATTRS.contains(&name) {
+            if !gui
+                || mirror
+                || IDENTITY_ATTRS.contains(&name)
+                || is_save_constant(&o.block_type, name)
+                // What a save writes when nothing is set is no setting.
+                || attr_save_default(&o.block_type, name) == Some(a.value.as_str())
+            {
                 continue;
             }
             let param = attr_param(&o.block_type, name);
@@ -396,6 +419,11 @@ impl Coverage {
             for c in &self.carried {
                 let claim = match c.param {
                     Some(p) => format!("  claim with `{p}:`"),
+                    None if c.block_type == "DayTimer"
+                        && SCHEDULE_ATTRS.contains(&c.attr.as_str()) =>
+                    {
+                        "  claim with `<timer>.schedule = <set>`".to_string()
+                    }
                     None => String::new(),
                 };
                 s.push_str(&format!(
@@ -442,7 +470,7 @@ mod tests {
         let unclaimed = Module::parse("p = PulseAt(\"P\")\n").unwrap();
         let mut lock = Lockfile::new();
         let mut doc = compile(&base, &unclaimed, &mut lock, &opts).unwrap();
-        // The GUI sets the time and the mode.
+        // The GUI sets a time and a daily pulse.
         let o = doc
             .objects()
             .into_iter()
@@ -450,7 +478,7 @@ mod tests {
             .unwrap();
         let el = doc.element_at_mut(&o.path).unwrap();
         el.set_attr("Sec", "68400");
-        el.set_attr("Typ", "0");
+        el.set_attr("Typ", "3");
 
         let rows = |m: &Module| -> Vec<(String, Option<&'static str>, usize)> {
             coverage(&doc, &lock, Some(m))
@@ -463,11 +491,13 @@ mod tests {
             rows(&unclaimed),
             vec![
                 ("Sec".to_string(), Some("At"), 1),
-                ("Typ".to_string(), None, 1)
+                ("Typ".to_string(), Some("Pulse"), 1)
             ]
         );
-        let claimed = Module::parse("p = PulseAt(\"P\", At: 19:00)\n").unwrap();
-        assert_eq!(rows(&claimed), vec![("Typ".to_string(), None, 1)]);
+        let at = Module::parse("p = PulseAt(\"P\", At: 19:00)\n").unwrap();
+        assert_eq!(rows(&at), vec![("Typ".to_string(), Some("Pulse"), 1)]);
+        let both = Module::parse("p = PulseAt(\"P\", At: 19:00, Pulse: \"time\")\n").unwrap();
+        assert!(rows(&both).is_empty());
         let text = coverage(&doc, &lock, None).to_text();
         assert!(text.contains("claim with `At:`"), "{text}");
     }

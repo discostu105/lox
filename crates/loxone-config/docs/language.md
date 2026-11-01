@@ -437,10 +437,55 @@ jalousie_schliessen = PulseAt("Jalousie schließen", At: 19:00, Time: 1s)
   source writes it, at the attribute's place in the base element.
   Decompile and adopt lift it, so an adopted PulseAt states its time.
 - It means a fixed time of day. A PulseAt set to a time function in
-  Loxone Config (sunrise, an hour pulse — any `Typ=` other than `0`) is
-  refused with `At:` and lifted without it. The source does not express
-  time functions yet.
+  Loxone Config (sunrise, an hour pulse) refuses `At:` unless the source
+  also says `Pulse: "time"`, and is lifted without it.
 - `loxl diff` shows a change as `At: 18:58 -> 06:58`.
+
+`Pulse:` on `PulseAt` says when the block fires: `"time"` (at `At:`),
+`"year"`, `"month"`, `"day"`, `"hour"`, `"minute"`, `"second"`, `"start"`
+(when the Miniserver starts), `"dusk"`, `"dawn"`, `"sunset"` or
+`"sunrise"`. It writes `Typ=`. `At:` goes only with `"time"`. A one-off
+pulse on a date stays with Loxone Config.
+
+```text
+licht_an = PulseAt("Licht an", Pulse: "sunset", Time: 1s)
+```
+
+#### Block settings
+
+These settings live on the block element. Each is a claim like `At:`:
+carried from the base while the source leaves it out, written from source
+once bound, at the place a save writes it. Decompile and adopt lift them,
+except a value a save writes when nothing is set.
+
+| Parameter | Blocks | Takes | Loxone Config field |
+|-----------|--------|-------|---------------------|
+| `Desc:` | most blocks with an app entry | text | Anzeigename: the name the app shows |
+| `Type:` | `Memory` | `"digital"`, `"analog"` or `"text"` | Typ |
+| `Pulse:` | `PulseAt` | see above | Impuls |
+| `Sun:` | `AutoJalousie` | `on` or `off` | Sonnenschein verwenden |
+| `On:`, `Off:` | `DayTimer` | text, may be `""` | Bezeichnung Ein / Aus |
+| `PwrN:` | meters | text | Anzeigename of the power value |
+| `Un1:`, `Un2:` | meters | text | Einheit of the two values |
+| `UnSt:`, `MaxLvl:` | `MeterAbsSt` | text, a number | storage unit, Max. Speicherstand |
+
+```text
+merker = Memory("Anrufer", Desc: "Letzter Anrufer", Type: "text", Input: tel.TQ1)
+zaehler = MeterDig("Strom", PwrN: "Leistung", Un1: "kW", Un2: "kWh", Input: s0.Q)
+```
+
+- `Desc:` is the name the app shows. Without it the app shows the label.
+  It is written right after `Type=`, as a save writes it.
+- `Sun: off` leaves the attribute out, as a save does.
+- A text setting refuses `""`, except `On:` and `Off:`, where empty is
+  what a save writes. Leave the setting out to keep what Loxone Config has.
+- Some attributes stay with Loxone Config and are refused by name: the
+  member lists of alarms and central blocks (`Objects=`, `Entries=`,
+  `CentralOut=`, `rec=`), a meter's energy flow monitor (`Rec=`),
+  statistics settings (`StatsType=`), a virtual input's hidden `MinChange=`,
+  `MinTime=`, `ValOT=` and `Idx=`, and a program's `Task="1"`, which every
+  save writes.
+- `loxl types <Type>` lists the settings a type takes and their values.
 
 `Code:` on `Code16` holds the PicoC program. A program is hundreds
 of lines, so its value is a **file**:

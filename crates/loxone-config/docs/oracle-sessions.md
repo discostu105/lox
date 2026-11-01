@@ -1091,6 +1091,26 @@ parameters, inputs wired from virtual inputs, and every output wired into a `For
   order and UUIDs, and an empty semantic diff. A recompile onto the saved file was byte-identical, and so was
   a compile of the module `loxl adopt` made from it.
 
+## Block settings (sessions 43 and 44, D95) — passed, four findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. The base was
+`examples/library/shading/shading.Loxone`. One probe minted a Memory, a PulseAt, a DayTimer, each meter
+type, a Code16 and virtual inputs, then set the attributes in question by hand: `Tp=` 1 and 2, `Typ=` 1
+to 12, `Desc=` at the end of the element, meter fields, DayTimer texts, `ValOT=` and `Idx=` from 0 to 3.
+Each was opened, saved and read back, and the property pane of each block was read. Session 44 ticked
+and unticked options in the panes and saved again. The facts are in [loxone-format.md](loxone-format.md)
+(*Objects*).
+
+- A save keeps `Tp=`, `Typ=` 0 to 11, the meter fields and the DayTimer texts. It moves `Desc=` right
+  after `Type=`. The panes name each field.
+- **Finding — `Typ=` 12 is no choice.** The dropdown has twelve entries; 12 shows blank.
+- **Finding — one-off is a date.** Ticking *Einmaliger Impuls* adds a date field and writes `Sec=` as an
+  absolute date, with `LtE=`.
+- **Finding — `Sun=` off is absent.** Unticking *Sonnenschein verwenden* removes `Sun=`.
+- **Finding — hidden virtual-input fields.** No pane shows `MinChange=`, `MinTime=`, `ValOT=` or `Idx=`.
+  A save drops `ValOT="0"`, `Idx="0"` and `MinVal="0"`, and forces a digital input's `MinChange=` to 0.5.
+- A Program block's pane has no field for `Task=`.
+
 ## The first scripted run
 
 First scripted run 2026-08-26: the full r50 rebuild (1929 objects,

@@ -223,6 +223,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
+| D95 | [Block settings from source: app name, memory type, pulse function, sunshine, texts and units](decisions/0095-block-settings.md) | accepted |
 | D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
 | D102 | [Tree devices created from source](decisions/0102-created-tree-devices.md) | accepted |
 | D110 | [One spelling per operating mode](decisions/0110-mode-reference-spelling.md) | accepted, amends [D69](decisions/0069-operating-modes.md) and [D73](decisions/0073-rule-conditions.md) |

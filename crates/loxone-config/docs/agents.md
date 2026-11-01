@@ -285,7 +285,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
 - **Taking over GUI logic.** Use `loxl adopt`, then confirm with `loxl diff --exit-code` that the
   takeover changed nothing. Adopting an extern `--as` its own slug promotes it, and its wires move
   into the declaration. `loxl coverage` lists what is not managed yet, including attributes of managed
-  blocks still carried from the base (a PulseAt's time is `At: 19:00`).
+  blocks still carried from the base and the parameter that claims each (a PulseAt's time is
+  `At: 19:00`, the name the app shows is `Desc: "…"`). `loxl types <Type>` lists a type's settings.
 - **The app.** A managed block takes `.room`/`.category`, never `.title` (its label is the title). The
   app lists a control only with both. The push adds app entries for the types Lox Logic knows
   (switches, inputs, jalousies, central blocks, meters, …) and names the rest; a save from Loxone

@@ -135,8 +135,13 @@ fn element_attrs(
         res.and_then(|r| r.attrs.iter().find(|(n, _)| n == name))
             .map(|(_, v)| v.as_str())
     };
+    let claimed = |name: &str| managed_attrs.get(&(block.slug.clone(), name.to_string()));
     let mut el = Element::new("C");
     el.set_attr("Type", &block.block_type);
+    // A save writes `Desc=` right after `Type=`.
+    if let Some(d) = claimed("Desc") {
+        el.set_attr("Desc", d);
+    }
     let iname_prefix = if block.block_type == "VirtualIn" {
         Some("VI")
     } else {
@@ -275,20 +280,21 @@ fn element_attrs(
         el.set_attr("Mode", &next_mode.to_string());
         *next_mode -= 1;
     }
-    // `At:` is a fixed time of day, `Typ="0"` on every instance with
-    // one (#248); another `Typ=` is a time function (sunrise, an hour
-    // pulse …) the source cannot express yet, and a fixed time on it
-    // would mean something else.
+    // `At:` is a fixed time of day, `Typ="0"` (#248). Any other `Typ=`
+    // is a time function (sunrise, an hour pulse …), and a fixed time
+    // on it would mean something else. `Pulse:` claims `Typ=`.
     if block.block_type == "PulseAt"
-        && managed_attrs.contains_key(&(block.slug.clone(), "Sec".to_string()))
-        && let Some(typ) = res.and_then(|r| r.attrs.iter().find(|(n, _)| n == "Typ"))
-        && typ.1 != "0"
+        && claimed("Sec").is_some()
+        && let Some(typ) = claimed("Typ")
+            .map(String::as_str)
+            .or_else(|| carried("Typ"))
+        && typ != "0"
     {
         return Err(Error::Compile(format!(
             "block `{}`: `At:` sets a fixed time of day, but the block fires on a \
-             time function (`Typ=\"{}\"`, set in Loxone Config). Remove `At:`, or \
-             switch the block to a fixed time in Loxone Config.",
-            block.slug, typ.1
+             time function (`Typ=\"{typ}\"`, set in Loxone Config). Remove `At:`, or \
+             add `Pulse: \"time\"`.",
+            block.slug
         )));
     }
     for param in attr_params(&block.block_type) {
@@ -298,7 +304,7 @@ fn element_attrs(
         if res.is_some_and(|r| r.attrs.iter().any(|(n, _)| n == name)) {
             continue;
         }
-        if let Some(v) = managed_attrs.get(&(block.slug.clone(), name.to_string())) {
+        if let Some(v) = claimed(name) {
             el.set_attr(name, v);
         }
     }
@@ -320,9 +326,9 @@ fn element_attrs(
             let compiler_owned = matches!(n.as_str(), "Cl" | "LtE" | "WF" | "IName")
                 || (is_ref_type(&block.block_type)
                     && matches!(n.as_str(), "Ref" | "LinkRefType" | "Analog" | "Text"));
-            if let Some(claimed) = managed_attrs.get(&(block.slug.clone(), n.clone())) {
+            if let Some(v) = claimed(n) {
                 if attr_param(&block.block_type, n).is_some() {
-                    el.set_attr(n, claimed);
+                    el.set_attr(n, v);
                 }
             } else if !compiler_owned {
                 el.set_attr_raw(n, v);

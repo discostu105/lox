@@ -2588,6 +2588,20 @@ impl Module {
         {
             return Ok(Cow::Borrowed(if b { "true" } else { "false" }));
         }
+        // A choice (`Pulse: "sunset"`) is stored as its code.
+        if let Some(choices) = crate::connectors::choice_values(block_type, port) {
+            let word = self.resolve_value(value)?;
+            return choices
+                .iter()
+                .find(|(w, _)| *w == word)
+                .map(|(_, code)| Cow::Borrowed(*code))
+                .ok_or_else(|| {
+                    Error::Compile(format!(
+                        "`{slug}.{port}`: `{word}` is not one of {}",
+                        crate::connectors::choice_list(choices)
+                    ))
+                });
+        }
         match suffixed {
             Some((number, unit)) => scale_for_port(number, unit, port_unit(block_type, port))
                 .map(Cow::Owned)

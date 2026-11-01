@@ -8,8 +8,9 @@
 
 use super::ast::{Module, Value};
 use crate::connectors::{
-    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, bool_params, builtin, clock_params,
-    file_params, message_params, save_rewrite_error, title_save_rewrite, title_underscored,
+    BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, bool_params, builtin, choice_values,
+    clock_params, empty_ok, file_params, message_params, save_rewrite_error, text_params,
+    title_save_rewrite, title_underscored,
 };
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
@@ -124,6 +125,18 @@ pub fn validate_ports(module: &Module) -> Result<()> {
             )));
         }
         let mut mirrors = None;
+        // `At:` is a fixed time of day; a time function fires on its own.
+        if block.block_type == "PulseAt"
+            && block.params().any(|(k, _)| k == "At")
+            && let Some((_, v)) = block.params().find(|(k, _)| *k == "Pulse")
+            && !matches!(module.resolve_value(v).as_deref(), Ok("time"))
+        {
+            return Err(Error::Compile(format!(
+                "block `{}`: `At:` sets a fixed time of day, but `Pulse: {v}` is a time \
+                 function. Remove `At:`, or write `Pulse: \"time\"`",
+                block.slug
+            )));
+        }
         for (key, v) in block.params() {
             // A file holds program text — nothing else takes one.
             if let Value::File { .. } = v
@@ -200,6 +213,37 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 )
             {
                 return Err(Error::Compile(e));
+            }
+            // A choice is one of its words, as a string.
+            if let Some(choices) = choice_values(&block.block_type, key) {
+                let ok =
+                    matches!(resolved, Some(Value::Str(w)) if choices.iter().any(|(c, _)| c == w));
+                if resolved.is_some() && !ok {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` is not a choice of `{key}:`. Write one of {}",
+                        block.slug,
+                        crate::connectors::choice_list(choices)
+                    )));
+                }
+            }
+            // A text attribute takes a string (a number reads as one).
+            if text_params(&block.block_type).contains(&key) {
+                match resolved {
+                    Some(Value::Str(t)) if t.is_empty() && !empty_ok(&block.block_type, key) => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: `{key}:` is empty. Leave it out to keep the value \
+                             Loxone Config has",
+                            block.slug
+                        )));
+                    }
+                    Some(Value::Str(_) | Value::Number(_)) | None => {}
+                    Some(_) => {
+                        return Err(Error::Compile(format!(
+                            "block `{}`: `{key}: {v}` takes text, `{key}: \"…\"`",
+                            block.slug
+                        )));
+                    }
+                }
             }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.
@@ -449,6 +493,11 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
     // their wires) on save — verified via the Wine oracle with a grown `I3`
     // on `And`. Gates are fixed two-input; refusing here is what keeps
     // compiled logic from vanishing.
+    if let Some(why) = crate::connectors::unclaimed_reason(&block.block_type, key) {
+        return Err(Error::Compile(format!(
+            "block `{slug}`: `{key}:` cannot be set from source: {why}"
+        )));
+    }
     let gate_hint = if matches!(block.block_type.as_str(), "And" | "Or")
         && key
             .strip_prefix('I')
@@ -472,7 +521,7 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
             specs
                 .iter()
                 .map(|s| s.key)
-                .chain(attr_params(&block.block_type).iter().copied()),
+                .chain(attr_params(&block.block_type)),
         )
     } else {
         format!(

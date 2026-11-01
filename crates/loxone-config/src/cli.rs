@@ -2276,7 +2276,8 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 10] = [
+    let older: [(Form, &str); 11] = [
+        (d::semantic_fingerprint_v11, "app names and block settings"),
         (
             d::semantic_fingerprint_v10,
             "extension settings and statistics",
@@ -2517,6 +2518,12 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                         "  {a:<18} attr   time of day (HH:MM[:SS]) → {}=",
                         connectors::attr_name(t, &a)
                     );
+                } else if let Some(c) = connectors::choice_values(t, &a) {
+                    println!("  {a:<18} attr   {}", connectors::choice_list(c));
+                } else if connectors::bool_params(t).contains(&a.as_str()) {
+                    println!("  {a:<18} attr   on or off");
+                } else if connectors::text_params(t).contains(&a.as_str()) {
+                    println!("  {a:<18} attr   text");
                 } else {
                     println!("  {a:<18} attr");
                 }

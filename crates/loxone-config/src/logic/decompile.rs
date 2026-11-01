@@ -49,10 +49,10 @@
 //! else `title` when unique, else the exact `uuid`.
 
 use crate::connectors::{
-    BUILTIN_TYPES, attr_name, attr_params, bool_params, carried_children, clock_params,
-    container_type,
+    BUILTIN_TYPES, attr_name, attr_params, attr_save_default, bool_params, carried_children,
+    choice_values, clock_params, container_type, file_params, text_params,
 };
-use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
+use crate::doc::{LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
@@ -1553,17 +1553,18 @@ impl Scan<'_> {
             let o = &objects[i];
             let el = doc.element_at(&o.path).expect("path from objects()");
             let mut args = Vec::new();
-            // Attribute parameters (block logic stored as an element
-            // attribute, e.g. `Formula=`) lead the argument list. A
-            // GUI-owned one (`Code=`) stays unclaimed: the compile
-            // carries it, and claiming it is a source decision.
+            // Attribute parameters (block logic and settings stored as an
+            // element attribute, e.g. `Formula=`) lead the argument list.
+            // Program text (`Code=`) stays unclaimed: the compile carries
+            // it, and moving it into a file is a source decision. A value a
+            // save writes by itself (`Tp="0"`) is left out, and carried.
             // A fire time (`At:` from `Sec=`, #248) is lifted as a time of
             // day, and only where it is one: a time function (`Typ=` other
-            // than 0) keeps the block's timing with the GUI.
+            // than 0) is lifted as `Pulse:`.
             for param in attr_params(&o.block_type) {
                 let name = attr_name(&o.block_type, param);
-                let clock = clock_params(&o.block_type).contains(param);
-                if GUI_OWNED_ATTRS.contains(&name) && !clock {
+                let clock = clock_params(&o.block_type).contains(&param);
+                if file_params(&o.block_type).contains(&param) {
                     continue;
                 }
                 // A setting a save leaves out at 0 or unticked reads as
@@ -1573,22 +1574,32 @@ impl Scan<'_> {
                 }) else {
                     continue;
                 };
+                if attr_save_default(&o.block_type, name) == Some(&*v) {
+                    continue;
+                }
                 let value = if clock {
                     match v.parse().ok().and_then(clock_text) {
                         Some(t) if el.attr("Typ").is_none_or(|t| t == "0") => Value::Clock(t),
                         _ => continue,
                     }
-                } else if bool_params(&o.block_type).contains(param)
+                } else if let Some(choices) = choice_values(&o.block_type, param) {
+                    match choices.iter().find(|(_, code)| *code == v) {
+                        Some((word, _)) => Value::Str((*word).to_string()),
+                        None => continue,
+                    }
+                } else if bool_params(&o.block_type).contains(&param)
                     && (v == "true" || v == "false")
                 {
                     // A text-boolean attribute reads `on`/`off`.
                     Value::Bool(v == "true")
+                } else if text_params(&o.block_type).contains(&param) {
+                    Value::from_literal(&v)
                 } else {
                     duration_value(&o.block_type, param, &v)
                         .unwrap_or_else(|| Value::from_literal(&v))
                 };
                 args.push(ArgItem::Binding(Binding {
-                    port: (*param).to_string(),
+                    port: param.to_string(),
                     kind: BindingKind::Param(value),
                     comment: None,
                 }));
