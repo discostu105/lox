@@ -903,6 +903,10 @@ pub fn lint_dead_outputs(
         if shown {
             detail.push_str(". It is in the app, but its outputs reach nothing");
         }
+        if let Some(fix) = expected_use(block_type) {
+            detail.push_str(". To use it, ");
+            detail.push_str(fix);
+        }
         findings.push(LintFinding {
             kind: LintKind::DeadOutputs,
             slug: b.slug.clone(),
@@ -910,6 +914,22 @@ pub fn lint_dead_outputs(
         });
     }
     Ok(findings)
+}
+
+/// What a controller is expected to drive, as its knowledge-base page
+/// says, for a `dead-outputs` finding on one that drives nothing.
+fn expected_use(block_type: &str) -> Option<&'static str> {
+    Some(match block_type {
+        // intelligent-room-controller: H, C and HC are the outputs "for
+        // valves or actuators"; the example connects the actuators to H.
+        "HeatIRoomController2" => {
+            "wire AQh (heating), AQc (cooling) or AQhc (both) to the valve actuators"
+        }
+        // touch-pure-flex-controller: API is its connector to devices; the
+        // house config's controllers sit on Flex API connectors.
+        "TpfController" => "link its OutputAPI to the API Connector of a Touch Pure Flex",
+        _ => return None,
+    })
 }
 
 /// The `ctrlUuid=` of every `<nd>` node below an energy flow monitor.

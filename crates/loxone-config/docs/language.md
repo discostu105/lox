@@ -1710,8 +1710,9 @@ GUI wires included. These count as used:
 - operating modes and calendar entries: schedules and rules read them by number;
 - a block without outputs (a virtual output command, a Modbus actuator) when something drives it.
 
-A switch or controller in the app that drives nothing is still reported. Two or more inputs of one
-device (Modbus device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
+A switch or controller in the app that drives nothing is still reported; for a room controller and a
+Touch Pure Flex controller the finding names what to wire. Two or more inputs of one device (Modbus
+device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
 The dead commands of one Touch Pure Flex and command type are one `tile-dead-command` finding.
 
 A finding that is deliberate stays out of the report with an allow comment on the line right above
