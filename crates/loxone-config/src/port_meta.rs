@@ -66,6 +66,40 @@ pub fn port_meta(block_type: &str, port: &str) -> Option<PortMeta> {
 
 fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
     Some(match (block_type, port) {
+        ("AMemory", "Input") => m(None, Some("V"), None, None, Some("0")),
+        ("AMemory", "Trigger") => m(None, Some("Set"), None, None, None),
+        ("AMemory", "Reset") => m(None, Some("Off"), None, None, None),
+        ("AMemory", "AQ") => m(None, Some("V"), None, None, Some("0")),
+        ("Add", "AQ") => m(None, Some("O"), None, None, Some("0")),
+        ("Add", "Input1") => m(None, Some("V1"), None, None, Some("0")),
+        ("Add", "Input2") => m(None, Some("V2"), None, None, Some("0")),
+        ("Alarm", "Q") => m(None, Some("S"), Some("0"), Some("2"), Some("0")),
+        ("Alarm", "Q1") => m(None, Some("Sa"), None, None, None),
+        ("Alarm", "Q2") => m(None, Some("Aa"), None, None, None),
+        ("Alarm", "Q3") => m(None, Some("Va"), None, None, None),
+        ("Alarm", "Q4") => m(None, Some("Ia"), None, None, None),
+        ("Alarm", "Q5") => m(None, Some("Ea"), None, None, None),
+        ("Alarm", "Q6") => m(None, Some("Ra"), None, None, None),
+        ("Alarm", "AQ") => m(None, Some("N"), None, None, Some("0")),
+        ("Alarm", "QT") => m(None, Some("At"), None, None, None),
+        ("Alarm", "AQr") => m(Some("s"), Some("Rtad"), Some("0"), None, Some("0")),
+        ("Alarm", "TQ") => m(None, Some("Ca"), None, None, None),
+        ("Alarm", "OutTime") => m(None, Some("Ta"), None, None, None),
+        ("Alarm", "Qo") => m(None, Some("WDs"), None, None, None),
+        ("Alarm", "TTS") => m(None, Some("WDot"), None, None, None),
+        ("Alarm", "Delay") => m(Some("s"), Some("Ard"), Some("0"), None, Some("600")),
+        ("Alarm", "TQ1") => m(Some("s"), Some("Sad"), Some("0"), None, Some("0")),
+        ("Alarm", "TQ2") => m(Some("s"), Some("Aad"), Some("0"), None, Some("20")),
+        ("Alarm", "TQ3") => m(Some("s"), Some("Vad"), Some("0"), None, Some("40")),
+        ("Alarm", "TQ4") => m(Some("s"), Some("Iad"), Some("0"), None, Some("90")),
+        ("Alarm", "TQ5") => m(Some("s"), Some("Ead"), Some("0"), None, Some("150")),
+        ("Alarm", "TQ6") => m(Some("s"), Some("Rad"), Some("0"), None, Some("300")),
+        ("Alarm", "TI") => m(Some("s"), Some("Eip"), Some("0"), None, Some("0")),
+        ("Alarm", "WI2") => m(Some("s"), Some("Spt"), Some("0"), None, Some("900")),
+        ("Alarm", "TM") => m(None, Some("Atm"), None, None, None),
+        ("Alarm", "MaxDurOut") => m(Some("s"), Some("MaxA"), Some("0"), None, Some("900")),
+        ("Alarm", "AutoConfirm") => m(None, Some("Sac"), None, None, None),
+        ("Alarm", "IInit") => m(None, Some("Aoc"), None, None, None),
         ("AnalogMultiplexer2", "Input1") => m(None, Some("V1"), None, None, Some("0")),
         ("AnalogMultiplexer2", "Input2") => m(None, Some("V2"), None, None, Some("0")),
         ("AnalogMultiplexer2", "AQ") => m(None, Some("V"), None, None, Some("0")),
@@ -135,6 +169,11 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
             Some("-30"),
         ),
         ("AutoJalousie", "Rdd") => m(None, Some("Rdd"), None, None, None),
+        ("Avg", "Input") => m(None, Some("V"), None, None, Some("0")),
+        ("Avg", "Reset") => m(None, Some("R"), None, None, None),
+        ("Avg", "AQ") => m(None, Some("Avg"), None, None, Some("0")),
+        ("Avg", "Time") => m(Some("s"), Some("C"), Some("0"), None, Some("60")),
+        ("Avg", "Max") => m(None, Some("N"), Some("0"), Some("1000"), Some("60")),
         ("CentralLight", "OutActive") => m(None, Some("Na"), None, None, None),
         ("CentralShade", "OutOpen") => m(None, Some("No"), None, None, None),
         ("CentralShade", "OutClose") => m(None, Some("Nc"), None, None, None),
@@ -171,6 +210,11 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("Code16", "AQ12") => m(None, Some("O12"), None, None, Some("0")),
         ("Code16", "AQ13") => m(None, Some("O13"), None, None, Some("0")),
         ("Code16", "TeQ") => m(None, Some("Etxt"), None, None, None),
+        ("Counter", "Trigger") => m(None, Some("C"), None, None, None),
+        ("Counter", "Q") => m(None, Some("Lr"), None, None, None),
+        ("Counter", "AQ") => m(None, Some("V"), None, None, Some("0")),
+        ("Counter", "EndValue") => m(None, Some("L"), None, None, Some("1000")),
+        ("Counter", "Mode") => m(None, Some("M"), None, None, None),
         ("DayTimer", "InputTrigger") => m(None, Some("Act"), None, None, None),
         ("DayTimer", "AQ") => m(None, Some("O"), None, None, Some("0")),
         ("DayTimer", "AQm") => m(None, Some("Om"), None, None, Some("0")),
@@ -180,6 +224,24 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("DayTimer", "Manual") => m(None, Some("Am"), None, None, None),
         ("DayTimer", "Mode") => m(None, Some("Mm"), None, None, Some("0")),
         ("DayTimer", "PulseTime") => m(Some("s"), Some("Don"), Some("0"), None, Some("0")),
+        ("Div", "AQ") => m(None, Some("O"), None, None, Some("0")),
+        ("Div", "Input1") => m(None, Some("V1"), None, None, Some("0")),
+        ("Div", "Input2") => m(None, Some("V2"), None, None, Some("0")),
+        ("EFM", "Pre") => m(None, Some("Pre"), None, None, Some("0.2")),
+        ("EFM", "Pri") => m(None, Some("Pri"), None, None, Some("0.2")),
+        ("EFM", "CO2") => m(Some("Kg/kWh"), Some("CO2"), Some("0"), None, Some("0.42")),
+        ("EFM", "OGpwr") => m(None, Some("Gpwr"), None, None, None),
+        ("EFM", "OPpwr") => m(None, Some("Ppwr"), None, None, None),
+        ("EFM", "OSpwr") => m(None, Some("Spwr"), None, None, None),
+        ("EFM", "OEd") => m(None, Some("Ed"), None, None, None),
+        ("EFM", "OId") => m(None, Some("Id"), None, None, None),
+        ("EFM", "OPd") => m(None, Some("Pd"), None, None, None),
+        ("EFM", "OCd") => m(None, Some("Cd"), None, None, None),
+        ("EFM", "OScd") => m(None, Some("Scd"), None, None, None),
+        ("EFM", "OCo2d") => m(None, Some("Co2d"), None, None, None),
+        ("EFM", "OYd") => m(None, Some("Yd"), None, None, None),
+        ("EFM", "OSc") => m(None, Some("Sc"), None, None, None),
+        ("EFM", "Rest") => m(None, Some("Rest"), None, None, None),
         ("EdgeDetection", "Input") => m(None, Some("I"), None, None, None),
         ("EdgeDetection", "Edge") => m(None, Some("P"), None, None, None),
         ("EdgeDetection", "RisingEdge") => m(None, Some("On"), None, None, None),
@@ -200,6 +262,136 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("GreaterEqual", "Q") => m(None, Some("Ge"), None, None, None),
         ("GreaterEqual", "Input1") => m(None, Some("V1"), None, None, Some("0")),
         ("GreaterEqual", "Input2") => m(None, Some("V2"), None, None, Some("0")),
+        ("HeatIRoomController2", "AMode") => {
+            m(None, Some("Mode"), Some("-1"), Some("5"), Some("0"))
+        }
+        ("HeatIRoomController2", "Input") => m(Some("°"), Some("ϑt"), None, None, Some("0")),
+        ("HeatIRoomController2", "Temp") => m(Some("°"), Some("ϑc"), None, None, Some("0")),
+        ("HeatIRoomController2", "Window") => m(None, Some("Dwc"), None, None, None),
+        ("HeatIRoomController2", "Comfort") => m(None, Some("C"), None, None, None),
+        ("HeatIRoomController2", "Save") => m(None, Some("E"), None, None, None),
+        ("HeatIRoomController2", "Save2") => m(None, Some("Bp"), None, None, None),
+        ("HeatIRoomController2", "Move") => m(None, Some("P"), None, None, None),
+        ("HeatIRoomController2", "Reset") => m(None, Some("Off"), None, None, None),
+        ("HeatIRoomController2", "DisMv") => m(None, Some("DisP"), None, None, None),
+        ("HeatIRoomController2", "TempO") => m(Some("°"), Some("ϑo"), None, None, Some("0")),
+        ("HeatIRoomController2", "InCo2") => m(Some("ppm"), Some("CO2"), None, None, Some("0")),
+        ("HeatIRoomController2", "InHumid") => m(Some("%"), Some("H"), None, None, Some("0")),
+        ("HeatIRoomController2", "inFan") => m(None, Some("Fan"), Some("0"), Some("7"), Some("2")),
+        ("HeatIRoomController2", "inAirDir") => {
+            m(None, Some("ADir"), Some("1"), Some("8"), Some("1"))
+        }
+        ("HeatIRoomController2", "AQh") => m(None, Some("H"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQc") => m(None, Some("C"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQhc") => m(None, Some("HC"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQh1") => m(None, Some("H1"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQh2") => m(None, Some("H2"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQh3") => m(None, Some("H3"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQc1") => m(None, Some("C1"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQc2") => m(None, Some("C2"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQc3") => m(None, Some("C3"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQhc1") => m(None, Some("HC1"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQhc2") => m(None, Some("HC2"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "AQhc3") => m(None, Some("HC3"), Some("0"), Some("10"), Some("0")),
+        ("HeatIRoomController2", "Qs") => m(None, Some("Shd"), None, None, None),
+        ("HeatIRoomController2", "AQs") => m(None, Some("HCm"), None, None, Some("0")),
+        ("HeatIRoomController2", "Qe") => m(None, Some("Error"), None, None, None),
+        ("HeatIRoomController2", "Qa") => m(None, Some("TxErr"), None, None, None),
+        ("HeatIRoomController2", "AQt") => m(Some("°"), Some("ϑt"), None, None, Some("0")),
+        ("HeatIRoomController2", "AQhm") => m(None, Some("Om"), None, None, Some("0")),
+        ("HeatIRoomController2", "Qb") => m(None, Some("Boost"), None, None, Some("0")),
+        ("HeatIRoomController2", "AQtm") => m(None, Some("Os"), None, None, None),
+        ("HeatIRoomController2", "TComfort") => m(Some("°"), Some("ϑch"), None, None, Some("22.5")),
+        ("HeatIRoomController2", "TComfortC") => {
+            m(Some("°"), Some("ϑcc"), None, None, Some("24.5"))
+        }
+        ("HeatIRoomController2", "TComfortHC") => {
+            m(Some("°"), Some("ϑchc"), None, None, Some("22"))
+        }
+        ("HeatIRoomController2", "TDiff") => {
+            m(Some("°"), Some("ϑd"), Some("0.5"), Some("5"), Some("1.5"))
+        }
+        ("HeatIRoomController2", "TSaveL") => {
+            m(Some("°"), Some("ϑeh"), Some("0.5"), None, Some("3"))
+        }
+        ("HeatIRoomController2", "TSaveU") => {
+            m(Some("°"), Some("ϑec"), Some("0.5"), None, Some("3"))
+        }
+        ("HeatIRoomController2", "TSave") => m(Some("°"), Some("ϑe"), Some("0.5"), None, Some("2")),
+        ("HeatIRoomController2", "TShadeHeat") => {
+            m(Some("°"), Some("ϑsh"), None, None, Some("27.5"))
+        }
+        ("HeatIRoomController2", "TShadeCool") => {
+            m(Some("°"), Some("ϑsc"), None, None, Some("23.5"))
+        }
+        ("HeatIRoomController2", "TDeepSleep") => m(Some("°"), Some("ϑfp"), None, None, Some("5")),
+        ("HeatIRoomController2", "TMax") => m(Some("°"), Some("ϑhp"), None, None, Some("28")),
+        ("HeatIRoomController2", "TimeMove") => m(Some("d"), Some("Vs"), None, None, Some("14")),
+        ("HeatIRoomController2", "TimeC") => m(Some("s"), Some("Cet"), None, None, Some("3600")),
+        ("HeatIRoomController2", "TimeS") => m(Some("s"), Some("EBpet"), None, None, Some("3600")),
+        ("HeatIRoomController2", "TimeMv") => m(Some("s"), Some("Pet"), None, None, Some("1800")),
+        ("HeatIRoomController2", "THCelvin") => {
+            m(Some("min/°C"), Some("Hs"), None, None, Some("120"))
+        }
+        ("HeatIRoomController2", "TCCelvin") => {
+            m(Some("min/°C"), Some("Cs"), None, None, Some("60"))
+        }
+        ("HeatIRoomController2", "TPWM") => {
+            m(Some("min"), Some("Pwm"), Some("0"), Some("1440"), Some("0"))
+        }
+        ("HeatIRoomController2", "TWin") => {
+            m(Some("s"), Some("Ddwc"), Some("0"), None, Some("300"))
+        }
+        ("HeatIRoomController2", "TExcess") => {
+            m(Some("°"), Some("ϑExc"), Some("0"), None, Some("1"))
+        }
+        ("HourCounter", "InputEnable") => m(None, Some("En"), None, None, None),
+        ("HourCounter", "Reset") => m(None, Some("Rmc"), None, None, None),
+        ("HourCounter", "Q") => m(None, Some("Me"), None, None, None),
+        ("HourCounter", "AQ") => m(None, Some("To"), None, None, Some("0")),
+        ("HourCounter", "AQl") => m(None, Some("Lst"), None, None, Some("0")),
+        ("HourCounter", "AQr") => m(None, Some("Rtm"), None, None, Some("0")),
+        ("HourCounter", "Unit") => m(None, Some("Tu"), Some("0"), Some("3"), Some("0")),
+        ("HourCounter", "Maintenance") => m(None, Some("Mi"), None, None, Some("0")),
+        ("Int", "AQ") => m(None, Some("R"), None, None, Some("0")),
+        ("Int", "Input") => m(None, Some("V"), None, None, Some("0")),
+        ("Int", "Mode") => m(None, Some("Ro"), None, None, None),
+        ("Intercom", "Ib") => m(None, Some("Bell"), None, None, None),
+        ("Intercom", "Mute") => m(None, Some("Mute"), None, None, None),
+        ("Intercom", "TTS") => m(None, Some("TTS"), None, None, None),
+        ("Intercom", "Qb") => m(None, Some("Bell"), None, None, None),
+        ("Intercom", "Qmute") => m(None, Some("Mute"), None, None, None),
+        ("Intercom", "Q1") => m(None, Some("O1"), None, None, None),
+        ("Intercom", "Q2") => m(None, Some("O2"), None, None, None),
+        ("Intercom", "Q3") => m(None, Some("O3"), None, None, None),
+        ("Intercom", "Timeout") => m(Some("s"), Some("maxB"), Some("0"), None, Some("60")),
+        ("Intercom", "Lbr") => m(Some("%"), Some("Bbr"), Some("0"), Some("100"), Some("20")),
+        ("Intercom", "Lon") => m(None, Some("Bbl"), None, None, None),
+        ("Intercom", "Tp") => m(Some("s"), Some("Qon"), Some("0"), None, Some("3")),
+        ("Irrigation", "A") => m(None, Some("Act"), None, None, None),
+        ("Irrigation", "AIv") => m(None, Some("Sel"), Some("0"), Some("9"), None),
+        ("Irrigation", "Rf") => m(Some("l/m²"), Some("Raf"), Some("0"), None, None),
+        ("Irrigation", "Ra") => m(None, Some("Ra"), None, None, None),
+        ("Irrigation", "Qp") => m(None, Some("P"), None, None, None),
+        ("Irrigation", "Qv1") => m(None, Some("V1"), None, None, None),
+        ("Irrigation", "Qv2") => m(None, Some("V2"), None, None, None),
+        ("Irrigation", "Qv3") => m(None, Some("V3"), None, None, None),
+        ("Irrigation", "Qv4") => m(None, Some("V4"), None, None, None),
+        ("Irrigation", "Qv5") => m(None, Some("V5"), None, None, None),
+        ("Irrigation", "Qv6") => m(None, Some("V6"), None, None, None),
+        ("Irrigation", "Qv7") => m(None, Some("V7"), None, None, None),
+        ("Irrigation", "Qv8") => m(None, Some("V8"), None, None, None),
+        ("Irrigation", "AQv") => m(None, Some("Av"), Some("0"), Some("9"), None),
+        ("Irrigation", "MaxP") => m(Some("l/m²"), Some("MaxR"), Some("0"), None, None),
+        ("Irrigation", "MaxR") => m(Some("s"), Some("MaxRa"), Some("0"), None, None),
+        ("Irrigation", "Tv1") => m(Some("s"), Some("Tv1"), Some("0"), None, None),
+        ("Irrigation", "Tv2") => m(Some("s"), Some("Tv2"), Some("0"), None, None),
+        ("Irrigation", "Tv3") => m(Some("s"), Some("Tv3"), Some("0"), None, None),
+        ("Irrigation", "Tv4") => m(Some("s"), Some("Tv4"), Some("0"), None, None),
+        ("Irrigation", "Tv5") => m(Some("s"), Some("Tv5"), Some("0"), None, None),
+        ("Irrigation", "Tv6") => m(Some("s"), Some("Tv6"), Some("0"), None, None),
+        ("Irrigation", "Tv7") => m(Some("s"), Some("Tv7"), Some("0"), None, None),
+        ("Irrigation", "Tv8") => m(Some("s"), Some("Tv8"), Some("0"), None, None),
         ("Less", "Q") => m(None, Some("L"), None, None, None),
         ("Less", "Input1") => m(None, Some("V1"), None, None, Some("0")),
         ("Less", "Input2") => m(None, Some("V2"), None, None, Some("0")),
@@ -291,9 +483,62 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
             Some("12000"),
             Some("6500"),
         ),
+        ("MeterAbsUni", "Pf") => m(None, None, Some("0"), None, None),
+        ("MeterAbsUni", "OPf") => m(None, None, Some("0"), None, None),
+        ("MeterAbsUni", "OMr") => m(None, Some("Mr"), None, None, None),
+        ("MeterAbsUni", "ORd") => m(None, Some("Rd"), None, None, None),
+        ("MeterAbsUni", "ORld") => m(None, Some("Rld"), None, None, None),
+        ("MeterAbsUni", "ORw") => m(None, Some("Rw"), None, None, None),
+        ("MeterAbsUni", "ORlw") => m(None, Some("Rlw"), None, None, None),
+        ("MeterAbsUni", "ORm") => m(None, Some("Rm"), None, None, None),
+        ("MeterAbsUni", "ORlm") => m(None, Some("Rlm"), None, None, None),
+        ("MeterAbsUni", "ORy") => m(None, Some("Ry"), None, None, None),
+        ("MeterAbsUni", "ORly") => m(None, Some("Rly"), None, None, None),
+        ("MeterDig", "A") => m(None, Some("S"), None, None, None),
+        ("MeterDig", "Ppwr") => m(None, Some("Pf"), Some("0"), None, Some("1")),
+        ("MeterDig", "OMr") => m(None, Some("Mr"), None, None, None),
+        ("MeterDig", "ORd") => m(None, Some("Rd"), None, None, None),
+        ("MeterDig", "ORld") => m(None, Some("Rld"), None, None, None),
+        ("MeterDig", "ORw") => m(None, Some("Rw"), None, None, None),
+        ("MeterDig", "ORlw") => m(None, Some("Rlw"), None, None, None),
+        ("MeterDig", "ORm") => m(None, Some("Rm"), None, None, None),
+        ("MeterDig", "ORlm") => m(None, Some("Rlm"), None, None, None),
+        ("MeterDig", "ORy") => m(None, Some("Ry"), None, None, None),
+        ("MeterDig", "ORly") => m(None, Some("Rly"), None, None, None),
         ("Monoflop", "InputTrigger") => m(None, Some("Tr"), None, None, None),
         ("Monoflop", "Q") => m(None, Some("O"), None, None, None),
         ("Monoflop", "Time") => m(Some("s"), Some("D"), Some("0"), None, Some("2")),
+        ("Mult", "AQ") => m(None, Some("O"), None, None, Some("0")),
+        ("Mult", "Input1") => m(None, Some("V1"), None, None, Some("0")),
+        ("Mult", "Input2") => m(None, Some("V2"), None, None, Some("0")),
+        ("NfcCodeTouch", "Lr") => m(None, Some("Lr"), None, None, None),
+        ("NfcCodeTouch", "Lg") => m(None, Some("Lg"), None, None, None),
+        ("NfcCodeTouch", "Lb") => m(None, Some("Lb"), None, None, None),
+        ("NfcCodeTouch", "Lw") => m(None, Some("Lw"), None, None, None),
+        ("NfcCodeTouch", "Q1") => m(None, Some("O1"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "Q2") => m(None, Some("O2"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "Q3") => m(None, Some("O3"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "Q4") => m(None, Some("O4"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "Q5") => m(None, Some("O5"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "Q6") => m(None, Some("O6"), Some("1"), Some("6"), None),
+        ("NfcCodeTouch", "TQ") => m(None, Some("Cla"), None, None, None),
+        ("NfcCodeTouch", "TQU") => m(None, Some("Ula"), None, None, None),
+        ("NfcCodeTouch", "TQo") => m(None, Some("Nlo"), None, None, None),
+        ("NfcCodeTouch", "TQt") => m(None, Some("Tla"), None, None, None),
+        ("NfcCodeTouch", "Qd") => m(None, Some("Ad"), None, None, None),
+        ("NfcCodeTouch", "Qa") => m(None, Some("As"), None, None, None),
+        ("NfcCodeTouch", "Qn") => m(None, Some("Nco"), Some("-1"), None, Some("0")),
+        ("NfcCodeTouch", "Be") => m(None, Some("Bell"), None, None, None),
+        ("NfcCodeTouch", "BeSel") => m(None, Some("Bsel"), Some("-1"), Some("9999"), Some("0")),
+        ("NfcCodeTouch", "TQU2") => m(None, Some("Unla"), None, None, None),
+        ("NfcCodeTouch", "TQU3") => m(None, Some("Uidla"), None, None, None),
+        ("NfcCodeTouch", "PUDel") => m(None, Some("PUDel"), None, None, None),
+        ("NfcCodeTouch", "Bg") => m(None, Some("Bbl"), None, None, None),
+        ("NfcCodeTouch", "Lbr") => m(Some("%"), Some("Bbr"), Some("0"), Some("100"), Some("50")),
+        ("NfcCodeTouch", "PulseTime") => m(Some("s"), Some("Don"), Some("0"), None, Some("3")),
+        ("NfcCodeTouch", "La") => m(None, Some("Blan"), None, None, None),
+        ("NfcCodeTouch", "Lon") => m(None, Some("Bl"), None, None, None),
+        ("NfcCodeTouch", "Au") => m(None, Some("Au"), Some("0"), Some("4"), None),
         ("Not", "I") => m(None, Some("I"), None, None, None),
         ("Not", "Q") => m(None, Some("O"), None, None, None),
         ("NotEqual", "Q") => m(None, Some("U"), None, None, None),
@@ -318,6 +563,9 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("PButtonT", "Time") => m(Some("s"), Some("Don"), Some("0"), None, Some("0.3")),
         ("PulseAt", "Q") => m(None, Some("O"), None, None, None),
         ("PulseAt", "Time") => m(Some("s"), Some("Don"), Some("0"), None, Some("1")),
+        ("PulseBy", "Text") => m(None, Some("T"), None, None, None),
+        ("PulseBy", "Pulse") => m(None, Some("P"), None, None, None),
+        ("PulseBy", "Time") => m(Some("s"), Some("Pd"), Some("0"), None, Some("1")),
         ("PulseGen", "InputInvert") => m(None, Some("Inv"), None, None, None),
         ("PulseGen", "Q") => m(None, Some("P"), None, None, None),
         ("PulseGen", "TimeHigh") => m(Some("s"), Some("Don"), Some("0.1"), None, Some("1")),
@@ -331,6 +579,25 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("SRFlipFlop", "InputTrigger") => m(None, Some("Tg"), None, None, None),
         ("SRFlipFlop", "InputR") => m(None, Some("R"), None, None, None),
         ("SRFlipFlop", "Q") => m(None, Some("O"), None, None, None),
+        ("SmokeAlarm", "Confirm") => m(None, Some("Ca"), None, None, None),
+        ("SmokeAlarm", "Mute") => m(None, Some("Cs"), None, None, None),
+        ("SmokeAlarm", "InputAlarm") => m(None, Some("S"), None, None, None),
+        ("SmokeAlarm", "InputAlarmW") => m(None, Some("W"), None, None, None),
+        ("SmokeAlarm", "InputAlarmS") => m(None, Some("F"), None, None, None),
+        ("SmokeAlarm", "InputTemp") => m(None, Some("T"), None, None, Some("0")),
+        ("SmokeAlarm", "OutAlarm1") => m(None, Some("Pa"), None, None, None),
+        ("SmokeAlarm", "OutAlarm2") => m(None, Some("Ma"), None, None, None),
+        ("SmokeAlarm", "OutSilent") => m(None, Some("Pas"), None, None, None),
+        ("SmokeAlarm", "OutHorn") => m(None, Some("Mas"), None, None, None),
+        ("SmokeAlarm", "OutNumAlarms") => m(None, Some("N"), None, None, Some("0")),
+        ("SmokeAlarm", "OutAlarmTest") => m(None, Some("At"), None, None, None),
+        ("SmokeAlarm", "OutText") => m(None, Some("Ca"), None, None, None),
+        ("SmokeAlarm", "OutTime") => m(None, Some("Ta"), None, None, None),
+        ("SmokeAlarm", "AlarmDelay") => m(Some("s"), Some("Mad"), Some("0"), None, Some("120")),
+        ("SmokeAlarm", "MaxTemp") => m(Some("°"), Some("Maxϑ"), None, None, Some("43")),
+        ("SmokeAlarm", "MaxDuration") => m(Some("s"), Some("MaxA"), Some("0"), None, Some("300")),
+        ("SmokeAlarm", "Autoconfirm") => m(None, Some("Pac"), None, None, None),
+        ("SmokeAlarm", "Servicemode") => m(Some("s"), Some("Sm"), Some("0"), None, Some("0")),
         ("StairwayLS", "InputTrigger") => m(None, Some("Tr"), None, None, None),
         ("StairwayLS", "On") => m(None, Some("On"), None, None, None),
         ("StairwayLS", "Q") => m(None, Some("O"), None, None, None),
@@ -347,6 +614,61 @@ fn documented(block_type: &str, port: &str) -> Option<PortMeta> {
         ("State", "I8") => m(None, Some("I8"), None, None, None),
         ("State", "TQ") => m(None, Some("Txt"), None, None, None),
         ("State", "AQ") => m(None, Some("Val"), None, None, Some("0")),
+        ("StateV", "I") => m(None, Some("I"), None, None, None),
+        ("StateV", "AQ") => m(None, Some("AQ"), None, None, Some("0")),
+        ("Sub", "AQ") => m(None, Some("O"), None, None, Some("0")),
+        ("Sub", "Input1") => m(None, Some("V1"), None, None, Some("0")),
+        ("Sub", "Input2") => m(None, Some("V2"), None, None, Some("0")),
+        ("TpfController", "inpres") => m(None, Some("P"), None, None, None),
+        ("TpfController", "indnd") => m(None, Some("DnD"), None, None, None),
+        ("TpfController", "inlbt") => m(None, Some("LbT"), None, None, None),
+        ("TpfController", "inroomlight") => m(None, Some("L"), None, None, None),
+        ("TpfController", "indaylight") => m(None, Some("Dl"), None, None, None),
+        ("TpfController", "inbrightness") => m(Some("lux"), Some("Br"), None, None, None),
+        ("TpfController", "insetpoint") => m(Some("%"), Some("Set"), None, None, None),
+        ("TpfController", "inoff") => m(None, Some("Off"), None, None, None),
+        ("TpfController", "indis") => m(None, Some("Dis"), None, None, None),
+        ("TpfController", "indisplay") => m(None, Some("Don"), None, None, None),
+        ("TpfController", "inbacklight") => m(None, Some("Bl"), None, None, None),
+        ("TpfController", "inText") => m(None, Some("Txt"), None, None, None),
+        ("TpfController", "parsetpoint1") => {
+            m(Some("%"), Some("BrDP"), Some("0"), Some("100"), Some("10"))
+        }
+        ("TpfController", "parsetpoint2") => {
+            m(Some("%"), Some("BrDnP"), Some("0"), Some("100"), None)
+        }
+        ("TpfController", "parsetpoint3") => {
+            m(Some("%"), Some("BrLP"), Some("0"), Some("100"), Some("70"))
+        }
+        ("TpfController", "parsetpoint4") => {
+            m(Some("%"), Some("BrLnP"), Some("0"), Some("100"), None)
+        }
+        ("TpfController", "parsetpoint5") => {
+            m(Some("%"), Some("BrBP"), Some("0"), Some("100"), Some("70"))
+        }
+        ("TpfController", "parsetpoint6") => {
+            m(Some("%"), Some("BrBnP"), Some("0"), Some("100"), None)
+        }
+        ("TpfController", "parsetpointFB") => {
+            m(Some("%"), Some("BrDef"), Some("0"), Some("100"), None)
+        }
+        ("TpfController", "maxbrightness") => {
+            m(Some("lux"), Some("Brt"), Some("0"), None, Some("30"))
+        }
+        ("TpfController", "outsetpoint") => m(None, Some("CBrB"), None, None, None),
+        ("TpfController", "outpresence") => m(None, Some("P"), None, None, None),
+        ("TpfController", "outroomlight") => m(None, Some("L"), None, None, None),
+        ("TpfController", "outdaylight") => m(None, Some("B"), None, None, None),
+        ("TpfController", "outbrightness") => m(Some("lux"), Some("Br"), None, None, None),
+        ("TpfController", "outsetpointdisplay") => m(None, Some("BrD"), None, None, None),
+        ("UpDownCounter", "Trigger") => m(None, Some("C"), None, None, None),
+        ("UpDownCounter", "InputDir") => m(None, Some("Dir"), None, None, None),
+        ("UpDownCounter", "Reset") => m(None, Some("R"), None, None, None),
+        ("UpDownCounter", "Q") => m(None, Some("O"), None, None, None),
+        ("UpDownCounter", "AQ") => m(None, Some("V"), None, None, Some("0")),
+        ("UpDownCounter", "StartValue") => m(None, Some("Sv"), None, None, Some("0")),
+        ("UpDownCounter", "OnValue") => m(None, Some("Von"), None, None, Some("10")),
+        ("UpDownCounter", "OffValue") => m(None, Some("Voff"), None, None, Some("5")),
         _ => return None,
     })
 }

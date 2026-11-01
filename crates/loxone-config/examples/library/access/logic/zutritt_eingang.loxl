@@ -6,7 +6,7 @@ extern tueroeffner_haustuer = Actor(iname: "Q1") # periphery
 code_touch_eingang = NfcCodeTouch(
 	Au: 1,
 	Lbr: 50,
-	PulseTime: 3,
+	PulseTime: 3s,
 	OutputAPI: api_connector.I,
 )
 

@@ -70,8 +70,11 @@ def port_docs() -> dict[str, list[tuple[str, str]]]:
     }
     body = src[src.index("fn entries(") :]
     out = {}
-    for m in re.finditer(r'"(\w+)" => (?:&\[(.*?)\n        \]|([A-Z0-9_]+)),', body, re.S):
-        out[m.group(1)] = re.findall(entry, m.group(2)) if m.group(2) else consts[m.group(3)]
+    # A type's entries span lines, or fit on one (`"StateV" => &[(…)],`).
+    arm = r'"(\w+)" => (?:&\[(\([^\n]*\))\](?=,\n)|&\[(.*?)\n        \]|([A-Z0-9_]+)),'
+    for m in re.finditer(arm, body, re.S):
+        listed = m.group(2) or m.group(3)
+        out[m.group(1)] = re.findall(entry, listed) if listed else consts[m.group(4)]
     return out
 
 
