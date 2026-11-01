@@ -1,6 +1,6 @@
 # D68: `loxl test` runs in a simulator of its own
 
-Status: accepted (2026-10-31), supersedes the simulator part of [D36](0036-tests-in-module.md)
+Status: accepted (2026-10-31), supersedes the simulator part of [D36](0036-tests-in-module.md), amended by [D106](0106-simulator-readings.md)
 
 ## Context
 
