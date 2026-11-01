@@ -250,6 +250,20 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
     }
 }
 
+/// The `Circuit<n>:` parameter that claims a light controller's
+/// `NameAI<n-1>=`/`PresM<n-1>=`.
+fn circuit_of(block_type: &str, attr: &str) -> Option<&'static str> {
+    let i: usize = ["NameAI", "PresM"]
+        .iter()
+        .find_map(|p| attr.strip_prefix(p))?
+        .parse()
+        .ok()?;
+    crate::connectors::CIRCUIT_PARAMS
+        .get(i)
+        .copied()
+        .filter(|k| crate::connectors::circuit_param(block_type, k).is_some())
+}
+
 /// Per managed type, the attributes its elements carry from the base:
 /// the GUI-owned ones and the type's own carried set.
 fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<CarriedAttr> {
@@ -264,6 +278,12 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
             for (k, _) in b.params() {
                 if attr_params(&b.block_type).contains(&k) {
                     claims.insert((o.uuid.clone(), attr_name(&b.block_type, k).to_string()));
+                }
+                // `Circuit<n>:` writes the circuit's name and presence flag.
+                if let Some(n) = crate::connectors::circuit_param(&b.block_type, k) {
+                    for a in ["NameAI", "PresM"] {
+                        claims.insert((o.uuid.clone(), format!("{a}{}", n - 1)));
+                    }
                 }
             }
         }
@@ -303,7 +323,7 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
             {
                 continue;
             }
-            let param = attr_param(&o.block_type, name);
+            let param = attr_param(&o.block_type, name).or_else(|| circuit_of(&o.block_type, name));
             let c = out
                 .entry((o.block_type.clone(), name.to_string()))
                 .or_insert_with(|| CarriedAttr {
@@ -500,5 +520,50 @@ mod tests {
         assert!(rows(&both).is_empty());
         let text = coverage(&doc, &lock, None).to_text();
         assert!(text.contains("claim with `At:`"), "{text}");
+    }
+
+    #[test]
+    fn a_declared_circuit_is_owned() {
+        let base =
+            LoxoneDoc::parse(&std::fs::read("examples/library/lighting/lighting.Loxone").unwrap())
+                .unwrap();
+        let opts = CompileOptions {
+            machine: crate::uuid::parse_serial("504F94112233").unwrap(),
+            mint_time_unix: 1_767_225_600,
+            page_title: None,
+            allow_removals: false,
+            accept_version: None,
+            relayout: Vec::new(),
+        };
+        let src = "page \"Probe\" (room: \"Wohnzimmer\")\n\
+                   extern relais2 = Actor(iname: \"Q2\")\n\
+                   l1 = LightController2(\"L1\", Circuit1: \"dimmer\")\n\
+                   relais2.I <- l1.AQ1\n";
+        let module = Module::parse(src).unwrap();
+        let mut lock = Lockfile::new();
+        let mut doc = compile(&base, &module, &mut lock, &opts).unwrap();
+        // A second circuit named in Loxone Config, unclaimed.
+        let o = doc
+            .objects()
+            .into_iter()
+            .find(|o| o.title.as_deref() == Some("L1"))
+            .unwrap();
+        let el = doc.element_at_mut(&o.path).unwrap();
+        el.set_attr("NameAI1", "Flur");
+        el.set_attr("PresM1", "65535");
+        let rows: Vec<(String, Option<&'static str>)> = coverage(&doc, &lock, Some(&module))
+            .carried
+            .into_iter()
+            .filter(|c| c.block_type == "LightController2")
+            .map(|c| (c.attr, c.param))
+            .collect();
+        assert!(
+            !rows.iter().any(|(a, _)| a == "NameAI0" || a == "PresM0"),
+            "{rows:?}"
+        );
+        assert!(
+            rows.contains(&("NameAI1".to_string(), Some("Circuit2"))),
+            "{rows:?}"
+        );
     }
 }

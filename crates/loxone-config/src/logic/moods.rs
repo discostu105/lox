@@ -25,7 +25,8 @@
 //! Loxone Config save — first gets what that save would write: the stock
 //! moods "Viel Licht" and "Aus" and their behaviour defaults ([`seed`]).
 
-use super::ast::{Module, MoodLine, MoodSetting, MoodsDecl};
+use super::ast::{Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl, Value};
+use crate::connectors::{CIRCUIT_KINDS, circuit_param};
 use crate::doc::LoxoneDoc;
 use crate::error::{Error, Result};
 use crate::moods::{MoodValue, Moods, OFF_SID, encode, settings};
@@ -49,7 +50,8 @@ pub(crate) fn apply(
     minter: &mut Minter,
 ) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
     let mut minted: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-    if module.moods_claims().next().is_none() {
+    let declared = circuits(doc, module, uuid_of)?;
+    if module.moods_claims().next().is_none() && declared.is_empty() {
         return Ok(minted);
     }
     let path_of: BTreeMap<String, Vec<usize>> = doc
@@ -58,8 +60,8 @@ pub(crate) fn apply(
         .map(|o| (o.uuid.clone(), o.path.clone()))
         .collect();
     let mut claimed: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut claims: BTreeMap<&str, (&MoodsClaim, &MoodsDecl)> = BTreeMap::new();
     for c in module.moods_claims() {
-        let fail = |m: String| Err(Error::Compile(format!("`{c}`: {m}")));
         let uuid = uuid_of[&c.slug].as_str();
         if let Some(other) = claimed.insert(uuid, &c.slug) {
             return Err(Error::Compile(format!(
@@ -71,14 +73,28 @@ pub(crate) fn apply(
             .mood_sets()
             .find(|s| s.name == c.moods)
             .expect("validate admitted only declared mood sets");
+        claims.insert(uuid, (c, set));
+    }
+    let controllers: BTreeSet<&str> = claims
+        .keys()
+        .copied()
+        .chain(declared.keys().map(String::as_str))
+        .collect();
+    for uuid in controllers {
+        let claim = claims.get(uuid);
+        let what = match claim {
+            Some((c, _)) => format!("`{c}`"),
+            None => format!("`{}`", declared[uuid].slug),
+        };
+        let fail = |m: String| Error::Compile(format!("{what}: {m}"));
         let el = doc
             .element_at_mut(&path_of[uuid])
             .expect("object path from objects()");
         if el.attr("Type") != Some("LightController2") {
-            return fail(format!(
+            return Err(fail(format!(
                 "{uuid} is a {:?}, not a LightController2",
                 el.attr("Type")
-            ));
+            )));
         }
         // A mood new to the controller takes the UUID an earlier compile
         // minted for it, else a fresh one; either way the lock keeps it.
@@ -95,12 +111,215 @@ pub(crate) fn apply(
         if Moods::read(el).is_none() {
             seed(el, &mut mint);
         }
-        let have = Moods::read(el).expect("seeded");
-        let want = values(set, &have).map_err(|m| Error::Compile(format!("`{c}`: {m}")))?;
-        rewrite(el, &have, &want, &mut mint).map_err(|m| Error::Compile(format!("`{c}`: {m}")))?;
+        if let Some(d) = declared.get(uuid) {
+            write_circuits(el, d);
+        }
+        if let Some((_, set)) = claim {
+            let have = Moods::read(el).expect("seeded");
+            let want = values(set, &have).map_err(fail)?;
+            rewrite(el, &have, &want, &mut mint).map_err(fail)?;
+        }
     }
     minted.retain(|_, m| !m.is_empty());
     Ok(minted)
+}
+
+/// The circuits a managed controller declares (`Circuit<n>:`).
+struct Declared {
+    slug: String,
+    /// Circuit number, mood prefix, and the name a circuit without one
+    /// takes.
+    circuits: Vec<(usize, u32, Option<String>)>,
+}
+
+/// The declared circuits of every managed LightController2, by controller
+/// UUID. A circuit without a name yet is named the way the mood editor
+/// names it: after the actuator `AQ<n>` drives, directly or through an
+/// `OutputRef` (oracle sessions 33 and 45). Anything else that editor
+/// was never seen to name is refused.
+fn circuits(
+    doc: &LoxoneDoc,
+    module: &Module,
+    uuid_of: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, Declared>> {
+    let mut out = BTreeMap::new();
+    let objects = doc.objects();
+    let mut feeds: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, o) in objects.iter().enumerate() {
+        let el = doc.element_at(&o.path).expect("path from objects()");
+        for p in crate::doc::ports(el) {
+            for src in p.inputs {
+                feeds.entry(src).or_default().push(i);
+            }
+        }
+    }
+    for b in module.blocks() {
+        let kinds: Vec<(usize, &Value)> = b
+            .params()
+            .filter_map(|(k, v)| Some((circuit_param(&b.block_type, k)?, v)))
+            .collect();
+        if kinds.is_empty() {
+            continue;
+        }
+        let uuid = &uuid_of[&b.slug];
+        let fail =
+            |n: usize, m: String| Error::Compile(format!("block `{}`: `Circuit{n}:` {m}", b.slug));
+        let el = objects
+            .iter()
+            .find(|o| &o.uuid == uuid)
+            .and_then(|o| doc.element_at(&o.path))
+            .expect("a compiled managed block");
+        let mut circuits = Vec::new();
+        for (n, v) in kinds {
+            let kind = module.resolve_value(v)?;
+            let prefix = CIRCUIT_KINDS
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, p)| *p)
+                .expect("validate admitted only circuit kinds");
+            let name = if el.attr(&format!("NameAI{}", n - 1)).is_some() {
+                None // the controller's own: an earlier compile or Loxone Config named it
+            } else {
+                let port = crate::doc::ports(el)
+                    .into_iter()
+                    .find(|p| p.key == format!("AQ{n}"));
+                let driven: Vec<&crate::doc::ObjectSummary> = port
+                    .and_then(|p| feeds.get(&p.uuid))
+                    .into_iter()
+                    .flatten()
+                    .map(|&i| &objects[i])
+                    .collect();
+                let [o] = driven[..] else {
+                    return Err(fail(
+                        n,
+                        if driven.is_empty() {
+                            format!(
+                                "AQ{n} drives no actuator, and the circuit is named after it. \
+                                 Wire AQ{n} to the light first"
+                            )
+                        } else {
+                            format!(
+                                "AQ{n} drives {} objects, and Lox Logic does not know which one \
+                                 Loxone Config names the circuit after. Set the circuit up in \
+                                 Loxone Config's mood editor",
+                                driven.len()
+                            )
+                        },
+                    ));
+                };
+                // An `OutputRef` stands for the actuator it names.
+                let actuator = match o.block_type.as_str() {
+                    "OutputRef" => doc
+                        .element_at(&o.path)
+                        .and_then(|e| e.attr("Ref"))
+                        .and_then(|r| objects.iter().find(|x| x.uuid == r)),
+                    _ => Some(o),
+                }
+                .filter(|a| matches!(a.block_type.as_str(), "Actor" | "TreeAactor"));
+                let Some(a) = actuator else {
+                    return Err(fail(
+                        n,
+                        format!(
+                            "AQ{n} drives a {}, not a relay or Tree actuator, which is all \
+                             Lox Logic has seen the mood editor name a circuit after",
+                            o.block_type
+                        ),
+                    ));
+                };
+                let a_el = doc.element_at(&a.path).expect("path from objects()");
+                if a_el.attr("CCap").is_some() {
+                    return Err(fail(
+                        n,
+                        format!(
+                            "AQ{n} drives a colour actuator, and Lox Logic declares switch and \
+                             dimmer circuits only. Set the circuit up in Loxone Config's mood editor"
+                        ),
+                    ));
+                }
+                let Some(title) = a.title.clone().filter(|t| !t.is_empty()) else {
+                    return Err(fail(
+                        n,
+                        format!("AQ{n} drives an actuator without a title. Give it one"),
+                    ));
+                };
+                Some(title)
+            };
+            circuits.push((n, prefix, name));
+        }
+        out.insert(
+            uuid.clone(),
+            Declared {
+                slug: b.slug.clone(),
+                circuits,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// Write the declared circuits onto the controller the way the mood
+/// editor does (oracle session 45): a circuit without a name gets
+/// `NameAI<n-1>=` and `PresM<n-1>="65535"`, placed in index order before
+/// the sequencing lists; a circuit whose kind changes gets its new prefix
+/// in every mood, with the value cleared, as the editor's *Typ* does.
+fn write_circuits(el: &mut Element, d: &Declared) {
+    for &(n, prefix, ref name) in &d.circuits {
+        let i = n - 1;
+        if let Some(name) = name {
+            // After the attributes of the circuits before it, else
+            // before the first attribute that follows the circuits.
+            let after = el.attrs.iter().rposition(|a| {
+                ["NameAI", "CapAI", "PresM"].iter().any(|p| {
+                    a.name
+                        .strip_prefix(p)
+                        .and_then(|k| k.parse::<usize>().ok())
+                        .is_some_and(|k| k < i)
+                })
+            });
+            let at = match after {
+                Some(p) => p + 1,
+                None => el
+                    .attrs
+                    .iter()
+                    .position(|a| {
+                        matches!(
+                            a.name.as_str(),
+                            "uuidSeqencing" | "uuidSeqenceIx" | "SpStates" | "COName"
+                        ) || ["NameAI", "CapAI", "PresM"]
+                            .iter()
+                            .any(|p| a.name.starts_with(p))
+                    })
+                    .unwrap_or(el.attrs.len()),
+            };
+            el.attrs.insert(
+                at,
+                crate::xml::Attr {
+                    name: format!("PresM{i}"),
+                    value: "65535".into(),
+                },
+            );
+            el.attrs.insert(
+                at,
+                crate::xml::Attr {
+                    name: format!("NameAI{i}"),
+                    value: crate::xml::escape(name).into_owned(),
+                },
+            );
+        }
+        let Some(scenes) = el.child_elements_mut().find(|c| c.name == "LightscenesC") else {
+            continue;
+        };
+        for m in scenes
+            .child_elements_mut()
+            .filter(|c| c.name == "LightsceneC")
+        {
+            let key = format!("Q{n}");
+            let q: u32 = m.attr(&key).and_then(|q| q.parse().ok()).unwrap_or(0);
+            if q >> 28 != prefix {
+                m.set_attr(&key, &(prefix << 28).to_string());
+            }
+        }
+    }
 }
 
 /// What Loxone Config 17.2.8.28 writes into a LightController2 on its

@@ -50,6 +50,9 @@ pub enum LintKind {
     /// A bare number on a port documented in seconds or minutes that a
     /// unit suffix writes exactly (`Time: 300` is `5min`).
     UnitSuffix,
+    /// A mood that dims a lighting circuit without an actuator: the
+    /// Miniserver switches such a circuit, so any percentage turns it on.
+    NoActuator,
     /// A `# lint: allow` comment that covers no finding.
     UnusedAllow,
 }
@@ -68,12 +71,13 @@ impl LintKind {
             LintKind::DefaultPage => "default-page",
             LintKind::UnusedDefault => "unused-default",
             LintKind::UnitSuffix => "unit-suffix",
+            LintKind::NoActuator => "no-actuator",
             LintKind::UnusedAllow => "unused-allow",
         }
     }
 
     /// Every kind.
-    pub const ALL: [LintKind; 12] = [
+    pub const ALL: [LintKind; 13] = [
         LintKind::UnusedExtern,
         LintKind::UnusedLet,
         LintKind::UnusedTemplate,
@@ -85,6 +89,7 @@ impl LintKind {
         LintKind::DefaultPage,
         LintKind::UnusedDefault,
         LintKind::UnitSuffix,
+        LintKind::NoActuator,
         LintKind::UnusedAllow,
     ];
 
@@ -1078,7 +1083,68 @@ fn needs_project(kind: LintKind) -> bool {
             | LintKind::TileBroadcast
             | LintKind::TileDeadCommand
             | LintKind::NoAccessRight
+            | LintKind::NoActuator
     )
+}
+
+/// Moods the source gives a lighting controller that set a percentage
+/// on a circuit without an actuator. Loxone Config assigns a circuit its
+/// actuator in the mood editor (`NameAI<n>=`); without one the Miniserver
+/// treats the circuit as a switch, and 20 %, 40 % and 60 % all read 1
+/// (a live test). A controller created from source has no actuators. One
+/// finding per circuit, naming the moods.
+pub fn lint_circuits(
+    module: &Module,
+    lock: &Lockfile,
+    compiled: &LoxoneDoc,
+) -> Result<Vec<LintFinding>> {
+    let flat = module.expand()?;
+    let objects = compiled.objects();
+    let mut findings = Vec::new();
+    for c in flat.moods_claims() {
+        let uuid = match (lock.objects.get(&c.slug), lock.externals.get(&c.slug)) {
+            (Some(o), _) => &o.uuid,
+            (None, Some(x)) => &x.uuid,
+            (None, None) => continue, // never compiled — nothing to judge yet
+        };
+        let Some(el) = objects
+            .iter()
+            .find(|o| &o.uuid == uuid)
+            .and_then(|o| compiled.element_at(&o.path))
+        else {
+            continue;
+        };
+        let Some(moods) = crate::moods::Moods::read(el) else {
+            continue;
+        };
+        for n in 0..moods.moods.iter().map(|m| m.qs.len()).max().unwrap_or(0) {
+            if el.attr(&format!("NameAI{n}")).is_some() {
+                continue;
+            }
+            let dims: Vec<String> = moods
+                .moods
+                .iter()
+                .filter_map(|m| match m.qs.get(n).map(|&q| crate::moods::decode(q)) {
+                    Some(crate::moods::MoodValue::Pct(p)) => Some(format!("\"{}\" {p}%", m.name)),
+                    _ => None,
+                })
+                .collect();
+            if dims.is_empty() {
+                continue;
+            }
+            findings.push(LintFinding {
+                kind: LintKind::NoActuator,
+                slug: c.slug.clone(),
+                detail: format!(
+                    "AQ{} has no actuator, so the Miniserver switches it: {} turns it on, not dimmed. \
+                     Assign the actuator in Loxone Config's mood editor, or write `on`",
+                    n + 1,
+                    dims.join(", ")
+                ),
+            });
+        }
+    }
+    Ok(findings)
 }
 
 /// The last step of a lint run over `module`: drops the findings a

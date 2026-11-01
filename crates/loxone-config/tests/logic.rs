@@ -4752,3 +4752,42 @@ knapp = a.Q <= 5 and b.Q < 70%\n";
         ["a.Q ≤ 5", "a.Q ≤ 5 and b.Q ＜ 70％", "b.Q ＜ 70％"]
     );
 }
+
+#[test]
+fn a_percentage_on_a_circuit_without_an_actuator_is_flagged() {
+    use loxone_config::logic::{LintKind, lint_circuits};
+    let src = "licht = LightController2(\"Licht\")\n\
+               moods abend\n\t\"Viel Licht\": AQ1 80%, AQ2 on\n\t\"Kino\": AQ1 20%\nend\n\
+               licht.moods = abend\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let base = LoxoneDoc::parse(&std::fs::read("examples/configs/pool.Loxone").unwrap()).unwrap();
+    let opts = CompileOptions {
+        page_title: Some("Pool".into()),
+        ..opts()
+    };
+    let out = compile(&base, &module, &mut lock, &opts).unwrap();
+    let findings = lint_circuits(&module, &lock, &out).unwrap();
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let f = &findings[0];
+    assert_eq!((f.kind, f.slug.as_str()), (LintKind::NoActuator, "licht"));
+    assert!(f.detail.starts_with("AQ1 has no actuator"), "{}", f.detail);
+    assert!(
+        f.detail.contains("\"Viel Licht\" 80%, \"Kino\" 20%"),
+        "{}",
+        f.detail
+    );
+
+    // With the actuator assigned in Loxone Config, the circuit dims.
+    let mut assigned = out.clone();
+    let o = assigned
+        .objects()
+        .into_iter()
+        .find(|o| o.block_type == "LightController2")
+        .unwrap();
+    assigned
+        .element_at_mut(&o.path)
+        .unwrap()
+        .set_attr("NameAI0", "Dimmer");
+    assert!(lint_circuits(&module, &lock, &assigned).unwrap().is_empty());
+}

@@ -1046,6 +1046,34 @@ The base was the redacted library config `examples/library/energy`.
   `Port: 0` where the GUI default is not 0 ([D128](decisions/0128-no-def-at-zero.md)). A block minted
   without a parameter has it at 0 (#362).
 
+## Light controller circuits (sessions 45 and 46, #284) — passed, three findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh`, in a reflink clone of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/lighting`.
+
+Session 45: a probe page with two minted controllers, `L1` (`AQ1` → relay Q2, `AQ2` → relay Q3) and
+`L2` (`AQ1` → the Tree actuator *LED-Streifen*, `CCap="31"`), opened and saved, then edited in the
+mood editor by hand and saved again.
+
+- The plain save wrote no circuits, as in session 33.
+- **Finding:** confirming the editor of `L1` wrote `NameAI0="Aktor (Relais) 2" PresM0="65535"
+  NameAI1="Aktor (Relais) 3" PresM1="65535"`: the actuators' titles. It dropped `WF="16384"` on both
+  controllers and rewrote `<HCL>`. `L2`'s circuit became a *Schalter* named *LED-Streifen* without
+  `CapAI`.
+- **Finding:** *Typ* lives in the moods. *Dimmer 0-100%* on `Lc1` rewrote `Q1` of every mood to
+  `268435456`; renaming `Lc2` and naming the unwired `Lc3` (*Spot*) wrote `COName="6"`.
+
+Session 46: the same page compiled with `Circuit1: "dimmer", Circuit2: "switch"` on `L1` and a mood
+set (`AQ1 80%`, `AQ2 on`), and `Circuit1: "dimmer"` on `L2` with relay Q4, opened and saved.
+
+- The semantic diff was empty: names, `PresM` and every mood prefix survived.
+- **Finding:** the save added `COName="3"` (`L1`) and `COName="1"` (`L2`), with the first-save lists.
+  Carried, like every `COName`.
+- The editor showed `Lc1` as *Dimmer 0-100%* at 80 % in *Viel Licht* and `Lc2` as *Schalter*, *Ein*.
+  Compiled again onto the save, the file came back byte-identical.
+
+Not tested: whether the Miniserver dims such a circuit. That needs an upload.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

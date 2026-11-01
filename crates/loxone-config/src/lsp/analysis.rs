@@ -14,7 +14,8 @@ use crate::connectors::{
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
     CompileOptions, LintFinding, LintKind, Module, TemplateParam, compile, finish_lint,
-    lint_access, lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
+    lint_access, lint_circuits, lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids,
+    validate_ports,
 };
 use crate::port_meta::port_meta;
 use crate::{Error, Lockfile, Project};
@@ -343,6 +344,9 @@ impl Workspace {
                         Ok(compiled) => {
                             findings.extend(
                                 lint_dead_outputs(&module, &lock, &compiled).unwrap_or_default(),
+                            );
+                            findings.extend(
+                                lint_circuits(&module, &lock, &compiled).unwrap_or_default(),
                             );
                             findings.extend(lint_tiles(&module, &compiled));
                             findings.extend(lint_access(&compiled));

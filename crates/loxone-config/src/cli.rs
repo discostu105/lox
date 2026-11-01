@@ -8,9 +8,9 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_dead_outputs,
-    lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results, rename_slug,
-    run_tests, slugify, trace_tests, valid_slug, validate_ports,
+    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_circuits,
+    lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
+    rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -1524,6 +1524,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
         Some((compiled, _)) => {
             let lock = &base.as_ref().expect("a project has a lockfile").1;
             findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
+            findings.extend(lint_circuits(&module, lock, &compiled)?);
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
             true

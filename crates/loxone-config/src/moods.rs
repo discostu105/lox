@@ -18,10 +18,12 @@
 //! | `4` | `BBBGGGRRR` | RGB, percent per channel |
 //! | `5`, `6` | `BBBGGGRRR`, `20BBBTTTT` | RGB, or tunable white: brightness percent and Kelvin |
 //!
-//! So the compiler never decides a circuit's kind: it reads the prefix off
-//! the controller's existing moods (every saved controller has at least
-//! the built-in off mood, `SID="778"`) and refuses a value that prefix
-//! has never been seen to carry — refuse, never guess.
+//! So the compiler reads a circuit's kind off the controller's existing
+//! moods (every saved controller has at least the built-in off mood,
+//! `SID="778"`) and refuses a value that prefix has never been seen to
+//! carry — refuse, never guess. Only a `Circuit<n>:` parameter in source
+//! sets a kind, and only switch (0) or dimmer (1), the two the mood
+//! editor was seen to write (D96).
 
 use crate::doc::{LoxoneDoc, ObjectSummary};
 use crate::xml::Element;

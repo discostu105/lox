@@ -49,8 +49,8 @@
 //! else `title` when unique, else the exact `uuid`.
 
 use crate::connectors::{
-    BUILTIN_TYPES, attr_name, attr_params, attr_save_default, bool_params, carried_children,
-    choice_values, clock_params, container_type, file_params, text_params,
+    BUILTIN_TYPES, MESSAGE_REF_TARGET, attr_name, attr_params, attr_save_default, bool_params,
+    carried_children, choice_values, clock_params, container_type, file_params, text_params,
 };
 use crate::doc::{LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
@@ -58,7 +58,7 @@ use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
     BindingKind, BlockDecl, DefaultsDecl, ExprWireDecl, ExternDecl, Item, MatchSpec, Module,
     MoodLine, MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind,
-    RuleDecl, SetKind, Value, WireDecl, clock_text, duration_value,
+    RuleDecl, SetKind, Unit, Value, WireDecl, clock_text, duration_value,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -114,9 +114,11 @@ impl Default for DecompileOptions {
         DecompileOptions {
             // Objects of the object tree (a VirtualIn) can be minted
             // but are not adopted — existing ones stay externs.
+            // A notification's message ref is a block of its own too.
             managed_types: BUILTIN_TYPES
                 .iter()
                 .filter(|t| container_type(t).is_none())
+                .chain(&["OutputRefLM"])
                 .map(|t| String::from(*t))
                 .collect(),
             scope: DecompileScope::Full,
@@ -239,6 +241,10 @@ pub(super) struct Lift {
     /// Each Code Touch with access rights: the index of the set it claims,
     /// or why its rights cannot be written as one.
     access_claims: BTreeMap<usize, std::result::Result<usize, String>>,
+    /// Recipient sets lifted from push notifications, and each
+    /// notification's claim, like the access sets.
+    recipient_sets: Vec<(AccessDecl, Option<usize>)>,
+    recipient_claims: BTreeMap<usize, std::result::Result<usize, String>>,
     /// The `rule` declaration of each Automatic Designer rule whose
     /// payload reads as the documented shapes.
     rule_decls: BTreeMap<usize, RuleDecl>,
@@ -355,6 +361,7 @@ impl Lift {
         let access = crate::access::AccessModel::read(doc);
         let rights = access.access_rights();
         let with_rights = cx.access_blocks(&rights, &mut lifted, &mut externs);
+        let notifications = cx.notifications(&managed, &access, &mut lifted, &mut externs);
         let liftable_rules = cx.liftable_rules(&mut lifted, &mut externs);
         let mood_lines = cx.mood_controllers(&mut lifted, &mut externs);
         let (mut slugs, slug_of, obj_of_slug) = cx.assign_slugs(&managed, &externs, hints);
@@ -362,8 +369,22 @@ impl Lift {
         let (match_specs, devices) = cx.match_specs(&slug_of, &managed, &externs);
         let extern_decls = cx.extern_decls(&slug_of, &externs, &match_specs, &devices);
 
-        let (access_sets, access_claims) =
-            cx.access_sets(&mut slugs, &slug_of, &access, &rights, &with_rights);
+        let (access_sets, access_claims) = cx.access_sets(
+            &mut slugs,
+            &slug_of,
+            &access,
+            &rights,
+            &with_rights,
+            RightKind::Access,
+        );
+        let (recipient_sets, recipient_claims) = cx.access_sets(
+            &mut slugs,
+            &slug_of,
+            &access,
+            &rights,
+            &notifications,
+            RightKind::Recipients,
+        );
         let rule_decls = cx.rule_decls(&slug_of, &liftable_rules);
         let (block_decls, default_params_elided) = cx.block_decls(&slug_of, &managed);
         let wires = cx.extern_wires(&slug_of, &managed, touched);
@@ -390,6 +411,8 @@ impl Lift {
             rule_notes,
             access_sets,
             access_claims,
+            recipient_sets,
+            recipient_claims,
             rule_decls,
             mood_sets,
             mood_claims,
@@ -412,8 +435,9 @@ impl Lift {
         }
     }
 
-    /// The access sets and claims of a bucket's Code Touches; a block
-    /// whose rights cannot be written as a set gets a comment saying why.
+    /// The access sets and claims of a bucket's Code Touches and the
+    /// recipient sets of its notifications; a block whose rights cannot be
+    /// written as a set gets a comment saying why.
     fn push_access(
         &self,
         page: Option<usize>,
@@ -421,28 +445,37 @@ impl Lift {
         self_contained: bool,
         items: &mut Vec<Item>,
     ) {
-        let sets: Vec<(&AccessDecl, Option<usize>)> =
-            self.access_sets.iter().map(|(s, h)| (s, *h)).collect();
-        self.push_sets(
-            SetsOf {
-                kind: SetKind::Access,
-                page,
-                bucket: b,
-                self_contained,
-                sets: &sets,
-                claims: &self.access_claims,
-            },
-            |set| Item::Access(set.clone()),
-            |slug, set| {
-                Item::AccessClaim(AccessClaim {
-                    slug,
-                    right: RightKind::Access,
-                    set: set.name.clone(),
-                    comment: None,
-                })
-            },
-            items,
-        );
+        for (right, sets, claims) in [
+            (RightKind::Access, &self.access_sets, &self.access_claims),
+            (
+                RightKind::Recipients,
+                &self.recipient_sets,
+                &self.recipient_claims,
+            ),
+        ] {
+            let sets: Vec<(&AccessDecl, Option<usize>)> =
+                sets.iter().map(|(s, h)| (s, *h)).collect();
+            self.push_sets(
+                SetsOf {
+                    kind: right.set_kind(),
+                    page,
+                    bucket: b,
+                    self_contained,
+                    sets: &sets,
+                    claims,
+                },
+                |set| Item::Access(set.clone()),
+                |slug, set| {
+                    Item::AccessClaim(AccessClaim {
+                        slug,
+                        right,
+                        set: set.name.clone(),
+                        comment: None,
+                    })
+                },
+                items,
+            );
+        }
     }
 
     /// The mood sets and claims of a bucket's controllers.
@@ -1017,6 +1050,7 @@ impl Scan<'_> {
             if opts.managed_types.contains(&o.block_type)
                 && !opts.exclude.contains(&o.uuid)
                 && !owned_by_block(doc, o)
+                && (o.block_type != "OutputRefLM" || message_of(doc, objects, o).is_some())
             {
                 lifted[i] = true;
                 managed.push(i);
@@ -1161,6 +1195,44 @@ impl Scan<'_> {
             }
         }
         with_rights
+    }
+
+    /// Push notifications, in both scopes: the one each managed message
+    /// ref mirrors, and every one with recipients, which the `recipients`
+    /// claim needs. Lifted as externs; returns those with recipients.
+    fn notifications(
+        &self,
+        managed: &[usize],
+        model: &crate::access::AccessModel,
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> Vec<usize> {
+        let Scan { doc, objects, .. } = *self;
+        let mirrored: BTreeSet<&str> = managed
+            .iter()
+            .filter_map(|&i| message_of(doc, objects, &objects[i]))
+            .collect();
+        let mut with_recipients = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            if o.block_type != MESSAGE_REF_TARGET {
+                continue;
+            }
+            let recipients = model
+                .users
+                .iter()
+                .map(|u| &u.permissions)
+                .chain(model.groups.iter().map(|g| &g.permissions))
+                .flatten()
+                .any(|p| p.target == o.uuid && p.ui.is_some());
+            if recipients {
+                with_recipients.push(i);
+            }
+            if (recipients || mirrored.contains(o.uuid.as_str())) && !lifted[i] {
+                lifted[i] = true;
+                externs.push(i);
+            }
+        }
+        with_recipients
     }
 
     /// Automatic Designer rules whose payload reads as the documented
@@ -1326,7 +1398,8 @@ impl Scan<'_> {
 
     /// The access sets of the Code Touches with rights, like the mood
     /// sets: Code Touches with the same grants share one set, named after
-    /// the first (`<slug>_access`).
+    /// the first (`<slug>_access`). With [`RightKind::Recipients`], the
+    /// recipient sets of push notifications (`<slug>_recipients`).
     fn access_sets(
         &self,
         slugs: &mut SlugTable,
@@ -1334,6 +1407,7 @@ impl Scan<'_> {
         model: &crate::access::AccessModel,
         rights: &[crate::access::AccessRight<'_>],
         with_rights: &[usize],
+        right: RightKind,
     ) -> LiftedSets<AccessDecl> {
         let Scan {
             objects, page_of, ..
@@ -1343,14 +1417,18 @@ impl Scan<'_> {
         for &i in with_rights {
             let uuid = &objects[i].uuid;
             let page = page_of.get(uuid).copied();
-            let claim = access_grants(model, rights, uuid).map(|body| {
+            let grants = match right {
+                RightKind::Access => access_grants(model, rights, uuid),
+                RightKind::Recipients => recipient_grants(model, uuid),
+            };
+            let claim = grants.map(|body| {
                 if let Some(k) = sets.iter().position(|(set, _)| set.body == body) {
                     sets[k].1 = sets[k].1.min(page);
                     return k;
                 }
                 let set = AccessDecl {
-                    right: RightKind::Access,
-                    name: slugs.assign(&format!("{}_access", slug_of[uuid])),
+                    right,
+                    name: slugs.assign(&format!("{}_{}", slug_of[uuid], right.keyword())),
                     body,
                     comment: None,
                     end_comment: None,
@@ -1604,6 +1682,79 @@ impl Scan<'_> {
                     comment: None,
                 }));
             }
+            // A message ref: the notification it mirrors and the message
+            // its `<LoggerMailer>` holds.
+            if let Some(target) = (o.block_type == "OutputRefLM")
+                .then(|| message_of(doc, objects, o))
+                .flatten()
+            {
+                let mut param = |port: &str, value: Value| {
+                    args.push(ArgItem::Binding(Binding {
+                        port: port.to_string(),
+                        kind: BindingKind::Param(value),
+                        comment: None,
+                    }))
+                };
+                param("mirrors", Value::Ref(slug_of[target].clone()));
+                let lm = el
+                    .child_elements()
+                    .find(|c| c.name == "LoggerMailer")
+                    .expect("message_of found it");
+                for k in ["On", "Off"] {
+                    if let Some(t) = lm.attr_decoded(k).filter(|t| !t.is_empty()) {
+                        param(k, Value::Str(t.into_owned()));
+                    }
+                }
+                if let Some(ms) = lm.attr("MinimumTime").filter(|ms| *ms != "5000")
+                // the default compile writes
+                {
+                    // Seconds in the source, in the largest unit that
+                    // writes them exactly (`12h`).
+                    let value = match ms.parse::<u64>() {
+                        Ok(ms) if ms > 0 && ms % 1000 == 0 => {
+                            let s = ms / 1000;
+                            match [(Unit::H, 3600), (Unit::Min, 60), (Unit::S, 1)]
+                                .into_iter()
+                                .find(|(_, size)| s % size == 0)
+                            {
+                                Some((unit, size)) => Value::Unit {
+                                    number: (s / size).to_string(),
+                                    unit,
+                                },
+                                None => Value::Number(s.to_string()),
+                            }
+                        }
+                        _ => Value::from_literal(&format!(
+                            "{}",
+                            ms.parse::<f64>().unwrap_or(0.0) / 1000.0
+                        )),
+                    };
+                    param("MinimumTime", value);
+                }
+            }
+            // A light controller's named circuits, by the kind their moods
+            // store; a colour circuit stays with Loxone Config.
+            let prefixes = crate::moods::Moods::read(el).and_then(|m| m.prefixes().ok());
+            for key in crate::connectors::CIRCUIT_PARAMS {
+                let Some(n) = crate::connectors::circuit_param(&o.block_type, key) else {
+                    continue;
+                };
+                if el.attr(&format!("NameAI{}", n - 1)).is_none() {
+                    continue;
+                }
+                let prefix = prefixes.as_ref().and_then(|p| p.get(n - 1).copied());
+                let Some((kind, _)) = crate::connectors::CIRCUIT_KINDS
+                    .iter()
+                    .find(|(_, p)| Some(*p) == prefix)
+                else {
+                    continue;
+                };
+                args.push(ArgItem::Binding(Binding {
+                    port: (*key).to_string(),
+                    kind: BindingKind::Param(Value::Str((*kind).to_string())),
+                    comment: None,
+                }));
+            }
             for p in ports(el) {
                 if !is_ident(&p.key) {
                     continue; // not representable, stays raw
@@ -1700,8 +1851,11 @@ impl Scan<'_> {
                     // already encodes (`slugify(title) == slug`); the
                     // adoptable view keeps it, because rebuilding must
                     // write the exact `Title=` back.
+                    // A ref's title is its target's.
                     title: o.title.clone().filter(|t| {
-                        t != &slug && (opts.scope != DecompileScope::Full || slugify(t) != slug)
+                        o.block_type != "OutputRefLM"
+                            && t != &slug
+                            && (opts.scope != DecompileScope::Full || slugify(t) != slug)
                     }),
                     slug,
                     args,
@@ -1881,6 +2035,71 @@ fn access_grants(
         }));
     }
     Ok(body)
+}
+
+/// The recipients of the push notification `target` as the body of a
+/// `recipients` set: users, then groups, each in document order.
+fn recipient_grants(
+    model: &crate::access::AccessModel,
+    target: &str,
+) -> std::result::Result<Vec<AccessItem>, String> {
+    use crate::access::PrincipalKind;
+    let unique = |what: &str, title: Option<&str>, titles: Vec<Option<&str>>| {
+        let title = title
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| format!("a {what} without a title"))?;
+        let n = titles.iter().filter(|t| **t == Some(title)).count();
+        if n > 1 {
+            return Err(format!("{n} {what}s are titled \"{title}\""));
+        }
+        Ok(title.to_string())
+    };
+    let gets = |perms: &[crate::access::Permission]| {
+        perms.iter().any(|p| p.target == target && p.ui.is_some())
+    };
+    let mut body = Vec::new();
+    for u in model.users.iter().filter(|u| gets(&u.permissions)) {
+        let titles = model.users.iter().map(|u| u.title.as_deref()).collect();
+        body.push((
+            PrincipalKind::User,
+            unique("user", u.title.as_deref(), titles)?,
+        ));
+    }
+    for g in model.groups.iter().filter(|g| gets(&g.permissions)) {
+        let titles = model.groups.iter().map(|g| g.title.as_deref()).collect();
+        body.push((
+            PrincipalKind::Group,
+            unique("group", g.title.as_deref(), titles)?,
+        ));
+    }
+    Ok(body
+        .into_iter()
+        .map(|(kind, principal)| {
+            AccessItem::Grant(AccessGrant {
+                kind,
+                principal,
+                schedule: None,
+                comment: None,
+            })
+        })
+        .collect())
+}
+
+/// The notification a message ref (`OutputRefLM`) sends, when its
+/// `Ref=` and its message's `RefNotification=` both name one.
+pub(super) fn message_of<'a>(
+    doc: &'a LoxoneDoc,
+    objects: &[ObjectSummary],
+    o: &ObjectSummary,
+) -> Option<&'a str> {
+    let el = doc.element_at(&o.path)?;
+    let target = el.attr("Ref")?;
+    let lm = el.child_elements().find(|c| c.name == "LoggerMailer")?;
+    (lm.attr("RefNotification") == Some(target)
+        && objects
+            .iter()
+            .any(|x| x.uuid == target && x.block_type == MESSAGE_REF_TARGET))
+    .then_some(target)
 }
 
 /// Whether `s` can be written as a language identifier
