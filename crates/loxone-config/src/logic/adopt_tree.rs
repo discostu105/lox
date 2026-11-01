@@ -300,11 +300,11 @@ pub(super) fn adopt_device(
             }));
         }
         for name in settings {
-            // A setting a save leaves out at 0 reads as 0 where a fresh
-            // mint would fill in something else.
-            let v = el.attr_decoded(name).or_else(|| {
-                crate::periphery::zero_when_missing(&o.block_type, name).then_some("0".into())
-            });
+            // A setting a save leaves out at 0 or unticked reads as such
+            // where a fresh mint would fill in something else.
+            let v = el
+                .attr_decoded(name)
+                .or_else(|| crate::periphery::missing_value(&o.block_type, name).map(Into::into));
             if let Some(v) = v {
                 args.push(ArgItem::Binding(Binding {
                     port: (*name).to_string(),

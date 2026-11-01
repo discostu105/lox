@@ -442,3 +442,58 @@ fn zero_is_no_attribute_on_a_number() {
     let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
     assert_eq!(recompiled.to_bytes(), out.to_bytes());
 }
+
+#[test]
+fn adopt_states_an_unticked_box_a_fresh_object_ticks() {
+    // An unticked `Signed`/`Analog`/`CloseAfterSend` has no attribute,
+    // and a fresh object ticks it: adopt writes `off`, so the source
+    // means the same on another config (#333).
+    let src = "out = VirtualOut(\"Aktor\", Address: \"http://192.0.2.11\", CloseAfterSend: off)\n\
+               out_cmd = VirtualOutCmd(\"Ein\", device: out, CmdOn: \"/on\")\n\
+               udp = VirtualUdpIn(\"Kamera\", Port: 45999)\n\
+               udp_cmd = VirtualUdpInCmd(\"Person\", device: udp, Check: \"p\", Signed: off, Analog: off)\n\
+               http = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/s\", Poll: 600)\n\
+               http_cmd = VirtualHttpInCmd(\"Leistung\", device: http, Check: \"p\", Signed: off)\n";
+    let mut lock = Lockfile::default();
+    let out = compile(&base(), &Module::parse(src).unwrap(), &mut lock, &opts()).unwrap();
+    let mut fresh = Lockfile::default();
+    let mut adopted_module = Module::default();
+    for (slug, name) in [("out", "aktor"), ("udp", "kamera"), ("http", "zaehler")] {
+        let adopted = adopt_one(
+            &out,
+            &lock.objects[slug].uuid,
+            name,
+            &adopted_module,
+            &mut fresh,
+        )
+        .unwrap();
+        adopted_module.items.extend(adopted.items);
+    }
+    let text = adopted_module.to_text();
+    assert!(text.contains("CloseAfterSend: off,"), "{text}");
+    assert_eq!(text.matches("Signed: off,").count(), 2, "{text}");
+    assert!(text.contains("Analog: off,"), "{text}");
+    assert!(text.contains("Analog: on,"), "{text}");
+    // A box a fresh object leaves unticked lifts as nothing.
+    assert_eq!(text.matches("Analog:").count(), 2, "{text}");
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+
+    // Minted fresh, the boxes stay unticked.
+    let elsewhere = compile(&base(), &adopted_module, &mut Lockfile::default(), &opts()).unwrap();
+    for o in elsewhere.objects() {
+        let el = elsewhere.element_at(&o.path).unwrap();
+        match o.block_type.as_str() {
+            "VirtualOut" => assert_eq!(el.attr("CloseAfterSend"), None),
+            "VirtualUdpInCmd" => {
+                assert_eq!(el.attr("Signed"), None);
+                assert_eq!(el.attr("Analog"), None);
+            }
+            "VirtualHttpInCmd" => {
+                assert_eq!(el.attr("Signed"), None);
+                assert_eq!(el.attr("Analog"), Some("true"));
+            }
+            _ => {}
+        }
+    }
+}
