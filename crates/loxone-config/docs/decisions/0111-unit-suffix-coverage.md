@@ -44,6 +44,11 @@ where a Loxone page states it:
 - No Loxone page gives the unit of the Modbus server's `Timeout` or the Modbus sensors'
   `ModbusPollingCycle`, `MinTime` and `MaxTime` (reference `kb-modbus-tcp` names them without a
   unit). They stay bare numbers until a document states one.
+- Update (#344): Loxone Config's property panel counts as such a document. It shows the unit next
+  to each setting, and a value set there and saved shows the attribute's scale. Oracle session 70
+  read the Modbus server's `Timeout` (ms), the sensors' `ModbusPollingCycle` (s) and `MaxTime`
+  (ms), and the UDP command's `MinTime` (ms) that way. The Modbus sensors' `MinTime` is not in the
+  panel and stays bare.
 
 **Milliseconds are a port unit.** A time suffix scales exactly into milliseconds there (`4s` →
 `4000`); decompile, adopt and the lint write `4s` for `4000`. Before, a suffix on such a port

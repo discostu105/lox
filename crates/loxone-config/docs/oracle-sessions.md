@@ -1073,6 +1073,32 @@ set (`AQ1 80%`, `AQ2 on`), and `Circuit1: "dimmer"` on `L2` with relay Q4, opene
   Compiled again onto the save, the file came back byte-identical.
 
 Not tested: whether the Miniserver dims such a circuit. That needs an upload.
+## Units of Modbus and UDP settings (session 70, #344) — passed
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run --keep`, in a private copy of the
+oracle prefix on its own display. The base was the redacted library config `examples/library/energy`.
+The probe compiled a Modbus server (`Timeout="2345"`), an analog and a digital Modbus sensor
+(`ModbusPollingCycle` 37 and 41, `MinTime` 1500 and 15, `MaxTime` 123000 and 45000) and a virtual
+UDP command (`MinTime="25"`). The unedited open+save gave an empty semantic diff. The property panel
+showed:
+
+| Object | Panel | Shown | Range (tooltip) |
+|---|---|---|---|
+| Modbus server | Timeout [ms] | 2345 | 10…8000 |
+| Modbus sensors | Abfragezyklus [s] | 37, 41 | 0…4095 |
+| Modbus sensors | Zeitüberschreitung Empfang [s] | 123, 45 | 0…∞ |
+| UDP command | Minimaler Zeitabstand [s] | 0.025 | 0…∞ |
+
+Then each was set in the panel and saved: Timeout 2346, Abfragezyklus 38 and 42, Zeitüberschreitung
+Empfang 124 and 46, Minimaler Zeitabstand 0.03. The save wrote `Timeout="2346"`,
+`ModbusPollingCycle="38"` and `"42"`, `MaxTime="124000"` and `"46000"`, `MinTime="30"`. So
+`Timeout` is in ms, the polling cycle in s, `MaxTime` and the UDP `MinTime` in ms.
+
+- Neither Modbus sensor shows `MinTime` or `MinChange` anywhere in the panel, so their unit stays
+  unknown.
+- The UDP command also shows *Zeitüberschreitung Empfang [s]*. Setting it to 7 wrote
+  `MaxTime="7000"` and switched *Wert bei Zeitüberschreitung* to *Standardwert*. Sessions 84 to 86
+  (#346) followed this up.
 
 ## LightController2 on a Miniserver, live (2026-10-31)
 

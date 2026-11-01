@@ -867,8 +867,9 @@ writes ([D120](decisions/0120-refuse-titles-a-save-rewrites.md)). Source: oracle
 
 ### Units of the settings
 
-The unit a setting's attribute is in, where a Loxone knowledge-base page states it. The table is
-`src/settings_meta.rs`; value suffixes scale into these units.
+The unit a setting's attribute is in, where a Loxone knowledge-base page or Loxone Config's
+property panel states it. The table is `src/settings_meta.rs`; value suffixes scale into these
+units. Units and ranges are those of the attribute.
 
 | Object | Attribute | Property | Unit | Range | Source |
 |---|---|---|---|---|---|
@@ -876,18 +877,26 @@ The unit a setting's attribute is in, where a Loxone knowledge-base page states 
 | `VirtualHttpIn` | `Timeout` | Timeout | ms | 10…8000 | `kb-virtual-http-input`, *Properties* |
 | `VirtualHttpIn` | `Allowedtimeouts` | Number of permitted timeouts | none | 0…100 | `kb-virtual-http-input`, *Properties* |
 | `VirtualUdpInCmd` | `MaxTime` | Zeitüberschreitung Empfang [s] | ms | 0 or more | oracle session 84 |
+| `ModbusServer` | `Timeout` | Timeout [ms] | ms | 10…8000 | oracle session 70 |
+| `ModbusASensor`, `ModbusSensor` | `ModbusPollingCycle` | Abfragezyklus [s] | s | 0…4095 | oracle session 70 |
+| `ModbusASensor`, `ModbusSensor` | `MaxTime` | Zeitüberschreitung Empfang [s] | ms | 0 or more | oracle session 70 |
+| `VirtualUdpInCmd` | `MinTime` | Minimaler Zeitabstand [s] | ms | 0 or more | oracle session 70 |
 
-The attributes match the properties by name. The corpus agrees: all 19 `VirtualHttpIn`s have
-`Timeout="4000"` (the mint default), and every `Poll` is 10 or more (10 to 3600).
+The `VirtualHttpIn` attributes match the properties by name. The corpus agrees: all 19
+`VirtualHttpIn`s have `Timeout="4000"` (the mint default), and every `Poll` is 10 or more (10 to
+3600).
 
-No Loxone page states the unit of these settings, so they stay bare numbers:
+No Loxone page states the Modbus units. Reference `kb-modbus-tcp` (German; there is no English
+page) names the server's timeout and the sensors' polling cycle without units, and the Modbus Air
+and Modbus Extension pages document only RS-485 timing. The units come from Loxone Config's
+property panel instead ([oracle session 70](oracle-sessions.md#units-of-modbus-and-udp-settings-session-70-344--passed)):
 
-- `ModbusServer` `Timeout`. Reference `kb-modbus-tcp` (German; there is no English page) names the
-  server's timeout and the sensors' polling cycle, without units. The Modbus Air and Modbus
-  Extension pages document only RS-485 timing ("Timeout: 1000ms" in Auto mode), not these
-  attributes.
-- `ModbusASensor` and `ModbusSensor` `ModbusPollingCycle`, `MinTime`, `MaxTime`.
-- `VirtualUdpInCmd` `MinTime`.
+- The panel shows `Timeout` and `ModbusPollingCycle` in the attribute's own unit.
+- The panel shows `MaxTime` and the UDP command's `MinTime` in seconds, but the save writes
+  milliseconds: 46 s is saved as `MaxTime="46000"`, 0.03 s as `MinTime="30"`.
+
+A Modbus sensor's `MinTime` has no entry and stays a bare number: the panel does not show it on
+either sensor type (nor `MinChange`).
 
 ## Settings of physical inputs and outputs
 

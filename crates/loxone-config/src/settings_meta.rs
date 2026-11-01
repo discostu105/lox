@@ -1,14 +1,13 @@
 //! Documented units and ranges of the settings of virtual and Modbus
 //! devices, which the TechDoc scrape behind `port_meta` does not cover.
-//! Hand-written: every entry is read off a Loxone knowledge-base page,
-//! cited per type. The table is in loxone-format.md, *Virtual and Modbus
-//! devices*.
+//! Hand-written: every entry is read off a Loxone knowledge-base page or
+//! off Loxone Config's property panel (an oracle session), cited per
+//! type. Units and ranges are those of the saved attribute. The table is
+//! in loxone-format.md, *Units of the settings*.
 //!
-//! A setting whose unit no Loxone page states has no entry, so its value
-//! stays a plain number: the Modbus server's `Timeout`, the Modbus
-//! sensors' `ModbusPollingCycle`, `MinTime` and `MaxTime`, and the
-//! virtual UDP command's `MinTime` (reference `kb-modbus-tcp` names the
-//! timeout and the polling cycle without a unit).
+//! A setting whose unit neither source shows has no entry, so its value
+//! stays a plain number: the Modbus sensors' `MinTime`, which the
+//! property panel does not show.
 
 use crate::port_meta::PortMeta;
 
@@ -39,6 +38,18 @@ pub fn documented(block_type: &str, setting: &str) -> Option<PortMeta> {
         // "Zeitüberschreitung Empfang [s]", saved in ms (7 s saved as
         // 7000), absent at 0.
         ("VirtualUdpInCmd", "MaxTime") => m(Some("ms"), Some("0"), None),
+        // Oracle session 70, same panel: "Timeout [ms]", 10...8000, saved as is.
+        ("ModbusServer", "Timeout") => m(Some("ms"), Some("10"), Some("8000")),
+        // "Abfragezyklus [s]", 0...4095, saved as is.
+        ("ModbusASensor" | "ModbusSensor", "ModbusPollingCycle") => {
+            m(Some("s"), Some("0"), Some("4095"))
+        }
+        // "Zeitüberschreitung Empfang [s]", 0...unbounded, saved in ms
+        // (46 s saved as 46000).
+        ("ModbusASensor" | "ModbusSensor", "MaxTime") => m(Some("ms"), Some("0"), None),
+        // "Minimaler Zeitabstand [s]", 0...unbounded, saved in ms (0.03 s
+        // saved as 30).
+        ("VirtualUdpInCmd", "MinTime") => m(Some("ms"), Some("0"), None),
         _ => return None,
     })
 }
@@ -55,12 +66,19 @@ mod tests {
             Some(PortUnit::Milliseconds)
         );
         assert_eq!(port_unit("VirtualHttpIn", "Allowedtimeouts"), None);
-        // No Loxone page states these units.
-        assert_eq!(port_unit("ModbusServer", "Timeout"), None);
-        assert_eq!(port_unit("ModbusASensor", "MaxTime"), None);
-        assert_eq!(
-            port_unit("VirtualUdpInCmd", "MaxTime"),
-            Some(PortUnit::Milliseconds)
-        );
+    }
+
+    #[test]
+    fn modbus_and_udp_units() {
+        let ms = Some(PortUnit::Milliseconds);
+        assert_eq!(port_unit("ModbusServer", "Timeout"), ms);
+        for t in ["ModbusASensor", "ModbusSensor"] {
+            assert_eq!(port_unit(t, "ModbusPollingCycle"), Some(PortUnit::Seconds));
+            assert_eq!(port_unit(t, "MaxTime"), ms);
+            // The property panel does not show it.
+            assert_eq!(port_unit(t, "MinTime"), None);
+        }
+        assert_eq!(port_unit("VirtualUdpInCmd", "MinTime"), ms);
+        assert_eq!(port_unit("VirtualUdpInCmd", "MaxTime"), ms);
     }
 }
