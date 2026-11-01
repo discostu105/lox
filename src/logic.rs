@@ -1163,7 +1163,7 @@ impl Logic {
                 MatchSpec::Title(t) => self
                     .browsable()
                     .find(|b| b.typ == e.block_type && &b.title == t && room_ok(b)),
-                MatchSpec::Mirrors(_) => None,
+                MatchSpec::Mirrors(_) | MatchSpec::Serial(_) => None,
             };
             let Some(b) = found else { continue };
             let mut ctx = Vec::new();

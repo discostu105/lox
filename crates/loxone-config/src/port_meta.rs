@@ -49,10 +49,13 @@ const fn m(
 
 /// The documented metadata of a builtin block's port, if any. A canvas
 /// label the documentation lacks comes from the table, verified in Loxone Config,
-/// in `canvas_labels`.
+/// in `canvas_labels`. The settings of virtual and Modbus devices come
+/// from the hand-written table in `settings_meta`.
 pub fn port_meta(block_type: &str, port: &str) -> Option<PortMeta> {
     let label = crate::canvas_labels::label(block_type, port);
-    match documented(block_type, port) {
+    match documented(block_type, port)
+        .or_else(|| crate::settings_meta::documented(block_type, port))
+    {
         Some(meta) => Some(PortMeta {
             label: meta.label.or(label),
             ..meta

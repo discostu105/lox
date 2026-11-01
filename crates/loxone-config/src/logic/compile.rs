@@ -34,8 +34,8 @@
 
 use crate::connectors::{
     MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_name,
-    attr_param, attr_params, bool_params, builtin, carried_attrs, carried_children, container_type,
-    message_params, object_tree, omitted_when_off, ref_link_type, save_defaults,
+    attr_param, attr_params, builtin, carried_attrs, carried_children, container_type,
+    message_params, object_tree, omitted_value, ref_link_type, save_defaults,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, WireView, ports};
 use crate::error::{Error, Result};
@@ -52,6 +52,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod claims;
 mod emit;
+mod owned;
 mod plan;
 mod teardown;
 mod wires;
@@ -258,6 +259,15 @@ fn compile_expanded(
     // --- Resolve externs (against the untouched base).
     let extern_uuid = resolve_externs(&doc, module, lock)?;
     check_externs_unmanaged(&extern_uuid, module, lock)?;
+    // A calendar entry's raw mode number, named the way its replacement
+    //     reads (a user mode's number is only in the base).
+    let known: BTreeMap<String, String> = lock
+        .objects
+        .iter()
+        .map(|(s, o)| (s.clone(), o.uuid.clone()))
+        .chain(extern_uuid.iter().map(|(s, u)| (s.clone(), u.clone())))
+        .collect();
+    super::calendar::refuse_numbers(&doc, module, &known)?;
     let snap = teardown::snapshot_base(&doc, lock);
 
     // --- Tear down our previous output: managed objects, extern wires,
@@ -314,6 +324,8 @@ fn compile_expanded(
 
     claims::apply_claims(&mut doc, lock, &cx)?;
     claims::retire_claims(lock, &prior);
+
+    owned::apply_owned(&mut doc, lock, &cx)?;
 
     apply_features(&mut doc, base, lock, &mut minter, &cx)?;
 
@@ -614,6 +626,10 @@ fn apply_features(
         .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
         .collect();
     super::tiles::apply(doc, module, &uuid_of)?;
+    // Calendar entries: `CalType=` from `switches:`, now that every mode
+    //     has its number.
+    super::calendar::apply(doc, module, &uuid_of)?;
+    super::calendar::place_new_attrs(doc, base, module, &uuid_of);
     // DayTimer schedules: the claimed `Modes=`/`N=`/`<Entry>` set,
     //     on extern and managed timers alike; no lock state either.
     super::schedule::apply(doc, module, &uuid_of)?;
@@ -852,6 +868,10 @@ fn resolve_externs(
                         MatchSpec::Mirrors(_) => {
                             mirror_uuid.is_some() && ref_attr(o) == mirror_uuid
                         }
+                        MatchSpec::Serial(v) => doc
+                            .element_at(&o.path)
+                            .and_then(crate::doc::element_serial)
+                            .is_some_and(|s| crate::doc::same_serial(&s, v)),
                     }
                     && ext.room.as_ref().is_none_or(|want| {
                         iodata_ref(o, "Pr")
@@ -954,6 +974,7 @@ fn resolve_externs(
                         matched_by: matcher_kind(&ext.match_spec).to_string(),
                         title_at_match: only.title.clone(),
                         iname_at_match: only.iname.clone(),
+                        owned: false,
                     },
                 );
                 out.insert(ext.slug.clone(), only.uuid.clone());
@@ -972,6 +993,10 @@ fn resolve_externs(
     let declared: BTreeSet<&str> = module.externs().map(|e| e.slug.as_str()).collect();
     lock.externals
         .retain(|slug, _| declared.contains(slug.as_str()));
+    let owned: BTreeSet<&str> = module.owned().map(|o| o.slug.as_str()).collect();
+    for (slug, e) in lock.externals.iter_mut() {
+        e.owned = owned.contains(slug.as_str());
+    }
     Ok(out)
 }
 
@@ -1003,6 +1028,7 @@ fn matcher_kind(m: &MatchSpec) -> &'static str {
         MatchSpec::IName(_) => "iname",
         MatchSpec::Title(_) => "title",
         MatchSpec::Mirrors(_) => "mirrors",
+        MatchSpec::Serial(_) => "serial",
     }
 }
 
@@ -1474,6 +1500,16 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
         .and_then(|co| co.attr_decoded("Def").map(|v| v.into_owned()))
 }
 
+/// Whether `port_uuid` keys a setting a save writes only when it is not 0
+/// ([`crate::connectors::omitted_when_zero`]): absent, it reads as 0.
+fn zero_when_absent(doc: &LoxoneDoc, port_uuid: &str) -> bool {
+    crate::settings::split_key(port_uuid).is_some_and(|(owner, name)| {
+        find_c(&doc.xml.root, owner).is_some_and(|c| {
+            crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name)
+        })
+    })
+}
+
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
 /// in Loxone's canonical position: after `Def`, before `U` (a save rewrites
 /// `K,Nc,Def,U` to `K,Def,Nc,U`).
@@ -1548,6 +1584,9 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
     let Some(c) = find_c_mut(&mut doc.xml.root, owner) else {
         return;
     };
+    // A save writes these numbers only when they are not 0.
+    let zero = value.is_some_and(crate::connectors::is_zero)
+        && crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name);
     let el = if name == "Unit" {
         match c.child_elements_mut().find(|e| e.name == "Display") {
             Some(d) => d,
@@ -1558,6 +1597,9 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
     };
     match value {
         None => {
+            el.remove_attr(name);
+        }
+        Some(_) if zero => {
             el.remove_attr(name);
         }
         Some(v) if el.attr(name).is_some() => el.set_attr(name, v),

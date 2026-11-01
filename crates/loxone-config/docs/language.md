@@ -50,7 +50,8 @@ wire       = slug "." port "<-" ( ref "." port | expr ) [ comment ] ;
                                        desugars into gate blocks *)
 set        = slug "." port "=" value [ comment ] ;            (* extern target *)
 attr       = slug "." attr-name "=" ( string | number | const-ref ) [ comment ] ;
-                                    (* extern target, top-level only *)
+                                    (* extern target, top-level only; or
+                                       `.title` on a named signal *)
 attr-name  = "title" | "room" | "category" ;      (* lowercase: never a port key *)
 bulk       = "(" ref { "," ref } ")" "." ( port | attr-name ) "=" value [ comment ] ;
                                     (* each ref once; one line *)
@@ -137,7 +138,7 @@ day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | "holiday" | "vacation" | "dayoff"
            | "weekdays" | "weekend" | "daily"
            | "heating" | "cooling"
-           | string ;                      (* any operating mode by title *)
+           | mode-name ;                   (* a Mode of the module, or another mode by title *)
 interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
 schedule-claim = ref "." "schedule" "=" slug [ comment ] ;
@@ -175,7 +176,7 @@ rule-line  = ( "active" | "inactive"
              | "then" ref ( command-word | string ) ) [ comment ] ;
                                     (* after `then`, the action words win:
                                        a block named `wait` is no target *)
-mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
+mode-name  = slug | string ;                       (* one spelling per mode: see Operating modes *)
 command-word = letter { letter | digit | "_" } ;  (* one word, bare: `then pumpe on`;
                                                       anything else stays quoted *)
 rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
@@ -184,7 +185,10 @@ rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
-value      = number [ unit ] | string | bool | const-ref | clock ;
+value      = number [ unit ] | string | bool | const-ref | clock | date | day-of-year ;
+day-of-year = digit digit "-" digit digit ;        (* MM-DD; a date and a day of the year
+                                                      bind only a calendar entry's
+                                                      `on:`, `from:`, `to:` *)
 bool       = "on" | "off" ;                        (* digital 1/0; "true"/"false" on a
                                                       text-boolean attribute *)
 clock      = digit [ digit ] ":" digit digit [ ":" digit digit ] ;
@@ -219,24 +223,42 @@ Notes:
     `Analog:`, `VirtualHttpInCmd`'s `Signed:`/`Analog:`, …) they compile to that text. Such an
     attribute takes only `on`/`off`; `Analog: "true"` is an error naming `Analog: on`.
   - Except on a `VirtualIn`, `off` compiles to no attribute, which is how Loxone Config stores an
-    unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`.
+    unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`. Decompile and adopt write `off`
+    for an unticked box that a new object would tick (`Signed`, `Analog` on the HTTP and UDP commands,
+    `CloseAfterSend`).
   - A number stays a number: `1` is never rewritten to `on`.
   - The formula backend rejects them; write `1`/`0`.
+- **0 on a setting** that Loxone Config leaves out at 0 (`MinVal: 0` on a `VirtualIn`, the range, low
+  ends and timing of the virtual and Modbus objects and physical inputs, `ModbusDataType: 0`, …)
+  compiles to no attribute, which is how a save stores it. A Modbus server's `Timeout: 0` stays
+  `Timeout="0"`.
+- A value that a Loxone Config save would rewrite is an error that names what the save writes: a
+  virtual HTTP input's `Poll` is a whole number of seconds from 10 to 604800, its `Timeout` whole
+  milliseconds from 10, its `Allowedtimeouts` a whole number; a digital `VirtualIn`'s `MaxVal` is 1 and
+  its `MinVal` 0.
 - A number may carry a **unit suffix**, written immediately adjacent: `40s`, `250ms`, `90min`,
   `1.5h`, `2700K`, `70%`. `loxl types <Type>` shows each port's documented unit.
   - Time units scale exactly into the port's unit. That is seconds by default (`1.5h` compiles to
     `Def="5400"`, byte-identical to `5400`), minutes on a minutes port (`AutoShadeTime: 2h` compiles
-    to `120`). A value that is not an exact decimal number of minutes (`10s`) is an error there.
+    to `120`), milliseconds on a milliseconds port (`VirtualHttpIn`'s `Timeout: 4s` compiles to
+    `4000`). A value that is not an exact decimal number of minutes (`10s`) is an error there.
   - `%` and `K` (color temperature) have factor 1. They are accepted only on a port documented in
     that unit, or on an undocumented one. A time suffix on a `%`, `K` or `°` port is an error.
   - A suffixed `let` scales per use, into each port's unit.
   - The suffix is part of the canonical spelling: `1.5h` stays `1.5h` through `fmt`.
   - An unknown suffix is a parse error. A quoted `"40s"` stays a string.
-  - Decompile and adopt write the suffix on a port documented in seconds or minutes: the largest of
+  - Decompile and adopt write the suffix on a port documented in milliseconds, seconds or minutes:
+    the largest of
     `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
     and only when it compiles back to the same digits. Zero and the other ports stay bare.
   - `loxl lint` reports a bare number that this rule would write with a suffix (`unit-suffix`:
-    `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults` and in template bodies.
+    `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults`, on extern port assignments
+    (`x.Time = 300` → `x.Time = 5min`) and in template bodies. A template value parameter
+    (`zeit = 75`) and an instance's argument for it count when every use of the parameter in the
+    body is a port of the same unit; an argument the instance forwards to its primary block counts
+    by that block's port. A bulk line `(a, b).Port = 300` changes only as a whole.
+  - A setting with no unit in Loxone's documentation stays a bare number: the Modbus server's
+    `Timeout`, the Modbus sensors' `ModbusPollingCycle`, `MinTime` and `MaxTime`.
     `loxl lint --fix` writes the suffixes; the compile output stays byte-identical, and in a project
     the fix is refused if it would not.
 - **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
@@ -279,6 +301,7 @@ extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 extern boiler = Switch(uuid: "1d844a67-0333-5301-ffffed57184a04d2")
 extern licht_buero = LightController2(title: "Deckenlicht", room: "Büro")
 extern taster_flur = TreeSensor(title: "Taster 1", device: "B0A1B2C3")
+extern tree = LoxTree(serial: "13000003")
 extern status_alarm_ref = InputRef(mirrors: status_alarm)
 ```
 
@@ -298,7 +321,8 @@ match. Zero is a `NoMatch` error; several is an `AmbiguousMatch` error that list
   for its own I/Os and virtual folders. For a device, it is the device's own. An Air device's serial
   is the one the Miniserver's `/data/status` lists (`50:4F:94:FF:FE:BA:1F:0E`). Serials compare
   ignoring case and `:`.
-- These constraints never combine with `uuid:`, which pins exactly on its own.
+- **`serial:`** matches a device by its own serial, compared the same way.
+- These constraints never combine with `uuid:` or `serial:`, which pin exactly on their own.
 
 Once resolved, the UUID is pinned in the lockfile. Later compiles use the pin, even if the title has
 changed, as long as an object with that UUID and type still exists. Editing a `uuid:` value re-points
@@ -377,7 +401,11 @@ value decides the meaning:
   gate/comparator blocks whose result is wired into the port — the same
   sugar as on `<-` (see [Expressions](#expressions--sugar-over-the-discrete-blocks)).
 - An optional leading string is the display **label** (the XML `Title`);
-  it defaults to the slug.
+  it defaults to the slug. A label that a Loxone Config save would rewrite is an error that names
+  what the save writes: the save drops `{`, `}`, tabs and line breaks, turns a space at either end
+  into `_`, and turns `%`, `<` and `|` into `_` on most types (the per-type sets are in
+  [loxone-format.md](loxone-format.md#titles-a-save-rewrites)). An empty label is an error too. The
+  same holds for `.title` claims.
 
 Some block types carry **attribute parameters** — block logic stored as an
 element attribute rather than a connector. They bind exactly like
@@ -530,6 +558,10 @@ follows `page`.
   (`connectors::periphery` lists them per type). A new one is refused
   without the settings that make it work (`Address` and `Poll` for an
   HTTP input, `Check` for a command, `ModbusAddress` for a Modbus I/O).
+- A UDP command's receive timeout: `MaxTime: 30s` sets it (0 is off).
+  When nothing arrives in that time, the value becomes `DefVal:`, or
+  stays as it was with `ValOT: 1`. HTTP commands have no receive
+  timeout.
 - Strings are source strings: a backslash is written `\\`, so Loxone's
   `\v` placeholder in a command's check is `"\\v"`.
 - `IName=` (VHI1, VCI3, AMQ12, …) is minted once and kept.
@@ -539,6 +571,50 @@ follows `page`.
   extern of an object the source manages is an error.
 - `extern … (device: "<serial>")` is something else: an extern matched
   by the serial of a physical device.
+
+### Hardware — Tree and Air devices and what hangs below them
+
+```text
+taster = TreeDevice("Taster Bad", serial: "B0A1B2C3", Installation: "Neben der Tür")
+klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", Statistics: on)
+temp = TreeAsensor("Raum", device: taster, iname: "AI0", Unit: "<v.1> °C", MinTime: 600)
+led = TreeActor("Status", device: taster, iname: "Q0", I: klingel.Q)
+tree = LoxTree("Tree", serial: "13000003", SwitchBoard: "Verteiler 2")
+klingel.room = "Flur"
+```
+
+A hardware declaration takes over a device that Loxone Config paired, or
+an input or output below one. The element stays where it is; the source
+owns its title (the label), its room and category, and the settings it
+states. They are written on every compile.
+
+- **Devices:** `TreeDevice`, `LoxAIRDevice`, and the extensions `LoxTree`
+  and `LoxAIR`. A device is matched by `serial:` (an Air device's is
+  the one `/data/status` lists, from its `IP=`) or by `uuid:`.
+- **Inputs and outputs:** `TreeSensor`, `TreeAsensor`, `TreeActor` and
+  `TreeAactor` below a `TreeDevice`; `LoxAIRsensor`, `LoxAIRAsensor`,
+  `LoxAIRactor` and `LoxAIRAactor` below a `LoxAIRDevice`. `device:`
+  names the device's declaration. The I/O is matched by `iname:` inside
+  that device, which needs the device matched by `serial:`, or by
+  `uuid:`.
+- **Settings** are those of `=` on a setting (below), with the same
+  rules for adding one. The extensions have `Installation`,
+  `SwitchBoard`, `SwitchBoardRow` and `SwitchBoardPos`, rewritten only.
+- **`Statistics: on`** records the I/O's value: `StatsType="7"` on a
+  digital input or output, `11` on an analog sensor (TreeAsensor,
+  LoxAIRAsensor). `off` removes it. Left out, the statistics stay as
+  Loxone Config set them.
+- **Ports** are bound in the argument list (`I: klingel.Q`, `I: 30`).
+  `x.Port <- …`, `x.Port = …` and `x.title = …` on a declaration are
+  errors. `.room` and `.category` are allowed; they only rewrite a
+  binding the element has.
+- **Removing** a declaration from the source releases the hardware: the
+  element keeps the values the source wrote last, and its wires from
+  the argument list leave. Nothing is ever deleted.
+- `adopt --uuid <device>` declares the device with every I/O below it,
+  with the values the config holds. An extern among them keeps its
+  slug, and its statements move into its declaration. Adopting an I/O
+  alone is an error. Pairing a device stays in Loxone Config.
 
 ### Operating modes — minted into the "Betriebsmodi" folder
 
@@ -552,39 +628,74 @@ A user-defined operating mode is an object of the object tree, like a virtual in
 `page`.
 
 - A new one gets the next `Mode=` number below the lowest in use (`-1`, `-2`, …) and keeps it.
-  Schedules can name it by its title.
-- Existing modes, built-in or made in Loxone Config, are referenced by title in a schedule or as an
-  extern (`extern montag = Mode(title: "Montag")`).
+- Existing modes, built-in or made in Loxone Config, are an extern
+  (`extern urlaub = Mode(title: "Urlaub")`), or are named by title where no extern declares them.
 - `adopt --uuid <mode> --as <slug>` takes over a user mode made in Loxone Config. It keeps its UUID
   and `Mode=` number; a new title is a rename. A built-in mode (`Mode=` ≥ 0) stays an extern.
+
+**One spelling per mode.** Rules (`when mode`, `then mode`), schedule lines and a calendar entry's
+`switches:` name a mode one way:
+
+1. a built-in mode in a schedule or calendar entry by its day word (`mon`, `holiday`, `heating`, …);
+2. a mode the module declares or externs by its slug (`when mode party`, `party 18:00-24:00`);
+3. any other mode by its quoted title (`when mode "Urlaub"`).
+
+A slug that is a day word cannot name a mode in a schedule or calendar entry, since the day word
+wins; that mode keeps its title there. Another spelling is an error that states the line as it should read: write
+`party 18:00-24:00` instead of `"Party" 18:00-24:00`. `loxl check` catches what the source shows,
+`loxl compile` the rest (a mode an extern matches by UUID, a built-in mode by title). `loxl fmt` on a
+module directory rewrites the spellings the source shows; `decompile` and `adopt` write them.
 
 ### Calendar entries — the *Betriebszeiten* that switch a mode on
 
 ```text
-ferien = CalendarEntry("Sommerferien", CalType: 2, Mode: 3, From: 6393, To: 6456)
-ostern = CalendarEntry("Ostermontag", Mode: 1, EasterOffset: 1)
-silvester = CalendarEntry("Silvester", CalType: -8, Month: 12, Day: 31)
+party = Mode("Party")
+ferien = CalendarEntry("Sommerferien", switches: vacation, from: 2026-07-04, to: 2026-09-05)
+ostern = CalendarEntry("Ostermontag", switches: holiday, easter: 1)
+silvester = CalendarEntry("Silvester", switches: party, on: 12-31)
+heizperiode = CalendarEntry("Heizperiode", switches: heating, from: 10-01, to: 04-30)
 ```
 
 An entry of the *Betriebszeiten* calendar is an object of the object
-tree, minted into the `CalendarCaption` folder. `CalType` is the
-`Mode=` number of the mode it switches on (absent: 0, the holiday
-mode); `Mode` says what kind of date it is:
+tree, minted into the `CalendarCaption` folder. `switches:` names the
+operating mode it switches on, spelled as everywhere else (see
+[One spelling per mode](#operating-modes--minted-into-the-betriebsmodi-folder)):
+a built-in mode by one day word (`holiday`, `vacation`, `dayoff`,
+`mon` … `sun`, `heating`, `cooling`; not `weekdays`, which is several
+modes), a mode the module declares or externs by its slug, any other by
+its quoted title (`switches: "Urlaub"`). It compiles to the entry's
+`CalType=`, the mode's `Mode=` number (none for the holiday mode, 0).
+Without `switches:`, a fresh entry switches the holiday mode, and an
+adopted one keeps its mode.
 
-| `Mode` | Kind | Attributes |
+The date is one of four kinds, written bare like `when date`:
+
+| Source | Kind | Compiles to |
 |---|---|---|
-| absent | a fixed date, every year | `Month`, `Day` |
-| `1` | relative to Easter Sunday | `EasterOffset` (days) |
-| `3` | one period | `From`, `To` (days since 2009-01-01) |
-| `4` | a yearly range | `Month`, `Day` to `Month2`, `Day2` |
+| `on: 12-31` | a day every year (`MM-DD`) | no `Mode=`; `Month`, `Day` |
+| `easter: 1` | days after Easter Sunday (`easter: -2`: before it) | `Mode="1"`, `EasterOffset` |
+| `from: 2026-07-04, to: 2026-09-05` | one period (`YYYY-MM-DD`) | `Mode="3"`, `From`, `To` (days since 2009-01-01) |
+| `from: 10-01, to: 04-30` | a range every year (`MM-DD`), across New Year when `to` is earlier | `Mode="4"`, `Month`, `Day`, `Month2`, `Day2` |
 
-Other kinds do not occur among the corpus's 397 entries; the attributes
-are written as stated. A fresh entry carries the attributes Loxone
-Config writes for an unset date (`Month`/`Day`/`Month2`/`Day2` 1,
-`WeekDayInMonth="1"`). The entries Loxone Config made are taken over
-with `adopt --uuid`; edits change only the attributes the source
-states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
-is the output to use.
+Month and day have two digits, and `02-29` is a day of the year. A
+period starts on 2009-01-01 or later. `on:` takes no year: for one day,
+write `from: 2026-12-24, to: 2026-12-24`. The attributes the kind does
+not read stay as they are, as in a Loxone Config save. Without a date,
+a fresh entry is 1 January (what Loxone Config writes for an unset
+date), and an adopted one keeps its date.
+
+The stored attributes are no longer source. `CalType: 10` is an error
+that names `switches: heating`: `loxl check` names it for a built-in
+mode, `loxl compile` for a user mode (negative numbers, which only the
+config resolves). `Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30` is
+an error that names `from: 10-01, to: 04-30`. `Mode`, `Month`, `Day`,
+`Month2`, `Day2`, `From`, `To`, `EasterOffset` and `WeekDayInMonth`
+(1 on every entry) are all refused, and a `Mode` other than none, 1, 3
+or 4 is no date. `loxl fmt` rewrites a built-in mode's number and the
+stored date. The entries Loxone Config made are taken over with
+`adopt --uuid`, which writes their mode with `switches:` and their date
+as a date; edits change only what the source states. Its `I` and `Q`
+are never wired in the corpus; the mode's `Q` is the output to use.
 
 ### `<-` — wire onto an extern port
 
@@ -649,7 +760,8 @@ An Air or Tree device (`LoxAIRDevice`, `TreeDevice`) has settings of its
 own: `Desc`, which may be added, and where it is installed —
 `Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` —
 which are rewritten only (a Tree device has a board only when it is
-mounted in one).
+mounted in one). The Tree and Air extensions (`LoxTree`, `LoxAIR`) have
+the place and the board.
 
 ```text
 extern relais = LoxAIRDevice(title: "Relais Jalousie", device: "50:4F:94:FF:FE:BA:1F:0E")
@@ -713,9 +825,10 @@ minted ref (`mirrors:`) of a claimed extern carries the claimed title.
 
 Rules:
 
-- **Title: externs only.** A managed block's title is its label
+- **Title: externs and named signals.** A managed block's title is its label
   (`slug = Type("…", …)`); `.title` on it is a validation error naming
-  the remedy. Its `.room` and `.category` are allowed: the compile
+  the remedy. On a named signal `.title` sets the top block's label (see
+  [Named signals](#named-signals-slug--expr)). Its `.room` and `.category` are allowed: the compile
   writes them on every rebuild, with no lock state and no followers.
 - **Not what it is matched by.** `title:` matcher plus `.title`,
   `room:` plus `.room`, `category:` plus `.category` are refused: after
@@ -726,7 +839,8 @@ Rules:
   the same attribute are a compile error.
 - **Text, not units.** The value is a string, number or `let` reference;
   a unit value is an error.
-- **Top-level only** — not inside a `template` body.
+- **Top-level only** — not inside a `template` body, except a named
+  signal's `.title`.
 - `x.room <- …` is a parse error: attributes are assigned, never wired.
 
 ### `removed` — authorize deleting a managed block
@@ -781,6 +895,10 @@ page), also in a directory module where an earlier file names a page. Placement
 is positional, so the synthetic blocks of an expression land on the page the
 expression is written under. Objects of the object tree (a `VirtualIn`, a
 `Mode`, a device's I/O) have no page and ignore the statement.
+
+There is no statement that goes back to the default page. Put those blocks
+above the file's first `page`, or in a file of their own, or name the page:
+`page "<title>"` works for the default page too.
 
 The statement is **authoritative**. On every compile, each block it governs is pinned to a base page
 with the declared title:
@@ -979,7 +1097,8 @@ compile, like template expansion, it desugars into verified blocks:
 - Operand order is kept: the left side binds `Input1`, the right side `Input2`. A port operand becomes
   a wire; a number or `let` reference becomes the port's `Def=`.
 - Each generated block is labeled with its sub-expression, so the rule stays readable on the Loxone
-  Config canvas.
+  Config canvas. A save would turn `<` and `%` in a title into `_`, so the label writes `<=` as `≤`,
+  `<` as `＜` and `%` as `％` (`p1.Q ≤ 5 and p2.Q ＜ 70％`).
 - A bare `slug.Port` stays a plain wire and a bare value a plain parameter. Parentheses around one
   change nothing.
 
@@ -1048,8 +1167,21 @@ The right side must be an expression:
 
 - A bare port (`x = a.Q`) is an error, since an alias is not a block. Write `a.Q` where `x.Q` would go.
 - A bare value (`x = 5`, `x = on`) is a constant; write `let x = 5`.
-- A signal's inputs are its expression. `<-`, port-`=` and attribute statements on a signal are
+- A signal's inputs are its expression. `<-`, port-`=`, `.room` and `.category` on a signal are
   errors, and a template body's only signal takes no call-site port forwards.
+
+**Label.** The top block's label is the expression text, unless a `.title` line gives it one:
+
+```text
+beschatten = sonne.Q and aussentemp.Q >= schwelle
+beschatten.title = "Beschatten Süd"
+```
+
+- The value is a string, number or `let` reference, as for an extern's `.title`. It is the label, not
+  a claim: nothing goes into the lockfile and the lock keys stay the same.
+- Only the top block takes it. The sub-blocks keep their expression text.
+- One `.title` per signal. `fmt` keeps it on the line below the signal.
+- In a template body a signal's `.title` may interpolate the parameters (`"Warm {name}"`).
 
 **Identity.** The top slug is written by hand, so it is **hand-owned**:
 
@@ -1064,6 +1196,16 @@ The sub-blocks are **expression-owned**, as inline: derived from the text, orpha
 automatically. A declared name in the `<slug>__` namespace is an error. In a template body a signal is
 body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `sued_warm__ge1` in the
 lock, and source names it `sued.warm` (`sued` when it is the primary block).
+
+**Decompile and adopt** write the blocks an expression compiled to as that expression again, if it
+compiles to the same blocks:
+
+- A chain used once, by a block or `<-` on its own page, goes back into that argument or wire.
+- Any other chain becomes a named signal, its label as `.title` when that is not the expression text.
+- A constant whose name a label shows comes back as `let`.
+- The operands take the names the labels give them, where the labels agree.
+
+Anything else, such as a gate drawn in Loxone Config, stays a declared block.
 
 ### `test` — a simulated scenario
 
@@ -1290,9 +1432,12 @@ timers. Each line lists days, then the intervals the timer is on:
 - **Days** are the built-in operating modes: `mon` … `sun`, `holiday` (Feiertag), `vacation`
   (Urlaub), `dayoff` (Freier Tag/Schulferien), `heating` (Heizperiode), `cooling` (Kühlperiode), and
   the groups `weekdays` (mon–fri), `weekend` (sat, sun), `daily` (mon–sun).
-  - Any other operating mode of the config, user-defined ones included, is named by its title in
-    quotes: `"Party" 18:00-24:00`. The title must name exactly one mode of the compiled config (new
-    ones included).
+  - A `Mode` the module declares or externs is named by its slug: `party 18:00-24:00`.
+  - Any other operating mode of the config is named by its title in quotes: `"Party" 18:00-24:00`.
+    The title must name exactly one mode of the compiled config (new ones included).
+  - Each mode has one of these spellings (see [Operating modes](#operating-modes--minted-into-the-betriebsmodi-folder)):
+    `"Montag"` is an error naming `mon`, and `"Party"` one naming `party` where the module declares
+    it.
   - A day may appear on several lines; its intervals merge.
   - The timer always has a column for each of the seven weekdays. A weekday the schedule does not name
     is **off all day**. Each other mode the schedule names gets a column; modes it does not name get
@@ -1357,8 +1502,9 @@ created, named and deleted in the app; the declaration edits one.
   capability table the Miniserver serves the app
   (`loxone_config::autopilot_caps`), per app control type.
 - **`when mode <mode> [on|off]`** — while an operating mode is
-  (not) active; `<mode>` is a `Mode` block's slug or a mode's title
-  (`when mode "Party"`).
+  (not) active; `<mode>` is the slug of a `Mode` the module declares or externs
+  (`when mode party`), else the mode's title (`when mode "Urlaub"`). A title of a mode the module
+  names is an error naming its slug.
 - **`or`** — the conditions after it form another group: the
   rule fires when all conditions of any one group hold.
 - **`then <slug> <command>`** — the app's command text to a block. It is bare when it is one word
@@ -1636,8 +1782,9 @@ GUI wires included. These count as used:
 - operating modes and calendar entries: schedules and rules read them by number;
 - a block without outputs (a virtual output command, a Modbus actuator) when something drives it.
 
-A switch or controller in the app that drives nothing is still reported. Two or more inputs of one
-device (Modbus device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
+A switch or controller in the app that drives nothing is still reported; for a room controller and a
+Touch Pure Flex controller the finding names what to wire. Two or more inputs of one device (Modbus
+device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
 The dead commands of one Touch Pure Flex and command type are one `tile-dead-command` finding.
 
 A finding that is deliberate stays out of the report with an allow comment on the line right above
@@ -1653,7 +1800,9 @@ the declaration below it: a block, extern, instance (all its blocks), device (al
 constant, template, signal or `defaults`. Inside a template body it covers that block in every
 instance. An allow that covers no finding, names no kind or stands above no declaration is reported
 as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
-`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged.
+`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged. The language server offers
+both as quick fixes: on a finding it inserts the allow comment above the declaration (or adds the
+kind to the allow already there), and on an `unused-allow` it removes the comment.
 
 ## Canonical form
 
@@ -1716,6 +1865,10 @@ replacement. The compile output of a migrated file is byte-identical.
 - The "expected a statement" error lists every statement kind.
 - **Named signals**: `wp_bedarf = a.Q and b.AQ >= 5` names an expression's result (see
   [Named signals](#named-signals-slug--expr)). New syntax only; no v1 file changes.
+  `wp_bedarf.title = "…"` gives the top block a label of its own.
+- **Decompile and adopt write expressions**: the gate chains and `Formula` blocks an expression or
+  a named signal compiled to come back as that expression, signal and `let`, where they compile to
+  the same blocks again. The rest stays declared blocks.
 - **Instance names**: a block of a template instance is `inst.block.Port`, its primary block (the
   body's only block, or the one `template t(…) -> block` names) is `inst.Port`. The expanded name
   `inst_block.Port` is an error naming the scoped one. The lock keys stay `inst_block`. Call-site
@@ -1759,6 +1912,19 @@ replacement. The compile output of a migrated file is byte-identical.
   `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
   statistics, energy flow, messages and modes as used and reports a device's unused inputs once;
   `# lint: allow <kind>` keeps a deliberate finding out (see [Lint](#lint)).
+- **One spelling per operating mode** in rules and schedules: a built-in mode in a schedule by its day
+  word, a mode the module declares or externs by its slug (schedule lines take slugs now,
+  `party 18:00-24:00`), any other by title. `when mode "Party"` next to `party = Mode("Party")` is
+  an error naming `when mode party`; `"Montag" 06:00-07:00` one naming `mon 06:00-07:00`. `fmt`,
+  `decompile` and `adopt` write the one spelling.
+- **A calendar entry names its mode with `switches:`**, in the same one spelling
+  (`switches: heating`, `switches: party`, `switches: "Urlaub"`), instead of the stored number
+  `CalType: 10`. The number is an error naming the replacement; `fmt` rewrites a built-in mode's
+  number, `adopt` writes `switches:`.
+- **A calendar entry states its date as a date**: `on: 12-31`, `easter: 1`,
+  `from: 2026-07-04, to: 2026-09-05` (one period), `from: 10-01, to: 04-30` (every year), instead
+  of the stored `Mode:`, `Month:`, `Day:`, `Month2:`, `Day2:`, `From:`, `To:`, `EasterOffset:` and
+  `WeekDayInMonth:`. They are an error naming the replacement; `fmt` and `adopt` write the date.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1769,7 +1935,10 @@ whose blocks relied on the previous file's `page` that `page` line, rename each
 `recipients <extern>_recipients` and add the claim
 (`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
 `notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
-(which also unquotes one-word `then` commands and puts short calls on one line) and, if you like,
+(which also unquotes one-word `then` commands, puts short calls on one line and names a mode the
+module declares by its slug, a calendar entry's built-in `CalType:` by its day word and its
+stored date as a date; `loxl
+compile` names the modes it cannot see) and, if you like,
 `loxl lint --fix` for the unit suffixes.
 
 ## Versioning

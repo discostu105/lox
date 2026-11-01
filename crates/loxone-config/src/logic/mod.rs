@@ -31,12 +31,15 @@
 
 mod access;
 mod adopt;
+mod adopt_hardware;
 mod adopt_tree;
 mod ast;
+pub(crate) mod calendar;
 mod compile;
 mod decompile;
 mod defaults;
 mod desugar;
+mod hardware;
 mod lint;
 mod moods;
 mod parser;
@@ -54,12 +57,12 @@ pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adop
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl,
     Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, Day, DefaultsDecl, ExpectDecl, Expr,
-    ExprWireDecl, ExternDecl, Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting,
-    MoodsClaim, MoodsDecl, MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE,
-    RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim,
-    ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, SetKind, SignalDecl, TemplateDecl,
-    TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl,
-    TilesItem, Value, WireDecl, clock_seconds, clock_text,
+    ExprWireDecl, ExternDecl, Interval, Item, LetDecl, MatchSpec, ModeName, ModeSpellings, Module,
+    MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem, MovedDecl, Operand, PageDecl, PortRef,
+    RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind,
+    ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, SetKind, SignalDecl,
+    TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim,
+    TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{
@@ -68,8 +71,10 @@ pub use decompile::{
 };
 pub use defaults::taken as defaults_taken;
 pub use desugar::DesugarInfo;
+pub(crate) use lint::is_allow_comment;
 pub use lint::{
-    LintFinding, LintKind, finish_lint, fix_unit_suffixes, lint_dead_outputs, lint_source,
+    LintFinding, LintKind, finish_lint, fix_unit_suffixes, fix_unit_suffixes_in, lint_dead_outputs,
+    lint_source,
 };
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{

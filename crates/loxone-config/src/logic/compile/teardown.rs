@@ -226,7 +226,11 @@ pub(super) fn sweep_tombstones(
         if def == rs.original {
             return false;
         }
-        if def.as_deref() == Some(rs.written.as_str()) {
+        let written = def.as_deref() == Some(rs.written.as_str())
+            || (def.is_none()
+                && crate::connectors::is_zero(&rs.written)
+                && zero_when_absent(doc, port_uuid));
+        if written {
             restore_def(doc, port_uuid, rs.original.as_deref());
             return true;
         }
@@ -258,8 +262,15 @@ pub(super) fn tear_down_extern_edits(doc: &mut LoxoneDoc, lock: &mut Lockfile) -
     // restore — the "written" marker of a potential tombstone.
     let mut defs_written: BTreeMap<String, String> = BTreeMap::new();
     for (port_uuid, original) in &old_originals {
-        if let Some(v) = current_def(doc, port_uuid) {
-            defs_written.insert(port_uuid.clone(), v);
+        match current_def(doc, port_uuid) {
+            Some(v) => {
+                defs_written.insert(port_uuid.clone(), v);
+            }
+            // A 0 we wrote as no attribute, over a value the base had.
+            None if original.is_some() && zero_when_absent(doc, port_uuid) => {
+                defs_written.insert(port_uuid.clone(), "0".to_string());
+            }
+            None => {}
         }
         restore_def(doc, port_uuid, original.as_deref());
     }

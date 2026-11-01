@@ -367,3 +367,327 @@ fn off_is_no_attribute_except_on_a_virtual_input() {
     let again = compile(&off, &module, &mut lock2.clone(), &opts()).unwrap();
     assert_eq!(again.to_bytes(), off.to_bytes());
 }
+
+#[test]
+fn zero_is_no_attribute_on_a_number() {
+    // A save drops every numeric setting at 0, except a Modbus server's
+    // `Timeout="0"` (#312, Loxone Config 17.2).
+    let src = |min: &str| {
+        format!(
+            "vi = VirtualIn(\"Wert\", Analog: on, MinVal: {min}, MaxVal: 0, DefVal: 0)\n\
+             http = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/s\", Poll: 600)\n\
+             http_cmd = VirtualHttpInCmd(\"Leistung\", device: http, Check: \"p\", MinVal: 0, SourceValLow: 0)\n\
+             mb = ModbusServer(\"Wärmepumpe\", Address: \"192.0.2.12:502\", Timeout: 0)\n\
+             mb_dev = ModbusDev(\"Regler\", device: mb, Channel: 0)\n\
+             mb_temp = ModbusASensor(\"Vorlauf\", device: mb_dev, ModbusAddress: 0, ModbusDataType: 0, MaxTime: 0)\n"
+        )
+    };
+    let mut lock = Lockfile::default();
+    let module = Module::parse(&src("0")).unwrap();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let attr = |doc: &LoxoneDoc, slug: &str, name: &str| {
+        element(doc, &lock.objects[slug].uuid)
+            .attr(name)
+            .map(str::to_string)
+    };
+    for (slug, name) in [
+        ("vi", "MinVal"),
+        ("vi", "MaxVal"),
+        ("vi", "DefVal"),
+        ("http_cmd", "MinVal"),
+        ("http_cmd", "SourceValLow"),
+        ("mb_dev", "Channel"),
+        ("mb_temp", "ModbusAddress"),
+        ("mb_temp", "ModbusDataType"),
+        ("mb_temp", "MaxTime"),
+    ] {
+        assert_eq!(attr(&out, slug, name), None, "{slug}.{name}");
+    }
+    assert_eq!(attr(&out, "mb", "Timeout").as_deref(), Some("0"));
+    assert_eq!(attr(&out, "http_cmd", "MaxVal").as_deref(), Some("10000"));
+
+    // Setting a value and back to 0 removes the attribute again.
+    let mut lock2 = lock.clone();
+    let five = compile(
+        &out,
+        &Module::parse(&src("5")).unwrap(),
+        &mut lock2,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(attr(&five, "vi", "MinVal").as_deref(), Some("5"));
+    let zero = compile(&five, &module, &mut lock2, &opts()).unwrap();
+    assert_eq!(attr(&zero, "vi", "MinVal"), None);
+    let again = compile(&zero, &module, &mut lock2.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), zero.to_bytes());
+
+    // Adopting states a missing number as 0 where a fresh object would
+    // get another default, so the source means the same anywhere.
+    let mut fresh = Lockfile::default();
+    let adopted = adopt_one(
+        &out,
+        &lock.objects["mb"].uuid,
+        "wp",
+        &Module::default(),
+        &mut fresh,
+    )
+    .unwrap();
+    let mut adopted_module = Module::default();
+    adopted_module.items.extend(adopted.items);
+    let text = adopted_module.to_text();
+    assert!(text.contains("ModbusDataType: 0"), "{text}");
+    assert!(text.contains("MaxTime: 0"), "{text}");
+    assert!(text.contains("Channel: 0"), "{text}");
+    assert!(text.contains("ModbusAddress: 0"), "{text}");
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+}
+
+#[test]
+fn adopt_states_an_unticked_box_a_fresh_object_ticks() {
+    // An unticked `Signed`/`Analog`/`CloseAfterSend` has no attribute,
+    // and a fresh object ticks it: adopt writes `off`, so the source
+    // means the same on another config (#333).
+    let src = "out = VirtualOut(\"Aktor\", Address: \"http://192.0.2.11\", CloseAfterSend: off)\n\
+               out_cmd = VirtualOutCmd(\"Ein\", device: out, CmdOn: \"/on\")\n\
+               udp = VirtualUdpIn(\"Kamera\", Port: 45999)\n\
+               udp_cmd = VirtualUdpInCmd(\"Person\", device: udp, Check: \"p\", Signed: off, Analog: off)\n\
+               http = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/s\", Poll: 600)\n\
+               http_cmd = VirtualHttpInCmd(\"Leistung\", device: http, Check: \"p\", Signed: off)\n";
+    let mut lock = Lockfile::default();
+    let out = compile(&base(), &Module::parse(src).unwrap(), &mut lock, &opts()).unwrap();
+    let mut fresh = Lockfile::default();
+    let mut adopted_module = Module::default();
+    for (slug, name) in [("out", "aktor"), ("udp", "kamera"), ("http", "zaehler")] {
+        let adopted = adopt_one(
+            &out,
+            &lock.objects[slug].uuid,
+            name,
+            &adopted_module,
+            &mut fresh,
+        )
+        .unwrap();
+        adopted_module.items.extend(adopted.items);
+    }
+    let text = adopted_module.to_text();
+    assert!(text.contains("CloseAfterSend: off,"), "{text}");
+    assert_eq!(text.matches("Signed: off,").count(), 2, "{text}");
+    assert!(text.contains("Analog: off,"), "{text}");
+    assert!(text.contains("Analog: on,"), "{text}");
+    // A box a fresh object leaves unticked lifts as nothing.
+    assert_eq!(text.matches("Analog:").count(), 2, "{text}");
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+
+    // Minted fresh, the boxes stay unticked.
+    let elsewhere = compile(&base(), &adopted_module, &mut Lockfile::default(), &opts()).unwrap();
+    for o in elsewhere.objects() {
+        let el = elsewhere.element_at(&o.path).unwrap();
+        match o.block_type.as_str() {
+            "VirtualOut" => assert_eq!(el.attr("CloseAfterSend"), None),
+            "VirtualUdpInCmd" => {
+                assert_eq!(el.attr("Signed"), None);
+                assert_eq!(el.attr("Analog"), None);
+            }
+            "VirtualHttpInCmd" => {
+                assert_eq!(el.attr("Signed"), None);
+                assert_eq!(el.attr("Analog"), Some("true"));
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn a_value_a_save_rewrites_is_refused() {
+    // Loxone Config raises Poll and Timeout to 10, cuts them to whole
+    // numbers, and fixes a digital VirtualIn's range at 0 to 1 (#332).
+    let base = base();
+    let run = |src: &str| {
+        Module::parse(src).map_err(|e| e.to_string()).and_then(|m| {
+            m.validate().map_err(|e| e.to_string())?;
+            loxone_config::logic::validate_ports(&m).map_err(|e| e.to_string())?;
+            compile(&base, &m, &mut Lockfile::default(), &opts())
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+    };
+    let http = |settings: &str| {
+        format!("h = VirtualHttpIn(\"H\", Address: \"http://192.0.2.10/s\", {settings})\n")
+    };
+    for (settings, want) in [
+        ("Poll: 5", "`Poll: 10`"),
+        ("Poll: 600.5", "`Poll: 600`"),
+        ("Poll: 200h", "`Poll: 604800`"),
+        ("Poll: 600, Timeout: 9", "`Timeout: 10`"),
+        ("Poll: 600, Timeout: 0", "`Timeout: 10`"),
+        ("Poll: 600, Timeout: 40.5ms", "`Timeout: 40`"),
+        ("Poll: 600, Allowedtimeouts: 2.5", "`Allowedtimeouts: 2`"),
+    ] {
+        let err = run(&http(settings)).unwrap_err();
+        assert!(err.contains(want), "{settings}: {err}");
+        assert!(err.contains("a Loxone Config save turns it into"), "{err}");
+    }
+    for ok in [
+        "Poll: 10",
+        "Poll: 168h",
+        "Poll: 10min, Timeout: 10s",
+        "Poll: 600, Allowedtimeouts: -1",
+    ] {
+        run(&http(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+
+    for (src, want) in [
+        ("VirtualIn(\"D\", MaxVal: 5)", "`MaxVal: 1`"),
+        ("VirtualIn(\"D\", Analog: off, MaxVal: 0)", "`MaxVal: 1`"),
+        ("VirtualIn(\"D\", MinVal: -1)", "`MinVal: 0`"),
+    ] {
+        let err = run(&format!("d = {src}\n")).unwrap_err();
+        assert!(err.contains(want), "{src}: {err}");
+    }
+    for ok in [
+        "VirtualIn(\"D\", MaxVal: 1, MinVal: 0, DefVal: 2)",
+        "VirtualIn(\"A\", Analog: on, MinVal: -1, MaxVal: 5)",
+    ] {
+        run(&format!("d = {ok}\n")).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+
+    // Without `Analog:`, an existing analog input stays analog.
+    let mut lock = Lockfile::default();
+    let analog = compile(
+        &base,
+        &Module::parse("d = VirtualIn(\"A\", Analog: on)\n").unwrap(),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    compile(
+        &analog,
+        &Module::parse("d = VirtualIn(\"A\", MaxVal: 5)\n").unwrap(),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_title_a_save_rewrites_is_refused() {
+    // Loxone Config turns `%`, `<` and `|` into `_`, drops `{` and `}`,
+    // and marks spaces at either end (#342).
+    let run = |src: &str| {
+        Module::parse(src).map_err(|e| e.to_string()).and_then(|m| {
+            m.validate().map_err(|e| e.to_string())?;
+            loxone_config::logic::validate_ports(&m).map_err(|e| e.to_string())
+        })
+    };
+    for (src, want) in [
+        ("d = VirtualIn(\"R Ana Max<Min\")\n", "\"R Ana Max_Min\""),
+        ("g = And(\"Licht 100%\")\n", "\"Licht 100_\""),
+        ("g = And(\" Licht\")\n", "\"_Licht\""),
+        ("m = Mode(\"Urlaub: Juli\")\n", "\"Urlaub_ Juli\""),
+        (
+            "extern q = Actor(iname: \"Q1\")\nq.title = \"Pumpe {alt}\"\n",
+            "\"Pumpe alt\"",
+        ),
+    ] {
+        let err = run(src).unwrap_err();
+        assert!(err.contains(want), "{src}: {err}");
+        assert!(err.contains("a Loxone Config save writes it as"), "{err}");
+    }
+    let err = run("g = And(\"\")\n").unwrap_err();
+    assert!(err.contains("`noname <UUID>`"), "{err}");
+    for ok in [
+        "d = VirtualIn(\"R Ana Def>Max\")\n",
+        "lc = LightController2(\"Licht <EG>\")\n",
+        "m = Mode(\"Urlaub < Juli\")\n",
+        "mb = ModbusServer(\"Zähler 100%\", Address: \"192.0.2.12:502\")\n",
+    ] {
+        run(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+}
+
+#[test]
+fn a_udp_command_takes_its_receive_timeout() {
+    // Oracle sessions 84 to 86 (#346): the receive timeout `MaxTime` in
+    // ms, what the value becomes then (`ValOT="1"` keeps the last value,
+    // otherwise `DefVal`), each written where a save writes it and left
+    // out at 0.
+    let src = "udp = VirtualUdpIn(\"Kamera\", Port: 45998)\n\
+         u1 = VirtualUdpInCmd(\"Q U1\", device: udp, Check: \"a\", MaxTime: 7s, DefVal: 3.5)\n\
+         u2 = VirtualUdpInCmd(\"Q U2\", device: udp, Check: \"b\", MaxTime: 9s, ValOT: 1)\n\
+         u3 = VirtualUdpInCmd(\"Q U3\", device: udp, Check: \"c\", MaxTime: 0, DefVal: 0, ValOT: 0)\n";
+    let mut lock = Lockfile::default();
+    let module = Module::parse(src).unwrap();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let attrs = |slug: &str| -> Vec<String> {
+        element(&out, &lock.objects[slug].uuid)
+            .attrs
+            .iter()
+            .filter(|a| !matches!(a.name.as_str(), "Type" | "U" | "IName" | "V" | "Title"))
+            .map(|a| format!("{}={}", a.name, a.value))
+            .collect()
+    };
+    // As session 84's save wrote them.
+    let saved = |valot: &str, check: &str, defval: &str, maxtime: &str| -> Vec<String> {
+        [
+            "Nio=2",
+            "WF=16384",
+            valot,
+            check,
+            "Signed=true",
+            "Analog=true",
+            "SourceValHigh=100",
+            "DestValHigh=100",
+            defval,
+            "MinVal=-10000",
+            "MaxVal=10000",
+            "MinChange=0.25",
+            "MinTime=1000",
+            maxtime,
+        ]
+        .into_iter()
+        .filter(|a| !a.is_empty())
+        .map(String::from)
+        .collect()
+    };
+    assert_eq!(
+        attrs("u1"),
+        saved("", "Check=a", "DefVal=3.5", "MaxTime=7000")
+    );
+    assert_eq!(attrs("u2"), saved("ValOT=1", "Check=b", "", "MaxTime=9000"));
+    assert_eq!(attrs("u3"), saved("", "Check=c", "", ""));
+
+    // Adopted, the source names them again, the timeout in seconds.
+    let mut fresh = Lockfile::default();
+    let adopted = adopt_one(
+        &out,
+        &lock.objects["udp"].uuid,
+        "udp",
+        &Module::default(),
+        &mut fresh,
+    )
+    .unwrap();
+    let mut adopted_module = Module::default();
+    adopted_module.items.extend(adopted.items);
+    let text = adopted_module.to_text();
+    for want in ["MaxTime: 7s", "DefVal: 3.5", "MaxTime: 9s", "ValOT: 1"] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+
+    // A fraction a save cuts off is refused.
+    let err = compile(
+        &base(),
+        &Module::parse(
+            "udp = VirtualUdpIn(\"K\", Port: 45998)\n\
+             u = VirtualUdpInCmd(\"U\", device: udp, Check: \"a\", MaxTime: 1.5ms)\n",
+        )
+        .unwrap(),
+        &mut Lockfile::default(),
+        &opts(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("`MaxTime: 1`"), "{err}");
+}

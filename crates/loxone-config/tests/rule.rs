@@ -698,15 +698,48 @@ fn states_modes_and_groups_compile_and_read_back() {
         )),
         "{off}"
     );
-    // It reads back as the source (the mode by title), and compiling
-    // that again writes the same bytes.
+    // It reads back as the source, the mode by the slug the decompiled
+    // module gives it, and compiling either again writes the same bytes.
     let (m, _) = decompile(&parse(&out), &DecompileOptions::default()).unwrap();
     let text = m.to_text();
+    let by_slug = SHAPES
+        .replace("rule pumpe_aus\n", "rule pumpe_aus \"Pumpe Aus\"\n")
+        .replace("mode \"Party\"", "mode party");
     assert!(
-        text.contains(&SHAPES.replace("rule pumpe_aus\n", "rule pumpe_aus \"Pumpe Aus\"\n")),
+        text.contains("extern party = Mode(title: \"Party\")"),
         "{text}"
     );
+    assert!(text.contains(&by_slug), "{text}");
+    // Split into pages, the rule's page declares the mode it names.
+    let (pages, _) =
+        loxone_config::logic::decompile_pages(&parse(&out), &DecompileOptions::default()).unwrap();
+    let page = pages
+        .iter()
+        .map(|p| p.module.to_text())
+        .find(|t| t.contains("rule pumpe_aus"))
+        .unwrap();
+    assert!(
+        page.contains("extern party = Mode(title: \"Party\")"),
+        "{page}"
+    );
+    assert!(page.contains("\twhen mode party\n"), "{page}");
     assert_eq!(compile_rules(&out, &src).unwrap(), out);
+    let declared = format!(
+        "extern party = Mode(title: \"Party\")\n{}",
+        src.replace("mode \"Party\"", "mode party")
+    );
+    assert_eq!(compile_rules(&out, &declared).unwrap(), out);
+    // With the mode declared, its title is refused, naming the slug.
+    let e = compile_rules(
+        &out,
+        &format!("extern party = Mode(title: \"Party\")\n{src}"),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        e.contains("Write `when mode party` instead of `when mode \"Party\"`"),
+        "{e}"
+    );
     // Back to the old rule: the original bytes.
     assert_eq!(compile_rules(&out, AS_READ).unwrap(), base);
 }

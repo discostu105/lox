@@ -352,6 +352,8 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
             // resolved separately below.
             if (is_ref_type(&block.block_type) && k == "mirrors")
                 || crate::periphery::is_device_binding(&block.block_type, k)
+                || crate::logic::calendar::is_switches(&block.block_type, k)
+                || crate::logic::calendar::is_date_key(&block.block_type, k)
             {
                 continue;
             }
@@ -380,6 +382,15 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
             // (`At:` → `Sec=`).
             let name = attr_name(&block.block_type, k);
             target.insert((block.slug.clone(), name.to_string()), value.into_owned());
+        }
+        // A calendar entry's date: its stored `Mode=` and the attributes
+        // of its kind.
+        if block.block_type == crate::logic::calendar::BLOCK_TYPE {
+            for (name, value) in
+                crate::logic::calendar::date_attrs(module, block)?.unwrap_or_default()
+            {
+                managed_attrs.insert((block.slug.clone(), name.to_string()), value);
+            }
         }
     }
     Ok(Params {

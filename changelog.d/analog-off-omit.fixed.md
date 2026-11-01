@@ -1,1 +1,0 @@
-- **`loxl compile`** writes `Signed: off`, `Analog: off` and `CloseAfterSend: off` on virtual commands and outputs as no attribute, the way Loxone Config stores an unticked box, so a save no longer shows them as changed. A virtual input's `Analog: off` stays `Analog="false"`, which Loxone Config writes too.

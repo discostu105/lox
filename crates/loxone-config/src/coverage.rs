@@ -25,6 +25,9 @@ pub enum Support {
     /// Verified builtin that Loxone Config creates when it pairs a device
     /// (Code Touch, Intercom, Touch Pure Flex): adopted, never minted.
     AdoptOnly,
+    /// Hardware Loxone Config paired: a declaration takes it over with
+    /// its inputs and outputs, never creates it.
+    Hardware,
     /// An Autopilot rule: one the source names is its own, one made
     /// in the app is referenced (`rule <slug>`).
     Rule,
@@ -38,6 +41,8 @@ impl Support {
     pub fn of(block_type: &str) -> Support {
         if block_type == "AutopilotRule" {
             Support::Rule
+        } else if crate::hardware::is_hardware(block_type) {
+            Support::Hardware
         } else if builtin(block_type).is_none() {
             Support::Reference
         } else if adopt_only(block_type) {
@@ -51,6 +56,7 @@ impl Support {
         match self {
             Support::Managed => "managed",
             Support::AdoptOnly => "adopt-only",
+            Support::Hardware => "hardware",
             Support::Rule => "rule",
             Support::Reference => "reference",
         }
@@ -125,7 +131,18 @@ fn is_plumbing(block_type: &str) -> bool {
 /// `module` is the one the lock was compiled from, when known: an
 /// attribute the source claims counts as written from source.
 pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Coverage {
-    let managed: BTreeSet<&str> = lock.objects.values().map(|o| o.uuid.as_str()).collect();
+    // What a hardware declaration owns counts as managed.
+    let managed: BTreeSet<&str> = lock
+        .objects
+        .values()
+        .map(|o| o.uuid.as_str())
+        .chain(
+            lock.externals
+                .values()
+                .filter(|e| e.owned)
+                .map(|e| e.uuid.as_str()),
+        )
+        .collect();
     let externs: BTreeMap<&str, &str> = lock
         .externals
         .iter()
@@ -151,7 +168,8 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
         // Off the pages, only objects a wire can reach count: rooms,
         // categories, users and folders have no connectors.
         let el = doc.element_at(&o.path).expect("path from objects()");
-        let device = crate::periphery::periphery(&o.block_type).is_some();
+        let device = crate::periphery::periphery(&o.block_type).is_some()
+            || crate::hardware::is_hardware(&o.block_type);
         if !on_page && !device && !el.child_elements().any(|c| c.name == "Co") {
             continue;
         }
@@ -189,8 +207,13 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
                             && a.attr("U").is_some_and(|u| !managed.contains(u))
                     })
                 });
-            if (on_page || topmost)
-                && matches!(t.support, Some(Support::Managed | Support::AdoptOnly))
+            // A hardware device is taken over with its inputs and outputs.
+            let hardware = crate::hardware::is_device(&o.block_type);
+            if (on_page || topmost || hardware)
+                && matches!(
+                    t.support,
+                    Some(Support::Managed | Support::AdoptOnly | Support::Hardware)
+                )
             {
                 t.adoptable.push(Adoptable {
                     uuid: o.uuid.clone(),

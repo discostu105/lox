@@ -1143,6 +1143,185 @@ pub fn omitted_when_off(block_type: &str, attr: &str) -> bool {
     block_type != "VirtualIn" && bool_params(block_type).contains(&attr)
 }
 
+/// The numeric settings a save writes only when they are not 0: an
+/// absent attribute is 0, and a save drops an explicit `"0"`.
+const OMITTED_WHEN_ZERO: &[&str] = &[
+    "SourceValLow",
+    "DestValLow",
+    "SourceValHigh",
+    "DestValHigh",
+    "MinVal",
+    "MaxVal",
+    "DefVal",
+    "MinChange",
+    "MinTime",
+    "MaxTime",
+    "ValOT",
+    "ResetTime",
+    "AverageTime",
+    "Repeat",
+    "RepeatRate",
+    "CmdOnMethod",
+    "Allowedtimeouts",
+    "Port",
+    "Channel",
+    "ModbusAddress",
+    "ModbusDataType",
+    "ModbusCmd",
+    "ModbusPollingCycle",
+    "ModbusCoilQuantity",
+    "DimmType",
+    "Mode",
+    "From",
+    "To",
+    "EasterOffset",
+    "WeekDayInMonth",
+];
+
+/// Whether a save writes this numeric setting only when it is not 0, so
+/// a bound 0 compiles to no attribute. That holds for every number the
+/// source can set on a virtual input, a virtual or Modbus object, a
+/// calendar entry and a physical input or output, except a Modbus
+/// server's `Timeout=` (a save keeps `"0"`) and a virtual HTTP input's
+/// `Poll=` and `Timeout=` (a save raises them to 10). Loxone Config
+/// 17.2, and no real config holds `"0"` on any of them (see
+/// loxone-format.md).
+pub fn omitted_when_zero(block_type: &str, attr: &str) -> bool {
+    let settable = block_type == "VirtualIn"
+        || crate::settings::SETTING_TYPES.contains(&block_type)
+        || crate::periphery::periphery(block_type).is_some_and(|p| p.settings.contains(&attr));
+    settable && OMITTED_WHEN_ZERO.contains(&attr)
+}
+
+/// Whether a setting's value is 0 as a number (`0`, `0.0`, `-0`).
+pub fn is_zero(value: &str) -> bool {
+    value.trim().parse::<f64>().is_ok_and(|v| v == 0.0)
+}
+
+/// Whether a save leaves out this attribute at this value: `off` on a
+/// box of [`omitted_when_off`], 0 on a number of [`omitted_when_zero`].
+pub fn omitted_value(block_type: &str, attr: &str, value: &str) -> bool {
+    (value == "false" && omitted_when_off(block_type, attr))
+        || (is_zero(value) && omitted_when_zero(block_type, attr))
+}
+
+/// What a Loxone Config save writes instead of `value`, and the rule it
+/// follows, or `None` when a save keeps the value. `digital` says whether
+/// a `VirtualIn` is digital. Loxone Config 17.2 (see loxone-format.md):
+///
+/// - A virtual HTTP input's `Poll`, `Timeout` and `Allowedtimeouts` are
+///   32-bit whole numbers: a fraction is cut off, a larger number wraps.
+///   `Poll` then goes up to 10 and down to 604800, `Timeout` up to 10.
+/// - A virtual UDP command's `MaxTime` and `ValOT` are 32-bit whole
+///   numbers the same way, with no bounds.
+/// - A digital `VirtualIn` has `MaxVal` 1 and `MinVal` 0.
+pub fn save_rewrite(
+    block_type: &str,
+    attr: &str,
+    value: &str,
+    digital: bool,
+) -> Option<(String, &'static str)> {
+    let (written, rule) = match (block_type, attr) {
+        ("VirtualHttpIn", "Poll" | "Timeout" | "Allowedtimeouts") => {
+            let v = value.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+            // Cut to a whole number, then to 32 bits, as the save does.
+            let n = (v.trunc() as i64) as i32;
+            match attr {
+                "Poll" => (
+                    n.clamp(10, 604_800),
+                    "a virtual HTTP input polls in whole seconds, from 10 to 604800",
+                ),
+                "Timeout" => (
+                    n.max(10),
+                    "a virtual HTTP input's timeout is whole milliseconds, at least 10",
+                ),
+                _ => (n, "allowed timeouts are a whole number"),
+            }
+        }
+        ("VirtualUdpInCmd", "MaxTime" | "ValOT") => {
+            let v = value.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+            let n = (v.trunc() as i64) as i32;
+            match attr {
+                "MaxTime" => (
+                    n,
+                    "a virtual UDP command's receive timeout is whole milliseconds",
+                ),
+                _ => (n, "`ValOT` is a whole number"),
+            }
+        }
+        ("VirtualIn", "MaxVal") if digital => (1, "a digital VirtualIn's range is 0 to 1"),
+        ("VirtualIn", "MinVal") if digital => (0, "a digital VirtualIn's range is 0 to 1"),
+        _ => return None,
+    };
+    let same = match attr {
+        "MinVal" | "MaxVal" => value.trim().parse::<f64>().ok() == Some(f64::from(written)),
+        _ => value.trim() == written.to_string(),
+    };
+    (!same).then(|| (written.to_string(), rule))
+}
+
+/// The compile error for a value a save rewrites ([`save_rewrite`]):
+/// `value` as compiled, `source` as written (`4.5ms`).
+pub fn save_rewrite_error(
+    slug: &str,
+    block_type: &str,
+    attr: &str,
+    (value, source): (&str, &str),
+    digital: bool,
+) -> Option<String> {
+    let (written, rule) = save_rewrite(block_type, attr, value, digital)?;
+    Some(format!(
+        "block `{slug}`: `{attr}: {source}`: {rule}, so a Loxone Config save turns it into \
+         `{attr}: {written}`. Write that instead."
+    ))
+}
+
+/// The characters a Loxone Config save turns into `_` in the title of an
+/// object of `block_type`, or `None` where the title is not checked: a page
+/// and a Modbus server keep any title, and types no oracle run has saved are
+/// left alone. Loxone Config 17.2 (see loxone-format.md, *Titles a save
+/// rewrites*).
+pub(crate) fn title_underscored(block_type: &str) -> Option<&'static [char]> {
+    match block_type {
+        "Mode" => Some(&['%', ',', ':', ';', '=', '|']),
+        "CalendarEntry" => Some(&['%', '/', '<', '|']),
+        "LightController2" => Some(&['%', '|']),
+        "ModbusServer" | "TpfController" | "NfcCodeTouch" | "Intercom" => None,
+        t if t == "Actor" || BUILTIN_TYPES.contains(&t) => Some(&['%', '<', '|']),
+        _ => None,
+    }
+}
+
+/// What a Loxone Config save writes for the title `title` of an object of
+/// `block_type`, or `None` when it keeps the title. An empty result means
+/// the save leaves the object without a title. Loxone Config 17.2:
+///
+/// - `{` and `}` go, and so do a tab and a line break.
+/// - Each space or tab at either end becomes `_` (checked after the braces
+///   go: `"{ a}"` is written `"_a"`).
+/// - The type's characters ([`title_underscored`]) become `_`: `%`, `<`
+///   and `|` on most objects.
+///
+/// An empty title is not handled here: a save names the object
+/// `noname <UUID>`.
+pub fn title_save_rewrite(block_type: &str, title: &str) -> Option<String> {
+    let underscored = title_underscored(block_type)?;
+    let kept: Vec<char> = title.chars().filter(|c| !matches!(c, '{' | '}')).collect();
+    let end = |c: &char| matches!(c, ' ' | '\t');
+    let lead = kept.iter().take_while(|c| end(c)).count();
+    let trail = kept[lead..].iter().rev().take_while(|c| end(c)).count();
+    let mut written = String::with_capacity(title.len());
+    for (i, &c) in kept.iter().enumerate() {
+        match c {
+            _ if i < lead || i >= kept.len() - trail => written.push('_'),
+            '\t' | '\n' | '\r' => {}
+            c if underscored.contains(&c) => written.push('_'),
+            c => written.push(c),
+        }
+    }
+    (written != title).then_some(written)
+}
+
 /// The container a block type lives in when it is not drawn on a page:
 /// a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.
@@ -1310,6 +1489,7 @@ pub fn file_params(block_type: &str) -> &'static [&'static str] {
 /// time suffixes scale into seconds, `%`/`K` are annotations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortUnit {
+    Milliseconds,
     Seconds,
     Minutes,
     Percent,
@@ -1321,6 +1501,7 @@ pub enum PortUnit {
 impl PortUnit {
     pub fn describe(self) -> String {
         match self {
+            PortUnit::Milliseconds => "milliseconds".into(),
             PortUnit::Seconds => "seconds".into(),
             PortUnit::Minutes => "minutes".into(),
             PortUnit::Percent => "percent".into(),
@@ -1334,6 +1515,7 @@ impl PortUnit {
 pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
     let unit = crate::port_meta::port_meta(block_type, port)?.unit?;
     Some(match unit {
+        "ms" => PortUnit::Milliseconds,
         "s" => PortUnit::Seconds,
         "min" => PortUnit::Minutes,
         "%" => PortUnit::Percent,
@@ -1686,6 +1868,132 @@ mod tests {
         assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
         assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
         assert_eq!(ref_link_type("And"), None);
+    }
+
+    #[test]
+    fn titles_a_save_rewrites() {
+        // Oracle sessions 80 to 82, Loxone Config 17.2.
+        let w = |t: &str, title: &str| title_save_rewrite(t, title);
+        let all = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~äß€°µ²é😀";
+        let most = "!\"#$_&'()*+,-./:;_=>?@[\\]^_`_~äß€°µ²é😀";
+        for t in [
+            "VirtualIn",
+            "And",
+            "Formula",
+            "VirtualHttpInCmd",
+            "ModbusDev",
+            "Actor",
+        ] {
+            assert_eq!(w(t, all).as_deref(), Some(most), "{t}");
+        }
+        assert_eq!(
+            w("LightController2", all).as_deref(),
+            Some("!\"#$_&'()*+,-./:;<=>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(
+            w("Mode", all).as_deref(),
+            Some("!\"#$_&'()*+_-./__<_>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(
+            w("CalendarEntry", all).as_deref(),
+            Some("!\"#$_&'()*+,-._:;_=>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(w("ModbusServer", all), None);
+        assert_eq!(w("Page", all), None);
+        assert_eq!(w("TreeSensor", all), None);
+        for (title, saved) in [
+            (" V lead trail ", Some("_V lead trail_")),
+            ("  W two lead", Some("__W two lead")),
+            ("W\ttab", Some("Wtab")),
+            ("V new\nline", Some("V newline")),
+            ("W a\rb", Some("W ab")),
+            ("a\t ", Some("a__")),
+            (" ", Some("_")),
+            ("{ a}", Some("_a")),
+            (" {a} ", Some("_a_")),
+            ("{}", Some("")),
+            ("V double  space", None),
+            ("R Ana Def>Max", None),
+            ("", None),
+        ] {
+            assert_eq!(w("VirtualIn", title).as_deref(), saved, "{title:?}");
+        }
+    }
+
+    #[test]
+    fn what_a_save_writes_instead() {
+        // Oracle sessions 61 to 64, Loxone Config 17.2.
+        let w = |t: &str, a: &str, v: &str, digital: bool| {
+            save_rewrite(t, a, v, digital).map(|(w, _)| w)
+        };
+        let http = |a: &str, v: &str| w("VirtualHttpIn", a, v, false);
+        for (v, poll, timeout) in [
+            ("0", Some("10"), Some("10")),
+            ("1", Some("10"), Some("10")),
+            ("9", Some("10"), Some("10")),
+            ("-5", Some("10"), Some("10")),
+            ("9.5", Some("10"), Some("10")),
+            ("10", None, None),
+            ("10.6", Some("10"), Some("10")),
+            ("12.5", Some("12"), Some("12")),
+            ("600.5", Some("600"), Some("600")),
+            ("604800", None, None),
+            ("604801", Some("604800"), None),
+            ("999999999", Some("604800"), None),
+            ("2147483647", Some("604800"), None),
+            ("2147483648", Some("10"), Some("10")),
+            ("4294967296", Some("10"), Some("10")),
+            ("99999999999", Some("604800"), Some("1215752191")),
+        ] {
+            assert_eq!(http("Poll", v).as_deref(), poll, "Poll {v}");
+            assert_eq!(http("Timeout", v).as_deref(), timeout, "Timeout {v}");
+        }
+        assert_eq!(http("Allowedtimeouts", "-1"), None);
+        assert_eq!(http("Allowedtimeouts", "1000"), None);
+        assert_eq!(http("Allowedtimeouts", "2.5").as_deref(), Some("2"));
+        assert_eq!(
+            http("Allowedtimeouts", "99999999999").as_deref(),
+            Some("1215752191")
+        );
+        // A digital VirtualIn's range is 0 to 1; its default is its own.
+        for v in ["0", "0.5", "2", "5", "-1"] {
+            assert_eq!(w("VirtualIn", "MaxVal", v, true).as_deref(), Some("1"));
+        }
+        assert_eq!(w("VirtualIn", "MaxVal", "1", true), None);
+        assert_eq!(w("VirtualIn", "MinVal", "0", true), None);
+        assert_eq!(w("VirtualIn", "MinVal", "-1", true).as_deref(), Some("0"));
+        assert_eq!(w("VirtualIn", "DefVal", "2", true), None);
+        assert_eq!(w("VirtualIn", "MaxVal", "5", false), None);
+        assert_eq!(w("ModbusServer", "Timeout", "0", false), None);
+        // Oracle session 86: a UDP command's receive timeout settings.
+        let udp = |a: &str, v: &str| w("VirtualUdpInCmd", a, v, false);
+        assert_eq!(udp("MaxTime", "1500.5").as_deref(), Some("1500"));
+        assert_eq!(udp("MaxTime", "0.4").as_deref(), Some("0"));
+        assert_eq!(udp("MaxTime", "3000000000").as_deref(), Some("-1294967296"));
+        assert_eq!(udp("MaxTime", "-3000"), None);
+        assert_eq!(udp("MaxTime", "7000"), None);
+        assert_eq!(udp("ValOT", "0.5").as_deref(), Some("0"));
+        assert_eq!(udp("ValOT", "1"), None);
+        assert_eq!(udp("DefVal", "0.001"), None);
+    }
+
+    #[test]
+    fn a_save_leaves_out_zero_on_numbers_it_drops() {
+        assert!(is_zero("0") && is_zero("0.0") && is_zero("-0"));
+        assert!(!is_zero("0.5") && !is_zero("") && !is_zero("false"));
+        assert!(omitted_value("VirtualIn", "MinVal", "0"));
+        assert!(omitted_value("ModbusASensor", "ModbusDataType", "0"));
+        assert!(omitted_value("VoltageIn", "MaxVal", "0.0"));
+        assert!(omitted_value("CalendarEntry", "EasterOffset", "0"));
+        // A save keeps a Modbus server's 0 and raises an HTTP input's.
+        assert!(!omitted_value("ModbusServer", "Timeout", "0"));
+        assert!(!omitted_value("VirtualHttpIn", "Poll", "0"));
+        assert!(!omitted_value("VirtualHttpIn", "Timeout", "0"));
+        // Not a setting of the type, and not a number.
+        assert!(!omitted_value("Formula", "MinVal", "0"));
+        assert!(!omitted_value("VirtualOutCmd", "CmdOn", "0"));
+        // A month has no 0.
+        assert!(!omitted_value("CalendarEntry", "Month", "0"));
     }
 
     #[test]

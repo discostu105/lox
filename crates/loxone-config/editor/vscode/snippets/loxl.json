@@ -79,7 +79,7 @@
   "signal": {
     "prefix": "signal",
     "body": "${1:name} = ${2:a}.Q ${3|and,or|} ${4:b}.AQ >= ${5:limit}",
-    "description": "Named signal: the expression's top block is `name` (`name.Q`, a Formula's `name.AQ`), its sub-blocks `name__<op><n>`"
+    "description": "Named signal: the expression's top block is `name` (`name.Q`, a Formula's `name.AQ`), its sub-blocks `name__<op><n>`; `name.title = \"…\"` labels the top block"
   },
   "set": {
     "prefix": "set",

@@ -80,7 +80,7 @@ party = Mode("Party")
 
 schedule abend
 	weekdays 18:00-22:00
-	"Party" 18:00-24:00
+	party 18:00-24:00
 	"Tiefschlaf" off
 	heating 06:00-07:00
 end
@@ -137,5 +137,104 @@ fn an_unknown_mode_title_is_refused_with_the_titles() {
     assert!(
         err.contains("no operating mode titled \"Partymodus\"") && err.contains("\"Tiefschlaf\""),
         "{err}"
+    );
+}
+
+// --- One spelling per mode: day word, else slug, else title.
+
+/// `SOURCE` with the schedule's party line as `line`.
+fn with_party_line(line: &str) -> String {
+    SOURCE.replace("\tparty 18:00-24:00\n", &format!("\t{line}\n"))
+}
+
+#[test]
+fn a_declared_mode_is_named_by_its_slug() {
+    // Check refuses the title of a mode the module declares, naming the
+    // line as it should read.
+    let err = Module::parse(&with_party_line("\"Party\" 18:00-24:00 # Fest"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("Write `party 18:00-24:00` instead of `\"Party\" 18:00-24:00`"),
+        "{err}"
+    );
+    // An extern by UUID: only the compile knows its title.
+    let by_uuid =
+        format!("extern tief = Mode(uuid: \"00000003-0000-0000-ffff000000000001\")\n{SOURCE}");
+    let err = build(&by_uuid).unwrap_err();
+    assert!(
+        err.contains("Write `tief off` instead of `\"Tiefschlaf\" off`"),
+        "{err}"
+    );
+    // The slug compiles to the same bytes the title did.
+    let fixed = build(&by_uuid.replace("\t\"Tiefschlaf\" off\n", "\ttief off\n")).unwrap();
+    assert_eq!(fixed.to_bytes(), build(SOURCE).unwrap().to_bytes());
+}
+
+#[test]
+fn a_builtin_mode_is_named_by_its_day_word() {
+    let err = build(&with_party_line("\"Montag\" 18:00-24:00")).unwrap_err();
+    assert!(
+        err.contains("Write `mon 18:00-24:00` instead of `\"Montag\" 18:00-24:00`"),
+        "{err}"
+    );
+    // An extern of a built-in mode: by UUID check knows it, by title the
+    // compile.
+    let by_uuid = format!(
+        "extern montag = Mode(uuid: \"00000000-0000-0004-1500000000000000\")\n{}",
+        with_party_line("montag 18:00-24:00")
+    );
+    let err = Module::parse(&by_uuid).unwrap_err().to_string();
+    assert!(
+        err.contains("Write `mon 18:00-24:00` instead of `montag 18:00-24:00`"),
+        "{err}"
+    );
+    let by_title = by_uuid.replace(
+        "uuid: \"00000000-0000-0004-1500000000000000\"",
+        "title: \"Montag\"",
+    );
+    let err = build(&by_title).unwrap_err();
+    assert!(
+        err.contains("Write `mon 18:00-24:00` instead of `montag 18:00-24:00`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_day_slug_must_name_a_mode() {
+    let err = Module::parse(&with_party_line("mondy 18:00-24:00"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown day `mondy`"), "{err}");
+    let err = Module::parse(&with_party_line("pary 18:00-24:00"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("did you mean `party`?"), "{err}");
+    let err = Module::parse(&with_party_line("timer 18:00-24:00"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`timer` is a `DayTimer`, not a `Mode`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn fmt_writes_the_one_spelling() {
+    let page = Module::parse_fragment(
+        "party = Mode(\"Party\")\n\
+         extern montag = Mode(uuid: \"00000000-0000-0004-1500000000000000\")\n",
+    )
+    .unwrap();
+    let mut other = Module::parse_fragment(
+        "schedule s\n\t\"Party\" montag 18:00-24:00\n\t\"Tiefschlaf\" off\nend\n\n\
+         rule r\n\tactive\n\twhen mode \"Party\"\n\tthen mode \"Tiefschlaf\" on\nend\n",
+    )
+    .unwrap();
+    loxone_config::logic::ModeSpellings::of([&page, &other]).apply(&mut other);
+    assert_eq!(
+        other.to_text(),
+        "schedule s\n\tparty mon 18:00-24:00\n\t\"Tiefschlaf\" off\nend\n\n\
+         rule r\n\tactive\n\twhen mode party\n\tthen mode \"Tiefschlaf\" on\nend\n"
     );
 }
