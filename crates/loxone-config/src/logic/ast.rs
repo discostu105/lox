@@ -1601,8 +1601,8 @@ pub enum ScheduleItem {
 }
 
 /// `mon tue 06:00-08:00 = 21.5, 17:00-22:00` — the days (operating-mode
-/// keywords, kept as written: `weekdays` stays `weekdays`; or modes by
-/// title) and their intervals. No intervals (`holiday off`) lists the
+/// keywords, kept as written: `weekdays` stays `weekdays`; a `Mode` by
+/// slug; or a mode by title) and their intervals. No intervals (`holiday off`) lists the
 /// modes with the timer off all day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleLine {
@@ -1613,19 +1613,21 @@ pub struct ScheduleLine {
 }
 
 /// The days of a schedule line: a built-in keyword (`mon`, `weekdays`,
-/// `heating`, …) or an operating mode of the config by its title
+/// `heating`, …), a `Mode` the module declares or externs by its slug
+/// (`party`), or another operating mode of the config by its title
 /// (`"Party"`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Day {
     Keyword(String),
-    Mode(String),
+    Slug(String),
+    Title(String),
 }
 
 impl fmt::Display for Day {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Day::Keyword(k) => f.write_str(k),
-            Day::Mode(title) => f.write_str(&quote(title)),
+            Day::Keyword(k) | Day::Slug(k) => f.write_str(k),
+            Day::Title(title) => f.write_str(&quote(title)),
         }
     }
 }
@@ -1910,8 +1912,9 @@ pub enum RuleStmtKind {
     Or,
 }
 
-/// An operating mode in a rule: an extern or minted `Mode` by slug, or a
-/// mode of the config by its title (as in a schedule).
+/// An operating mode in a rule: a `Mode` the module declares or externs
+/// by its slug, or another mode of the config by its title (as in a
+/// schedule).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModeName {
     Slug(String),
@@ -1923,6 +1926,119 @@ impl fmt::Display for ModeName {
         match self {
             ModeName::Slug(s) => f.write_str(s),
             ModeName::Title(t) => f.write_str(&quote(t)),
+        }
+    }
+}
+
+/// The one spelling of an operating mode, as far as the source tells it.
+/// A built-in mode in a schedule is its day word (`mon`); a mode the
+/// module declares or externs is its slug; any other mode is its title.
+/// A slug that is a day word cannot name a mode in a schedule (the day
+/// wins), so there that mode stays a title.
+#[derive(Debug, Clone, Default)]
+pub struct ModeSpellings {
+    /// Title → slug: managed `Mode`s by title (the slug when untitled),
+    /// externs matched by `title:`. A title two of them share is left out.
+    slugs: BTreeMap<String, String>,
+    /// Slug → day word: externs of a built-in mode by its fixed UUID.
+    days: BTreeMap<String, &'static str>,
+}
+
+impl ModeSpellings {
+    /// The spellings the `Mode`s of `modules` (the fragments of one
+    /// module) give.
+    pub fn of<'a>(modules: impl IntoIterator<Item = &'a Module>) -> ModeSpellings {
+        let mut slugs: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut days = BTreeMap::new();
+        let mut add = |title: &str, slug: &str| {
+            slugs
+                .entry(title.to_string())
+                .and_modify(|s| {
+                    if s.as_deref() != Some(slug) {
+                        *s = None;
+                    }
+                })
+                .or_insert_with(|| Some(slug.to_string()));
+        };
+        for m in modules {
+            for item in &m.items {
+                match item {
+                    Item::Block(b) if b.block_type == "Mode" => {
+                        add(b.title.as_deref().unwrap_or(&b.slug), &b.slug);
+                    }
+                    Item::Extern(e) if e.block_type == "Mode" => match &e.match_spec {
+                        MatchSpec::Title(t) => add(t, &e.slug),
+                        MatchSpec::Uuid(u) => {
+                            if let Some(day) = crate::logic::schedule::builtin_day(u) {
+                                days.insert(e.slug.clone(), day);
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+        ModeSpellings {
+            slugs: slugs
+                .into_iter()
+                .filter_map(|(t, s)| Some((t, s?)))
+                .collect(),
+            days,
+        }
+    }
+
+    /// The spelling a rule should use for `mode`, if it is another.
+    pub fn in_rule(&self, mode: &ModeName) -> Option<ModeName> {
+        match mode {
+            ModeName::Title(t) => self.slugs.get(t).map(|s| ModeName::Slug(s.clone())),
+            ModeName::Slug(_) => None,
+        }
+    }
+
+    /// The spelling a schedule line should use for `day`, if it is
+    /// another.
+    pub fn in_schedule(&self, day: &Day) -> Option<Day> {
+        match day {
+            Day::Title(t) => self
+                .slugs
+                .get(t)
+                .filter(|s| !crate::logic::schedule::is_day(s))
+                .map(|s| Day::Slug(s.clone())),
+            Day::Slug(s) => self.days.get(s).map(|d| Day::Keyword(d.to_string())),
+            Day::Keyword(_) => None,
+        }
+    }
+
+    /// Rewrite every mode reference of `module` in its one spelling.
+    /// `loxl fmt` runs it with the spellings of the whole module.
+    pub fn apply(&self, module: &mut Module) {
+        for item in &mut module.items {
+            match item {
+                Item::Rule(r) => {
+                    for st in &mut r.body {
+                        if let RuleItem::Stmt(st) = st
+                            && let RuleStmtKind::Mode { mode, .. }
+                            | RuleStmtKind::ThenMode { mode, .. } = &mut st.kind
+                            && let Some(m) = self.in_rule(mode)
+                        {
+                            *mode = m;
+                        }
+                    }
+                }
+                Item::Schedule(s) => {
+                    for line in &mut s.body {
+                        if let ScheduleItem::Line(l) = line {
+                            for d in &mut l.days {
+                                if let Some(new) = self.in_schedule(d) {
+                                    *d = new;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }

@@ -14,6 +14,8 @@ struct Scope<'a> {
     /// plain blocks. Test bodies may reference the slugs those lowerings
     /// mint, so their references only resolve on this form.
     flattened: bool,
+    /// The one spelling of each operating mode the module names.
+    modes: ModeSpellings,
 }
 
 /// Statements that may appear once per target, collected across items.
@@ -104,7 +106,11 @@ impl Module {
             _ => false,
         });
         crate::logic::defaults::by_type(&self.items)?;
-        let sc = Scope { names, flattened };
+        let sc = Scope {
+            names,
+            flattened,
+            modes: ModeSpellings::of([self]),
+        };
         let mut seen = Seen::default();
         for item in &self.items {
             self.check_item(&sc, item, &mut seen)?;
@@ -230,6 +236,7 @@ impl Module {
             Item::Access(a) => self.check_access(a)?,
             Item::AccessClaim(c) => self.check_access_claim(sc, c, seen)?,
             Item::Schedule(t) => {
+                self.check_schedule_days(sc, t)?;
                 crate::logic::schedule::program(t)
                     .map_err(|m| Error::Compile(format!("`schedule {}`: {m}", t.name)))?;
             }
@@ -869,6 +876,67 @@ impl Module {
         Ok(())
     }
 
+    /// A schedule's days: a slug names a `Mode` of the module, and each
+    /// mode is spelled the one way the module tells.
+    fn check_schedule_days(&self, sc: &Scope, t: &ScheduleDecl) -> Result<()> {
+        let ctx = format!("`schedule {}`", t.name);
+        for line in t.lines() {
+            for day in &line.days {
+                let Day::Slug(slug) = day else { continue };
+                let ty = match sc.names.get(slug.as_str()) {
+                    Some(NameKind::Extern) => self
+                        .externs()
+                        .find(|e| e.slug == *slug)
+                        .map_or("…", |e| e.block_type.as_str()),
+                    Some(NameKind::Block) => self.block_type_of(slug),
+                    None if !sc.flattened => continue,
+                    None => {
+                        let modes = self
+                            .externs()
+                            .filter(|e| e.block_type == "Mode")
+                            .map(|e| e.slug.as_str())
+                            .chain(
+                                self.blocks()
+                                    .filter(|b| b.block_type == "Mode")
+                                    .map(|b| b.slug.as_str()),
+                            );
+                        return compile_err(format!(
+                            "{ctx}: {}",
+                            crate::logic::schedule::unknown_day(slug, modes)
+                        ));
+                    }
+                    Some(kind) => {
+                        return compile_err(format!(
+                            "{ctx}: `{line}`: `{slug}` is {}, not an operating mode",
+                            kind.describe()
+                        ));
+                    }
+                };
+                if ty != "Mode" && ty != "…" {
+                    return compile_err(format!(
+                        "{ctx}: `{line}`: `{slug}` is a `{ty}`, not a `Mode`"
+                    ));
+                }
+            }
+            let mut canonical = line.clone();
+            for day in &mut canonical.days {
+                if let Some(d) = sc.modes.in_schedule(day) {
+                    *day = d;
+                }
+            }
+            if canonical.days != line.days {
+                let (mut new, mut old) = (canonical, line.clone());
+                new.comment = None;
+                old.comment = None;
+                return compile_err(format!(
+                    "{ctx}: a schedule names a built-in mode by its day word and a mode the \
+                     module declares by its slug. Write `{new}` instead of `{old}`."
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// `timer.schedule = set` claims a DayTimer's schedule.
     fn check_schedule_claim<'a>(
         &self,
@@ -1138,16 +1206,27 @@ impl Module {
                     when += 1;
                     object(target, &st.kind, "a condition watches a block")?;
                 }
-                RuleStmtKind::Mode { mode, .. } => {
-                    when += 1;
+                RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. } => {
+                    if matches!(st.kind, RuleStmtKind::Mode { .. }) {
+                        when += 1;
+                    } else {
+                        then += 1;
+                    }
                     if let ModeName::Slug(s) = mode {
                         object(s, &st.kind, "a mode is an operating mode object")?;
                     }
-                }
-                RuleStmtKind::ThenMode { mode, .. } => {
-                    then += 1;
-                    if let ModeName::Slug(s) = mode {
-                        object(s, &st.kind, "a mode is an operating mode object")?;
+                    if let Some(slug) = sc.modes.in_rule(mode) {
+                        let mut new = st.kind.clone();
+                        if let RuleStmtKind::Mode { mode, .. }
+                        | RuleStmtKind::ThenMode { mode, .. } = &mut new
+                        {
+                            *mode = slug;
+                        }
+                        return compile_err(format!(
+                            "{ctx}: a rule names a mode the module declares by its slug. \
+                             Write `{new}` instead of `{}`.",
+                            st.kind
+                        ));
                     }
                 }
                 RuleStmtKind::Weekday(days) => {

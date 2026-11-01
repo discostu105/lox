@@ -573,19 +573,49 @@ impl Context {
         }
     }
 
-    /// The `Mode=` number of a mode a rule names.
-    fn mode(&self, ctx: &str, mode: &ModeName, uuid_of: &BTreeMap<String, String>) -> Result<i64> {
+    /// The `Mode=` number of the mode the rule line `line` names. A title
+    /// of a mode the module names by a slug is refused with the line as
+    /// it should read.
+    fn mode(
+        &self,
+        ctx: &str,
+        line: &RuleStmtKind,
+        uuid_of: &BTreeMap<String, String>,
+    ) -> Result<i64> {
+        let (RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. }) = line else {
+            unreachable!("a mode line")
+        };
         let found: Vec<&(String, String, i64)> = match mode {
             ModeName::Slug(s) => {
                 let uuid = uuid_of
                     .get(s)
                     .ok_or_else(|| Error::Compile(format!("{ctx}: `{s}` resolves to no object")))?;
-                self.modes.iter().filter(|(u, _, _)| u == uuid).collect()
+                self.modes
+                    .iter()
+                    .filter(|(u, _, _)| u.eq_ignore_ascii_case(uuid))
+                    .collect()
             }
             ModeName::Title(t) => self.modes.iter().filter(|(_, x, _)| x == t).collect(),
         };
         match found.as_slice() {
-            [(_, _, n)] => Ok(*n),
+            [(uuid, _, n)] => {
+                if let ModeName::Title(_) = mode
+                    && let Some((slug, _)) =
+                        uuid_of.iter().find(|(_, u)| u.eq_ignore_ascii_case(uuid))
+                {
+                    let mut new = line.clone();
+                    if let RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. } =
+                        &mut new
+                    {
+                        *mode = ModeName::Slug(slug.clone());
+                    }
+                    return Err(Error::Compile(format!(
+                        "{ctx}: a rule names a mode the module declares by its slug. \
+                         Write `{new}` instead of `{line}`."
+                    )));
+                }
+                Ok(*n)
+            }
             [] => {
                 let titles: Vec<String> = self
                     .modes
@@ -604,12 +634,11 @@ impl Context {
         }
     }
 
-    /// The source name of a mode number: its title.
-    fn mode_title(&self, n: i64) -> Option<&str> {
-        self.modes
-            .iter()
-            .find(|(_, _, m)| *m == n)
-            .map(|(_, t, _)| t.as_str())
+    /// The source name of a mode number: the slug `slug_of` gives its
+    /// object, else its title.
+    fn mode_name(&self, n: i64, slug_of: &dyn Fn(&str) -> Option<String>) -> Option<ModeName> {
+        let (uuid, title, _) = self.modes.iter().find(|(_, _, m)| *m == n)?;
+        Some(slug_of(uuid).map_or_else(|| ModeName::Title(title.clone()), ModeName::Slug))
     }
 }
 
@@ -996,8 +1025,8 @@ fn wanted(
                 days.sort_unstable();
                 group.push(Event::Weekdays(days));
             }
-            RuleStmtKind::Mode { mode, on } => group.push(Event::Mode {
-                mode: cx.mode(ctx, mode, uuid_of)?,
+            RuleStmtKind::Mode { on, .. } => group.push(Event::Mode {
+                mode: cx.mode(ctx, &st.kind, uuid_of)?,
                 on: *on,
             }),
             RuleStmtKind::State {
@@ -1014,8 +1043,8 @@ fn wanted(
                 target: resolve(st, target)?,
                 command: command.clone(),
             }),
-            RuleStmtKind::ThenMode { mode, on } => rule.actions.push(Action::Mode {
-                mode: cx.mode(ctx, mode, uuid_of)?,
+            RuleStmtKind::ThenMode { on, .. } => rule.actions.push(Action::Mode {
+                mode: cx.mode(ctx, &st.kind, uuid_of)?,
                 on: *on,
             }),
             RuleStmtKind::Weather { field, op, value } => {
@@ -1318,8 +1347,7 @@ pub(crate) fn lift(
     };
     let slug = |u: &str| slug_of(u).ok_or_else(|| format!("its block {u} is not in the config"));
     let mode = |n: i64| {
-        cx.mode_title(n)
-            .map(|t| ModeName::Title(t.to_string()))
+        cx.mode_name(n, slug_of)
             .ok_or_else(|| format!("its operating mode {n} is not in the config"))
     };
     let mut body = vec![stmt(RuleStmtKind::Active(rule.active))];

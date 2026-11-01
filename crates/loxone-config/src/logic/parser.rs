@@ -1894,26 +1894,20 @@ fn parse_schedule_line(
     loop {
         match toks.get(i) {
             Some(Tok::Ident(w)) if w == "off" || w == "activate" => break,
-            Some(Tok::Ident(w)) => {
-                if !super::schedule::is_day(w) {
-                    let known: Vec<&str> = super::schedule::day_keywords().collect();
-                    let mut hint = super::validate::suggest(w, known.iter().copied());
-                    if hint.is_empty()
-                        && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
-                    {
-                        hint = format!("; did you mean `{short}`?");
-                    }
-                    return Err(err(format!(
-                        "unknown day `{w}`{hint}. Days are {}, or the title of an operating mode (`\"Party\"`).",
-                        known.join(", ")
-                    )));
-                }
+            Some(Tok::Ident(w)) if super::schedule::is_day(w) => {
                 days.push(Day::Keyword(w.clone()));
+            }
+            // Any other word is a `Mode`'s slug; validate resolves it.
+            Some(Tok::Ident(w)) if super::rename::valid_slug(w).is_ok() => {
+                days.push(Day::Slug(w.clone()));
+            }
+            Some(Tok::Ident(w)) => {
+                return Err(err(super::schedule::unknown_day(w, std::iter::empty())));
             }
             Some(Tok::Str(s)) if s.trim().is_empty() => {
                 return Err(err("an operating mode's title cannot be empty".into()));
             }
-            Some(Tok::Str(s)) => days.push(Day::Mode(s.clone())),
+            Some(Tok::Str(s)) => days.push(Day::Title(s.clone())),
             _ => break,
         }
         i += 1;

@@ -12,9 +12,10 @@
 //!
 //! The built-in operating modes have fixed UUIDs in every config
 //! (`00000000-0000-000N-1500000000000000`, corpus-wide) and are named by
-//! keyword. Any mode of the config, a user-defined one included, can be
-//! named by its title: the title resolves against the compiled
-//! document's `Mode` objects. A column's place in `Modes=` follows the
+//! keyword. A `Mode` the module declares or externs is named by its slug,
+//! any other mode of the config by its title: the title resolves against
+//! the compiled document's `Mode` objects. Each mode has that one
+//! spelling; another is refused with the line as it should read. A column's place in `Modes=` follows the
 //! modes' `Mode=` numbers, ascending — how every observed timer lists
 //! them (a user-defined mode, `Mode="-3"`, before Monday, `Mode="3"`).
 
@@ -52,15 +53,42 @@ pub(crate) fn day_keywords() -> impl Iterator<Item = &'static str> {
     DAYS.iter().map(|(k, _)| *k)
 }
 
+/// The error for a schedule day that is no day word and no `Mode` of the
+/// module (`modes`: the module's `Mode` slugs), with the nearest name.
+pub(crate) fn unknown_day<'a>(word: &str, modes: impl IntoIterator<Item = &'a str>) -> String {
+    let modes: Vec<&str> = modes.into_iter().collect();
+    let words = day_keywords().map(|k| -> &str { k });
+    let mut hint = super::validate::suggest(word, words.chain(modes.iter().copied()));
+    if hint.is_empty()
+        && let Some(short) = word.get(..3).filter(|s| is_day(s))
+    {
+        hint = format!("; did you mean `{short}`?");
+    }
+    format!(
+        "unknown day `{word}`{hint}. Days are {}, the slug of a `Mode` the module declares, \
+         or the title of another operating mode (`\"Party\"`).",
+        day_keywords().collect::<Vec<_>>().join(", ")
+    )
+}
+
 fn mode_uuid(n: u8) -> String {
     format!("00000000-0000-{n:04x}-1500000000000000")
 }
 
+/// The day word of a built-in operating mode, by its fixed UUID.
+pub(crate) fn builtin_day(uuid: &str) -> Option<&'static str> {
+    DAYS.iter()
+        .find(|(_, m)| m.len() == 1 && mode_uuid(m[0]).eq_ignore_ascii_case(uuid))
+        .map(|(k, _)| *k)
+}
+
 /// One column of a schedule before the document is known: a built-in
-/// mode by number, or a mode of the config by title.
+/// mode by number, a `Mode` of the module by slug, or a mode of the
+/// config by title.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Column {
     Builtin(u8),
+    Slug(String),
     Titled(String),
 }
 
@@ -71,6 +99,7 @@ impl Column {
                 .iter()
                 .find(|(_, m)| m == &[*n])
                 .map_or_else(|| format!("mode {n}"), |(k, _)| (*k).to_string()),
+            Column::Slug(s) => s.clone(),
             Column::Titled(t) => format!("\"{t}\""),
         }
     }
@@ -96,7 +125,8 @@ pub(crate) fn program(decl: &ScheduleDecl) -> std::result::Result<Program<'_>, S
                     .find(|(d, _)| d == k)
                     .map(|(_, m)| m.iter().map(|&n| Column::Builtin(n)).collect())
                     .ok_or_else(|| format!("unknown day `{k}`"))?,
-                Day::Mode(title) => vec![Column::Titled(title.clone())],
+                Day::Slug(slug) => vec![Column::Slug(slug.clone())],
+                Day::Title(title) => vec![Column::Titled(title.clone())],
             };
             for c in columns {
                 out.entry(c).or_default().extend(line.intervals.iter());
@@ -144,16 +174,85 @@ struct ModeColumn {
     uuid: String,
 }
 
+/// The one spelling of each day of the schedule's lines, now that the
+/// document tells which mode a title or slug names: a built-in mode by
+/// its day word, a mode the module names by its slug (unless that slug is
+/// a day word), any other by its title. A line that spells one otherwise
+/// is refused with the line as it should read.
+fn check_spelling(
+    decl: &ScheduleDecl,
+    modes: &[(String, String, i64)],
+    uuid_of: &BTreeMap<String, String>,
+) -> std::result::Result<(), String> {
+    let slug_of = |uuid: &str| {
+        uuid_of
+            .iter()
+            .find(|(s, u)| u.eq_ignore_ascii_case(uuid) && !is_day(s))
+            .map(|(s, _)| s.clone())
+    };
+    for line in decl.lines() {
+        let mut canonical = line.clone();
+        for day in &mut canonical.days {
+            let uuid = match day {
+                Day::Keyword(_) => continue,
+                Day::Slug(s) => uuid_of.get(s.as_str()).cloned(),
+                Day::Title(t) => match modes
+                    .iter()
+                    .filter(|(_, x, _)| x == t)
+                    .collect::<Vec<_>>()
+                    .as_slice()
+                {
+                    [(u, _, _)] => Some(u.clone()),
+                    _ => None,
+                },
+            };
+            let Some(uuid) = uuid else { continue };
+            if let Some(word) = builtin_day(&uuid) {
+                *day = Day::Keyword(word.to_string());
+            } else if let Day::Title(_) = day
+                && let Some(s) = slug_of(&uuid)
+            {
+                *day = Day::Slug(s);
+            }
+        }
+        if canonical.days != line.days {
+            let (mut new, mut old) = (canonical, line.clone());
+            new.comment = None;
+            old.comment = None;
+            return Err(format!(
+                "a schedule names a built-in mode by its day word and a mode the module \
+                 declares by its slug. Write `{new}` instead of `{old}`."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Resolve each column against the document's modes, merging columns
-/// that turn out to be the same mode (`mon` and `"Montag"`).
+/// that turn out to be the same mode.
 fn resolve<'a>(
     program: Program<'a>,
     modes: &[(String, String, i64)],
+    uuid_of: &BTreeMap<String, String>,
 ) -> std::result::Result<BTreeMap<ModeColumn, Vec<&'a Interval>>, String> {
     let mut out: BTreeMap<ModeColumn, Vec<&Interval>> = BTreeMap::new();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
     for (column, ivs) in program {
         let mode = match &column {
+            Column::Slug(slug) => {
+                let uuid = uuid_of
+                    .get(slug)
+                    .ok_or_else(|| format!("`{slug}` resolves to no object"))?;
+                let Some((uuid, _, number)) =
+                    modes.iter().find(|(u, _, _)| u.eq_ignore_ascii_case(uuid))
+                else {
+                    return Err(format!("`{slug}` ({uuid}) is no operating mode"));
+                };
+                ModeColumn {
+                    number: *number,
+                    uuid: uuid.clone(),
+                }
+            }
             Column::Builtin(n) => {
                 let uuid = mode_uuid(*n);
                 if *n > 10 && !modes.iter().any(|(u, _, _)| *u == uuid) {
@@ -232,8 +331,9 @@ pub(crate) fn apply(
             .schedules()
             .find(|s| s.name == c.schedule)
             .expect("validate admitted only declared schedules");
-        let program = program(decl)
-            .and_then(|p| resolve(p, &modes))
+        let program = check_spelling(decl, &modes, uuid_of)
+            .and_then(|()| program(decl))
+            .and_then(|p| resolve(p, &modes, uuid_of))
             .map_err(|m| Error::Compile(format!("`{c}`: {m}")))?;
         let el = doc
             .element_at_mut(&path_of[uuid])
@@ -338,7 +438,7 @@ mod tests {
     use super::*;
 
     fn decl(src: &str) -> ScheduleDecl {
-        let m = Module::parse(&format!("schedule s\n{src}end\n")).unwrap();
+        let m = Module::parse_fragment(&format!("schedule s\n{src}end\n")).unwrap();
         m.schedules().next().unwrap().clone()
     }
 
@@ -382,28 +482,54 @@ mod tests {
     #[test]
     fn modes_by_title_order_by_their_number() {
         let d = decl("\t\"Tiefschlaf\" off\n\t\"Party\" 18:00-23:00\n\tmon 06:00-07:00\n");
-        let r = resolve(program(&d).unwrap(), &modes()).unwrap();
+        let none = BTreeMap::new();
+        let r = resolve(program(&d).unwrap(), &modes(), &none).unwrap();
         let uuids: Vec<&str> = r.keys().map(|m| m.uuid.as_str()).take(3).collect();
         assert_eq!(uuids, ["u-party", "u-tief", mode_uuid(4).as_str()]);
     }
 
     #[test]
-    fn a_title_naming_a_keyword_mode_merges_with_it() {
-        let d = decl("\tmon 06:00-07:00\n\t\"Montag\" 06:30-08:00\n");
-        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
-        assert!(err.contains("overlap on mon (06:30–07:00)"), "{err}");
+    fn each_mode_has_one_spelling() {
+        let party: BTreeMap<String, String> = [
+            ("party".to_string(), "u-party".to_string()),
+            ("montag".to_string(), mode_uuid(4)),
+        ]
+        .into();
+        let spelling = |src: &str| check_spelling(&decl(src), &modes(), &party);
+        assert!(spelling("\tmon 06:00-07:00\n\tparty off\n\t\"Tiefschlaf\" off\n").is_ok());
+        // A built-in mode by title or slug: its day word.
+        let err = spelling("\tsat \"Montag\" 06:30-08:00\n").unwrap_err();
+        assert!(
+            err.contains("Write `sat mon 06:30-08:00` instead of `sat \"Montag\" 06:30-08:00`"),
+            "{err}"
+        );
+        let err = spelling("\tmontag off\n").unwrap_err();
+        assert!(
+            err.contains("Write `mon off` instead of `montag off`"),
+            "{err}"
+        );
+        // A mode the module names: its slug.
+        let err = spelling("\t\"Party\" 18:00-23:00 # Fest\n").unwrap_err();
+        assert!(
+            err.contains("Write `party 18:00-23:00` instead of `\"Party\" 18:00-23:00`"),
+            "{err}"
+        );
+        // A slug columns its mode by number.
+        let d = decl("\tparty off\n");
+        let r = resolve(program(&d).unwrap(), &modes(), &party).unwrap();
+        assert!(r.keys().any(|m| m.uuid == "u-party" && m.number == -2));
     }
 
     #[test]
     fn an_unknown_title_lists_the_modes_and_heating_needs_its_object() {
         let d = decl("\t\"Partymodus\" 18:00-23:00\n");
-        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
+        let err = resolve(program(&d).unwrap(), &modes(), &BTreeMap::new()).unwrap_err();
         assert!(
             err.contains("no operating mode titled \"Partymodus\". It has \"Montag\", \"Party\""),
             "{err}"
         );
         let d = decl("\theating 00:00-24:00\n");
-        let err = resolve(program(&d).unwrap(), &modes()).unwrap_err();
+        let err = resolve(program(&d).unwrap(), &modes(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("no operating mode `heating`"), "{err}");
     }
 }

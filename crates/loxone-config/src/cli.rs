@@ -788,7 +788,8 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     let path = path.as_str();
     // Formatting is per file and needs no name resolution (a fragment of
     // a module directory may reference slugs from sibling files), so
-    // every target parses as a fragment.
+    // every target parses as a fragment. The one thing the files share is
+    // how they spell an operating mode: by the slug any of them gives it.
     let targets: Vec<PathBuf> = if std::path::Path::new(path).is_dir() {
         if mode == "print" {
             return Err("fmt on a module directory requires --write or --check".into());
@@ -797,13 +798,19 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     } else {
         vec![PathBuf::from(path)]
     };
-    let mut dirty = false;
+    let mut parsed = Vec::new();
     for f in &targets {
         let name = f.display();
         let src = std::fs::read_to_string(f).map_err(|e| format!("{name}: {e}"))?;
-        let canonical = Module::parse_fragment(&src)
-            .map_err(|e| format!("{name}: {e}"))?
-            .to_text();
+        let module = Module::parse_fragment(&src).map_err(|e| format!("{name}: {e}"))?;
+        parsed.push((src, module));
+    }
+    let spellings = loxone_config::logic::ModeSpellings::of(parsed.iter().map(|(_, m)| m));
+    let mut dirty = false;
+    for (f, (src, mut module)) in targets.iter().zip(parsed) {
+        let name = f.display();
+        spellings.apply(&mut module);
+        let canonical = module.to_text();
         match mode {
             "print" => print!("{canonical}"),
             "write" => {
@@ -814,7 +821,7 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
             _check => {
                 if src != canonical {
                     eprintln!(
-                        "{name}: not canonical (run `{} fmt --write {name}`)",
+                        "{name}: not canonical (run `{} fmt --write {path}`)",
                         prog()
                     );
                     dirty = true;

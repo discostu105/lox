@@ -137,7 +137,7 @@ day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | "holiday" | "vacation" | "dayoff"
            | "weekdays" | "weekend" | "daily"
            | "heating" | "cooling"
-           | string ;                      (* any operating mode by title *)
+           | mode-name ;                   (* a Mode of the module, or another mode by title *)
 interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
 schedule-claim = ref "." "schedule" "=" slug [ comment ] ;
@@ -175,7 +175,7 @@ rule-line  = ( "active" | "inactive"
              | "then" ref ( command-word | string ) ) [ comment ] ;
                                     (* after `then`, the action words win:
                                        a block named `wait` is no target *)
-mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
+mode-name  = slug | string ;                       (* one spelling per mode: see Operating modes *)
 command-word = letter { letter | digit | "_" } ;  (* one word, bare: `then pumpe on`;
                                                       anything else stays quoted *)
 rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
@@ -610,11 +610,22 @@ A user-defined operating mode is an object of the object tree, like a virtual in
 `page`.
 
 - A new one gets the next `Mode=` number below the lowest in use (`-1`, `-2`, …) and keeps it.
-  Schedules can name it by its title.
-- Existing modes, built-in or made in Loxone Config, are referenced by title in a schedule or as an
-  extern (`extern montag = Mode(title: "Montag")`).
+- Existing modes, built-in or made in Loxone Config, are an extern
+  (`extern urlaub = Mode(title: "Urlaub")`), or are named by title where no extern declares them.
 - `adopt --uuid <mode> --as <slug>` takes over a user mode made in Loxone Config. It keeps its UUID
   and `Mode=` number; a new title is a rename. A built-in mode (`Mode=` ≥ 0) stays an extern.
+
+**One spelling per mode.** Rules (`when mode`, `then mode`) and schedule lines name a mode one way:
+
+1. a built-in mode in a schedule by its day word (`mon`, `holiday`, `heating`, …);
+2. a mode the module declares or externs by its slug (`when mode party`, `party 18:00-24:00`);
+3. any other mode by its quoted title (`when mode "Urlaub"`).
+
+A slug that is a day word cannot name a mode in a schedule, since the day word wins; that mode keeps
+its title there. Another spelling is an error that states the line as it should read: write
+`party 18:00-24:00` instead of `"Party" 18:00-24:00`. `loxl check` catches what the source shows,
+`loxl compile` the rest (a mode an extern matches by UUID, a built-in mode by title). `loxl fmt` on a
+module directory rewrites the spellings the source shows; `decompile` and `adopt` write them.
 
 ### Calendar entries — the *Betriebszeiten* that switch a mode on
 
@@ -1349,9 +1360,12 @@ timers. Each line lists days, then the intervals the timer is on:
 - **Days** are the built-in operating modes: `mon` … `sun`, `holiday` (Feiertag), `vacation`
   (Urlaub), `dayoff` (Freier Tag/Schulferien), `heating` (Heizperiode), `cooling` (Kühlperiode), and
   the groups `weekdays` (mon–fri), `weekend` (sat, sun), `daily` (mon–sun).
-  - Any other operating mode of the config, user-defined ones included, is named by its title in
-    quotes: `"Party" 18:00-24:00`. The title must name exactly one mode of the compiled config (new
-    ones included).
+  - A `Mode` the module declares or externs is named by its slug: `party 18:00-24:00`.
+  - Any other operating mode of the config is named by its title in quotes: `"Party" 18:00-24:00`.
+    The title must name exactly one mode of the compiled config (new ones included).
+  - Each mode has one of these spellings (see [Operating modes](#operating-modes--minted-into-the-betriebsmodi-folder)):
+    `"Montag"` is an error naming `mon`, and `"Party"` one naming `party` where the module declares
+    it.
   - A day may appear on several lines; its intervals merge.
   - The timer always has a column for each of the seven weekdays. A weekday the schedule does not name
     is **off all day**. Each other mode the schedule names gets a column; modes it does not name get
@@ -1416,8 +1430,9 @@ created, named and deleted in the app; the declaration edits one.
   capability table the Miniserver serves the app
   (`loxone_config::autopilot_caps`), per app control type.
 - **`when mode <mode> [on|off]`** — while an operating mode is
-  (not) active; `<mode>` is a `Mode` block's slug or a mode's title
-  (`when mode "Party"`).
+  (not) active; `<mode>` is the slug of a `Mode` the module declares or externs
+  (`when mode party`), else the mode's title (`when mode "Urlaub"`). A title of a mode the module
+  names is an error naming its slug.
 - **`or`** — the conditions after it form another group: the
   rule fires when all conditions of any one group hold.
 - **`then <slug> <command>`** — the app's command text to a block. It is bare when it is one word
@@ -1818,6 +1833,11 @@ replacement. The compile output of a migrated file is byte-identical.
   `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
   statistics, energy flow, messages and modes as used and reports a device's unused inputs once;
   `# lint: allow <kind>` keeps a deliberate finding out (see [Lint](#lint)).
+- **One spelling per operating mode** in rules and schedules: a built-in mode in a schedule by its day
+  word, a mode the module declares or externs by its slug (schedule lines take slugs now,
+  `party 18:00-24:00`), any other by title. `when mode "Party"` next to `party = Mode("Party")` is
+  an error naming `when mode party`; `"Montag" 06:00-07:00` one naming `mon 06:00-07:00`. `fmt`,
+  `decompile` and `adopt` write the one spelling.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1828,7 +1848,8 @@ whose blocks relied on the previous file's `page` that `page` line, rename each
 `recipients <extern>_recipients` and add the claim
 (`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
 `notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
-(which also unquotes one-word `then` commands and puts short calls on one line) and, if you like,
+(which also unquotes one-word `then` commands, puts short calls on one line and names a mode the
+module declares by its slug; `loxl compile` names the modes it cannot see) and, if you like,
 `loxl lint --fix` for the unit suffixes.
 
 ## Versioning
