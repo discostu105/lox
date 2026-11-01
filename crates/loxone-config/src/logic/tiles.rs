@@ -573,6 +573,9 @@ pub fn lint_tiles(module: &Module, compiled: &LoxoneDoc) -> Vec<LintFinding> {
             .or_else(|| o.title.clone())
             .unwrap_or_else(|| o.uuid.clone());
         let linked = links.linked(device);
+        // Commands no linked block receives, one finding per device and
+        // abbreviation: a device's tiles of one type share their cause.
+        let mut dead: Vec<(String, &[&str], Vec<String>)> = Vec::new();
         for btn in btns.child_elements().filter(|e| e.name == "btn") {
             let i = btn.attr("i").unwrap_or("?");
             for slot in &FUNCTIONS {
@@ -605,20 +608,15 @@ pub fn lint_tiles(module: &Module, compiled: &LoxoneDoc) -> Vec<LintFinding> {
                         .collect();
                     let what = format!("tile {i} {}: `{api}`", slot.key);
                     if receivers.is_empty() {
-                        findings.push(LintFinding {
-                            kind: LintKind::TileDeadCommand,
-                            slug: name.clone(),
-                            detail: format!(
-                                "{what} addresses {abbr}, but no {}{} is API-linked to \
-                                 the device, so the command reaches nothing",
-                                types.join("/"),
-                                if ctrls.is_empty() {
-                                    ""
-                                } else {
-                                    " among its ctrls"
-                                }
-                            ),
-                        });
+                        let what = if ctrls.is_empty() {
+                            what
+                        } else {
+                            format!("{what} (to its ctrls)")
+                        };
+                        match dead.iter_mut().find(|(a, _, _)| *a == abbr) {
+                            Some((_, _, list)) => list.push(what),
+                            None => dead.push((abbr.to_string(), types, vec![what])),
+                        }
                     } else if ctrls.is_empty() && receivers.len() >= 2 {
                         let names: Vec<String> =
                             receivers.iter().map(|&r| links.describe(r)).collect();
@@ -637,6 +635,25 @@ pub fn lint_tiles(module: &Module, compiled: &LoxoneDoc) -> Vec<LintFinding> {
                     }
                 }
             }
+        }
+        for (abbr, types, list) in dead {
+            let types = types.join("/");
+            findings.push(LintFinding {
+                kind: LintKind::TileDeadCommand,
+                slug: name.clone(),
+                detail: match list.as_slice() {
+                    [one] => format!(
+                        "{one} addresses {abbr}, but no {types} is API-linked to the device, so \
+                         the command reaches nothing"
+                    ),
+                    _ => format!(
+                        "{} commands address {abbr}, but no {types} is API-linked to the device, \
+                         so they reach nothing: {}",
+                        list.len(),
+                        list.join(", ")
+                    ),
+                },
+            });
         }
     }
     findings

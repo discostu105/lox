@@ -1,0 +1,1 @@
+- **`loxl lint`**: a `# lint: allow <kind>` comment on the line above a declaration keeps a deliberate finding out of the report. An allow that covers nothing is reported as `unused-allow`.

@@ -19,6 +19,8 @@ line       = comment | let | extern | block-head | arg-line | signal
            | moods | moods-claim | rule | defaults | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
+allow      = "#" "lint:" "allow" kind { [ "," ] kind } [ any-text ] ;
+             (* a comment; the line right above a declaration *)
 let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
 extern     = "extern" slug "=" type "(" matcher
              { "," constraint ":" string } ")" [ comment ] ;
@@ -1620,6 +1622,37 @@ compiled by accident. Inside the directory, `loxl compile` needs no flags
 (flags override the file), and `check`/`fmt`/`drift` default to the
 project's module and lock.
 
+## Lint
+
+`loxl lint` gives advice; it never changes the compiled config. In a project it also reads the
+compiled config. `dead-outputs` reports a block, extern or device whose outputs feed nothing there,
+GUI wires included. These count as used:
+
+- a wire from the output, an energy flow monitor that reads the block, a statistic it records;
+- a value the app shows (an info-only control: `Visu` on, display "state only");
+- a block that logs, mails or notifies (an `OutputRefLM`), and what feeds it;
+- operating modes and calendar entries: schedules and rules read them by number;
+- a block without outputs (a virtual output command, a Modbus actuator) when something drives it.
+
+A switch or controller in the app that drives nothing is still reported. Two or more inputs of one
+device (Modbus device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
+The dead commands of one Touch Pure Flex and command type are one `tile-dead-command` finding.
+
+A finding that is deliberate stays out of the report with an allow comment on the line right above
+the declaration:
+
+```text
+# lint: allow dead-outputs registers kept for later
+solax_x3 = ModbusDev("Solax Hybrid X3", device: solax, Channel: 1)
+```
+
+It names one or more kinds (comma or space separated); the rest of the line is the reason. It covers
+the declaration below it: a block, extern, instance (all its blocks), device (all its inputs),
+constant, template, signal or `defaults`. Inside a template body it covers that block in every
+instance. An allow that covers no finding, names no kind or stands above no declaration is reported
+as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
+`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged.
+
 ## Canonical form
 
 `loxl fmt` writes:
@@ -1636,6 +1669,7 @@ project's module and lock.
 - a `tile` the same way one level deeper (`tile 2(click: "…", to: licht)` on one line, or a
   two-tab-indented list with the `)` on its own tab-indented line);
 - each grant of an `access` or `recipients` set on its own tab-indented line.
+- a `# lint: allow` comment directly above its statement, with no blank line between them.
 
 Values keep their variant: numbers bare, strings quoted, constant references bare, port references
 dotted, unit values and `on`/`off` as written. Some values are canonicalized at parse time, so every
@@ -1720,7 +1754,9 @@ replacement. The compile output of a migrated file is byte-identical.
   reports bare durations that read better with their unit (`unit-suffix`); `loxl lint --fix` writes
   the suffixes. Module-check errors name the fragment and line. The language server hovers and
   goes to the definition of `inst.block` and `inst.block.Port`, completes argument keys (in
-  `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes.
+  `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
+  statistics, energy flow, messages and modes as used and reports a device's unused inputs once;
+  `# lint: allow <kind>` keeps a deliberate finding out (see [Lint](#lint)).
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite

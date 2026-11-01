@@ -565,3 +565,30 @@ fn lint_reports_broadcasts_and_dead_commands_on_every_device() {
     assert_eq!(after.len(), 2);
     assert!(after.iter().all(|f| f.slug == "Touch Pure Flex Tür"));
 }
+
+#[test]
+fn dead_commands_of_one_type_are_one_finding_per_device() {
+    // A second Lico function on Tür: both commands share the cause (no
+    // light controller linked), so they read as one finding.
+    let tree = TREE.replacen(
+        "<f1 api=\"MENU(Lico;Mood)\"/>",
+        "<f1 api=\"MENU(Lico;Mood)\"/>\n\t\t\t\t\t\t\t<f2 api=\"SET(Lico;M+;pulse)\" bT=\"1\"/>",
+        1,
+    );
+    assert_ne!(tree, TREE);
+    let findings = lint_tiles(&module(""), &base_from(&tree, BLOCKS));
+    let dead: Vec<&str> = findings
+        .iter()
+        .filter(|f| f.kind == LintKind::TileDeadCommand)
+        .map(|f| f.detail.as_str())
+        .collect();
+    assert_eq!(dead.len(), 1, "{dead:#?}");
+    assert!(
+        dead[0].starts_with(
+            "2 commands address Lico, but no LightController2 is API-linked to the device, so \
+             they reach nothing: tile 3 click: `MENU(Lico;Mood)`, tile 3 up: `SET(Lico;M+;pulse)`"
+        ),
+        "{}",
+        dead[0]
+    );
+}

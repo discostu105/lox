@@ -8,9 +8,9 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, fix_unit_suffixes, lint_access, lint_dead_outputs, lint_source, lint_tiles,
-    lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify, trace_tests,
-    valid_slug, validate_ports,
+    decompile_pages, finish_lint, fix_unit_suffixes, lint_access, lint_dead_outputs, lint_source,
+    lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify,
+    trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -125,11 +125,16 @@ outside a port's documented range and bare time values that read better with the
 blocks come before its first `page` statement while other files name their page (those blocks go
 to the default page).
 In a lox.toml project it also reports:
-  - managed blocks whose outputs feed nothing in the compiled config
+  - managed blocks whose outputs feed nothing in the compiled config (blocks shown in the app,
+    modes and blocks that send messages count as used; a device's unused inputs are one finding)
   - Touch Pure Flex commands that reach several blocks, or none
   - users whose NFC tag or access code opens no NFC Code Touch
 
 Findings are grouped by kind, each kind with its count.
+
+A finding you mean to keep: put `# lint: allow <kind>` on the line above its declaration (the
+block, extern, instance or device). Text after the kind is free. An allow that covers nothing is
+reported (`unused-allow`).
 
 Options:
   --fix       write the unit suffixes the `unit-suffix` findings name, in canonical form (as
@@ -1494,7 +1499,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
 
     let module = read_module(&module_path)?;
     let mut findings = lint_source(&module)?;
-    match compile_project(&module)
+    let project = match compile_project(&module)
         .map_err(|e| format!("compile for dead-output analysis failed: {e}"))?
     {
         Some((compiled, _)) => {
@@ -1502,9 +1507,14 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
+            true
         }
-        None => eprintln!("note: no lox.toml project — dead-output analysis skipped"),
-    }
+        None => {
+            eprintln!("note: no lox.toml project — dead-output analysis skipped");
+            false
+        }
+    };
+    let findings = finish_lint(&module, findings, project)?;
 
     if findings.is_empty() {
         println!("lint: clean");
