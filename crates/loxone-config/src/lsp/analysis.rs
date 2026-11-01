@@ -11,8 +11,8 @@
 use crate::connectors::{BUILTIN_TYPES, PortDir, builtin};
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
-    CompileOptions, LintFinding, Module, TemplateParam, compile, finish_lint, lint_access,
-    lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
+    CompileOptions, LintFinding, LintKind, Module, TemplateParam, compile, finish_lint,
+    lint_access, lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
 };
 use crate::port_meta::port_meta;
 use crate::{Error, Lockfile, Project};
@@ -35,6 +35,9 @@ pub struct Diagnostic {
     pub end: usize,
     pub severity: Severity,
     pub message: String,
+    /// A lint finding on a declaration: its kind and the declaration's
+    /// line, where a `# lint: allow <kind>` comment would go above.
+    pub allow: Option<(LintKind, usize)>,
 }
 
 /// A place in a file: line and byte range.
@@ -92,6 +95,38 @@ pub fn replacement(message: &str) -> Option<(&str, &str)> {
     let (new, rest) = rest.split_once("` instead of `")?;
     let old = &rest[..rest.find('`')?];
     (!old.is_empty()).then_some((new, old))
+}
+
+/// Where `old`, a list of arguments (`Mode: 4, Month: 10`), stands in
+/// `text` from byte `from` on, written over several lines: each `, `
+/// matches a comma and any white space. The byte range, `None` when it
+/// is not there.
+pub fn find_arguments(text: &str, from: usize, old: &str) -> Option<(usize, usize)> {
+    let parts: Vec<&str> = old.split(", ").collect();
+    let mut search = from;
+    while let Some(at) = text.get(search..)?.find(parts[0]) {
+        let start = search + at;
+        let mut end = start + parts[0].len();
+        let fits = parts[1..].iter().all(|p| {
+            let Some(rest) = text[end..].strip_prefix(',') else {
+                return false;
+            };
+            let gap = rest.len() - rest.trim_start().len();
+            if !rest[gap..].starts_with(p) {
+                return false;
+            }
+            end += 1 + gap + p.len();
+            true
+        });
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
+        let whole = !text[..start].chars().next_back().is_some_and(word)
+            && !text[end..].chars().next().is_some_and(word);
+        if fits && whole {
+            return Some((start, end));
+        }
+        search = start + 1;
+    }
+    None
 }
 
 /// The `CLAIM` of a diagnostic's "claim it with `CLAIM`": the statement
@@ -318,13 +353,16 @@ impl Workspace {
         }
         let findings = finish_lint(&module, findings.clone(), project_lints).unwrap_or(findings);
         for f in findings {
-            let span = self.lint_span(&f, &decls, unit, &first);
-            push(
-                &mut out,
-                span,
-                Severity::Warning,
-                format!("{}: {}", f.kind.label(), f.detail),
-            );
+            let (span, decl_line) = self.lint_span(&f, &decls, unit, &first);
+            let allow = decl_line.map(|n| (f.kind, n));
+            out.entry(span.file).or_default().push(Diagnostic {
+                line: span.line,
+                start: span.start,
+                end: span.end,
+                severity: Severity::Warning,
+                message: format!("{}: {}", f.kind.label(), f.detail),
+                allow,
+            });
         }
         out
     }
@@ -456,26 +494,95 @@ impl Workspace {
         None
     }
 
-    fn lint_span(&self, f: &LintFinding, decls: &[Decl], unit: &Unit, fallback: &Path) -> Span {
+    /// Where a lint finding shows, and the line of its declaration when an
+    /// allow comment above that line would cover it.
+    fn lint_span(
+        &self,
+        f: &LintFinding,
+        decls: &[Decl],
+        unit: &Unit,
+        fallback: &Path,
+    ) -> (Span, Option<usize>) {
+        let decl = decls.iter().find(|d| d.slug == f.slug);
+        // An unused allow shows on the comment, so its quick fix removes it.
+        if f.kind == LintKind::UnusedAllow
+            && let Some(s) = self.allow_comment(&f.detail, decl, unit)
+        {
+            return (s, None);
+        }
         // A `defaults` finding is named by its type.
-        let at = decls
-            .iter()
-            .find(|d| d.slug == f.slug)
-            .map(|d| d.span.clone())
-            .or_else(|| self.first_text(&format!("defaults {}", f.slug), unit));
+        let defaults = || {
+            self.first_text(&format!("defaults {}", f.slug), unit)
+                .filter(|s| s.start == self.indent(s))
+        };
+        let (at, allowable) = match decl {
+            Some(d) => (Some(d.span.clone()), ALLOWABLE.contains(&d.kind)),
+            None => (defaults(), true),
+        };
+        let decl_line = at
+            .as_ref()
+            .filter(|_| allowable && f.kind != LintKind::UnusedAllow)
+            .map(|s| s.line);
         // "write `Time: 5min` instead of `Time: 300`": the old text in the
         // statement, so the quick fix applies.
         if let (Some(at), Some((_, old))) = (&at, replacement(&f.detail))
             && let Some(s) = self.text_in_statement(at, old)
         {
-            return s;
+            return (s, decl_line);
+        }
+        // A port assignment (`x.Time = 300`) is its own statement, away
+        // from the extern's declaration.
+        if let Some((_, old)) = replacement(&f.detail)
+            && old.contains(" = ")
+            && let Some(s) = self.first_text(old, unit)
+        {
+            return (s, decl_line);
         }
         match at {
-            Some(s) => s,
-            None => self
-                .first_use(&f.slug, unit)
-                .unwrap_or_else(|| span(fallback, 0, 0, 0)),
+            Some(s) => (s, decl_line),
+            None => (
+                self.first_use(&f.slug, unit)
+                    .unwrap_or_else(|| span(fallback, 0, 0, 0)),
+                None,
+            ),
         }
+    }
+
+    /// The byte length of the indentation of `s`'s line.
+    fn indent(&self, s: &Span) -> usize {
+        let text = self.text(&s.file).unwrap_or_default();
+        let line = super::text::line(&text, s.line);
+        line.len() - line.trim_start().len()
+    }
+
+    /// The `# lint: allow …` comment an `unused-allow` finding quotes
+    /// (`` `# lint: allow …` covers no finding ``): the nearest one above
+    /// its declaration, or the first in the unit.
+    fn allow_comment(&self, detail: &str, decl: Option<&Decl>, unit: &Unit) -> Option<Span> {
+        let quoted = detail.strip_prefix("`#")?;
+        let quoted = quoted[..quoted.find('`')?].trim();
+        let hit = |f: &Path, n: usize, line: &str| {
+            let t = line.trim_start();
+            (t.strip_prefix('#').map(str::trim) == Some(quoted))
+                .then(|| span(f, n, line.len() - t.len(), line.len()))
+        };
+        if let Some(d) = decl
+            && let Some(text) = self.text(&d.span.file)
+        {
+            let lines: Vec<&str> = text.split('\n').collect();
+            if let Some(s) = (0..d.span.line.min(lines.len()))
+                .rev()
+                .find_map(|n| hit(&d.span.file, n, lines[n]))
+            {
+                return Some(s);
+            }
+        }
+        unit.files.iter().find_map(|f| {
+            let text = self.text(f)?;
+            text.split('\n')
+                .enumerate()
+                .find_map(|(n, line)| hit(f, n, line))
+        })
     }
 
     /// `needle` in the statement that starts at `at`, not inside a longer
@@ -989,10 +1096,25 @@ impl Workspace {
             .filter(|p| dirs.contains(&p.dir))
             .map(|p| p.key)
             .collect();
-        self.port_completions(unit, &block)
+        let mut out: Vec<Completion> = self
+            .port_completions(unit, &block)
             .into_iter()
             .filter(|c| keep.contains(&c.label.as_str()))
-            .collect()
+            .filter(|c| !crate::logic::calendar::is_raw_date(ty, &c.label))
+            .collect();
+        // A calendar entry's mode and date, not its stored attributes.
+        if ty == crate::logic::calendar::BLOCK_TYPE {
+            out.extend(
+                crate::logic::calendar::SOURCE_KEYS
+                    .iter()
+                    .map(|(key, detail)| Completion {
+                        label: (*key).to_string(),
+                        kind: "port",
+                        detail: Some((*detail).to_string()),
+                    }),
+            );
+        }
+        out
     }
 
     /// After `instance.`: the template's blocks (`licht.taster`) and the
@@ -1097,10 +1219,25 @@ pub fn locate_error(files: &[PathBuf], message: &str) -> Option<(PathBuf, usize)
         .map(|s| (s.file, s.line + 1))
 }
 
-/// `text` in canonical form (`loxl fmt`), if it parses.
-pub fn format(text: &str) -> Option<String> {
-    Module::parse_fragment(text).ok().map(|m| m.to_text())
+/// The file at `path` in canonical form (`loxl fmt`), if it parses. Its
+/// operating modes are spelled by the slugs the whole unit gives them.
+pub fn format(ws: &Workspace, path: &Path) -> Option<String> {
+    let mut module = Module::parse_fragment(&ws.text(path)?).ok()?;
+    let unit = ws.unit(path);
+    let siblings: Vec<Module> = unit
+        .files
+        .iter()
+        .filter(|f| f.as_path() != path)
+        .filter_map(|f| Module::parse_fragment(&ws.text(f)?).ok())
+        .collect();
+    let spellings =
+        crate::logic::ModeSpellings::of(siblings.iter().chain(std::iter::once(&module)));
+    spellings.apply(&mut module);
+    Some(module.to_text())
 }
+
+/// The declarations a `# lint: allow` comment right above covers.
+const ALLOWABLE: &[&str] = &["extern", "block", "instance", "signal", "let", "template"];
 
 fn push(
     out: &mut BTreeMap<PathBuf, Vec<Diagnostic>>,
@@ -1114,6 +1251,7 @@ fn push(
         end: span.end,
         severity,
         message,
+        allow: None,
     });
 }
 

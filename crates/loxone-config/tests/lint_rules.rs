@@ -123,6 +123,41 @@ fn a_switch_nothing_reads_is_dead_even_in_the_app() {
 }
 
 #[test]
+fn a_controller_that_drives_nothing_names_what_to_wire() {
+    // The type is changed after compiling, as a GUI save of the
+    // controller would leave it: in the app, its outputs unwired.
+    let src = format!("{QUELLE}regler = And(I1: quelle.Q)\n");
+    for (ty, fix) in [
+        (
+            "HeatIRoomController2",
+            "wire AQh (heating), AQc (cooling) or AQhc",
+        ),
+        ("TpfController", "link its OutputAPI to the API Connector"),
+    ] {
+        let findings = lint_with(&src, |lock, xml| {
+            with_child(lock, &xml, "regler", "<IoData Visu=\"true\"/>").replacen(
+                "Type=\"And\"",
+                &format!("Type=\"{ty}\""),
+                1,
+            )
+        });
+        let dead: Vec<_> = findings
+            .iter()
+            .filter(|f| f.kind == LintKind::DeadOutputs)
+            .collect();
+        assert_eq!(dead.len(), 1, "{findings:?}");
+        assert!(
+            dead[0].detail.contains("in the app") && dead[0].detail.contains(fix),
+            "{ty}: {}",
+            dead[0].detail
+        );
+    }
+    // A gate has no expected use to name.
+    let findings = lint(&src);
+    assert!(!findings[0].detail.contains("To use it"), "{findings:?}");
+}
+
+#[test]
 fn a_statistic_is_a_use() {
     let src = format!("{QUELLE}verwaist = And(I1: quelle.Q)\n");
     let src = src.as_str();

@@ -10,10 +10,10 @@
 
 use crate::error::{Error, Result};
 use crate::logic::ast::{
-    AccessClaim, ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, MatchSpec,
-    ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind, ScheduleClaim, SetDecl,
-    SetKind, SignalDecl, TemplateDecl, TemplateParam, TestItem, TilesClaim, TilesItem, Value,
-    WireDecl,
+    AccessClaim, ArgItem, AttrDecl, Binding, BindingKind, BlockDecl, Day, Expr, ExprWireDecl, Item,
+    MatchSpec, ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind,
+    ScheduleClaim, ScheduleItem, SetDecl, SetKind, SignalDecl, TemplateDecl, TemplateParam,
+    TestItem, TilesClaim, TilesItem, Value, WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -113,14 +113,25 @@ pub(crate) fn visit_refs(
                 }
             }
         }
+        Item::Schedule(s) => {
+            for line in &mut s.body {
+                if let ScheduleItem::Line(l) = line {
+                    for d in &mut l.days {
+                        if let Day::Slug(slug) = d {
+                            f(slug, RefUse::Object)?;
+                        }
+                    }
+                }
+            }
+        }
         Item::Let(_)
         | Item::Defaults(_)
         | Item::Template(_)
         | Item::Instance(_)
         | Item::Page(_)
         | Item::FragmentEnd
+        | Item::Owned(_)
         | Item::Access(_)
-        | Item::Schedule(_)
         | Item::Moods(_)
         | Item::Comment(_) => {}
     }
@@ -138,6 +149,14 @@ fn visit_args(
                 BindingKind::Expr(e) => visit_expr(e, f)?,
                 // A minted ref's `mirrors:` names an object.
                 BindingKind::Param(Value::Ref(target)) if b.port == "mirrors" => {
+                    f(target, RefUse::Object)?
+                }
+                // A calendar entry's `switches:` names a `Mode` by slug
+                // (a day word is no name).
+                BindingKind::Param(Value::Ref(target))
+                    if b.port == crate::logic::calendar::SWITCHES
+                        && !crate::logic::schedule::is_day(target) =>
+                {
                     f(target, RefUse::Object)?
                 }
                 BindingKind::Param(_) => {}
@@ -413,6 +432,7 @@ impl Module {
             }
         }
         super::defaults::apply(&mut items, &defaults);
+        super::hardware::lower(&mut items)?;
         Ok(Module { items })
     }
 
@@ -838,6 +858,15 @@ impl Module {
                     slug: map_slug(&x.slug)?,
                     expr: map_expr(&x.expr, &map_ref, &map_value)?,
                     comment: x.comment.clone(),
+                })),
+                // A body signal's label, interpolated like a block's.
+                Item::Attr(a) => out.push(Item::Attr(AttrDecl {
+                    slug: map_slug(&a.slug)?,
+                    value: match &a.value {
+                        Value::Str(s) => Value::Str(map_title(s)?),
+                        v => map_value(v)?,
+                    },
+                    ..a.clone()
                 })),
                 Item::Set(s) => out.push(Item::Set(SetDecl {
                     target: map_ref(&s.target)?,

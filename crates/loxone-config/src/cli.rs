@@ -8,9 +8,9 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, finish_lint, fix_unit_suffixes, lint_access, lint_dead_outputs, lint_source,
-    lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify,
-    trace_tests, valid_slug, validate_ports,
+    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_dead_outputs,
+    lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results, rename_slug,
+    run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -121,7 +121,8 @@ Needs a lox.toml project. Also rewrites the project's out file.
         summary: "Report unused and dead parts of a module",
         details: r#"On any module, reports unused externs and constants, templates nothing uses, values
 outside a port's documented range and bare time values that read better with their unit
-(`unit-suffix`: `Delay: 10800` is `Delay: 3h`). In a directory module it reports a file whose
+(`unit-suffix`: `Delay: 10800` is `Delay: 3h`; also extern port assignments and template
+parameters). In a directory module it reports a file whose
 blocks come before its first `page` statement while other files name their page (those blocks go
 to the default page).
 In a lox.toml project it also reports:
@@ -787,7 +788,8 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     let path = path.as_str();
     // Formatting is per file and needs no name resolution (a fragment of
     // a module directory may reference slugs from sibling files), so
-    // every target parses as a fragment.
+    // every target parses as a fragment. The one thing the files share is
+    // how they spell an operating mode: by the slug any of them gives it.
     let targets: Vec<PathBuf> = if std::path::Path::new(path).is_dir() {
         if mode == "print" {
             return Err("fmt on a module directory requires --write or --check".into());
@@ -796,13 +798,19 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     } else {
         vec![PathBuf::from(path)]
     };
-    let mut dirty = false;
+    let mut parsed = Vec::new();
     for f in &targets {
         let name = f.display();
         let src = std::fs::read_to_string(f).map_err(|e| format!("{name}: {e}"))?;
-        let canonical = Module::parse_fragment(&src)
-            .map_err(|e| format!("{name}: {e}"))?
-            .to_text();
+        let module = Module::parse_fragment(&src).map_err(|e| format!("{name}: {e}"))?;
+        parsed.push((src, module));
+    }
+    let spellings = loxone_config::logic::ModeSpellings::of(parsed.iter().map(|(_, m)| m));
+    let mut dirty = false;
+    for (f, (src, mut module)) in targets.iter().zip(parsed) {
+        let name = f.display();
+        spellings.apply(&mut module);
+        let canonical = module.to_text();
         match mode {
             "print" => print!("{canonical}"),
             "write" => {
@@ -813,7 +821,7 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
             _check => {
                 if src != canonical {
                     eprintln!(
-                        "{name}: not canonical (run `{} fmt --write {name}`)",
+                        "{name}: not canonical (run `{} fmt --write {path}`)",
                         prog()
                     );
                     dirty = true;
@@ -1437,11 +1445,15 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     if fix {
         let mut fixed = Vec::new();
         let mut count = 0;
+        let mut parsed = Vec::new();
         for f in &files {
             let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
-            let mut m =
-                Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
-            let n = fix_unit_suffixes(&mut m).len();
+            parsed.push(Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?);
+        }
+        // Externs and templates may live in another file of the module.
+        let whole = Module::from_fragments(parsed.clone());
+        for (f, mut m) in files.iter().zip(parsed) {
+            let n = fix_unit_suffixes_in(&mut m, &whole).len();
             if n > 0 {
                 count += n;
                 fixed.push((f.clone(), m.to_text()));
@@ -2257,7 +2269,11 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 9] = [
+    let older: [(Form, &str); 10] = [
+        (
+            d::semantic_fingerprint_v10,
+            "extension settings and statistics",
+        ),
         (d::semantic_fingerprint_v9, "PulseAt fire times"),
         (d::semantic_fingerprint_v8, "Air and Tree device settings"),
         (d::semantic_fingerprint_v7, "device settings"),

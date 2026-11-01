@@ -27,7 +27,10 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
                 .resolve_value_for(&s.value, &e.block_type, &s.target.slug, &s.target.port)?
                 .into_owned();
             let original = read_setting(doc, owner, &s.target.port);
-            if original.is_none() && !addable {
+            // A 0 a save leaves out adds nothing.
+            let omitted = crate::connectors::is_zero(&value)
+                && crate::connectors::omitted_when_zero(&e.block_type, &s.target.port);
+            if original.is_none() && !addable && !omitted {
                 return Err(Error::Compile(format!(
                     "`{}.{}`: the object ({owner}) has no `{}` setting. Lox Logic changes \
                      this setting but never adds it.",

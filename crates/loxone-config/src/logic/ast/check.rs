@@ -14,6 +14,8 @@ struct Scope<'a> {
     /// plain blocks. Test bodies may reference the slugs those lowerings
     /// mint, so their references only resolve on this form.
     flattened: bool,
+    /// The one spelling of each operating mode the module names.
+    modes: ModeSpellings,
 }
 
 /// Statements that may appear once per target, collected across items.
@@ -104,7 +106,11 @@ impl Module {
             _ => false,
         });
         crate::logic::defaults::by_type(&self.items)?;
-        let sc = Scope { names, flattened };
+        let sc = Scope {
+            names,
+            flattened,
+            modes: ModeSpellings::of([self]),
+        };
         let mut seen = Seen::default();
         for item in &self.items {
             self.check_item(&sc, item, &mut seen)?;
@@ -211,7 +217,12 @@ impl Module {
     fn check_item<'a>(&'a self, sc: &Scope<'a>, item: &'a Item, seen: &mut Seen<'a>) -> Result<()> {
         let names = &sc.names;
         match item {
-            Item::Block(b) => self.check_block(names, b)?,
+            Item::Block(b) => {
+                if b.block_type == "CalendarEntry" {
+                    self.check_calendar_entry(sc, b)?;
+                }
+                self.check_block(names, b)?;
+            }
             Item::Wire(w) => self.check_wire(names, w)?,
             Item::ExprWire(w) => self.check_expr_wire(names, w)?,
             Item::Signal(x) => self.check_expr_operands(names, &x.expr, &x.slug)?,
@@ -230,6 +241,7 @@ impl Module {
             Item::Access(a) => self.check_access(a)?,
             Item::AccessClaim(c) => self.check_access_claim(sc, c, seen)?,
             Item::Schedule(t) => {
+                self.check_schedule_days(sc, t)?;
                 crate::logic::schedule::program(t)
                     .map_err(|m| Error::Compile(format!("`schedule {}`: {m}", t.name)))?;
             }
@@ -262,10 +274,20 @@ impl Module {
                     if binding.port == "device" {
                         // The device an I/O hangs below,
                         // checked by `validate_ports`.
-                        if crate::periphery::device_types(&b.block_type).is_empty() {
+                        if !crate::periphery::is_device_binding(&b.block_type, "device") {
                             return compile_err(format!(
-                                "`device:` names the virtual or Modbus device an I/O hangs below, \
+                                "`device:` names the device an I/O hangs below, \
                                              but {} has no device (in `{} = {}(…)`)",
+                                b.block_type, b.slug, b.block_type
+                            ));
+                        }
+                    } else if binding.port == crate::logic::calendar::SWITCHES {
+                        // The mode a calendar entry switches on, checked
+                        // by `check_calendar_entry`.
+                        if b.block_type != "CalendarEntry" {
+                            return compile_err(format!(
+                                "`switches:` names the operating mode a calendar entry \
+                                 switches on, but {} is no calendar entry (in `{} = {}(…)`)",
                                 b.block_type, b.slug, b.block_type
                             ));
                         }
@@ -399,11 +421,14 @@ impl Module {
             // source's when it states them; its title
             // is its label.
             Some(NameKind::Block) if a.attr != Attr::Title => {}
+            // A named signal has no call to carry a label: `.title` is
+            // its top block's label.
+            Some(NameKind::Signal) if a.attr == Attr::Title => {}
             Some(NameKind::Signal) => {
                 return compile_err(format!(
-                    "`{target} = …` targets named signal `{}`, which takes no \
-                     attributes. Declare the blocks by hand to set one.",
-                    a.slug
+                    "`{target} = …` targets named signal `{}`, which takes only a \
+                     `.title`. Declare the blocks by hand to set its {}.",
+                    a.slug, a.attr
                 ));
             }
             Some(NameKind::Block) => {
@@ -869,6 +894,194 @@ impl Module {
         Ok(())
     }
 
+    /// A calendar entry's mode: `switches:` names one mode, the one way
+    /// the module spells it. A built-in mode's raw number (`CalType: 10`)
+    /// is refused with its day word; a user mode's (negative) number is
+    /// left to the compile, which knows the config's numbers.
+    fn check_calendar_entry(&self, sc: &Scope, b: &BlockDecl) -> Result<()> {
+        use crate::logic::calendar::{CAL_TYPE, SWITCHES, builtin_value, number_refused};
+        let ctx = format!("block `{}`", b.slug);
+        for (k, v) in b.params() {
+            match (k, v) {
+                (CAL_TYPE, Value::Number(n)) => {
+                    let Ok(number) = n.parse::<i64>() else {
+                        return compile_err(format!(
+                            "{ctx}: `{CAL_TYPE}: {n}` is no operating mode. Name the mode with \
+                             `{SWITCHES}:`."
+                        ));
+                    };
+                    if number < 0 {
+                        continue;
+                    }
+                    let Some(word) = builtin_value(number) else {
+                        return compile_err(format!(
+                            "{ctx}: `{CAL_TYPE}: {n}` names no built-in operating mode. Name \
+                             the mode with `{SWITCHES}:`: a day word (`heating`), the slug of a \
+                             `Mode`, or a mode's quoted title."
+                        ));
+                    };
+                    return compile_err(number_refused(&b.slug, n, &word));
+                }
+                (CAL_TYPE, _) => {
+                    return compile_err(format!(
+                        "{ctx}: a calendar entry names its operating mode with `{SWITCHES}:`, \
+                         not `{CAL_TYPE}: {v}`."
+                    ));
+                }
+                // The spelling that reads like the date kind, and the date
+                // kind given a mode.
+                ("mode", _) => {
+                    return compile_err(format!(
+                        "{ctx}: a calendar entry names its operating mode with `{SWITCHES}:`. \
+                         Write `{SWITCHES}: {v}` instead of `mode: {v}`."
+                    ));
+                }
+                ("Mode", Value::Ref(_) | Value::Str(_)) => {
+                    return compile_err(format!(
+                        "{ctx}: `Mode:` is the kind of date (a number), and `{SWITCHES}:` the \
+                         operating mode. Write `{SWITCHES}: {v}` instead of `Mode: {v}`."
+                    ));
+                }
+                (SWITCHES, _) => {}
+                _ => continue,
+            }
+            let fail = |m: String| compile_err(format!("{ctx}: `{SWITCHES}: {v}` {m}"));
+            match v {
+                Value::Ref(w) if crate::logic::schedule::is_day(w) => {
+                    if crate::logic::schedule::builtin_number(w).is_none() {
+                        return fail(
+                            "names several modes; a calendar entry switches one on (`mon`, \
+                             `sat`, …)"
+                                .into(),
+                        );
+                    }
+                }
+                Value::Ref(slug) => {
+                    let ty = match sc.names.get(slug.as_str()) {
+                        Some(NameKind::Extern) => self
+                            .externs()
+                            .find(|e| e.slug == *slug)
+                            .map_or("…", |e| e.block_type.as_str()),
+                        Some(NameKind::Block) => self.block_type_of(slug),
+                        Some(kind) => {
+                            return fail(format!(
+                                "names {}, not an operating mode",
+                                kind.describe()
+                            ));
+                        }
+                        None => {
+                            let modes = self
+                                .externs()
+                                .filter(|e| e.block_type == "Mode")
+                                .map(|e| e.slug.as_str())
+                                .chain(
+                                    self.blocks()
+                                        .filter(|b| b.block_type == "Mode")
+                                        .map(|b| b.slug.as_str()),
+                                );
+                            let words: Vec<&str> = crate::logic::schedule::day_keywords()
+                                .filter(|w| crate::logic::schedule::builtin_number(w).is_some())
+                                .collect();
+                            let hint = crate::logic::validate::suggest(
+                                slug,
+                                words.iter().copied().chain(modes),
+                            );
+                            return fail(format!(
+                                "names no mode{hint}. Name it by a day word ({}), the slug of \
+                                 a `Mode` the module declares, or another mode's quoted title \
+                                 (`\"Urlaub\"`).",
+                                words.join(", ")
+                            ));
+                        }
+                    };
+                    if ty != "Mode" && ty != "…" {
+                        return fail(format!("names a `{ty}`, not a `Mode`"));
+                    }
+                }
+                Value::Str(t) if t.trim().is_empty() => {
+                    return fail("is empty: an operating mode's title cannot be".into());
+                }
+                Value::Str(_) => {}
+                _ => {
+                    return fail(
+                        "names no operating mode. Name it by a day word (`heating`), the slug \
+                         of a `Mode`, or a mode's quoted title."
+                            .into(),
+                    );
+                }
+            }
+            if let Some(new) = sc.modes.in_calendar(v) {
+                return compile_err(format!(
+                    "{ctx}: a calendar entry names a built-in mode by its day word and a mode \
+                     the module declares by its slug. Write `{SWITCHES}: {new}` instead of \
+                     `{SWITCHES}: {v}`."
+                ));
+            }
+        }
+        crate::logic::calendar::check_date(self, b)
+    }
+
+    /// A schedule's days: a slug names a `Mode` of the module, and each
+    /// mode is spelled the one way the module tells.
+    fn check_schedule_days(&self, sc: &Scope, t: &ScheduleDecl) -> Result<()> {
+        let ctx = format!("`schedule {}`", t.name);
+        for line in t.lines() {
+            for day in &line.days {
+                let Day::Slug(slug) = day else { continue };
+                let ty = match sc.names.get(slug.as_str()) {
+                    Some(NameKind::Extern) => self
+                        .externs()
+                        .find(|e| e.slug == *slug)
+                        .map_or("…", |e| e.block_type.as_str()),
+                    Some(NameKind::Block) => self.block_type_of(slug),
+                    None if !sc.flattened => continue,
+                    None => {
+                        let modes = self
+                            .externs()
+                            .filter(|e| e.block_type == "Mode")
+                            .map(|e| e.slug.as_str())
+                            .chain(
+                                self.blocks()
+                                    .filter(|b| b.block_type == "Mode")
+                                    .map(|b| b.slug.as_str()),
+                            );
+                        return compile_err(format!(
+                            "{ctx}: {}",
+                            crate::logic::schedule::unknown_day(slug, modes)
+                        ));
+                    }
+                    Some(kind) => {
+                        return compile_err(format!(
+                            "{ctx}: `{line}`: `{slug}` is {}, not an operating mode",
+                            kind.describe()
+                        ));
+                    }
+                };
+                if ty != "Mode" && ty != "…" {
+                    return compile_err(format!(
+                        "{ctx}: `{line}`: `{slug}` is a `{ty}`, not a `Mode`"
+                    ));
+                }
+            }
+            let mut canonical = line.clone();
+            for day in &mut canonical.days {
+                if let Some(d) = sc.modes.in_schedule(day) {
+                    *day = d;
+                }
+            }
+            if canonical.days != line.days {
+                let (mut new, mut old) = (canonical, line.clone());
+                new.comment = None;
+                old.comment = None;
+                return compile_err(format!(
+                    "{ctx}: a schedule names a built-in mode by its day word and a mode the \
+                     module declares by its slug. Write `{new}` instead of `{old}`."
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// `timer.schedule = set` claims a DayTimer's schedule.
     fn check_schedule_claim<'a>(
         &self,
@@ -1138,16 +1351,27 @@ impl Module {
                     when += 1;
                     object(target, &st.kind, "a condition watches a block")?;
                 }
-                RuleStmtKind::Mode { mode, .. } => {
-                    when += 1;
+                RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. } => {
+                    if matches!(st.kind, RuleStmtKind::Mode { .. }) {
+                        when += 1;
+                    } else {
+                        then += 1;
+                    }
                     if let ModeName::Slug(s) = mode {
                         object(s, &st.kind, "a mode is an operating mode object")?;
                     }
-                }
-                RuleStmtKind::ThenMode { mode, .. } => {
-                    then += 1;
-                    if let ModeName::Slug(s) = mode {
-                        object(s, &st.kind, "a mode is an operating mode object")?;
+                    if let Some(slug) = sc.modes.in_rule(mode) {
+                        let mut new = st.kind.clone();
+                        if let RuleStmtKind::Mode { mode, .. }
+                        | RuleStmtKind::ThenMode { mode, .. } = &mut new
+                        {
+                            *mode = slug;
+                        }
+                        return compile_err(format!(
+                            "{ctx}: a rule names a mode the module declares by its slug. \
+                             Write `{new}` instead of `{}`.",
+                            st.kind
+                        ));
                     }
                 }
                 RuleStmtKind::Weekday(days) => {
@@ -1331,9 +1555,15 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::TilesClaim(_)
             | Item::AccessClaim(_)
             | Item::Comment(_) => {}
+            // A body signal's label.
+            Item::Attr(a)
+                if a.attr == Attr::Title
+                    && t.body
+                        .iter()
+                        .any(|i| matches!(i, Item::Signal(x) if x.slug == a.slug)) => {}
             _ => {
                 return compile_err(format!(
-                    "template `{}`: a body holds only block declarations, named signals, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
+                    "template `{}`: a body holds only block declarations, named signals and their titles, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
                     t.name
                 ));
             }

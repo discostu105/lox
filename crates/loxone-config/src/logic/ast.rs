@@ -88,6 +88,10 @@ pub enum Item {
     /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
     /// active or not, its conditions and its actions.
     Rule(RuleDecl),
+    /// What a hardware declaration owns, after [`Module::expand`]: the
+    /// declaration became an extern of its object and this. Never parsed
+    /// or printed.
+    Owned(OwnedDecl),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -129,6 +133,10 @@ pub enum Value {
     /// on a text-boolean attribute (`connectors::bool_params`, e.g.
     /// `Analog:` on VirtualIn).
     Bool(bool),
+    /// A calendar date, `YYYY-MM-DD` or a day of the year `MM-DD`, kept
+    /// as written (two-digit month and day). Binds only a calendar
+    /// entry's `on:`, `from:` and `to:`.
+    Date(String),
 }
 
 /// Seconds since midnight of a `HH:MM[:SS]` time of day, `None` unless
@@ -221,7 +229,7 @@ impl fmt::Display for Unit {
     }
 }
 
-/// The duration `raw` (a `Def=` value) of a port documented in seconds or
+/// The duration `raw` (a `Def=` value) of a port documented in milliseconds, seconds or
 /// minutes, spelled with the largest time suffix that writes it as a whole
 /// number (`300` s → `5min`, `0.3` s → `300ms`, `7200` s → `2h`). `None`
 /// for a port of any other unit or none documented, for zero, and where no
@@ -229,6 +237,7 @@ impl fmt::Display for Unit {
 pub(crate) fn duration_value(block_type: &str, port: &str, raw: &str) -> Option<Value> {
     let pu = port_unit(block_type, port)?;
     let per_ms: u128 = match pu {
+        PortUnit::Milliseconds => 1,
         PortUnit::Seconds => 1000,
         PortUnit::Minutes => 60_000,
         _ => return None,
@@ -288,6 +297,9 @@ pub(crate) fn scale_for_port(
     match port_unit {
         None => scale_by_unit(number, unit).ok_or_else(overflow),
         Some(PortUnit::Seconds) if is_time => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Milliseconds) if is_time => scale_by_unit(number, unit)
+            .and_then(|seconds| scale_decimal(&seconds, 1000, 0))
+            .ok_or_else(overflow),
         Some(PortUnit::Minutes) if is_time => {
             let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
             divide_exact(&seconds, 60).ok_or_else(|| {
@@ -364,6 +376,11 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 /// `250`÷1000 → `0.25`). `None` when the digits overflow the exact range.
 pub(crate) fn scale_by_unit(number: &str, unit: Unit) -> Option<String> {
     let (mul, shift) = unit.factor();
+    scale_decimal(number, mul, shift)
+}
+
+/// `number · mul / 10^shift` as an exact decimal literal.
+fn scale_decimal(number: &str, mul: u128, shift: u32) -> Option<String> {
     let (neg, rest) = match number.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, number),
@@ -419,6 +436,7 @@ impl Value {
             Value::File { text, .. } => text.as_deref().map(Cow::Borrowed),
             Value::Clock(t) => clock_seconds(t).map(|s| Cow::Owned(s.to_string())),
             Value::Bool(b) => Some(Cow::Borrowed(if *b { "1" } else { "0" })),
+            Value::Date(d) => Some(Cow::Borrowed(d)),
         }
     }
 }
@@ -433,6 +451,7 @@ impl fmt::Display for Value {
             Value::File { path, .. } => write!(f, "file({})", quote(path)),
             Value::Clock(t) => f.write_str(t),
             Value::Bool(b) => f.write_str(if *b { "on" } else { "off" }),
+            Value::Date(d) => f.write_str(d),
         }
     }
 }
@@ -502,6 +521,10 @@ pub enum MatchSpec {
     /// declaring file's `page` statement narrows the candidates; a still
     /// ambiguous match is refused (keep `uuid:` for those).
     Mirrors(String),
+    /// `serial: "B0A1B2C3"` — a hardware device by its own serial: the
+    /// `Serial=` of a Tree device or an extension, the MAC an Air device's
+    /// `IP=` encodes. Compared without case and `:`.
+    Serial(String),
 }
 
 impl fmt::Display for MatchSpec {
@@ -511,6 +534,7 @@ impl fmt::Display for MatchSpec {
             MatchSpec::IName(v) => write!(f, "iname: {}", quote(v)),
             MatchSpec::Title(v) => write!(f, "title: {}", quote(v)),
             MatchSpec::Mirrors(v) => write!(f, "mirrors: {v}"),
+            MatchSpec::Serial(v) => write!(f, "serial: {}", quote(v)),
         }
     }
 }
@@ -570,6 +594,24 @@ impl BlockDecl {
             _ => None,
         })
     }
+}
+
+/// The attributes a hardware declaration owns (`x = TreeSensor("Klingel",
+/// device: taster, iname: "I0", Desc: "…")`): written on every compile,
+/// with no original kept, so the statement's removal leaves them as they
+/// are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedDecl {
+    pub slug: String,
+    pub block_type: String,
+    /// The slug of the device an I/O belongs to.
+    pub device: Option<String>,
+    /// The label: the object's `Title=`.
+    pub title: Option<String>,
+    pub room: Option<Value>,
+    pub category: Option<Value>,
+    /// Settings (`Desc`, `Unit`, `MinTime`, `StatsType`, …), in source order.
+    pub settings: Vec<(String, Value)>,
 }
 
 /// `defaults <Type>(Port: value, …)` — the parameter values every
@@ -1565,8 +1607,8 @@ pub enum ScheduleItem {
 }
 
 /// `mon tue 06:00-08:00 = 21.5, 17:00-22:00` — the days (operating-mode
-/// keywords, kept as written: `weekdays` stays `weekdays`; or modes by
-/// title) and their intervals. No intervals (`holiday off`) lists the
+/// keywords, kept as written: `weekdays` stays `weekdays`; a `Mode` by
+/// slug; or a mode by title) and their intervals. No intervals (`holiday off`) lists the
 /// modes with the timer off all day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleLine {
@@ -1577,19 +1619,21 @@ pub struct ScheduleLine {
 }
 
 /// The days of a schedule line: a built-in keyword (`mon`, `weekdays`,
-/// `heating`, …) or an operating mode of the config by its title
+/// `heating`, …), a `Mode` the module declares or externs by its slug
+/// (`party`), or another operating mode of the config by its title
 /// (`"Party"`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Day {
     Keyword(String),
-    Mode(String),
+    Slug(String),
+    Title(String),
 }
 
 impl fmt::Display for Day {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Day::Keyword(k) => f.write_str(k),
-            Day::Mode(title) => f.write_str(&quote(title)),
+            Day::Keyword(k) | Day::Slug(k) => f.write_str(k),
+            Day::Title(title) => f.write_str(&quote(title)),
         }
     }
 }
@@ -1874,8 +1918,9 @@ pub enum RuleStmtKind {
     Or,
 }
 
-/// An operating mode in a rule: an extern or minted `Mode` by slug, or a
-/// mode of the config by its title (as in a schedule).
+/// An operating mode in a rule: a `Mode` the module declares or externs
+/// by its slug, or another mode of the config by its title (as in a
+/// schedule).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModeName {
     Slug(String),
@@ -1887,6 +1932,162 @@ impl fmt::Display for ModeName {
         match self {
             ModeName::Slug(s) => f.write_str(s),
             ModeName::Title(t) => f.write_str(&quote(t)),
+        }
+    }
+}
+
+/// The one spelling of an operating mode, as far as the source tells it.
+/// A built-in mode in a schedule is its day word (`mon`); a mode the
+/// module declares or externs is its slug; any other mode is its title.
+/// A slug that is a day word cannot name a mode in a schedule (the day
+/// wins), so there that mode stays a title.
+#[derive(Debug, Clone, Default)]
+pub struct ModeSpellings {
+    /// Title → slug: managed `Mode`s by title (the slug when untitled),
+    /// externs matched by `title:`. A title two of them share is left out.
+    slugs: BTreeMap<String, String>,
+    /// Slug → day word: externs of a built-in mode by its fixed UUID.
+    days: BTreeMap<String, &'static str>,
+}
+
+impl ModeSpellings {
+    /// The spellings the `Mode`s of `modules` (the fragments of one
+    /// module) give.
+    pub fn of<'a>(modules: impl IntoIterator<Item = &'a Module>) -> ModeSpellings {
+        let mut slugs: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut days = BTreeMap::new();
+        let mut add = |title: &str, slug: &str| {
+            slugs
+                .entry(title.to_string())
+                .and_modify(|s| {
+                    if s.as_deref() != Some(slug) {
+                        *s = None;
+                    }
+                })
+                .or_insert_with(|| Some(slug.to_string()));
+        };
+        for m in modules {
+            for item in &m.items {
+                match item {
+                    Item::Block(b) if b.block_type == "Mode" => {
+                        add(b.title.as_deref().unwrap_or(&b.slug), &b.slug);
+                    }
+                    Item::Extern(e) if e.block_type == "Mode" => match &e.match_spec {
+                        MatchSpec::Title(t) => add(t, &e.slug),
+                        MatchSpec::Uuid(u) => {
+                            if let Some(day) = crate::logic::schedule::builtin_day(u) {
+                                days.insert(e.slug.clone(), day);
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+        ModeSpellings {
+            slugs: slugs
+                .into_iter()
+                .filter_map(|(t, s)| Some((t, s?)))
+                .collect(),
+            days,
+        }
+    }
+
+    /// The spelling a rule should use for `mode`, if it is another.
+    pub fn in_rule(&self, mode: &ModeName) -> Option<ModeName> {
+        match mode {
+            ModeName::Title(t) => self.slugs.get(t).map(|s| ModeName::Slug(s.clone())),
+            ModeName::Slug(_) => None,
+        }
+    }
+
+    /// The spelling a schedule line should use for `day`, if it is
+    /// another.
+    pub fn in_schedule(&self, day: &Day) -> Option<Day> {
+        match day {
+            Day::Title(t) => self
+                .slugs
+                .get(t)
+                .filter(|s| !crate::logic::schedule::is_day(s))
+                .map(|s| Day::Slug(s.clone())),
+            Day::Slug(s) => self.days.get(s).map(|d| Day::Keyword(d.to_string())),
+            Day::Keyword(_) => None,
+        }
+    }
+
+    /// The spelling a calendar entry's `switches:` should use for the
+    /// mode `v` names, if it is another: as in a schedule.
+    pub fn in_calendar(&self, v: &Value) -> Option<Value> {
+        let day = match v {
+            Value::Ref(w) if crate::logic::schedule::is_day(w) => return None,
+            Value::Ref(s) => Day::Slug(s.clone()),
+            Value::Str(t) => Day::Title(t.clone()),
+            _ => return None,
+        };
+        Some(match self.in_schedule(&day)? {
+            Day::Keyword(k) | Day::Slug(k) => Value::Ref(k),
+            Day::Title(t) => Value::Str(t),
+        })
+    }
+
+    /// Rewrite every mode reference of `module` in its one spelling.
+    /// `loxl fmt` runs it with the spellings of the whole module. A
+    /// calendar entry's built-in mode number (`CalType: 10`) becomes its
+    /// day word (`switches: heating`), and its stored date (`Mode: 4,
+    /// Month: 10, …`) its date (`from: 10-01, to: 04-30`).
+    pub fn apply(&self, module: &mut Module) {
+        for item in &mut module.items {
+            match item {
+                Item::Block(b) if b.block_type == "CalendarEntry" => {
+                    for arg in &mut b.args {
+                        let ArgItem::Binding(binding) = arg else {
+                            continue;
+                        };
+                        let BindingKind::Param(v) = &mut binding.kind else {
+                            continue;
+                        };
+                        if binding.port == crate::logic::calendar::CAL_TYPE
+                            && let Value::Number(n) = v
+                            && let Some(word) = n
+                                .parse()
+                                .ok()
+                                .and_then(crate::logic::calendar::builtin_value)
+                        {
+                            binding.port = crate::logic::calendar::SWITCHES.to_string();
+                            *v = word;
+                        } else if binding.port == crate::logic::calendar::SWITCHES
+                            && let Some(new) = self.in_calendar(v)
+                        {
+                            *v = new;
+                        }
+                    }
+                    crate::logic::calendar::rewrite_raw_date(b);
+                }
+                Item::Rule(r) => {
+                    for st in &mut r.body {
+                        if let RuleItem::Stmt(st) = st
+                            && let RuleStmtKind::Mode { mode, .. }
+                            | RuleStmtKind::ThenMode { mode, .. } = &mut st.kind
+                            && let Some(m) = self.in_rule(mode)
+                        {
+                            *mode = m;
+                        }
+                    }
+                }
+                Item::Schedule(s) => {
+                    for line in &mut s.body {
+                        if let ScheduleItem::Line(l) = line {
+                            for d in &mut l.days {
+                                if let Some(new) = self.in_schedule(d) {
+                                    *d = new;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -2094,6 +2295,14 @@ impl Module {
     pub fn externs(&self) -> impl Iterator<Item = &ExternDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Extern(e) => Some(e),
+            _ => None,
+        })
+    }
+
+    /// What hardware declarations own (only in an expanded module).
+    pub fn owned(&self) -> impl Iterator<Item = &OwnedDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Owned(o) => Some(o),
             _ => None,
         })
     }
@@ -2381,7 +2590,7 @@ impl Module {
                 // line on both sides comes from the family change.
                 Item::Page(_) => 10,
                 // Not printed (skipped below).
-                Item::FragmentEnd => 10,
+                Item::FragmentEnd | Item::Owned(_) => 10,
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
@@ -2407,10 +2616,18 @@ impl Module {
                 skip -= 1;
                 continue;
             }
-            if matches!(item, Item::FragmentEnd) {
+            if matches!(item, Item::FragmentEnd | Item::Owned(_)) {
                 continue;
             }
             let mut disc = family(item);
+            // A signal's `.title` stays on the line below the signal.
+            if let Item::Attr(a) = item
+                && a.attr == Attr::Title
+                && i > 0
+                && matches!(&self.items[i - 1], Item::Signal(x) if x.slug == a.slug)
+            {
+                disc = family(&self.items[i - 1]);
+            }
             let mut text = String::new();
             skip = self.write_item(i, item, depth, &mut text);
             let mut multiline = text.trim_end_matches('\n').contains('\n');
@@ -2448,7 +2665,7 @@ impl Module {
     fn write_item(&self, i: usize, item: &Item, depth: usize, out: &mut String) -> usize {
         let mut skip = 0;
         match item {
-            Item::FragmentEnd => {}
+            Item::FragmentEnd | Item::Owned(_) => {}
             Item::Extern(e) => {
                 out.push_str(&format!(
                     "extern {} = {}({}){}\n",
@@ -2844,6 +3061,24 @@ mod tests {
         assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
         let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
         assert!(err.contains("exact number of minutes"), "{err}");
+        let ms = Some(PortUnit::Milliseconds);
+        assert_eq!(scale_for_port("4", Unit::S, ms).unwrap(), "4000");
+        assert_eq!(scale_for_port("250", Unit::Ms, ms).unwrap(), "250");
+        assert_eq!(scale_for_port("1.5", Unit::Min, ms).unwrap(), "90000");
+        assert_eq!(
+            duration_value("VirtualHttpIn", "Timeout", "4000"),
+            Some(Value::Unit {
+                number: "4".into(),
+                unit: Unit::S
+            })
+        );
+        assert_eq!(
+            duration_value("VirtualHttpIn", "Timeout", "250"),
+            Some(Value::Unit {
+                number: "250".into(),
+                unit: Unit::Ms
+            })
+        );
 
         assert_eq!(
             scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),

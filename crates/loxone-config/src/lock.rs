@@ -235,6 +235,10 @@ pub struct LockedExternal {
     pub matched_by: String,
     pub title_at_match: Option<String>,
     pub iname_at_match: Option<String>,
+    /// A hardware declaration owns the object: its title, room, category
+    /// and settings are the source's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub owned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

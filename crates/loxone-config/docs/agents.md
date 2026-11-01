@@ -116,6 +116,10 @@ loxl compile --base current.Loxone --module modules/haus.loxl \
 loxl diff --exit-code current.Loxone out.Loxone   # must be empty
 ```
 
+Blocks an expression or named signal compiled to come back as that expression, where it compiles to
+the same blocks. A signal's name is not in the config, so an adopted signal is named after its label;
+rename it with `loxl rename`.
+
 ## The language in 30 seconds
 
 See [language.md](language.md) for the full spec. The sample is in canonical form (`loxl fmt`) and
@@ -206,7 +210,8 @@ its own argument list.
 A named signal `x = <expr>` names an expression's result. Its top block is `x` (`x.Q`; an arithmetic
 one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it instead of spelling an
 inline expression's synthetic slug (`jal_autoshade__and1`) in a test or a second consumer. `x` counts as
-a declared block, so deleting the line needs `removed x`.
+a declared block, so deleting the line needs `removed x`. Its top block's label is the expression text;
+`x.title = "Beschatten"` on the next line gives it another.
 
 A template instance names its blocks through the instance. `bad.Q` is the output of its primary block
 (the body's only block, or the one `template t(…) -> <block>` names), and `bad.melder.Q` of any other
@@ -252,13 +257,22 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `fuehler.MinTime = 600`, `taster.Desc = "Klingel"`. The original returns when the line goes. `Desc`
   is the app's name for the control. Only `Desc`, the low ends of the correction, `MinVal`,
   `ResetTime` and `AverageTime` can be added; the rest must already be on the object.
+- **Hardware is declared to own it:** `taster = TreeDevice("Taster", serial: "B0A1B2C3")`,
+  `klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", Statistics: on)`.
+  The source owns title, room, category and the stated settings; nothing is restored when the line
+  goes, and the element is never deleted. Bind ports in the argument list. `loxl adopt --uuid
+  <device>` declares an existing device with all its I/O. Pairing stays in Loxone Config.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.
 - **Schedules and modes.** A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
-  `weekend off`, `holiday …`) with `timer.schedule = <set>`. Any operating mode can be named by title
-  (`"Party" 18:00-24:00`). `party = Mode("Party")` creates a mode, and `party.Q` is on while it is
-  active.
+  `weekend off`, `holiday …`) with `timer.schedule = <set>`. `party = Mode("Party")` creates a mode,
+  and `party.Q` is on while it is active. Rules and schedules name a mode one way: a built-in one in a
+  schedule by its day word (`mon`), one the module declares or externs by its slug
+  (`party 18:00-24:00`, `when mode party`), any other by title (`when mode "Urlaub"`). A calendar
+  entry names the mode it switches on the same way and states its date as a date,
+  `CalendarEntry("Heizperiode", switches: heating, from: 10-01, to: 04-30)`, never with its
+  `CalType` number or its stored `Mode`, `Month`, … attributes.
 - **Users are never declared.** They belong to the Miniserver's user management; source names them by
   title.
 - **Light moods.** Values per circuit kind are `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`. Claim a set
@@ -292,6 +306,8 @@ it only when it matches what you intended.
 | `not in the verified builtin table` | the compiler cannot create this type | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
 | `is the canvas label of port` | a canvas label (`Tr`, `D`) used as a port name | use the port the error names (`InputTrigger`, `Time`) |
+| `a Loxone Config save turns it into` | Config would store the value differently (`Poll: 5` as 10, a digital input's `MaxVal: 5` as 1) | write the value the error names |
+| `a Loxone Config save writes it as` | Config would store the title differently (`Max<Min` as `Max_Min`, a space at the end as `_`) | write the title the error names |
 | `does not fit. The port is documented in …` | a unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`loxl types <Type>`) |
 | `is not an exact number of minutes` | a time on a minutes port that minutes cannot hold exactly (`10s`) | write it in `min` (`0.5min`), or pick a value that fits |
 | `ends before it starts` / `overlap on` (schedule) | a schedule interval wraps midnight, or two intervals of one day overlap | split at `24:00`/`00:00`; merge or shorten the intervals |
@@ -299,7 +315,8 @@ it only when it matches what you intended.
 | `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or create the mode (`party = Mode("Party")`) |
 | `no <C Type="VirtualInCaption"> to hold a new VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then compile again |
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
-| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
+| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"`, a mode by title that the module names by slug (`"Party"` for `party`), a built-in mode by title in a schedule (`"Montag"` for `mon`), a calendar entry's mode number (`CalType: 10` for `switches: heating`) or stored date (`Mode: 4, Month: 10, …` for `from: 10-01, to: 04-30`) | write what the message names (the language server offers it as a quick fix; `loxl fmt` on the module directory rewrites declared modes) |
+| `unknown day` | a schedule day that is no day word and no `Mode` of the module | fix the spelling, declare the mode (`extern x = Mode(title: "…")`), or quote its title |
 | `` Write `a.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name; `a.Q` when `b` is the primary block |
 | `has no primary block` | `a.Q` on an instance whose template has several blocks | name the block (`a.<block>.Q`), or mark one with `template t(…) -> <block>` |
 | `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |
@@ -316,7 +333,7 @@ it only when it matches what you intended.
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
 | `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
-| `targets named signal` | `<-`, port-`=` or an attribute on an `x = <expr>` signal | change the expression; its inputs are its operands |
+| `targets named signal` | `<-`, port-`=`, `.room` or `.category` on an `x = <expr>` signal | change the expression; its inputs are its operands. Only `.title` is allowed |
 | `an alias is not a block` | `x = a.Q`: a named signal needs an expression | use `a.Q` directly where `x.Q` would go |
 | `changed its top operator` | a named signal's top `and`/`or`/comparison changed, and with it its block type | give the signal a new name and add `removed <old>` |
 | `is old syntax` | a `block`/`wire`/`set`/`match`/`use` keyword from the old grammar | rewrite the line in the spelling the error shows |
@@ -326,11 +343,11 @@ it only when it matches what you intended.
 | `` `defaults` … is not a value `` / `takes no label string` | a wire, expression or label in `defaults` | write it on each block; `defaults` takes values only |
 | `says which object a block is` | `device:`/`mirrors:` in `defaults` | write it on each block |
 | `cannot adopt` + `would set it to` (from `adopt --uuid`) | the adopted block leaves a defaulted port unset | take the port out of the `defaults` statement and bind it on the other blocks, or set the port on the block in Loxone Config |
-| `unit-suffix` (from `lint`) | a bare time value on a port documented in seconds or minutes (`Delay: 10800`) | `loxl lint --fix` writes the unit (`Delay: 3h`); the compile output does not change. The language server offers it as a quick fix |
+| `unit-suffix` (from `lint`) | a bare time value on a port documented in milliseconds, seconds or minutes (`Delay: 10800`), also in a port assignment or a template parameter | `loxl lint --fix` writes the unit (`Delay: 3h`); the compile output does not change. The language server offers it as a quick fix |
 | `default-page` (from `lint`) | a fragment of a directory module without its own `page` line, while others have one | add the `page` line; the language server offers the previous file's page as a quick fix |
 | `dead-outputs` (from `lint`) | a block, extern or device whose outputs reach nothing in the compiled config: no wire, not shown in the app as a value, no statistic, no energy flow, no message | wire it, delete it, or keep it with `# lint: allow dead-outputs <reason>` on the line above |
 | `tile-dead-command` (from `lint`) | Touch Pure Flex commands for a block type that no block linked to the device has | link a block of that type, empty the tiles (`tile 2()`), or `# lint: allow tile-dead-command` above the extern |
-| `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration |
+| `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration; the language server offers "Remove this allow" |
 | `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |

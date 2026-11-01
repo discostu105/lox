@@ -1292,7 +1292,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                     }
                     _ => {
                         return Err(err(
-                            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\" \
+                            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
                                      | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
                                      [, device: \"…\"])`"
                                 .into(),
@@ -1320,9 +1320,10 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                 Some(("uuid", v, _)) => MatchSpec::Uuid(v),
                 Some(("iname", v, _)) => MatchSpec::IName(v),
                 Some(("title", v, _)) => MatchSpec::Title(v),
+                Some(("serial", v, _)) => MatchSpec::Serial(v),
                 Some((other, _, _)) => {
                     return Err(err(format!(
-                        "unknown matcher `{other}`. Start with uuid, iname, title or mirrors, then narrow with room, category or device."
+                        "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
                     )));
                 }
                 None => return Err(err("empty matcher list".into())),
@@ -1348,11 +1349,15 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
                 }
             }
             let constrained = room.is_some() || category.is_some() || device.is_some();
-            if matches!(match_spec, MatchSpec::Uuid(_)) && constrained {
-                return Err(err(
-                    "`uuid:` matches exactly, so room, category and device are not allowed with it"
-                        .into(),
-                ));
+            if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
+                let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
+                    "uuid"
+                } else {
+                    "serial"
+                };
+                return Err(err(format!(
+                    "`{k}:` matches exactly, so room, category and device are not allowed with it"
+                )));
             }
             if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
                 return Err(err(
@@ -1371,7 +1376,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             })
         }
         _ => Err(err(
-            "expected `extern <slug> = <Type>(uuid|iname|title: \"…\")`".into(),
+            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\")`".into(),
         )),
     }
 }
@@ -1889,26 +1894,20 @@ fn parse_schedule_line(
     loop {
         match toks.get(i) {
             Some(Tok::Ident(w)) if w == "off" || w == "activate" => break,
-            Some(Tok::Ident(w)) => {
-                if !super::schedule::is_day(w) {
-                    let known: Vec<&str> = super::schedule::day_keywords().collect();
-                    let mut hint = super::validate::suggest(w, known.iter().copied());
-                    if hint.is_empty()
-                        && let Some(short) = w.get(..3).filter(|s| super::schedule::is_day(s))
-                    {
-                        hint = format!("; did you mean `{short}`?");
-                    }
-                    return Err(err(format!(
-                        "unknown day `{w}`{hint}. Days are {}, or the title of an operating mode (`\"Party\"`).",
-                        known.join(", ")
-                    )));
-                }
+            Some(Tok::Ident(w)) if super::schedule::is_day(w) => {
                 days.push(Day::Keyword(w.clone()));
+            }
+            // Any other word is a `Mode`'s slug; validate resolves it.
+            Some(Tok::Ident(w)) if super::rename::valid_slug(w).is_ok() => {
+                days.push(Day::Slug(w.clone()));
+            }
+            Some(Tok::Ident(w)) => {
+                return Err(err(super::schedule::unknown_day(w, std::iter::empty())));
             }
             Some(Tok::Str(s)) if s.trim().is_empty() => {
                 return Err(err("an operating mode's title cannot be empty".into()));
             }
-            Some(Tok::Str(s)) => days.push(Day::Mode(s.clone())),
+            Some(Tok::Str(s)) => days.push(Day::Title(s.clone())),
             _ => break,
         }
         i += 1;
@@ -2462,7 +2461,11 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                     }
                     end += 1;
                 }
-                let kind = binding_kind(port, &toks[start..end], lineno)?;
+                let value = &toks[start..end];
+                let kind = match calendar_date(&call.block_type, port, value, lineno)? {
+                    Some(date) => BindingKind::Param(date),
+                    None => binding_kind(port, value, lineno)?,
+                };
                 if let BindingKind::Param(Value::Str(text)) = &kind
                     && (text == "true" || text == "false")
                     && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
@@ -2549,6 +2552,46 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             e => BindingKind::Expr(e),
         },
     })
+}
+
+/// A calendar entry's `on:`, `from:` or `to:` date, `YYYY-MM-DD` or
+/// `MM-DD`, written bare like `when date 2026-12-24`; `None` for any other
+/// argument or shape (the check names the right one). A quoted date is
+/// refused with the bare one.
+fn calendar_date(
+    block_type: &str,
+    port: &str,
+    toks: &[Tok],
+    lineno: usize,
+) -> Result<Option<Value>> {
+    use crate::logic::calendar::{is_full_date, month_day, takes_date};
+    if !takes_date(block_type, port) {
+        return Ok(None);
+    }
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let written = match toks {
+        [Tok::Str(d)] if is_full_date(d) || month_day(d).is_some() => {
+            return Err(err(format!(
+                "a date takes no quotes. Write `{port}: {d}` instead of `{port}: \"{d}\"`."
+            )));
+        }
+        [
+            Tok::Num(y),
+            Tok::Minus,
+            Tok::Num(m),
+            Tok::Minus,
+            Tok::Num(d),
+        ] => format!("{y}-{m}-{d}"),
+        [Tok::Num(m), Tok::Minus, Tok::Num(d)] => format!("{m}-{d}"),
+        _ => return Ok(None),
+    };
+    if is_full_date(&written) || month_day(&written).is_some() {
+        return Ok(Some(Value::Date(written)));
+    }
+    Err(err(format!(
+        "`{port}: {written}` is no date. Write a day of the year as MM-DD (`12-31`) and a \
+         day of the calendar as YYYY-MM-DD (`2026-07-05`)."
+    )))
 }
 
 /// A `YYYY-MM-DD` token run (`2026`, `-`, `01`, `-`, `03`), validated;
@@ -2691,6 +2734,16 @@ fn check_slug(s: &str, lineno: usize) -> Result<String> {
             msg: format!("invalid slug `{s}` (expected [a-z][a-z0-9_]*)"),
         })
     }
+}
+
+/// `text` read as a whole expression, or `None`: decompile reads a block's
+/// label back as the expression it was desugared from.
+pub(crate) fn expr_text(text: &str) -> Option<Expr> {
+    if text.contains('#') {
+        return None;
+    }
+    let (toks, _) = lex(text, 1).ok()?;
+    parse_expr(&toks, 1).ok()
 }
 
 /// Parse the RHS of `<-` as an expression. Precedence, loosest to

@@ -169,6 +169,29 @@
       ]
     },
     {
+      "id": "kb-virtual-http-input",
+      "title": "Knowledge Base: Virtual HTTP Input",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/enen/kb/virtual-http-input/",
+      "pinned": false,
+      "covers": "Virtual HTTP Input properties: polling cycle (s), timeout (ms), permitted timeouts, with their ranges",
+      "used_by": [
+        "crates/loxone-config/docs/loxone-format.md",
+        "crates/loxone-config/src/settings_meta.rs"
+      ]
+    },
+    {
+      "id": "kb-modbus-tcp",
+      "title": "Knowledge Base: Kommunikation mit Modbus TCP (German; no English page)",
+      "publisher": "Loxone",
+      "url": "https://www.loxone.com/dede/kb/kommunikation-mit-modbus-tcp/",
+      "pinned": false,
+      "covers": "Modbus server and sensor properties by name (IP address, timeout, polling cycle), without units",
+      "used_by": [
+        "crates/loxone-config/docs/loxone-format.md"
+      ]
+    },
+    {
       "id": "exosphere-program-files",
       "title": "Exosphere: Program Files",
       "publisher": "Loxone",

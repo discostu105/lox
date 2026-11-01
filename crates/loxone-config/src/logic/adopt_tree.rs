@@ -20,7 +20,7 @@ use crate::xml::{Element, Node};
 
 /// A value as source text writes it: a number where the attribute holds
 /// one (the parser canonicalizes the same way), a string otherwise.
-fn value_of(raw: &str) -> Value {
+pub(super) fn value_of(raw: &str) -> Value {
     let numeric = {
         let digits = raw.strip_prefix('-').unwrap_or(raw);
         let mut parts = digits.splitn(2, '.');
@@ -260,6 +260,7 @@ pub(super) fn adopt_device(
                 matched_by: "uuid".to_string(),
                 title_at_match: o.title.clone(),
                 iname_at_match: o.iname.clone(),
+                owned: false,
             },
         );
         new_externs.push(candidate.clone());
@@ -298,8 +299,65 @@ pub(super) fn adopt_device(
                 comment: None,
             }));
         }
+        // A calendar entry's mode, by its one spelling: a day word, the
+        // module's slug for it, or its title.
+        if o.block_type == "CalendarEntry" {
+            let number = el.attr("CalType").map_or(Ok(0), str::parse).map_err(|_| {
+                fail(format!(
+                    "CalendarEntry \"{}\": `CalType=\"{}\"` is no number",
+                    o.title.as_deref().unwrap_or(""),
+                    el.attr("CalType").unwrap_or("")
+                ))
+            })?;
+            let known: BTreeMap<String, String> = lock
+                .objects
+                .iter()
+                .map(|(s, lo)| (lo.uuid.clone(), s.clone()))
+                .chain(
+                    lock.externals
+                        .iter()
+                        .map(|(s, le)| (le.uuid.clone(), s.clone())),
+                )
+                .chain(slug_of.iter().map(|(u, s)| (u.clone(), s.clone())))
+                .collect();
+            let mode = crate::logic::calendar::lift(doc, number, &known).map_err(|why| {
+                fail(format!(
+                    "cannot adopt CalendarEntry \"{}\": {why}",
+                    o.title.as_deref().unwrap_or("")
+                ))
+            })?;
+            args.push(ArgItem::Binding(Binding {
+                port: crate::logic::calendar::SWITCHES.to_string(),
+                kind: BindingKind::Param(mode),
+                comment: None,
+            }));
+            // Its date, as a date (`from: 10-01, to: 04-30`).
+            let date =
+                crate::logic::calendar::lift_date(|n| el.attr_decoded(n).map(|v| v.into_owned()))
+                    .map_err(|why| {
+                    fail(format!(
+                        "cannot adopt CalendarEntry \"{}\": {why}",
+                        o.title.as_deref().unwrap_or("")
+                    ))
+                })?;
+            for (port, v) in date {
+                args.push(ArgItem::Binding(Binding {
+                    port: port.to_string(),
+                    kind: BindingKind::Param(v),
+                    comment: None,
+                }));
+            }
+        }
         for name in settings {
-            if let Some(v) = el.attr_decoded(name) {
+            if crate::logic::calendar::is_raw_date(&o.block_type, name) {
+                continue;
+            }
+            // A setting a save leaves out at 0 or unticked reads as such
+            // where a fresh mint would fill in something else.
+            let v = el
+                .attr_decoded(name)
+                .or_else(|| crate::periphery::missing_value(&o.block_type, name).map(Into::into));
+            if let Some(v) = v {
                 args.push(ArgItem::Binding(Binding {
                     port: (*name).to_string(),
                     kind: BindingKind::Param(
@@ -308,7 +366,9 @@ pub(super) fn adopt_device(
                         {
                             Value::Bool(v == "true") // `on`/`off`
                         } else {
-                            value_of(&v)
+                            // A duration reads in its unit (`4s`, not `4000`).
+                            crate::logic::ast::duration_value(&o.block_type, name, &v)
+                                .unwrap_or_else(|| value_of(&v))
                         },
                     ),
                     comment: None,

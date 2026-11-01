@@ -10,6 +10,64 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.73.0] — 2026-11-01
+
+### Added
+- **loxl**: a named signal takes a label of its own: `beschatten.title = "Beschatten Süd"` on the line
+  below it sets the top block's title, which is otherwise the expression text (#288).
+- **loxl decompile**, **loxl adopt**: the blocks an expression or named signal compiled to come back as
+  that expression, signal and `let`, where they compile to the same blocks. Adopt marks them
+  expression-owned in the lock.
+
+## [0.72.0] — 2026-11-01
+
+### Changed
+- **loxl** names the operating mode a calendar entry switches on like rules and schedules do: `CalendarEntry("Heizperiode", switches: heating, …)`, `switches: party`, `switches: "Urlaub"`. The stored number (`CalType: 10`) is an error that names the replacement, with a quick fix in the language server; `loxl fmt` rewrites a built-in mode's number and `adopt` writes `switches:`. The compiled config does not change.
+
+### Fixed
+- **Lox Logic** sets a virtual UDP command's receive timeout: `MaxTime: 30s`, with `DefVal:` (the value then) or `ValOT: 1` (keep the last value). Compile refuses a timeout a Loxone Config save would cut to whole milliseconds.
+
+## [0.71.1] — 2026-11-01
+
+### Fixed
+- **`loxl compile`** and **`loxl check`** refuse a title that Loxone Config rewrites on save, and name the title it writes: `%`, `<` and `|` become `_` on most objects (other sets on lighting controllers, operating modes and calendar entries), `{`, `}`, tabs and line breaks go, and a space at either end becomes `_`. An empty title is refused too. Before, the next save showed the object as renamed. The blocks of an expression write `<=`, `<` and `%` in their labels as `≤`, `＜` and `％`, which a save keeps.
+
+## [0.71.0] — 2026-11-01
+
+### Added
+- **`loxl lsp`** offers a quick fix on a lint finding that keeps it: `# lint: allow <kind>` above its declaration, indented like it, or the kind added to the allow already there. An `unused-allow` finding now shows on its comment and offers to remove it.
+
+## [0.70.1] — 2026-11-01
+
+### Fixed
+- **`loxl compile`** and **`loxl check`** refuse a value that Loxone Config rewrites on save, and name the value it writes: a virtual HTTP input's `Poll` below 10 or above 604800, a `Timeout` below 10, a fraction on either or on `Allowedtimeouts`, and a digital `VirtualIn`'s `MaxVal` other than 1 or `MinVal` other than 0. Before, the next save showed them as changed.
+
+## [0.70.0] — 2026-11-01
+
+### Changed
+- **loxl** names each operating mode one way in rules and schedules: a built-in mode in a schedule by its day word (`mon`), a mode the module declares or externs by its slug (`when mode party`, and now `party 18:00-24:00` in a schedule), any other by its title. Another spelling is an error that names the replacement, with a quick fix in the language server; `loxl fmt` on a module directory, `decompile` and `adopt` write the one spelling. The compiled config does not change.
+- **`loxl lint`**: a `dead-outputs` finding on a room controller or a Touch Pure Flex controller that drives nothing says what to wire: the heating or cooling output to the valve actuators, or the controller to the API Connector of a Touch Pure Flex.
+
+### Fixed
+- **`loxl adopt`** and **`loxl decompile`** write `Signed: off`, `Analog: off` or `CloseAfterSend: off` for an unticked box on a virtual HTTP or UDP command or a virtual output. Before, they wrote nothing, and the box came out ticked when the source was compiled onto another config.
+
+## [0.69.0] — 2026-11-01 — hardware in source
+
+Tree and Air devices, with their inputs and outputs, can now be taken over in Lox Logic. Pairing stays in Loxone Config.
+
+### Added
+- **`loxl compile`** takes over existing hardware by declaration: `taster = TreeDevice("Taster", serial: "…")` and `klingel = TreeSensor("Klingel", device: taster, iname: "I0", …)`. The source owns the title, room, category and the settings it states, including `Statistics: on`/`off`. Tree and Air devices and their inputs and outputs, and the Tree and Air extensions, are supported. Removing a declaration leaves the hardware as it is.
+- **`loxl adopt --uuid <device>`** declares a Tree or Air device with every input and output below it.
+- **`extern … (serial: "…")`** matches a device by its own serial.
+
+### Changed
+- **`loxl lint`** reports bare durations also on extern port assignments (`x.TimeEnd = 120`), template value parameters and instance arguments, and `--fix` writes their units across the files of a module. The compiled config does not change.
+- **Lox Logic** knows the units of the Virtual HTTP Input from Loxone's documentation: `Poll` in seconds, `Timeout` in milliseconds (`Timeout: 4s` compiles to `4000`). Modbus settings have no documented unit and stay bare numbers.
+
+### Fixed
+- **`loxl compile`** writes a 0 on a setting such as `MinVal`, `ModbusDataType` or a calendar entry's `CalType` as no attribute, the way Loxone Config stores it, so a save no longer shows it as changed. Adopt writes such a missing setting as 0 where a new object would get another default.
+- **`loxl types`** and the LSP hover no longer link Greater and Less to the Comparator page of the Loxone knowledge base, which documents another block. The knowledge base has no page for these two.
+
 ## [0.68.1] — 2026-11-01
 
 ### Fixed

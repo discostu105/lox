@@ -713,12 +713,132 @@ Virtual inputs, virtual and Modbus devices are not page blocks. They live in fix
   Version` 74 to 267): all 167 `VirtualIn`s have `Analog=`, 53 of them `"false"`, in every version. Two
   saves of the house config made before Lox Logic minted anything (Version 273) have 16 digital ones, all
   `Analog="false"`. The commands and outputs have 1,501 such attribute slots: none is `"false"`, 505 are
-  absent. Oracle session 37 checked both directions.
-- A save drops `MinVal="0"` on an analog `VirtualIn`, as on physical inputs.
+  absent. Oracle session 37 checked both directions. A fresh object from Lox Logic ticks `Signed` and
+  `Analog` on the HTTP and UDP commands and `CloseAfterSend`, so adopt writes `off` for a missing one
+  ([D113](decisions/0113-adopt-writes-off.md)).
+- A save writes no numeric setting at 0, see [*Numbers at 0*](#numbers-at-0).
+- A `VirtualUdpInCmd`'s receive timeout (property panel *Validierung › Zeitüberschreitung Empfang
+  [s]*) is `MaxTime=`, in ms and absent when off. What the value becomes then (*Wert bei
+  Zeitüberschreitung*) is `ValOT=`: absent for *Standardwert*, `"1"` for *Letzten Wert
+  beibehalten*. The default value (*Standardwert*) is `DefVal=`, absent at 0. A save writes them as
+  `…WF, ValOT, Check, …, DestValHigh, DefVal, MinVal, …, MinTime, MaxTime`. A
+  `VirtualHttpInCmd`'s panel has no receive timeout, and the corpus has none of the three on one
+  (186 of them). Corpus: 28 of 247 UDP commands have `ValOT="1"`, one `MaxTime`. Oracle sessions 84
+  to 86.
 
 Lox Logic creates these objects ([D54](decisions/0054-virtual-inputs.md),
 [D64](decisions/0064-virtual-modbus-devices.md)). Source: corpus (175 `VirtualIn`s); oracle sessions 18, 26
 and 37.
+
+### Numbers at 0
+
+A save writes a numeric setting only when it is not 0: an absent attribute is 0, and a save drops an
+explicit `"0"`. This holds for these settings, on every type that has them:
+
+- range and default: `MinVal`, `MaxVal`, `DefVal`
+- analog correction: `SourceValLow`, `DestValLow`, `SourceValHigh`, `DestValHigh`
+- timing: `MinChange`, `MinTime`, `MaxTime`, `ResetTime`, `AverageTime`, `Repeat`, `RepeatRate`
+- `CmdOnMethod`, `Allowedtimeouts`, `Port`, `Channel`, `DimmType`, `ValOT`
+- Modbus: `ModbusAddress`, `ModbusDataType`, `ModbusCmd`, `ModbusPollingCycle`, `ModbusCoilQuantity`
+- calendar entries: `CalType`, `Mode`, `From`, `To`, `EasterOffset`, `WeekDayInMonth`
+
+Exceptions:
+
+- A Modbus server keeps `Timeout="0"`.
+- A virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`, see [*Values a save
+  rewrites*](#values-a-save-rewrites).
+- A digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
+
+Elsewhere `"0"` is a value like any other: real configs hold `Typ="0"` and `Sec="0"` on `PulseAt`, `Tp="0"`
+on `Memory`.
+
+Lox Logic writes a bound 0 as no attribute ([D112](decisions/0112-zero-is-no-attribute.md)). Source: corpus
+(131 files: none of these settings holds `"0"` on `VirtualIn`, the virtual commands, the Modbus objects,
+calendar entries or the physical inputs and outputs; `MinVal` is absent on 112 of 171 `VirtualIn`s,
+`ModbusDataType` on 149 of 339 Modbus sensors); oracle sessions 37, 61 and 62 (Loxone Config 17.2.8.28).
+
+### Values a save rewrites
+
+A save puts some settings into a fixed form:
+
+- A virtual HTTP input's `Poll`, `Timeout` and `Allowedtimeouts` are 32-bit whole numbers. A fraction
+  is cut off (`10.6` and `10.5` become `10`, `600.5` becomes `600`), and a larger number wraps
+  around: `99999999999` becomes `1215752191`, and `2147483648` (negative) and `4294967296` (0) end
+  as `Timeout="10"`.
+- Then `Poll` goes up to 10 and down to 604800 (one week): `0`, `5`, `9`, `-5` become `10`, `604801`
+  and `999999999` become `604800`.
+- `Timeout` goes up to 10, and is kept above the documented 8000: `60000` and `2147483647` stay.
+- `Allowedtimeouts` keeps any whole number, `-1` and `1000` included.
+- A virtual UDP command's `MaxTime` and `ValOT` are 32-bit whole numbers the same way, with no
+  bounds: `MaxTime` `1500.5` becomes `1500`, `0.4` goes (0), `3000000000` becomes `-1294967296`, and
+  `-3000` stays. `ValOT` keeps `2` and `-1`, and `0.5` goes. Its `DefVal` stays as written (`0.001`).
+- A digital `VirtualIn` has `MaxVal="1"` and no `MinVal` (0), whatever it was: `0`, `0.5`, `2`, `5`
+  and `-1` become `MaxVal="1"`, a `MinVal` of `1`, `-1` or `2` goes. Its `DefVal` stays as written,
+  also outside 0 to 1 (`2`, `-1`, `0.5`). Thirteen corpus files of `ControlList Version` 74 and 75
+  hold digital ones with `MinVal="-10000"` and `MaxVal="10000"`; none of a later version does.
+- An analog `VirtualIn` keeps its range and default as written, `MaxVal` below `MinVal` and a
+  `DefVal` outside the range included.
+
+Lox Logic refuses a value a save would rewrite, and names the value the save writes
+([D114](decisions/0114-refuse-what-a-save-rewrites.md)). Source: oracle sessions 61 to 64 and 86
+(Loxone Config 17.2.8.28); corpus.
+
+### Titles a save rewrites
+
+A save puts some characters of a `Title=` into a fixed form, on minted objects and on existing ones
+alike (a `.title` claim on a base `Actor` was rewritten too):
+
+- `{` and `}` go, and so do a tab and a line break inside the title.
+- Then each space or tab at either end becomes `_`: `" V lead trail "` is written `"_V lead trail_"`,
+  `"a\t "` as `"a__"`, `"{ a}"` as `"_a"`. Two spaces inside stay.
+- `%`, `<` and `|` become `_` on every program block (all types of the builtin table), the virtual
+  inputs, outputs and their commands, `VirtualTextIn`, a Modbus device and its sensors and actuators,
+  and a physical output (`Actor`). `>` stays: `R Ana Max<Min` became `R Ana Max_Min`, `R Ana Def>Max`
+  was kept.
+- The types that differ:
+
+  | Type | Becomes `_` |
+  |---|---|
+  | `LightController2` | `%`, `\|` (`<` stays) |
+  | `Mode` | `%`, `,`, `:`, `;`, `=`, `\|` (`<` stays) |
+  | `CalendarEntry` | `%`, `/`, `<`, `\|` |
+  | `ModbusServer`, `Page` | nothing: any title stays, tabs and spaces at the ends included |
+
+- A title left empty by the save (`"{}"`) is written as no `Title=`. An empty `Title=""` is written as
+  `noname <UUID>`.
+- Every other printable ASCII character stays, and so do `ä`, `ß`, `€`, `°`, `µ`, `²`, `é` and an
+  emoji. A mood's name (`<Mood Name=…>`) keeps every character.
+
+`≤`, `＜` and `％` stay (session 83): an expression's block labels use them for `<=`, `<` and `%`.
+
+Not checked: rule names, the I/Os and devices of the Tree, Air and other hardware, and types the
+compiler cannot create. Lox Logic refuses a title a save would rewrite, and names the title the save
+writes ([D120](decisions/0120-refuse-titles-a-save-rewrites.md)). Source: oracle sessions 80 to 83
+(Loxone Config 17.2.8.28).
+
+### Units of the settings
+
+The unit a setting's attribute is in, where a Loxone knowledge-base page states it. The table is
+`src/settings_meta.rs`; value suffixes scale into these units.
+
+| Object | Attribute | Property | Unit | Range | Source |
+|---|---|---|---|---|---|
+| `VirtualHttpIn` | `Poll` | Polling cycle | s | 10…604800 | `kb-virtual-http-input`, *Properties* |
+| `VirtualHttpIn` | `Timeout` | Timeout | ms | 10…8000 | `kb-virtual-http-input`, *Properties* |
+| `VirtualHttpIn` | `Allowedtimeouts` | Number of permitted timeouts | none | 0…100 | `kb-virtual-http-input`, *Properties* |
+| `VirtualUdpInCmd` | `MaxTime` | Zeitüberschreitung Empfang [s] | ms | 0 or more | oracle session 84 |
+
+The attributes match the properties by name. The corpus agrees: all 19 `VirtualHttpIn`s have
+`Timeout="4000"` (the mint default), and every `Poll` is 10 or more (10 to 3600).
+
+No Loxone page states the unit of these settings, so they stay bare numbers:
+
+- `ModbusServer` `Timeout`. Reference `kb-modbus-tcp` (German; there is no English page) names the
+  server's timeout and the sensors' polling cycle, without units. The Modbus Air and Modbus
+  Extension pages document only RS-485 timing ("Timeout: 1000ms" in Auto mode), not these
+  attributes.
+- `ModbusASensor` and `ModbusSensor` `ModbusPollingCycle`, `MinTime`, `MaxTime`.
+- `VirtualUdpInCmd` `MinTime`.
 
 ## Settings of physical inputs and outputs
 
@@ -734,6 +854,8 @@ Inputs and outputs of extensions, Tree and Air devices and 1-Wire sensors carry 
 
 - A save omits `Desc`, the low ends of the correction, `MinVal`, `ResetTime` and `AverageTime` at their
   defaults. It writes `Desc` right after `Type`, the others in a fixed order.
+- A save drops every numeric setting at 0, the high ends, `MaxVal`, `MinChange` and `MinTime` included
+  ([*Numbers at 0*](#numbers-at-0)).
 - Digital inputs have no analog correction.
 - With a unit set, the Miniserver formats the value (`8.2 °C`), and the app catalogue's format becomes
   `%.1f °C`.
@@ -741,6 +863,27 @@ Inputs and outputs of extensions, Tree and Air devices and 1-Wire sensors carry 
 Lox Logic writes these settings ([D65](decisions/0065-physical-io-settings.md)). Source: oracle session 27 (a
 save kept description, unit, low end, averaging and time on two Air sensors); live check on the house
 Miniserver.
+
+### Statistics: `StatsType=`
+
+An input or output with statistics carries `StatsType=`, often with
+`StatsAutoDel="1"`; without statistics it has neither. The value is the
+recording kind. Every hardware I/O with statistics in the corpus and the
+house config uses one per type:
+
+| Type | `StatsType` |
+|---|---|
+| `TreeSensor`, `TreeActor`, `LoxAIRsensor`, `LoxAIRactor`, `DigitalIn` | `7` |
+| `TreeAsensor`, `LoxAIRAsensor` | `11` |
+| `Lox1wireAsensor` | `10` or `11` |
+| `VoltageIn` | `6` |
+
+The structure file's statistic `frequency` gives the meaning: 1 is every
+change, 2 to 6 averages (deprecated), 8 to 11 intervals. The app
+catalogue maps `7` to frequency 1 and `11` to frequency 11. A save keeps
+`StatsType` added or removed, with or without `StatsAutoDel` (oracle
+session 51). Lox Logic writes `7` and `11` only
+([D101](decisions/0101-hardware-declarations.md)).
 
 ## Hardware identity: `Serial=`
 
@@ -778,6 +921,10 @@ session 30). Every Air device in the corpus has
 `PWMFrequency="123"`, `UseDimmer="true"` and (99 of 103)
 `UseRGBDimmer="true"`. A save writes `TId=` (`NanoIO`,
 `RoomsensorTree`) right after a `Desc` it finds on a device.
+
+The Tree and Air extensions (`LoxTree`, `LoxAIR`) carry `Installation`
+and `SwitchBoard` too. A save keeps both rewritten, a board also from
+`""` (oracle session 51).
 
 ## Time functions: per-project singletons
 
@@ -834,11 +981,20 @@ wires. Attributes, in the save's order:
   - `3`: one period (`From`, `To`: days since 2009-01-01; `2375` is 4
     July 2015);
   - `4`: a yearly range (`Month`, `Day` to `Month2`, `Day2`).
-- `Month`, `Day`, `Month2`, `Day2` — always present; `1` where the kind
-  does not use them. Some Easter entries carry a date there (the day
-  of some year the offset gave); it is carried as written.
-- `From`, `To`, `EasterOffset` — only with their kind.
-- `WeekDayInMonth` — always `1`.
+- `Month`, `Day`, `Month2`, `Day2` — present on every entry but 8
+  Easter entries; `1` where the kind does not use them. Some Easter
+  entries carry a date there (the day of some year the offset gave); it
+  is carried as written.
+- `From`, `To`, `EasterOffset` — with their kind. 3 fixed-date entries
+  (one entry in three configs) also carry an `EasterOffset`, which their
+  kind does not read: an entry that changes its kind keeps the
+  attributes of the old one.
+- `WeekDayInMonth` — `1` where present; 2 entries of `V="122"` lack it.
+
+The counts are from the corpus of 2026-11-01 (431 entries): 308 yearly
+ranges, 52 fixed dates, 40 periods (2 of them with `To` before
+`From`), 31 Easter entries. No other `Mode` occurs. In `From`/`To`,
+2009-01-01 is day 0.
 
 A save of fresh period, Easter and yearly-range entries changed nothing
 (oracle session 31); a fixed-date entry for the day switched its mode on

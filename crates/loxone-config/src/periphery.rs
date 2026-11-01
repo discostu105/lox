@@ -105,7 +105,9 @@ const CALENDAR: &[PortSpec] = &[port("I", Input), port("Q", Output)];
 pub const PERIPHERY: &[PeripheryType] = &[
     // A calendar entry (#211): on which dates an operating mode is on.
     // `CalType=` is the mode's `Mode=` number (absent: 0, the holiday
-    // mode); `Mode=` the kind — absent a fixed date (`Month`/`Day`), 1
+    // mode). It is no setting: the source names the mode with
+    // `switches:`, written by `logic::calendar` once the compiled
+    // document numbers every mode. `Mode=` is the kind — absent a fixed date (`Month`/`Day`), 1
     // relative to Easter (`EasterOffset` days; `Month`/`Day` the date in
     // the year of the save), 3 one period (`From`/`To`, days since
     // 2009-01-01), 4 every year from `Month`/`Day` to `Month2`/`Day2`.
@@ -118,7 +120,6 @@ pub const PERIPHERY: &[PeripheryType] = &[
         ports: CALENDAR,
         iname: None,
         settings: &[
-            "CalType",
             "Mode",
             "Month",
             "Day",
@@ -133,7 +134,6 @@ pub const PERIPHERY: &[PeripheryType] = &[
         mint_attrs: &[
             ("Nio", Some("2")),
             ("WF", Some("16384")),
-            ("CalType", None),
             ("Mode", None),
             ("Month", Some("1")),
             ("Day", Some("1")),
@@ -214,6 +214,9 @@ pub const PERIPHERY: &[PeripheryType] = &[
         home: Home::Device(&["VirtualUdpIn"]),
         ports: IN_CMD,
         iname: Some("VCI"),
+        // The receive timeout (oracle session 84): `MaxTime` (ms, absent
+        // when off), what the value becomes then — `ValOT="1"` keeps the
+        // last value, without it the default value `DefVal` (absent at 0).
         settings: &[
             "Check",
             "Signed",
@@ -222,15 +225,19 @@ pub const PERIPHERY: &[PeripheryType] = &[
             "DestValLow",
             "SourceValHigh",
             "DestValHigh",
+            "DefVal",
             "MinVal",
             "MaxVal",
             "MinChange",
             "MinTime",
+            "MaxTime",
+            "ValOT",
         ],
         required: &["Check"],
         mint_attrs: &[
             ("Nio", Some("2")),
             ("WF", Some("16384")),
+            ("ValOT", None),
             ("Check", None),
             ("Signed", Some("true")),
             ("Analog", Some("true")),
@@ -238,10 +245,12 @@ pub const PERIPHERY: &[PeripheryType] = &[
             ("DestValLow", None),
             ("SourceValHigh", Some("100")),
             ("DestValHigh", Some("100")),
+            ("DefVal", None),
             ("MinVal", Some("-10000")),
             ("MaxVal", Some("10000")),
             ("MinChange", Some("0.25")),
             ("MinTime", Some("1000")),
+            ("MaxTime", None),
         ],
         mint_children: &[
             IODATA,
@@ -488,8 +497,31 @@ pub fn folder(block_type: &str) -> Option<&'static str> {
     }
 }
 
+/// The value decompile states for a missing setting: 0 on a number a
+/// save leaves out at 0, `false` (`off`) on a box a save leaves out
+/// unticked. Only where a fresh mint needs the setting or would fill in
+/// something else (`Signed="true"`), so lifting nothing would fail or
+/// change the value when the source is minted elsewhere.
+pub fn missing_value(block_type: &str, name: &str) -> Option<&'static str> {
+    let p = periphery(block_type)?;
+    let default = p
+        .mint_attrs
+        .iter()
+        .find(|(n, _)| *n == name)
+        .and_then(|(_, d)| *d);
+    if crate::connectors::omitted_when_zero(block_type, name)
+        && (p.required.contains(&name) || default.is_some_and(|d| !crate::connectors::is_zero(d)))
+    {
+        return Some("0");
+    }
+    if crate::connectors::omitted_when_off(block_type, name) && default == Some("true") {
+        return Some("false");
+    }
+    None
+}
+
 /// `device:` on a block names the device it hangs below — an
 /// identity binding like `mirrors:`, not a value.
 pub fn is_device_binding(block_type: &str, key: &str) -> bool {
-    key == "device" && !device_types(block_type).is_empty()
+    key == "device" && (!device_types(block_type).is_empty() || crate::hardware::is_io(block_type))
 }

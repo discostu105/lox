@@ -1961,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "lox"
-version = "0.68.1"
+version = "0.73.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "loxone-config"
-version = "0.15.0"
+version = "0.18.0"
 dependencies = [
  "crc32fast",
  "lz4_flex",

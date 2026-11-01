@@ -441,6 +441,112 @@ fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
 }
 
 #[test]
+fn a_calendar_mode_number_offers_its_day_word_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let numbered = format!("{src}\nheizperiode = CalendarEntry(\"Heizperiode\", CalType: 10)\n");
+    let out = session(&[open(&pool, &src), change(&pool, &numbered), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &numbered),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `switches: heating`");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    let (l, c) = pos(&numbered, "CalType: 10");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
+fn a_stored_calendar_date_offers_the_date_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    for (entry, old) in [
+        (
+            "heizperiode = CalendarEntry(\"Heizperiode\", switches: heating, Mode: 4, Month: 10, \
+             Day: 1, Month2: 4, Day2: 30)",
+            "Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30",
+        ),
+        (
+            "heizperiode = CalendarEntry(\n\t\"Heizperiode\",\n\tswitches: heating,\n\tMode: 4,\n\
+             \tMonth: 10,\n\tDay: 1,\n\tMonth2: 4,\n\tDay2: 30,\n\tWeekDayInMonth: 1,\n)",
+            "Mode: 4,\n\tMonth: 10,\n\tDay: 1,\n\tMonth2: 4,\n\tDay2: 30,\n\tWeekDayInMonth: 1",
+        ),
+    ] {
+        let stored = format!("{src}\n{entry}\n");
+        let out = session(&[open(&pool, &src), change(&pool, &stored), save(&pool)]);
+        let diags = diagnostics(&out, &pool).clone();
+        let d = diags
+            .iter()
+            .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+            .unwrap_or_else(|| panic!("{diags:?}"));
+        let out = session(&[
+            open(&pool, &stored),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+                "textDocument": {"uri": uri(&pool)},
+                "range": d["range"],
+                "context": {"diagnostics": [d]},
+            }}),
+        ]);
+        let actions = response(&out, 1).as_array().unwrap();
+        assert_eq!(actions.len(), 1, "{entry}: {actions:?}");
+        assert_eq!(actions[0]["title"], "Change to `from: 10-01, to: 04-30`");
+        let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+        assert_eq!(edit["newText"], "from: 10-01, to: 04-30");
+        let (l, c) = pos(&stored, old);
+        assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+        let end = &stored[..stored.find(old).unwrap() + old.len()];
+        let (l, c) = (
+            end.matches('\n').count(),
+            end[end.rfind('\n').map_or(0, |n| n + 1)..]
+                .encode_utf16()
+                .count(),
+        );
+        assert_eq!(edit["range"]["end"], json!({"line": l, "character": c}));
+    }
+}
+
+#[test]
+fn a_mode_title_offers_its_slug_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let titled =
+        format!("{src}\nparty = Mode(\"Party\")\n\nschedule abend\n\t\"Party\" 18:00-24:00\nend\n");
+    let out = session(&[open(&pool, &src), change(&pool, &titled), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &titled),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `party 18:00-24:00`");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    let (l, c) = pos(&titled, "\"Party\" 18:00");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
 fn an_access_section_on_the_block_offers_the_named_set_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
@@ -642,6 +748,26 @@ fn completion_offers_argument_keys_and_signal_names() {
 }
 
 #[test]
+fn completion_offers_a_calendar_entrys_mode_and_date() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let typing = format!("{src}\nh = CalendarEntry(\"H\", )\n");
+    let (l, c) = pos(&typing, ", )");
+    let out = session(&[
+        open(&pool, &src),
+        change(&pool, &typing),
+        at(1, "textDocument/completion", &pool, l, c + 2),
+    ]);
+    let got = labels(&out, 1);
+    for key in ["switches", "on", "easter", "from", "to"] {
+        assert!(got.contains(&key.to_string()), "{key}: {got:?}");
+    }
+    for key in ["Mode", "Month", "From", "WeekDayInMonth"] {
+        assert!(!got.contains(&key.to_string()), "{key}: {got:?}");
+    }
+}
+
+#[test]
 fn a_bare_duration_offers_its_unit_suffix_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
@@ -664,7 +790,9 @@ fn a_bare_duration_offers_its_unit_suffix_as_a_quick_fix() {
         }}),
     ]);
     let actions = response(&out, 1).as_array().unwrap();
-    assert_eq!(actions.len(), 1, "{actions:?}");
+    // The fix first, then the allow comment that keeps the finding.
+    assert_eq!(actions.len(), 2, "{actions:?}");
+    assert!(actions[1]["title"].as_str().unwrap().starts_with("Allow"));
     assert_eq!(
         actions[0]["edit"]["changes"][uri(&pool)][0]["newText"],
         "Time: 5min"
@@ -696,7 +824,7 @@ fn a_file_on_the_default_page_offers_the_previous_page_as_a_quick_fix() {
         }}),
     ]);
     let actions = response(&out, 1).as_array().unwrap();
-    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions.len(), 2, "{actions:?}");
     let edit = &actions[0]["edit"]["changes"][uri(&technik)][0];
     assert_eq!(edit["newText"], "page \"Pool\"\n\n");
     // Below the comments that head the file.
@@ -707,5 +835,100 @@ fn a_file_on_the_default_page_offers_the_previous_page_as_a_quick_fix() {
     assert_eq!(
         edit["range"]["start"],
         json!({"line": first, "character": 0})
+    );
+}
+
+/// The code actions for diagnostic `d` of `file` holding `text`.
+fn actions_for(file: &Path, text: &str, d: &Value) -> Vec<Value> {
+    let out = session(&[
+        open(file, text),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(file)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    response(&out, 1).as_array().unwrap().clone()
+}
+
+/// The diagnostics of `file` after saving it with `text`.
+fn saved(file: &Path, src: &str, text: &str) -> Vec<Value> {
+    let out = session(&[open(file, src), change(file, text), save(file)]);
+    diagnostics(&out, file).clone()
+}
+
+fn with_prefix<'a>(diags: &'a [Value], prefix: &str) -> Option<&'a Value> {
+    diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().starts_with(prefix))
+}
+
+#[test]
+fn a_lint_finding_offers_an_allow_comment_above_its_declaration() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    // Without its wire `heizen` drives nothing.
+    let text = src.replace("pumpe.On <- heizen.Q\n", "");
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "dead-outputs").unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, _) = pos(&text, "heizen =");
+    assert_eq!(d["data"], json!({"allow": "dead-outputs", "line": l}));
+
+    let actions = actions_for(&pool, &text, d);
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(
+        actions[0]["title"],
+        "Allow this finding (`# lint: allow dead-outputs`)"
+    );
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], "# lint: allow dead-outputs\n");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": 0}));
+
+    // With the comment in place the finding is gone, and the comment is used.
+    let allowed = text.replace("heizen =", "# lint: allow dead-outputs\nheizen =");
+    let diags = saved(&pool, &src, &allowed);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn an_allow_comment_already_above_takes_the_new_kind() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = src.replace("pumpe.On <- heizen.Q\n", "").replace(
+        "heizen =",
+        "# lint: allow unit-suffix kept for later\nheizen =",
+    );
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "dead-outputs").unwrap_or_else(|| panic!("{diags:?}"));
+    let actions = actions_for(&pool, &text, d);
+    let allow = actions
+        .iter()
+        .find(|a| a["title"].as_str().unwrap().starts_with("Allow"))
+        .unwrap_or_else(|| panic!("{actions:?}"));
+    let edit = &allow["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], " dead-outputs");
+    let (l, c) = pos(&text, " unit-suffix kept");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
+fn an_unused_allow_shows_on_its_comment_and_offers_to_remove_it() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = src.replace("heizen = ", "# lint: allow dead-outputs\nheizen = ");
+    let diags = saved(&pool, &src, &text);
+    let d = with_prefix(&diags, "unused-allow").unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, _) = pos(&text, "# lint: allow");
+    assert_eq!(d["range"]["start"], json!({"line": l, "character": 0}));
+    assert!(d.get("data").is_none(), "{d:?}");
+
+    let actions = actions_for(&pool, &text, d);
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Remove this allow");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    assert_eq!(edit["newText"], "");
+    assert_eq!(
+        edit["range"],
+        json!({"start": {"line": l, "character": 0}, "end": {"line": l + 1, "character": 0}})
     );
 }

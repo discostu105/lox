@@ -156,7 +156,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D21 | [The drift baseline is a fingerprint of what the diff compares](decisions/0021-drift-baseline.md) | accepted |
 | D22 | [The Loxone Config release is a qualification pin](decisions/0022-config-version-pin.md) | accepted, amended by [D46](decisions/0046-block-version.md) |
 | D23 | [Templates are macro expansion with locked identities](decisions/0023-templates.md) | accepted, amended by [D82](decisions/0082-template-instance-names.md) |
-| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md) and [D81](decisions/0081-named-signals.md) |
+| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md), [D81](decisions/0081-named-signals.md) and [D123](decisions/0123-decompile-lifts-expressions.md) |
 | D25 | [Projects are a `lox.toml`, and there is no `import`](decisions/0025-projects-lox-toml.md) | accepted |
 | D26 | [Expressions bind in argument lists too](decisions/0026-expressions-in-arguments.md) | accepted |
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
@@ -201,19 +201,19 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D66 | [Blocks minted from source in the app](decisions/0066-app-blocks.md) | accepted |
 | D67 | [Deleting a rule from source](decisions/0067-deleting-rules.md) | accepted |
 | D68 | [`loxl test` runs in a simulator of its own](decisions/0068-own-simulator.md) | accepted, supersedes the simulator part of [D36](decisions/0036-tests-in-module.md), amended by [D106](decisions/0106-simulator-readings.md) |
-| D69 | [Operating modes from source](decisions/0069-operating-modes.md) | accepted |
+| D69 | [Operating modes from source](decisions/0069-operating-modes.md) | accepted, amended by [D110](decisions/0110-mode-reference-spelling.md) |
 | D70 | [Users stay the Miniserver's](decisions/0070-users-stay-miniserver.md) | accepted |
 | D71 | [Several objects in one statement, device settings, Air serials](decisions/0071-multi-object-statements.md) | accepted |
 | D72 | [Light controllers in the app catalogue](decisions/0072-light-controllers-catalogue.md) | accepted |
-| D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) |
-| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted |
+| D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) and [D110](decisions/0110-mode-reference-spelling.md) |
+| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted, amended by [D115](decisions/0115-calendar-entry-mode.md) and [D126](decisions/0126-calendar-entry-date.md) |
 | D75 | [A redacted copy](decisions/0075-redacted-copy.md) | accepted |
 | D76 | [Weather, dates and messages in rules](decisions/0076-weather-date-message-rules.md) | accepted |
 | D77 | [A stale constant under a wire](decisions/0077-stale-constant-under-wire.md) | accepted |
 | D78 | [A block's own blocks stay with it](decisions/0078-owned-sub-blocks.md) | accepted |
 | D79 | [A PulseAt's fire time from source; what the compile carries](decisions/0079-pulseat-fire-time.md) | accepted |
 | D80 | [Language v2, one spelling per value](decisions/0080-v2-one-spelling.md) | accepted |
-| D81 | [Named signals](decisions/0081-named-signals.md) | accepted |
+| D81 | [Named signals](decisions/0081-named-signals.md) | accepted, amended by [D122](decisions/0122-signal-title.md) and [D123](decisions/0123-decompile-lifts-expressions.md) |
 | D82 | [Template instances are named by the instance](decisions/0082-template-instance-names.md) | accepted |
 | D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |
 | D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |
@@ -223,4 +223,16 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
+| D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
 | D106 | [The simulator takes the plain reading of a block's page](decisions/0106-simulator-readings.md) | accepted, amends [D68](decisions/0068-own-simulator.md) |
+| D110 | [One spelling per operating mode](decisions/0110-mode-reference-spelling.md) | accepted, amends [D69](decisions/0069-operating-modes.md) and [D73](decisions/0073-rule-conditions.md) |
+| D111 | [Unit suffixes on extern ports, template parameters and device settings](decisions/0111-unit-suffix-coverage.md) | accepted, extends [D87](decisions/0087-v2-tooling.md) |
+| D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
+| D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
+| D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
+| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md) |
+| D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |
+| D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
+| D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
+| D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
+| D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |

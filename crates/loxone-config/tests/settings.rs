@@ -209,6 +209,38 @@ fn a_withdrawn_setting_is_restored_and_stays_restored() {
 }
 
 #[test]
+fn a_zero_setting_is_no_attribute() {
+    // A save writes these numbers only when they are not 0 (#312): a 0
+    // removes the attribute, and adds nothing where it is missing, even
+    // a setting Lox Logic never adds.
+    let zeros = "garten.MinVal = 0\ngarten.SourceValLow = 0\ngarten.MaxTime = 0\n\
+                 taster.MinTime = 0\n";
+    let claimed = Module::parse(&format!("{EXTERNS}{zeros}")).unwrap();
+    let mut lock = Lockfile::default();
+    let deployed = compile(&base(), &claimed, &mut lock, &opts()).unwrap();
+    let names = attr_names(element(&deployed, AIR));
+    for n in ["MinVal", "SourceValLow", "MaxTime"] {
+        assert!(!names.contains(&n), "{n}: {names:?}");
+    }
+    assert!(!attr_names(element(&deployed, DIN)).contains(&"MinTime"));
+    let again = compile(&deployed, &claimed, &mut lock.clone(), &opts()).unwrap();
+    assert!(again.to_bytes() == deployed.to_bytes());
+
+    // Withdrawn, the originals come back, and until that is deployed an
+    // old base (still without them) is restored again.
+    let module = Module::parse(EXTERNS).unwrap();
+    let out = compile(&deployed, &module, &mut lock, &opts()).unwrap();
+    let plain = compile(&base(), &module, &mut Lockfile::default(), &opts()).unwrap();
+    assert!(out.to_bytes() == plain.to_bytes());
+    assert_eq!(lock.removed_sets.len(), 2, "{:?}", lock.removed_sets);
+    let out2 = compile(&deployed, &module, &mut lock.clone(), &opts()).unwrap();
+    assert!(out2.to_bytes() == out.to_bytes());
+    let out3 = compile(&out, &module, &mut lock, &opts()).unwrap();
+    assert!(out3.to_bytes() == out.to_bytes());
+    assert!(lock.removed_sets.is_empty());
+}
+
+#[test]
 fn one_statement_sets_several_objects() {
     // `(a, b).Setting = value` is the statements one per object (#199).
     let bulk = Module::parse(&format!(

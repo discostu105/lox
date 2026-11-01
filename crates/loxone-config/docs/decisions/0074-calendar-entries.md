@@ -13,7 +13,9 @@ An entry of the *Betriebszeiten* calendar switches an operating mode on for a da
 A calendar entry is minted, adopted and edited like a virtual input ([D54](0054-virtual-inputs.md)):
 `CalendarEntry("Title", CalType: …, Mode: …, …)`. Its parameters are the attributes of the corpus's 397
 entries: `CalType` names the mode ([D69](0069-operating-modes.md)), `Mode` the kind of date (fixed,
-Easter, period, yearly range).
+Easter, period, yearly range). Amended by [D115](0115-calendar-entry-mode.md): the mode is
+`switches: <mode>` now, and `CalType:` is refused. Amended by [D126](0126-calendar-entry-date.md): the
+date is `on:`, `easter:` or `from:`/`to:`, and the stored attributes are refused.
 
 Validated: oracle session 31, where fresh entries of the period, Easter and yearly-range kinds were saved
 without change (see [oracle-sessions.md](../oracle-sessions.md)). Live on the house (2026-10-31), a
