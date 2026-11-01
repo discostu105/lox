@@ -75,9 +75,11 @@ A fourth path can resolve what the corpus cannot: a **save in Loxone Config**
 open+save proves the shape, and a compiled wire sourced from a port
 surviving the save proves that port is an output.
 
-Physical hardware types (sensors, actors, Tree, Air and extension devices) are **never admitted**,
-whatever the evidence. They carry device bindings: Lox Logic references hardware, it does not own it
-(see [vision.md](vision.md)).
+Physical hardware types (sensors, actors, Tree, Air and extension devices) are not admitted to this
+table. They carry device bindings and live in the device tree, not on pages. Devices get their own
+table of verified device types, with the same rule: the corpus shows one child shape per type and a
+Loxone Config save keeps a minted instance (#320). Pairing stays in Loxone Config (see
+[vision.md](vision.md)).
 
 ## Block versions
 
@@ -337,4 +339,4 @@ corpus:
    count, which rule resolved each contested key, save result). The
    evidence sentence is what makes the next person trust the entry.
 
-Physical hardware types stay out whatever the evidence (see the admission rules).
+Physical hardware types go to the device type table instead (see the admission rules).
