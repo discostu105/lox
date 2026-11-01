@@ -1734,7 +1734,9 @@ the declaration below it: a block, extern, instance (all its blocks), device (al
 constant, template, signal or `defaults`. Inside a template body it covers that block in every
 instance. An allow that covers no finding, names no kind or stands above no declaration is reported
 as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
-`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged.
+`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged. The language server offers
+both as quick fixes: on a finding it inserts the allow comment above the declaration (or adds the
+kind to the allow already there), and on an `unused-allow` it removes the comment.
 
 ## Canonical form
 

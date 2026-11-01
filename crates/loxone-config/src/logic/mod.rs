@@ -70,6 +70,7 @@ pub use decompile::{
 };
 pub use defaults::taken as defaults_taken;
 pub use desugar::DesugarInfo;
+pub(crate) use lint::is_allow_comment;
 pub use lint::{
     LintFinding, LintKind, finish_lint, fix_unit_suffixes, fix_unit_suffixes_in, lint_dead_outputs,
     lint_source,

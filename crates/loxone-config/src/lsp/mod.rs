@@ -13,7 +13,8 @@
 //! - References and rename of module-level names (constants, externs,
 //!   blocks, templates, instances) across the module's files; in a
 //!   project, rename is `loxl rename`'s verified plan and also rewrites
-//!   the lockfile. Quick fixes for "did you mean `X`?" diagnostics.
+//!   the lockfile. Quick fixes for "did you mean `X`?" diagnostics,
+//!   and `# lint: allow <kind>` comments added or removed.
 //!
 //! Synchronous and single-threaded: requests are answered in order.
 
@@ -258,7 +259,7 @@ impl<W: Write> Server<'_, W> {
                 .iter()
                 .map(|d| {
                     let l = text::line(&text, d.line);
-                    json!({
+                    let mut item = json!({
                         "range": {
                             "start": { "line": d.line, "character": self.enc.column(l, d.start) },
                             "end": { "line": d.line, "character": self.enc.column(l, d.end) },
@@ -266,7 +267,13 @@ impl<W: Write> Server<'_, W> {
                         "severity": match d.severity { Severity::Error => 1, Severity::Warning => 2 },
                         "source": "loxl",
                         "message": d.message,
-                    })
+                    });
+                    // Sent back with a code action request: where the
+                    // allow comment for the finding goes.
+                    if let Some((kind, line)) = d.allow {
+                        item["data"] = json!({ "allow": kind.label(), "line": line });
+                    }
+                    item
                 })
                 .collect();
             write_message(
@@ -337,7 +344,9 @@ impl<W: Write> Server<'_, W> {
     /// Quick fixes: a diagnostic's "did you mean `X`?" on a misspelled
     /// name, and its "write `X` instead of `Y`" (old spellings, the
     /// `unit-suffix` lint), replace the text with `X`; the `default-page`
-    /// lint inserts the page line it names at the top of the file.
+    /// lint inserts the page line it names at the top of the file. A lint
+    /// finding on a declaration can be kept with `# lint: allow <kind>`
+    /// above it, and an `unused-allow` comment removed.
     fn code_actions(&self, params: &Value) -> Value {
         let Some(path) = path_of(&params["textDocument"]) else {
             return Value::Null;
@@ -345,12 +354,46 @@ impl<W: Write> Server<'_, W> {
         let text = self.ws.text(&path).unwrap_or_default();
         let uri = path_to_uri(&path);
         let mut out = Vec::new();
+        let mut allows = Vec::new();
         for d in params["context"]["diagnostics"]
             .as_array()
             .into_iter()
             .flatten()
         {
             let msg = d["message"].as_str().unwrap_or("");
+            if let Some(edit) = self.allow_edit(&text, &d["data"]) {
+                let kind = d["data"]["allow"].as_str().unwrap_or("");
+                allows.push(json!({
+                    "title": format!("Allow this finding (`# lint: allow {kind}`)"),
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                    "edit": { "changes": { uri.clone(): [edit] } },
+                }));
+            }
+            // An allow that covers nothing: the diagnostic is on the
+            // comment line, which goes.
+            if msg.starts_with("unused-allow:")
+                && let Some(n) = d["range"]["start"]["line"].as_u64()
+                && text::line(&text, n as usize)
+                    .trim_start()
+                    .strip_prefix('#')
+                    .is_some_and(crate::logic::is_allow_comment)
+            {
+                out.push(json!({
+                    "title": "Remove this allow",
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                    "isPreferred": true,
+                    "edit": { "changes": { uri.clone(): [{
+                        "range": {
+                            "start": { "line": n, "character": 0 },
+                            "end": { "line": n + 1, "character": 0 },
+                        },
+                        "newText": "",
+                    }] } },
+                }));
+                continue;
+            }
             let (start, end) = (&d["range"]["start"], &d["range"]["end"]);
             let line = start["line"].as_u64().unwrap_or(0) as usize;
             if end["line"].as_u64() != Some(line as u64) {
@@ -434,7 +477,39 @@ impl<W: Write> Server<'_, W> {
                 "edit": { "changes": { uri.clone(): [{ "range": d["range"], "newText": fix }] } },
             }));
         }
+        out.extend(allows);
         Value::Array(out)
+    }
+
+    /// The edit that keeps a finding: `# lint: allow <kind>` on its own
+    /// line above the declaration at `data.line`, indented like it, or the
+    /// kind added to the allow comment already there.
+    fn allow_edit(&self, text: &str, data: &Value) -> Option<Value> {
+        let kind = data["allow"].as_str()?;
+        let n = data["line"].as_u64()? as usize;
+        let decl = text::line(text, n);
+        let indent = &decl[..decl.len() - decl.trim_start().len()];
+        if n > 0 {
+            let above = text::line(text, n - 1);
+            let comment = above.trim_start();
+            if comment
+                .strip_prefix('#')
+                .is_some_and(crate::logic::is_allow_comment)
+            {
+                // Right after `allow`, before any reason.
+                let at = above.len() - comment.len() + comment.find("allow")? + "allow".len();
+                let at = json!({ "line": n - 1, "character": self.enc.column(above, at) });
+                return Some(json!({
+                    "range": { "start": at, "end": at },
+                    "newText": format!(" {kind}"),
+                }));
+            }
+        }
+        let at = json!({ "line": n, "character": 0 });
+        Some(json!({
+            "range": { "start": at, "end": at },
+            "newText": format!("{indent}# lint: allow {kind}\n"),
+        }))
     }
 
     fn formatting(&self, params: &Value) -> Value {

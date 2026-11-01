@@ -275,7 +275,8 @@ Miniserver) and credentials are out of scope; they live in [`lox`](https://githu
 - find references and rename of module-level names (in a project, rename runs `loxl rename`, which
   also updates the lockfile)
 - quick fixes for "did you mean `X`?", old spellings, bare durations (`unit-suffix`) and a fragment
-  without its `page` line (`default-page`)
+  without its `page` line (`default-page`); `# lint: allow <kind>` above a finding's declaration,
+  and removing an allow that covers nothing
 
 `editor/vscode/` is the VS Code extension: highlighting, snippets and the client that starts the server
 (see [editor/vscode/README.md](editor/vscode/README.md)). Other editors run `loxl lsp` (or
