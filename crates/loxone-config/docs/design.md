@@ -162,7 +162,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
 | D28 | [`page "Title"` places blocks, and it is authoritative](decisions/0028-page-statement.md) | accepted, amended by [D56](decisions/0056-creating-pages.md) and [D84](decisions/0084-page-per-fragment.md) |
 | D29 | [The full view is for the reader; only the adoptable view must compile](decisions/0029-full-and-adoptable-view.md) | accepted |
-| D30 | [The full view hides what the GUI wrote by default](decisions/0030-observed-defaults.md) | accepted |
+| D30 | [The full view hides what the GUI wrote by default](decisions/0030-observed-defaults.md) | accepted, amended by [D128](decisions/0128-no-def-at-zero.md) |
 | D31 | [Removal tombstones](decisions/0031-removal-tombstones.md) | accepted |
 | D32 | [A ref matched by what it mirrors](decisions/0032-mirrors-matching.md) | accepted |
 | D33 | [Minted mirrors](decisions/0033-minted-mirrors.md) | accepted, amended by [D48](decisions/0048-text-ref-flag.md) |
@@ -238,3 +238,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
 | D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |
 | D127 | [Adopt takes over a calendar entry whose mode is gone](decisions/0127-calendar-entry-gone-mode.md) | accepted, amends [D115](decisions/0115-calendar-entry-mode.md) |
+| D128 | [A connector's 0 is no `Def=`](decisions/0128-no-def-at-zero.md) | accepted, amends [D30](decisions/0030-observed-defaults.md), extends [D112](decisions/0112-zero-is-no-attribute.md) |

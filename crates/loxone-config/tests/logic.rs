@@ -288,6 +288,61 @@ fn removing_set_restores_original_def_and_wires_tear_down() {
     assert_eq!(reverted.objects().len(), base.objects().len());
 }
 
+/// A save writes no `Def=` at 0 on any block connector, and a missing one
+/// is 0 (oracle sessions 90 and 91): a parameter, an expression's operand
+/// and an extern assignment of 0 write none.
+#[test]
+fn zero_on_a_connector_is_no_def() {
+    let base = base();
+    let src = "page \"Beschattung\"\n\
+               extern aussentemp = VirtualIn(iname: \"VI1\")\n\
+               extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n\
+               frost = Less(\"Frost\", Input1: aussentemp.Q, Input2: 0)\n\
+               warm = GreaterEqual(\"Warm\", Input1: aussentemp.Q, Input2: 0.0)\n\
+               kurz = Monoflop(\"Kurz\", InputTrigger: frost.Q, Time: 0)\n\
+               lang = Monoflop(\"Lang\", InputTrigger: frost.Q, Time: 2)\n\
+               unter_null = aussentemp.Q < 0\n\
+               jal_sued.TargetPos = 0\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &module, &mut lock, &opts()).unwrap();
+    let def = |doc: &LoxoneDoc, title: &str, key: &str| {
+        let objs = doc.objects();
+        let o = objs
+            .iter()
+            .find(|o| o.title.as_deref() == Some(title))
+            .unwrap_or_else(|| panic!("no block {title}"));
+        loxone_config::doc::ports(doc.element_at(&o.path).unwrap())
+            .into_iter()
+            .find(|p| p.key == key)
+            .unwrap()
+            .def
+    };
+    assert_eq!(def(&out, "Frost", "Input2"), None);
+    assert_eq!(def(&out, "Warm", "Input2"), None);
+    assert_eq!(def(&out, "Kurz", "Time"), None);
+    assert_eq!(def(&out, "Lang", "Time").as_deref(), Some("2"));
+    assert_eq!(def(&out, "aussentemp.Q ＜ 0", "Input2"), None);
+    assert_eq!(def(&out, "Beschattung Süd", "TargetPos"), None);
+
+    // Recompiling converges, and withdrawing the extern 0 restores 100.
+    let again = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+    let without = Module::parse(&src.replace("jal_sued.TargetPos = 0\n", "")).unwrap();
+    let restored = compile(&out, &without, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        def(&restored, "Beschattung Süd", "TargetPos").as_deref(),
+        Some("100")
+    );
+
+    // Decompile states the 0 where the GUI default is not 0.
+    let text = decompile(&out, &DecompileOptions::default())
+        .unwrap()
+        .0
+        .to_text();
+    assert!(text.contains("Time: 0"), "{text}");
+}
+
 #[test]
 fn ambiguity_and_no_match_are_reported() {
     let base = base();

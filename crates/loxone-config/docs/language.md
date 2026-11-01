@@ -392,7 +392,9 @@ value decides the meaning:
 
 - `Port: 28`, `Port: "text"`, `Port: constant` — a **parameter**: the
   literal (or resolved `let` constant) becomes `Def=` on the port with key
-  `Port`.
+  `Port`. A 0 writes no `Def=`: Loxone Config writes none at 0, and a
+  missing `Def=` is 0. A parameter the block does not state is therefore 0,
+  not the default Loxone Config gives a block it places.
 - `Port: slug.Port` — a **wire**: the referenced source port is wired into
   this port. Sources may be extern or managed ports (including the block
   itself — feedback is representable) and are referenced before or after
@@ -800,7 +802,7 @@ list.
 jal_sued.TargetPos = 70
 ```
 
-Rewrites the extern port's `Def=`; the original value is recorded in the
+Rewrites the extern port's `Def=` (a 0 removes it); the original value is recorded in the
 lockfile and **restored** when the statement disappears from source.
 
 Like `<-`, this is for **extern targets only**. A managed block's

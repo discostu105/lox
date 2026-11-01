@@ -1,6 +1,7 @@
 # D30: The full view hides what the GUI wrote by default
 
-Status: accepted (2026-08-25)
+Status: accepted (2026-08-25), amended by [D128](0128-no-def-at-zero.md): a missing `Def=` is 0, not the
+default
 
 ## Context
 

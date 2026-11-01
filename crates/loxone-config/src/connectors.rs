@@ -1404,6 +1404,14 @@ pub fn omitted_when_zero(block_type: &str, attr: &str) -> bool {
     settable && OMITTED_WHEN_ZERO.contains(&attr)
 }
 
+/// Whether a save writes this `Def=` on a block's connector. It writes
+/// none at 0, so an absent `Def=` is 0 on every block type and a bound 0
+/// compiles to no attribute. Loxone Config 17.2, and no real config holds
+/// `Def="0"` on a connector (see loxone-format.md).
+pub fn def_written(value: &str) -> bool {
+    !is_zero(value)
+}
+
 /// Whether a setting's value is 0 as a number (`0`, `0.0`, `-0`).
 pub fn is_zero(value: &str) -> bool {
     value.trim().parse::<f64>().is_ok_and(|v| v == 0.0)
