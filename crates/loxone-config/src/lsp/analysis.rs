@@ -11,8 +11,8 @@
 use crate::connectors::{BUILTIN_TYPES, PortDir, builtin};
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
-    CompileOptions, LintFinding, Module, TemplateParam, compile, lint_access, lint_dead_outputs,
-    lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
+    CompileOptions, LintFinding, Module, TemplateParam, compile, finish_lint, lint_access,
+    lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
 };
 use crate::port_meta::port_meta;
 use crate::{Error, Lockfile, Project};
@@ -274,6 +274,7 @@ impl Workspace {
             return out;
         }
         let mut findings = lint_source(&module).unwrap_or_default();
+        let mut project_lints = false;
 
         if let Some(project) = &unit.project
             && let Some(base) = self.base_doc(&project.base)
@@ -308,12 +309,14 @@ impl Workspace {
                             );
                             findings.extend(lint_tiles(&module, &compiled));
                             findings.extend(lint_access(&compiled));
+                            project_lints = true;
                         }
                         Err(e) => report(&e, &first, &mut out),
                     }
                 }
             }
         }
+        let findings = finish_lint(&module, findings.clone(), project_lints).unwrap_or(findings);
         for f in findings {
             let span = self.lint_span(&f, &decls, unit, &first);
             push(

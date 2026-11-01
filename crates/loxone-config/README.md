@@ -140,7 +140,7 @@ loxl compile --base current.Loxone --module modules/beschattung.loxl \
              --lock modules/beschattung.lock.json --out out.Loxone \
              --serial 504F94112233
 loxl rename alter_name neuer_name    # rename in sources and lockfile, identities kept
-loxl lint                            # findings by kind: unused names, dead outputs, bare durations, …
+loxl lint                            # findings by kind: unused names, dead outputs, bare durations, …; `# lint: allow <kind>` keeps one out
 loxl lint --fix                      # write unit suffixes (`Delay: 3h`); compile output unchanged
 loxl diff current.Loxone out.Loxone  # semantic diff; --summary for a commit message, --json
 loxl render out.Loxone --page Beschattung --out page.svg   # a page as SVG

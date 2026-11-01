@@ -68,7 +68,9 @@ pub use decompile::{
 };
 pub use defaults::taken as defaults_taken;
 pub use desugar::DesugarInfo;
-pub use lint::{LintFinding, LintKind, fix_unit_suffixes, lint_dead_outputs, lint_source};
+pub use lint::{
+    LintFinding, LintKind, finish_lint, fix_unit_suffixes, lint_dead_outputs, lint_source,
+};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,

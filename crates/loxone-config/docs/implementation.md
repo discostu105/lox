@@ -49,7 +49,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |
 | `adopt.rs`, `adopt_tree.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
 | `rename.rs` | `loxl rename`: slug rename across module and lockfile, synthetic slugs included | output unchanged except titles the slug feeds |
-| `lint.rs` | advisory lints: unused names, values out of range, bare durations (`unit-suffix`, fixable), blocks whose outputs feed nothing in the compiled config | never part of compile; `lint --fix` keeps the compile output byte-identical |
+| `lint.rs` | advisory lints: unused names, values out of range, bare durations (`unit-suffix`, fixable), blocks whose outputs feed nothing in the compiled config, `# lint: allow` comments | never part of compile; `lint --fix` keeps the compile output byte-identical |
 | `tiles.rs` | Touch Pure Flex tiles: tile arguments → functions, rewrite of claimed `<btns>`, tile lints | unlisted tiles and layout kept byte for byte |
 | `access.rs` | access rights on NFC Code Touch blocks, and push notification recipients | an `access` declaration owns every `TIM=` on its block |
 | `schedule.rs` | DayTimer schedules from source | rewrites `Modes=`, the entries and their counts only |

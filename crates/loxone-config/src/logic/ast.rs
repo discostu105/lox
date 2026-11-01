@@ -2396,7 +2396,12 @@ impl Module {
         // A multi-line item is visually dense: a blank line separates it
         // from its neighbors even when the kind does not change.
         let mut prev_multiline = false;
+        let is_allow =
+            |item: &Item| matches!(item, Item::Comment(c) if super::lint::is_allow_comment(c));
         let mut skip = 0;
+        // The previous line was a `# lint: allow` comment: it stays right
+        // above the statement it is for.
+        let mut attached = false;
         for (i, item) in self.items.iter().enumerate() {
             if skip > 0 {
                 skip -= 1;
@@ -2405,16 +2410,33 @@ impl Module {
             if matches!(item, Item::FragmentEnd) {
                 continue;
             }
-            let disc = family(item);
+            let mut disc = family(item);
             let mut text = String::new();
             skip = self.write_item(i, item, depth, &mut text);
-            let multiline = text.trim_end_matches('\n').contains('\n');
-            if prev.is_some_and(|p| p != disc || prev_multiline || multiline) {
+            let mut multiline = text.trim_end_matches('\n').contains('\n');
+            let allow = is_allow(item);
+            if allow
+                && let Some((j, next)) = self
+                    .items
+                    .iter()
+                    .enumerate()
+                    .skip(i + 1)
+                    .find(|(_, x)| !is_allow(x))
+                && !matches!(next, Item::Comment(_) | Item::FragmentEnd)
+            {
+                // Spaced like the statement below it.
+                let mut next_text = String::new();
+                self.write_item(j, next, depth, &mut next_text);
+                disc = family(next);
+                multiline = next_text.trim_end_matches('\n').contains('\n');
+            }
+            if !attached && prev.is_some_and(|p| p != disc || prev_multiline || multiline) {
                 out.push('\n');
             }
             out.push_str(&text);
             prev = Some(disc);
             prev_multiline = multiline;
+            attached = allow;
         }
         out
     }
