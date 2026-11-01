@@ -45,9 +45,14 @@ pub enum Item {
     Signal(SignalDecl),
     /// `page "Title"` — the base-config page the following block
     /// declarations are placed on. Positional: governs every block
-    /// after it, until the next `page` statement; blocks above the first
+    /// after it, until the next `page` statement or the end of its
+    /// fragment ([`Item::FragmentEnd`]); blocks above a fragment's first
     /// `page` statement keep the compile options' default page.
     Page(PageDecl),
+    /// The end of one file of a directory module, inserted between the
+    /// fragments by [`Module::from_fragments`]. Never parsed or printed:
+    /// it only ends the governance of the fragment's last `page`.
+    FragmentEnd,
     /// `test "Name"` … `end` — a simulator-backed scenario.
     /// `compile` ignores it entirely; `loxl test` compiles the module in
     /// memory and replays the body in the simulator.
@@ -1868,6 +1873,19 @@ impl Module {
         super::parser::parse(src)
     }
 
+    /// The module of a directory: the fragments' items in file order, an
+    /// [`Item::FragmentEnd`] behind each, so a `page` statement governs
+    /// only the rest of its own file. Name resolution has not run; call
+    /// [`Module::validate`] (or expand first) on the result.
+    pub fn from_fragments(fragments: impl IntoIterator<Item = Module>) -> Module {
+        let mut items = Vec::new();
+        for f in fragments {
+            items.extend(f.items);
+            items.push(Item::FragmentEnd);
+        }
+        Module { items }
+    }
+
     /// Read every `file("…")` value relative to `dir` — the directory
     /// of the `.loxl` file these items were parsed from — so each fragment
     /// resolves its own paths before the merge. CRLF becomes LF: Loxone's
@@ -2190,6 +2208,8 @@ impl Module {
                 // A `page` statement heads a placement section — the blank
                 // line on both sides comes from the family change.
                 Item::Page(_) => 10,
+                // Not printed (skipped below).
+                Item::FragmentEnd => 10,
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
@@ -2207,6 +2227,9 @@ impl Module {
         for (i, item) in self.items.iter().enumerate() {
             if skip > 0 {
                 skip -= 1;
+                continue;
+            }
+            if matches!(item, Item::FragmentEnd) {
                 continue;
             }
             let disc = family(item);
@@ -2227,6 +2250,7 @@ impl Module {
         let mut multiline = false;
         let mut skip = 0;
         match item {
+            Item::FragmentEnd => {}
             Item::Extern(e) => {
                 out.push_str(&format!(
                     "extern {} = {}({}){}\n",

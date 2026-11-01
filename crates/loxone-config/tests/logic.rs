@@ -2239,13 +2239,16 @@ fn adopt_pages_fragments_merge_to_the_single_module() {
     assert_eq!(lock_a.to_json(), lock_b.to_json());
     let stems: Vec<&str> = fragments.iter().map(|(s, _)| s.as_str()).collect();
     assert_eq!(stems, ["_periphery", "beschattung"]);
-    let merged = Module {
-        items: fragments
-            .iter()
-            .flat_map(|(_, m)| m.items.iter().cloned())
-            .collect(),
-    };
-    assert_eq!(merged, single);
+    // Each fragment opens with its `page` (the periphery has none), so
+    // the merge places every block as the single module does.
+    let merged = Module::from_fragments(fragments.iter().map(|(_, m)| m.clone()));
+    let unmarked: Vec<_> = merged
+        .items
+        .iter()
+        .filter(|i| !matches!(i, loxone_config::logic::Item::FragmentEnd))
+        .cloned()
+        .collect();
+    assert_eq!(unmarked, single.items);
     // Each fragment is parseable in fragment form (a lone fragment may
     // cross-reference sibling slugs, so full parse is not required).
     for (stem, m) in &fragments {
@@ -2805,9 +2808,10 @@ fn module_fragments_merge_and_cross_reference() {
         Module::parse(frag_b).is_err(),
         "a lone fragment with a cross-file reference must not pass full parse"
     );
-    let mut items = Module::parse_fragment(frag_a).unwrap().items;
-    items.extend(Module::parse_fragment(frag_b).unwrap().items);
-    let merged = Module { items };
+    let merged = Module::from_fragments([
+        Module::parse_fragment(frag_a).unwrap(),
+        Module::parse_fragment(frag_b).unwrap(),
+    ]);
     merged.validate().unwrap();
     assert_eq!(merged.externs().count(), 1);
     assert_eq!(merged.blocks().count(), 1);
@@ -2816,9 +2820,12 @@ fn module_fragments_merge_and_cross_reference() {
 #[test]
 fn module_fragments_duplicate_slug_is_rejected() {
     let frag = "x = Not(\"X\", I: x.Q)\n";
-    let mut items = Module::parse_fragment(frag).unwrap().items;
-    items.extend(Module::parse_fragment(frag).unwrap().items);
-    let err = Module { items }.validate().unwrap_err();
+    let err = Module::from_fragments([
+        Module::parse_fragment(frag).unwrap(),
+        Module::parse_fragment(frag).unwrap(),
+    ])
+    .validate()
+    .unwrap_err();
     assert!(err.to_string().contains("duplicate name `x`"), "{err}");
 }
 

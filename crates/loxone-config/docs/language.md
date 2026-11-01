@@ -732,10 +732,12 @@ wp_ein = And(
 
 Names the `<C Type="Page">` (by display title, as in the base config) that
 the block declarations after it are built on — until the next `page`
-statement. Blocks above the first `page` statement keep the default page
-(`--page`, the project file, or the document's first page). Placement is
-positional, so the synthetic blocks of an expression land on the page the
-expression is written under.
+statement or the end of the file. Blocks above a file's first `page` statement
+keep the default page (`--page`, the project file, or the document's first
+page), also in a directory module where an earlier file names a page. Placement
+is positional, so the synthetic blocks of an expression land on the page the
+expression is written under. Objects of the object tree (a `VirtualIn`, a
+`Mode`, a device's I/O) have no page and ignore the statement.
 
 The statement is **authoritative**. On every compile, each block it governs is pinned to a base page
 with the declared title:
@@ -1497,13 +1499,15 @@ A module may be a directory of `*.loxl` fragments instead of one file.
 - Fragments parse one by one (errors name the file), then join into one module, subdirectories
   included, in path order.
 - Names resolve once over the whole module, so a fragment may use slugs declared in a sibling file.
-- The split has no meaning of its own: one namespace, one lockfile, and **no `import` statement** (it
-  would name a dependency with no effect). The convention is one file per page, with
+- The split means nothing beyond the scope of `page` (below): one namespace, one lockfile, and **no
+  `import` statement** (it would name a dependency with no effect). The convention is one file per page, with
   `_periphery.loxl` for the externs.
 - Dot-entries (`.git`, editor caches) are skipped.
-- `page` is positional across the merge: it governs the blocks after it until the next `page`, across
-  fragment boundaries. Start every fragment that declares blocks with its `page` statement, as
-  decompile and adopt do. Otherwise merge order only affects determinism.
+- `page` governs only its own fragment: from the statement to the next `page` or the end of the file.
+  Blocks above a fragment's first `page` take the default page, whatever page the previous file
+  named. Start every fragment that declares blocks with its `page` statement, as decompile and adopt
+  do; `loxl lint` reports a fragment that does not while others do (`default-page`). Merge order only
+  affects determinism.
 
 A directory with a `lox.toml` is a **project** — one deployment target:
 
@@ -1559,9 +1563,9 @@ Compile errors and their remedies are in [agents.md](agents.md#errors-and-remedi
 
 ## Changes from v1
 
-v2 keeps every v1 file's meaning; what changed is spelling, and
-each dropped spelling is an error that names its replacement. The
-compile output of a migrated file is byte-identical.
+v2 keeps every v1 file's meaning but one (`page` scope, below); what
+changed is spelling, and each dropped spelling is an error that names its
+replacement. The compile output of a migrated file is byte-identical.
 
 - **`on`/`off`** are reserved boolean literals in every value position
   (`I2: on` = `I2: 1`). Text-boolean attributes (`Analog:`, `Signed:`,
@@ -1591,11 +1595,16 @@ compile output of a migrated file is byte-identical.
   Touches (or notifications, `frost.recipients = familie`) may share one. The v1 form
   `access haustuer … end` on the extern is an error naming the set and the claim. Decompile writes
   `<slug>_access` sets. Set parameters take `access` and `recipients`.
+- **`page` is scoped to its file.** In a directory module a `page` statement governs the blocks after
+  it up to the next `page` or the end of its fragment. v1 carried it into the following files, so a
+  file without its own `page` took the previous file's page. Such a file now takes the default page;
+  `loxl lint` reports it (`default-page`). A single-file module does not change.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
 `inst_block` as `inst.block` (or `inst` for the primary block) and turn
-string-valued set parameters into set parameters, rename each
+string-valued set parameters into set parameters, give each fragment
+whose blocks relied on the previous file's `page` that `page` line, rename each
 `access <extern>` / `recipients <extern>` to `access <extern>_access` /
 `recipients <extern>_recipients` and add the claim
 (`<extern>.access = <extern>_access`) after its `end`, then `loxl fmt`

@@ -234,7 +234,7 @@ impl Workspace {
             push(out, span, Severity::Error, message);
         };
 
-        let mut items = Vec::new();
+        let mut fragments = Vec::new();
         let mut failed = false;
         for f in &unit.files {
             let text = self.text(f).unwrap_or_default();
@@ -242,7 +242,7 @@ impl Workspace {
                 m.load_files(f.parent().unwrap_or(Path::new(".")))?;
                 Ok(m)
             }) {
-                Ok(m) => items.extend(m.items),
+                Ok(m) => fragments.push(m),
                 Err(e) => {
                     report(&e, f, &mut out);
                     failed = true;
@@ -252,7 +252,7 @@ impl Workspace {
         if failed {
             return out;
         }
-        let module = Module { items };
+        let module = Module::from_fragments(fragments);
         let first = unit.files[0].clone();
         let checked = module
             .expand()

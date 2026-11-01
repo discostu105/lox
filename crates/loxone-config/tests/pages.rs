@@ -244,3 +244,73 @@ fn page_arguments_parse_and_print() {
         assert!(Module::parse(bad).is_err(), "{bad}");
     }
 }
+
+/// The module of a directory: each fragment parsed alone, then merged.
+fn fragments(files: &[&str]) -> Module {
+    Module::from_fragments(files.iter().map(|f| Module::parse_fragment(f).unwrap()))
+}
+
+#[test]
+fn a_page_governs_only_its_own_fragment() {
+    // `b` comes after `page "Zentral"` in the merged item list, but in
+    // another file: it takes the default page (the document's first),
+    // as it would on its own. Within one file the page still carries.
+    let module = fragments(&[
+        "page \"Zentral\"\n\na = Not()\n\nc = Not(I: a.Q)\n",
+        "b = Not(I: a.Q)\n",
+    ]);
+    module.validate().unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    assert_eq!(page_of(&out, &lock, "a"), "Zentral");
+    assert_eq!(page_of(&out, &lock, "c"), "Zentral");
+    assert_eq!(page_of(&out, &lock, "b"), "Automatik-Regeln");
+    // The compile options' default page is the default for every file.
+    let mut lock = Lockfile::new();
+    let out = compile(
+        &base(),
+        &module,
+        &mut lock,
+        &CompileOptions {
+            page_title: Some("K\u{fc}che".into()),
+            ..opts()
+        },
+    )
+    .unwrap();
+    assert_eq!(page_of(&out, &lock, "b"), "K\u{fc}che");
+    // The fragment boundary is not printed.
+    assert_eq!(
+        module.to_text(),
+        "page \"Zentral\"\n\na = Not()\nc = Not(\n\tI: a.Q,\n)\n\nb = Not(\n\tI: a.Q,\n)\n"
+    );
+}
+
+#[test]
+fn a_fragment_without_a_page_in_a_paged_module_is_linted() {
+    use loxone_config::logic::{LintKind, lint_source};
+    let lint = |m: &Module| -> Vec<String> {
+        lint_source(m)
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.kind == LintKind::DefaultPage)
+            .map(|f| format!("{}: {}", f.slug, f.detail))
+            .collect()
+    };
+    let module = fragments(&[
+        "page \"Zentral\"\n\na = Not()\n",
+        "# no page\nv = VirtualIn()\n\nb = Not(I: v.Q)\n\nc = Not(I: b.Q)\n",
+        "page \"K\u{fc}che\"\n\nd = Not(I: c.Q)\n",
+    ]);
+    let found = lint(&module);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].starts_with("b: 2 blocks before any"), "{found:?}");
+    // Object-tree items (a VirtualIn, a Mode) take no page: not flagged.
+    let module = fragments(&["page \"Zentral\"\n\na = Not(I: v.Q)\n", "v = VirtualIn()\n"]);
+    assert!(lint(&module).is_empty());
+    // A module without any `page` uses the default page throughout.
+    let module = fragments(&["a = Not()\n", "b = Not(I: a.Q)\n"]);
+    assert!(lint(&module).is_empty());
+    // A single file may open with default-page blocks.
+    let module = Module::parse("a = Not()\n\npage \"Zentral\"\n\nb = Not(I: a.Q)\n").unwrap();
+    assert!(lint(&module).is_empty());
+}

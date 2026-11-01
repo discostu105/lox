@@ -217,9 +217,11 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   open/close (Co/Cc), `Safety` the wind alarm (Wa), `Window` the window contact, `Stop` Off. On a
   `LightController2`, `Move` is motion (Mo), `Reset` Off, `MoveOn` the motion extend time.
   `loxl types <T>` shows the labels.
-- **Pages.** `page "Title"` puts the blocks that follow on that page. `page "Title" (room: "…")`
-  creates the page if it is missing (the room is required); without `room:` a missing title is an
-  error.
+- **Pages.** `page "Title"` puts the blocks that follow on that page, up to the next `page` or the end
+  of the file. In a directory module, open every file that declares blocks with its `page`: a file
+  without one puts its blocks on the default page, whatever the previous file said. `page "Title"
+  (room: "…")` creates the page if it is missing (the room is required); without `room:` a missing
+  title is an error.
 - **Templates first.** Before building a common automation by hand, look in `loxl templates` (motion
   and staircase light, push-button, heating and humidity hysteresis, CO2 ventilation, door and water
   alarms, intrusion alarm, awning protection). `loxl templates <name> > pages/licht.loxl` copies one

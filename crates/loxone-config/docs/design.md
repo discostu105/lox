@@ -153,7 +153,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D25 | [Projects are a `lox.toml`, and there is no `import`](decisions/0025-projects-lox-toml.md) | accepted |
 | D26 | [Expressions bind in argument lists too](decisions/0026-expressions-in-arguments.md) | accepted |
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
-| D28 | [`page "Title"` places blocks, and it is authoritative](decisions/0028-page-statement.md) | accepted, amended by [D56](decisions/0056-creating-pages.md) |
+| D28 | [`page "Title"` places blocks, and it is authoritative](decisions/0028-page-statement.md) | accepted, amended by [D56](decisions/0056-creating-pages.md) and [D84](decisions/0084-page-per-fragment.md) |
 | D29 | [The full view is for the reader; only the adoptable view must compile](decisions/0029-full-and-adoptable-view.md) | accepted |
 | D30 | [The full view hides what the GUI wrote by default](decisions/0030-observed-defaults.md) | accepted |
 | D31 | [Removal tombstones](decisions/0031-removal-tombstones.md) | accepted |
@@ -209,3 +209,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D81 | [Named signals](decisions/0081-named-signals.md) | accepted |
 | D82 | [Template instances are named by the instance](decisions/0082-template-instance-names.md) | accepted |
 | D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |
+| D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |

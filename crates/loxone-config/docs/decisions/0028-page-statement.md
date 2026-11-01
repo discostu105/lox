@@ -1,6 +1,7 @@
 # D28: `page "Title"` places blocks, and it is authoritative
 
-Status: accepted (2026-08-25), amended by [D56](0056-creating-pages.md)
+Status: accepted (2026-08-25), amended by [D56](0056-creating-pages.md) and
+[D84](0084-page-per-fragment.md)
 
 ## Context
 
@@ -23,4 +24,5 @@ until the next `page` statement.
 - Decompile writes `page` statements as section headers. Per-page modules and fragments open with theirs.
   The periphery is not a page and keeps a comment.
 - The order of fragments matters for `page`. The convention is that every fragment opens with its `page`
-  statement ([language.md](../language.md)).
+  statement ([language.md](../language.md)). [D84](0084-page-per-fragment.md) ends a `page` at the end
+  of its fragment.
