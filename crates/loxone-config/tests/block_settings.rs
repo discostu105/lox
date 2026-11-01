@@ -253,11 +253,11 @@ fn the_diff_sees_the_settings() {
         "{:?}",
         d.param_changes
     );
-    use loxone_config::diff::{semantic_fingerprint, semantic_fingerprint_v10};
+    use loxone_config::diff::{semantic_fingerprint, semantic_fingerprint_v11};
     assert_ne!(semantic_fingerprint(&a), semantic_fingerprint(&b));
     // An older lock's fingerprint is blind to them, so an upgrade alone
     // never reads as drift.
-    assert_eq!(semantic_fingerprint_v10(&a), semantic_fingerprint_v10(&b));
+    assert_eq!(semantic_fingerprint_v11(&a), semantic_fingerprint_v11(&b));
 }
 
 #[test]
