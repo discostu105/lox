@@ -210,7 +210,8 @@ Passwords and codes show as names, counts and short hashes, never as stored.
         details: r#"Options:
   --lock <lock.json>  Lockfile to compare against (default: the lox.toml project's)
 
-Exit 0 when in sync. Exit 1 when the config changed since the last adopt or compile.
+Exit 0 when in sync, also for the config the last compile started from (its output is not
+pushed yet). Exit 1 when the config changed since the last adopt or compile.
 Moved blocks and the changes Loxone Config makes on every save don't count.
 Run `loxl diff` to see what changed.
 "#,
@@ -2368,6 +2369,17 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = loxone_config::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches {lock_path}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    // The config the last compile started from: nothing changed it since,
+    // its output is only not pushed yet.
+    if lock.target.source_config_sha256.as_deref()
+        == Some(loxone_config::lock::sha256_hex(&doc.to_bytes()).as_str())
+    {
+        println!(
+            "in sync: {config} is the config the last compile of {lock_path} started from. \
+             Its output is not pushed yet."
+        );
         return Ok(ExitCode::SUCCESS);
     }
     // A lock written by an older Lox Logic records an older form, blind

@@ -2037,7 +2037,8 @@ replacement. The compile output of a migrated file is byte-identical.
   reports bare durations that read better with their unit (`unit-suffix`); `loxl lint --fix` writes
   the suffixes. Module-check errors name the fragment and line. The language server hovers and
   goes to the definition of `inst.block` and `inst.block.Port`, completes argument keys (in
-  `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
+  `defaults` too, leaving out the ones the call binds already) and signal names, shows the
+  defaults a template body's block takes, and offers the `unit-suffix` and `default-page` fixes. `dead-outputs` counts what the app shows,
   statistics, energy flow, messages and modes as used and reports a device's unused inputs once;
   `# lint: allow <kind>` keeps a deliberate finding out (see [Lint](#lint)).
 - **One spelling per operating mode** in rules and schedules: a built-in mode in a schedule by its day

@@ -907,21 +907,42 @@ impl Workspace {
     }
 
     /// The parameters block `decl` takes from its type's `defaults`
-    /// statement: the ones it does not bind itself.
+    /// statement: the ones it does not bind itself. A block of a template
+    /// body takes them in every instance.
     fn defaults_taken(&self, unit: &Unit, decl: &Decl) -> Option<String> {
+        use crate::logic::Item;
         let ty = decl.ty.as_deref()?;
-        let items: Vec<crate::logic::Item> = unit
+        let items: Vec<Item> = unit
             .files
             .iter()
             .filter_map(|f| Module::parse_fragment(&self.text(f)?).ok())
             .flat_map(|m| m.items)
             .collect();
         let d = items.iter().find_map(|i| match i {
-            crate::logic::Item::Defaults(d) if d.block_type == ty => Some(d),
+            Item::Defaults(d) if d.block_type == ty => Some(d),
             _ => None,
         })?;
-        let block = items.iter().find_map(|i| match i {
-            crate::logic::Item::Block(b) if b.slug == decl.slug => Some(b),
+        // The template whose body holds the declaration, if one does.
+        let text = self.text(&decl.span.file)?;
+        let lines: Vec<&str> = text.split('\n').collect();
+        let template = template_bodies(&text)
+            .into_iter()
+            .find(|(body, _)| body.start < decl.span.line && body.contains(&decl.span.line))
+            .and_then(|(body, _)| {
+                let head = code(lines.get(body.start)?)
+                    .trim_start()
+                    .strip_prefix("template ")?;
+                Some(head.split(|c: char| !is_ident(c)).next()?.to_string())
+            });
+        let scope: &[Item] = match &template {
+            Some(name) => items.iter().find_map(|i| match i {
+                Item::Template(t) if &t.name == name => Some(t.body.as_slice()),
+                _ => None,
+            })?,
+            None => &items,
+        };
+        let block = scope.iter().find_map(|i| match i {
+            Item::Block(b) if b.slug == decl.slug => Some(b),
             _ => None,
         })?;
         let lines: Vec<String> = crate::logic::defaults_taken(d, block)
@@ -1046,8 +1067,14 @@ impl Workspace {
             }
             return self.port_completions(&unit, &decl);
         }
-        if let Some(callee) = key_position(&text, line, &before[..partial]) {
-            return self.key_completions(&unit, &decls, &callee);
+        if let Some((callee, open)) = key_position(&text, line, &before[..partial]) {
+            // A key the call binds already is not offered again.
+            let bound = bound_keys(&text, open, (line, partial));
+            return self
+                .key_completions(&unit, &decls, &callee)
+                .into_iter()
+                .filter(|c| !bound.contains(&c.label))
+                .collect();
         }
         if is_type_position(&before[..partial]) {
             let mut out: Vec<Completion> = BUILTIN_TYPES
@@ -1618,8 +1645,9 @@ fn blank_strings(code: &str) -> String {
 /// The call whose argument key goes at the end of `before` (the start of
 /// line `line` of `text` up to the word being typed): `before` is blank
 /// or ends after `(` or `,`, inside the argument list of a `defaults`
-/// statement, a block or an instance.
-fn key_position(text: &str, line: usize, before: &str) -> Option<Callee> {
+/// statement, a block or an instance. With it, where its `(` is (line,
+/// byte).
+fn key_position(text: &str, line: usize, before: &str) -> Option<(Callee, (usize, usize))> {
     let t = before.trim_end();
     if !(t.trim_start().is_empty() || t.ends_with('(') || t.ends_with(',')) {
         return None;
@@ -1637,12 +1665,58 @@ fn key_position(text: &str, line: usize, before: &str) -> Option<Callee> {
             match c {
                 ')' => depth += 1,
                 '(' if depth > 0 => depth -= 1,
-                '(' => return callee(&part[..i]),
+                '(' => return callee(&part[..i]).map(|c| (c, (n, i))),
                 _ => {}
             }
         }
     }
     None
+}
+
+/// The keys bound in the argument list opened at `open` (line, byte of the
+/// `(`), up to its `)`, except one that starts at `typing` (the word being
+/// completed).
+fn bound_keys(
+    text: &str,
+    open: (usize, usize),
+    typing: (usize, usize),
+) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let mut depth = 0usize;
+    for (n, l) in text.split('\n').enumerate().skip(open.0) {
+        let blanked = blank_strings(code(l));
+        let from = if n == open.0 { open.1 } else { 0 };
+        let b = blanked.as_bytes();
+        let mut i = from;
+        while i < b.len() {
+            match b[i] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return out;
+                    }
+                }
+                c if depth == 1
+                    && is_ident(c as char)
+                    && (i == 0 || !is_ident(b[i - 1] as char)) =>
+                {
+                    let start = i;
+                    while i < b.len() && is_ident(b[i] as char) {
+                        i += 1;
+                    }
+                    let rest = blanked[i..].trim_start();
+                    if rest.starts_with(':') && (n, start) != typing {
+                        out.insert(blanked[start..i].to_string());
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    out
 }
 
 /// The callee `head` (a line up to its `(`) opens: `defaults Type`,
@@ -1825,6 +1899,41 @@ x = heizen.Q == 1
         );
         let (md, _) = ws.hover(path, 2, 0).unwrap();
         assert!(!md.contains("From `defaults"), "{md}");
+
+        // A template body's block takes them in every instance.
+        let src = "defaults Monoflop(Time: 2s, Reset: 1)\n\
+                   template t()\n\
+                   \tm = Monoflop(Reset: 0)\n\
+                   end\n";
+        ws.open(path.to_path_buf(), src.to_string());
+        let (md, _) = ws.hover(path, 2, 1).unwrap();
+        assert!(
+            md.contains("From `defaults Monoflop(…)`:\n```loxl\n\tTime: 2s,\n```"),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn key_completion_leaves_out_bound_keys() {
+        let src = "m = Monoflop(\n\tTime: 2s,\n\t\n\tReset: 0,\n)\nn = Monoflop(Time: 1s, )\n";
+        let path = Path::new("/nowhere/a.loxl");
+        let mut ws = Workspace::default();
+        ws.open(path.to_path_buf(), src.to_string());
+        let labels = |line, byte| -> Vec<String> {
+            ws.completion(path, line, byte)
+                .into_iter()
+                .map(|c| c.label)
+                .collect()
+        };
+        let in_m = labels(2, 1);
+        assert!(!in_m.is_empty());
+        assert!(
+            !in_m.iter().any(|l| l == "Time" || l == "Reset"),
+            "{in_m:?}"
+        );
+        let in_n = labels(5, 23);
+        assert!(!in_n.iter().any(|l| l == "Time"), "{in_n:?}");
+        assert!(in_n.iter().any(|l| l == "Reset"), "{in_n:?}");
     }
 
     #[test]
