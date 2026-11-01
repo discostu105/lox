@@ -133,7 +133,12 @@ rendered inline (`<Key>2B35</Key>`).
   ([D42](decisions/0042-placement-gui-geometry.md)).
 - `Cl` — RGB display color. Defaults differ by type: logic blocks are
   green (`141,255,112`), Memory grey, AutoJalousie blue.
-- `Desc=` — a description. Loxone Config writes it right after `Type=`.
+- `Desc=` — the name the app shows (*Anzeigename* under *Visualisierung*;
+  without it the app shows `Title`). Loxone Config writes it right after
+  `Type=`, on every type but `Plugin`, and moves it there on save. Plain
+  gates have no such field. `Desc:` authors it
+  ([D95](decisions/0095-block-settings.md)). Source: corpus, oracle
+  session 43.
 - `Nio` — connector count. Matches the number of `<Co>` children: Loxone
   emits **all** connectors, including unwired outputs and inputs without
   values.
@@ -144,13 +149,49 @@ rendered inline (`<Key>2B35</Key>`).
   UUID-list attributes…). All of it round-trips untouched through the
   lossless tree. Some of it is **block logic stored outside connectors**:
   - `PulseAt` keeps its fire time in `Sec=`, seconds since midnight
-    (`At:` authors it, [D79](decisions/0079-pulseat-fire-time.md)). `Typ="0"` is the fixed-time mode: every
-    V172+ instance with a `Sec=` has it (11 of 11), and a corpus block
-    titled "Pulse at 00:00" has `Sec="0"`. Loxone's documentation offers
-    time functions (sunrise, dusk, hour and month pulses) in the same
-    dialog. Which `Typ=` value means which is not observed yet, so a
-    non-zero `Typ=` stays with the GUI. `AutP=` also appears on `Memory`
-    blocks and is not a PulseAt flag.
+    (`At:` authors it, [D79](decisions/0079-pulseat-fire-time.md)), and
+    what it fires on in `Typ=` (*Impuls*, `Pulse:` authors it): 0 at a
+    fixed time, 1 yearly, 2 monthly, 3 daily, 4 hourly, 5 every minute, 6
+    every second, 7 on start, 8 at dusk, 9 at dawn, 10 at sunset, 11 at
+    sunrise. The dropdown has 12 entries; 12 shows blank. A save keeps
+    each value. *Einmaliger Impuls* (one-off) is no separate flag: ticking
+    it adds a date field and writes `Sec=` as an absolute date in Loxone
+    epoch seconds (≥ 86400) plus `LtE=`, so a `Sec=` of a day or more is
+    not a time of day. A bare mint gets `Sec="0" Typ="0"` on save. Every
+    corpus `Typ=` is 0. Source: oracle sessions 43 and 44. `AutP=` also
+    appears on `Memory` blocks and is not a PulseAt flag.
+  - `Memory` keeps its value type in `Tp=` (*Typ*): 0 digital, 1 analog,
+    2 text. In the corpus 0 goes with digital sources, 1 with `AQ`
+    outputs (60 of 62) and 2 with `TQ` outputs (2 of 2). Source: corpus,
+    oracle session 43.
+  - `AutoJalousie` has `Sun="true"` when *Sonnenschein verwenden* is
+    ticked. Unticking it removes the attribute on save; a blind without
+    it shows the box unticked. Source: oracle session 44.
+  - Meters (`MeterDig`, `MeterAbsUni`, `MeterAbsBi`, `MeterAbsSt`) keep
+    their display fields in `PwrN=` (*Anzeigename* of the power value),
+    `Un1=` and `Un2=` (the two *Einheit* fields) and, on `MeterAbsSt`,
+    `UnSt=` and `MaxLvl=` (storage unit, *Max. Speicherstand*). A save
+    keeps them; a minted meter gets none of them, only `Rec=""`. `Rec=`
+    holds the UUID of the energy flow monitor the meter belongs to.
+    `StatsType=` is 8 on every corpus meter. Source: corpus, oracle
+    session 43.
+  - `DayTimer` keeps the texts the app shows for on and off in `On=` and
+    `Off=` (*Bezeichnung Ein*/*Aus*); a save writes both, empty when
+    unset. Source: oracle session 43.
+  - `Code16` and `Code8` have `Task="1"` on every corpus block and after
+    every save. Loxone Config shows no field for it. Source: corpus,
+    oracle session 43.
+  - A `VirtualIn` holds `MinChange=`, `MinTime=`, `ValOT=` and `Idx=`,
+    which its property pane never shows. A save drops `ValOT="0"` and
+    `Idx="0"` and keeps other values. A digital input's save forces
+    `MinChange=` to 0.5. Source: oracle sessions 43 and 44.
+  - `Alarm` and `SmokeAlarm` list their members in `Objects=`, a comma
+    list that mixes block UUIDs (music players, lighting and shading
+    blocks, central blocks) with hidden refs. `Entries=` is 40 on every
+    corpus block; `CentralOut=` is 1 or 2, meaning unknown.
+    `CentralLight` and `CentralShade` list their members in `rec=`, a
+    comma list of `LightController2` or `AutoJalousie` UUIDs. Source:
+    corpus (4 alarms, 3 smoke alarms, 2 central lights, 1 central shade).
   - `DayTimer` keeps its schedule as `<Entry>` child elements after the
     `<Co>` list (`N=` holds their count). `Analog=`/`DefValue=`/`On=`/
     `Off=` set the output behavior, `Modes=`/`UserModes=` the

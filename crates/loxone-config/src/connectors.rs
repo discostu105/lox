@@ -1149,34 +1149,77 @@ pub const BUILTIN_TYPES: &[&str] = &[
 /// these. Compile emits the document's version when it is listed here.
 pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
 
-/// Element-attribute parameters per block type: logic Loxone stores as an
-/// attribute on the `<C>` element rather than as `Def=` on a connector. In
-/// the source they bind like any parameter (`Formula: "I1+I2"` in the argument
-/// list). Every observed `Formula=` attribute is accompanied by
-/// `Valid="false"` (the GUI revalidates on load); the compiler emits that
+/// Element-attribute parameters per block type: logic and settings Loxone
+/// stores as an attribute on the `<C>` element rather than as `Def=` on a
+/// connector. In the source they bind like any parameter (`Formula: "I1+I2"`
+/// in the argument list). Every observed `Formula=` attribute is accompanied
+/// by `Valid="false"` (the GUI revalidates on load); the compiler emits that
 /// pair together.
 ///
 /// An attribute parameter that is also GUI-owned (`Code=` on Code16, see
-/// [`crate::doc::GUI_OWNED_ATTRS`]) is a *claim*: carried verbatim
-/// from the base until the source binds it, written from source while it
-/// does. Decompile never lifts it, so adopting leaves it with the GUI.
-pub fn attr_params(block_type: &str) -> &'static [&'static str] {
-    match block_type {
+/// [`crate::doc::GUI_OWNED_ATTRS`] and [`carried_attrs`]) is a *claim*:
+/// carried verbatim from the base until the source binds it, written from
+/// source while it does. Decompile lifts every one but program text.
+pub fn attr_params(block_type: &str) -> Vec<&'static str> {
+    let own: &[&str] = match block_type {
         "Formula" => &["Formula"],
         "Code16" => &["Code"],
-        "PulseAt" => &["At"],
+        "PulseAt" => &["At", "Pulse"],
         "VirtualIn" => &["Analog", "MinVal", "MaxVal", "DefVal"],
+        "Memory" => &["Type"],
+        "AutoJalousie" => &["Sun"],
+        "DayTimer" => &["On", "Off"],
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2"],
+        "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "MaxLvl"],
         t => crate::periphery::periphery(t).map_or(&[], |p| p.settings),
+    };
+    let mut v = own.to_vec();
+    if DESC_TYPES.contains(&block_type) {
+        v.push("Desc");
     }
+    v
 }
 
+/// The types whose `Desc=` the source may claim (`Desc:`): the name the
+/// app shows instead of the title ("Anzeigename" in Loxone Config). The app
+/// controls the catalogue lists, and the types real configs or a Loxone
+/// Config pane show it on. Plain logic blocks have no such field.
+const DESC_TYPES: &[&str] = &[
+    "PButtonT",
+    "PushButton",
+    "VirtualIn",
+    "Memory",
+    "PulseAt",
+    "DayTimer",
+    "AutoJalousie",
+    "CentralLight",
+    "CentralShade",
+    "MeterDig",
+    "MeterAbsUni",
+    "MeterAbsBi",
+    "MeterAbsSt",
+    "LightController2",
+    "Code16",
+    "HeatIRoomController2",
+    "StairwayLS",
+    "State",
+    "ModbusDev",
+    "ModbusASensor",
+    "ModbusAActor",
+    "VirtualHttpInCmd",
+    "VirtualUdpInCmd",
+    "VirtualOutCmd",
+];
+
 /// The element attribute an attribute parameter is stored in: the
-/// parameter's own name, except where the attribute's name says nothing —
-/// `At:` on `PulseAt` is `Sec=`, the fire time in seconds since midnight
-/// (#248).
+/// parameter's own name, except where the attribute's name says nothing:
+/// `At:` on `PulseAt` is `Sec=`, the fire time in seconds since midnight,
+/// `Pulse:` its `Typ=`, and `Type:` on `Memory` is `Tp=`.
 pub fn attr_name<'a>(block_type: &str, param: &'a str) -> &'a str {
     match (block_type, param) {
         ("PulseAt", "At") => "Sec",
+        ("PulseAt", "Pulse") => "Typ",
+        ("Memory", "Type") => "Tp",
         _ => param,
     }
 }
@@ -1185,9 +1228,96 @@ pub fn attr_name<'a>(block_type: &str, param: &'a str) -> &'a str {
 /// inverse of [`attr_name`].
 pub fn attr_param(block_type: &str, attr: &str) -> Option<&'static str> {
     attr_params(block_type)
-        .iter()
-        .copied()
+        .into_iter()
         .find(|p| attr_name(block_type, p) == attr)
+}
+
+/// Attribute parameters that take one of a few words, each stored as a
+/// code. The codes are what Loxone Config writes and shows for the choice.
+pub fn choice_values(
+    block_type: &str,
+    param: &str,
+) -> Option<&'static [(&'static str, &'static str)]> {
+    match (block_type, param) {
+        // The memory flag's type (oracle session 43).
+        ("Memory", "Type") => Some(&[("digital", "0"), ("analog", "1"), ("text", "2")]),
+        // When a PulseAt fires (oracle sessions 43 and 44).
+        ("PulseAt", "Pulse") => Some(&[
+            ("time", "0"),
+            ("year", "1"),
+            ("month", "2"),
+            ("day", "3"),
+            ("hour", "4"),
+            ("minute", "5"),
+            ("second", "6"),
+            ("start", "7"),
+            ("dusk", "8"),
+            ("dawn", "9"),
+            ("sunset", "10"),
+            ("sunrise", "11"),
+        ]),
+        _ => None,
+    }
+}
+
+/// The words of a choice parameter for messages: `"a"`, `"b"` or `"c"`.
+pub fn choice_list(choices: &[(&str, &str)]) -> String {
+    let words: Vec<String> = choices.iter().map(|(w, _)| format!("\"{w}\"")).collect();
+    match words.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// Attribute parameters that take text: a string, or a number written as one.
+pub fn text_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "DayTimer" => &["On", "Off", "Desc"],
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2", "Desc"],
+        "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "Desc"],
+        t if DESC_TYPES.contains(&t) => &["Desc"],
+        _ => &[],
+    }
+}
+
+/// Text attribute parameters that may be empty. A save writes `On=""` and
+/// `Off=""` on a day timer; an empty name or unit is not seen.
+pub fn empty_ok(block_type: &str, param: &str) -> bool {
+    matches!((block_type, param), ("DayTimer", "On" | "Off"))
+}
+
+/// Attributes Loxone Config keeps that the source does not claim, with
+/// the reason. Binding one is refused by name.
+pub fn unclaimed_reason(block_type: &str, attr: &str) -> Option<&'static str> {
+    Some(match (block_type, attr) {
+        ("Alarm" | "SmokeAlarm", "Objects" | "Entries" | "CentralOut")
+        | ("CentralLight" | "CentralShade", "rec") => {
+            "the block's member list is edited in Loxone Config; Lox Logic does not write it yet"
+        }
+        ("VirtualIn", "MinChange" | "MinTime" | "ValOT" | "Idx") => {
+            "Loxone Config shows no field for it and its meaning is not documented"
+        }
+        ("MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt", "Rec") => {
+            "it names the energy flow monitor the meter belongs to, set in Loxone Config"
+        }
+        ("MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt" | "Memory", "StatsType") => {
+            "the statistics settings are not documented yet"
+        }
+        ("Code16" | "Code8", "Task") => "every save writes `Task=\"1\"`; there is nothing to set",
+        _ => return None,
+    })
+}
+
+/// The value a save writes for an attribute when nothing is set. Decompile
+/// leaves it out: the compile carries it anyway.
+pub fn attr_save_default(block_type: &str, attr: &str) -> Option<&'static str> {
+    match (block_type, attr) {
+        ("Memory", "Tp") | ("PulseAt", "Typ") => Some("0"),
+        ("DayTimer", "On" | "Off") => Some(""),
+        ("VirtualIn", "Analog") => Some("false"),
+        _ => None,
+    }
 }
 
 /// Attribute parameters whose value is a time of day (`At: 19:00`),
@@ -1207,6 +1337,7 @@ pub fn clock_params(block_type: &str) -> &'static [&'static str] {
 pub fn bool_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "VirtualIn" | "VirtualOutCmd" => &["Analog"],
+        "AutoJalousie" => &["Sun"],
         "VirtualHttpInCmd" | "VirtualUdpInCmd" => &["Signed", "Analog"],
         "VirtualOut" => &["CloseAfterSend"],
         _ => &[],
