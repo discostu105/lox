@@ -1474,7 +1474,11 @@ impl Scan<'_> {
                 if GUI_OWNED_ATTRS.contains(&name) && !clock {
                     continue;
                 }
-                let Some(v) = el.attr_decoded(name) else {
+                // A setting a save leaves out at 0 reads as 0 where a
+                // fresh mint would fill in something else.
+                let Some(v) = el.attr_decoded(name).or_else(|| {
+                    crate::periphery::zero_when_missing(&o.block_type, name).then_some("0".into())
+                }) else {
                     continue;
                 };
                 let value = if clock {

@@ -894,6 +894,22 @@ a scratch copy of the output, and an analog one with `MinVal: 0`), a `VirtualOut
   recompiled probe diffs against the saved file in one line only, the finding below.
 - **Finding:** the save dropped `MinVal="0"` on the analog `VirtualIn`, as on physical inputs.
 
+## Numeric settings at 0 (sessions 61 and 62, #312) — passed, three findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Two probes set
+every numeric setting the source can set to 0: on four fresh `VirtualIn`s (analog and digital), fresh
+HTTP and UDP inputs and commands, a virtual output command, a Modbus server, device, analog and digital
+sensor and actuator, three calendar entries, and on the base's analog and digital inputs (`AI1`–`AI4`,
+`I1`) through extern settings.
+
+- Of the 68 attributes written as 0, the save dropped 64: every range, correction, timing, Modbus and
+  calendar number. **Heal:** a bound 0 on those compiles to no attribute. The recompiled probes differ from the
+  saved files only in the findings below.
+- **Finding:** a Modbus server keeps `Timeout="0"`.
+- **Finding:** a virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`.
+- **Finding:** a digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

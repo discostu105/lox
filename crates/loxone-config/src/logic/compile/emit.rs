@@ -329,13 +329,13 @@ fn element_attrs(
             }
         }
     }
-    // An unticked box of a virtual command or output has no attribute:
-    // a bound `off` removes it.
-    for name in bool_params(&block.block_type) {
-        if omitted_when_off(&block.block_type, name)
-            && managed_attrs
-                .get(&(block.slug.clone(), (*name).to_string()))
-                .is_some_and(|v| v == "false")
+    // What a save leaves out has no attribute: a bound `off` on an
+    // unticked box of a virtual command or output, a bound 0 on a number.
+    for param in attr_params(&block.block_type) {
+        let name = attr_name(&block.block_type, param);
+        if managed_attrs
+            .get(&(block.slug.clone(), name.to_string()))
+            .is_some_and(|v| omitted_value(&block.block_type, name, v))
         {
             el.remove_attr(name);
         }
