@@ -525,6 +525,34 @@ pub enum MatchSpec {
     /// `Serial=` of a Tree device or an extension, the MAC an Air device's
     /// `IP=` encodes. Compared without case and `:`.
     Serial(String),
+    /// A Tree device the compiler creates: `kind:` names its type, `tree:`
+    /// the declaration of the Tree extension it goes on, `branch:` the
+    /// branch. The lockfile keeps the UUID it was given.
+    Create {
+        kind: String,
+        tree: String,
+        branch: Option<String>,
+    },
+    /// An input or output of a created device, by its designation:
+    /// `device:` names the device's declaration.
+    Within {
+        device: String,
+        iname: String,
+    },
+}
+
+impl MatchSpec {
+    /// The lockfile's `matched_by` name of the matcher.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            MatchSpec::Uuid(_) => "uuid",
+            MatchSpec::IName(_) | MatchSpec::Within { .. } => "iname",
+            MatchSpec::Title(_) => "title",
+            MatchSpec::Mirrors(_) => "mirrors",
+            MatchSpec::Serial(_) => "serial",
+            MatchSpec::Create { .. } => "created",
+        }
+    }
 }
 
 impl fmt::Display for MatchSpec {
@@ -535,6 +563,16 @@ impl fmt::Display for MatchSpec {
             MatchSpec::Title(v) => write!(f, "title: {}", quote(v)),
             MatchSpec::Mirrors(v) => write!(f, "mirrors: {v}"),
             MatchSpec::Serial(v) => write!(f, "serial: {}", quote(v)),
+            MatchSpec::Create { kind, tree, branch } => {
+                write!(f, "kind: {}, tree: {tree}", quote(kind))?;
+                match branch {
+                    Some(b) => write!(f, ", branch: {}", quote(b)),
+                    None => Ok(()),
+                }
+            }
+            MatchSpec::Within { device, iname } => {
+                write!(f, "device: {device}, iname: {}", quote(iname))
+            }
         }
     }
 }
@@ -2549,6 +2587,20 @@ impl Module {
             && crate::connectors::bool_params(block_type).contains(&port)
         {
             return Ok(Cow::Borrowed(if b { "true" } else { "false" }));
+        }
+        // A choice (`Pulse: "sunset"`) is stored as its code.
+        if let Some(choices) = crate::connectors::choice_values(block_type, port) {
+            let word = self.resolve_value(value)?;
+            return choices
+                .iter()
+                .find(|(w, _)| *w == word)
+                .map(|(_, code)| Cow::Borrowed(*code))
+                .ok_or_else(|| {
+                    Error::Compile(format!(
+                        "`{slug}.{port}`: `{word}` is not one of {}",
+                        crate::connectors::choice_list(choices)
+                    ))
+                });
         }
         match suffixed {
             Some((number, unit)) => scale_for_port(number, unit, port_unit(block_type, port))

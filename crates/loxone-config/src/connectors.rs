@@ -521,6 +521,73 @@ const STATE: &[PortSpec] = &[
     p("OutputAPI", Input),
 ];
 
+// The simple-logic batch (#316): the most frequent page blocks of the
+// public corpus that Lox Logic could not create. Shapes from the corpus
+// (every instance of a type has one connector order); the corpus holds
+// them only in pre-17 generations, so a Loxone Config 17.2 save of a
+// minted instance decided each descriptor (oracle-sessions.md, sessions
+// 38–39). Directions by corpus wires, else agreement of the legacy dbs
+// with zero corpus contradiction, else the inert-flag rule; Def-only
+// ports without wire evidence are Param (docs/connector-db.md).
+const STATE_V: &[PortSpec] = &[p("I", Input), p("AQ", Output)];
+const WIPING_RELAY: &[PortSpec] = &[
+    p("InputTrigger", Input),
+    p("Remanence", Input),
+    p("TimeOn", Input),
+    p("Q", Output),
+];
+const ARITH2: &[PortSpec] = &[p("Input1", Input), p("Input2", Input), p("AQ", Output)];
+const AVG: &[PortSpec] = &[
+    p("Input", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("Time", Param),
+    p("Max", Input),
+    p("AQ", Output),
+];
+const INT: &[PortSpec] = &[p("Input", Input), p("Mode", Input), p("AQ", Output)];
+const UP_DOWN_COUNTER: &[PortSpec] = &[
+    p("Trigger", Input),
+    p("InputDir", Input),
+    p("Reset", Input),
+    p("OnValue", Input),
+    p("OffValue", Input),
+    p("Remanence", Param),
+    p("StartValue", Input),
+    p("Q", Output),
+    p("AQ", Output),
+];
+const HOUR_COUNTER: &[PortSpec] = &[
+    p("InputEnable", Input),
+    p("Reset", Input),
+    p("InputResetAll", Input),
+    p("Unit", Param),
+    p("Maintenance", Input),
+    p("Q", Output),
+    p("AQ", Output),
+    p("AQl", Output),
+    p("AQr", Output),
+    p("AQs", Input),
+    p("OutputAPI", Input),
+];
+const COUNTER: &[PortSpec] = &[
+    p("Trigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("EndValue", Input),
+    p("Mode", Input),
+    p("Q", Output),
+    p("AQ", Output),
+];
+const PULSE_BY: &[PortSpec] = &[p("Text", Input), p("Time", Param), p("Pulse", Output)];
+const A_MEMORY: &[PortSpec] = &[
+    p("Input", Input),
+    p("Trigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("AQ", Output),
+];
+
 // The house-control batch: eight logic types a large real config used
 // but Lox Logic could only reference. Connector set and order are
 // the Config 17.2 (V178) descriptor as the house's GUI-saved instances
@@ -1031,6 +1098,19 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "AnalogMultiplexer2",
     "SRFlipFlop",
     "State",
+    "StateV",
+    "WipingRelay",
+    "Mult",
+    "Add",
+    "Sub",
+    "Div",
+    "Avg",
+    "Int",
+    "UpDownCounter",
+    "HourCounter",
+    "Counter",
+    "PulseBy",
+    "AMemory",
     "VirtualIn",
     "HeatIRoomController2",
     "Irrigation",
@@ -1069,34 +1149,77 @@ pub const BUILTIN_TYPES: &[&str] = &[
 /// these. Compile emits the document's version when it is listed here.
 pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
 
-/// Element-attribute parameters per block type: logic Loxone stores as an
-/// attribute on the `<C>` element rather than as `Def=` on a connector. In
-/// the source they bind like any parameter (`Formula: "I1+I2"` in the argument
-/// list). Every observed `Formula=` attribute is accompanied by
-/// `Valid="false"` (the GUI revalidates on load); the compiler emits that
+/// Element-attribute parameters per block type: logic and settings Loxone
+/// stores as an attribute on the `<C>` element rather than as `Def=` on a
+/// connector. In the source they bind like any parameter (`Formula: "I1+I2"`
+/// in the argument list). Every observed `Formula=` attribute is accompanied
+/// by `Valid="false"` (the GUI revalidates on load); the compiler emits that
 /// pair together.
 ///
 /// An attribute parameter that is also GUI-owned (`Code=` on Code16, see
-/// [`crate::doc::GUI_OWNED_ATTRS`]) is a *claim*: carried verbatim
-/// from the base until the source binds it, written from source while it
-/// does. Decompile never lifts it, so adopting leaves it with the GUI.
-pub fn attr_params(block_type: &str) -> &'static [&'static str] {
-    match block_type {
+/// [`crate::doc::GUI_OWNED_ATTRS`] and [`carried_attrs`]) is a *claim*:
+/// carried verbatim from the base until the source binds it, written from
+/// source while it does. Decompile lifts every one but program text.
+pub fn attr_params(block_type: &str) -> Vec<&'static str> {
+    let own: &[&str] = match block_type {
         "Formula" => &["Formula"],
         "Code16" => &["Code"],
-        "PulseAt" => &["At"],
+        "PulseAt" => &["At", "Pulse"],
         "VirtualIn" => &["Analog", "MinVal", "MaxVal", "DefVal"],
+        "Memory" => &["Type"],
+        "AutoJalousie" => &["Sun"],
+        "DayTimer" => &["On", "Off"],
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2"],
+        "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "MaxLvl"],
         t => crate::periphery::periphery(t).map_or(&[], |p| p.settings),
+    };
+    let mut v = own.to_vec();
+    if DESC_TYPES.contains(&block_type) {
+        v.push("Desc");
     }
+    v
 }
 
+/// The types whose `Desc=` the source may claim (`Desc:`): the name the
+/// app shows instead of the title ("Anzeigename" in Loxone Config). The app
+/// controls the catalogue lists, and the types real configs or a Loxone
+/// Config pane show it on. Plain logic blocks have no such field.
+const DESC_TYPES: &[&str] = &[
+    "PButtonT",
+    "PushButton",
+    "VirtualIn",
+    "Memory",
+    "PulseAt",
+    "DayTimer",
+    "AutoJalousie",
+    "CentralLight",
+    "CentralShade",
+    "MeterDig",
+    "MeterAbsUni",
+    "MeterAbsBi",
+    "MeterAbsSt",
+    "LightController2",
+    "Code16",
+    "HeatIRoomController2",
+    "StairwayLS",
+    "State",
+    "ModbusDev",
+    "ModbusASensor",
+    "ModbusAActor",
+    "VirtualHttpInCmd",
+    "VirtualUdpInCmd",
+    "VirtualOutCmd",
+];
+
 /// The element attribute an attribute parameter is stored in: the
-/// parameter's own name, except where the attribute's name says nothing —
-/// `At:` on `PulseAt` is `Sec=`, the fire time in seconds since midnight
-/// (#248).
+/// parameter's own name, except where the attribute's name says nothing:
+/// `At:` on `PulseAt` is `Sec=`, the fire time in seconds since midnight,
+/// `Pulse:` its `Typ=`, and `Type:` on `Memory` is `Tp=`.
 pub fn attr_name<'a>(block_type: &str, param: &'a str) -> &'a str {
     match (block_type, param) {
         ("PulseAt", "At") => "Sec",
+        ("PulseAt", "Pulse") => "Typ",
+        ("Memory", "Type") => "Tp",
         _ => param,
     }
 }
@@ -1105,9 +1228,96 @@ pub fn attr_name<'a>(block_type: &str, param: &'a str) -> &'a str {
 /// inverse of [`attr_name`].
 pub fn attr_param(block_type: &str, attr: &str) -> Option<&'static str> {
     attr_params(block_type)
-        .iter()
-        .copied()
+        .into_iter()
         .find(|p| attr_name(block_type, p) == attr)
+}
+
+/// Attribute parameters that take one of a few words, each stored as a
+/// code. The codes are what Loxone Config writes and shows for the choice.
+pub fn choice_values(
+    block_type: &str,
+    param: &str,
+) -> Option<&'static [(&'static str, &'static str)]> {
+    match (block_type, param) {
+        // The memory flag's type (oracle session 43).
+        ("Memory", "Type") => Some(&[("digital", "0"), ("analog", "1"), ("text", "2")]),
+        // When a PulseAt fires (oracle sessions 43 and 44).
+        ("PulseAt", "Pulse") => Some(&[
+            ("time", "0"),
+            ("year", "1"),
+            ("month", "2"),
+            ("day", "3"),
+            ("hour", "4"),
+            ("minute", "5"),
+            ("second", "6"),
+            ("start", "7"),
+            ("dusk", "8"),
+            ("dawn", "9"),
+            ("sunset", "10"),
+            ("sunrise", "11"),
+        ]),
+        _ => None,
+    }
+}
+
+/// The words of a choice parameter for messages: `"a"`, `"b"` or `"c"`.
+pub fn choice_list(choices: &[(&str, &str)]) -> String {
+    let words: Vec<String> = choices.iter().map(|(w, _)| format!("\"{w}\"")).collect();
+    match words.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// Attribute parameters that take text: a string, or a number written as one.
+pub fn text_params(block_type: &str) -> &'static [&'static str] {
+    match block_type {
+        "DayTimer" => &["On", "Off", "Desc"],
+        "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2", "Desc"],
+        "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "Desc"],
+        t if DESC_TYPES.contains(&t) => &["Desc"],
+        _ => &[],
+    }
+}
+
+/// Text attribute parameters that may be empty. A save writes `On=""` and
+/// `Off=""` on a day timer; an empty name or unit is not seen.
+pub fn empty_ok(block_type: &str, param: &str) -> bool {
+    matches!((block_type, param), ("DayTimer", "On" | "Off"))
+}
+
+/// Attributes Loxone Config keeps that the source does not claim, with
+/// the reason. Binding one is refused by name.
+pub fn unclaimed_reason(block_type: &str, attr: &str) -> Option<&'static str> {
+    Some(match (block_type, attr) {
+        ("Alarm" | "SmokeAlarm", "Objects" | "Entries" | "CentralOut")
+        | ("CentralLight" | "CentralShade", "rec") => {
+            "the block's member list is edited in Loxone Config; Lox Logic does not write it yet"
+        }
+        ("VirtualIn", "MinChange" | "MinTime" | "ValOT" | "Idx") => {
+            "Loxone Config shows no field for it and its meaning is not documented"
+        }
+        ("MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt", "Rec") => {
+            "it names the energy flow monitor the meter belongs to, set in Loxone Config"
+        }
+        ("MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt" | "Memory", "StatsType") => {
+            "the statistics settings are not documented yet"
+        }
+        ("Code16" | "Code8", "Task") => "every save writes `Task=\"1\"`; there is nothing to set",
+        _ => return None,
+    })
+}
+
+/// The value a save writes for an attribute when nothing is set. Decompile
+/// leaves it out: the compile carries it anyway.
+pub fn attr_save_default(block_type: &str, attr: &str) -> Option<&'static str> {
+    match (block_type, attr) {
+        ("Memory", "Tp") | ("PulseAt", "Typ") => Some("0"),
+        ("DayTimer", "On" | "Off") => Some(""),
+        ("VirtualIn", "Analog") => Some("false"),
+        _ => None,
+    }
 }
 
 /// Attribute parameters whose value is a time of day (`At: 19:00`),
@@ -1127,6 +1337,7 @@ pub fn clock_params(block_type: &str) -> &'static [&'static str] {
 pub fn bool_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "VirtualIn" | "VirtualOutCmd" => &["Analog"],
+        "AutoJalousie" => &["Sun"],
         "VirtualHttpInCmd" | "VirtualUdpInCmd" => &["Signed", "Analog"],
         "VirtualOut" => &["CloseAfterSend"],
         _ => &[],
@@ -1191,6 +1402,14 @@ pub fn omitted_when_zero(block_type: &str, attr: &str) -> bool {
         || crate::settings::SETTING_TYPES.contains(&block_type)
         || crate::periphery::periphery(block_type).is_some_and(|p| p.settings.contains(&attr));
     settable && OMITTED_WHEN_ZERO.contains(&attr)
+}
+
+/// Whether a save writes this `Def=` on a block's connector. It writes
+/// none at 0, so an absent `Def=` is 0 on every block type and a bound 0
+/// compiles to no attribute. Loxone Config 17.2, and no real config holds
+/// `Def="0"` on a connector (see loxone-format.md).
+pub fn def_written(value: &str) -> bool {
+    !is_zero(value)
 }
 
 /// Whether a setting's value is 0 as a number (`0`, `0.0`, `-0`).
@@ -1389,6 +1608,12 @@ pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
         "Alarm" => &["Entries", "CentralOut", "WaitAfterRestart", "Objects"],
         "SmokeAlarm" => &["Entries", "CentralOut", "Objects", "ST"],
         "EFM" => &["UnSt", "Un1", "Un2"],
+        // The virtual status dialog: text output, the documentation text,
+        // the blocks it is linked to.
+        "StateV" => &["Tx", "NTXT", "linkC"],
+        // A search pattern of the pulse-by dialog (corpus values such as
+        // `*10001*`); where its other three patterns go is unknown.
+        "PulseBy" => &["WTA"],
         "TpfController" => &["PRE"],
         "NfcCodeTouch" => &["Ref", "SpCdUuid", "OStr", "HSize", "AP", "NAUTT"],
         "Intercom" => &["Ref", "Objects", "ans", "OutName1", "OutName2", "OutName3"],
@@ -1553,6 +1778,16 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "AnalogMultiplexer2" => Some(ANALOG_MULTIPLEXER2),
         "SRFlipFlop" => Some(SR_FLIP_FLOP),
         "State" => Some(STATE),
+        "StateV" => Some(STATE_V),
+        "WipingRelay" => Some(WIPING_RELAY),
+        "Mult" | "Add" | "Sub" | "Div" => Some(ARITH2),
+        "Avg" => Some(AVG),
+        "Int" => Some(INT),
+        "UpDownCounter" => Some(UP_DOWN_COUNTER),
+        "HourCounter" => Some(HOUR_COUNTER),
+        "Counter" => Some(COUNTER),
+        "PulseBy" => Some(PULSE_BY),
+        "AMemory" => Some(A_MEMORY),
         "HeatIRoomController2" => Some(HEAT_I_ROOM_CONTROLLER2),
         "Irrigation" => Some(IRRIGATION),
         "Alarm" => Some(ALARM),
@@ -2050,6 +2285,44 @@ mod tests {
         let state = builtin("State").unwrap();
         assert_eq!(state.len(), 11);
         assert_eq!((state[9].key, state[9].dir), ("AQ", PortDir::Output));
+        // The simple-logic batch: Loxone Config 17.2 reorders the
+        // UpDownCounter of the corpus and appends OutputAPI to HourCounter.
+        let keys = |t| {
+            builtin(t)
+                .unwrap()
+                .iter()
+                .map(|p| p.key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            keys("UpDownCounter"),
+            [
+                "Trigger",
+                "InputDir",
+                "Reset",
+                "OnValue",
+                "OffValue",
+                "Remanence",
+                "StartValue",
+                "Q",
+                "AQ"
+            ]
+        );
+        let hc = builtin("HourCounter").unwrap();
+        assert_eq!((hc[10].key, hc[10].dir), ("OutputAPI", PortDir::Input));
+        assert_eq!(
+            keys("Avg"),
+            ["Input", "Reset", "Remanence", "Time", "Max", "AQ"]
+        );
+        for t in ["Mult", "Add", "Sub", "Div"] {
+            assert_eq!(keys(t), ["Input1", "Input2", "AQ"]);
+        }
+        assert_eq!(keys("StateV"), ["I", "AQ"]);
+        assert_eq!(
+            keys("WipingRelay"),
+            ["InputTrigger", "Remanence", "TimeOn", "Q"]
+        );
+        assert_eq!(keys("PulseBy"), ["Text", "Time", "Pulse"]);
         let dt = builtin("DayTimer").unwrap();
         assert_eq!(dt.len(), 13);
         assert_eq!((dt[3].key, dt[3].dir), ("PulseTime", PortDir::Param));

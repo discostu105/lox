@@ -25,6 +25,21 @@ raffstore_sued = AutoJalousie(
 	Type: 1,
 	TimeEnd: 1min,
 	TimeEndDown: 58s,
+	AutoShadeEnd: 0,
+	AutMode: 0,
+	MinPulse: 0,
+	DblClk: 0,
+	DirTol: 0,
+	DirTol2: 0,
+	AutoShadeTime: 0,
+	SRoff: 0,
+	SSoff: 0,
+	Width: 0,
+	Space: 0,
+	TimeBlock: 0,
+	TurnOffset: 0,
+	MinMove: 0,
+	Back: 0,
 )
 
 raffstore_west = AutoJalousie(
@@ -36,6 +51,21 @@ raffstore_west = AutoJalousie(
 	Dir: 270,
 	TimeEnd: 1min,
 	TimeEndDown: 58s,
+	AutoShadeEnd: 0,
+	AutMode: 0,
+	MinPulse: 0,
+	DblClk: 0,
+	DirTol: 0,
+	DirTol2: 0,
+	AutoShadeTime: 0,
+	SRoff: 0,
+	SSoff: 0,
+	Width: 0,
+	Space: 0,
+	TimeBlock: 0,
+	TurnOffset: 0,
+	MinMove: 0,
+	Back: 0,
 )
 
 raffstore_sued_ab.I <- raffstore_sued.OutputDown

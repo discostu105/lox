@@ -944,6 +944,13 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         compiled.counters().next_obj,
         lock_path.display()
     );
+    for slug in loxone_config::logic::unpaired_created(&compiled, &lock) {
+        eprintln!(
+            "note: `{slug}` is a Tree device the source created, not paired yet. Pair it with \
+             a Tree search in Loxone Config; how the Miniserver runs a device it has not \
+             searched for is untested."
+        );
+    }
     // Placement keeps to the sheet where it can (D50); say what it put
     // past it. An object that keeps its place in the base was put there in
     // Loxone Config, so it is not the compile's to report.
@@ -2269,7 +2276,8 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 10] = [
+    let older: [(Form, &str); 11] = [
+        (d::semantic_fingerprint_v11, "app names and block settings"),
         (
             d::semantic_fingerprint_v10,
             "extension settings and statistics",
@@ -2510,6 +2518,12 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                         "  {a:<18} attr   time of day (HH:MM[:SS]) → {}=",
                         connectors::attr_name(t, &a)
                     );
+                } else if let Some(c) = connectors::choice_values(t, &a) {
+                    println!("  {a:<18} attr   {}", connectors::choice_list(c));
+                } else if connectors::bool_params(t).contains(&a.as_str()) {
+                    println!("  {a:<18} attr   on or off");
+                } else if connectors::text_params(t).contains(&a.as_str()) {
+                    println!("  {a:<18} attr   text");
                 } else {
                     println!("  {a:<18} attr");
                 }

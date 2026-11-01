@@ -373,8 +373,8 @@ impl Simulator {
     /// The value an input receives (format facts: loxone-format.md,
     /// *Connectors*): what a test set; else its wires, combined by the
     /// block's fan-in and negated by `Inv=`; else `Inv=` unwired is the
-    /// constant 1; else the `Def=` value, or the documented default when
-    /// `Def=` is omitted.
+    /// constant 1; else the `Def=` value, 0 when `Def=` is omitted; the
+    /// documented default for a port the object has no connector for.
     fn input(&self, ix: usize, key: &str) -> Input {
         let obj = &self.objects[ix];
         let open = |v| Input {
@@ -406,10 +406,13 @@ impl Simulator {
                 connected: true,
             };
         }
-        match port.def.as_deref().and_then(model::parse_num) {
-            Some(v) => open(v),
-            None => open(documented_default(&obj.block_type, key)),
-        }
+        // An absent `Def=` is 0: a save writes none at 0.
+        open(
+            port.def
+                .as_deref()
+                .and_then(model::parse_num)
+                .unwrap_or(0.0),
+        )
     }
 
     /// The current value of a port. Call [`Simulator::check`] first: a

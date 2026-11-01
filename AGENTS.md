@@ -122,18 +122,19 @@ language: "lxir" became Lox Logic, `.lxir` became `.loxl`). It came from github.
 | `src/main.rs` | Top-level `Cli`/`Cmd` (help template, global flags), dispatch, the JSON error envelope (`categorize_error`). `lox logic` hands its arguments to `loxone_config::cli` |
 | `src/commands/*.rs` | One module per command group, each with its clap enum next to its handler: `control` (on/off, blind, light, input, music, …), `inspect` (ls, get, stream, if, autopilot, …), `energy`, `system` (status, update, files, otel, …), `access` (user, access), `config_cmd` (setup, alias, scene, cache, token, config), `ctx`, `completions`, `schema` |
 | `src/commands/config_insight.rs` | Read-only `lox config diff/show/wiring/find/lint/history` |
-| `src/commands/config_push.rs` | `lox config push`: drift check, compile against the live download, byte-exact staging, upload, restart, verify, move `base`. A `Miniserver` trait with a fake for tests |
+| `src/commands/config_push.rs` | `lox config push`: drift check, compile against the live download, byte-exact staging, upload, restart, verify, move `base`, the app-changes guard; `lox config sync`. A `Miniserver` trait with a fake for tests |
 | `src/commands/push_users.rs` | The push's user guard: live users against the program file's users |
 | `src/config.rs` | `Config`, `GlobalConfig`: flat or multi-context config, context resolution, project-local `.lox/` |
 | `src/util.rs` | Shared helpers: `xml_attr`/`json_val_str`, `http_status`, RGB→HSV, path encoding, terminal formatting |
 | `src/actions.rs` | Writes: per-control-type commands and risk levels (CLI, TUI, MCP) |
 | `src/inventory.rs` | Reads: sensors, energy meters, a light controller's moods (CLI, MCP) |
+| `src/hardware.rs` | Hardware for `lox hw status` and MCP `hw_status`: `/data/status` against the program file's serials |
 | `src/energy.rs` | Energy flow for `lox energy`, MCP `get_energy_flow` and the TUI: EFM node roles, `/all` parsing, meter ranking |
 | `src/logic.rs` | Adapter over loxone-config: program blocks, wires, `WiringView`, lint, block history, the logic diff |
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (hash, `v273`, date, `<hash>^`), working copy, cache, FTP, files |
 | `src/gitops.rs` | Config repo: init, pull (FTP → LoxCC → diff → commit), log, restore |
 | `src/scene.rs` | Scenes from YAML |
-| `src/mcp/` | `lox mcp` on rmcp. Design: `docs/design-mcp.md` |
+| `src/mcp/` | `lox mcp` on rmcp. Config-as-code tools run the CLI as a child process (`config_tools.rs`). Design: `docs/design-mcp.md` |
 | `src/tui/` | `lox tui` (feature `tui`), Elm-style `update()` over `App`. Design: `docs/design-tui.md` |
 
 ### Key design points

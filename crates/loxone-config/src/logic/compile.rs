@@ -51,6 +51,8 @@ use crate::xml::Element;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod claims;
+mod create;
+pub use create::unpaired_created;
 mod emit;
 mod owned;
 mod plan;
@@ -251,10 +253,12 @@ fn compile_expanded(
     base.require_unique_uuids("base")?;
 
     apply_moved(module, &desugar_info, lock)?;
+    create::retire_created(base, module, lock)?;
     let src_slugs = check_removals(base, module, lock, opts)?;
 
     let mut doc = base.clone();
     lock.absorb_counters(doc.counters());
+    create::create_devices(&mut doc, module, lock, opts)?;
 
     // --- Resolve externs (against the untouched base).
     let extern_uuid = resolve_externs(&doc, module, lock)?;
@@ -331,6 +335,7 @@ fn compile_expanded(
 
     place_blocks(&mut doc, lock, &cx);
 
+    create::check_hardware_kept(base, &doc, lock)?;
     finish(&mut doc, base, lock, opts)?;
     Ok(doc)
 }
@@ -852,6 +857,11 @@ fn resolve_externs(
     };
     let ref_attr =
         |o: &crate::doc::ObjectSummary| -> Option<&str> { doc.element_at(&o.path)?.attr("Ref") };
+    let created = lock.hardware.clone();
+    let path_of: BTreeMap<&str, &[usize]> = objects
+        .iter()
+        .map(|o| (o.uuid.as_str(), o.path.as_slice()))
+        .collect();
     // The declared matcher, evaluated fresh. For `mirrors:` the target's
     // uuid is resolved by the caller (it needs the phase order below).
     let matches_of = |ext: &crate::logic::ast::ExternDecl,
@@ -872,6 +882,14 @@ fn resolve_externs(
                             .element_at(&o.path)
                             .and_then(crate::doc::element_serial)
                             .is_some_and(|s| crate::doc::same_serial(&s, v)),
+                        MatchSpec::Create { .. } => created.get(&ext.slug) == Some(&o.uuid),
+                        // The device's uuid comes in as `mirror_uuid`.
+                        MatchSpec::Within { iname, .. } => {
+                            o.iname.as_deref() == Some(iname)
+                                && mirror_uuid
+                                    .and_then(|d| path_of.get(d))
+                                    .is_some_and(|p| o.path.starts_with(p))
+                        }
                     }
                     && ext.room.as_ref().is_none_or(|want| {
                         iodata_ref(o, "Pr")
@@ -914,11 +932,19 @@ fn resolve_externs(
     // extern, regardless of declaration order. (A mirror of a mirror is
     // refused; so is a mirror of a block minted this very compile — such a
     // block cannot have a ref in the base yet.)
-    let (plain, mirrored): (Vec<_>, Vec<_>) = module
-        .externs()
-        .partition(|e| !matches!(e.match_spec, MatchSpec::Mirrors(_)));
+    // The I/O of a created device goes with the mirrors: its device
+    // resolves first.
+    let (plain, mirrored): (Vec<_>, Vec<_>) = module.externs().partition(|e| {
+        !matches!(
+            e.match_spec,
+            MatchSpec::Mirrors(_) | MatchSpec::Within { .. }
+        )
+    });
     for ext in plain.into_iter().chain(mirrored) {
-        let mirror_uuid = mirror_target_uuid(ext, lock, &out)?;
+        let mirror_uuid = match &ext.match_spec {
+            MatchSpec::Within { device, .. } => out.get(device).cloned(),
+            _ => mirror_target_uuid(ext, lock, &out)?,
+        };
         // Lock pin wins as long as it still resolves to an object of the
         // declared type; otherwise fall back to fresh resolution by spec.
         // If the matcher *kind* changed in source, the new matcher must
@@ -1023,13 +1049,7 @@ fn extern_pages(module: &Module) -> BTreeMap<&str, &str> {
 
 /// The lockfile's `matched_by` name of a matcher kind.
 fn matcher_kind(m: &MatchSpec) -> &'static str {
-    match m {
-        MatchSpec::Uuid(_) => "uuid",
-        MatchSpec::IName(_) => "iname",
-        MatchSpec::Title(_) => "title",
-        MatchSpec::Mirrors(_) => "mirrors",
-        MatchSpec::Serial(_) => "serial",
-    }
+    m.kind()
 }
 
 /// For a `mirrors:` extern, the uuid of the mirrored object: a managed
@@ -1500,14 +1520,17 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
         .and_then(|co| co.attr_decoded("Def").map(|v| v.into_owned()))
 }
 
-/// Whether `port_uuid` keys a setting a save writes only when it is not 0
-/// ([`crate::connectors::omitted_when_zero`]): absent, it reads as 0.
+/// Whether an absent value of `port_uuid` reads as 0: always on a
+/// connector's `Def=` ([`crate::connectors::def_written`]), and on a
+/// setting a save writes only when it is not 0
+/// ([`crate::connectors::omitted_when_zero`]).
 fn zero_when_absent(doc: &LoxoneDoc, port_uuid: &str) -> bool {
-    crate::settings::split_key(port_uuid).is_some_and(|(owner, name)| {
-        find_c(&doc.xml.root, owner).is_some_and(|c| {
+    match crate::settings::split_key(port_uuid) {
+        Some((owner, name)) => find_c(&doc.xml.root, owner).is_some_and(|c| {
             crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name)
-        })
-    })
+        }),
+        None => true,
+    }
 }
 
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
@@ -1546,7 +1569,12 @@ fn apply_def(
         )));
     }
     let original = co.attr_decoded("Def").map(|v| v.into_owned());
-    set_attr_ordered(co, "Def", value, &["U"]);
+    // A 0 is no attribute, as a save writes it.
+    if crate::connectors::def_written(value) {
+        set_attr_ordered(co, "Def", value, &["U"]);
+    } else {
+        co.remove_attr("Def");
+    }
     Ok(original)
 }
 

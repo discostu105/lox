@@ -162,7 +162,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
 | D28 | [`page "Title"` places blocks, and it is authoritative](decisions/0028-page-statement.md) | accepted, amended by [D56](decisions/0056-creating-pages.md) and [D84](decisions/0084-page-per-fragment.md) |
 | D29 | [The full view is for the reader; only the adoptable view must compile](decisions/0029-full-and-adoptable-view.md) | accepted |
-| D30 | [The full view hides what the GUI wrote by default](decisions/0030-observed-defaults.md) | accepted |
+| D30 | [The full view hides what the GUI wrote by default](decisions/0030-observed-defaults.md) | accepted, amended by [D128](decisions/0128-no-def-at-zero.md) |
 | D31 | [Removal tombstones](decisions/0031-removal-tombstones.md) | accepted |
 | D32 | [A ref matched by what it mirrors](decisions/0032-mirrors-matching.md) | accepted |
 | D33 | [Minted mirrors](decisions/0033-minted-mirrors.md) | accepted, amended by [D48](decisions/0048-text-ref-flag.md) |
@@ -223,16 +223,20 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
+| D95 | [Block settings from source: app name, memory type, pulse function, sunshine, texts and units](decisions/0095-block-settings.md) | accepted |
 | D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
+| D102 | [Tree devices created from source](decisions/0102-created-tree-devices.md) | accepted |
 | D106 | [The simulator takes the plain reading of a block's page](decisions/0106-simulator-readings.md) | accepted, amends [D68](decisions/0068-own-simulator.md) |
 | D110 | [One spelling per operating mode](decisions/0110-mode-reference-spelling.md) | accepted, amends [D69](decisions/0069-operating-modes.md) and [D73](decisions/0073-rule-conditions.md) |
 | D111 | [Unit suffixes on extern ports, template parameters and device settings](decisions/0111-unit-suffix-coverage.md) | accepted, extends [D87](decisions/0087-v2-tooling.md) |
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
 | D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
 | D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
-| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md) |
+| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md), amended by [D127](decisions/0127-calendar-entry-gone-mode.md) |
 | D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |
 | D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
 | D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
 | D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
 | D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |
+| D127 | [Adopt takes over a calendar entry whose mode is gone](decisions/0127-calendar-entry-gone-mode.md) | accepted, amends [D115](decisions/0115-calendar-entry-mode.md) |
+| D128 | [A connector's 0 is no `Def=`](decisions/0128-no-def-at-zero.md) | accepted, amends [D30](decisions/0030-observed-defaults.md), extends [D112](decisions/0112-zero-is-no-attribute.md) |

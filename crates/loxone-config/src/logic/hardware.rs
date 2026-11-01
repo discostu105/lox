@@ -23,7 +23,10 @@ pub(crate) fn is_owned_setting(block_type: &str, key: &str) -> bool {
 
 /// The identity arguments of a hardware declaration.
 pub(crate) fn is_identity(key: &str) -> bool {
-    matches!(key, "serial" | "uuid" | "iname" | "device")
+    matches!(
+        key,
+        "serial" | "uuid" | "iname" | "device" | "kind" | "tree" | "branch"
+    )
 }
 
 /// A string argument, written quoted or (a serial of digits only) as a
@@ -40,6 +43,10 @@ struct Identity {
     uuid: Option<String>,
     iname: Option<String>,
     device: Option<String>,
+    /// A device to create: its kind, Tree extension and branch.
+    kind: Option<String>,
+    tree: Option<String>,
+    branch: Option<String>,
 }
 
 fn identity(b: &BlockDecl) -> Result<Identity> {
@@ -49,16 +56,22 @@ fn identity(b: &BlockDecl) -> Result<Identity> {
         uuid: None,
         iname: None,
         device: None,
+        kind: None,
+        tree: None,
+        branch: None,
     };
     for bind in b.bindings().filter(|x| is_identity(&x.port)) {
         let key = bind.port.as_str();
         let allowed = match key {
             "serial" => is_device(&b.block_type),
+            "kind" | "tree" | "branch" => b.block_type == "TreeDevice",
             "iname" | "device" => is_io(&b.block_type),
             _ => true,
         };
         if !allowed {
-            let what = if is_device(&b.block_type) {
+            let what = if b.block_type == "TreeDevice" {
+                "a Tree device takes `serial:`, `uuid:` or `kind:` with `tree:`"
+            } else if is_device(&b.block_type) {
                 "a device takes `serial:` or `uuid:`"
             } else {
                 "an input or output takes `device:` with `iname:` or `uuid:`"
@@ -72,11 +85,20 @@ fn identity(b: &BlockDecl) -> Result<Identity> {
             "serial" => &mut id.serial,
             "uuid" => &mut id.uuid,
             "iname" => &mut id.iname,
+            "kind" => &mut id.kind,
+            "tree" => &mut id.tree,
+            "branch" => &mut id.branch,
             _ => &mut id.device,
         };
-        let value = if key == "device" {
+        let value = if key == "device" || key == "tree" {
             match v {
                 Value::Ref(d) => d.clone(),
+                _ if key == "tree" => {
+                    return fail(format!(
+                        "`{}`: `tree:` names the Tree extension's declaration, e.g. `tree: tree1`.",
+                        b.slug
+                    ));
+                }
                 _ => {
                     return fail(format!(
                         "`{}`: `device:` names the device's declaration, e.g. `device: taster`.",
@@ -160,6 +182,35 @@ pub(super) fn lower(items: &mut Vec<Item>) -> Result<()> {
     Ok(())
 }
 
+/// The matcher of a device to create, checked against the kind table.
+fn create_spec(slug: &str, kind: &str, id: &Identity) -> Result<MatchSpec> {
+    if crate::tree_kinds::kind(kind).is_none() {
+        return Err(Error::Compile(format!(
+            "`{slug}`: Lox Logic cannot create a `{kind}`. It creates {}. Declare others by \
+             `serial:` once Loxone Config has paired them.",
+            crate::tree_kinds::names().join(", ")
+        )));
+    }
+    let Some(tree) = &id.tree else {
+        return Err(Error::Compile(format!(
+            "`{slug}`: name the Tree extension the device goes on, e.g. `tree: tree1`."
+        )));
+    };
+    if let Some(b) = &id.branch
+        && b != "left"
+        && b != "right"
+    {
+        return Err(Error::Compile(format!(
+            "`{slug}`: `branch:` is \"left\" or \"right\", not \"{b}\"."
+        )));
+    }
+    Ok(MatchSpec::Create {
+        kind: kind.to_string(),
+        tree: tree.clone(),
+        branch: id.branch.clone(),
+    })
+}
+
 fn lower_one(
     b: BlockDecl,
     hw: &BTreeMap<String, (String, Identity)>,
@@ -170,9 +221,17 @@ fn lower_one(
     let id = &hw[&b.slug].1;
     let ty = b.block_type.as_str();
     let (match_spec, device_serial) = if is_device(ty) {
-        match (&id.serial, &id.uuid) {
-            (Some(s), None) => (MatchSpec::Serial(s.clone()), None),
-            (None, Some(u)) => (MatchSpec::Uuid(u.clone()), None),
+        match (&id.serial, &id.uuid, &id.kind) {
+            (Some(s), None, None) => (MatchSpec::Serial(s.clone()), None),
+            (None, Some(u), None) => (MatchSpec::Uuid(u.clone()), None),
+            (None, None, Some(k)) => (create_spec(&b.slug, k, id)?, None),
+            _ if ty == "TreeDevice" => {
+                return fail(format!(
+                    "`{}`: say which {ty} this is with `serial: \"…\"` or `uuid: \"…\"`, or \
+                     create one with `kind: \"…\", tree: <extension>`.",
+                    b.slug
+                ));
+            }
             _ => {
                 return fail(format!(
                     "`{}`: say which {ty} this is with `serial: \"…\"` or `uuid: \"…\"`.",
@@ -206,6 +265,13 @@ fn lower_one(
             }
         };
         match (&id.iname, &id.uuid) {
+            (Some(i), None) if parent.kind.is_some() => (
+                MatchSpec::Within {
+                    device: dev.clone(),
+                    iname: i.clone(),
+                },
+                None,
+            ),
             (Some(i), None) => match &parent.serial {
                 Some(s) => (MatchSpec::IName(i.clone()), Some(s.clone())),
                 None => {
@@ -348,6 +414,11 @@ k = TreeSensor("K", device: t)"#)
         );
         assert!(
             err(r#"k = TreeSensor("K", device: t, iname: "I0")"#).contains("names no hardware")
+        );
+        // Air devices are never created: their MAC comes from pairing (#322).
+        assert!(
+            err(r#"t = LoxAIRDevice("T", kind: "PresenceSensorTree")"#)
+                .contains("`kind:` does not apply")
         );
         assert!(
             err(r#"t = LoxAIRDevice("T", serial: "B0")

@@ -203,6 +203,12 @@ Miniserver context.
 | `get_user` | read | One user: validity, groups, NFC tags, number of access codes |
 | `access_log` | read | Access log of an NFC Code Touch: who opened when, denied attempts |
 | `access_check` | read | Why a user may or may not open an NFC Code Touch: verdict, rights, warnings |
+| `hw_status` | read | Devices on the bus against the program file: missing, offline, replaced, not in the program |
+| `logic_check`, `logic_lint`, `logic_coverage`, `logic_test` | read | Check, lint, coverage and tests of a Lox Logic project |
+| `logic_types`, `logic_decompile` | read | The block catalogue; a config as Lox Logic |
+| `logic_diff`, `logic_drift` | read | What changed between two configs; whether the live config drifted from the lock |
+| `logic_compile` | read | Compile a project into a scratch directory and show what changes. The project stays as it is |
+| `config_sync`, `config_push_dry_run` | read | Whether project and Miniserver agree; a push staged, never uploaded |
 | `switch` | action | `on`, `off`, `pulse` |
 | `blind` | action | `up`, `down`, `stop`, `shade`, `position`, `slats` |
 | `light` | action | `mood`, `dim`, `color` |

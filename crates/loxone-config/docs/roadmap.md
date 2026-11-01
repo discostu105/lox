@@ -15,8 +15,8 @@ git and the [changelog](../../../CHANGELOG.md). This page says where the crate i
 - **Agents as authors.** The language, `loxl types`, the template library and [agents.md](agents.md) are
   written so an agent can write a module and prove it with `loxl test` and `loxl diff`.
 - **Hardware in source.** Existing Air and Tree devices and the Tree and Air extensions are taken over
-  by declaration, with their I/Os and settings. Next: other extensions, and creating Tree devices and
-  extensions from a verified type table (#320). Pairing stays in Loxone Config.
+  by declaration, with their I/Os and settings. Four Tree device kinds can be created, unpaired. Next:
+  other extensions, more kinds, and Link extensions. Pairing stays in Loxone Config.
 - **Editors.** `loxl lsp` and the VS Code extension; a tree-sitter grammar would reach other editors.
 
 ## Non-goals

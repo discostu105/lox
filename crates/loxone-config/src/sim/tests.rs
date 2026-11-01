@@ -180,6 +180,180 @@ fn monoflop_reset_ends_and_locks() {
 }
 
 #[test]
+fn wiping_relay_pulses_from_the_rising_edge_and_retriggers() {
+    let d = doc(&(vin(1)
+        + &obj(
+            2,
+            "WipingRelay",
+            &["InputTrigger<p1-AQ", "Remanence", "TimeOn=3", "Q"],
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.check("p2-Q").unwrap();
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(trace(&mut sim, "p2-Q", 1.0, 3), [1.0, 1.0, 0.0]);
+    sim.set("p1-AQ", 0.0);
+    sim.tick(1.0);
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0); // t=6, edge: on until t=9
+    sim.set("p1-AQ", 0.0);
+    sim.tick(1.0);
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0); // t=8, retrigger: on until t=11
+    assert_eq!(trace(&mut sim, "p2-Q", 1.0, 3), [1.0, 1.0, 0.0]);
+}
+
+#[test]
+fn integer_rounds_down_or_commercially() {
+    let d = doc(&(vin(1)
+        + &obj(2, "Int", &["Input<p1-AQ", "Mode=0", "AQ"])
+        + &obj(3, "Int", &["Input<p1-AQ", "Mode=1", "AQ"])));
+    let mut sim = Simulator::new(&d);
+    for (v, down, commercial) in [(2.4, 2.0, 2.0), (2.5, 2.0, 3.0), (7.0, 7.0, 7.0)] {
+        sim.set("p1-AQ", v);
+        sim.tick(1.0);
+        assert_eq!(
+            (sim.read("p2-AQ"), sim.read("p3-AQ")),
+            (down, commercial),
+            "{v}"
+        );
+    }
+    sim.set("p1-AQ", -1.5);
+    sim.tick(1.0);
+    let err = sim.check("p2-AQ").unwrap_err();
+    assert!(err.contains("negative value"), "{err}");
+}
+
+#[test]
+fn analog_memory_stores_on_set_and_resets_on_off() {
+    let d = doc(&(vin(1)
+        + &vin(2)
+        + &vin(3)
+        + &obj(
+            4,
+            "AMemory",
+            &[
+                "Input<p1-AQ",
+                "Trigger<p2-AQ",
+                "Reset<p3-AQ",
+                "Remanence",
+                "AQ",
+            ],
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.set("p1-AQ", 21.5);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ"), 0.0);
+    sim.set("p2-AQ", 1.0);
+    sim.tick(1.0);
+    sim.set("p1-AQ", 30.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ"), 21.5, "held after the edge");
+    sim.set("p3-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ"), 0.0);
+}
+
+#[test]
+fn up_counter_counts_to_the_limit_and_resets() {
+    let d = doc(&(vin(1)
+        + &vin(2)
+        + &obj(
+            3,
+            "Counter",
+            &[
+                "Trigger<p1-AQ",
+                "Reset<p2-AQ",
+                "Remanence",
+                "EndValue=2",
+                "Mode=1",
+                "Q",
+                "AQ",
+            ],
+        )));
+    let mut sim = Simulator::new(&d);
+    let pulse = |sim: &mut Simulator| {
+        sim.set("p1-AQ", 1.0);
+        sim.tick(1.0);
+        sim.set("p1-AQ", 0.0);
+        sim.tick(1.0);
+        (sim.read("p3-AQ"), sim.read("p3-Q"))
+    };
+    assert_eq!(pulse(&mut sim), (1.0, 0.0));
+    assert_eq!(pulse(&mut sim), (2.0, 1.0));
+    assert_eq!(pulse(&mut sim), (2.0, 1.0), "mode 1 stops at the limit");
+    sim.set("p2-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!((sim.read("p3-AQ"), sim.read("p3-Q")), (0.0, 0.0));
+}
+
+#[test]
+fn up_counter_refuses_to_loop() {
+    let d = doc(&(vin(1)
+        + &obj(
+            2,
+            "Counter",
+            &[
+                "Trigger<p1-AQ",
+                "Reset",
+                "Remanence",
+                "EndValue=1",
+                "Mode=0",
+                "Q",
+                "AQ",
+            ],
+        )));
+    let mut sim = Simulator::new(&d);
+    for _ in 0..2 {
+        sim.set("p1-AQ", 1.0);
+        sim.tick(1.0);
+        sim.set("p1-AQ", 0.0);
+        sim.tick(1.0);
+    }
+    let err = sim.check("p2-AQ").unwrap_err();
+    assert!(err.contains("loops past the limit"), "{err}");
+}
+
+#[test]
+fn up_down_counter_counts_from_the_start_value() {
+    let d = doc(&(vin(1)
+        + &vin(2)
+        + &vin(3)
+        + &obj(
+            4,
+            "UpDownCounter",
+            &[
+                "Trigger<p1-AQ",
+                "InputDir<p2-AQ",
+                "Reset<p3-AQ",
+                "OnValue=10",
+                "OffValue=5",
+                "Remanence",
+                "StartValue=3",
+                "Q",
+                "AQ",
+            ],
+        )));
+    let mut sim = Simulator::new(&d);
+    let pulse = |sim: &mut Simulator| {
+        sim.set("p1-AQ", 1.0);
+        sim.tick(1.0);
+        sim.set("p1-AQ", 0.0);
+        sim.tick(1.0);
+        sim.read("p4-AQ")
+    };
+    assert_eq!(pulse(&mut sim), 4.0);
+    assert_eq!(pulse(&mut sim), 5.0);
+    sim.set("p2-AQ", 1.0);
+    assert_eq!(pulse(&mut sim), 4.0, "Dir 1 counts down");
+    sim.set("p3-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ"), 3.0, "Reset returns to the start value");
+    let err = sim.check("p4-Q").unwrap_err();
+    assert!(err.contains("UpDownCounter"), "{err}");
+}
+
+#[test]
 fn on_delay_and_off_delay() {
     let d = doc(&(vin(1)
         + &obj(

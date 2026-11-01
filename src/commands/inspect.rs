@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::commands::RunContext;
 use crate::commands::config_insight::ConfigSource;
 use crate::config::Config;
-use crate::inventory::{LiveControl, is_sensor_type, read_live};
+use crate::inventory::{LiveControl, is_sensor_type, parse_changed, read_live, read_state};
 use crate::util::{now_hms, xml_attr};
 use loxone_client::client::{Control, LoxClient};
 use loxone_client::stats::{
@@ -1318,7 +1318,7 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         AutopilotCmd::Changed { explain, since } => {
             let cfg = Config::load()?;
             let ap = cfg.client()?.autopilot()?;
-            let (secs, at) = parse_changed(&read_state(&cfg, &ap.state_changed)?)?;
+            let (secs, at) = parse_changed(&read_state(&cfg.connection(), &ap.state_changed)?)?;
             let why = explain
                 .then(|| explain_changes(&cfg, since.as_deref()))
                 .transpose()?;
@@ -1332,7 +1332,7 @@ pub fn cmd_autopilot(ctx: &RunContext, action: AutopilotCmd) -> Result<()> {
         AutopilotCmd::State { name_or_uuid } => {
             let cfg = Config::load()?;
             let ap = cfg.client()?.autopilot()?;
-            let runs = parse_autopilot_history(&read_state(&cfg, &ap.state_history)?);
+            let runs = parse_autopilot_history(&read_state(&cfg.connection(), &ap.state_history)?);
             let hits = runs_of(&runs, &name_or_uuid)?;
             let last = hits.iter().copied().max_by(|a, b| a.time.cmp(&b.time));
             if ctx.json {
@@ -1561,21 +1561,6 @@ fn explain_changes(cfg: &Config, since: Option<&str>) -> Result<ChangeReport> {
     })
 }
 
-/// The autopilot `changed` state: unix seconds, and the local time unless 0
-/// (never changed).
-fn parse_changed(raw: &str) -> Result<(i64, Option<chrono::DateTime<chrono::Local>>)> {
-    let secs = raw
-        .trim()
-        .parse::<f64>()
-        .with_context(|| format!("autopilot `changed` is not a number: {raw:?}"))?
-        as i64;
-    let at = (secs > 0)
-        .then(|| chrono::DateTime::from_timestamp(secs, 0))
-        .flatten()
-        .map(|t| t.with_timezone(&chrono::Local));
-    Ok((secs, at))
-}
-
 /// The runs of one rule, by UUID or a part of its name; a name part that
 /// matches several rules is an error.
 fn runs_of<'a>(runs: &'a [AutopilotRun], name_or_uuid: &str) -> Result<Vec<&'a AutopilotRun>> {
@@ -1596,30 +1581,6 @@ fn runs_of<'a>(runs: &'a [AutopilotRun], name_or_uuid: &str) -> Result<Vec<&'a A
         );
     }
     Ok(hits)
-}
-
-/// One state's current value from the WebSocket state dump (max 10 s): text
-/// states as text, value states as a number.
-fn read_state(cfg: &Config, uuid: &str) -> Result<String> {
-    let target = uuid.to_string();
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let found = tokio::time::timeout(
-            Duration::from_secs(10),
-            stream::stream_events_until(&cfg.connection(), |ev| match ev {
-                stream::StateEvent::ValueState { uuid, value } if *uuid == target => {
-                    Some(value.to_string())
-                }
-                stream::StateEvent::TextState { uuid, text, .. } if *uuid == target => {
-                    Some(text.clone())
-                }
-                _ => None,
-            }),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Timeout waiting for state {} (10 s)", target))??;
-        Ok(found)
-    })
 }
 
 /// One entry of the autopilot `history` state.
@@ -1653,8 +1614,8 @@ mod tests {
     use super::{
         AutopilotRun, Backoff, ChangeReport, History, SnapshotFilter, changed_text, eval_op,
         fmt_offline, history_csv, history_json, history_table, last_run_json, last_run_text,
-        matches_filters, modes_table, parse_autopilot_history, parse_changed, parse_f, rules_table,
-        runs_of, statistic_output_names, weather_table,
+        matches_filters, modes_table, parse_autopilot_history, parse_f, rules_table, runs_of,
+        statistic_output_names, weather_table,
     };
     use loxone_client::stats::StatsEntry;
     use loxone_client::stream;
@@ -1853,15 +1814,6 @@ mod tests {
         let e = runs_of(&runs, "pump").unwrap_err().to_string();
         assert!(e.contains("matches 2 rules"), "{}", e);
         assert!(runs_of(&runs, "heating").unwrap().is_empty());
-    }
-
-    #[test]
-    fn autopilot_changed_seconds() {
-        let (secs, at) = parse_changed("1793275220").unwrap();
-        assert_eq!(secs, 1793275220);
-        assert_eq!(at.unwrap().timestamp(), 1793275220);
-        assert_eq!(parse_changed("0").unwrap(), (0, None));
-        assert!(parse_changed("soon").is_err());
     }
 
     #[test]

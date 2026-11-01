@@ -133,7 +133,12 @@ rendered inline (`<Key>2B35</Key>`).
   ([D42](decisions/0042-placement-gui-geometry.md)).
 - `Cl` — RGB display color. Defaults differ by type: logic blocks are
   green (`141,255,112`), Memory grey, AutoJalousie blue.
-- `Desc=` — a description. Loxone Config writes it right after `Type=`.
+- `Desc=` — the name the app shows (*Anzeigename* under *Visualisierung*;
+  without it the app shows `Title`). Loxone Config writes it right after
+  `Type=`, on every type but `Plugin`, and moves it there on save. Plain
+  gates have no such field. `Desc:` authors it
+  ([D95](decisions/0095-block-settings.md)). Source: corpus, oracle
+  session 43.
 - `Nio` — connector count. Matches the number of `<Co>` children: Loxone
   emits **all** connectors, including unwired outputs and inputs without
   values.
@@ -144,13 +149,49 @@ rendered inline (`<Key>2B35</Key>`).
   UUID-list attributes…). All of it round-trips untouched through the
   lossless tree. Some of it is **block logic stored outside connectors**:
   - `PulseAt` keeps its fire time in `Sec=`, seconds since midnight
-    (`At:` authors it, [D79](decisions/0079-pulseat-fire-time.md)). `Typ="0"` is the fixed-time mode: every
-    V172+ instance with a `Sec=` has it (11 of 11), and a corpus block
-    titled "Pulse at 00:00" has `Sec="0"`. Loxone's documentation offers
-    time functions (sunrise, dusk, hour and month pulses) in the same
-    dialog. Which `Typ=` value means which is not observed yet, so a
-    non-zero `Typ=` stays with the GUI. `AutP=` also appears on `Memory`
-    blocks and is not a PulseAt flag.
+    (`At:` authors it, [D79](decisions/0079-pulseat-fire-time.md)), and
+    what it fires on in `Typ=` (*Impuls*, `Pulse:` authors it): 0 at a
+    fixed time, 1 yearly, 2 monthly, 3 daily, 4 hourly, 5 every minute, 6
+    every second, 7 on start, 8 at dusk, 9 at dawn, 10 at sunset, 11 at
+    sunrise. The dropdown has 12 entries; 12 shows blank. A save keeps
+    each value. *Einmaliger Impuls* (one-off) is no separate flag: ticking
+    it adds a date field and writes `Sec=` as an absolute date in Loxone
+    epoch seconds (≥ 86400) plus `LtE=`, so a `Sec=` of a day or more is
+    not a time of day. A bare mint gets `Sec="0" Typ="0"` on save. Every
+    corpus `Typ=` is 0. Source: oracle sessions 43 and 44. `AutP=` also
+    appears on `Memory` blocks and is not a PulseAt flag.
+  - `Memory` keeps its value type in `Tp=` (*Typ*): 0 digital, 1 analog,
+    2 text. In the corpus 0 goes with digital sources, 1 with `AQ`
+    outputs (60 of 62) and 2 with `TQ` outputs (2 of 2). Source: corpus,
+    oracle session 43.
+  - `AutoJalousie` has `Sun="true"` when *Sonnenschein verwenden* is
+    ticked. Unticking it removes the attribute on save; a blind without
+    it shows the box unticked. Source: oracle session 44.
+  - Meters (`MeterDig`, `MeterAbsUni`, `MeterAbsBi`, `MeterAbsSt`) keep
+    their display fields in `PwrN=` (*Anzeigename* of the power value),
+    `Un1=` and `Un2=` (the two *Einheit* fields) and, on `MeterAbsSt`,
+    `UnSt=` and `MaxLvl=` (storage unit, *Max. Speicherstand*). A save
+    keeps them; a minted meter gets none of them, only `Rec=""`. `Rec=`
+    holds the UUID of the energy flow monitor the meter belongs to.
+    `StatsType=` is 8 on every corpus meter. Source: corpus, oracle
+    session 43.
+  - `DayTimer` keeps the texts the app shows for on and off in `On=` and
+    `Off=` (*Bezeichnung Ein*/*Aus*); a save writes both, empty when
+    unset. Source: oracle session 43.
+  - `Code16` and `Code8` have `Task="1"` on every corpus block and after
+    every save. Loxone Config shows no field for it. Source: corpus,
+    oracle session 43.
+  - A `VirtualIn` holds `MinChange=`, `MinTime=`, `ValOT=` and `Idx=`,
+    which its property pane never shows. A save drops `ValOT="0"` and
+    `Idx="0"` and keeps other values. A digital input's save forces
+    `MinChange=` to 0.5. Source: oracle sessions 43 and 44.
+  - `Alarm` and `SmokeAlarm` list their members in `Objects=`, a comma
+    list that mixes block UUIDs (music players, lighting and shading
+    blocks, central blocks) with hidden refs. `Entries=` is 40 on every
+    corpus block; `CentralOut=` is 1 or 2, meaning unknown.
+    `CentralLight` and `CentralShade` list their members in `rec=`, a
+    comma list of `LightController2` or `AutoJalousie` UUIDs. Source:
+    corpus (4 alarms, 3 smoke alarms, 2 central lights, 1 central shade).
   - `DayTimer` keeps its schedule as `<Entry>` child elements after the
     `<Co>` list (`N=` holds their count). `Analog=`/`DefValue=`/`On=`/
     `Off=` set the output behavior, `Modes=`/`UserModes=` the
@@ -208,7 +249,12 @@ rendered inline (`<Key>2B35</Key>`).
   wires ([connector-db.md](connector-db.md)). Source: oracle session 25.
 - `Nc` — number of incoming wires (= count of `<In>` children); omitted
   when zero.
-- `Def` — the port's parameter value; omitted at type default. A wired
+- `Def` — the port's parameter value. A missing `Def=` is 0, on every block
+  type: a save writes none at 0 and drops a `Def="0"` (oracle session 90, 22
+  connectors on 15 types), and Loxone Config shows 0 for a `Monoflop` without
+  one, whose GUI default is 2 (session 91). The GUI writes every other
+  default when it places a block; no real config holds `Def="0"` on a
+  connector ([D128](decisions/0128-no-def-at-zero.md)). A wired
   `<Co>` can carry one too (the Loxcall library entry: an `Equal`'s
   `Input1` with `Def="2"` and an `<In>`): Loxone Config keeps the value
   when a wire is drawn onto the port. The wire supplies the input; the
@@ -238,13 +284,17 @@ the XML by keys that often say something else (`EndUp` is *complete
 open*, not an end switch; `EnMove` is *DisP*, disable motion). The table
 maps each key to its label. Source: oracle session 34, which wired a `Not`
 into every fourth input of each block; the canvas lists wired rows in key
-order, so each wire pins one key to its label.
+order, so each wire pins one key to its label. Session 38 read the rows of
+blocks whose inputs were all wired (parameters with a value have no row).
 
 | Type | Key → label |
 |---|---|
 | `Switch2Button` (*Tastschalter*, push switch) | `InputTrigger` Tr, `On` On, `Reset` Off, `InputDisable` DisPc |
 | `PulseAt` (*Impuls um*) | `InputDisable` Off, `Remanence` Rem |
 | `MeterDig` (*Festwertzähler*, fixed value meter) | `A` S, `R` R |
+| `WipingRelay` (*Wischrelais*) | `InputTrigger` Tr |
+| `Counter` (*Aufwärtszähler*, up counter) | `Reset` Off |
+| `HourCounter` (*Betriebszeitzähler*, runtime counter) | `InputResetAll` Off |
 | `MeterAbsUni` (*Zähler*) | `Pf` Pf, `Mr` Mr, `R` R |
 | `MeterAbsBi` (*Zähler Bidirektional*) | `Pf` Pf, `Mr1` Mrc, `Mr2` Mrd, `R` R |
 | `AutoJalousie` | `InputTrigger` Tg, `InputTriggerUp` Po, `InputTriggerDown` Pc, `EndUp` Co, `EndDown` Cc, `Shade` So, `AutoShade` Sps, `EnAutoShade` DisSp, `ReactAutoShade` Spr, `Safety` Wa, `Window` Dwc, `Stop` Off, `ManualPosition` Pos, `ManualLamelle` Slat, `Gesture` T5, `InputDisable` DisPc, `Type` Type, `SO` Wap, `Rdd` Rdd, `Deadtime` Bld; `WP` has no row |
@@ -385,8 +435,7 @@ Evidence: the house config (all 113 uuid-pinned ref externs resolved,
   An empty `Off` text is not written. The GUI's defaults for `On`/`Off` are `<v>`.
   Inputs and outputs that log, mail or notify carry the same child with
   other `Ref…=` attributes (`RefLogger`, `RefMailer`, …); Lox Logic compares
-  all of it (`message <attr>` in the diff). A `Def="0"` is not written on
-  a comparator input; Config leaves the input open.
+  all of it (`message <attr>` in the diff).
 - **Recipients are `ACT=` rights** on the notification: ticking a user
   in Config 17.2 appends `<PRM REF="<Notification>" ACT="3"/>` to the
   user's `<PH>` list and raises `NUM=` — the same edit as an access
@@ -913,6 +962,21 @@ byte flipped back, `52` → `50` (house, 38 of 38). Lox Logic reads
 `Serial=`, and an Air device's serial from its `IP=`, for `device:`
 extern matching ([D55](decisions/0055-device-narrowed-matching.md), [D71](decisions/0071-multi-object-statements.md)); `loxl scan` reports both as personal data.
 
+`/data/status` names the other identities the same way (house, every
+element matched):
+
+- The Miniserver's `MAC=` is the `LoxLIVE` `Serial=` (1 of 1).
+- A `GenericNetworkDevice`'s `MAC=` is the `MAC=` of the program's
+  `NetworkDevice` (2 of 2).
+- A `OneWireDevice`'s `Serial="28.9E.A6.14.00.00.00.25"` is the
+  `Lox1wireDevice`'s `ROMID=` without the dots (2 of 2).
+- `TreeBranch` is a `LoxTree`, `TreeDevice` a Tree device or the Air base
+  (`LoxAIR`), `Extension` an Extension or bus interface (`LoxREL`,
+  `LoxDigin`, `Comm1wire` in the house). Serials
+  match as hex digits, ignoring case and separators.
+
+`lox hw status` compares the two by these serials.
+
 A device's own attributes: an Air device always carries `Installation`,
 `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` (103 of 103 in the
 corpus); a Tree device `Installation`, the board only where it is
@@ -925,6 +989,32 @@ session 30). Every Air device in the corpus has
 The Tree and Air extensions (`LoxTree`, `LoxAIR`) carry `Installation`
 and `SwitchBoard` too. A save keeps both rewritten, a board also from
 `""` (oracle session 51).
+
+### Tree devices created offline
+
+Loxone Config adds a Tree device offline, before a Tree search finds it, with `Serial="00000000"`.
+A paired device carries its own 8-digit serial instead, and a declaration matches it by that
+(`serial:`). In the public corpus, 77 of 110 Tree devices have the zeros. A compile
+creates devices in this offline state ([D102](decisions/0102-created-tree-devices.md)). How a Miniserver
+runs a device it has not searched for yet is not verified. What a save writes on one (oracle sessions
+53–55, Config 17.2):
+
+- **Place.** A Tree extension's branches are `LoxCaption` children: `CaptionType="2"` the left branch,
+  `3` the right one, or the only one. The devices are children of their branch. A save keeps a device
+  appended at the end of a branch, an empty self-closing one included.
+- **`TId=`** names the kind, right after `Type=`: `TouchTree` (TreeType 32771), `PresenceSensorTree`
+  (32794), `CorridorLightTree` (32774), `ValveTree` (32769). A save adds it where it is missing.
+- **Attribute order.** `Type TId V U Title WF Serial Installation SwitchBoard SubType TreeType PG`, then
+  the rest. A save reorders to this; a Valve Actuator Tree gains `SwitchBoard=""` and
+  `SwitchBoardPos="1"`.
+- **`<IoData>`.** A save writes `<IoData></IoData>` (never self-closing) on the device and on actuators,
+  and `<IoData St="2"/>` on digital sensors and the online status, `St="4"` on analog sensors, adding
+  the element where it is missing. A `Pr=` without `Cr=` stays.
+- **The online status** (`Type="Online"`, `IName="S0"`) is titled after the kind (`Online Status
+  Touch Tree`), not the device. A save does not rename it; in the corpus, many carry the device's
+  title instead.
+- **`WF`** is 16384 or 16400 on corpus devices; bit `0x10` varies within one kind and one config. A
+  save keeps 16384.
 
 ## Time functions: per-project singletons
 
@@ -974,6 +1064,8 @@ wires. Attributes, in the save's order:
 
 - `CalType` — the `Mode=` number of the operating mode the entry
   switches on; absent for 0, the holiday mode. User modes are negative.
+  A deleted mode leaves the number behind: 1 corpus entry
+  (`wiki_bewaesserung`) has `CalType="-7"` with no `Mode="-7"`.
 - `Mode` — the kind of date. No other value occurs:
   - absent: a fixed date every year (`Month`, `Day`);
   - `1`: relative to Easter Sunday (`EasterOffset` in days, which may be
@@ -1488,8 +1580,12 @@ Logic mints these children itself, and the first save changes nothing.
   on an HTTP command, an empty `<IoData></IoData>`, `Display` defaults, `Tx="false"`,
   `ModbusCoilQuantity="1"`, `WF` on an output command and `WF="16384"` on a text input.
 - **`Mode`:** a fresh one is saved with `WF="147456"` (see *Operating modes*).
+- **`StateV`:** `Analog="false"`, `Tx="false"`, `<IoData Visu="true"/>`, `<Display Unit="&lt;v.1&gt;"
+  StateOnly="true"/>`. **`HourCounter`:** two special states, `<IoData Visu="true"/>`, and its connectors in
+  the type's order (an appended `OutputAPI`). **`PulseBy`:** `WTA=""`, which holds a search pattern (corpus
+  values such as `*10001*`). **`UpDownCounter`:** its connectors in the type's order.
 
-Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29 and 33.
+Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29, 33 and 38.
 
 ## The three writers
 

@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::ServerOptions;
+use super::config_tools::{self, CliRun, CompileRun};
 use super::ops::{self, ActionResult, ControlFilter, SceneRun, invalid, tool_error};
 use crate::actions::{self, Action};
 use crate::config::Config;
@@ -216,6 +217,79 @@ pub struct WiringQuery {
     /// Also read the current value on each wire whose source is a state the app streams, and the control's own value (`22000lx`); one WebSocket state read
     #[serde(default)]
     pub live: bool,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ProjectQuery {
+    /// Lox Logic project directory (holds lox.toml), relative to the server's working directory. Default: that directory
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct TypesQuery {
+    /// One block type, e.g. PulseAt: its purpose, documentation page and ports
+    #[serde(default, rename = "type")]
+    pub typ: Option<String>,
+    /// List the types whose name or purpose mentions this text
+    #[serde(default)]
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DecompileQuery {
+    /// A .Loxone config, relative to the project directory
+    pub config: String,
+    /// Lox Logic project directory, relative to the server's working directory. Default: that directory
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Only the blocks Lox Logic manages and what they touch, with every parameter
+    #[serde(default)]
+    pub managed_only: bool,
+    /// Also show parameters left at their default
+    #[serde(default)]
+    pub all_params: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DiffQuery {
+    /// The older .Loxone config, relative to the project directory
+    pub old: String,
+    /// The newer .Loxone config, relative to the project directory
+    pub new: String,
+    /// Lox Logic project directory, relative to the server's working directory. Default: that directory
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct DriftQuery {
+    /// Lox Logic project directory, relative to the server's working directory. Default: that directory
+    #[serde(default)]
+    pub project: Option<String>,
+    /// The .Loxone config to check, relative to the project directory. Default: the project's base
+    #[serde(default)]
+    pub config: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct TestQuery {
+    /// Lox Logic project directory, relative to the server's working directory. Default: that directory
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Run only the tests whose name contains this text
+    #[serde(default)]
+    pub filter: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct HwQuery {
+    /// Download the current config from the Miniserver first (read-only FTP, a few seconds)
+    #[serde(default)]
+    pub download: bool,
+    /// Only the devices with a problem
+    #[serde(default)]
+    pub problems: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -557,6 +631,8 @@ pub struct LoxMcp {
     state: Arc<Mutex<State>>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     learn_io: LearnConnector,
+    /// Runs `lox logic` and `lox config` for the config-as-code tools.
+    runner: config_tools::Runner,
     tool_router: ToolRouter<Self>,
 }
 
@@ -587,6 +663,13 @@ impl LoxMcp {
         Self::build(opts, Some(cfg))
     }
 
+    /// Run the config-as-code tools with this binary instead.
+    #[cfg(test)]
+    pub fn with_runner(mut self, runner: config_tools::Runner) -> Self {
+        self.runner = runner;
+        self
+    }
+
     /// Learn NFC tags on `connector`'s sessions instead of the WebSocket.
     #[cfg(test)]
     pub fn with_learn_io(mut self, connector: LearnConnector) -> Self {
@@ -608,6 +691,7 @@ impl LoxMcp {
             state: Arc::new(Mutex::new(State { cfg, lox: None })),
             pending: Arc::new(Mutex::new(HashMap::new())),
             learn_io: websocket_learn(),
+            runner: config_tools::Runner::current(),
             tool_router,
         }
     }
@@ -1128,6 +1212,206 @@ impl LoxMcp {
             }
         }
         respond(Ok(wiring))
+    }
+
+    #[tool(
+        title = "Hardware status",
+        description = "Compare the devices the Miniserver reports (Tree, Air, extensions, network and 1-Wire devices) with the hardware in the Loxone Config program. Status per device: serial-changed (replaced: same name, other serial), missing (in the program, not reported), not-in-program, offline, ok. Read-only.",
+        output_schema = schema_for_output::<ops::HwReport>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn hw_status(&self, Parameters(q): Parameters<HwQuery>) -> ToolResponse {
+        respond(
+            self.blocking(move |lox| ops::hw_status(lox, q.download, q.problems))
+                .await,
+        )
+    }
+
+    #[tool(
+        title = "Check a Lox Logic module",
+        description = "Config as code: check the project's Lox Logic module for errors (syntax, references, block types, ports, wire directions), as `lox logic check --json`. No base config needed. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_check(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        respond(self.runner.logic(&dir, &["check", "--json"]).await)
+    }
+
+    #[tool(
+        title = "Lox Logic block types",
+        description = "The block types Lox Logic can create. Without arguments one line per type; `search` filters by name or purpose; `type` gives one type's purpose, documentation page and ports (direction, unit, range, default). Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_types(&self, Parameters(q): Parameters<TypesQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(None) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        let mut args = vec!["types"];
+        if let Some(t) = q.typ.as_deref() {
+            args.push(t);
+        } else if let Some(s) = q.search.as_deref() {
+            args.extend(["--search", s]);
+        }
+        args.push("--json");
+        respond(self.runner.logic(&dir, &args).await)
+    }
+
+    #[tool(
+        title = "Lox Logic coverage",
+        description = "How much of the project's config the module manages: objects per type as managed, extern or untouched, whether Lox Logic can manage each type, and the blocks it could adopt next. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_coverage(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        respond(self.runner.logic(&dir, &["coverage", "--json"]).await)
+    }
+
+    #[tool(
+        title = "Decompile a config",
+        description = "Print a .Loxone config as Lox Logic, one `page` section per page, for reading. `managed_only` shows only the blocks the module manages. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_decompile(&self, Parameters(q): Parameters<DecompileQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        let mut args = vec!["decompile"];
+        if q.managed_only {
+            args.push("--managed-only");
+        }
+        if q.all_params {
+            args.push("--all-params");
+        }
+        args.push(&q.config);
+        respond(self.runner.logic(&dir, &args).await)
+    }
+
+    #[tool(
+        title = "Diff two configs",
+        description = "What changed between two .Loxone configs: objects, parameters, rooms, categories, schedules, wires, users and access rights (codes as hashes). As `lox logic diff --json`; exit code 1 when they differ. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_diff(&self, Parameters(q): Parameters<DiffQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        respond(
+            self.runner
+                .logic(&dir, &["diff", "--exit-code", "--json", &q.old, &q.new])
+                .await,
+        )
+    }
+
+    #[tool(
+        title = "Drift check",
+        description = "Did a config change since the project's last compile (saved from Loxone Config or the app)? Exit code 0 in sync, 1 on drift. Checks the project's base unless `config` names another file, such as a fresh download. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_drift(&self, Parameters(q): Parameters<DriftQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        let config = match q.config {
+            Some(c) => c,
+            None => match config_tools::load_project(&dir) {
+                Ok(p) => p.base.display().to_string(),
+                Err(e) => return fail(e),
+            },
+        };
+        respond(self.runner.logic(&dir, &["drift", &config]).await)
+    }
+
+    #[tool(
+        title = "Lint a Lox Logic module",
+        description = "Unused and dead parts of the project's module: unused externs and constants, values outside a port's range, blocks whose outputs feed nothing, Touch Pure Flex commands that reach no block, users whose tag opens no door. Exit code 1 on findings. Read-only.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_lint(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        respond(self.runner.logic(&dir, &["lint", "."]).await)
+    }
+
+    #[tool(
+        title = "Compile into a scratch file",
+        description = "Compile the project's module into its base, writing the config and a copy of the lockfile to a scratch directory: the project stays as it is. Returns the compile's report, the scratch config's path (`out`) and the diff from the base to it. Nothing goes to the Miniserver.",
+        output_schema = schema_for_output::<CompileRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_compile(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        respond(self.runner.compile(&dir).await)
+    }
+
+    #[tool(
+        title = "Run the module's tests",
+        description = "Run the test scenarios of the project's module in the built-in simulator. The module is compiled in memory and nothing is written. Exit code 1 when a test fails.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn logic_test(&self, Parameters(q): Parameters<TestQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        let mut args = vec!["test", "."];
+        if let Some(f) = q.filter.as_deref() {
+            args.extend(["--filter", f]);
+        }
+        respond(self.runner.logic(&dir, &args).await)
+    }
+
+    #[tool(
+        title = "Sync check",
+        description = "Do the project and the Miniserver agree, as right after a verified push? Checks that the live config is the base, the module compiles to the base without changing the lockfile, and the Automatic Designer's rules did not change since the last push. As `lox config sync`; exit code 1 when a check fails. Downloads the config (read-only FTP).",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn config_sync(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        let args = ["-o", "json", "config", "sync", "."].map(String::from);
+        respond(self.runner.run(&dir, &args).await)
+    }
+
+    #[tool(
+        title = "Push dry run",
+        description = "Prepare a push of the project without uploading: download the live config, check for drift, custom changes, user changes and rules changed in the app, compile against it and stage the upload ZIP. Returns what the push would change and why it would refuse. The upload itself is for the user to run (`lox config push --force`); this tool never uploads. Keeps the downloads and the staged ZIP in the project's backups/ folder.",
+        output_schema = schema_for_output::<CliRun>(),
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn config_push_dry_run(&self, Parameters(q): Parameters<ProjectQuery>) -> ToolResponse {
+        let dir = match config_tools::project_dir(q.project.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return fail(e),
+        };
+        // No --force: the push ends after staging. --dry-run makes sure.
+        let args = ["-o", "json", "--dry-run", "config", "push", "."].map(String::from);
+        respond(self.runner.run(&dir, &args).await)
     }
 
     #[tool(

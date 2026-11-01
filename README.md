@@ -97,6 +97,7 @@ lox energy                                 # energy meters
 lox energy flow                            # PV, consumption, grid import/export, battery
 lox energy --top 5                         # the meters drawing the most power
 lox health --problems                      # low batteries, weak signal, offline devices
+lox hw status --problems                   # devices missing, offline, replaced or not in the program
 lox run abend                              # run a scene
 lox stream --room "Kitchen" -o json        # state changes as they happen
 lox otel serve --endpoint http://…         # push metrics, logs and traces via OTLP
@@ -196,7 +197,8 @@ lox health --problems -o json         # check device health
 **MCP server.** Clients that speak the [Model Context Protocol](https://modelcontextprotocol.io) (Claude
 Desktop, Claude Code, ChatGPT, Cursor, …) can launch `lox mcp serve`. It exposes typed tools over stdio:
 rooms, controls, live state, switches, blinds, lights, climate, scenes, the config wiring behind a control (with live values on the wires),
-door access, learning NFC tags and setting access codes. Doors, gates, the alarm, every change to users and
+door access, learning NFC tags and setting access codes, and read-only config-as-code tools (check, diff, drift,
+compile into a scratch directory, a push dry run). Doors, gates, the alarm, every change to users and
 any control on your `confirm:` list ask you to confirm in the client before anything is sent.
 
 ```bash
@@ -270,7 +272,8 @@ jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
 - `lox logic coverage` shows how much of the config the source owns.
 - `lox config push --force` deploys a project: drift check, compile against the live config, a check for user
   changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
-  runs the compiled file.
+  runs the compiled file. It refuses when the rules changed in the app since the last push.
+- `lox config sync` checks that source, lock and the live config agree.
 - `lox logic lsp` is a language server for your editor.
 - `lox logic templates` ships tested templates for common automations, and `lox logic types --search` says what
   each block type is for.

@@ -2148,3 +2148,229 @@ async fn learn_nfc_tag_starts_nothing_without_a_yes() {
     assert_eq!(opened.load(Ordering::SeqCst), 0);
     assert!(io.sent.lock().unwrap().is_empty());
 }
+
+// ── Config-as-code tools ──────────────────────────────────────────────────────
+
+/// A stand-in for the lox binary: prints its arguments and working directory
+/// as JSON, a note on stderr, and exits 1 for `lint`.
+#[cfg(unix)]
+fn fake_lox(dir: &std::path::Path) -> super::config_tools::Runner {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = dir.join("fake-lox");
+    std::fs::write(
+        &exe,
+        "#!/bin/sh\nprintf '{\"args\":\"%s\",\"pwd\":\"%s\"}' \"$*\" \"$PWD\"\necho note >&2\n\
+         case \" $* \" in *\" lint \"*) exit 1;; esac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    super::config_tools::Runner::with_exe(exe)
+}
+
+/// A project directory: lox.toml, a lock, and the base it names.
+fn logic_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("lox.toml"),
+        "base = \"base.Loxone\"\nmodule = \"pages\"\nlock = \"p.lock.json\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("p.lock.json"), "{}\n").unwrap();
+    std::fs::write(dir.path().join("base.Loxone"), "").unwrap();
+    dir
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn logic_tools_run_the_cli_in_the_project() {
+    let ms = miniserver().await;
+    let bin = tempfile::tempdir().unwrap();
+    let project = logic_project();
+    let root = project.path().canonicalize().unwrap();
+    let p = root.display().to_string();
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, None))
+            .with_runner(fake_lox(bin.path())),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+
+    let (out, err) = call(&client, "logic_check", json!({ "project": p })).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["json"]["args"], "logic check --json");
+    assert_eq!(out["json"]["pwd"], p);
+    assert_eq!(out["ok"], true);
+    assert_eq!(out["messages"], "note\n");
+    assert_eq!(out["cli"], "lox logic check --json");
+
+    // Findings are a result, not a tool error.
+    let (out, err) = call(&client, "logic_lint", json!({ "project": p })).await;
+    assert!(!err, "{}", out);
+    assert_eq!(
+        (out["ok"].clone(), out["exit_code"].clone()),
+        (json!(false), json!(1))
+    );
+
+    // Drift checks the project's base by default.
+    let (out, _) = call(&client, "logic_drift", json!({ "project": p })).await;
+    let args = out["json"]["args"].as_str().unwrap();
+    assert!(
+        args.starts_with("logic drift ") && args.ends_with("base.Loxone"),
+        "{args}"
+    );
+
+    let (out, _) = call(&client, "logic_types", json!({ "search": "hysteresis" })).await;
+    assert_eq!(
+        out["json"]["args"],
+        "logic types --search hysteresis --json"
+    );
+
+    let (out, _) = call(
+        &client,
+        "logic_diff",
+        json!({ "project": p, "old": "a.Loxone", "new": "b.Loxone" }),
+    )
+    .await;
+    assert_eq!(
+        out["json"]["args"],
+        "logic diff --exit-code --json a.Loxone b.Loxone"
+    );
+
+    // The push stops after staging: no --force, and --dry-run to make sure.
+    let (out, _) = call(&client, "config_push_dry_run", json!({ "project": p })).await;
+    let args = out["json"]["args"].as_str().unwrap();
+    assert_eq!(args, "-o json --dry-run config push .");
+    assert!(!args.contains("--force"));
+
+    let (out, _) = call(&client, "config_sync", json!({ "project": p })).await;
+    assert_eq!(out["json"]["args"], "-o json config sync .");
+
+    let (out, _) = call(&client, "logic_coverage", json!({ "project": p })).await;
+    assert_eq!(out["json"]["args"], "logic coverage --json");
+    let (out, _) = call(
+        &client,
+        "logic_test",
+        json!({ "project": p, "filter": "x" }),
+    )
+    .await;
+    let args = out["json"]["args"].as_str().unwrap();
+    assert!(
+        args.starts_with("logic test ") && args.contains("x"),
+        "{args}"
+    );
+    let (out, err) = call(
+        &client,
+        "logic_decompile",
+        json!({ "project": p, "config": "a.Loxone" }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    let args = out["json"]["args"].as_str().unwrap();
+    assert!(
+        args.starts_with("logic decompile ") && args.contains("a.Loxone"),
+        "{args}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn logic_compile_writes_only_to_a_scratch_directory() {
+    let ms = miniserver().await;
+    let bin = tempfile::tempdir().unwrap();
+    let project = logic_project();
+    let p = project.path().display().to_string();
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, None))
+            .with_runner(fake_lox(bin.path())),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    let (out, err) = call(&client, "logic_compile", json!({ "project": p })).await;
+    assert!(!err, "{}", out);
+    let args = out["compile"]["json"]["args"].as_str().unwrap();
+    let words: Vec<&str> = args.split(' ').collect();
+    assert_eq!(&words[..3], ["logic", "compile", "."]);
+    let flag = |f: &str| words[words.iter().position(|w| *w == f).unwrap() + 1];
+    let (out_file, lock) = (flag("--out"), flag("--lock"));
+    assert!(!out_file.starts_with(&p) && !lock.starts_with(&p), "{args}");
+    assert_eq!(
+        std::fs::read_to_string(lock).unwrap(),
+        "{}\n",
+        "a copy of the lock"
+    );
+    // The fake wrote no config: nothing to diff.
+    assert!(
+        out.get("out").is_none() && out.get("changes").is_none(),
+        "{}",
+        out
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logic_tools_need_a_project() {
+    let ms = miniserver().await;
+    let empty = tempfile::tempdir().unwrap();
+    let client = session(&ms, ServerOptions::default(), Lifecycle::Modern).await;
+    let p = empty.path().display().to_string();
+    let (out, err) = call(&client, "logic_drift", json!({ "project": p })).await;
+    assert!(err);
+    assert_eq!(out["error"], "invalid_arguments");
+    assert!(
+        out["message"].as_str().unwrap().contains("No lox.toml"),
+        "{}",
+        out
+    );
+    let (out, err) = call(
+        &client,
+        "logic_check",
+        json!({ "project": "/nonexistent/x" }),
+    )
+    .await;
+    assert!(err);
+    assert_eq!(out["error"], "invalid_arguments");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hw_status_compares_the_bus_with_the_program() {
+    let ms = miniserver().await;
+    ms.mock_async(|when, then| {
+        when.method(GET).path("/data/status");
+        then.status(200).body(
+            "<Status><Miniserver Name=\"MS\" MAC=\"504F94000001\" Offline=\"false\">\
+             <TreeBranch Name=\"Tree\" Serial=\"B0000001\">\
+             <TreeDevice Name=\"Touch\" Serial=\"B0000002\" Online=\"false\"/>\
+             <TreeDevice Name=\"Extra\" Serial=\"B0000009\" Online=\"true\"/>\
+             </TreeBranch></Miniserver></Status>",
+        );
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("config.Loxone"),
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<ControlList Version=\"1\">\r\n\
+         <C Type=\"Document\" V=\"175\" U=\"00000001-0000-0000-ffff000000000001\" Title=\"T\">\r\n\
+         <C Type=\"LoxLIVE\" V=\"175\" U=\"00000002-0000-0000-ffff000000000001\" Title=\"MS\" Serial=\"504F94000001\">\r\n\
+         <C Type=\"LoxTree\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"Tree\" Serial=\"B0000001\">\r\n\
+         <C Type=\"TreeDevice\" V=\"175\" U=\"00000004-0000-0000-ffff000000000001\" Title=\"Touch\" Serial=\"B0000002\"/>\r\n\
+         </C>\r\n</C>\r\n</C>\r\n</ControlList>\r\n",
+    )
+    .unwrap();
+    let client = connect(
+        LoxMcp::with_config(ServerOptions::default(), config(&ms, Some(dir.path()))),
+        TestClient::new(Lifecycle::Modern, UserAnswer::CannotAsk),
+    )
+    .await;
+    let (out, err) = call(&client, "hw_status", json!({ "problems": true })).await;
+    assert!(!err, "{}", out);
+    assert_eq!(out["config"], "cached");
+    let statuses: Vec<&str> = out["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(statuses, ["not-in-program", "offline"]);
+    assert_eq!(out["counts"]["ok"], 2);
+}

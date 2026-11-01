@@ -291,6 +291,9 @@ impl Module {
                                 b.block_type, b.slug, b.block_type
                             ));
                         }
+                    } else if binding.port == "tree" && b.block_type == "TreeDevice" {
+                        // The Tree extension a created device goes on,
+                        // checked when the device is created.
                     } else if binding.port == "mirrors" {
                         if !matches!(
                             b.block_type.as_str(),

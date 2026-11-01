@@ -10,6 +10,48 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.75.1] — 2026-11-01
+
+### Added
+- **Lox Logic block settings** come from source: the name the app shows (`Desc:`), a memory flag's type
+  (`Type: "text"`), when a PulseAt fires (`Pulse: "sunset"`), a blind's sunshine flag (`Sun: on`), a
+  DayTimer's on/off texts and a meter's units. `loxl decompile` and `loxl adopt` lift them, and
+  `loxl types <Type>` lists them
+  - `loxl coverage` names the parameter that claims each carried attribute and no longer lists values a
+    save writes on its own
+
+### Fixed
+- **`loxl compile`** writes no `Def="0"` on a block input, as Loxone Config saves it: a comparison with 0 (`x.Q < 0`), a parameter of 0 and `x.Port = 0` no longer show as changed after a save. `loxl test` reads an unset parameter as 0, as Loxone Config does, and `loxl decompile` states it (`Time: 0`) where Config's default is not 0.
+
+## [0.75.0] — 2026-11-01 — push guards and hardware status; create Tree devices
+
+`lox config push` now guards against deleting rules edited in the app, and `lox config sync` checks a project
+against the Miniserver. `lox hw status` finds missing, offline and replaced devices.
+
+Four kinds of Tree device can now be created from Lox Logic, unpaired, ready for a Tree search in Loxone Config.
+
+### Added
+- **`lox logic`** creates and adopts 13 more block types: virtual status (`StateV`), wiping relay, the four arithmetic blocks (`Add`, `Sub`, `Mult`, `Div`), moving average, integer, up counter, up-down counter, runtime counter, pulse by text and analog memory. They cover about 84% of the page blocks in the public test configs, up from 62%. `loxl test` simulates the wiping relay, integer, analog memory and both counters.
+- **`lox config push`** refuses `--force` when the Automatic Designer's rules changed since the last verified push,
+  since the upload would delete rules edited in the app. It records the change time in `autopilot.changed`;
+  `--allow-app-changes` overrides. The saved lock now matches the verified download.
+- **`lox config sync`** checks, read-only, that a project's source, lock and the live config agree, and exits 1
+  when they don't.
+- **`lox hw status`** compares the devices on the bus (`/data/status`) with the program file: missing, offline,
+  replaced (serial changed) or not in the program. Table or `-o json`.
+- **`lox mcp`** gets read-only tools for hardware and config as code: `hw_status`, `logic_check`, `logic_diff`,
+  `logic_drift`, `logic_lint`, `logic_compile` (into a scratch directory), `logic_test`, `config_sync`,
+  `config_push_dry_run` and more.
+- **`loxl compile`** creates Tree devices: `melder = TreeDevice("Melder", kind: "PresenceSensorTree", tree: tree1)` adds an unpaired device to the Tree extension `tree1`. Touch Tree, Presence Sensor Tree, LED Ceiling Light RGBW Tree and Valve Actuator Tree are supported. Pair it in Loxone Config; the compile prints a note until then. `removed melder` deletes it, and no compile deletes other hardware.
+
+### Fixed
+- **loxl adopt** takes over a calendar entry whose operating mode is gone from the config (a deleted user mode). It writes a comment instead of `switches:`, and the entry keeps its mode number until `switches:` names one. Before, adopt refused the entry.
+
+## [0.74.0] — 2026-11-01
+
+### Changed
+- **loxl** writes a calendar entry's date as a date: `on: 12-31` (a day every year), `easter: 1` (days after Easter Sunday), `from: 2026-07-04, to: 2026-09-05` (one period) and `from: 10-01, to: 04-30` (every year). The stored attributes (`Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30`, `From: 6393`, `EasterOffset:`, `WeekDayInMonth:`) are an error that names the replacement, with a quick fix in the language server; `loxl fmt` rewrites them and `adopt` writes the date. The compiled config does not change.
+
 ## [0.73.0] — 2026-11-01
 
 ### Added

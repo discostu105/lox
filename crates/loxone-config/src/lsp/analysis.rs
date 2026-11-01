@@ -8,7 +8,9 @@
 //! about in backticks; the first name that is declared somewhere places
 //! the diagnostic.
 
-use crate::connectors::{BUILTIN_TYPES, PortDir, builtin};
+use crate::connectors::{
+    BUILTIN_TYPES, PortDir, attr_params, bool_params, builtin, choice_values, text_params,
+};
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
     CompileOptions, LintFinding, LintKind, Module, TemplateParam, compile, finish_lint,
@@ -1114,6 +1116,19 @@ impl Workspace {
                     }),
             );
         }
+        // Settings the block's element holds (`Desc:`, `At:` …).
+        if matches!(callee, Callee::Block(_)) {
+            out.extend(
+                attr_params(ty)
+                    .into_iter()
+                    .filter(|a| !crate::logic::calendar::is_raw_date(ty, a))
+                    .map(|a| Completion {
+                        label: a.to_string(),
+                        kind: "port",
+                        detail: Some(setting_detail(ty, a)),
+                    }),
+            );
+        }
         out
     }
 
@@ -1320,7 +1335,23 @@ fn type_hover(ty: &str) -> String {
             md.push_str(&format!(" ({l})"));
         }
     }
+    for a in attr_params(ty) {
+        md.push_str(&format!("\n- `{a}` {}", setting_detail(ty, a)));
+    }
     md
+}
+
+/// What a setting takes: its words, text, on/off or a value.
+fn setting_detail(ty: &str, param: &str) -> String {
+    if let Some(choices) = choice_values(ty, param) {
+        format!("setting: {}", crate::connectors::choice_list(choices))
+    } else if bool_params(ty).contains(&param) {
+        "setting: on or off".to_string()
+    } else if text_params(ty).contains(&param) {
+        "setting: text".to_string()
+    } else {
+        "setting".to_string()
+    }
 }
 
 /// Type, title, room and page of the object `uuid` in `doc`.

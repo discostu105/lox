@@ -320,17 +320,18 @@ pub(super) fn adopt_device(
                 )
                 .chain(slug_of.iter().map(|(u, s)| (u.clone(), s.clone())))
                 .collect();
-            let mode = crate::logic::calendar::lift(doc, number, &known).map_err(|why| {
-                fail(format!(
-                    "cannot adopt CalendarEntry \"{}\": {why}",
-                    o.title.as_deref().unwrap_or("")
-                ))
-            })?;
-            args.push(ArgItem::Binding(Binding {
-                port: crate::logic::calendar::SWITCHES.to_string(),
-                kind: BindingKind::Param(mode),
-                comment: None,
-            }));
+            // A mode the config no longer has: no `switches:`, so the
+            // compile keeps `CalType=` as it is, and a comment says so.
+            match crate::logic::calendar::lift(doc, number, &known) {
+                Some(mode) => args.push(ArgItem::Binding(Binding {
+                    port: crate::logic::calendar::SWITCHES.to_string(),
+                    kind: BindingKind::Param(mode),
+                    comment: None,
+                })),
+                None => args.push(ArgItem::Comment(crate::logic::calendar::gone_mode_comment(
+                    number,
+                ))),
+            }
             // Its date, as a date (`from: 10-01, to: 04-30`).
             let date =
                 crate::logic::calendar::lift_date(|n| el.attr_decoded(n).map(|v| v.into_owned()))

@@ -29,14 +29,17 @@ fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
 /// of virtual and Modbus devices and of physical inputs and
 /// outputs (`Unit` is `<Display Unit=…>`, see [`setting_value`]).
 fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
-    let params: &'static [&'static str] = if (version < 8
+    let params: Vec<&'static str> = if (version < 8
         && crate::periphery::periphery(block_type).is_some())
         // A PulseAt's fire time (`At:` → `Sec=`, #248) joined in v10.
         || (version < 10 && !clock_params(block_type).is_empty())
     {
-        &[]
+        Vec::new()
     } else {
         attr_params(block_type)
+            .into_iter()
+            .filter(|p| version >= 12 || !since_v12(block_type, p))
+            .collect()
     };
     // Device settings (#197) joined in v9, the extensions' and the
     // statistics of hardware inputs and outputs in v11.
@@ -50,14 +53,29 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
     };
     let stats = version >= 11 && crate::hardware::stats_value(block_type).is_some();
     params
-        .iter()
+        .into_iter()
         .map(move |p| attr_name(block_type, p))
         .chain(settings)
         .chain(stats.then_some("StatsType"))
         .chain((block_type == "AutopilotRule").then_some("APC"))
 }
 
-const FINGERPRINT_VERSION: u8 = 11;
+/// The attribute parameters that joined the comparison in v12 (#253): the
+/// app name, a memory flag's type, when a PulseAt fires, an automatic
+/// blind's sunshine flag, a day timer's texts and the meters' names and units.
+fn since_v12(block_type: &str, param: &str) -> bool {
+    param == "Desc"
+        || matches!(
+            (block_type, param),
+            ("PulseAt", "Pulse")
+                | ("Memory", "Type")
+                | ("AutoJalousie", "Sun")
+                | ("DayTimer", "On" | "Off")
+                | ("MeterDig" | "MeterAbsUni" | "MeterAbsBi" | "MeterAbsSt", _)
+        )
+}
+
+const FINGERPRINT_VERSION: u8 = 12;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -583,10 +601,19 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 10: the current version without the settings of
-/// Tree and Air extensions and the statistics of hardware inputs and
-/// outputs.
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Fingerprint version 11: the current version without the attributes
+/// claimed by `Desc:`, `Type:`, `Pulse:`, `Sun:`, a day timer's texts and the
+/// meters' names and units (#253).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v11(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 11)
+}
+
+/// Fingerprint version 10: version 11 without the settings of Tree and Air
+/// extensions and the statistics of hardware inputs and outputs.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v11`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v10(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 10)
@@ -594,8 +621,7 @@ pub fn semantic_fingerprint_v10(doc: &LoxoneDoc) -> String {
 
 /// Fingerprint version 9: version 10 without a PulseAt's fire time
 /// (`Sec=`, #248).
-/// `loxl drift` accepts every older version, so an upgrade alone does not
-/// read as drift. The next compile records the current version.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v9(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 9)
@@ -603,7 +629,7 @@ pub fn semantic_fingerprint_v9(doc: &LoxoneDoc) -> String {
 
 /// Fingerprint version 8: version 9 without the settings of Air and Tree
 /// devices (#197).
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 8)
@@ -611,7 +637,7 @@ pub fn semantic_fingerprint_v8(doc: &LoxoneDoc) -> String {
 
 /// Fingerprint version 7: version 8 without the settings of virtual and Modbus
 /// devices and of physical inputs and outputs.
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 7)
@@ -619,7 +645,7 @@ pub fn semantic_fingerprint_v7(doc: &LoxoneDoc) -> String {
 
 /// Fingerprint version 6: version 7 without LightController2 moods
 /// (`<LightscenesC>`).
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 6)
@@ -627,35 +653,35 @@ pub fn semantic_fingerprint_v6(doc: &LoxoneDoc) -> String {
 
 /// Fingerprint version 5: version 6 without DayTimer schedules (`Modes=` and
 /// the `<Entry>` list).
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v5(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 5)
 }
 
 /// Fingerprint version 4: version 5 without messages (`<LoggerMailer>`).
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v4(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 4)
 }
 
 /// Fingerprint version 3: version 4 without Touch Pure Flex tile programs.
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v3(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 3)
 }
 
 /// Fingerprint version 2: version 3 without program text (`Code=` on Code16).
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v2(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 2)
 }
 
 /// Fingerprint version 1: version 2 without room/category bindings.
-/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v10`].
 #[doc(hidden)] // older forms, for drift checks against old locks
 pub fn semantic_fingerprint_v1(doc: &LoxoneDoc) -> String {
     fingerprint(doc, 1)
@@ -680,7 +706,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         8 => b"lxir-fingerprint-v8".to_vec(),
         9 => b"lxir-fingerprint-v9".to_vec(),
         10 => b"lxir-fingerprint-v10".to_vec(),
-        _ => b"lxir-fingerprint-v11".to_vec(),
+        11 => b"lxir-fingerprint-v11".to_vec(),
+        _ => b"lxir-fingerprint-v12".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));

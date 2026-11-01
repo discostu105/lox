@@ -392,7 +392,9 @@ value decides the meaning:
 
 - `Port: 28`, `Port: "text"`, `Port: constant` — a **parameter**: the
   literal (or resolved `let` constant) becomes `Def=` on the port with key
-  `Port`.
+  `Port`. A 0 writes no `Def=`: Loxone Config writes none at 0, and a
+  missing `Def=` is 0. A parameter the block does not state is therefore 0,
+  not the default Loxone Config gives a block it places.
 - `Port: slug.Port` — a **wire**: the referenced source port is wired into
   this port. Sources may be extern or managed ports (including the block
   itself — feedback is representable) and are referenced before or after
@@ -437,10 +439,55 @@ jalousie_schliessen = PulseAt("Jalousie schließen", At: 19:00, Time: 1s)
   source writes it, at the attribute's place in the base element.
   Decompile and adopt lift it, so an adopted PulseAt states its time.
 - It means a fixed time of day. A PulseAt set to a time function in
-  Loxone Config (sunrise, an hour pulse — any `Typ=` other than `0`) is
-  refused with `At:` and lifted without it. The source does not express
-  time functions yet.
+  Loxone Config (sunrise, an hour pulse) refuses `At:` unless the source
+  also says `Pulse: "time"`, and is lifted without it.
 - `loxl diff` shows a change as `At: 18:58 -> 06:58`.
+
+`Pulse:` on `PulseAt` says when the block fires: `"time"` (at `At:`),
+`"year"`, `"month"`, `"day"`, `"hour"`, `"minute"`, `"second"`, `"start"`
+(when the Miniserver starts), `"dusk"`, `"dawn"`, `"sunset"` or
+`"sunrise"`. It writes `Typ=`. `At:` goes only with `"time"`. A one-off
+pulse on a date stays with Loxone Config.
+
+```text
+licht_an = PulseAt("Licht an", Pulse: "sunset", Time: 1s)
+```
+
+#### Block settings
+
+These settings live on the block element. Each is a claim like `At:`:
+carried from the base while the source leaves it out, written from source
+once bound, at the place a save writes it. Decompile and adopt lift them,
+except a value a save writes when nothing is set.
+
+| Parameter | Blocks | Takes | Loxone Config field |
+|-----------|--------|-------|---------------------|
+| `Desc:` | most blocks with an app entry | text | Anzeigename: the name the app shows |
+| `Type:` | `Memory` | `"digital"`, `"analog"` or `"text"` | Typ |
+| `Pulse:` | `PulseAt` | see above | Impuls |
+| `Sun:` | `AutoJalousie` | `on` or `off` | Sonnenschein verwenden |
+| `On:`, `Off:` | `DayTimer` | text, may be `""` | Bezeichnung Ein / Aus |
+| `PwrN:` | meters | text | Anzeigename of the power value |
+| `Un1:`, `Un2:` | meters | text | Einheit of the two values |
+| `UnSt:`, `MaxLvl:` | `MeterAbsSt` | text, a number | storage unit, Max. Speicherstand |
+
+```text
+merker = Memory("Anrufer", Desc: "Letzter Anrufer", Type: "text", Input: tel.TQ1)
+zaehler = MeterDig("Strom", PwrN: "Leistung", Un1: "kW", Un2: "kWh", Input: s0.Q)
+```
+
+- `Desc:` is the name the app shows. Without it the app shows the label.
+  It is written right after `Type=`, as a save writes it.
+- `Sun: off` leaves the attribute out, as a save does.
+- A text setting refuses `""`, except `On:` and `Off:`, where empty is
+  what a save writes. Leave the setting out to keep what Loxone Config has.
+- Some attributes stay with Loxone Config and are refused by name: the
+  member lists of alarms and central blocks (`Objects=`, `Entries=`,
+  `CentralOut=`, `rec=`), a meter's energy flow monitor (`Rec=`),
+  statistics settings (`StatsType=`), a virtual input's hidden `MinChange=`,
+  `MinTime=`, `ValOT=` and `Idx=`, and a program's `Task="1"`, which every
+  save writes.
+- `loxl types <Type>` lists the settings a type takes and their values.
 
 `Code:` on `Code16` holds the PicoC program. A program is hundreds
 of lines, so its value is a **file**:
@@ -610,11 +657,43 @@ states. They are written on every compile.
   binding the element has.
 - **Removing** a declaration from the source releases the hardware: the
   element keeps the values the source wrote last, and its wires from
-  the argument list leave. Nothing is ever deleted.
+  the argument list leave. Nothing is deleted, except a device the
+  source created (below) under `removed <slug>`.
 - `adopt --uuid <device>` declares the device with every I/O below it,
   with the values the config holds. An extern among them keeps its
   slug, and its statements move into its declaration. Adopting an I/O
   alone is an error. Pairing a device stays in Loxone Config.
+
+#### Creating a Tree device
+
+```text
+tree1 = LoxTree("Tree", serial: "13000003")
+melder = TreeDevice("Melder Flur", kind: "PresenceSensorTree", tree: tree1, branch: "left")
+bewegung = TreeSensor("Bewegung Flur", device: melder, iname: "I1", MinTime: 20)
+```
+
+`kind:` creates the device instead of matching one. The compile adds it
+to the Tree extension that `tree:` names, unpaired, and from then on
+the lockfile keeps it. Pair it with a Tree search in Loxone Config.
+
+- **Kinds:** `TouchTree`, `PresenceSensorTree`, `CorridorLightTree`
+  (LED Ceiling Light RGBW) and `ValveTree` (Valve Actuator). Any other
+  is an error; declare it by `serial:` once Loxone Config has paired it.
+- **`branch:`** is `"left"` or `"right"`. It can be left out when the
+  extension has one branch.
+- **Its I/O** is declared by `iname:` (`I1`, `AI1`, `AQ1`, …) with
+  `device:` naming it. The title is the kind's English default when the
+  declaration gives none.
+- **Not paired yet:** `loxl compile` and `lox config push` print a note
+  for each such device. How the Miniserver runs a device it has not
+  searched for is untested.
+- **Deleting** it takes `removed <slug>`; without it, a declaration
+  that leaves the source is an error. A device that feeds a wire drawn
+  in Loxone Config is not deleted. Declaring it by `uuid:` (or
+  `serial:` once paired) keeps it as a plain declaration.
+- A base without the device, an older one or one where it was deleted
+  in Loxone Config, gets it back under the same UUID.
+- No compile deletes any other hardware.
 
 ### Operating modes — minted into the "Betriebsmodi" folder
 
@@ -694,7 +773,10 @@ an error that names `from: 10-01, to: 04-30`. `Mode`, `Month`, `Day`,
 or 4 is no date. `loxl fmt` rewrites a built-in mode's number and the
 stored date. The entries Loxone Config made are taken over with
 `adopt --uuid`, which writes their mode with `switches:` and their date
-as a date; edits change only what the source states. Its `I` and `Q`
+as a date; edits change only what the source states. An entry whose
+mode is gone from the config (a deleted user mode) is adopted without
+`switches:`, with a comment that names its `CalType`: it keeps that
+number until `switches:` names a mode. Its `I` and `Q`
 are never wired in the corpus; the mode's `Q` is the output to use.
 
 ### `<-` — wire onto an extern port
@@ -720,7 +802,7 @@ list.
 jal_sued.TargetPos = 70
 ```
 
-Rewrites the extern port's `Def=`; the original value is recorded in the
+Rewrites the extern port's `Def=` (a 0 removes it); the original value is recorded in the
 lockfile and **restored** when the statement disappears from source.
 
 Like `<-`, this is for **extern targets only**. A managed block's

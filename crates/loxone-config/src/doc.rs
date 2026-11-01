@@ -64,8 +64,8 @@ pub struct WireView {
 /// therefore never appear. Each entry needs evidence from a real config or a
 /// Loxone Config save.
 pub const GUI_OWNED_ATTRS: &[&str] = &[
-    "Tp",           // Memory subtype
-    "Sun",          // AutoJalousie
+    "Tp",           // Memory type: digital, analog or text (`Type:` claims it)
+    "Sun",          // AutoJalousie: use the sunshine variable (`Sun:` claims it)
     "SpStates",     // visualization-state UUID lists (PushButton, AutoJalousie)
     "NDOC",         // block documentation text (PushButton)
     "StatsType",    // statistics settings (PushButton, Memory)
@@ -73,7 +73,7 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
     // PulseAt fire time in seconds since midnight. Carried until the
     // source claims it with `At:` (#248).
     "Sec",
-    "Typ",  // PulseAt timing mode: `0` a fixed time, the other codes unknown
+    "Typ",  // PulseAt: when it fires, a fixed time or a time function (`Pulse:`)
     "AutP", // PulseAt and Memory, meaning unknown
     // DayTimer settings. Like the `<Entry>` schedule they gate *when* the
     // block runs, never what a declared wire or param means.
@@ -81,10 +81,10 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
     "DefValue",  // DayTimer output behavior
     "N",         // DayTimer: count of `<Entry>` children, carried with them
     "Modes",     // DayTimer: operating-mode UUIDs that gate it
-    "On",        // DayTimer output behavior
-    "Off",       // DayTimer output behavior
+    "On",        // DayTimer: the text for on (`On:` claims it)
+    "Off",       // DayTimer: the text for off (`Off:` claims it)
     "UserModes", // DayTimer: user operating-mode UUIDs that gate it
-    "Desc",      // DayTimer description text
+    "Desc",      // the name the app shows (`Desc:` claims it)
     // LightController2 per-circuit GUI state. Only the indexes seen in real
     // configs are listed: a sixth circuit surfaces `NameAI5` as a refusal
     // and gets added on that evidence. Each name in this group and the next
@@ -112,7 +112,7 @@ pub const GUI_OWNED_ATTRS: &[&str] = &[
     // Code16 (the PicoC program block) program source. A source binding
     // (`Code: file("…")`) claims it, and only then does the compiler write it.
     "Code",
-    "Task", // Code16 scheduling mode
+    "Task", // Code16: every save writes `Task="1"`; Loxone Config shows no field for it
 ];
 
 /// GUI-owned child elements of block elements, with the same contract as

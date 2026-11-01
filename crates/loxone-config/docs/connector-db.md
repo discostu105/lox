@@ -260,6 +260,32 @@ copied).
 sets, order and UUIDs, in a wired chain with parameters on every block
 ([oracle-sessions.md](oracle-sessions.md)).
 
+### The simple-logic batch (#316)
+
+The most frequent page blocks of the public corpus that Lox Logic could only reference: virtual status,
+wiping relay, arithmetic, averaging, rounding, counters, text pulses and analog memory. Each type has one
+connector order across all its corpus instances, but the corpus holds them only in pre-17 generations (V70
+to V174). Oracle session 38 minted all thirteen in that order and saved them in Loxone Config 17.2; session
+39 minted them in the saved order and they came back unchanged.
+
+| Type | Ports (element order) | Basis |
+|---|---|---|
+| `StateV` | I, AQ | 239 instances in 22 files, one order. `I` sink ×236; `AQ` never wired, all three legacy dbs Output |
+| `WipingRelay` | InputTrigger, Remanence, TimeOn, Q | 68 instances, one order. `InputTrigger` sink ×68, `Q` source ×68; `TimeOn` Def on every instance *and* sink ×2 → Input; `Remanence` inert-flag. In no legacy db |
+| `Mult`, `Add`, `Sub`, `Div` | Input1, Input2, AQ | 59 + 12 + 18 + 7 instances, one shared order. Inputs sink on every instance, `AQ` source |
+| `Avg` | Input, Reset, Remanence, Time(P), Max, AQ | 18 instances (V109–V145) lack `Reset`; the newest (V151) has it, and the save keeps it. `Reset` both legacy dbs Input; `Max` Def everywhere plus sink ×2; `Time` Def-only; `Remanence` inert-flag |
+| `Int` | Input, Mode, AQ | 5 instances. `Mode` never wired and never `Def` → inert-flag Input |
+| `UpDownCounter` | Trigger, InputDir, Reset, OnValue, OffValue, Remanence(P), StartValue, Q, AQ | 9 instances (V126, V141) in another order: **the save reorders it**, keeping every UUID. `Trigger`/`Reset`/`OnValue` sink ×9, `Q` source; `Remanence` Def-only; `InputDir`/`OffValue`/`StartValue` inert-flag; `AQ` both legacy dbs Output |
+| `HourCounter` | InputEnable, Reset, InputResetAll, Unit(P), Maintenance, Q, AQ, AQl, AQr, AQs, OutputAPI | 3 instances (V137, one file). **The save appends `OutputAPI`.** `InputEnable`/`InputResetAll` sink, `Maintenance` Def plus sink, `Unit` Def-only, `Q`/`AQ`/`AQr` source, `AQl` both legacy dbs Output; `Reset` both dbs Input; `AQs` and `OutputAPI` are in no db and never wired → inert-flag Input |
+| `Counter` | Trigger, Reset, Remanence, EndValue, Mode, Q, AQ | 6 instances (V99). `Trigger`/`Reset` sink, `EndValue` Def plus sink, `Q`/`AQ` source; `Remanence`/`Mode` inert-flag |
+| `PulseBy` | Text, Time(P), Pulse | 15 instances (V172, V174). `Text` sink, `Pulse` source, `Time` Def-only |
+| `AMemory` | Input, Trigger, Reset, Remanence, AQ | 38 instances. `Input`/`Trigger` sink ×38, `Reset` sink ×7, `AQ` source; `Remanence` inert-flag |
+
+Content Loxone Config owns on these types, carried verbatim: `Tx=`, `NTXT=` and `linkC=` on `StateV`
+(`Analog=`, `StatsType=` and the display children are carried for every type), and `WTA=` on `PulseBy`, which holds
+a search pattern (corpus values such as `*10001*`). The block takes up to four patterns, and where the
+others are stored is unknown, so the search patterns stay with Loxone Config.
+
 ### VirtualIn
 
 `Q`, `Qm` — both Output. 175 corpus instances from Config 3.x to 17;
@@ -297,6 +323,37 @@ connector sets of every corpus instance that carries connectors, and
 corpus wires prove the directions. The table lives in
 `src/periphery.rs` together with the settings each type binds and the
 folder or device it goes into. Checked in Loxone Config.
+
+## Tree devices
+
+`tree_kinds.rs` is the table of Tree devices a declaration can create (`kind:`,
+[D102](decisions/0102-created-tree-devices.md)). The element of a Tree device holds its I/Os, so a kind
+is admitted as a whole element, not port by port:
+
+1. Every corpus instance of its `TreeType` has the same I/O: types, designations (`IName`), sub-types and
+   connector keys. At least three instances.
+2. Nothing in it is specific to one installation, apart from UUIDs, titles and the settings a
+   declaration states.
+3. A config with one created by the compiler opens and saves in Loxone Config with an empty semantic
+   diff, and the created element stays byte for byte.
+
+| Kind (`TId`) | `TreeType` | Corpus instances (configs) | I/O | Saved |
+|---|---|---|---|---|
+| `TouchTree` | 32771 | 14 (7) | Online, `I1`–`I5`, `AI1`–`AI3`, `Q1` | sessions 54, 55 |
+| `PresenceSensorTree` | 32794 | 12 (6) | Online, `I1`–`I3`, `AI1`–`AI3`, `AQ1`, `AQ2` | sessions 54, 55 |
+| `CorridorLightTree` (LED Ceiling Light RGBW) | 32774 | 7 (3) | Online, `I1`, `AI1`, `AQ1` | sessions 54, 55 |
+| `ValveTree` (Valve Actuator) | 32769 | 7 (2) | Online, `AQ1`, `I1`–`I4` | sessions 54, 55 |
+
+The table holds each element in the form a save writes, with the English default titles. The format
+facts are in [loxone-format.md](loxone-format.md#tree-devices-created-offline).
+
+Not admitted:
+
+- LED Spot RGBW Tree (32790, 22 instances): all from one installation's two configs, and the title of
+  its output follows the device's title.
+- Nano 2 Relay Tree (32793, 5 instances): its `ApiActor` carries an `AiT` that differs per instance,
+  and a configuration blob.
+- Any kind with fewer than three corpus instances or more than one I/O shape.
 
 ## Growing the table
 

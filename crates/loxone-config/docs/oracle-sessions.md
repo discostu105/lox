@@ -918,6 +918,31 @@ wire into an actor, the extension's place and board. The compile opened
 and saved with an empty semantic diff, and a recompile of the save was
 byte-identical. Removing the declarations left every value as written.
 
+## Tree devices added offline (sessions 53 and 54, D102) — passed, findings folded in
+
+Ran 2026-11-01 on scratch copies of the house config (research only). Corpus instances of the
+candidate Tree device kinds, without wires and with fresh UUIDs, were added by hand to the branch of
+one Tree extension, unpaired (`Serial="00000000"`).
+
+- The save kept every device and its I/O.
+- **Finding:** it added `TId=` after `Type=`, reordered the device's attributes, wrote `<IoData></IoData>`
+  on the device and on actuators, and added a missing `<IoData>` (`St="2"` digital, `St="4"` analog).
+- **Finding:** on a Valve Actuator Tree it added `SwitchBoard=""` and `SwitchBoardPos="1"`.
+- The online status kept the kind's title.
+- Session 54 repeated four kinds in the saved form, with connector UUIDs in the compiler's form: the
+  semantic diff held only the Valve Actuator Tree finding. The kind table carries the saved form.
+
+## Tree devices created by the compiler (sessions 55 and 56, D102) — passed
+
+Ran 2026-11-01 on a copy of the house config. A module declared both Tree extensions by serial and
+created one device of each kind, three on one extension's branch and one in the other's empty branch,
+and an input of one of them by designation.
+
+- Session 55: the compile opened and saved with an empty semantic diff. The created elements came back
+  byte for byte, and a recompile of the save was byte-identical.
+- Session 56: `removed` on two of them, compiled against that save. The save gave an empty semantic
+  diff.
+
 ## Numeric settings at 0 (sessions 61 and 62, #312) — passed, three findings
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
@@ -1004,6 +1029,23 @@ and edited them in the property panel.
   `MaxTime="-3000"`, `ValOT="2"` and `"-1"` and `DefVal="0.001"` stayed. **Heal:** compile refuses a
   value the save rewrites.
 
+## `Def="0"` on block connectors (sessions 90 and 91, #352) — passed, one finding
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.
+The base was the redacted library config `examples/library/energy`.
+
+- Session 90 compiled 22 connectors at 0 on 15 types: the six comparators (one through an expression,
+  `v.Q < 0`, one as `0.0`), `And.I1`, `Or.I1`, `Formula.Input1`, `Monoflop.Time`, `PulseGen` `TimeHigh`
+  and `TimeLow`, `AnalogThresholdTrigger` `On`, `Off` and `PulseTime`, `OffDelay.Time`, `OnDelay.Time`,
+  `PButtonT.Time`, `StairwayLS.TimeHigh`, `EdgeDetection.PulseTime` and `AnalogMultiplexer2.Input1`. The
+  save dropped every `Def="0"` and nothing else. It kept `Def="1"`, and a `Monoflop` and an
+  `AnalogThresholdTrigger` minted without `Def=` stayed without one.
+- **Finding:** session 91 opened a `Monoflop` minted without `Def=` on `Time` (GUI default 2). The property
+  panel shows *Duration* 0. A missing `Def=` is 0 on a connector, not the type's default.
+- **Heal:** compile writes no `Def=` at 0, the simulator reads a missing one as 0, and decompile states
+  `Port: 0` where the GUI default is not 0 ([D128](decisions/0128-no-def-at-zero.md)). A block minted
+  without a parameter has it at 0 (#362).
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone
@@ -1042,6 +1084,49 @@ mood editor). The details are in #261. Results:
   MBr was 0 lit normally. A change while everything was off changed
   nothing.
 - **DisP** (`EnMove`) 1 ignored motion; at 0 motion worked again.
+
+## The simple-logic batch (sessions 38–39, #316) — passed
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. Base:
+`examples/library/shading/shading.Loxone`. One page minted StateV, WipingRelay, Mult, Add, Sub, Div, Avg,
+Int, UpDownCounter, HourCounter, Counter, PulseBy and AMemory, each in its corpus connector order, with
+parameters, inputs wired from virtual inputs, and every output wired into a `Formula`.
+
+- **Session 38:** the semantic diff was empty and every wire survived. Eleven types came back with the
+  identical connector keys, order and UUIDs; Avg kept the `Reset` that only the newest corpus generation
+  has. Two were rewritten, keeping every existing UUID:
+  - UpDownCounter's connectors were reordered to `Trigger, InputDir, Reset, OnValue, OffValue, Remanence,
+    StartValue, Q, AQ`.
+  - HourCounter gained `OutputAPI` with a GUI-minted UUID, plus two special states and `IoData`.
+
+  The save added `Analog="false"`, `Tx="false"`, `IoData` and `Display` to StateV and `WTA=""` to PulseBy.
+  The tables took the saved order.
+- **Canvas labels:** the canvas rows of the wired inputs named `InputTrigger` Tr on WipingRelay, `Reset`
+  Off on Counter and `InputResetAll` Off on HourCounter, which Loxone's documentation lacks
+  ([loxone-format.md](loxone-format.md), *Canvas labels of input keys*). The other rows matched it.
+- **Session 39:** the thirteen types minted in the saved order came back with identical connector keys,
+  order and UUIDs, and an empty semantic diff. A recompile onto the saved file was byte-identical, and so was
+  a compile of the module `loxl adopt` made from it.
+
+## Block settings (sessions 43 and 44, D95) — passed, four findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. The base was
+`examples/library/shading/shading.Loxone`. One probe minted a Memory, a PulseAt, a DayTimer, each meter
+type, a Code16 and virtual inputs, then set the attributes in question by hand: `Tp=` 1 and 2, `Typ=` 1
+to 12, `Desc=` at the end of the element, meter fields, DayTimer texts, `ValOT=` and `Idx=` from 0 to 3.
+Each was opened, saved and read back, and the property pane of each block was read. Session 44 ticked
+and unticked options in the panes and saved again. The facts are in [loxone-format.md](loxone-format.md)
+(*Objects*).
+
+- A save keeps `Tp=`, `Typ=` 0 to 11, the meter fields and the DayTimer texts. It moves `Desc=` right
+  after `Type=`. The panes name each field.
+- **Finding — `Typ=` 12 is no choice.** The dropdown has twelve entries; 12 shows blank.
+- **Finding — one-off is a date.** Ticking *Einmaliger Impuls* adds a date field and writes `Sec=` as an
+  absolute date, with `LtE=`.
+- **Finding — `Sun=` off is absent.** Unticking *Sonnenschein verwenden* removes `Sun=`.
+- **Finding — hidden virtual-input fields.** No pane shows `MinChange=`, `MinTime=`, `ValOT=` or `Idx=`.
+  A save drops `ValOT="0"`, `Idx="0"` and `MinVal="0"`, and forces a digital input's `MinChange=` to 0.5.
+- A Program block's pane has no field for `Task=`.
 
 ## The first scripted run
 

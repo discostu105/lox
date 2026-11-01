@@ -248,6 +248,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`. On a block, `device:` names
   the device (by slug) the I/O hangs in. Write Loxone's `\v` as `"\\v"`. `loxl adopt --uuid <device>`
   takes over an existing device with its I/O.
+- **State every parameter the block needs.** One the source leaves out is 0 in Loxone Config, not the
+  default `loxl types` shows: a `Monoflop` without `Time` pulses for 0 s, a `LightController2` without
+  `MoveTimeout` has it at 0.
 - **Shared parameters: `defaults <Type>(Port: value, …)`.** Every managed block of the type takes
   these values for the ports it does not bind (`defaults ModbusASensor(ModbusPollingCycle: 60)`).
   Values only, one statement per type, at the top level. A block's own binding wins. Decompile and
@@ -262,6 +265,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   The source owns title, room, category and the stated settings; nothing is restored when the line
   goes, and the element is never deleted. Bind ports in the argument list. `loxl adopt --uuid
   <device>` declares an existing device with all its I/O. Pairing stays in Loxone Config.
+- **A Tree device can be created:** `melder = TreeDevice("Melder", kind: "PresenceSensorTree", tree:
+  tree1)`, for the kinds in `tree_kinds.rs` only. It is added unpaired; pair it in Loxone Config.
+  Delete it with `removed melder`. Never delete other hardware.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.
@@ -282,7 +288,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
 - **Taking over GUI logic.** Use `loxl adopt`, then confirm with `loxl diff --exit-code` that the
   takeover changed nothing. Adopting an extern `--as` its own slug promotes it, and its wires move
   into the declaration. `loxl coverage` lists what is not managed yet, including attributes of managed
-  blocks still carried from the base (a PulseAt's time is `At: 19:00`).
+  blocks still carried from the base and the parameter that claims each (a PulseAt's time is
+  `At: 19:00`, the name the app shows is `Desc: "…"`). `loxl types <Type>` lists a type's settings.
 - **The app.** A managed block takes `.room`/`.category`, never `.title` (its label is the title). The
   app lists a control only with both. The push adds app entries for the types Lox Logic knows
   (switches, inputs, jalousies, central blocks, meters, …) and names the rest; a save from Loxone
