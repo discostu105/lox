@@ -1,26 +1,26 @@
 class Lox < Formula
   desc "Loxone Miniserver CLI — control lights, blinds, and automations from your terminal"
   homepage "https://github.com/discostu105/lox"
-  version "0.66.0"
+  version "0.67.0"
   license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/discostu105/lox/releases/download/v#{version}/lox-macos-aarch64"
-      sha256 "42b709bbb90a9ab99a3a46e0745d82e7a191726527c1053b85ae9661b29a1253"
+      sha256 "c0d5bbecc82e6fdae36fa8c23e5f4d18397e024f858c64bb25e550d5fcfc34eb"
     else
       url "https://github.com/discostu105/lox/releases/download/v#{version}/lox-macos-x86_64"
-      sha256 "7a667f69e0606c034908d7301083cc38bda12d9aa2003e6ffd36d7f05d28683a"
+      sha256 "b264e9838f5b055e99b0a7ec1b1ed2efa2d8e477f0fe9d2572da9d8e4837c67f"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/discostu105/lox/releases/download/v#{version}/lox-linux-aarch64"
-      sha256 "554d9179835120e8f982cdc898ba0ff3b4fff9479603b41e85fbb5f21fbd549b"
+      sha256 "f7c64a3ee4b33c4915a667cd0c22f2618c61f401eeb4ee4dc358e1824986323b"
     else
       url "https://github.com/discostu105/lox/releases/download/v#{version}/lox-linux-x86_64"
-      sha256 "fd442ac9d65243f0bbcfd5427f30c7da521e85ec0f897e794ccdfbe7841f39e4"
+      sha256 "9fec28420dcec6551c1a39713083e5a900fb2130b8f0739fa64557b6ed647a3b"
     end
   end
 
