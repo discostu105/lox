@@ -881,9 +881,10 @@ pub struct MovedDecl {
     pub comment: Option<String>,
 }
 
-/// `template <name>(<params>)` … `end` — a reusable body of block, wire,
-/// and port-assignment statements. Body slugs are private to the
-/// template: instance `sued` expands body block `hoch` to `sued_hoch`.
+/// `template <name>(<params>) [-> <block>]` … `end` — a reusable body of
+/// block, wire, and port-assignment statements. Body slugs are private to
+/// the template: source names body block `hoch` of instance `sued` as
+/// `sued.hoch`, and expansion turns it into the lock key `sued_hoch`.
 /// Free identifiers (neither parameter nor body slug) resolve in the
 /// module namespace after expansion — a template may capture module
 /// externs.
@@ -891,6 +892,10 @@ pub struct MovedDecl {
 pub struct TemplateDecl {
     pub name: String,
     pub params: Vec<TemplateParam>,
+    /// `-> <block>`: the body block `instance.Port` and call-site port
+    /// bindings mean. A body with exactly one block makes it primary
+    /// without the arrow; see [`TemplateDecl::primary_block`].
+    pub primary: Option<String>,
     /// Block declarations, wires, port assignments, and comments.
     pub body: Vec<Item>,
     /// Trailing `#` comment on the header line, verbatim.
@@ -909,12 +914,50 @@ pub enum TemplateParam {
     /// `name = <literal>` — a value parameter with a default; the
     /// instance may override it with a literal or a `let` reference.
     Value { name: String, default: Value },
+    /// `name: moods [= <set>]` — a named set of one kind, passed by
+    /// its bare name. The only object parameter that takes a default.
+    Set {
+        name: String,
+        kind: SetKind,
+        default: Option<String>,
+    },
+}
+
+/// The kinds of named set a template parameter can take. The
+/// sections still written per target (`access`, `recipients`) join here
+/// once they are named sets too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetKind {
+    Moods,
+    Schedule,
+    Tiles,
+}
+
+impl SetKind {
+    pub fn parse(s: &str) -> Option<SetKind> {
+        match s {
+            "moods" => Some(SetKind::Moods),
+            "schedule" => Some(SetKind::Schedule),
+            "tiles" => Some(SetKind::Tiles),
+            _ => None,
+        }
+    }
+
+    pub fn keyword(self) -> &'static str {
+        match self {
+            SetKind::Moods => "moods",
+            SetKind::Schedule => "schedule",
+            SetKind::Tiles => "tiles",
+        }
+    }
 }
 
 impl TemplateParam {
     pub fn name(&self) -> &str {
         match self {
-            TemplateParam::Object { name, .. } | TemplateParam::Value { name, .. } => name,
+            TemplateParam::Object { name, .. }
+            | TemplateParam::Value { name, .. }
+            | TemplateParam::Set { name, .. } => name,
         }
     }
 }
@@ -924,6 +967,40 @@ impl fmt::Display for TemplateParam {
         match self {
             TemplateParam::Object { name, block_type } => write!(f, "{name}: {block_type}"),
             TemplateParam::Value { name, default } => write!(f, "{name} = {default}"),
+            TemplateParam::Set {
+                name,
+                kind,
+                default: Some(d),
+            } => write!(f, "{name}: {} = {d}", kind.keyword()),
+            TemplateParam::Set {
+                name,
+                kind,
+                default: None,
+            } => write!(f, "{name}: {}", kind.keyword()),
+        }
+    }
+}
+
+impl TemplateDecl {
+    /// The body's blocks and named signals, in order.
+    pub fn body_slugs(&self) -> impl Iterator<Item = &str> {
+        self.body.iter().filter_map(|i| match i {
+            Item::Block(b) => Some(b.slug.as_str()),
+            Item::Signal(x) => Some(x.slug.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The primary block: the one `-> <block>` names, or the body's only
+    /// block.
+    pub fn primary_block(&self) -> Option<&str> {
+        if let Some(p) = &self.primary {
+            return Some(p);
+        }
+        let mut it = self.body_slugs();
+        match (it.next(), it.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
         }
     }
 }
@@ -2327,8 +2404,12 @@ fn write_template(t: &TemplateDecl, out: &mut String) {
         .map(|p| p.to_string())
         .collect::<Vec<_>>()
         .join(", ");
+    let primary = t
+        .primary
+        .as_ref()
+        .map_or(String::new(), |p| format!(" -> {p}"));
     out.push_str(&format!(
-        "template {}({params}){}\n",
+        "template {}({params}){primary}{}\n",
         t.name,
         tail(&t.comment)
     ));

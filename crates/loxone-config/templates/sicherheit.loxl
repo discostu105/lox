@@ -2,10 +2,10 @@
 #
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
-# gelesen; das Ergebnis jeder Vorlage ist der Block `ausgang` der Instanz:
+# gelesen; das Ergebnis jeder Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
 #
 #   haustuer = tuer_offen_hinweis(kontakt: haustuer_offen, nach: 3min)
-#   hinweis.I <- haustuer_ausgang.Q
+#   hinweis.I <- haustuer.Q
 
 template tuer_offen_hinweis(kontakt: any, nach = 3min, titel = "Tür offen")
 	# Hinweis, wenn die Tür länger als `nach` offen steht.
@@ -27,7 +27,7 @@ template wasseralarm(melder: any, dauer = 60s, titel = "Wasseralarm")
 	)
 end
 
-template alarm_abwesend(kontakt: any, abwesend: any, frist = 30s, dauer = 3min, titel = "Einbruch")
+template alarm_abwesend(kontakt: any, abwesend: any, frist = 30s, dauer = 3min, titel = "Einbruch") -> ausgang
 	# Einbruchalarm: Kontakt bei aktivem `abwesend` → nach `frist` die
 	# Sirene, höchstens `dauer` lang. Ausschalten von `abwesend` beendet den
 	# Alarm und entschärft innerhalb der Frist.

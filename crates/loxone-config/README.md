@@ -42,7 +42,8 @@ what you changed.
 ## What the language covers
 
 - **Templates.** `template fassade(jalousie: AutoJalousie, pos = 70) … end` declares a body once;
-  `sued = fassade(jalousie: jal_sued)` creates it per facade. Each instance keeps stable identities.
+  `sued = fassade(jalousie: jal_sued)` creates it per facade. Each instance keeps stable identities,
+  and source names its blocks through it (`sued.hoch.Q`, `sued.Q` for its primary block).
 - **Expressions.** `jal_sued.AutoShade <- sonne.Q and aussentemp.Q >= temp_schwelle` compiles into gate
   and comparator blocks, each labeled with its sub-expression. Arithmetic such as
   `verbrauch.AQ / 1000` becomes one `Formula` block.
@@ -205,10 +206,10 @@ Tests live in the module and simulate the compiled config:
 test "Frostwächter schlägt an und beruhigt sich"
     wassertemp.Q = 2         # drive the sensor
     tick 2
-    expect frost_alarm.Q == 1
+    expect frost.Q == 1
     wassertemp.Q = 10
     tick 2
-    expect frost_alarm.Q == 0
+    expect frost.Q == 0
 end
 ```
 

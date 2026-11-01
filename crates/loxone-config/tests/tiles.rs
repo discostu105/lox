@@ -309,7 +309,7 @@ fn targets_must_be_api_linked_and_of_the_addressed_type() {
 #[test]
 fn managed_and_template_targets_link_through_source_wires() {
     let api = format!("extern flex_api = ApiActor(uuid: \"{KUECHE_API}\")\n");
-    let set = "tiles t\n\ttile 4(click: \"SET(As;Tg;pulse)\", to: ost_jal)\nend\nflex.tiles = t\n";
+    let set = "tiles t\n\ttile 4(click: \"SET(As;Tg;pulse)\", to: ost)\nend\nflex.tiles = t\n";
     let template =
         "template shade(api: ApiActor)\n\tjal = AutoJalousie(\"Ost\", OutputAPI: api.I)\nend\n";
 
@@ -330,14 +330,14 @@ fn managed_and_template_targets_link_through_source_wires() {
     let err = compile_err(&format!(
         "{api}{unlinked}\nost = shade(api: flex_api)\n\n{set}"
     ));
-    assert!(err.contains("`to: ost_jal` is not API-linked"), "{err}");
+    assert!(err.contains("is not API-linked"), "{err}");
 
-    // A `to:` names the block, not the instance.
+    // The expanded name of the block names its replacement.
     let err = parse_err(&format!(
         "{api}{template}\nost = shade(api: flex_api)\n\n{}",
-        set.replace("ost_jal", "ost")
+        set.replace("to: ost)", "to: ost_jal)")
     ));
-    assert!(err.contains("names a template instance"), "{err}");
+    assert!(err.contains("Write `ost` instead of `ost_jal`"), "{err}");
 }
 
 /// A second mirror of Küche's API connector on the page, distributing

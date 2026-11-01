@@ -568,9 +568,9 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
             items.extend(fragment.items);
         }
         let module = Module { items };
-        // Validate the expanded view: module-level statements may reference
-        // an instance's blocks by their expanded names (D23), which only
-        // exist after template expansion — mirroring what compile checks.
+        // Validate the expanded view: module-level statements reference an
+        // instance's blocks (`a.b`), which only exist after template
+        // expansion — mirroring what compile checks.
         module
             .expand()
             .and_then(|x| x.validate())
@@ -998,7 +998,8 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
     // Tests may reference template-expanded and expression-owned slugs;
     // plan on the same flattened view the compiler used.
     let (flat, _) = m.expand()?.desugar()?;
-    let plan = plan_tests(&flat, &lock_copy, &compiled, filter.as_deref())?;
+    let mut plan = plan_tests(&flat, &lock_copy, &compiled, filter.as_deref())?;
+    plan.respell(&m);
     if plan.runs.is_empty() {
         match &filter {
             Some(f) => println!("no tests match --filter {f}"),

@@ -433,3 +433,60 @@ fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
         json!({"line": l, "character": c + 12})
     );
 }
+
+#[test]
+fn an_expanded_instance_name_offers_the_scoped_one_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let v1 =
+        format!("{src}\ntemplate paar()\n\tein = Not()\nend\npx = paar()\nqx = Not(I: px_ein.Q)\n");
+    let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, c) = pos(&v1, "px_ein.Q");
+    assert_eq!(d["range"]["start"], json!({"line": l, "character": c}));
+
+    let out = session(&[
+        open(&pool, &v1),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(
+        actions[0]["edit"]["changes"][uri(&pool)][0]["newText"],
+        "px.Q"
+    );
+}
+
+#[test]
+fn completion_after_an_instance_offers_its_blocks_and_primary_ports() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let typing = format!(
+        "{src}\ntemplate paar() -> ein\n\tein = Not()\n\taus = Or()\nend\npx = paar()\npx.\n"
+    );
+    let (cl, _) = pos(&typing, "px.\n");
+    let out = session(&[
+        open(&pool, &src),
+        change(&pool, &typing),
+        at(1, "textDocument/completion", &pool, cl, 3),
+    ]);
+    let labels: Vec<&str> = response(&out, 1)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["label"].as_str().unwrap())
+        .collect();
+    // `aus` is a block of the instance; `Q` and `I` ports of its primary
+    // block `ein` (a Not).
+    assert!(labels.contains(&"aus"), "{labels:?}");
+    assert!(labels.contains(&"Q"), "{labels:?}");
+    assert!(!labels.contains(&"ein"), "{labels:?}");
+}

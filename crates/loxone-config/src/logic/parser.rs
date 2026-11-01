@@ -219,7 +219,56 @@ fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
             other => return Err(err(format!("unexpected character `{other}`"))),
         }
     }
-    Ok((toks, comment))
+    Ok((join_scoped(toks), comment))
+}
+
+/// `instance.block.Port`: the scoped name `instance.block` becomes
+/// one identifier, so every `<slug>.<Port>` form takes it unchanged. Only
+/// a lowercase pair followed by another `.` joins — `a.b` alone stays a
+/// port reference, and the forms that take a bare scoped name
+/// (`removed a.b`, `to: a.b`, …) join it themselves.
+fn join_scoped(toks: Vec<Tok>) -> Vec<Tok> {
+    let lower =
+        |t: &Tok| matches!(t, Tok::Ident(s) if s.starts_with(|c: char| c.is_ascii_lowercase()));
+    let mut out: Vec<Tok> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        if lower(&toks[i])
+            && toks.get(i + 1) == Some(&Tok::Dot)
+            && toks.get(i + 2).is_some_and(lower)
+            && toks.get(i + 3) == Some(&Tok::Dot)
+            && out.last() != Some(&Tok::Dot)
+        {
+            let (Tok::Ident(a), Tok::Ident(b)) = (&toks[i], &toks[i + 2]) else {
+                unreachable!("guarded")
+            };
+            out.push(Tok::Ident(format!("{a}.{b}")));
+            i += 3;
+            continue;
+        }
+        out.push(toks[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// `instance.block`, a body block of a template instance named in a
+/// position that takes an object.
+fn scoped(a: &str, b: &str, lineno: usize) -> Result<String> {
+    Ok(format!(
+        "{}.{}",
+        check_slug(a, lineno)?,
+        check_slug(b, lineno)?
+    ))
+}
+
+/// A slug or a scoped `instance.block`: a name that may be part of
+/// a reference.
+fn check_ref(s: &str, lineno: usize) -> Result<String> {
+    match s.split_once('.') {
+        Some((a, b)) => scoped(a, b, lineno),
+        None => check_slug(s, lineno),
+    }
 }
 
 /// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
@@ -289,9 +338,21 @@ fn finish_tile(call: BlockDecl, index: u32, lineno: usize) -> Result<TileDecl> {
             ),
         });
     }
+    // `to: licht.lc` names a body block of a template instance: an
+    // object, written like a port reference.
+    let mut args = call.args;
+    for arg in &mut args {
+        if let ArgItem::Binding(b) = arg
+            && (b.port == "to" || b.port.ends_with("_to"))
+            && let BindingKind::Wire(r) = &b.kind
+            && r.port.starts_with(|c: char| c.is_ascii_lowercase())
+        {
+            b.kind = BindingKind::Param(Value::Ref(scoped(&r.slug, &r.port, lineno)?));
+        }
+    }
     Ok(TileDecl {
         index,
-        args: call.args,
+        args,
         comment: call.comment,
         close_comment: call.close_comment,
     })
@@ -767,25 +828,30 @@ impl Parser {
                 self.items
                     .push(Item::Extern(parse_extern(toks, comment, lineno)?));
             }
-            Tok::Ident(kw) if kw == "removed" => match toks {
-                [_, Tok::Ident(slug)] => {
-                    self.items.push(Item::Removed(RemovedDecl {
-                        slug: check_slug(slug, lineno)?,
-                        comment,
-                    }));
-                }
-                _ => return Err(err("expected `removed <slug>`".into())),
-            },
-            Tok::Ident(kw) if kw == "moved" => match toks {
-                [_, Tok::Ident(from), Tok::Arrow, Tok::Ident(to)] => {
-                    self.items.push(Item::Moved(MovedDecl {
-                        from: check_slug(from, lineno)?,
-                        to: check_slug(to, lineno)?,
-                        comment,
-                    }));
-                }
-                _ => return Err(err("expected `moved <old_slug> -> <new_slug>`".into())),
-            },
+            Tok::Ident(kw) if kw == "removed" => {
+                let slug = match toks {
+                    [_, Tok::Ident(slug)] => check_slug(slug, lineno)?,
+                    [_, Tok::Ident(a), Tok::Dot, Tok::Ident(b)] => scoped(a, b, lineno)?,
+                    _ => return Err(err("expected `removed <slug>`".into())),
+                };
+                self.items
+                    .push(Item::Removed(RemovedDecl { slug, comment }));
+            }
+            Tok::Ident(kw) if kw == "moved" => {
+                let Some(at) = toks.iter().position(|t| *t == Tok::Arrow) else {
+                    return Err(err("expected `moved <old_slug> -> <new_slug>`".into()));
+                };
+                let name = |part: &[Tok]| match part {
+                    [Tok::Ident(slug)] => check_slug(slug, lineno),
+                    [Tok::Ident(a), Tok::Dot, Tok::Ident(b)] => scoped(a, b, lineno),
+                    _ => Err(err("expected `moved <old_slug> -> <new_slug>`".into())),
+                };
+                self.items.push(Item::Moved(MovedDecl {
+                    from: name(&toks[1..at])?,
+                    to: name(&toks[at + 1..])?,
+                    comment,
+                }));
+            }
             Tok::Ident(kw) if kw == "page" => {
                 self.items
                     .push(Item::Page(parse_page(toks, comment, lineno)?));
@@ -895,25 +961,64 @@ impl Parser {
     }
 }
 
-/// `template <name>(<param>: <Type> | <param> = <literal>, …)` opens a
-/// template body.
+/// `template <name>(<param>: <Type> | <param>: <set kind> [= <set>] |
+/// <param> = <literal>, …) [-> <block>]` opens a template body.
 fn parse_template_head(
     toks: &[Tok],
     comment: Option<String>,
     lineno: usize,
 ) -> Result<TemplateDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks else {
+    let (toks, primary) = match toks {
+        [head @ .., Tok::RParen, Tok::Arrow, Tok::Ident(block)] => {
+            let mut head = head.to_vec();
+            head.push(Tok::RParen);
+            (head, Some(check_slug(block, lineno)?))
+        }
+        [.., Tok::Arrow] | [.., Tok::Arrow, _] => {
+            return Err(err(
+                "expected `-> <block>` after the parameter list: the body block \
+                 `<instance>.<Port>` means"
+                    .into(),
+            ));
+        }
+        _ => (toks.to_vec(), None),
+    };
+    let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks.as_slice() else {
         return Err(err(
             "expected `template <name>(<param>: <Type> | <param> = <literal>, …)`".into(),
         ));
     };
     let mut params = Vec::new();
     if !rest.is_empty() {
-        let mut it = rest.iter();
-        loop {
-            match (it.next(), it.next(), it.next()) {
-                (Some(Tok::Ident(n)), Some(Tok::Colon), Some(Tok::Ident(ty))) => {
+        for param in rest.split(|t| *t == Tok::Comma) {
+            match param {
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(kind), tail @ ..]
+                    if SetKind::parse(kind).is_some() =>
+                {
+                    let default = match tail {
+                        [] => None,
+                        [Tok::Eq, Tok::Ident(set)] => Some(check_slug(set, lineno)?),
+                        [Tok::Eq, Tok::Str(set)] => {
+                            return Err(err(format!(
+                                "a set is named by its bare name. Write `{n}: {kind} = {set}` \
+                                 instead of `{n}: {kind} = \"{set}\"`."
+                            )));
+                        }
+                        _ => {
+                            return Err(err(format!(
+                                "expected `{n}: {kind}` or `{n}: {kind} = <name>` (the default \
+                                 `{kind}` set)"
+                            )));
+                        }
+                    };
+                    params.push(TemplateParam::Set {
+                        name: check_slug(n, lineno)?,
+                        kind: SetKind::parse(kind).expect("guarded"),
+                        default,
+                    });
+                }
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(ty)] => {
                     params.push(TemplateParam::Object {
                         name: check_slug(n, lineno)?,
                         // `any` takes an object of every type.
@@ -924,7 +1029,13 @@ fn parse_template_head(
                         },
                     });
                 }
-                (Some(Tok::Ident(n)), Some(Tok::Eq), Some(v))
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(ty), Tok::Eq, ..] => {
+                    return Err(err(format!(
+                        "`{n}: {ty}` takes no default: an object parameter is given at \
+                         every call (only set parameters, `{n}: moods = <name>`, have one)"
+                    )));
+                }
+                [Tok::Ident(n), Tok::Eq, v]
                     if matches!(v, Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))
                         || matches!(v, Tok::Ident(b) if b == "on" || b == "off") =>
                 {
@@ -933,18 +1044,13 @@ fn parse_template_head(
                         default: value_of(v, lineno)?,
                     });
                 }
+                [] => return Err(err("expected a parameter between the commas".into())),
                 _ => {
-                    return Err(err("expected `<name>: <Type>` (object parameter) or \
+                    return Err(err("expected `<name>: <Type>` (object parameter), \
+                                     `<name>: moods|schedule|tiles [= <set>]` (set parameter) or \
                                      `<name> = <literal>` (value parameter with default: a \
                                      number, `on`/`off` or a quoted string)"
                         .into()));
-                }
-            }
-            match it.next() {
-                None => break,
-                Some(Tok::Comma) => continue,
-                Some(_) => {
-                    return Err(err("expected `,` between parameters".into()));
                 }
             }
         }
@@ -952,6 +1058,7 @@ fn parse_template_head(
     Ok(TemplateDecl {
         name: check_slug(name, lineno)?,
         params,
+        primary,
         body: Vec::new(),
         comment,
         end_comment: None,
@@ -1334,7 +1441,7 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                 }
             };
             RuleStmtKind::State {
-                target: check_slug(target, lineno)?,
+                target: check_ref(target, lineno)?,
                 state: state.clone(),
                 op: *op,
                 value,
@@ -1500,6 +1607,17 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             Tok::Str(command) | Tok::Ident(command),
         ] if w == "then" => RuleStmtKind::Then {
             target: check_slug(target, lineno)?,
+            command: command.clone(),
+        },
+        // `then licht.lc on` — a body block of a template instance.
+        [
+            Tok::Ident(w),
+            Tok::Ident(a),
+            Tok::Dot,
+            Tok::Ident(b),
+            Tok::Str(command) | Tok::Ident(command),
+        ] if w == "then" && b.starts_with(|c: char| c.is_ascii_lowercase()) => RuleStmtKind::Then {
+            target: scoped(a, b, lineno)?,
             command: command.clone(),
         },
         _ => return Err(err(format!("unexpected rule line. {usage}"))),
@@ -1962,12 +2080,6 @@ fn parse_ident_statement(
                     "expected `{ts}.tiles = <name>`, the name of a `tiles` set"
                 )));
             };
-            if in_template {
-                return Err(err(
-                    "`.tiles` is not allowed inside a template body. Assign tiles at the top level of the file."
-                        .into(),
-                ));
-            }
             items.push(Item::TilesClaim(TilesClaim {
                 slug: ts.clone(),
                 tiles: set.clone(),
@@ -1982,12 +2094,6 @@ fn parse_ident_statement(
                     "expected `{ts}.schedule = <name>`, the name of a `schedule`"
                 )));
             };
-            if in_template {
-                return Err(err(
-                    "`.schedule` is not allowed inside a template body. Assign schedules at the top level of the file."
-                        .into(),
-                ));
-            }
             items.push(Item::ScheduleClaim(ScheduleClaim {
                 slug: ts.clone(),
                 schedule: name.clone(),
@@ -1995,13 +2101,13 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
-        // slug.moods = name — a LightController2 mood claim. Unlike
-        // the other claims it may sit in a template body: one mood set for
-        // every room the template stamps out.
+        // slug.moods = name — a LightController2 mood claim. Like the other
+        // claims it may sit in a template body: one mood set for every room
+        // the template stamps out, or the one a set parameter passes.
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "moods" => {
             let [Tok::Ident(name)] = rest else {
                 return Err(err(format!(
-                    "expected `{ts}.moods = <name>`, the name of a `moods` set (in a template body: the value parameter that passes one)"
+                    "expected `{ts}.moods = <name>`, the name of a `moods` set (in a template body: the set parameter that passes one)"
                 )));
             };
             items.push(Item::MoodsClaim(MoodsClaim {

@@ -1477,14 +1477,147 @@ a = melder(schwelle: 3, Input1: vi_a.Q, Input1: vi_b.Q)\n";
         Some("3")
     );
 
-    // A body with several blocks cannot take forwards (qualified form is
-    // deferred): the unknown binding reports the constraint.
+    // A body with several blocks forwards to its primary block (D82); without
+    // one the unknown binding reports the constraint.
     let multi = src.replace(
         "\talarm = GreaterEqual(Input2: schwelle)\n",
         "\talarm = GreaterEqual(Input2: schwelle)\n\tinvers = Not(I: alarm.Q)\n",
     );
     let err = Module::parse(&multi).unwrap_err();
-    assert!(err.to_string().contains("exactly one block"), "{err}");
+    assert!(err.to_string().contains("primary block"), "{err}");
+    let primary = multi.replace(
+        "template melder(schwelle = 1)",
+        "template melder(schwelle = 1) -> alarm",
+    );
+    let module = Module::parse(&primary).unwrap();
+    assert_eq!(
+        Module::parse(&module.to_text()).unwrap(),
+        module,
+        "fmt round-trips"
+    );
+    assert!(
+        module
+            .to_text()
+            .contains("template melder(schwelle = 1) -> alarm\n")
+    );
+    let mut lock2 = Lockfile::new();
+    let out2 = compile(&base(), &module, &mut lock2, &opts()).unwrap();
+    let objs = out2.objects();
+    let o = objs
+        .iter()
+        .find(|o| o.block_type == "GreaterEqual")
+        .unwrap();
+    let ports = loxone_config::doc::ports(out2.element_at(&o.path).unwrap());
+    assert_eq!(
+        ports
+            .iter()
+            .find(|p| p.key == "Input1")
+            .unwrap()
+            .inputs
+            .len(),
+        2
+    );
+    assert!(lock2.objects.contains_key("a_invers"));
+}
+
+#[test]
+fn instance_blocks_are_named_by_their_instance() {
+    // D82: `a.Port` reads the primary block, `a.block.Port` any other; the
+    // lock keys stay the expanded slugs.
+    let head = "\
+extern vi = VirtualIn(iname: \"VI1\")\n\
+template paar(x: VirtualIn) -> ein\n\
+\tein = Not(I: x.Q)\n\
+\taus = Not(I: ein.Q)\n\
+end\n\
+a = paar(x: vi)\n";
+    let ok = format!("{head}e = Or(I1: a.Q and a.aus.Q)\nb = And(I1: a.Q, I2: a.aus.Q)\n");
+    let module = Module::parse(&ok).unwrap();
+    assert_eq!(Module::parse(&module.to_text()).unwrap(), module);
+    let mut lock = Lockfile::new();
+    compile(&base(), &module, &mut lock, &opts()).unwrap();
+    assert!(lock.objects.contains_key("a_ein") && lock.objects.contains_key("a_aus"));
+    let flat = module.expand().unwrap();
+    let b = flat.blocks().find(|b| b.slug == "b").unwrap();
+    let wires: Vec<String> = b.input_wires().map(|(_, r)| r.to_string()).collect();
+    assert_eq!(wires, ["a_ein.Q", "a_aus.Q"]);
+    assert_eq!(module.spelling("a_ein"), "a");
+    assert_eq!(module.spelling("a_aus"), "a.aus");
+    assert_eq!(module.spelling("vi"), "vi");
+
+    let fails = |src: String, needle: &str| {
+        let err = match Module::parse(&src) {
+            Err(e) => e.to_string(),
+            Ok(m) => compile(&base(), &m, &mut Lockfile::new(), &opts())
+                .unwrap_err()
+                .to_string(),
+        };
+        assert!(err.contains(needle), "`{needle}` not in: {err}");
+    };
+    // The expanded spelling names its replacement.
+    fails(
+        format!("{head}b = Not(I: a_aus.Q)\n"),
+        "Write `a.aus.Q` instead of `a_aus.Q`",
+    );
+    fails(
+        format!("{head}b = Not(I: a_ein.Q)\n"),
+        "Write `a.Q` instead of `a_ein.Q`",
+    );
+    // One spelling: the primary block is the instance.
+    fails(
+        format!("{head}b = Not(I: a.ein.Q)\n"),
+        "Write `a.Q` instead of `a.ein.Q`",
+    );
+    fails(format!("{head}b = Not(I: a.nix.Q)\n"), "has no block `nix`");
+    fails(
+        format!("{head}b = Not(I: vi.nix.Q)\n"),
+        "`vi` is not a template instance",
+    );
+    fails(
+        format!("{}b = Not(I: a.Q)\n", head.replace(" -> ein", "")),
+        "has no primary block",
+    );
+    fails(
+        head.replace(" -> ein", " -> zwei"),
+        "`-> zwei` names no block of the body",
+    );
+    fails(
+        format!("{head}extern a = Switch(title: \"A\")\n"),
+        "duplicate name `a`",
+    );
+    // Object arguments, tests, removed/moved take the scoped name too.
+    let more = format!(
+        "{head}template weiter(y: Not)\n\tz = Not(I: y.Q)\nend\n\
+         c = weiter(y: a.aus)\nd = weiter(y: a)\n\
+         moved alt -> a.aus\nremoved a.weg\n\
+         test \"t\"\n\tvi.Q = 1\n\ttick 1\n\texpect a.Q == 0\n\texpect a.aus.Q == 1\nend\n"
+    );
+    let m = Module::parse(&more).unwrap();
+    let flat = m.expand().unwrap();
+    let c = flat.blocks().find(|b| b.slug == "c_z").unwrap();
+    assert_eq!(c.input_wires().next().unwrap().1.to_string(), "a_aus.Q");
+    let d = flat.blocks().find(|b| b.slug == "d_z").unwrap();
+    assert_eq!(d.input_wires().next().unwrap().1.to_string(), "a_ein.Q");
+    assert!(
+        flat.items
+            .iter()
+            .any(|i| matches!(i, Item::Moved(x) if x.from == "alt" && x.to == "a_aus"))
+    );
+    assert!(
+        flat.items
+            .iter()
+            .any(|i| matches!(i, Item::Removed(x) if x.slug == "a_weg"))
+    );
+    assert!(
+        m.to_text().contains("c = weiter(\n\ty: a.aus,\n)\n"),
+        "{}",
+        m.to_text()
+    );
+    assert!(
+        m.to_text().contains("moved alt -> a.aus\n") && m.to_text().contains("removed a.weg\n"),
+        "{}",
+        m.to_text()
+    );
 }
 
 #[test]
@@ -1515,7 +1648,7 @@ fn template_misuse_is_reported() {
     );
     fails(
         &format!("{vi}{tmpl}a = t(x: 5)\n"),
-        "takes an extern or block slug",
+        "takes an extern, block or instance",
     );
     fails(&format!("{vi}{tmpl}a = t(x: vi, n: vi.Q)\n"), "not a port");
     fails(
@@ -1537,12 +1670,17 @@ fn template_misuse_is_reported() {
         "Close it with `end`",
     );
     fails("end\n", "`end` without an open `template`");
-    // The instance slug names no object; the message points at the
-    // expanded names.
+    // An instance of a template without a primary block names no object;
+    // the message points at the scoped names.
     fails(
-        &format!("{vi}{tmpl}a = t(x: vi)\nb = Not(I: a.Q)\n"),
-        "template instance",
+        &format!(
+            "{vi}template t2(x: VirtualIn)\n\ty = Not(I: x.Q)\n\tz = Not(I: y.Q)\nend\n\
+             a = t2(x: vi)\nb = Not(I: a.Q)\n"
+        ),
+        "Name the block (`a.<block>.Q`)",
     );
+    // An object parameter takes no default; only a set parameter does.
+    fails("template t(x: VirtualIn = vi)\nend\n", "takes no default");
     // A wrong object-arg type is caught where the declaration is known.
     fails(
         &format!("extern j = AutoJalousie(title: \"X\")\n{tmpl}a = t(x: j)\n"),
@@ -4087,16 +4225,56 @@ fn a_minted_controller_gets_the_stock_moods_first() {
 #[test]
 fn a_template_gives_every_room_its_moods() {
     // The loop Loxone Config lacks: one claim in a room template, the set
-    // a value parameter with a default.
+    // a set parameter with a default (D82).
     let src = "moods abend\n\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 on\nend\n\
                moods kueche\n\t\"Viel Licht\": all on\n\t\"Kochen\": AQ1 50%\nend\n\
-               template raum(stimmungen = \"abend\")\n\
+               template raum(stimmungen: moods = abend)\n\
                \tlc = LightController2(\"Licht\")\n\
                \tlc.moods = stimmungen\n\
                end\n\
                wohnen = raum()\n\
-               kochen = raum(stimmungen: \"kueche\")\n";
+               kochen = raum(stimmungen: kueche)\n";
     let module = Module::parse(src).unwrap();
+    assert!(
+        module
+            .to_text()
+            .contains("template raum(stimmungen: moods = abend)\n")
+    );
+    // v1's string-named set names its replacement.
+    let fails = |src: String, needle: &str| {
+        let err = match Module::parse(&src) {
+            Err(e) => e.to_string(),
+            Ok(m) => compile(&mood_base(), &m, &mut Lockfile::new(), &mood_opts())
+                .unwrap_err()
+                .to_string(),
+        };
+        assert!(err.contains(needle), "`{needle}` not in: {err}");
+    };
+    fails(
+        src.replace("stimmungen: moods = abend", "stimmungen = \"abend\"")
+            .replace("stimmungen: kueche", "stimmungen: \"kueche\""),
+        "Write `stimmungen: moods = abend` instead of `stimmungen = \"abend\"`",
+    );
+    fails(
+        src.replace("stimmungen: kueche", "stimmungen: \"kueche\""),
+        "Write `stimmungen: kueche` instead of `stimmungen: \"kueche\"`",
+    );
+    fails(
+        src.replace("stimmungen: moods = abend", "stimmungen: moods = \"abend\""),
+        "Write `stimmungen: moods = abend` instead of",
+    );
+    fails(
+        src.replace("stimmungen: kueche", "stimmungen: nix"),
+        "`nix` is not a `moods` set",
+    );
+    fails(
+        src.replace("stimmungen: moods = abend", "stimmungen: moods"),
+        "set parameter `stimmungen` must be given",
+    );
+    fails(
+        src.replace("stimmungen: moods = abend", "stimmungen: schedule = abend"),
+        "not a `schedule` set",
+    );
     assert_eq!(
         Module::parse(&module.to_text()).unwrap(),
         module,
@@ -4431,4 +4609,61 @@ fn a_stale_constant_under_a_wire_survives_adopt_and_compile() {
         .unwrap();
     assert_eq!(co.attr("Def"), None);
     assert_eq!(co.attr("Nc"), None);
+}
+
+#[test]
+fn a_template_takes_a_schedule_set_parameter() {
+    // A `schedule` set parameter: each instance claims its own DayTimer.
+    let src = "page \"Beschattung\"\n\
+               schedule abend\n\tmon 17:00-22:00\nend\n\
+               schedule morgen\n\tmon 06:00-07:30\nend\n\
+               template uhr(plan: schedule = abend)\n\
+               \tdt = DayTimer(\"Uhr\")\n\
+               \tdt.schedule = plan\n\
+               end\n\
+               a = uhr()\n\
+               b = uhr(plan: morgen)\n";
+    let module = Module::parse(src).unwrap();
+    assert_eq!(Module::parse(&module.to_text()).unwrap(), module);
+    let flat = module.expand().unwrap();
+    let claims: Vec<(String, String)> = flat
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::ScheduleClaim(c) => Some((c.slug.clone(), c.schedule.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        claims,
+        [
+            ("a_dt".to_string(), "abend".to_string()),
+            ("b_dt".to_string(), "morgen".to_string())
+        ]
+    );
+    let mut lock = Lockfile::new();
+    compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let err = Module::parse(&src.replace("plan: morgen", "plan: nix"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("`nix` is not a `schedule` set"), "{err}");
+}
+
+#[test]
+fn renaming_an_instance_renames_its_scoped_references() {
+    use loxone_config::logic::rename_slug;
+    let src = "extern vi = VirtualIn(iname: \"VI1\")\n\
+               template paar(x: VirtualIn) -> ein\n\
+               \tein = Not(I: x.Q)\n\
+               \taus = Not(I: ein.Q)\n\
+               end\n\
+               a = paar(x: vi)\n\
+               b = And(I1: a.Q, I2: a.aus.Q)\n";
+    let mut m = Module::parse(src).unwrap();
+    rename_slug(&mut m, "a", "c");
+    let text = m.to_text();
+    assert!(text.contains("c = paar("), "{text}");
+    assert!(text.contains("I1: c.Q"), "{text}");
+    assert!(text.contains("I2: c.aus.Q"), "{text}");
+    Module::parse(&text).unwrap();
 }

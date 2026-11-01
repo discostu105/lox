@@ -12,6 +12,8 @@
 //! removed <slug>                               (delete a managed block)
 //! moved   <old_slug> -> <new_slug>             (rename, keeping identity)
 //! page    "<Title>"                            (place the following blocks there)
+//! <slug>  = <template>(<param>: <arg>, …)      (template instance: its blocks
+//!                                               are `<slug>.<block>`, its primary block `<slug>`)
 //! ```
 //!
 //! Bodies closed by `end`: `template`, `test`, `tiles`, `access`,

@@ -23,6 +23,39 @@ use std::collections::BTreeMap;
 #[derive(Debug)]
 pub struct TestPlan {
     pub runs: Vec<TestRun>,
+    /// How source spells an expanded slug (`hitze_alarm` → `hitze`), for
+    /// reports; filled by [`TestPlan::respell`].
+    pub spelled: BTreeMap<String, String>,
+}
+
+impl TestPlan {
+    /// Report the ports as `source` (the unexpanded module) writes them:
+    /// a template instance's blocks by the instance (`hitze.Q`, not
+    /// `hitze_alarm.Q`).
+    pub fn respell(&mut self, source: &Module) {
+        let spelled = &mut self.spelled;
+        let mut spell = |port: &mut PortRef| {
+            let s = source.spelling(&port.slug);
+            if s != port.slug {
+                spelled.insert(port.slug.clone(), s.clone());
+                port.slug = s;
+            }
+        };
+        for run in &mut self.runs {
+            for step in &mut run.steps {
+                for (signal, _) in &mut step.sets {
+                    spell(&mut signal.port);
+                }
+                for e in &mut step.expects {
+                    let old = format!("expect {} ", e.signal.port);
+                    spell(&mut e.signal.port);
+                    if let Some(rest) = e.line.strip_prefix(&old) {
+                        e.line = format!("expect {} {rest}", e.signal.port);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -121,7 +154,10 @@ pub fn plan_tests(
         }
         runs.push(plan_one(module, t, &resolve)?);
     }
-    Ok(TestPlan { runs })
+    Ok(TestPlan {
+        runs,
+        spelled: BTreeMap::new(),
+    })
 }
 
 fn plan_one(
@@ -252,11 +288,12 @@ pub fn run_tests(plan: &TestPlan, compiled: &LoxoneDoc) -> Vec<TestResult> {
 /// object goes by its title.
 pub fn trace_tests(plan: &TestPlan, compiled: &LoxoneDoc, lock: &Lockfile) -> Vec<TestResult> {
     let mut slugs = BTreeMap::new();
+    let spell = |slug: &String| plan.spelled.get(slug).unwrap_or(slug).clone();
     for (slug, o) in &lock.objects {
-        slugs.insert(o.uuid.clone(), slug.clone());
+        slugs.insert(o.uuid.clone(), spell(slug));
     }
     for (slug, e) in &lock.externals {
-        slugs.insert(e.uuid.clone(), slug.clone());
+        slugs.insert(e.uuid.clone(), spell(slug));
     }
     run_all(plan, compiled, Some(&slugs))
 }

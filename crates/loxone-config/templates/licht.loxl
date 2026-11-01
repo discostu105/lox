@@ -3,10 +3,10 @@
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
 # gelesen (virtuelle Eingänge, digitale Eingänge); das Ergebnis jeder
-# Vorlage ist der Block `ausgang` der Instanz:
+# Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
 #
 #   flur = bewegungslicht_dunkel(bewegung: bewegung_flur, helligkeit: lux)
-#   licht_flur.I <- flur_ausgang.Q
+#   licht_flur.I <- flur.Q
 
 template bewegungslicht(bewegung: any, nachlauf = 3min, titel = "Bewegungslicht")
 	# Licht an bei Bewegung, aus `nachlauf` nach der letzten Bewegung.
@@ -18,7 +18,7 @@ template bewegungslicht(bewegung: any, nachlauf = 3min, titel = "Bewegungslicht"
 	)
 end
 
-template bewegungslicht_dunkel(bewegung: any, helligkeit: any, lux = 50, nachlauf = 3min, titel = "Bewegungslicht")
+template bewegungslicht_dunkel(bewegung: any, helligkeit: any, lux = 50, nachlauf = 3min, titel = "Bewegungslicht") -> ausgang
 	# Wie bewegungslicht, aber nur wenn die Helligkeit unter `lux` liegt.
 
 	dunkel = Less(

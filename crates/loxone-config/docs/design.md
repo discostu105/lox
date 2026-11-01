@@ -148,7 +148,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D20 | [A connector with `Inv=` is wholly GUI-owned](decisions/0020-inv-connector-gui-owned.md) | accepted |
 | D21 | [The drift baseline is a fingerprint of what the diff compares](decisions/0021-drift-baseline.md) | accepted |
 | D22 | [The Loxone Config release is a qualification pin](decisions/0022-config-version-pin.md) | accepted, amended by [D46](decisions/0046-block-version.md) |
-| D23 | [Templates are macro expansion with locked identities](decisions/0023-templates.md) | accepted |
+| D23 | [Templates are macro expansion with locked identities](decisions/0023-templates.md) | accepted, amended by [D82](decisions/0082-template-instance-names.md) |
 | D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md) and [D81](decisions/0081-named-signals.md) |
 | D25 | [Projects are a `lox.toml`, and there is no `import`](decisions/0025-projects-lox-toml.md) | accepted |
 | D26 | [Expressions bind in argument lists too](decisions/0026-expressions-in-arguments.md) | accepted |
@@ -207,3 +207,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D79 | [A PulseAt's fire time from source; what the compile carries](decisions/0079-pulseat-fire-time.md) | accepted |
 | D80 | [Language v2, one spelling per value](decisions/0080-v2-one-spelling.md) | accepted |
 | D81 | [Named signals](decisions/0081-named-signals.md) | accepted |
+| D82 | [Template instances are named by the instance](decisions/0082-template-instance-names.md) | accepted |

@@ -32,7 +32,8 @@ fn results(source: &str, trace: bool) -> Vec<TestResult> {
     let mut lock = Lockfile::new();
     let compiled = compile(&base, &module, &mut lock, &opts).unwrap();
     let (flat, _) = module.expand().unwrap().desugar().unwrap();
-    let plan = plan_tests(&flat, &lock, &compiled, None).unwrap();
+    let mut plan = plan_tests(&flat, &lock, &compiled, None).unwrap();
+    plan.respell(&module);
     if trace {
         trace_tests(&plan, &compiled, &lock)
     } else {
@@ -58,14 +59,14 @@ fn example_tests_pass() {
 #[test]
 fn a_wrong_expectation_fails_with_its_line() {
     let source = example("sprachtour");
-    let marker = "expect hitze_alarm.Q == 1";
+    let marker = "expect hitze.Q == 1";
     assert!(source.contains(marker), "the example changed");
-    let broken = source.replacen(marker, "expect hitze_alarm.Q == 0", 1);
+    let broken = source.replacen(marker, "expect hitze.Q == 0", 1);
     let results = run(&broken);
     let (_, pass, failures, error) = &results[0];
     assert!(!pass && error.is_none());
     assert!(
-        failures[0].contains("expect hitze_alarm.Q == 0 — actual 1"),
+        failures[0].contains("expect hitze.Q == 0 — actual 1"),
         "{failures:?}"
     );
 }
@@ -73,17 +74,17 @@ fn a_wrong_expectation_fails_with_its_line() {
 #[test]
 fn a_trace_lists_sets_changes_and_outcomes_by_slug() {
     let source = example("sprachtour");
-    let marker = "expect hitze_alarm.Q == 1";
-    let broken = source.replacen(marker, "expect hitze_alarm.Q == 0", 1);
+    let marker = "expect hitze.Q == 1";
+    let broken = source.replacen(marker, "expect hitze.Q == 0", 1);
     assert!(results(&source, false)[0].trace.is_empty());
     let r = &results(&broken, true)[0];
     let trace = r.trace.join("\n");
     assert!(trace.contains(": set "), "{trace}");
     // The first cycle lists every watched port, later ones the changes.
-    assert!(trace.contains("hitze_alarm.Q = "), "{trace}");
+    assert!(trace.contains("hitze.Q = "), "{trace}");
     assert!(trace.contains(" → "), "{trace}");
     assert!(
-        trace.contains("expect hitze_alarm.Q == 0 — actual 1 FAILED"),
+        trace.contains("expect hitze.Q == 0 — actual 1 FAILED"),
         "{trace}"
     );
     let first_cycle = r.trace.iter().position(|l| l.starts_with("t=")).unwrap();

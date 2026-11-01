@@ -2,10 +2,10 @@
 #
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
-# gelesen; das Ergebnis jeder Vorlage ist der Block `ausgang` der Instanz:
+# gelesen; das Ergebnis jeder Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
 #
 #   bad = heizung_hysterese(temperatur: raumtemp_bad, ein: 20, aus: 22)
-#   heizung_bad.I <- bad_ausgang.Q
+#   heizung_bad.I <- bad.Q
 
 template heizung_hysterese(temperatur: any, ein = 20, aus = 22, titel = "Heizung")
 	# Heizen unter `ein` °C, aufhören ab `aus` °C (ein < aus).
@@ -27,7 +27,7 @@ template frostschutz(temperatur: any, grenze = 5)
 	)
 end
 
-template lueftung_co2(co2: any, fenster: any, grenze = 1000, verzoegerung = 5min, titel = "CO2 hoch")
+template lueftung_co2(co2: any, fenster: any, grenze = 1000, verzoegerung = 5min, titel = "CO2 hoch") -> ausgang
 	# Lüften, wenn CO2 `verzoegerung` lang über `grenze` ppm liegt und das
 	# Fenster zu ist.
 
