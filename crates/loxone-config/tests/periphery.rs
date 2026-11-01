@@ -605,3 +605,89 @@ fn a_title_a_save_rewrites_is_refused() {
         run(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
     }
 }
+
+#[test]
+fn a_udp_command_takes_its_receive_timeout() {
+    // Oracle sessions 84 to 86 (#346): the receive timeout `MaxTime` in
+    // ms, what the value becomes then (`ValOT="1"` keeps the last value,
+    // otherwise `DefVal`), each written where a save writes it and left
+    // out at 0.
+    let src = "udp = VirtualUdpIn(\"Kamera\", Port: 45998)\n\
+         u1 = VirtualUdpInCmd(\"Q U1\", device: udp, Check: \"a\", MaxTime: 7s, DefVal: 3.5)\n\
+         u2 = VirtualUdpInCmd(\"Q U2\", device: udp, Check: \"b\", MaxTime: 9s, ValOT: 1)\n\
+         u3 = VirtualUdpInCmd(\"Q U3\", device: udp, Check: \"c\", MaxTime: 0, DefVal: 0, ValOT: 0)\n";
+    let mut lock = Lockfile::default();
+    let module = Module::parse(src).unwrap();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let attrs = |slug: &str| -> Vec<String> {
+        element(&out, &lock.objects[slug].uuid)
+            .attrs
+            .iter()
+            .filter(|a| !matches!(a.name.as_str(), "Type" | "U" | "IName" | "V" | "Title"))
+            .map(|a| format!("{}={}", a.name, a.value))
+            .collect()
+    };
+    // As session 84's save wrote them.
+    let saved = |valot: &str, check: &str, defval: &str, maxtime: &str| -> Vec<String> {
+        [
+            "Nio=2",
+            "WF=16384",
+            valot,
+            check,
+            "Signed=true",
+            "Analog=true",
+            "SourceValHigh=100",
+            "DestValHigh=100",
+            defval,
+            "MinVal=-10000",
+            "MaxVal=10000",
+            "MinChange=0.25",
+            "MinTime=1000",
+            maxtime,
+        ]
+        .into_iter()
+        .filter(|a| !a.is_empty())
+        .map(String::from)
+        .collect()
+    };
+    assert_eq!(
+        attrs("u1"),
+        saved("", "Check=a", "DefVal=3.5", "MaxTime=7000")
+    );
+    assert_eq!(attrs("u2"), saved("ValOT=1", "Check=b", "", "MaxTime=9000"));
+    assert_eq!(attrs("u3"), saved("", "Check=c", "", ""));
+
+    // Adopted, the source names them again, the timeout in seconds.
+    let mut fresh = Lockfile::default();
+    let adopted = adopt_one(
+        &out,
+        &lock.objects["udp"].uuid,
+        "udp",
+        &Module::default(),
+        &mut fresh,
+    )
+    .unwrap();
+    let mut adopted_module = Module::default();
+    adopted_module.items.extend(adopted.items);
+    let text = adopted_module.to_text();
+    for want in ["MaxTime: 7s", "DefVal: 3.5", "MaxTime: 9s", "ValOT: 1"] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+
+    // A fraction a save cuts off is refused.
+    let err = compile(
+        &base(),
+        &Module::parse(
+            "udp = VirtualUdpIn(\"K\", Port: 45998)\n\
+             u = VirtualUdpInCmd(\"U\", device: udp, Check: \"a\", MaxTime: 1.5ms)\n",
+        )
+        .unwrap(),
+        &mut Lockfile::default(),
+        &opts(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("`MaxTime: 1`"), "{err}");
+}

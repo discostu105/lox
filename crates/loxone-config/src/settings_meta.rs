@@ -35,6 +35,10 @@ pub fn documented(block_type: &str, setting: &str) -> Option<PortMeta> {
         ("VirtualHttpIn", "Poll") => m(Some("s"), Some("10"), Some("604800")),
         ("VirtualHttpIn", "Timeout") => m(Some("ms"), Some("10"), Some("8000")),
         ("VirtualHttpIn", "Allowedtimeouts") => m(None, Some("0"), Some("100")),
+        // Oracle session 84, Loxone Config 17.2 property panel:
+        // "Zeitüberschreitung Empfang [s]", saved in ms (7 s saved as
+        // 7000), absent at 0.
+        ("VirtualUdpInCmd", "MaxTime") => m(Some("ms"), Some("0"), None),
         _ => return None,
     })
 }
@@ -54,5 +58,9 @@ mod tests {
         // No Loxone page states these units.
         assert_eq!(port_unit("ModbusServer", "Timeout"), None);
         assert_eq!(port_unit("ModbusASensor", "MaxTime"), None);
+        assert_eq!(
+            port_unit("VirtualUdpInCmd", "MaxTime"),
+            Some(PortUnit::Milliseconds)
+        );
     }
 }

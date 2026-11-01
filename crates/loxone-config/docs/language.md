@@ -554,6 +554,10 @@ follows `page`.
   (`connectors::periphery` lists them per type). A new one is refused
   without the settings that make it work (`Address` and `Poll` for an
   HTTP input, `Check` for a command, `ModbusAddress` for a Modbus I/O).
+- A UDP command's receive timeout: `MaxTime: 30s` sets it (0 is off).
+  When nothing arrives in that time, the value becomes `DefVal:`, or
+  stays as it was with `ValOT: 1`. HTTP commands have no receive
+  timeout.
 - Strings are source strings: a backslash is written `\\`, so Loxone's
   `\v` placeholder in a command's check is `"\\v"`.
 - `IName=` (VHI1, VCI3, AMQ12, …) is minted once and kept.
