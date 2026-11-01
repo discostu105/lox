@@ -337,6 +337,13 @@ impl Workspace {
     /// else the declaration of the first declared one, else the first use
     /// of one, else the top of `fallback`.
     fn locate(&self, message: &str, decls: &[Decl], unit: &Unit, fallback: &Path) -> Span {
+        // "`defaults Type(…)` …": that statement.
+        if let Some(rest) = message.split("`defaults ").nth(1)
+            && let Some(ty) = rest.split('(').next()
+            && let Some(s) = self.first_text(&format!("defaults {ty}"), unit)
+        {
+            return s;
+        }
         // "write `a.Q` instead of `a_ein.Q`": the old spelling, so the quick
         // fix applies.
         if let Some((_, old)) = replacement(message)
@@ -622,10 +629,45 @@ impl Workspace {
             .trim()
             .to_string();
         let mut md = format!("```loxl\n{decl_text}\n```\n");
+        if decl.kind == "block"
+            && let Some(taken) = self.defaults_taken(&unit, decl)
+        {
+            md.push_str(&taken);
+        }
         if let Some(obj) = self.object(&unit, decl) {
             md.push_str(&obj);
         }
         Some((md, here))
+    }
+
+    /// The parameters block `decl` takes from its type's `defaults`
+    /// statement: the ones it does not bind itself.
+    fn defaults_taken(&self, unit: &Unit, decl: &Decl) -> Option<String> {
+        let ty = decl.ty.as_deref()?;
+        let items: Vec<crate::logic::Item> = unit
+            .files
+            .iter()
+            .filter_map(|f| Module::parse_fragment(&self.text(f)?).ok())
+            .flat_map(|m| m.items)
+            .collect();
+        let d = items.iter().find_map(|i| match i {
+            crate::logic::Item::Defaults(d) if d.block_type == ty => Some(d),
+            _ => None,
+        })?;
+        let block = items.iter().find_map(|i| match i {
+            crate::logic::Item::Block(b) if b.slug == decl.slug => Some(b),
+            _ => None,
+        })?;
+        let lines: Vec<String> = crate::logic::defaults_taken(d, block)
+            .map(|(p, v)| format!("\t{p}: {v},\n"))
+            .collect();
+        if lines.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "\nFrom `defaults {ty}(…)`:\n```loxl\n{}```\n",
+            lines.concat()
+        ))
     }
 
     /// The base object a declaration stands for: an extern's resolved
@@ -1261,6 +1303,22 @@ x = heizen.Q == 1
             edits[0].new
         );
         assert!(edits[0].new.contains("t.Q"), "{}", edits[0].new);
+    }
+
+    #[test]
+    fn hover_on_a_block_shows_the_defaults_it_takes() {
+        let src = "defaults Monoflop(Time: 2s, Reset: 1)\n\
+                   a = Monoflop(Reset: 0)\nb = Monoflop(Time: 3s, Reset: 0)\n";
+        let path = Path::new("/nowhere/a.loxl");
+        let mut ws = Workspace::default();
+        ws.open(path.to_path_buf(), src.to_string());
+        let (md, _) = ws.hover(path, 1, 0).unwrap();
+        assert!(
+            md.contains("From `defaults Monoflop(…)`:\n```loxl\n\tTime: 2s,\n```"),
+            "{md}"
+        );
+        let (md, _) = ws.hover(path, 2, 0).unwrap();
+        assert!(!md.contains("From `defaults"), "{md}");
     }
 
     #[test]

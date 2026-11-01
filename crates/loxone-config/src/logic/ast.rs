@@ -34,6 +34,11 @@ pub enum Item {
     /// lowercase callee. Shares [`BlockDecl`]'s shape (`block_type`
     /// holds the template name; a label string is not allowed).
     Instance(BlockDecl),
+    /// `defaults <Type>(Port: value, …)` — parameter values for every
+    /// managed block of `<Type>` that does not bind the port itself.
+    /// Top level only, one per type; [`Module::expand`] applies it and
+    /// drops it.
+    Defaults(DefaultsDecl),
     /// `target.Port <- <expr>` — expression sugar: the boolean
     /// expression desugars into managed gate/comparator blocks whose
     /// result is wired onto the extern port. A bare `slug.Port` RHS is a
@@ -209,6 +214,51 @@ impl fmt::Display for Unit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.suffix())
     }
+}
+
+/// The duration `raw` (a `Def=` value) of a port documented in seconds or
+/// minutes, spelled with the largest time suffix that writes it as a whole
+/// number (`300` s → `5min`, `0.3` s → `300ms`, `7200` s → `2h`). `None`
+/// for a port of any other unit or none documented, for zero, and where no
+/// suffix reproduces `raw` exactly: the value then stays a plain number.
+pub(crate) fn duration_value(block_type: &str, port: &str, raw: &str) -> Option<Value> {
+    let pu = port_unit(block_type, port)?;
+    let per_ms: u128 = match pu {
+        PortUnit::Seconds => 1000,
+        PortUnit::Minutes => 60_000,
+        _ => return None,
+    };
+    if !is_number_literal(raw) {
+        return None;
+    }
+    let (neg, rest) = match raw.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, raw),
+    };
+    let (int, frac) = rest.split_once('.').unwrap_or((rest, ""));
+    let mantissa: u128 = format!("{int}{frac}").parse().ok()?;
+    let scaled = mantissa.checked_mul(per_ms)?;
+    let den = 10u128.checked_pow(frac.len() as u32)?;
+    if scaled == 0 || scaled % den != 0 {
+        return None;
+    }
+    let ms = scaled / den;
+    for (unit, size) in [
+        (Unit::H, 3_600_000u128),
+        (Unit::Min, 60_000),
+        (Unit::S, 1000),
+        (Unit::Ms, 1),
+    ] {
+        if ms % size != 0 {
+            continue;
+        }
+        let number = format!("{}{}", if neg { "-" } else { "" }, ms / size);
+        // Exactly the bytes the compile writes back, or no suffix.
+        if scale_for_port(&number, unit, Some(pu)).as_deref() == Ok(raw) {
+            return Some(Value::Unit { number, unit });
+        }
+    }
+    None
 }
 
 /// Resolve a suffixed value for a port whose documented unit is
@@ -512,6 +562,36 @@ impl BlockDecl {
     pub fn expr_bindings(&self) -> impl Iterator<Item = (&str, &Expr)> {
         self.bindings().filter_map(|b| match &b.kind {
             BindingKind::Expr(e) => Some((b.port.as_str(), e)),
+            _ => None,
+        })
+    }
+}
+
+/// `defaults <Type>(Port: value, …)` — the parameter values every
+/// managed block of `block_type` takes for the ports it does not bind
+/// itself (template bodies included). Values only: no label, no wires,
+/// no expressions, no identity bindings (`device:`, `mirrors:`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultsDecl {
+    pub block_type: String,
+    /// `Port: value` bindings (always [`BindingKind::Param`]) and
+    /// whole-line comments, in source order.
+    pub args: Vec<ArgItem>,
+    /// Trailing `#` comment on the header line.
+    pub comment: Option<String>,
+    /// Trailing `#` comment on the closing `)` line.
+    pub close_comment: Option<String>,
+}
+
+impl DefaultsDecl {
+    /// The `(port, value)` pairs, in source order.
+    pub fn params(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.args.iter().filter_map(|a| match a {
+            ArgItem::Binding(Binding {
+                port,
+                kind: BindingKind::Param(v),
+                ..
+            }) => Some((port.as_str(), v)),
             _ => None,
         })
     }
@@ -1896,6 +1976,7 @@ impl Module {
             for item in items {
                 let args = match item {
                     Item::Block(b) | Item::Instance(b) => &mut b.args,
+                    Item::Defaults(d) => &mut d.args,
                     Item::Template(t) => {
                         load(&mut t.body, dir)?;
                         continue;
@@ -2216,6 +2297,7 @@ impl Module {
                 Item::Schedule(_) => 14,
                 Item::Moods(_) => 16,
                 Item::Rule(_) => 15,
+                Item::Defaults(_) => 17,
             }
         }
         let mut out = String::new();
@@ -2262,6 +2344,16 @@ impl Module {
             }
             Item::Block(b) | Item::Instance(b) => {
                 multiline = write_block(b, out);
+            }
+            Item::Defaults(d) => {
+                multiline = write_call(
+                    &format!("defaults {}", d.block_type),
+                    None,
+                    &d.args,
+                    &d.comment,
+                    &d.close_comment,
+                    out,
+                );
             }
             Item::Wire(w) => {
                 out.push_str(&format!("{} <- {}{}\n", w.to, w.from, tail(&w.comment)));
@@ -2460,22 +2552,42 @@ fn tail(c: &Option<String>) -> String {
 /// Canonical text of a block or instance call: on one line without
 /// arguments, else one argument per line. True when multi-line.
 fn write_block(b: &BlockDecl, out: &mut String) -> bool {
+    write_call(
+        &format!("{} = {}", b.slug, b.block_type),
+        b.title.as_deref(),
+        &b.args,
+        &b.comment,
+        &b.close_comment,
+        out,
+    )
+}
+
+/// `<head>(…)`: on one line without arguments, else one argument per
+/// line. Returns whether it spans lines.
+fn write_call(
+    head: &str,
+    title: Option<&str>,
+    args: &[ArgItem],
+    comment: &Option<String>,
+    close_comment: &Option<String>,
+    out: &mut String,
+) -> bool {
     let mut multiline = false;
-    out.push_str(&format!("{} = {}(", b.slug, b.block_type));
-    if b.args.is_empty() {
+    out.push_str(&format!("{head}("));
+    if args.is_empty() {
         // Single line: `slug = Type()` or `slug = Type("Label")`.
-        if let Some(t) = &b.title {
+        if let Some(t) = title {
             out.push_str(&quote(t));
         }
         out.push(')');
-        out.push_str(&tail(&b.comment));
+        out.push_str(&tail(comment));
     } else {
-        out.push_str(&tail(&b.comment));
+        out.push_str(&tail(comment));
         out.push('\n');
-        if let Some(t) = &b.title {
+        if let Some(t) = title {
             out.push_str(&format!("\t{},\n", quote(t)));
         }
-        for arg in &b.args {
+        for arg in args {
             match arg {
                 ArgItem::Binding(x) => {
                     out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
@@ -2486,7 +2598,7 @@ fn write_block(b: &BlockDecl, out: &mut String) -> bool {
             }
         }
         out.push(')');
-        out.push_str(&tail(&b.close_comment));
+        out.push_str(&tail(close_comment));
         multiline = true;
     }
     out.push('\n');

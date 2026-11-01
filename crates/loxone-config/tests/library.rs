@@ -146,7 +146,8 @@ fn views_check_and_adoptions_rebuild_byte_identical() {
     // The views are what people copy from: each must pass `loxl check`
     // (#226: a stale constant under a wire once printed as a duplicate
     // argument). Adopting the config and compiling the pair must give the
-    // config back byte for byte — the stale constant included (D77).
+    // config back byte for byte — the stale constant included (D77) —
+    // from the adopted text, with shared values in `defaults` statements.
     use loxone_config::logic::{CompileOptions, adopt, compile};
     use loxone_config::uuid::parse_serial;
     for entry in entries() {
@@ -158,6 +159,8 @@ fn views_check_and_adoptions_rebuild_byte_identical() {
         let bytes = std::fs::read(&path).unwrap();
         let base = loxone_config::LoxoneDoc::parse(&bytes).unwrap();
         let (module, mut lock, _) = adopt(&base).unwrap();
+        // As written: the text, its `defaults` factored out.
+        let module = loxone_config::logic::Module::parse(&module.to_text()).unwrap();
         let opts = CompileOptions {
             machine: parse_serial("504F94112233").unwrap(),
             mint_time_unix: 1_767_225_600,

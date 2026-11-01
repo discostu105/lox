@@ -138,6 +138,7 @@ pub fn adopt_one(
     // The items reference the lock's (expanded) slugs; source names an
     // instance's blocks by the instance.
     module.respell(&mut adopted.items);
+    super::defaults::fit_adopted(&mut adopted.items, module)?;
     Ok(adopted)
 }
 

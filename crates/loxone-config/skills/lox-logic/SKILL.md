@@ -67,6 +67,8 @@ end
 - A template instance is named by itself: `flur.Q` is its primary block (the only block, or the one
   `template t(…) -> <block>` names), `flur.taster.Q` any other block. Never write the lock key
   `flur_taster`. A set goes in by a set parameter: `template raum(stimmungen: moods = standard)`.
+- `defaults <Type>(Port: value, …)` gives every managed block of the type the values it does not bind
+  itself. Values only, one per type. Look for it at the top of a file before repeating a value.
 - Deleting a block needs `removed <slug>`; renaming a slug needs `loxl rename` or
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
 - To take over logic drawn in Loxone Config, use `loxl adopt`, then check with

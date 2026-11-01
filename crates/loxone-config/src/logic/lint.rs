@@ -39,6 +39,9 @@ pub enum LintKind {
     /// Page blocks above their file's first `page` statement in a
     /// directory module whose other files use `page`.
     DefaultPage,
+    /// A `defaults` value no block takes: every block of the type binds
+    /// the port itself, or the module has no block of the type.
+    UnusedDefault,
 }
 
 impl LintKind {
@@ -53,6 +56,7 @@ impl LintKind {
             LintKind::NoAccessRight => "no-access-right",
             LintKind::OutOfRange => "out-of-range",
             LintKind::DefaultPage => "default-page",
+            LintKind::UnusedDefault => "unused-default",
         }
     }
 }
@@ -62,6 +66,53 @@ pub struct LintFinding {
     pub kind: LintKind,
     pub slug: String,
     pub detail: String,
+}
+
+/// `defaults` values that reach no block: the blocks of the type, as
+/// expanded without the defaults, all bind the port.
+fn unused_defaults(module: &Module) -> Result<Vec<LintFinding>> {
+    if !module.items.iter().any(|i| matches!(i, Item::Defaults(_))) {
+        return Ok(Vec::new());
+    }
+    let bare = Module {
+        items: module
+            .items
+            .iter()
+            .filter(|i| !matches!(i, Item::Defaults(_)))
+            .cloned()
+            .collect(),
+    }
+    .expand()?;
+    let mut out = Vec::new();
+    for item in &module.items {
+        let Item::Defaults(d) = item else { continue };
+        let blocks: Vec<_> = bare
+            .blocks()
+            .filter(|b| b.block_type == d.block_type)
+            .collect();
+        for (port, v) in d.params() {
+            if blocks.iter().any(|b| !b.bindings().any(|x| x.port == port)) {
+                continue;
+            }
+            out.push(LintFinding {
+                kind: LintKind::UnusedDefault,
+                slug: d.block_type.clone(),
+                detail: if blocks.is_empty() {
+                    format!("`defaults {}(…)`: no block of the type", d.block_type)
+                } else {
+                    format!(
+                        "`defaults {}({port}: {v})`: every block of the type binds `{port}` \
+                         itself",
+                        d.block_type
+                    )
+                },
+            });
+            if blocks.is_empty() {
+                break;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Source-only lints: declared names nothing references. Templates are
@@ -90,6 +141,8 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             });
         }
     }
+
+    findings.extend(unused_defaults(module)?);
 
     let (flat, _) = module.expand()?.desugar()?;
     let mut object_refs: BTreeSet<&str> = BTreeSet::new();

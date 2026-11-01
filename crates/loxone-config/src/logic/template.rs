@@ -114,6 +114,7 @@ pub(crate) fn visit_refs(
             }
         }
         Item::Let(_)
+        | Item::Defaults(_)
         | Item::Template(_)
         | Item::Instance(_)
         | Item::Page(_)
@@ -380,11 +381,13 @@ impl Module {
                 return Err(Error::Compile(format!("duplicate name `{name}`")));
             }
         }
+        let defaults = super::defaults::by_type(&self.items)?;
         let scopes = Scopes::of(self);
         let mut items = Vec::new();
         for item in &self.items {
             match item {
-                Item::Template(_) => {}
+                // Applied below, to the expanded blocks.
+                Item::Template(_) | Item::Defaults(_) => {}
                 Item::Instance(call) => {
                     let Some(t) = templates.get(call.block_type.as_str()) else {
                         return Err(Error::Compile(format!(
@@ -405,6 +408,7 @@ impl Module {
                 }
             }
         }
+        super::defaults::apply(&mut items, &defaults);
         Ok(Module { items })
     }
 

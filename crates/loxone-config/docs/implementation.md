@@ -42,6 +42,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `ast.rs`, `ast/check.rs` | `Module`, `Item`, declarations, `Binding`s, typed `Value`; canonical `to_text()`; `Module::validate` (names, references, per-statement checks) | `parse(to_text(m)) == m` |
 | `validate.rs` | builtin-table checks (`validate_ports`): types, port names, wire directions, "did you mean" | needs no base config; shared by `check` and `compile` |
 | `template.rs` | template expansion into plain statements | the lockfile and compiler only see the expanded form |
+| `defaults.rs` | `defaults <Type>(…)`: applied during expansion; factoring for decompile and adopt; fitting a block `adopt --uuid` brings in | compiles like the values written on each block |
 | `desugar.rs` | expressions into gate and comparator blocks; arithmetic into one `Formula` | runs after expansion, before port validation |
 | `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims) | teardown and rebuild converge; deterministic |
 | `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |

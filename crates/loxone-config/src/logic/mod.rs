@@ -12,6 +12,7 @@
 //! removed <slug>                               (delete a managed block)
 //! moved   <old_slug> -> <new_slug>             (rename, keeping identity)
 //! page    "<Title>"                            (place the following blocks there)
+//! defaults <Type>(<Port>: <value>, …)          (values for every block of the type)
 //! <slug>  = <template>(<param>: <arg>, …)      (template instance: its blocks
 //!                                               are `<slug>.<block>`, its primary block `<slug>`)
 //! ```
@@ -34,6 +35,7 @@ mod adopt_tree;
 mod ast;
 mod compile;
 mod decompile;
+mod defaults;
 mod desugar;
 mod lint;
 mod moods;
@@ -51,19 +53,20 @@ pub use access::lint_access;
 pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adopt_pages};
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl,
-    Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, Day, ExpectDecl, Expr, ExprWireDecl,
-    ExternDecl, Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting, MoodsClaim,
-    MoodsDecl, MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl,
-    RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl,
-    ScheduleItem, ScheduleLine, SetDecl, SetKind, SignalDecl, TemplateDecl, TemplateParam, TestCmp,
-    TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl,
-    clock_seconds, clock_text,
+    Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, Day, DefaultsDecl, ExpectDecl, Expr,
+    ExprWireDecl, ExternDecl, Interval, Item, LetDecl, MatchSpec, Module, MoodLine, MoodSetting,
+    MoodsClaim, MoodsDecl, MoodsItem, MovedDecl, Operand, PageDecl, PortRef, RULE_BLOCK_TYPE,
+    RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind, ScheduleClaim,
+    ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, SetKind, SignalDecl, TemplateDecl,
+    TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim, TilesDecl,
+    TilesItem, Value, WireDecl, clock_seconds, clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids};
 pub use decompile::{
     DecompileOptions, DecompileReport, DecompileScope, PageModule, decompile, decompile_pages,
     slugify,
 };
+pub use defaults::taken as defaults_taken;
 pub use desugar::DesugarInfo;
 pub use lint::{LintFinding, LintKind, lint_dead_outputs, lint_source};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
