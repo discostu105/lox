@@ -78,10 +78,7 @@ fn a_time_of_day_has_one_spelling() {
         ("23:59:59", "23:59:59"),
     ] {
         let m = module(&format!("p = PulseAt(At: {written})\n"));
-        assert_eq!(
-            m.to_text(),
-            format!("p = PulseAt(\n\tAt: {canonical},\n)\n")
-        );
+        assert_eq!(m.to_text(), format!("p = PulseAt(At: {canonical})\n"));
     }
     for bad in ["24:00", "7:5", "12:60", "12:00:60", "123:00"] {
         let err = Module::parse(&format!("p = PulseAt(At: {bad})\n")).unwrap_err();

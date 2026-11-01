@@ -175,6 +175,11 @@ pub enum Unit {
 }
 
 impl Unit {
+    /// `ms`, `s`, `min` or `h`.
+    pub fn is_time(self) -> bool {
+        matches!(self, Unit::Ms | Unit::S | Unit::Min | Unit::H)
+    }
+
     pub fn suffix(self) -> &'static str {
         match self {
             Unit::Ms => "ms",
@@ -1157,16 +1162,99 @@ pub enum TestItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TickDecl {
-    /// The number of ticks: as written, or the duration divided by dt.
-    pub n: u64,
-    /// `tick 5min`: the duration as written (a time `Unit` value); `None`
-    /// for a plain tick count.
-    pub duration: Option<Value>,
-    /// Simulated seconds per tick; `None` = the default (1s). Always
-    /// `Number` or `Unit`.
+    /// What `tick` advances, as written: a plain tick count (`Number`), a
+    /// duration (a time `Unit` value, `tick 5min`), or a `let` constant
+    /// naming either. [`TickDecl::count`] turns it into ticks.
+    pub amount: Value,
+    /// Simulated seconds per tick; `None` = the default (1s). `Number`,
+    /// `Unit`, or a `let` constant naming one.
     pub dt: Option<Value>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
+}
+
+impl TickDecl {
+    /// The number of ticks, with `let` constants looked up in `lets`: the
+    /// count as written, or the duration divided by dt (which must divide
+    /// it). `None` from `lets` for a constant means it is not known yet
+    /// (the parser checks literals only); that gives `Ok(None)`.
+    pub fn count<'v>(
+        &'v self,
+        lets: impl Fn(&str) -> Option<&'v Value>,
+    ) -> std::result::Result<Option<u64>, String> {
+        let deref = |v: &'v Value| match v {
+            Value::Ref(name) => lets(name),
+            other => Some(other),
+        };
+        let Some(amount) = deref(&self.amount) else {
+            return Ok(None);
+        };
+        let n = match amount {
+            Value::Number(n) => n.parse::<u64>().map_err(|_| {
+                format!("`tick {}`: the tick count is a positive whole number or a duration (`tick 5min`)", self.amount)
+            })?,
+            Value::Unit { unit, .. } if unit.is_time() => {
+                let dt_secs = match &self.dt {
+                    None => Cow::Borrowed("1"),
+                    Some(dt) => match deref(dt) {
+                        None => return Ok(None),
+                        Some(Value::Number(n)) => Cow::Borrowed(n.as_str()),
+                        Some(v @ Value::Unit { unit, .. }) if unit.is_time() => {
+                            v.literal().ok_or_else(|| format!("`dt {dt}` overflows"))?
+                        }
+                        Some(_) => return Err(dt_error(dt)),
+                    },
+                };
+                let total = amount
+                    .literal()
+                    .ok_or_else(|| format!("`tick {}` overflows", self.amount))?;
+                whole_ratio(&total, &dt_secs).ok_or_else(|| {
+                    let dt = self.dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
+                    format!(
+                        "`tick {}` is not a whole number of `dt {dt}` ticks. Make the duration a multiple of dt.",
+                        self.amount
+                    )
+                })?
+            }
+            _ => {
+                return Err(format!(
+                    "`tick {}`: a tick takes a plain tick count or a duration (`tick 90s`, `tick 5min`)",
+                    self.amount
+                ));
+            }
+        };
+        if n == 0 {
+            return Err(format!(
+                "`tick {}` advances nothing. Use at least 1.",
+                self.amount
+            ));
+        }
+        Ok(Some(n))
+    }
+}
+
+/// The error for a `dt` that is no number of seconds or duration.
+pub(crate) fn dt_error(dt: &Value) -> String {
+    format!(
+        "`dt {dt}`: the tick length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
+    )
+}
+
+/// `a / b` for two exact decimal numbers when the quotient is a whole
+/// number (`whole_ratio("300", "0.5") == Some(600)`).
+pub(crate) fn whole_ratio(a: &str, b: &str) -> Option<u64> {
+    let split = |d: &str| -> Option<(u128, u32)> {
+        let (int, frac) = d.split_once('.').unwrap_or((d, ""));
+        Some((format!("{int}{frac}").parse().ok()?, frac.len() as u32))
+    };
+    let ((ma, sa), (mb, sb)) = (split(a)?, split(b)?);
+    let scale = sa.max(sb);
+    let ma = ma.checked_mul(10u128.checked_pow(scale - sa)?)?;
+    let mb = mb.checked_mul(10u128.checked_pow(scale - sb)?)?;
+    if mb == 0 || ma % mb != 0 {
+        return None;
+    }
+    u64::try_from(ma / mb).ok()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1227,10 +1315,7 @@ impl fmt::Display for TestItem {
         match self {
             TestItem::Inject(s) => write!(f, "{} = {}{}", s.target, s.value, tail(&s.comment)),
             TestItem::Tick(t) => {
-                match &t.duration {
-                    Some(d) => write!(f, "tick {d}")?,
-                    None => write!(f, "tick {}", t.n)?,
-                }
+                write!(f, "tick {}", t.amount)?;
                 if let Some(dt) = &t.dt {
                     write!(f, " dt {dt}")?;
                 }
@@ -2266,6 +2351,12 @@ impl Module {
 
     /// Canonical text form. `parse(to_text(m)) == m`.
     pub fn to_text(&self) -> String {
+        self.text_at(0)
+    }
+
+    /// [`Module::to_text`] for items indented `depth` tabs (a template
+    /// body: 1); the indentation decides which calls fit on one line.
+    fn text_at(&self, depth: usize) -> String {
         // Blank lines separate statement families; plain and expression
         // wires are one family (both read `sink <- …`).
         fn family(item: &Item) -> u8 {
@@ -2302,8 +2393,8 @@ impl Module {
         }
         let mut out = String::new();
         let mut prev: Option<u8> = None;
-        // A multi-line call is visually dense; separate it from the next
-        // item even when the kind does not change.
+        // A multi-line item is visually dense: a blank line separates it
+        // from its neighbors even when the kind does not change.
         let mut prev_multiline = false;
         let mut skip = 0;
         for (i, item) in self.items.iter().enumerate() {
@@ -2315,21 +2406,24 @@ impl Module {
                 continue;
             }
             let disc = family(item);
-            if prev.is_some_and(|p| p != disc) || prev_multiline {
+            let mut text = String::new();
+            skip = self.write_item(i, item, depth, &mut text);
+            let multiline = text.trim_end_matches('\n').contains('\n');
+            if prev.is_some_and(|p| p != disc || prev_multiline || multiline) {
                 out.push('\n');
             }
+            out.push_str(&text);
             prev = Some(disc);
-            (prev_multiline, skip) = self.write_item(i, item, &mut out);
+            prev_multiline = multiline;
         }
         out
     }
 
-    /// Writes one item in canonical form (the body of [`Module::to_text`]).
-    /// `i` is its index in `self.items`. Returns whether it was written
-    /// over several lines and how many following items a bulk line
+    /// Writes one item in canonical form (the body of [`Module::to_text`]),
+    /// indented `depth` tabs by the caller. `i` is its index in
+    /// `self.items`. Returns how many following items a bulk line
     /// absorbed.
-    fn write_item(&self, i: usize, item: &Item, out: &mut String) -> (bool, usize) {
-        let mut multiline = false;
+    fn write_item(&self, i: usize, item: &Item, depth: usize, out: &mut String) -> usize {
         let mut skip = 0;
         match item {
             Item::FragmentEnd => {}
@@ -2343,15 +2437,24 @@ impl Module {
                 ));
             }
             Item::Block(b) | Item::Instance(b) => {
-                multiline = write_block(b, out);
+                write_call(
+                    &format!("{} = {}", b.slug, b.block_type),
+                    b.title.as_deref(),
+                    &b.args,
+                    &b.comment,
+                    &b.close_comment,
+                    depth,
+                    out,
+                );
             }
             Item::Defaults(d) => {
-                multiline = write_call(
+                write_call(
                     &format!("defaults {}", d.block_type),
                     None,
                     &d.args,
                     &d.comment,
                     &d.close_comment,
+                    depth,
                     out,
                 );
             }
@@ -2430,10 +2533,7 @@ impl Module {
                     tail(&m.comment)
                 ));
             }
-            Item::Template(t) => {
-                write_template(t, out);
-                multiline = true;
-            }
+            Item::Template(t) => write_template(t, depth, out),
             Item::Page(p) => {
                 let mut args = Vec::new();
                 if let Some(r) = &p.room {
@@ -2459,12 +2559,8 @@ impl Module {
                     out.push_str(&format!("\t{stmt}\n"));
                 }
                 out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                multiline = true;
             }
-            Item::Tiles(t) => {
-                write_tiles(t, out);
-                multiline = true;
-            }
+            Item::Tiles(t) => write_tiles(t, depth, out),
             Item::TilesClaim(c) => {
                 out.push_str(&format!("{c}{}\n", tail(&c.comment)));
             }
@@ -2487,7 +2583,6 @@ impl Module {
                     }
                 }
                 out.push_str(&format!("end{}\n", tail(&a.end_comment)));
-                multiline = true;
             }
             Item::Schedule(t) => {
                 out.push_str(&format!("schedule {}{}\n", t.name, tail(&t.comment)));
@@ -2498,7 +2593,6 @@ impl Module {
                     }
                 }
                 out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                multiline = true;
             }
             Item::ScheduleClaim(c) => {
                 out.push_str(&format!("{c}{}\n", tail(&c.comment)));
@@ -2512,7 +2606,6 @@ impl Module {
                     }
                 }
                 out.push_str(&format!("end{}\n", tail(&t.end_comment)));
-                multiline = true;
             }
             Item::MoodsClaim(c) => {
                 out.push_str(&format!("{c}{}\n", tail(&c.comment)));
@@ -2534,13 +2627,12 @@ impl Module {
                     }
                 }
                 out.push_str(&format!("end{}\n", tail(&r.end_comment)));
-                multiline = true;
             }
             Item::Comment(text) => {
                 out.push_str(&format!("#{text}\n"));
             }
         }
-        (multiline, skip)
+        skip
     }
 }
 
@@ -2549,64 +2641,77 @@ fn tail(c: &Option<String>) -> String {
     c.as_ref().map(|t| format!(" #{t}")).unwrap_or_default()
 }
 
-/// Canonical text of a block or instance call: on one line without
-/// arguments, else one argument per line. True when multi-line.
-fn write_block(b: &BlockDecl, out: &mut String) -> bool {
-    write_call(
-        &format!("{} = {}", b.slug, b.block_type),
-        b.title.as_deref(),
-        &b.args,
-        &b.comment,
-        &b.close_comment,
-        out,
-    )
-}
+/// The columns a tab counts for when [`write_call`] measures a line.
+const TAB_WIDTH: usize = 4;
 
-/// `<head>(…)`: on one line without arguments, else one argument per
-/// line. Returns whether it spans lines.
+/// The longest line, indentation included, a call is joined into.
+const MAX_LINE: usize = 100;
+
+/// The most arguments (a label counts as one) a call joined onto one line has.
+const MAX_INLINE_ARGS: usize = 3;
+
+/// `<head>(…)`, at `depth` tabs (the caller indents). On one line when it has at most
+/// three arguments (the label counts), no comment inside the argument list
+/// or after its `)`, and the line, indentation and trailing comment
+/// included, fits in 100 columns; otherwise one argument per line.
 fn write_call(
     head: &str,
     title: Option<&str>,
     args: &[ArgItem],
     comment: &Option<String>,
     close_comment: &Option<String>,
+    depth: usize,
     out: &mut String,
-) -> bool {
-    let mut multiline = false;
-    out.push_str(&format!("{head}("));
-    if args.is_empty() {
-        // Single line: `slug = Type()` or `slug = Type("Label")`.
-        if let Some(t) = title {
-            out.push_str(&quote(t));
-        }
-        out.push(')');
-        out.push_str(&tail(comment));
-    } else {
-        out.push_str(&tail(comment));
+) {
+    if let Some(line) = inline_call(head, title, args, comment, close_comment, depth) {
+        out.push_str(&line);
         out.push('\n');
-        if let Some(t) = title {
-            out.push_str(&format!("\t{},\n", quote(t)));
-        }
-        for arg in args {
-            match arg {
-                ArgItem::Binding(x) => {
-                    out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
-                }
-                ArgItem::Comment(text) => {
-                    out.push_str(&format!("\t#{text}\n"));
-                }
-            }
-        }
-        out.push(')');
-        out.push_str(&tail(close_comment));
-        multiline = true;
+        return;
     }
-    out.push('\n');
-    multiline
+    out.push_str(&format!("{head}({}\n", tail(comment)));
+    if let Some(t) = title {
+        out.push_str(&format!("\t{},\n", quote(t)));
+    }
+    for arg in args {
+        match arg {
+            ArgItem::Binding(x) => {
+                out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
+            }
+            ArgItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+        }
+    }
+    out.push_str(&format!("){}\n", tail(close_comment)));
+}
+
+/// The one-line form of a call (see [`write_call`]), when it qualifies.
+fn inline_call(
+    head: &str,
+    title: Option<&str>,
+    args: &[ArgItem],
+    comment: &Option<String>,
+    close_comment: &Option<String>,
+    depth: usize,
+) -> Option<String> {
+    let mut parts: Vec<String> = title.map(quote).into_iter().collect();
+    for arg in args {
+        match arg {
+            ArgItem::Binding(x) if x.comment.is_none() => {
+                parts.push(format!("{}: {}", x.port, x.kind));
+            }
+            _ => return None,
+        }
+    }
+    if parts.len() > MAX_INLINE_ARGS || close_comment.is_some() {
+        return None;
+    }
+    let line = format!("{head}({}){}", parts.join(", "), tail(comment));
+    let width = depth * TAB_WIDTH + line.chars().count();
+    // A call without arguments stays on one line whatever its length.
+    (parts.is_empty() || width <= MAX_LINE).then_some(line)
 }
 
 /// Canonical text of a template: its head, the body indented one level, `end`.
-fn write_template(t: &TemplateDecl, out: &mut String) {
+fn write_template(t: &TemplateDecl, depth: usize, out: &mut String) {
     let params = t
         .params
         .iter()
@@ -2627,7 +2732,7 @@ fn write_template(t: &TemplateDecl, out: &mut String) {
     let body = Module {
         items: t.body.clone(),
     }
-    .to_text();
+    .text_at(depth + 1);
     for line in body.lines() {
         if !line.is_empty() {
             out.push('\t');
@@ -2639,35 +2744,24 @@ fn write_template(t: &TemplateDecl, out: &mut String) {
 }
 
 /// Canonical text of a `tiles` set: one `tile` call per tile, then `end`.
-fn write_tiles(t: &TilesDecl, out: &mut String) {
+fn write_tiles(t: &TilesDecl, depth: usize, out: &mut String) {
     out.push_str(&format!("tiles {}{}\n", t.name, tail(&t.comment)));
     for stmt in &t.body {
         match stmt {
             TilesItem::Tile(tile) => {
-                out.push_str(&format!("\ttile {}(", tile.index));
-                if tile.args.is_empty() {
-                    out.push(')');
-                    out.push_str(&tail(&tile.comment));
-                } else {
-                    out.push_str(&tail(&tile.comment));
-                    out.push('\n');
-                    for arg in &tile.args {
-                        match arg {
-                            ArgItem::Binding(x) => out.push_str(&format!(
-                                "\t\t{}: {},{}\n",
-                                x.port,
-                                x.kind,
-                                tail(&x.comment)
-                            )),
-                            ArgItem::Comment(text) => {
-                                out.push_str(&format!("\t\t#{text}\n"));
-                            }
-                        }
-                    }
-                    out.push_str("\t)");
-                    out.push_str(&tail(&tile.close_comment));
+                let mut call = String::new();
+                write_call(
+                    &format!("tile {}", tile.index),
+                    None,
+                    &tile.args,
+                    &tile.comment,
+                    &tile.close_comment,
+                    depth + 1,
+                    &mut call,
+                );
+                for line in call.lines() {
+                    out.push_str(&format!("\t{line}\n"));
                 }
-                out.push('\n');
             }
             TilesItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
         }

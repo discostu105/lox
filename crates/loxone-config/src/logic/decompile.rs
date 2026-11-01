@@ -1772,14 +1772,34 @@ fn is_ident(s: &str) -> bool {
     }
 }
 
-/// Statement-initial keywords (v1, plus reserved v0 words) and the
-/// expression operators. A slug colliding with one would change the
-/// meaning of the line or expression it appears in, so [`SlugTable`] never
-/// hands them out and the parser refuses them as names.
+/// The reserved words: statement and body keywords (plus v0's), the
+/// boolean literals and the expression operators. A name spelled like one
+/// would change the meaning of the line or expression it appears in, so the
+/// parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tiles", "tile", "schedule", "moods",
-    "on", "off",
+    "and", "or", "not", "test", "tick", "expect", "clock", "tile", "on", "off",
+];
+
+/// Contextual keywords: a section kind is a keyword only where its section
+/// starts (`moods <name>`, `defaults <Type>(…)`, `rule <slug>`) or after the
+/// dot of a claim (`x.moods = …`), a rule word only in its place on a rule
+/// line (`then wait 5s`). Elsewhere they are ordinary names, but
+/// [`SlugTable`] never hands them out, so generated source never reads like
+/// a keyword and a generated rule never names a block `wait`.
+pub(super) const CONTEXTUAL: &[&str] = &[
+    "tiles",
+    "schedule",
+    "moods",
+    "access",
+    "recipients",
+    "defaults",
+    "rule",
+    "wait",
+    "mode",
+    "notify",
+    "mail",
+    "message",
 ];
 
 /// Slug generation with umlaut transliteration and `_2`-style
@@ -1791,7 +1811,11 @@ struct SlugTable {
 impl Default for SlugTable {
     fn default() -> Self {
         SlugTable {
-            used: RESERVED.iter().map(|s| s.to_string()).collect(),
+            used: RESERVED
+                .iter()
+                .chain(CONTEXTUAL)
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }

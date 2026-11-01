@@ -4,24 +4,9 @@ extern lueftung = VirtualOutCmd(title: "Lüftung Büro")
 
 page "Logik"
 
-co2_hoch = Greater(
-	Input1: co2.Q,
-	Input2: 1000,
-)
-
-co2_lange = OnDelay(
-	"CO2 5 Minuten hoch",
-	InputTrigger: co2_hoch.Q,
-	Time: 5min,
-)
-
-fenster_zu = Not(
-	I: fenster.Q,
-)
-
-lueften = And(
-	I1: co2_lange.Q,
-	I2: fenster_zu.Q,
-)
+co2_hoch = Greater(Input1: co2.Q, Input2: 1000)
+co2_lange = OnDelay("CO2 5 Minuten hoch", InputTrigger: co2_hoch.Q, Time: 5min)
+fenster_zu = Not(I: fenster.Q)
+lueften = And(I1: co2_lange.Q, I2: fenster_zu.Q)
 
 lueftung.I <- lueften.Q

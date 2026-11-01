@@ -238,10 +238,10 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
     module.items.extend(adopted.items);
     let text = module.to_text();
     assert!(
-        text.contains("wp_regler = ModbusDev(\n\t\"Regler\",\n\tdevice: wp,"),
+        text.contains("wp_regler = ModbusDev(\"Regler\", device: wp"),
         "{text}"
     );
-    assert!(text.contains("\tI: plus.AQ,\n"), "{text}");
+    assert!(text.contains("I: plus.AQ"), "{text}");
     assert!(!text.contains("<-"), "{text}");
     let out = compile(&base1, &module, &mut lock2, &opts()).unwrap();
     assert_eq!(out.to_bytes(), base1.to_bytes());

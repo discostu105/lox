@@ -3,15 +3,7 @@ extern hinweis = VirtualOutCmd(title: "Hinweis Energie Heizstab")
 
 page "Logik"
 
-zaehler = MeterDig(
-	"Energie Heizstab",
-	A: heizstab.Q,
-	Ppwr: 3,
-)
-
-genug = GreaterEqual(
-	Input1: zaehler.OMr,
-	Input2: 6,
-)
+zaehler = MeterDig("Energie Heizstab", A: heizstab.Q, Ppwr: 3)
+genug = GreaterEqual(Input1: zaehler.OMr, Input2: 6)
 
 hinweis.I <- genug.Q

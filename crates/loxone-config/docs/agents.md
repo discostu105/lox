@@ -295,6 +295,10 @@ it only when it matches what you intended.
 | `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |
 | `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
 | `is not a whole number of … ticks` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
+| `a plain tick count or a duration` / `positive whole number` (tick) | a `tick` constant that holds no count or time (`let x = on`, `let x = 1.5`) | give the `let` a whole count or a time, or write the value on the `tick` line |
+| `is a reserved word and cannot be used as a name` | a name that is a keyword everywhere (`tick`, `page`, `on`, `and`, …) | pick another name; section kinds (`moods`, `rule`, …) are fine as names |
+| `cannot be a rule target` | `then wait …` (or `mode`, `notify`, `mail`, `message`) where a block of that name was meant | rename the block: `loxl rename wait <new>` |
+| `would both name their blocks` | a named signal `a_i1 = …` and an expression on `a.I1` would generate the same block names | rename the signal (or the block `a`) with `loxl rename` |
 | `` uses `!=`, which lox-cli's `lox sim` lacks `` (from `test --lox`) | lox-cli's simulator has no `!=` | run the test in the built-in simulator, or rewrite as `==` |
 | `out-of-range` (from `lint`) | value outside the documented range, read in the port's unit | usually a unit slip (`AlarmClockPeriod: 2h` = 120 min); fix, or keep if deliberate |
 | `has no port … in the base config (ports: …)` | the extern port's `<Co>` is missing from the base | use a listed port, or wire or set the port once in Loxone Config so it exists |

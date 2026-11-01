@@ -4,10 +4,6 @@
 
 page "Pool"
 
-heizen = Less(
-	"Wasser unter Soll",
-	Input1: wasser.Q,
-	Input2: solltemp,
-)
+heizen = Less("Wasser unter Soll", Input1: wasser.Q, Input2: solltemp)
 
 pumpe.On <- heizen.Q

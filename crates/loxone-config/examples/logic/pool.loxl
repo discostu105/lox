@@ -25,26 +25,16 @@ extern wp_freigabe = Switch(title: "Freigabe", room: "Technikraum")
 # `alarm` der Instanz `frost` (im Lock `frost_alarm`).
 
 template waechter(sensor: VirtualIn, grenze = 3)
-	alarm = Less(
-		"Unter Grenzwert",
-		Input1: sensor.Q,
-		Input2: grenze,
-	)
+	alarm = Less("Unter Grenzwert", Input1: sensor.Q, Input2: grenze)
 end
 
-frost = waechter(
-	sensor: wassertemp,
-)
+frost = waechter(sensor: wassertemp)
 
 # Ein Ausdruck als Argument (D26) und ein Einheiten-Wert (D27): der
 # Monoflop hält nach Erreichen der Wunschtemperatur noch 30min —
 # kompiliert exakt zu Def="1800".
 
-nachlauf = Monoflop(
-	"Filter-Nachlauf",
-	InputTrigger: wassertemp.Q >= wunschtemp,
-	Time: 30min,
-)
+nachlauf = Monoflop("Filter-Nachlauf", InputTrigger: wassertemp.Q >= wunschtemp, Time: 30min)
 
 # Ein benanntes Signal (D81): heizen, wenn Wasser unter Soll ist, die PV
 # genug liefert und die Abdeckung zu ist (Verdunstungsverlust). Jeder

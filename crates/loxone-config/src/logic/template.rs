@@ -136,6 +136,10 @@ fn visit_args(
             match &mut b.kind {
                 BindingKind::Wire(r) => f(&mut r.slug, RefUse::Port(&r.port))?,
                 BindingKind::Expr(e) => visit_expr(e, f)?,
+                // A minted ref's `mirrors:` names an object.
+                BindingKind::Param(Value::Ref(target)) if b.port == "mirrors" => {
+                    f(target, RefUse::Object)?
+                }
                 BindingKind::Param(_) => {}
             }
         }
@@ -452,6 +456,38 @@ impl Module {
         match scopes.expanded.get(slug) {
             Some((a, b)) => scopes.spelling(a, b),
             None => slug.to_string(),
+        }
+    }
+
+    /// [`Module::expand`], then `f` on the expanded module, whose errors
+    /// name blocks as the source does ([`Module::respell_error`]). The
+    /// expansion's own errors already do, and some name the expanded
+    /// spelling on purpose ("write `kueche` instead of `kueche_lc`").
+    pub fn with_expanded<T>(&self, f: impl FnOnce(Module) -> Result<T>) -> Result<T> {
+        let expanded = self.expand()?;
+        f(expanded).map_err(|e| self.respell_error(e))
+    }
+
+    /// `e` naming blocks the way this (unexpanded) module's source does:
+    /// every expanded slug of a template instance (`kueche_lc`) in a
+    /// compile or lockfile error becomes its spelling (`kueche.lc`, or
+    /// `kueche` for the primary block). The passes after expansion only
+    /// see expanded slugs; this is the one place their messages are
+    /// translated back.
+    pub fn respell_error(&self, e: Error) -> Error {
+        let scopes = Scopes::of(self);
+        if scopes.expanded.is_empty() {
+            return e;
+        }
+        let respell = |msg: String| respell_text(&msg, &scopes);
+        match e {
+            Error::Compile(m) => Error::Compile(respell(m)),
+            Error::Lock(m) => Error::Lock(respell(m)),
+            Error::NoMatch { slug, spec } => Error::NoMatch {
+                slug: respell(slug),
+                spec: respell(spec),
+            },
+            other => other,
         }
     }
 
@@ -855,4 +891,44 @@ impl Module {
             _ => None,
         })
     }
+}
+
+/// [`Module::respell_error`] on one message: each name inside a backtick
+/// span (a maximal `[a-z0-9_]` run, not after a `.`) that is an expanded
+/// instance slug is replaced by its spelling. Synthetic names
+/// (`kueche_lc__and1`) and ports are longer runs or follow a dot, so they
+/// stay.
+fn respell_text(msg: &str, scopes: &Scopes) -> String {
+    let mut out = String::with_capacity(msg.len());
+    for (i, part) in msg.split('`').enumerate() {
+        if i > 0 {
+            out.push('`');
+        }
+        if i % 2 == 0 {
+            out.push_str(part);
+            continue;
+        }
+        let bytes = part.as_bytes();
+        let mut k = 0;
+        while k < bytes.len() {
+            let is_name = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_';
+            if is_name(bytes[k]) && (k == 0 || !(is_name(bytes[k - 1]) || bytes[k - 1] == b'.')) {
+                let end = (k..bytes.len())
+                    .find(|&j| !is_name(bytes[j]))
+                    .unwrap_or(bytes.len());
+                let word = &part[k..end];
+                match scopes.expanded.get(word) {
+                    Some((a, b)) => out.push_str(&scopes.spelling(a, b)),
+                    None => out.push_str(word),
+                }
+                k = end;
+            } else {
+                // Copy one whole character (messages are UTF-8).
+                let ch = part[k..].chars().next().expect("in bounds");
+                out.push(ch);
+                k += ch.len_utf8();
+            }
+        }
+    }
+    out
 }

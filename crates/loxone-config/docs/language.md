@@ -14,7 +14,7 @@ Lox Logic is the text language for managed Loxone logic.
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
-           | page | test | tiles | tiles-claim | access | access-claim
+           | bulk | page | test | tiles | tiles-claim | access | access-claim
            | recipients | recipients-claim | schedule | schedule-claim
            | moods-claim | rule | defaults | blank ;
 
@@ -23,7 +23,7 @@ let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
 extern     = "extern" slug "=" type "(" matcher
              { "," constraint ":" string } ")" [ comment ] ;
 matcher    = ( "uuid" | "iname" | "title" ) ":" string
-           | "mirrors" ":" slug ;
+           | "mirrors" ":" ref ;
 constraint = "room" | "category" ;  (* not with "uuid"/"mirrors"; each at most once *)
 
 block-head = slug "=" type "(" [ args ] [ ")" ] [ comment ] ;
@@ -50,6 +50,8 @@ set        = slug "." port "=" value [ comment ] ;            (* extern target *
 attr       = slug "." attr-name "=" ( string | number | const-ref ) [ comment ] ;
                                     (* extern target, top-level only *)
 attr-name  = "title" | "room" | "category" ;      (* lowercase: never a port key *)
+bulk       = "(" ref { "," ref } ")" "." ( port | attr-name ) "=" value [ comment ] ;
+                                    (* each ref once; one line *)
 
 expr       = and-expr { "or" and-expr } ;
 and-expr   = unary { "and" unary } ;
@@ -90,8 +92,10 @@ test       = "test" string [ comment ]
              "end" [ comment ] ;
 test-cmp   = "==" | "!=" | ">=" | ">" | "<=" | "<" | "~=" ;
 inject     = ref "." port "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
-tick       = "tick" ( integer | number time-unit )   (* a count, or a duration:
-                                                      a whole number of dt steps *)
+tick       = "tick" ( integer | number time-unit | const-ref )
+                                    (* a count, or a duration: a whole
+                                       number of dt steps; a constant
+                                       holds either *)
              [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
 time-unit  = "ms" | "s" | "min" | "h" ;
 expect     = "expect" ref "." port test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
@@ -142,7 +146,7 @@ rule       = "rule" slug [ comment ]               (* Automatic Designer rule *)
              { comment | rule-line }
              "end" [ comment ] ;
 rule-line  = ( "active" | "inactive"
-             | "when" "time" time                  (* 00:00 … 23:59 *)
+             | "when" "time" clock                 (* 00:00 … 23:59, whole minutes *)
              | "when" "weekday" rule-day { rule-day }
              | "when" ref "." ident cmp ( number | "on" | "off" )
              | "when" "mode" mode-name [ "on" | "off" ]
@@ -208,16 +212,19 @@ Notes:
   - Decompile and adopt write the suffix on a port documented in seconds or minutes: the largest of
     `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
     and only when it compiles back to the same digits. Zero and the other ports stay bare.
-- The keywords `let`, `extern`, `removed`, `moved`, `template`, `end`,
-  `page`, `test`, `tick`, `expect`, `clock`, `tiles`, `tile`, `schedule`, the boolean
-  literals `on` and `off`, and the expression
-  operators `and`, `or`, `not` are reserved, as are v0's `block`,
-  `wire`, `set`, and `use` (migration errors) — none can be declared as
-  a name. `access` and `recipients` are keywords only where a line
-  starts with `access <name>` or `recipients <name>`, and after the dot
-  of a claim (`x.access = …`); elsewhere they stay ordinary slugs
-  (`access = Switch()`). `rule` likewise, only in front of a slug, and
-  `defaults` only in front of a block type (`defaults = Monoflop()` is a block).
+- **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
+  `moved`, `template`, `end`, `page`, `test`, `tick`, `expect`, `clock`, `tile`, the boolean
+  literals `on` and `off`, the expression operators `and`, `or`, `not`, and v0's `block`, `wire`,
+  `set` and `use` (migration errors). `tick = Not()` is an error saying so.
+- **Contextual words** are keywords only in their place and ordinary names everywhere else. One
+  rule covers them: the section kinds `tiles`, `schedule`, `moods`, `access`, `recipients`, `rule`
+  and `defaults` are keywords at the start of a line in front of a name or type (`moods kueche`,
+  `defaults Monoflop(…)`) and after the dot of a claim (`x.moods = kueche`); `moods = Not()` is a
+  block and `moods.Q` its output. The rule words `wait`, `mode`, `notify`, `mail` and `message` are
+  keywords after `then` in a rule body (`then wait 5s`, `then mode urlaub on`), so a block of that
+  name cannot be a rule action's target; the error names `loxl rename`. Conditions carry a dot
+  (`when mode.Q == 1`) and take a block of any name. `decompile` and `adopt` never pick a
+  contextual word as a slug.
 - An instantiation is distinguished from a block declaration by the case
   of the callee: `sued = fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
@@ -277,7 +284,7 @@ objects; `title` is human-friendly but locale-volatile — use it only for
 objects you named yourself.
 
 **`mirrors:` — match a ref by what it mirrors.** For `InputRef`, `OutputRef` and `OutputRefLM`
-externs only. `mirrors: <slug>` (a bare slug) matches the ref whose `Ref=` attribute names the object
+externs only. `mirrors: <slug>` (a bare name, or `inst.block` for a block of a template instance) matches the ref whose `Ref=` attribute names the object
 that slug resolves to: a managed block with a locked identity, or a plain-matched extern
 ([loxone-format.md](loxone-format.md) documents `Ref=`).
 
@@ -631,8 +638,9 @@ relais.SwitchBoardPos = 3
 ```
 
 The statement is the assignment on each listed object, in that order —
-a port, a setting or `title`/`room`/`category`. `fmt` keeps it as one
-line. A slug may be listed once; `.tiles`, `.schedule` and `.moods` take
+a port, a setting or `title`/`room`/`category`. A block of a template instance is listed as
+`inst.block` (`(sued.hoch, nord).room = "Garten"`). `fmt` keeps it as one
+line. A name may be listed once; `.tiles`, `.schedule` and `.moods` take
 one object.
 
 ### `.title` / `.room` / `.category` — assign an extern object
@@ -1069,6 +1077,9 @@ Statements, in file order:
   is `tick 300`, `tick 2s dt 500ms` is `tick 4 dt 500ms`. The duration
   must be a whole number of `dt` steps (`tick 1s dt 300ms` is an
   error); `fmt` keeps the spelling written.
+- **`tick <constant> [dt <constant>]`** — a `let` constant holds the count or the duration
+  (`let warten = 5min` … `tick warten`), and `dt` takes one too. A constant that is neither a whole
+  count nor a time, or a duration that is no whole number of `dt` steps, is an error.
 - **`expect slug.Port <cmp> <value>`** — assert after the preceding
   `tick`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and `~=`
   (approximately, 5 % tolerance); `==` and `!=` allow the rounding of
@@ -1307,7 +1318,8 @@ does: whether it is `active`, its conditions (all must hold) and its
 actions, in order. The slug is an `AutopilotRule` extern — rules are
 created, named and deleted in the app; the declaration edits one.
 
-- **`when time HH:MM`** — at that time of day.
+- **`when time HH:MM`** — at that time of day, written like every time of day (`clock`, `At:`):
+  `7:30` reads as `07:30`, seconds must be `:00`, and a quoted time is an error naming the bare one.
 - **`when weekday <days>`** — on those days (`mon` … `sun`, `weekdays`,
   `weekend`, `daily`; no day twice).
 - **`when <slug>.<state> <op> <value>`** — a state of a block
@@ -1588,13 +1600,17 @@ project's module and lock.
 
 `loxl fmt` writes:
 
-- statements in source order, single spaces between tokens, and one blank line whenever the item kind
-  changes and after every multi-line block declaration;
+- statements in source order, single spaces between tokens, a blank line where the item kind
+  changes and before and after every item that spans several lines; single-line items of one kind
+  stay together;
 - an argument-free call on one line (`b = And()`, `c = Or("Oder")`);
-- a call with bindings with the label and each argument on its own tab-indented line with a trailing
+- a call on one line when it has at most three arguments (the label counts as one), no comments,
+  and the line fits in 100 columns with its indentation (a tab counts four):
+  `b = And(I1: x.Q, I2: on)`;
+- any other call with the label and each argument on its own tab-indented line with a trailing
   comma, and the `)` on its own line;
-- a `tile` the same way one level deeper: `tile 2()` on one line, a tile with keys as a
-  two-tab-indented list with the `)` on its own tab-indented line;
+- a `tile` the same way one level deeper (`tile 2(click: "…", to: licht)` on one line, or a
+  two-tab-indented list with the `)` on its own tab-indented line);
 - each grant of an `access` or `recipients` set on its own tab-indented line.
 
 Values keep their variant: numbers bare, strings quoted, constant references bare, port references
@@ -1660,6 +1676,20 @@ replacement. The compile output of a migrated file is byte-identical.
   factor shared values into it, write time values with a unit suffix (`Delay: 3h`) and keep the `<-`
   wires into one extern together. New syntax only; no v1 file changes, and `defaults` stays usable
   as a slug.
+- **One rule for contextual words**: the section kinds (`tiles`, `schedule`, `moods`, `access`,
+  `recipients`, `rule`, `defaults`) are names everywhere but at their section head and claim;
+  `tiles`, `schedule` and `moods` were reserved in v1. `then wait|mode|notify|mail|message` is
+  always the rule action; a block of that name as a `then` target is an error naming `loxl rename`.
+- **Short calls go on one line**: `fmt` writes a call with up to three arguments that fits in 100
+  columns on one line, and puts a blank line around every multi-line item. The compile output does
+  not change.
+- **`tick` and `dt` take `let` constants** (`tick warten`, `tick 3 dt takt`).
+- **`when time`** reads the time like `clock` (`7:30` = `07:30`).
+- **Scoped names everywhere**: `(inst.block, x).room = …` and `mirrors: inst.block` (extern
+  matcher and minted ref) take the instance spelling. Compile, check and test errors spell a block
+  of an instance that way too.
+- A named signal whose name equals an expression's generated prefix (`a_i1 = …` next to an
+  expression on `a.I1`) is an error naming both; v1 let them share block names.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1668,8 +1698,9 @@ string-valued set parameters into set parameters, give each fragment
 whose blocks relied on the previous file's `page` that `page` line, rename each
 `access <extern>` / `recipients <extern>` to `access <extern>_access` /
 `recipients <extern>_recipients` and add the claim
-(`<extern>.access = <extern>_access`) after its `end`, then `loxl fmt`
-(which also unquotes one-word `then` commands).
+(`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
+`notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
+(which also unquotes one-word `then` commands and puts short calls on one line).
 
 ## Versioning
 

@@ -4,11 +4,7 @@ extern entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
 
 page "Logik"
 
-alarm = Monoflop(
-	"Sirene Wasseralarm",
-	InputTrigger: melder.Q,
-	Time: 60s,
-)
+alarm = Monoflop("Sirene Wasseralarm", InputTrigger: melder.Q, Time: 60s)
 
 sirene.I <- alarm.Q
 entfeuchter.I <- melder.Q

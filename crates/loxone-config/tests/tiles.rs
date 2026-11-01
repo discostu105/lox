@@ -146,10 +146,7 @@ const KUECHE_SET: &str = "tiles kueche # Küche
 \t\tto: jal_sued,
 \t\tup_to: jal_nord, # nur Nord fährt hoch
 \t)
-\ttile 4(
-\t\tclick: \"SET(Lico;M+;pulse)&WAIT(500)&MENU(Lico;Mood)\",
-\t\tto: licht,
-\t)
+\ttile 4(click: \"SET(Lico;M+;pulse)&WAIT(500)&MENU(Lico;Mood)\", to: licht)
 end
 
 flex.tiles = kueche
@@ -187,15 +184,14 @@ fn tiles_sets_are_canonical() {
     let src = format!("{EXTERNS}\n{KUECHE_SET}");
     let m = Module::parse(&src).unwrap();
     assert_eq!(m.to_text(), src);
-    // One-line argument lists canonicalize to the multi-line form.
+    // A short tile goes on one line, like any call.
     let short =
         format!("{EXTERNS}\ntiles t\n\ttile 4(click: \"SET(Lico;Tg;pulse)\", to: licht)\nend\n");
-    assert_eq!(
-        Module::parse(&short).unwrap().to_text(),
-        format!(
-            "{EXTERNS}\ntiles t\n\ttile 4(\n\t\tclick: \"SET(Lico;Tg;pulse)\",\n\t\tto: licht,\n\t)\nend\n"
-        )
+    assert_eq!(Module::parse(&short).unwrap().to_text(), short);
+    let long = format!(
+        "{EXTERNS}\ntiles t\n\ttile 4(\n\t\tclick: \"SET(Lico;Tg;pulse)\",\n\t\tto: licht,\n\t\tup: \"x\",\n\t\tdown: \"y\",\n\t)\nend\n"
     );
+    assert_eq!(Module::parse(&long).unwrap().to_text(), long);
 }
 
 #[test]

@@ -3,10 +3,6 @@ extern licht = VirtualOutCmd(title: "Licht Flur")
 
 page "Logik"
 
-nachlauf = OffDelay(
-	"Flurlicht Nachlauf",
-	InputTrigger: bewegung.Q,
-	Time: 2min,
-)
+nachlauf = OffDelay("Flurlicht Nachlauf", InputTrigger: bewegung.Q, Time: 2min)
 
 licht.I <- nachlauf.Q

@@ -75,12 +75,9 @@ fn defaults_compile_like_the_values_on_each_block() {
     let explicit = explicit();
     let factored = module(FACTORED);
 
-    // Canonical text: one argument per line, a fixpoint.
+    // Canonical text: a short call on one line, a fixpoint.
     let text = factored.to_text();
-    assert!(
-        text.contains("defaults Monoflop(\n\tTime: 2s,\n)\n"),
-        "{text}"
-    );
+    assert!(text.contains("defaults Monoflop(Time: 2s)\n"), "{text}");
     assert_eq!(
         Module::parse(&text).unwrap(),
         factored,
@@ -205,11 +202,8 @@ fn adopt_factors_shared_values_and_rebuilds_byte_identical() {
     let (adopted, lock, _) = adopt(&out).unwrap();
     let text = adopted.to_text();
     // Five Monoflops (the template's included) bind `Time`; four of them 2 s.
-    assert!(
-        text.contains("defaults Monoflop(\n\tTime: 2s,\n)\n"),
-        "{text}"
-    );
-    assert!(text.contains("\tTime: 5s,\n"), "{text}");
+    assert!(text.contains("defaults Monoflop(Time: 2s)\n"), "{text}");
+    assert!(text.contains("Time: 5s)"), "{text}");
     assert_eq!(text.matches("Time:").count(), 2, "{text}");
     let reparsed = Module::parse(&text).unwrap();
     let mut lock2 = lock.clone();
@@ -242,10 +236,7 @@ fn adopting_one_block_drops_what_the_defaults_say() {
         items: adopted.items,
     }
     .to_text();
-    assert!(
-        text.contains("c = Monoflop(\n\tReset: sonne.Q,\n)\n"),
-        "{text}"
-    );
+    assert!(text.contains("c = Monoflop(Reset: sonne.Q)\n"), "{text}");
 }
 
 #[test]
@@ -265,11 +256,11 @@ fn decompile_spells_durations_in_units() {
     let (adopted, lock, _) = adopt(&out).unwrap();
     let text = adopted.to_text();
     for want in [
-        "\tTime: 10min,\n",
-        "\tDelay: 3h,\n",
-        "\tTime: 500ms,\n",
-        "\tTime: 58s,\n",
-        "\tTime: 20ms,\n",
+        "Time: 10min)",
+        "Delay: 3h,",
+        "Time: 500ms)",
+        "Time: 58s)",
+        "Time: 20ms)",
     ] {
         assert!(text.contains(want), "{want:?} in {text}");
     }

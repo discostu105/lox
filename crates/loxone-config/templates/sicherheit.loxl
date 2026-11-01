@@ -10,21 +10,13 @@
 template tuer_offen_hinweis(kontakt: any, nach = 3min, titel = "Tür offen")
 	# Hinweis, wenn die Tür länger als `nach` offen steht.
 
-	ausgang = OnDelay(
-		"{titel}",
-		InputTrigger: kontakt.Q,
-		Time: nach,
-	)
+	ausgang = OnDelay("{titel}", InputTrigger: kontakt.Q, Time: nach)
 end
 
 template wasseralarm(melder: any, dauer = 60s, titel = "Wasseralarm")
 	# Wasseralarm: der Melder löst die Sirene für `dauer` aus.
 
-	ausgang = Monoflop(
-		"{titel}",
-		InputTrigger: melder.Q,
-		Time: dauer,
-	)
+	ausgang = Monoflop("{titel}", InputTrigger: melder.Q, Time: dauer)
 end
 
 template alarm_abwesend(kontakt: any, abwesend: any, frist = 30s, dauer = 3min, titel = "Einbruch") -> ausgang
@@ -32,26 +24,10 @@ template alarm_abwesend(kontakt: any, abwesend: any, frist = 30s, dauer = 3min, 
 	# Sirene, höchstens `dauer` lang. Ausschalten von `abwesend` beendet den
 	# Alarm und entschärft innerhalb der Frist.
 
-	einbruch = And(
-		I1: kontakt.Q,
-		I2: abwesend.Q,
-	)
-
-	zuhause = Not(
-		I: abwesend.Q,
-	)
-
-	erkannt = SRFlipFlop(
-		"{titel} erkannt",
-		InputS: einbruch.Q,
-		InputR: zuhause.Q,
-	)
-
-	verzoegert = OnDelay(
-		"{titel} Entschärfzeit",
-		InputTrigger: erkannt.Q,
-		Time: frist,
-	)
+	einbruch = And(I1: kontakt.Q, I2: abwesend.Q)
+	zuhause = Not(I: abwesend.Q)
+	erkannt = SRFlipFlop("{titel} erkannt", InputS: einbruch.Q, InputR: zuhause.Q)
+	verzoegert = OnDelay("{titel} Entschärfzeit", InputTrigger: erkannt.Q, Time: frist)
 
 	ausgang = Monoflop(
 		"{titel} Sirene",

@@ -531,7 +531,7 @@ b1 = blinker(takt: takt)
         assert!(text.contains("template blinker(takt: VirtualIn)"));
         assert!(text.contains("I1: takt.Q"));
         assert!(
-            text.contains("takt: sekundentakt,"),
+            text.contains("b1 = blinker(takt: sekundentakt)"),
             "instance arg:\n{text}"
         );
     }

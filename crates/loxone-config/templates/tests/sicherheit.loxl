@@ -6,18 +6,9 @@ tuer = VirtualIn("Haustür offen")
 melder = VirtualIn("Wassermelder")
 abwesend = VirtualIn("Abwesend")
 
-hinweis = tuer_offen_hinweis(
-	kontakt: tuer,
-)
-
-wasser = wasseralarm(
-	melder: melder,
-)
-
-alarm = alarm_abwesend(
-	kontakt: tuer,
-	abwesend: abwesend,
-)
+hinweis = tuer_offen_hinweis(kontakt: tuer)
+wasser = wasseralarm(melder: melder)
+alarm = alarm_abwesend(kontakt: tuer, abwesend: abwesend)
 
 test "tuer_offen_hinweis: nach 3 Minuten"
 	tuer.Q = 1

@@ -211,3 +211,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |
 | D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |
 | D85 | [`defaults <Type>(…)` states a type's shared parameters once](decisions/0085-defaults.md) | accepted |
+| D86 | [Contextual words, one-line calls and the v2 polish](decisions/0086-v2-polish.md) | accepted |

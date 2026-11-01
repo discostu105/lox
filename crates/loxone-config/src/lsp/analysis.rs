@@ -254,12 +254,12 @@ impl Workspace {
         }
         let module = Module::from_fragments(fragments);
         let first = unit.files[0].clone();
-        let checked = module
-            .expand()
-            .and_then(|x| x.validate().map(|()| x))
-            .and_then(|x| x.desugar())
-            .and_then(|(x, _)| x.validate().map(|()| x))
-            .and_then(|x| validate_ports(&x));
+        let checked = module.with_expanded(|x| {
+            x.validate()?;
+            let (x, _) = x.desugar()?;
+            x.validate()?;
+            validate_ports(&x)
+        });
         if let Err(e) = checked {
             report(&e, &first, &mut out);
             return out;

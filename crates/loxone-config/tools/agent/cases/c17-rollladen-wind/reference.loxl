@@ -6,10 +6,7 @@ extern motor_ab = VirtualOutCmd(title: "Rollladen Wohnzimmer ab")
 
 page "Logik"
 
-sturm = Greater(
-	Input1: wind.Q,
-	Input2: 50,
-)
+sturm = Greater(Input1: wind.Q, Input2: 50)
 
 rollladen = AutoJalousie(
 	"Rollladen Wohnzimmer",

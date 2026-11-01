@@ -281,7 +281,7 @@ fn a_page_governs_only_its_own_fragment() {
     // The fragment boundary is not printed.
     assert_eq!(
         module.to_text(),
-        "page \"Zentral\"\n\na = Not()\nc = Not(\n\tI: a.Q,\n)\n\nb = Not(\n\tI: a.Q,\n)\n"
+        "page \"Zentral\"\n\na = Not()\nc = Not(I: a.Q)\nb = Not(I: a.Q)\n"
     );
 }
 

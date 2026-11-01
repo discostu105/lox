@@ -11,30 +11,11 @@ extern raffstore_sued_auf = Actor(iname: "Q1") # periphery
 extern raffstore_west_ab = Actor(iname: "Q4") # periphery
 extern raffstore_west_auf = Actor(iname: "Q3") # periphery
 
-wind_ueber_40_km_h = Greater(
-	Input1: windgeschwindigkeit.AQ,
-	Input2: 40,
-)
-
-windalarm = Or(
-	I1: wind_ueber_40_km_h.Q,
-	I2: windwarnung.Q,
-)
-
-windalarm_halten = OffDelay(
-	InputTrigger: windalarm.Q,
-	Time: 10min,
-)
-
-aussen_ueber_22_c = Greater(
-	Input1: temperatur.AQ,
-	Input2: 22,
-)
-
-sonne_und_warm = And(
-	I1: sonnenschein.Q,
-	I2: aussen_ueber_22_c.Q,
-)
+wind_ueber_40_km_h = Greater(Input1: windgeschwindigkeit.AQ, Input2: 40)
+windalarm = Or(I1: wind_ueber_40_km_h.Q, I2: windwarnung.Q)
+windalarm_halten = OffDelay(InputTrigger: windalarm.Q, Time: 10min)
+aussen_ueber_22_c = Greater(Input1: temperatur.AQ, Input2: 22)
+sonne_und_warm = And(I1: sonnenschein.Q, I2: aussen_ueber_22_c.Q)
 
 raffstore_sued = AutoJalousie(
 	InputTriggerUp: taste_links_oben.Q,

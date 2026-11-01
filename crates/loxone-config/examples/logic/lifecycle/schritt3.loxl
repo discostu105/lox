@@ -6,8 +6,6 @@
 
 extern sonne = VirtualIn(iname: "VI1")
 
-wetter_sperre = Not(
-	I: sonne.Q,
-)
+wetter_sperre = Not(I: sonne.Q)
 
 removed altlast

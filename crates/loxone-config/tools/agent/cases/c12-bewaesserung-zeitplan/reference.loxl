@@ -11,13 +11,7 @@ zeit = DayTimer("Bewässerung Garten")
 
 zeit.schedule = morgens
 
-trocken = Not(
-	I: regen.Q,
-)
-
-giessen = And(
-	I1: zeit.AQ,
-	I2: trocken.Q,
-)
+trocken = Not(I: regen.Q)
+giessen = And(I1: zeit.AQ, I2: trocken.Q)
 
 bewaesserung.I <- giessen.Q

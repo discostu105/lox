@@ -222,12 +222,22 @@ pub fn compile(
     lock: &mut Lockfile,
     opts: &CompileOptions,
 ) -> Result<LoxoneDoc> {
+    // Errors name blocks the way the source spells them (`kueche.lc`),
+    // not by their expanded slugs.
+    module.with_expanded(|expanded| compile_expanded(base, &expanded, lock, opts))
+}
+
+fn compile_expanded(
+    base: &LoxoneDoc,
+    module: &Module,
+    lock: &mut Lockfile,
+    opts: &CompileOptions,
+) -> Result<LoxoneDoc> {
     // Templates expand first, then expressions desugar:
     // everything below — the lockfile, minting — sees only plain
     // statements. Validation runs before desugaring so reference errors
     // name what the user wrote, and again after as a self-check on the
     // generated blocks.
-    let module = &module.expand()?;
     module.validate()?;
     let (module, desugar_info) = module.desugar()?;
     let module = &module;

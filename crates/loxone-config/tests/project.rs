@@ -21,16 +21,8 @@ const SUED: &str = "\
 
 let temp_schwelle = 28
 
-temp_hoch = GreaterEqual(
-\t\"Temp über 28\",
-\tInput1: aussentemp.Q,
-\tInput2: temp_schwelle,
-)
-
-beschatten = And(
-\tI1: temp_hoch.Q,
-\tI2: sonne.Q,
-)
+temp_hoch = GreaterEqual(\"Temp über 28\", Input1: aussentemp.Q, Input2: temp_schwelle)
+beschatten = And(I1: temp_hoch.Q, I2: sonne.Q)
 
 jal_sued.AutoShade <- beschatten.Q
 jal_sued.Safety <- wind_alarm.Q
