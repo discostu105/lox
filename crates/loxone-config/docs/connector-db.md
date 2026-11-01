@@ -265,8 +265,8 @@ sets, order and UUIDs, in a wired chain with parameters on every block
 The most frequent page blocks of the public corpus that Lox Logic could only reference: virtual status,
 wiping relay, arithmetic, averaging, rounding, counters, text pulses and analog memory. Each type has one
 connector order across all its corpus instances, but the corpus holds them only in pre-17 generations (V70
-to V174). Oracle session 37 minted all thirteen in that order and saved them in Loxone Config 17.2; session
-38 minted them in the saved order and they came back unchanged.
+to V174). Oracle session 38 minted all thirteen in that order and saved them in Loxone Config 17.2; session
+39 minted them in the saved order and they came back unchanged.
 
 | Type | Ports (element order) | Basis |
 |---|---|---|

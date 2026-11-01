@@ -238,7 +238,7 @@ the XML by keys that often say something else (`EndUp` is *complete
 open*, not an end switch; `EnMove` is *DisP*, disable motion). The table
 maps each key to its label. Source: oracle session 34, which wired a `Not`
 into every fourth input of each block; the canvas lists wired rows in key
-order, so each wire pins one key to its label. Session 37 read the rows of
+order, so each wire pins one key to its label. Session 38 read the rows of
 blocks whose inputs were all wired (parameters with a value have no row).
 
 | Type | Key → label |
@@ -1341,7 +1341,7 @@ Logic mints these children itself, and the first save changes nothing.
   the type's order (an appended `OutputAPI`). **`PulseBy`:** `WTA=""`, which holds a search pattern (corpus
   values such as `*10001*`). **`UpDownCounter`:** its connectors in the type's order.
 
-Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29, 33 and 37.
+Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29, 33 and 38.
 
 ## The three writers
 

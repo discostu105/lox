@@ -526,7 +526,7 @@ const STATE: &[PortSpec] = &[
 // (every instance of a type has one connector order); the corpus holds
 // them only in pre-17 generations, so a Loxone Config 17.2 save of a
 // minted instance decided each descriptor (oracle-sessions.md, sessions
-// 37–38). Directions by corpus wires, else agreement of the legacy dbs
+// 38–39). Directions by corpus wires, else agreement of the legacy dbs
 // with zero corpus contradiction, else the inert-flag rule; Def-only
 // ports without wire evidence are Param (docs/connector-db.md).
 const STATE_V: &[PortSpec] = &[p("I", Input), p("AQ", Output)];
