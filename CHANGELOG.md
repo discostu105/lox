@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.71.1] — 2026-11-01
+
+### Fixed
+- **`loxl compile`** and **`loxl check`** refuse a title that Loxone Config rewrites on save, and name the title it writes: `%`, `<` and `|` become `_` on most objects (other sets on lighting controllers, operating modes and calendar entries), `{`, `}`, tabs and line breaks go, and a space at either end becomes `_`. An empty title is refused too. Before, the next save showed the object as renamed. The blocks of an expression write `<=`, `<` and `%` in their labels as `≤`, `＜` and `％`, which a save keeps.
+
 ## [0.71.0] — 2026-11-01
 
 ### Added
