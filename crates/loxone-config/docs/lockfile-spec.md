@@ -66,11 +66,17 @@ edit fields by hand otherwise: a wrong port UUID silently breaks wire identity.
                                     // the desugared source, the compiler
                                     // removes it without a `removed`
                                     // statement. Absent = hand-written.
-      "states": ["…", "…"]          // the special states (`SpStates=`)
+      "states": ["…", "…"],         // the special states (`SpStates=`)
                                     // minted with a new block whose app
                                     // entry names them; written
                                     // while the base lacks the block.
                                     // Absent for most blocks.
+      "gui_defaults": true          // created with Loxone Config's
+                                    // defaults: a port the source gives
+                                    // no value gets its GUI default on
+                                    // every compile. Absent on blocks
+                                    // from before and adopted ones: there
+                                    // such a port has no `Def=` (0).
     }
   },
 
@@ -219,8 +225,9 @@ advanced it before failing. The CLI saves the lock only after a successful compi
 ## Versioning
 
 `lockfile_version` is checked on load, and unknown versions are refused rather than reinterpreted. An
-older lock loads with the newer fields empty. Saving always writes the current version, so an older
-binary refuses the lock instead of silently dropping state it does not know.
+older lock loads with the newer fields empty. Saving writes the current version, so an older binary
+refuses the lock instead of silently dropping state it does not know. The one exception: a lock
+without `gui_defaults` on any object is written as v8, since it holds nothing an older binary drops.
 
 | Version | Adds |
 |---|---|
@@ -232,3 +239,4 @@ binary refuses the lock instead of silently dropping state it does not know.
 | v6 | `moods`: light moods the compiler created |
 | v7 | `rules`: named Automatic Designer rules |
 | v8 | `states` on objects: the special states of a new block |
+| v9 | `gui_defaults` on objects: a block created with Loxone Config's defaults |

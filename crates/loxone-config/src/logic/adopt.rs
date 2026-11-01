@@ -510,6 +510,7 @@ fn adopt_one_expanded(
             page_uuid: Some(lift.page_uuids[page].clone()),
             expr_owned: false,
             states: Vec::new(),
+            gui_defaults: false,
         },
     );
     // The adopted-from config is the new drift baseline: nothing changed
@@ -638,6 +639,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 page_uuid: Some(lift.page_uuids[page].clone()),
                 expr_owned: lift.exprs.absorbed.contains(&i),
                 states: Vec::new(),
+                gui_defaults: false,
             },
         );
     }

@@ -33,7 +33,7 @@
 //!   the LoxCC codec of the `sps0.LoxCC` inside them.
 //!
 //! The modules listed here are the API. A few more are public but hidden
-//! (`cli`, `lsp`, `library`, `observed_defaults`): they serve the `loxl`
+//! (`cli`, `lsp`, `library`, `gui_defaults`, `observed_defaults`): they serve the `loxl`
 //! binary, `lox` and the tests, and may change in any release.
 //!
 //! Transport (FTP, HTTP, WebSocket, push) is deliberately **out of scope**:
@@ -60,6 +60,8 @@ pub(crate) mod coverage;
 pub mod diff;
 pub mod doc;
 pub mod error;
+#[doc(hidden)]
+pub mod gui_defaults;
 pub(crate) mod hardware;
 pub mod layout;
 #[doc(hidden)]

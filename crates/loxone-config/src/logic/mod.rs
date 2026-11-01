@@ -73,8 +73,9 @@ pub use defaults::taken as defaults_taken;
 pub use desugar::DesugarInfo;
 pub(crate) use lint::is_allow_comment;
 pub use lint::{
-    LintFinding, LintKind, finish_lint, fix_unit_suffixes, fix_unit_suffixes_in,
-    fix_unit_suffixes_text, lint_circuits, lint_dead_outputs, lint_source,
+    ImplicitZero, LintFinding, LintKind, finish_lint, fix_implicit_zeros, fix_unit_suffixes,
+    fix_unit_suffixes_in, fix_unit_suffixes_text, implicit_zeros, lint_circuits, lint_dead_outputs,
+    lint_implicit_zero, lint_source,
 };
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{

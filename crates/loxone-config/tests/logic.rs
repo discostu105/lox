@@ -343,6 +343,112 @@ fn zero_on_a_connector_is_no_def() {
     assert!(text.contains("Time: 0"), "{text}");
 }
 
+/// The `Def=` of `title`'s connector `key` in `doc`.
+fn def_of(doc: &LoxoneDoc, title: &str, key: &str) -> Option<String> {
+    let objs = doc.objects();
+    let o = objs
+        .iter()
+        .find(|o| o.title.as_deref() == Some(title))
+        .unwrap_or_else(|| panic!("no block {title}"));
+    loxone_config::doc::ports(doc.element_at(&o.path).unwrap())
+        .into_iter()
+        .find(|p| p.key == key)
+        .unwrap()
+        .def
+}
+
+/// A new block gets Loxone Config's defaults on the ports the source leaves
+/// out (oracle sessions 92 and 93); a block from before keeps them at 0.
+#[test]
+fn a_new_block_gets_the_gui_defaults() {
+    let base = base();
+    let src = "page \"Beschattung\"\n\
+               extern aussentemp = VirtualIn(iname: \"VI1\")\n\
+               frost = Less(\"Frost\", Input1: aussentemp.Q, Input2: 3)\n\
+               puls = Monoflop(\"Puls\", InputTrigger: frost.Q)\n\
+               null = Monoflop(\"Null\", InputTrigger: frost.Q, Time: 0)\n\
+               licht = LightController2(\"Licht\", Max: 80)\n\
+               treppe = StairwayLS(\"Treppe\", InputTrigger: frost.Q, TimeHigh: aussentemp.Q)\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(def_of(&out, "Puls", "Time").as_deref(), Some("2"));
+    assert_eq!(def_of(&out, "Null", "Time"), None);
+    assert_eq!(def_of(&out, "Licht", "Max").as_deref(), Some("80"));
+    assert_eq!(
+        def_of(&out, "Licht", "MoveTimeout").as_deref(),
+        Some("3600")
+    );
+    // Under a wire, as Loxone Config keeps the value it placed.
+    assert_eq!(def_of(&out, "Treppe", "TimeHigh").as_deref(), Some("180"));
+    assert_eq!(def_of(&out, "Frost", "Input1"), None);
+    assert!(lock.objects["puls"].gui_defaults);
+    assert!(!lock.objects["frost"].gui_defaults, "no default to give");
+    assert!(lock.to_json().contains("\"lockfile_version\": 9"));
+
+    // Stable against a base without the blocks and against its own output.
+    let again = compile(&base, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+    let on_own = compile(&out, &module, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(on_own.to_bytes(), out.to_bytes());
+
+    // A block from before keeps a port the source leaves out at 0.
+    let mut old = lock.clone();
+    for o in old.objects.values_mut() {
+        o.gui_defaults = false;
+    }
+    let legacy = compile(&out, &module, &mut old, &opts()).unwrap();
+    assert_eq!(def_of(&legacy, "Puls", "Time"), None);
+    assert_eq!(def_of(&legacy, "Licht", "MoveTimeout"), None);
+    assert!(old.to_json().contains("\"lockfile_version\": 8"));
+}
+
+/// `implicit-zero`: an existing block whose port is 0 only because nothing
+/// sets it. `lint --fix` writes the 0, and the compile does not change.
+#[test]
+fn implicit_zeros_are_found_and_fixed() {
+    use loxone_config::logic::{fix_implicit_zeros, implicit_zeros, lint_implicit_zero};
+    let base = base();
+    let src = "page \"Beschattung\"\n\
+               extern aussentemp = VirtualIn(iname: \"VI1\")\n\
+               puls = Monoflop(\"Puls\", InputTrigger: aussentemp.Q)\n\
+               lang = Monoflop(\"Lang\", InputTrigger: aussentemp.Q, Time: 5)\n";
+    let module = Module::parse(src).unwrap();
+    let mut lock = Lockfile::new();
+    compile(&base, &module, &mut lock, &opts()).unwrap();
+    for o in lock.objects.values_mut() {
+        o.gui_defaults = false;
+    }
+    let out = compile(&base, &module, &mut lock, &opts()).unwrap();
+
+    let zeros = implicit_zeros(&module, &lock, &out).unwrap();
+    assert_eq!(zeros.len(), 1, "{zeros:?}");
+    assert_eq!(zeros[0].slug, "puls");
+    assert_eq!(zeros[0].ports, vec![("Time".to_string(), "2")]);
+    let findings = lint_implicit_zero(&module, &lock, &out).unwrap();
+    assert!(
+        findings[0].detail.contains("Write `Time: 0`"),
+        "{}",
+        findings[0].detail
+    );
+
+    let mut fixed = module.clone();
+    assert_eq!(fix_implicit_zeros(&mut fixed, &zeros), 1);
+    let text = fixed.to_text();
+    assert!(
+        text.contains("InputTrigger: aussentemp.Q, Time: 0"),
+        "{text}"
+    );
+    let refixed = compile(&base, &fixed, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(refixed.to_bytes(), out.to_bytes());
+    assert!(implicit_zeros(&fixed, &lock, &refixed).unwrap().is_empty());
+
+    // A new block is no finding: it gets the default.
+    let mut fresh = Lockfile::new();
+    let minted = compile(&base, &module, &mut fresh, &opts()).unwrap();
+    assert!(implicit_zeros(&module, &fresh, &minted).unwrap().is_empty());
+}
+
 #[test]
 fn ambiguity_and_no_match_are_reported() {
     let base = base();

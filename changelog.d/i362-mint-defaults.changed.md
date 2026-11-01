@@ -1,0 +1,1 @@
+- **lox logic**: a block the compiler creates gets the defaults Loxone Config places it with on the ports the source leaves out, so a new `Monoflop` without `Time` pulses for 2 s instead of 0 s. Blocks that already exist keep their values.

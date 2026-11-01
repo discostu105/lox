@@ -15,6 +15,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `src/doc.rs` | `LoxoneDoc` and its read views: `objects()`, `ports()`, `wires()`, `index()`, counters, `page_path`, `remove_by_uuid`, `duplicate_uuids()` | views are derived on demand; nothing is cached |
 | `src/connectors.rs` | the verified `builtin()` table, evidence from `observe()` | only live-verified types in `builtin` |
 | `src/observed_defaults.rs` | GENERATED: the defaults Loxone Config writes, from the corpus (`tools/extract-defaults.py`) | view only: hides defaults in decompile, never affects compile |
+| `src/gui_defaults.rs` | the defaults Loxone Config places a block with, read off a save (oracle session 92) | a new block gets them (`gui_defaults` in the lock); `implicit-zero` and decompile's `Port: 0` use them |
 | `src/port_meta.rs` | GENERATED: documented port facts (unit, canvas label, range, default) from lox-cli's TechDoc scrape (`tools/extract-port-meta.py`, read from a path, never vendored) | units scale suffixes and refuse mismatches; labels only feed error hints; ranges only feed lint |
 | `src/canvas_labels.rs` | canvas labels of input keys that `port_meta` lacks, read off Loxone Config's canvas | hand-written; only entries checked in Loxone Config |
 | `src/blockdoc.rs` | one line per builtin type on what it is for (`loxl types`, LSP hover) | written for Lox Logic, not copied from Loxone |
@@ -52,7 +53,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |
 | `adopt.rs`, `adopt_tree.rs`, `adopt_hardware.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os; a Tree or Air device with its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
 | `rename.rs` | `loxl rename`: slug rename across module and lockfile, synthetic slugs included | output unchanged except titles the slug feeds |
-| `lint.rs` | advisory lints: unused names, values out of range, bare durations (`unit-suffix`, fixable), blocks whose outputs feed nothing in the compiled config, `# lint: allow` comments | never part of compile; `lint --fix` keeps the compile output byte-identical |
+| `lint.rs` | advisory lints: unused names, values out of range, bare durations (`unit-suffix`, fixable), blocks whose outputs feed nothing in the compiled config, existing blocks with a port at 0 where a new one gets a default (`implicit-zero`, fixable), `# lint: allow` comments | never part of compile; `lint --fix` keeps the compile output byte-identical |
 | `tiles.rs` | Touch Pure Flex tiles: tile arguments → functions, rewrite of claimed `<btns>`, tile lints | unlisted tiles and layout kept byte for byte |
 | `access.rs` | access rights on NFC Code Touch blocks, and push notification recipients | an `access` declaration owns every `TIM=` on its block |
 | `schedule.rs` | DayTimer schedules from source | rewrites `Modes=`, the entries and their counts only |

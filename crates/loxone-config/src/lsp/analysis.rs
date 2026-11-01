@@ -14,8 +14,8 @@ use crate::connectors::{
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
     CompileOptions, LintFinding, LintKind, Module, TemplateParam, compile, finish_lint,
-    lint_access, lint_circuits, lint_dead_outputs, lint_source, lint_tiles, resolve_extern_uuids,
-    validate_ports,
+    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source, lint_tiles,
+    resolve_extern_uuids, validate_ports,
 };
 use crate::port_meta::port_meta;
 use crate::{Error, Lockfile, MAX_ERRORS, Project};
@@ -360,6 +360,9 @@ impl Workspace {
                             );
                             findings.extend(
                                 lint_circuits(&module, &lock, &compiled).unwrap_or_default(),
+                            );
+                            findings.extend(
+                                lint_implicit_zero(&module, &lock, &compiled).unwrap_or_default(),
                             );
                             findings.extend(lint_tiles(&module, &compiled));
                             findings.extend(lint_access(&compiled));
@@ -991,18 +994,24 @@ impl Workspace {
             if let Some(d) = crate::port_doc::describe(ty, port) {
                 md.push_str(&format!("\n\n{d}\n"));
             }
-            if let Some(m) = port_meta(ty, port) {
-                for (k, v) in [
-                    ("label", m.label),
-                    ("unit", m.unit),
-                    ("min", m.min),
-                    ("max", m.max),
-                    ("default", m.default),
-                ] {
-                    if let Some(v) = v {
-                        md.push_str(&format!("\n- {k}: `{v}`"));
-                    }
+            let meta = port_meta(ty, port);
+            let gui = crate::gui_defaults::gui_default(ty, port);
+            for (k, v) in [
+                ("label", meta.and_then(|m| m.label)),
+                ("unit", meta.and_then(|m| m.unit)),
+                ("min", meta.and_then(|m| m.min)),
+                ("max", meta.and_then(|m| m.max)),
+                ("default", gui.or_else(|| meta.and_then(|m| m.default))),
+            ] {
+                if let Some(v) = v {
+                    md.push_str(&format!("\n- {k}: `{v}`"));
                 }
+            }
+            if gui.is_some() {
+                md.push_str(
+                    "\n\nA new block gets the default when the source leaves the port out. \
+                     A block that already exists has 0 there unless it has a value.",
+                );
             }
             return Some(md);
         }

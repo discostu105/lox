@@ -30,13 +30,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
-/// The lockfile format version that [`Lockfile::save`] writes.
+/// The newest lockfile format version, the one [`Lockfile::save`] writes
+/// when the lock holds what only it can hold.
 ///
-/// Older lockfiles load, with the newer maps empty. Saving always writes
-/// this version, so an older binary refuses the file instead of silently
-/// dropping state it does not know. The versions are listed in the crate's
-/// `docs/lockfile-spec.md`.
-pub const LOCKFILE_VERSION: u32 = 8;
+/// Older lockfiles load, with the newer maps empty. Saving writes this
+/// version, so an older binary refuses the file instead of silently
+/// dropping state it does not know. A lock without `gui_defaults` on any
+/// object is written as v8, which every binary since v8 reads in full.
+/// The versions are listed in the crate's `docs/lockfile-spec.md`.
+pub const LOCKFILE_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -205,6 +207,12 @@ pub struct LockedObject {
     /// its own `SpStates=` is the GUI's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub states: Vec<String>,
+    /// The compiler created the block with the values Loxone Config gives
+    /// a placed block ([`crate::gui_defaults`]): a port the source leaves
+    /// out gets its GUI default. Absent on a block created before that, or
+    /// adopted: there a port the source leaves out has no `Def=`, which is 0.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gui_defaults: bool,
 }
 
 /// What a removal tombstone remembers: enough to recognize the object in
@@ -281,9 +289,23 @@ impl Lockfile {
         Ok(())
     }
 
+    /// The version [`Lockfile::save`] writes: v8 unless an object carries
+    /// `gui_defaults`, so a lock without it stays readable by older binaries.
+    pub fn written_version(&self) -> u32 {
+        if self.objects.values().any(|o| o.gui_defaults) {
+            LOCKFILE_VERSION
+        } else {
+            8
+        }
+    }
+
     /// Stable, pretty JSON (BTreeMaps keep key order deterministic).
     pub fn to_json(&self) -> String {
-        let mut s = serde_json::to_string_pretty(self).expect("lockfile serializes");
+        let written = Lockfile {
+            lockfile_version: self.written_version(),
+            ..self.clone()
+        };
+        let mut s = serde_json::to_string_pretty(&written).expect("lockfile serializes");
         s.push('\n');
         s
     }
@@ -388,12 +410,37 @@ mod tests {
                 page_uuid: Some("00000002-0000-0000-ffff504f94112233".into()),
                 expr_owned: false,
                 states: Vec::new(),
+                gui_defaults: true,
             },
         );
         let json = lock.to_json();
+        assert!(json.contains("\"lockfile_version\": 9"), "{json}");
         let back: Lockfile = serde_json::from_str(&json).unwrap();
         assert_eq!(back, lock);
         assert_eq!(back.to_json(), json, "serialization must be stable");
+    }
+
+    #[test]
+    fn a_lock_without_gui_defaults_is_written_as_v8() {
+        let mut lock = Lockfile::new();
+        assert!(lock.to_json().contains("\"lockfile_version\": 8"));
+        lock.objects.insert(
+            "m".into(),
+            LockedObject {
+                uuid: "u".into(),
+                block_type: "Monoflop".into(),
+                ports: BTreeMap::new(),
+                layout: None,
+                superseded_layout: None,
+                page_uuid: None,
+                expr_owned: false,
+                states: Vec::new(),
+                gui_defaults: true,
+            },
+        );
+        let json = lock.to_json();
+        assert!(json.contains("\"lockfile_version\": 9"), "{json}");
+        assert!(json.contains("\"gui_defaults\": true"), "{json}");
     }
 
     #[test]
@@ -426,6 +473,11 @@ mod tests {
             "empty followers elided"
         );
         let back: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.lockfile_version, 8);
+        let back = Lockfile {
+            lockfile_version: LOCKFILE_VERSION,
+            ..back
+        };
         assert_eq!(back, lock);
         assert_eq!(back.to_json(), json);
     }
@@ -449,6 +501,7 @@ mod tests {
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                gui_defaults: false,
             },
         );
         assert!(!lock.to_json().contains("superseded_layout"));
@@ -460,6 +513,11 @@ mod tests {
         });
         let json = lock.to_json();
         let back: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.lockfile_version, 8);
+        let back = Lockfile {
+            lockfile_version: LOCKFILE_VERSION,
+            ..back
+        };
         assert_eq!(back, lock);
         assert_eq!(back.to_json(), json);
     }
@@ -478,6 +536,7 @@ mod tests {
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                gui_defaults: false,
             },
         );
         lock.rename_object("a", "b").unwrap();
