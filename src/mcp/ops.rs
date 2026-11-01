@@ -4,7 +4,7 @@
 //! blocking pool. The output types derive `JsonSchema`, so every tool
 //! publishes an `outputSchema` and returns matching `structuredContent`.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use loxone_client::system::code_of;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -748,6 +748,53 @@ pub fn apply_live_plan(
     {
         t.live = live(&t.source);
     }
+}
+
+/// The hardware the Miniserver reports against the program file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HwReport {
+    /// The program file compared with
+    pub config: String,
+    /// Problems first: serial-changed, missing, not-in-program, offline, ok
+    pub devices: Vec<crate::hardware::HwEntry>,
+    /// Devices per status, before `problems` filters
+    pub counts: std::collections::BTreeMap<String, usize>,
+}
+
+/// `/data/status` against the hardware of the program file (repo, cache, or
+/// an FTP download). Read-only.
+pub fn hw_status(lox: &mut Lox, download: bool, problems: bool) -> Result<HwReport> {
+    use crate::hardware::{self, HwStatus};
+    let snap = if download {
+        crate::snapshot::download(&lox.cfg, None)
+    } else {
+        crate::snapshot::current(&lox.cfg)
+    }
+    .map_err(|e| {
+        tool_error(
+            "config_unavailable",
+            format!(
+                "{:#} — pass download=true to fetch the config from the Miniserver (read-only FTP)",
+                e
+            ),
+        )
+    })?;
+    let doc = loxone_config::LoxoneDoc::parse(&snap.bytes)
+        .with_context(|| format!("cannot read the program file {}", snap.label))?;
+    let live = hardware::read_live(&lox.client)?;
+    let mut devices = hardware::compare(&live, &hardware::program_devices(&doc));
+    let counts = hardware::counts(&devices)
+        .into_iter()
+        .map(|(s, n)| (s.key().to_string(), n))
+        .collect();
+    if problems {
+        devices.retain(|e| e.status != HwStatus::Ok);
+    }
+    Ok(HwReport {
+        config: snap.label,
+        devices,
+        counts,
+    })
 }
 
 /// What is wired to a control or logic block: inputs, outputs, parameters,

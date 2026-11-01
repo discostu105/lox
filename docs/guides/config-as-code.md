@@ -205,19 +205,21 @@ readable in Loxone Config.
 ```bash
 lox config push              # dry run: download live, drift check, compile, show the changes, stage
 lox config push --force      # … then upload, restart the program, verify, move base forward
+lox config sync              # read-only: source, lock and the Miniserver agree
 git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 ```
 
 Each step stops the push when it fails:
 
-1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`) and list its custom changes.
+1. Download what the Miniserver runs now (`backups/<stamp>-pre-push.zip`) and list its custom changes. Check that
+   the automatic rules didn't change since the last push.
 2. Drift check: the live logic must still be your `base`.
 3. Compile against the live download, so users, passwords, access rights and layout stay as they are live.
 4. Show the changes and compare the live users with the program file.
 5. Stage the upload and check that it extracts to exactly the compiled file. Without `--force`, the push ends here.
 6. Upload as `/prog/sps_new.zip` and restart the program, as a save from Loxone Config does.
 7. Download again: the Miniserver must run exactly the compiled file, or the project stays as it was.
-8. Update the lock, `out`, and `base` in `lox.toml`. Commit them.
+8. Update the lock, `out`, `base` in `lox.toml` and `autopilot.changed`. Commit them.
 
 Custom changes are what the app, the web UI or the API changed and Loxone Config hasn't saved yet: light moods,
 timers, automatic rules, users, NFC tags and codes. The download doesn't contain them and the upload would delete
@@ -233,6 +235,7 @@ the JSON report:
 | `--patched-from <dl.Loxone>` | Your base is a byte patch of that download |
 | `--backup-dir <dir>` | Downloads and artifacts elsewhere (default `backups/`, git-ignored: configs hold personal data) |
 | `--discard-custom-changes` | Push although the Miniserver holds custom changes, deleting them |
+| `--allow-app-changes` | The rules' change time moved, and `lox autopilot changed --explain` shows no rule change |
 | `-o json` | A machine-readable report on stdout |
 
 {: .note }
