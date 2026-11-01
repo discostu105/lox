@@ -556,6 +556,23 @@ pub(crate) enum ConfigCmd {
         /// loading the upload deletes them
         #[arg(long)]
         discard_custom_changes: bool,
+        /// Push even though the Automatic Designer's rules changed since the
+        /// last verified push (in the app, or any other program write)
+        #[arg(long)]
+        allow_app_changes: bool,
+    },
+    /// Check that a Lox Logic project and the Miniserver agree (read-only)
+    ///
+    /// Passes right after a verified push: the live config is the base, the
+    /// module compiles to the base without changing the lockfile, and the
+    /// rules' change time is the one the push recorded. Exit 1 when a check
+    /// fails.
+    ///
+    /// JSON fields: `in_sync`, `base`, `live`, `saved`, `checks` (`name`, `ok`, `detail`).
+    Sync {
+        /// Project directory (holds lox.toml)
+        #[arg(default_value = ".")]
+        project: String,
     },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     ///
@@ -707,6 +724,7 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             backup_dir,
             discard_custom_changes,
             reboot,
+            allow_app_changes,
         } => {
             let ms = config_push::LiveMiniserver::new(Config::load()?);
             let opts = config_push::PushOptions {
@@ -718,10 +736,23 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
                 backup_dir: backup_dir.map(Into::into),
                 discard_custom_changes,
                 reboot,
+                allow_app_changes,
             };
             let report = config_push::push(&ms, &opts, ctx.quiet)?;
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        ConfigCmd::Sync { project } => {
+            let ms = config_push::LiveMiniserver::new(Config::load()?);
+            let report = config_push::sync(&ms, Path::new(&project))?;
+            if ctx.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.text());
+            }
+            if !report.in_sync {
+                std::process::exit(1);
             }
         }
         ConfigCmd::Upload { file, force } => config_upload(&file, force)?,

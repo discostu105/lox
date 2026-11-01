@@ -676,6 +676,126 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
 }
 
 #[derive(Subcommand)]
+pub(crate) enum HwCmd {
+    /// Compare the devices the Miniserver reports with the program file
+    ///
+    /// Reads `/data/status` (Tree, Air, extensions, network and 1-Wire
+    /// devices) and the program file like `lox config` does (config repo or
+    /// cached download; `--at`, `--file`, `--download`). Devices match by
+    /// serial (MAC for network devices). Statuses: `serial-changed` (a
+    /// replaced device: same name, other serial), `missing` (in the program,
+    /// not listed), `not-in-program`, `offline`, `ok`.
+    ///
+    /// JSON fields: `config`, `devices` (`status`, `name`, `type`, `place`,
+    /// `serial`, `program_serial`, `uuid`, `online`, `firmware`), `counts`.
+    Status {
+        /// Show only devices with a problem
+        #[arg(long)]
+        problems: bool,
+        #[command(flatten)]
+        src: crate::commands::config_insight::ConfigSource,
+    },
+}
+
+pub fn cmd_hw(ctx: &RunContext, action: HwCmd) -> Result<()> {
+    use crate::hardware::{self, HwStatus};
+    match action {
+        HwCmd::Status { problems, src } => {
+            let (snap, _) = crate::commands::config_insight::load(&src)?;
+            let doc = loxone_config::LoxoneDoc::parse(&snap.bytes)
+                .with_context(|| format!("Cannot read the program file {}", snap.label))?;
+            let live = hardware::read_live(&Config::load()?.client()?)?;
+            let mut entries = hardware::compare(&live, &hardware::program_devices(&doc));
+            let counts = hardware::counts(&entries);
+            if problems {
+                entries.retain(|e| e.status != HwStatus::Ok);
+            }
+            if ctx.json {
+                let counts: serde_json::Map<String, serde_json::Value> = counts
+                    .iter()
+                    .map(|(s, n)| (s.key().to_string(), (*n).into()))
+                    .collect();
+                let v =
+                    serde_json::json!({"config": snap.label, "devices": entries, "counts": counts});
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                print!(
+                    "{}",
+                    hw_table(&entries, &counts, &snap.label, !ctx.no_header)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn hw_table(
+    entries: &[crate::hardware::HwEntry],
+    counts: &std::collections::BTreeMap<crate::hardware::HwStatus, usize>,
+    config: &str,
+    header: bool,
+) -> String {
+    use crate::hardware::HwStatus;
+    let dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
+    let rows: Vec<[String; 6]> = entries
+        .iter()
+        .map(|e| {
+            let serial = match (&e.program_serial, &e.serial) {
+                (Some(old), Some(new)) if e.status == HwStatus::SerialChanged => {
+                    format!("{old} → {new}")
+                }
+                (_, Some(s)) | (Some(s), None) => s.clone(),
+                (None, None) => "—".into(),
+            };
+            [
+                e.status.label().to_string(),
+                e.name.clone(),
+                e.kind.clone(),
+                dash(&e.place),
+                serial,
+                dash(&e.firmware),
+            ]
+        })
+        .collect();
+    let heads = ["STATUS", "NAME", "TYPE", "PLACE", "SERIAL", "FIRMWARE"];
+    let mut widths = heads.map(|h| h.chars().count());
+    for r in &rows {
+        for (w, c) in widths.iter_mut().zip(r) {
+            *w = (*w).max(c.chars().count());
+        }
+    }
+    let line = |cells: &[String]| -> String {
+        let mut s = String::new();
+        for (i, (c, w)) in cells.iter().zip(widths).enumerate() {
+            if i + 1 == cells.len() {
+                s.push_str(c);
+            } else {
+                s.push_str(&format!("{c:<w$}  "));
+            }
+        }
+        s.trim_end().to_string() + "\n"
+    };
+    let mut out = format!("Program file: {config}\n\n");
+    if header {
+        out.push_str(&line(&heads.map(String::from)));
+        out.push_str(&format!(
+            "{}\n",
+            "─".repeat(widths.iter().sum::<usize>() + 2 * (widths.len() - 1))
+        ));
+    }
+    for r in &rows {
+        out.push_str(&line(r));
+    }
+    let total: usize = counts.values().sum();
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|(s, n)| format!("{n} {}", s.label()))
+        .collect();
+    out.push_str(&format!("\n{total} devices: {}\n", parts.join(", ")));
+    out
+}
+
+#[derive(Subcommand)]
 pub(crate) enum UpdateCmd {
     /// Check for available firmware updates
     Check,

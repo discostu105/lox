@@ -5,6 +5,7 @@
 //! every earlier revision back to 2024-11-05 over stdio. stdout carries protocol
 //! messages only; diagnostics go to stderr. Design: `docs/design-mcp.md`.
 
+mod config_tools;
 mod ops;
 mod server;
 

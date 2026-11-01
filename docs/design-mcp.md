@@ -72,12 +72,32 @@ a generated **`outputSchema`**, a title, and annotations (`readOnlyHint`, `destr
 | `get_user` | `name` | one user (`getuser`): state, validity, groups, NFC tags, number of access codes |
 | `access_log` | `code_touch`, `limit?` | the NFC Code Touch's access log (`/log/<uuid>.txt`), newest entries, decoded |
 | `access_check` | `user`, `code_touch?`, `cached?` | per Code Touch: verdict (granted, no-access-right, no-credential, user-disabled, unknown-full-access), the rights found, warnings where the program file and the live state disagree. Downloads the config via FTP (read-only) unless `cached` |
+| `hw_status` | `download?`, `problems?` | `/data/status` against the program file's hardware, as `lox hw status` |
+| `logic_check` | `project?` | `lox logic check --json` |
+| `logic_types` | `type?`, `search?` | `lox logic types`: the block catalogue, or one type |
+| `logic_coverage` | `project?` | `lox logic coverage --json` |
+| `logic_decompile` | `config`, `project?`, `managed_only?`, `all_params?` | `lox logic decompile`: a `.Loxone` as Lox Logic |
+| `logic_diff` | `old`, `new`, `project?` | `lox logic diff --json` between two configs |
+| `logic_drift` | `project?`, `config?` | `lox logic drift`: a config (default: the project's `base`) against the lock |
+| `logic_lint` | `project?` | `lox logic lint` |
+| `logic_compile` | `project?` | `lox logic compile` into a scratch directory, with a copy of the lock; then the diff from `base` |
+| `logic_test` | `project?`, `filter?` | `lox logic test` |
+| `config_sync` | `project?` | `lox config sync`: source, lock and the live config agree |
+| `config_push_dry_run` | `project?` | `lox config push --dry-run`: download, drift check, compile, stage. Never uploads |
 
 `get_wiring` reads the config repo or the cached `.Loxone`. `download` fetches the config over FTP (read-only).
 `live` adds the current value to every wire whose source is a state the app streams, as
 `live: {value, text?, control, state}`. `text` is in the control's own format (`22000lx`). One WebSocket state dump
 serves all wires, the same read as the TUI's wiring overlay. A wire without a streamed source gets no value, never
 a guessed one. If the WebSocket fails, the config wiring is still returned and `live_error` says why.
+
+The `logic_*` and `config_*` tools run the CLI as a child process of the same binary, in the `project` directory
+(default: the server's working directory). The logic CLI prints to stdout, which carries the protocol here, so it
+cannot run in-process. Each result is a `CliRun`: the command line to run by hand, the exit code, stdout as `json`
+or `output`, and stderr as `messages`, cut at 512 KB per stream. A pinned `--ctx` goes along. Exit code 1 is a
+finding (check, lint, drift, diff, test, sync), not a tool error. None of them writes to the project:
+`logic_compile` writes into a fresh directory under the system's temp directory, and the push runs with
+`--dry-run` only.
 
 ### 4.2 Action tools
 
@@ -213,6 +233,7 @@ Protocol errors are left to rmcp (unknown tool, malformed request, unsupported p
 | `src/mcp/mod.rs` | `ServerOptions`, `lox mcp serve/config/tools`, the stdio runtime |
 | `src/mcp/server.rs` | `LoxMcp`: `#[tool_router]` tools, typed parameters, confirmation (MRTR and elicitation), progress, cancellation, `tools/list` cache hints, server info |
 | `src/mcp/ops.rs` | synchronous Miniserver operations and the `JsonSchema` output types |
+| `src/mcp/config_tools.rs` | the config-as-code tools: runs `lox logic` and `lox config` as a child process |
 | `src/mcp/tests.rs` | protocol tests: an rmcp client against the server over an in-memory duplex |
 
 ## 9. Testing
@@ -225,7 +246,9 @@ Protocol errors are left to rmcp (unknown tool, malformed request, unsupported p
 - **Schema tests**: every tool has a title, annotations, an inline input schema and an output schema
   whose `required` fields are always present.
 - **CLI smoke tests** pipe JSON-RPC into the real binary: an `initialize` session, a `server/discover`
-  session, and a stateless 2026-07-28 `tools/call`.
+  session, a stateless 2026-07-28 `tools/call`, and `logic_check` and `logic_compile` on the example project.
+- **Config-as-code tools** run against a fake `lox` script in the protocol tests: arguments, working directory,
+  the scratch output and a missing `lox.toml`.
 - **Interop**: the official Python SDK (`mcp` 2.2) was run against the release binary in `auto`
   (discover), pinned `2026-07-28`, and `legacy` modes, including the door confirmation. It caught the
   one bug the Rust tests had missed: output schemas that required fields the server omits.

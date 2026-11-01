@@ -18,6 +18,7 @@ mod config;
 mod custom_changes;
 mod energy;
 mod gitops;
+mod hardware;
 mod inventory;
 mod logic;
 mod loxone_xml;
@@ -91,6 +92,7 @@ Inspect:
 System:
   status, log, time            Health, logs, clock
   health                       Device health dashboard
+  hw                           Hardware on the bus against the program file
   discover, extensions         Find Miniservers, list extensions
   update, reboot               Firmware updates, reboot
   files                        Browse Miniserver filesystem
@@ -532,6 +534,11 @@ pub(crate) enum Cmd {
         #[arg(long)]
         problems: bool,
     },
+    /// Hardware the Miniserver sees against the program file
+    Hw {
+        #[command(subcommand)]
+        action: commands::system::HwCmd,
+    },
     /// Check for firmware updates
     Update {
         #[command(subcommand)]
@@ -936,6 +943,7 @@ fn run(cli: Cli) -> Result<()> {
             device_type,
             problems,
         } => commands::system::cmd_health(&ctx, device_type, problems),
+        Cmd::Hw { action } => commands::system::cmd_hw(&ctx, action),
         Cmd::Update { action } => commands::system::cmd_update(&ctx, action),
         Cmd::Reboot { yes } => commands::system::cmd_reboot(&ctx, yes),
         #[cfg(feature = "tui")]

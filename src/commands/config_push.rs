@@ -1,15 +1,17 @@
 //! `lox config push`: deploy a Lox Logic project to the Miniserver. Each step stops the push when it fails:
 //!
-//! 1. Download the live config (kept under `backups/`); refuse to discard custom changes without a flag.
+//! 1. Download the live config (kept under `backups/`); refuse to discard custom changes without a flag,
+//!    and refuse when the rules changed in the app since the last verified push.
 //! 2. Drift check: the live config must still match the project's base.
 //! 3. Compile the module against the live download, keeping what the module does not own.
 //! 4. Show what the push changes.
 //! 5. Stage the upload: the live ZIP with the compiled `sps0.LoxCC`, catalogue and permissions.
 //! 6. Upload it as `sps_new.zip` and restart the program (`--reboot`: the Miniserver).
 //! 7. Download again and verify the Miniserver runs the compiled file.
-//! 8. Move lock, out file and `base` to the verified state.
+//! 8. Move lock, out file and `base` to the verified state; record the rules' change time.
 //!
 //! With `--patched-from DOWNLOAD` the base is a byte patch of an earlier download.
+//! [`sync`] checks, read-only, that source, lock and the live config agree.
 
 use crate::app_catalogue::{self, StaleEntry};
 use crate::config::Config;
@@ -49,6 +51,9 @@ pub(crate) trait Miniserver {
     fn wait_until_up(&self) -> Result<()>;
     /// The app catalogue the Miniserver serves (`/data/LoxApp3.json`).
     fn app_catalogue(&self) -> Result<Vec<u8>>;
+    /// When the Automatic Designer's rules last changed (unix seconds);
+    /// `None` without an Automatic Designer.
+    fn rules_changed(&self) -> Result<Option<i64>>;
 }
 
 /// The Miniserver of the connection settings: FTP for configs, HTTP for the
@@ -154,11 +159,19 @@ impl Miniserver for LiveMiniserver {
     fn app_catalogue(&self) -> Result<Vec<u8>> {
         Ok(self.cfg.client()?.get_bytes("/data/LoxApp3.json")?)
     }
+
+    fn rules_changed(&self) -> Result<Option<i64>> {
+        crate::inventory::rules_changed(&mut self.cfg.client()?)
+    }
 }
 
 /// `/jdev/sps/state` while the program runs (the Web Services list: 5 =
 /// "PLC running").
 const PLC_RUNNING: &str = "5";
+
+/// The project file that holds the rules' change time after the last
+/// verified push (unix seconds).
+pub(crate) const APP_CHANGES_FILE: &str = "autopilot.changed";
 
 pub(crate) struct PushOptions {
     /// The project directory (holds lox.toml).
@@ -176,6 +189,8 @@ pub(crate) struct PushOptions {
     pub backup_dir: Option<PathBuf>,
     /// Upload even though the Miniserver holds custom changes, deleting them.
     pub discard_custom_changes: bool,
+    /// Upload even though the rules changed since the last verified push.
+    pub allow_app_changes: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -229,6 +244,26 @@ pub(crate) struct PushReport {
     /// Users changed live that the program file does not hold: loading the
     /// upload deletes these changes
     pub user_changes_pending: Vec<crate::commands::push_users::PendingUserChange>,
+    /// The Automatic Designer's change time against the recorded one
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_changes: Option<AppChanges>,
+    /// After the push: compiling the module into the verified config gives it
+    /// back byte for byte, so the lock moved with the base
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixpoint: Option<bool>,
+}
+
+/// When the rules last changed on the Miniserver, against the time recorded
+/// after the last verified push. The time also moves on other program
+/// writes, such as a password changed in the app.
+#[derive(Debug, Serialize)]
+pub(crate) struct AppChanges {
+    /// Unix seconds, 0 = never
+    pub changed: i64,
+    /// Absent before the first verified push
+    pub recorded: Option<i64>,
+    /// `changed` is not the recorded time
+    pub moved: bool,
 }
 
 pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Result<PushReport> {
@@ -244,15 +279,7 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         )
     })?;
     let project = Project::load(&project_file)?;
-    if let (Some(live), Some(want)) = (ms.serial(), &project.serial)
-        && !live.eq_ignore_ascii_case(want)
-    {
-        bail!(
-            "The project targets Miniserver {want}, but the connection settings point at {live}. \
-             Pick the right one with `--ctx` / `lox ctx use`, or fix `serial` in {}.",
-            project_file.display()
-        );
-    }
+    check_target(ms, &project, &project_file)?;
     let backups = opts
         .backup_dir
         .clone()
@@ -269,6 +296,8 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     let live_path = file("pre-push.Loxone");
     fs::write(file("pre-push.zip"), &live_zip)?;
     fs::write(&live_path, &live_xml)?;
+
+    let app_changes = check_app_changes(ms, opts, &project, &say)?;
 
     // 2. Drift: nobody else may have changed the logic since the base.
     let mut kept_as_live = Vec::new();
@@ -352,9 +381,14 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
         staged: None,
         verified: None,
         user_changes_pending: Vec::new(),
+        app_changes,
+        fixpoint: None,
     };
     if compiled == live_xml {
         say("Nothing to push: the Miniserver already runs the compiled module.");
+        if opts.force {
+            record_app_changes(ms, &project.root)?;
+        }
         return Ok(report);
     }
     report.changes = change_lines(&live_xml, &compiled)?;
@@ -497,23 +531,369 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
             check_served_catalogue(ms, &uploaded, c.content.is_some(), &say);
     }
 
-    // 8. The verified state is the project's new base.
-    fs::copy(&scratch_lock, &project.lock)
-        .with_context(|| format!("Cannot update {}", project.lock.display()))?;
+    // 8. The verified state is the project's new base, with the lock of a
+    // compile into it: the lock records the base it was compiled against.
+    let mut next_lock = lock.clone();
+    let fixpoint = compile_project(&project, &post_xml, &mut next_lock, opts)
+        .is_ok_and(|doc| doc.to_bytes() == post_xml);
+    if fixpoint {
+        next_lock.save(&project.lock)
+    } else {
+        eprintln!(
+            "Warning: compiling the module into {} does not give it back byte for byte. \
+             Run `lox logic compile` and review the result with `lox logic diff`.",
+            post_path.display()
+        );
+        fs::copy(&scratch_lock, &project.lock)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+    .with_context(|| format!("Cannot update {}", project.lock.display()))?;
+    report.fixpoint = Some(fixpoint);
     fs::write(&project.out, &compiled)?;
     let src = fs::read_to_string(&project_file)?;
     fs::write(
         &project_file,
         set_base(&src, &project_path(&post_path, &project.root))?,
     )?;
+    record_app_changes(ms, &project.root)?;
     say(&format!(
-        "Pushed and verified. {} now points at {}; commit the lock and lox.toml.",
+        "Pushed and verified. {} now points at {}; commit the lock, lox.toml and {APP_CHANGES_FILE}.",
         project_file.display(),
         post_path.display()
     ));
     report.outcome = "pushed";
     report.verified = Some(post_path);
     Ok(report)
+}
+
+/// One check of [`sync`].
+#[derive(Debug, Serialize)]
+pub(crate) struct SyncCheck {
+    /// `live`, `source`, `lock`, `drift` or `app-changes`
+    pub name: &'static str,
+    pub ok: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct SyncReport {
+    pub in_sync: bool,
+    pub base: PathBuf,
+    /// The live config's file on the Miniserver
+    pub live: String,
+    /// Where the live download was saved, when it is not the base
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved: Option<PathBuf>,
+    pub checks: Vec<SyncCheck>,
+}
+
+/// Check, read-only, that the project and the Miniserver agree, as right after
+/// a verified push:
+///
+/// - `live`: the live config is the base (no semantic difference);
+/// - `source`: compiling the module into the base gives the base;
+/// - `lock`: that compile leaves the lockfile as it is;
+/// - `drift`: the live config is what the lockfile recorded at the last compile;
+/// - `app-changes`: the rules' change time is the recorded one.
+///
+/// A live config that differs from the base is saved under `backups/` to
+/// review. Nothing else is written.
+pub(crate) fn sync(ms: &dyn Miniserver, project_dir: &Path) -> Result<SyncReport> {
+    let project_file = Project::find(project_dir).ok_or_else(|| {
+        anyhow!(
+            "No lox.toml in {}. `lox config sync` checks a Lox Logic project: see `lox logic help`.",
+            project_dir.display()
+        )
+    })?;
+    let project = Project::load(&project_file)?;
+    check_target(ms, &project, &project_file)?;
+    let base_xml = fs::read(&project.base)
+        .with_context(|| format!("Cannot read the base {}", project.base.display()))?;
+    let base_doc = parse(&base_xml)?;
+    let (name, live_zip) = ms.download_newest()?;
+    let live_xml = archive::extract_and_decompress(&live_zip)
+        .with_context(|| format!("Cannot extract the live config {name}"))?;
+    let live_doc = parse(&live_xml)?;
+    let mut checks = Vec::new();
+    let mut check = |name, ok, detail: String| checks.push(SyncCheck { name, ok, detail });
+
+    let mut saved = None;
+    let live_diff = loxone_config::diff::diff(&base_doc, &live_doc);
+    if live_xml == base_xml {
+        check("live", true, format!("{name} is the base"));
+    } else if live_diff.is_empty() {
+        check("live", true, format!("{name} matches the base"));
+    } else {
+        let backups = project.root.join("backups");
+        prepare_backup_dir(&backups)?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = backups.join(format!("{stamp}-sync.Loxone"));
+        fs::write(&path, &live_xml)?;
+        check(
+            "live",
+            false,
+            format!(
+                "{name} differs from the base: {}. Review it with `lox logic diff {} {}`.",
+                summary(&live_diff),
+                project.base.display(),
+                path.display()
+            ),
+        );
+        saved = Some(path);
+    }
+
+    let lock = if project.lock.exists() {
+        Lockfile::load(&project.lock)?
+    } else {
+        Lockfile::new()
+    };
+    let lock_json = fs::read_to_string(&project.lock).unwrap_or_default();
+    let mut scratch = lock.clone();
+    let opts = PushOptions {
+        project: project.root.clone(),
+        force: false,
+        reboot: false,
+        patched_from: None,
+        allow_removals: false,
+        accept_version: None,
+        backup_dir: None,
+        discard_custom_changes: false,
+        allow_app_changes: false,
+    };
+    match compile_project(&project, &base_xml, &mut scratch, &opts) {
+        Ok(compiled) => {
+            let d = loxone_config::diff::diff(&base_doc, &compiled);
+            if d.is_empty() {
+                check("source", true, "the module compiles to the base".into());
+            } else {
+                check(
+                    "source",
+                    false,
+                    format!(
+                        "the module changes the base: {}. Push it, or run `lox logic diff`.",
+                        summary(&d)
+                    ),
+                );
+            }
+            if scratch.to_json() == lock_json {
+                check(
+                    "lock",
+                    true,
+                    "the compile leaves the lockfile as it is".into(),
+                );
+            } else {
+                check(
+                    "lock",
+                    false,
+                    format!(
+                        "compiling changes {}. Run `lox logic compile` and commit the lockfile.",
+                        project.lock.display()
+                    ),
+                );
+            }
+        }
+        Err(e) => check("source", false, format!("{e:#}")),
+    }
+
+    match &lock.target.semantic_fingerprint {
+        Some(recorded) if *recorded == loxone_config::diff::semantic_fingerprint(&live_doc) => {
+            check(
+                "drift",
+                true,
+                "the live config is the last compile's".into(),
+            )
+        }
+        Some(_) => check(
+            "drift",
+            false,
+            "the live config changed since the last compile. Run `lox logic drift` on a download."
+                .into(),
+        ),
+        None => check(
+            "drift",
+            false,
+            format!(
+                "{} has no record of the last compile. Compile once.",
+                project.lock.display()
+            ),
+        ),
+    }
+
+    match ms.rules_changed() {
+        Ok(None) => {}
+        Ok(Some(changed)) => match recorded_app_changes(&project.root)? {
+            Some(rec) if rec == changed => check(
+                "app-changes",
+                true,
+                format!("rules unchanged since {}", local_time(changed)),
+            ),
+            Some(rec) => check(
+                "app-changes",
+                false,
+                format!(
+                    "the rules changed at {}, after the last verified push ({}). See \
+                     `lox autopilot changed --explain --since {}`.",
+                    local_time(changed),
+                    local_time(rec),
+                    project.base.display()
+                ),
+            ),
+            None => check(
+                "app-changes",
+                false,
+                format!("no change time recorded ({APP_CHANGES_FILE}); a verified push records it"),
+            ),
+        },
+        Err(e) => check(
+            "app-changes",
+            false,
+            format!("cannot read when the rules last changed: {e:#}"),
+        ),
+    }
+
+    Ok(SyncReport {
+        in_sync: checks.iter().all(|c| c.ok),
+        base: project.base.clone(),
+        live: name,
+        saved,
+        checks,
+    })
+}
+
+impl SyncReport {
+    pub(crate) fn text(&self) -> String {
+        let mut out = String::new();
+        for c in &self.checks {
+            let mark = if c.ok { "✓" } else { "✗" };
+            out.push_str(&format!("{mark}  {:<12} {}\n", c.name, c.detail));
+        }
+        let failed = self.checks.iter().filter(|c| !c.ok).count();
+        if failed == 0 {
+            out.push_str("\nIn sync.\n");
+        } else {
+            out.push_str(&format!(
+                "\nNot in sync: {failed} of {} checks failed.\n",
+                self.checks.len()
+            ));
+        }
+        out
+    }
+}
+
+/// The project must target the Miniserver of the connection settings.
+fn check_target(ms: &dyn Miniserver, project: &Project, project_file: &Path) -> Result<()> {
+    if let (Some(live), Some(want)) = (ms.serial(), &project.serial)
+        && !live.eq_ignore_ascii_case(want)
+    {
+        bail!(
+            "The project targets Miniserver {want}, but the connection settings point at {live}. \
+             Pick the right one with `--ctx` / `lox ctx use`, or fix `serial` in {}.",
+            project_file.display()
+        );
+    }
+    Ok(())
+}
+
+/// The rules' change time recorded after the last verified push.
+fn recorded_app_changes(root: &Path) -> Result<Option<i64>> {
+    let path = root.join(APP_CHANGES_FILE);
+    match fs::read_to_string(&path) {
+        Ok(s) => Ok(Some(s.trim().parse().with_context(|| {
+            format!("{} does not hold a time in unix seconds", path.display())
+        })?)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("Cannot read {}", path.display())),
+    }
+}
+
+/// Unix seconds as local time.
+fn local_time(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| secs.to_string())
+}
+
+/// The app-changes guard. Rules edited in the app live in no download, so the
+/// drift check cannot see them, and an upload deletes them. Their change time
+/// tells: it must still be the one recorded after the last verified push.
+///
+/// - With `--force`, a moved time or a failed read stops the push unless
+///   `--allow-app-changes`; a staging run only warns.
+/// - No recorded time (before the first verified push) stops nothing.
+fn check_app_changes(
+    ms: &dyn Miniserver,
+    opts: &PushOptions,
+    project: &Project,
+    say: &dyn Fn(&str),
+) -> Result<Option<AppChanges>> {
+    let guard = opts.force && !opts.allow_app_changes;
+    let changed = match ms.rules_changed() {
+        Ok(Some(changed)) => changed,
+        Ok(None) => return Ok(None),
+        Err(e) if guard => bail!(
+            "Cannot read when the Automatic Designer's rules last changed: {e:#}. \
+             Push with --allow-app-changes to go ahead without this check."
+        ),
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot read when the Automatic Designer's rules last changed: {e:#}"
+            ));
+            return Ok(None);
+        }
+    };
+    let recorded = recorded_app_changes(&project.root)?;
+    let moved = recorded.is_some_and(|r| r != changed);
+    match recorded {
+        Some(rec) if moved => {
+            let msg = format!(
+                "The Automatic Designer's rules changed on the Miniserver at {}, after the last \
+                 verified push ({}), and an upload deletes rule changes made in the app. See what \
+                 changed with `lox autopilot changed --explain --since {}`, then push with \
+                 --allow-app-changes.",
+                local_time(changed),
+                local_time(rec),
+                project.base.display()
+            );
+            if guard {
+                bail!(msg);
+            }
+            if !opts.allow_app_changes {
+                say(&format!("Warning: {msg}"));
+            }
+        }
+        Some(_) => {}
+        None => say(&format!(
+            "No rule change time recorded yet ({APP_CHANGES_FILE}); a verified push records it."
+        )),
+    }
+    Ok(Some(AppChanges {
+        changed,
+        recorded,
+        moved,
+    }))
+}
+
+/// Record the rules' change time after a verified push, for the next push's
+/// guard. Read after the upload is loaded, since loading moves it too.
+fn record_app_changes(ms: &dyn Miniserver, root: &Path) -> Result<()> {
+    match ms.rules_changed() {
+        Ok(Some(changed)) => {
+            let path = root.join(APP_CHANGES_FILE);
+            fs::write(&path, format!("{changed}\n"))
+                .with_context(|| format!("Cannot write {}", path.display()))?;
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!(
+            "Warning: cannot record when the rules last changed ({e:#}). The next push refuses \
+             until it runs with --allow-app-changes."
+        ),
+    }
+    Ok(())
 }
 
 /// Check the custom changes an upload would delete. Returns the pending ones
@@ -916,6 +1296,8 @@ mod tests {
         restarts: RefCell<usize>,
         /// The files of /sys/custom; `None`: listing it fails
         custom: Option<Vec<(String, Vec<u8>)>>,
+        /// The rules' change time; `Err` when reading it fails
+        rules_changed: RefCell<Result<Option<i64>, String>>,
     }
 
     impl FakeMiniserver {
@@ -928,15 +1310,20 @@ mod tests {
                 reboots: RefCell::new(0),
                 restarts: RefCell::new(0),
                 custom: Some(Vec::new()),
+                rules_changed: RefCell::new(Ok(Some(1_000))),
             }
         }
     }
 
     impl FakeMiniserver {
         /// What loading `sps_new.zip` does: the upload becomes the program.
+        /// Loading also moves the rules' change time, as a program write does.
         fn load(&self) {
             if let Some(zip) = self.uploaded.borrow_mut().take() {
                 *self.current.borrow_mut() = zip;
+                if let Ok(Some(t)) = &mut *self.rules_changed.borrow_mut() {
+                    *t += 100;
+                }
             }
         }
         /// How often the push applied an upload, either way.
@@ -998,6 +1385,9 @@ mod tests {
             file.read_to_end(&mut bytes)?;
             Ok(bytes)
         }
+        fn rules_changed(&self) -> Result<Option<i64>> {
+            self.rules_changed.borrow().clone().map_err(|e| anyhow!(e))
+        }
     }
 
     /// A config ZIP as the Miniserver serves it: sps0.LoxCC plus a side file.
@@ -1054,6 +1444,7 @@ mod tests {
             backup_dir: None,
             discard_custom_changes: false,
             reboot: false,
+            allow_app_changes: false,
         }
     }
 
@@ -1088,15 +1479,14 @@ mod tests {
         assert!(toml.contains(&format!("base = \"{rel}\"")), "{toml}");
         assert!(rel.starts_with("backups/"));
         assert!(toml.starts_with('#'), "comments survive");
-        let scratch = fs::read_dir(dir.path().join("backups"))
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .find(|p| p.to_string_lossy().ends_with("-push.lock.json"))
-            .unwrap();
+        // The lock of a compile into the new base: it reproduces it exactly.
+        assert_eq!(report.fixpoint, Some(true));
+        let lock = Lockfile::load(&dir.path().join("pool.lock.json")).unwrap();
         assert_eq!(
-            fs::read(dir.path().join("pool.lock.json")).unwrap(),
-            fs::read(scratch).unwrap(),
-            "the lock of the verified compile"
+            lock.target.source_config_sha256,
+            Some(loxone_config::lock::sha256_hex(
+                &fs::read(&verified).unwrap()
+            ))
         );
         // The backups dir keeps real configs out of git.
         assert!(dir.path().join("backups/.gitignore").exists());
@@ -1104,6 +1494,140 @@ mod tests {
         let again = push(&ms, &options(dir.path(), true), true).unwrap();
         assert_eq!(again.outcome, "nothing-to-push");
         assert_eq!(ms.applies(), 1);
+    }
+
+    fn recorded(dir: &Path) -> Option<String> {
+        fs::read_to_string(dir.join(APP_CHANGES_FILE)).ok()
+    }
+
+    #[test]
+    fn push_records_the_rule_change_time_after_loading() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+        assert_eq!(report.outcome, "pushed");
+        let app = report.app_changes.unwrap();
+        assert_eq!((app.changed, app.recorded, app.moved), (1_000, None, false));
+        // Recorded after the load, which moved the time.
+        assert_eq!(recorded(dir.path()).as_deref(), Some("1100\n"));
+    }
+
+    #[test]
+    fn push_refuses_when_the_rules_changed_since_the_last_push() {
+        let dir = project();
+        fs::write(dir.path().join(APP_CHANGES_FILE), "900\n").unwrap();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+        assert!(err.to_string().contains("--allow-app-changes"), "{err}");
+        assert!(err.to_string().contains("--explain --since"), "{err}");
+        assert_eq!(ms.applies(), 0);
+        assert!(ms.uploaded.borrow().is_none());
+
+        // Staging only reports it.
+        let staged = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(staged.outcome, "staged");
+        assert!(staged.app_changes.unwrap().moved);
+
+        // On purpose: push, and record the new time.
+        let opts = PushOptions {
+            allow_app_changes: true,
+            ..options(dir.path(), true)
+        };
+        assert_eq!(push(&ms, &opts, true).unwrap().outcome, "pushed");
+        assert_eq!(recorded(dir.path()).as_deref(), Some("1100\n"));
+    }
+
+    #[test]
+    fn push_goes_ahead_when_the_rules_are_as_recorded() {
+        let dir = project();
+        fs::write(dir.path().join(APP_CHANGES_FILE), "1000\n").unwrap();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+        assert_eq!(report.outcome, "pushed");
+        assert!(!report.app_changes.unwrap().moved);
+    }
+
+    #[test]
+    fn an_unreadable_rule_change_time_stops_force_only() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        *ms.rules_changed.borrow_mut() = Err("Timeout waiting for state".into());
+        let err = push(&ms, &options(dir.path(), true), true).unwrap_err();
+        assert!(err.to_string().contains("--allow-app-changes"), "{err}");
+        assert_eq!(ms.applies(), 0);
+        let staged = push(&ms, &options(dir.path(), false), true).unwrap();
+        assert_eq!(staged.outcome, "staged");
+        assert!(staged.app_changes.is_none());
+    }
+
+    #[test]
+    fn a_miniserver_without_automatic_designer_has_no_guard() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        *ms.rules_changed.borrow_mut() = Ok(None);
+        let report = push(&ms, &options(dir.path(), true), true).unwrap();
+        assert_eq!(report.outcome, "pushed");
+        assert!(report.app_changes.is_none());
+        assert!(recorded(dir.path()).is_none());
+    }
+
+    fn failed(report: &SyncReport) -> Vec<&'static str> {
+        report
+            .checks
+            .iter()
+            .filter(|c| !c.ok)
+            .map(|c| c.name)
+            .collect()
+    }
+
+    #[test]
+    fn sync_passes_right_after_a_verified_push() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        // Before: the module changes the base, nothing is recorded.
+        let before = sync(&ms, dir.path()).unwrap();
+        assert!(!before.in_sync);
+        assert_eq!(failed(&before), ["source", "drift", "app-changes"]);
+
+        push(&ms, &options(dir.path(), true), true).unwrap();
+        let toml = fs::read_to_string(dir.path().join("lox.toml")).unwrap();
+        let after = sync(&ms, dir.path()).unwrap();
+        assert!(after.in_sync, "{}", after.text());
+        assert_eq!(after.checks.len(), 5);
+        assert!(after.saved.is_none());
+        assert!(after.text().ends_with("In sync.\n"));
+        // Read-only: the project is as the push left it.
+        assert_eq!(
+            fs::read_to_string(dir.path().join("lox.toml")).unwrap(),
+            toml
+        );
+    }
+
+    #[test]
+    fn sync_names_a_live_change_and_saves_the_download() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        push(&ms, &options(dir.path(), true), true).unwrap();
+        // A rename in Loxone Config, and a rule edited in the app.
+        let live = archive::extract_and_decompress(&ms.current.borrow()).unwrap();
+        let live = String::from_utf8(live).unwrap();
+        let title = live
+            .split("Title=\"")
+            .nth(3)
+            .and_then(|s| s.split('"').next())
+            .unwrap()
+            .to_string();
+        let live = live.replacen(&format!("Title=\"{title}\""), "Title=\"Renamed\"", 1);
+        *ms.current.borrow_mut() = config_zip(live.as_bytes());
+        *ms.rules_changed.borrow_mut() = Ok(Some(5_000));
+
+        let report = sync(&ms, dir.path()).unwrap();
+        assert!(!report.in_sync);
+        assert_eq!(failed(&report), ["live", "drift", "app-changes"]);
+        let saved = report.saved.unwrap();
+        assert_eq!(fs::read_to_string(&saved).unwrap(), live);
+        assert!(report.checks[0].detail.contains("lox logic diff"));
     }
 
     #[test]

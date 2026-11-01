@@ -137,3 +137,65 @@ async fn fetch_mood_list_via_ws(
     .await
     .context("moodList state not received in initial state dump")
 }
+
+/// One state's current value from the WebSocket state dump (max 10 s): text
+/// states as text, value states as a number.
+pub fn read_state(conn: &loxone_client::connection::Connection, uuid: &str) -> Result<String> {
+    let target = uuid.to_string();
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let found = tokio::time::timeout(
+            Duration::from_secs(10),
+            stream::stream_events_until(conn, |ev| match ev {
+                StateEvent::ValueState { uuid, value } if *uuid == target => {
+                    Some(value.to_string())
+                }
+                StateEvent::TextState { uuid, text, .. } if *uuid == target => Some(text.clone()),
+                _ => None,
+            }),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Timeout waiting for state {} (10 s)", target))??;
+        Ok(found)
+    })
+}
+
+/// The autopilot `changed` state: unix seconds, and the local time unless 0
+/// (never changed).
+pub fn parse_changed(raw: &str) -> Result<(i64, Option<chrono::DateTime<chrono::Local>>)> {
+    let secs = raw
+        .trim()
+        .parse::<f64>()
+        .with_context(|| format!("autopilot `changed` is not a number: {raw:?}"))?
+        as i64;
+    let at = (secs > 0)
+        .then(|| chrono::DateTime::from_timestamp(secs, 0))
+        .flatten()
+        .map(|t| t.with_timezone(&chrono::Local));
+    Ok((secs, at))
+}
+
+/// When the Automatic Designer's rules last changed on the Miniserver (unix
+/// seconds); `None` when the Miniserver has no Automatic Designer.
+pub fn rules_changed(lox: &mut LoxClient) -> Result<Option<i64>> {
+    lox.get_structure()?;
+    let Ok(ap) = lox.autopilot() else {
+        return Ok(None);
+    };
+    let raw = read_state(lox.connection(), &ap.state_changed)?;
+    Ok(Some(parse_changed(&raw)?.0))
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::parse_changed;
+
+    #[test]
+    fn autopilot_changed_seconds() {
+        let (secs, at) = parse_changed("1793275220").unwrap();
+        assert_eq!(secs, 1793275220);
+        assert_eq!(at.unwrap().timestamp(), 1793275220);
+        assert_eq!(parse_changed("0").unwrap(), (0, None));
+        assert!(parse_changed("soon").is_err());
+    }
+}

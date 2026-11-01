@@ -770,6 +770,21 @@ byte flipped back, `52` → `50` (house, 38 of 38). Lox Logic reads
 `Serial=`, and an Air device's serial from its `IP=`, for `device:`
 extern matching ([D55](decisions/0055-device-narrowed-matching.md), [D71](decisions/0071-multi-object-statements.md)); `loxl scan` reports both as personal data.
 
+`/data/status` names the other identities the same way (house, every
+element matched):
+
+- The Miniserver's `MAC=` is the `LoxLIVE` `Serial=` (1 of 1).
+- A `GenericNetworkDevice`'s `MAC=` is the `MAC=` of the program's
+  `NetworkDevice` (2 of 2).
+- A `OneWireDevice`'s `Serial="28.9E.A6.14.00.00.00.25"` is the
+  `Lox1wireDevice`'s `ROMID=` without the dots (2 of 2).
+- `TreeBranch` is a `LoxTree`, `TreeDevice` a Tree device or the Air base
+  (`LoxAIR`), `Extension` an Extension or bus interface (`LoxREL`,
+  `LoxDigin`, `Comm1wire` in the house). Serials
+  match as hex digits, ignoring case and separators.
+
+`lox hw status` compares the two by these serials.
+
 A device's own attributes: an Air device always carries `Installation`,
 `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` (103 of 103 in the
 corpus); a Tree device `Installation`, the board only where it is

@@ -296,6 +296,56 @@ fn mcp_tool_call_without_config_reports_error() {
 }
 
 #[test]
+fn mcp_logic_tools_run_the_real_cli() {
+    // The example project: check passes, and a compile writes nothing into
+    // the project.
+    let project = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/crates/loxone-config/examples/project"
+    );
+    let meta = r#""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"smoke","version":"0"}}"#;
+    let call = |id: u32, tool: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{tool}","arguments":{{"project":"{project}"}},{meta}}}}}"#
+        )
+    };
+    let input = format!("{}\n{}\n", call(1, "logic_check"), call(2, "logic_compile"));
+    let before = std::fs::read(format!("{project}/pool.lock.json")).unwrap();
+    let out = lox()
+        .args(["mcp", "serve", "--read-only"])
+        .env("LOX_CONFIG", "/nonexistent/lox-config.yaml")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replies: Vec<serde_json::Value> = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("stdout carries JSON-RPC only"))
+        .collect();
+    let result = |id: u32| {
+        replies.iter().find(|r| r["id"] == id).expect("reply")["result"]["structuredContent"]
+            .clone()
+    };
+    let check = result(1);
+    assert_eq!(check["ok"], true, "{check}");
+    assert!(check["json"].is_object(), "{check}");
+    let compile = result(2);
+    assert_eq!(compile["compile"]["ok"], true, "{compile}");
+    let out_file = compile["out"].as_str().unwrap();
+    assert!(!out_file.starts_with(project));
+    assert!(std::path::Path::new(out_file).exists());
+    assert!(compile["changes"]["json"].is_object(), "{compile}");
+    assert_eq!(
+        std::fs::read(format!("{project}/pool.lock.json")).unwrap(),
+        before,
+        "the project's lock stays as it is"
+    );
+}
+
+#[test]
 fn mcp_read_only_conflicts_with_allow_risky() {
     lox()
         .args(["mcp", "serve", "--read-only", "--allow-risky"])

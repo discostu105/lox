@@ -532,11 +532,14 @@ lox config push --allow-removals --force   # delete managed blocks gone from the
 lox config push --accept-version 17010727  # base saved by a new Loxone Config release
 lox config push --backup-dir /tmp/push # downloads and artifacts elsewhere (default: PROJECT/backups)
 lox config push --discard-custom-changes --force  # push although the Miniserver holds custom changes
+lox config push --allow-app-changes --force  # push although the rules changed since the last push
+lox config sync                        # read-only: project, lock and Miniserver agree (exit 1 if not)
 ```
 
 Each step stops the push when it fails:
 
 1. Download the running config to `backups/<stamp>-pre-push.zip` and `.Loxone`, and list its custom changes.
+   Check that the Automatic Designer's rules didn't change since the last verified push.
 2. Drift check: the live logic must still match the project's `base`.
 3. Compile the module against the live download, with a scratch copy of the lock.
 4. Print the logic changes (live → compiled) and compare the live users with the program file.
@@ -544,7 +547,8 @@ Each step stops the push when it fails:
    `--force`, or with `--dry-run`, the push ends here.
 6. Upload it as `/prog/sps_new.zip`, restart the program and wait until it runs again (at most a minute).
 7. Download again and check that the Miniserver runs exactly the compiled file (`<stamp>-post-push.*`).
-8. Copy the lock, write `out`, and point `base` in lox.toml at the verified download. Commit those files.
+8. Write the lock and `out`, point `base` in lox.toml at the verified download, and record the rules' change time
+   in `autopilot.changed`. Commit those files.
 
 If live and compiled are identical, there is nothing to push. If step 7 fails, the project is left as it was.
 
@@ -574,6 +578,32 @@ contain them, and loading the upload deletes them.
 
 To keep the changes, open the project from the Miniserver in Loxone Config, save it, then bring the project up to
 date. To delete them on purpose, pass `--discard-custom-changes`.
+
+#### Rules changed in the app
+
+Rules edited in the app can live only on the Miniserver, and an upload deletes them. After a verified push, the
+push writes the Automatic Designer's change time (`lox autopilot changed`) to `autopilot.changed` next to lox.toml.
+The next `--force` refuses when the time moved, and names the `lox autopilot changed --explain` to run. A staging
+run only warns.
+
+The time also moves on any other program write, a password set in the app for example. When `--explain` shows no
+rule change, pass `--allow-app-changes`. Without `autopilot.changed` the push says so and goes ahead. On a
+Miniserver without Automatic Designer the check is skipped.
+
+#### Checking the project: `lox config sync`
+
+`lox config sync` checks, read-only, that the project and the Miniserver agree. It passes right after a verified
+push and exits 1 when a check fails:
+
+| Check | Passes when |
+|-------|-------------|
+| `live` | The live config is the project's `base` (else it saves the download as `backups/<stamp>-sync.Loxone`) |
+| `source` | The module compiles against `base` without changes |
+| `lock` | The compile leaves the lockfile as it is |
+| `drift` | The live logic matches the lock |
+| `app-changes` | The rules' change time is the one in `autopilot.changed` |
+
+`-o json` prints `{in_sync, base, live, saved, checks: [{name, ok, detail}]}`.
 
 #### The app catalogue and permissions
 
@@ -608,6 +638,8 @@ groups differently.
 | `app_catalogue_rebuilt: true` | The Miniserver serves a catalogue other than the uploaded one |
 | `permissions` | `unchanged`, `regenerated` or `kept` |
 | `permissions_stale: true` | The kept `permissions.bin` no longer matches the compiled users and groups |
+| `app_changes` | `{changed, recorded, moved}`: the rules' change time, the recorded one, and whether it moved |
+| `fixpoint` | The source compiles against the verified download without changes, so the saved lock matches it |
 
 To go back to the config from before a push, upload its download again:
 `lox config upload backups/<stamp>-pre-push.zip --force && lox reboot`.
@@ -720,6 +752,27 @@ lox health -o json                    # JSON output
 
 Shows battery levels, signal strength, online/offline status, and bus errors for Tree and Air devices.
 
+### Hardware against the program: `lox hw status`
+
+```bash
+lox hw status                         # every device on the bus against the program file
+lox hw status --problems              # only devices with a finding
+lox hw status --file backup.Loxone    # same sources as `lox config` (--at, --file, --download)
+lox hw status -o json                 # {config, devices: [...], counts}
+```
+
+Compares the Miniserver's `/data/status` (serial, type, online, firmware) with the hardware in the program file.
+Devices match by serial: Tree, Air, extensions, network devices (MAC), 1-Wire devices (ROM ID) and the Miniserver.
+Each device gets one status:
+
+| Status | Meaning |
+|--------|---------|
+| `serial-changed` | A device of that name and kind has another serial live: replaced, not yet updated in the program |
+| `missing` | In the program, not on the bus |
+| `not-in-program` | On the bus, not in the program |
+| `offline` | In the program and on the bus, but offline |
+| `ok` | In the program and online |
+
 ---
 
 ## Command Schema (AI Agents)
@@ -757,6 +810,13 @@ the meters), `list_light_moods`, `list_scenes`,
 downloads the config unless `cached=true`), `switch`, `blind`, `light`, `thermostat`, `gate`, `alarm`, `door`, `run_scene`,
 `learn_nfc_tag`, `assign_nfc_tag`, `remove_nfc_tag`, `set_access_code` (and `send_command` with `--allow-raw`). Every tool
 has input and output schemas; every action tool accepts `dry_run`.
+
+Read-only tools for hardware and config as code: `hw_status` (see [`lox hw status`](#hardware-against-the-program-lox-hw-status)),
+`logic_check`, `logic_types`, `logic_coverage`, `logic_decompile`, `logic_diff`, `logic_drift`, `logic_lint`,
+`logic_compile`, `logic_test`, `config_sync` and `config_push_dry_run`. They take a `project` directory (default: the
+server's working directory) and run the matching `lox logic` or `lox config` command. Each result carries that command
+line, its exit code and its output. `logic_compile` writes into a scratch directory and leaves the project and its
+lock as they are. `config_push_dry_run` stages a push and never uploads.
 High-risk actions (the ones `lox tui` asks to confirm, any action on a door lock, gate or alarm, and every change to users
 and NFC learning) are confirmed by the user
 through the MCP client; clients that cannot ask are refused with `action_not_allowed` unless the server runs with `--allow-risky`.
