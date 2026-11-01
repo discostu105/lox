@@ -397,7 +397,11 @@ value decides the meaning:
   gate/comparator blocks whose result is wired into the port — the same
   sugar as on `<-` (see [Expressions](#expressions--sugar-over-the-discrete-blocks)).
 - An optional leading string is the display **label** (the XML `Title`);
-  it defaults to the slug.
+  it defaults to the slug. A label that a Loxone Config save would rewrite is an error that names
+  what the save writes: the save drops `{`, `}`, tabs and line breaks, turns a space at either end
+  into `_`, and turns `%`, `<` and `|` into `_` on most types (the per-type sets are in
+  [loxone-format.md](loxone-format.md#titles-a-save-rewrites)). An empty label is an error too. The
+  same holds for `.title` claims.
 
 Some block types carry **attribute parameters** — block logic stored as an
 element attribute rather than a connector. They bind exactly like
@@ -1055,7 +1059,8 @@ compile, like template expansion, it desugars into verified blocks:
 - Operand order is kept: the left side binds `Input1`, the right side `Input2`. A port operand becomes
   a wire; a number or `let` reference becomes the port's `Def=`.
 - Each generated block is labeled with its sub-expression, so the rule stays readable on the Loxone
-  Config canvas.
+  Config canvas. A save would turn `<` and `%` in a title into `_`, so the label writes `<=` as `≤`,
+  `<` as `＜` and `%` as `％` (`p1.Q ≤ 5 and p2.Q ＜ 70％`).
 - A bare `slug.Port` stays a plain wire and a bare value a plain parameter. Parentheses around one
   change nothing.
 

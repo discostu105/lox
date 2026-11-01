@@ -1263,6 +1263,52 @@ pub fn save_rewrite_error(
     ))
 }
 
+/// The characters a Loxone Config save turns into `_` in the title of an
+/// object of `block_type`, or `None` where the title is not checked: a page
+/// and a Modbus server keep any title, and types no oracle run has saved are
+/// left alone. Loxone Config 17.2 (see loxone-format.md, *Titles a save
+/// rewrites*).
+pub(crate) fn title_underscored(block_type: &str) -> Option<&'static [char]> {
+    match block_type {
+        "Mode" => Some(&['%', ',', ':', ';', '=', '|']),
+        "CalendarEntry" => Some(&['%', '/', '<', '|']),
+        "LightController2" => Some(&['%', '|']),
+        "ModbusServer" | "TpfController" | "NfcCodeTouch" | "Intercom" => None,
+        t if t == "Actor" || BUILTIN_TYPES.contains(&t) => Some(&['%', '<', '|']),
+        _ => None,
+    }
+}
+
+/// What a Loxone Config save writes for the title `title` of an object of
+/// `block_type`, or `None` when it keeps the title. An empty result means
+/// the save leaves the object without a title. Loxone Config 17.2:
+///
+/// - `{` and `}` go, and so do a tab and a line break.
+/// - Each space or tab at either end becomes `_` (checked after the braces
+///   go: `"{ a}"` is written `"_a"`).
+/// - The type's characters ([`title_underscored`]) become `_`: `%`, `<`
+///   and `|` on most objects.
+///
+/// An empty title is not handled here: a save names the object
+/// `noname <UUID>`.
+pub fn title_save_rewrite(block_type: &str, title: &str) -> Option<String> {
+    let underscored = title_underscored(block_type)?;
+    let kept: Vec<char> = title.chars().filter(|c| !matches!(c, '{' | '}')).collect();
+    let end = |c: &char| matches!(c, ' ' | '\t');
+    let lead = kept.iter().take_while(|c| end(c)).count();
+    let trail = kept[lead..].iter().rev().take_while(|c| end(c)).count();
+    let mut written = String::with_capacity(title.len());
+    for (i, &c) in kept.iter().enumerate() {
+        match c {
+            _ if i < lead || i >= kept.len() - trail => written.push('_'),
+            '\t' | '\n' | '\r' => {}
+            c if underscored.contains(&c) => written.push('_'),
+            c => written.push(c),
+        }
+    }
+    (written != title).then_some(written)
+}
+
 /// The container a block type lives in when it is not drawn on a page:
 /// a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.
@@ -1809,6 +1855,56 @@ mod tests {
         assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
         assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
         assert_eq!(ref_link_type("And"), None);
+    }
+
+    #[test]
+    fn titles_a_save_rewrites() {
+        // Oracle sessions 80 to 82, Loxone Config 17.2.
+        let w = |t: &str, title: &str| title_save_rewrite(t, title);
+        let all = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~äß€°µ²é😀";
+        let most = "!\"#$_&'()*+,-./:;_=>?@[\\]^_`_~äß€°µ²é😀";
+        for t in [
+            "VirtualIn",
+            "And",
+            "Formula",
+            "VirtualHttpInCmd",
+            "ModbusDev",
+            "Actor",
+        ] {
+            assert_eq!(w(t, all).as_deref(), Some(most), "{t}");
+        }
+        assert_eq!(
+            w("LightController2", all).as_deref(),
+            Some("!\"#$_&'()*+,-./:;<=>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(
+            w("Mode", all).as_deref(),
+            Some("!\"#$_&'()*+_-./__<_>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(
+            w("CalendarEntry", all).as_deref(),
+            Some("!\"#$_&'()*+,-._:;_=>?@[\\]^_`_~äß€°µ²é😀")
+        );
+        assert_eq!(w("ModbusServer", all), None);
+        assert_eq!(w("Page", all), None);
+        assert_eq!(w("TreeSensor", all), None);
+        for (title, saved) in [
+            (" V lead trail ", Some("_V lead trail_")),
+            ("  W two lead", Some("__W two lead")),
+            ("W\ttab", Some("Wtab")),
+            ("V new\nline", Some("V newline")),
+            ("W a\rb", Some("W ab")),
+            ("a\t ", Some("a__")),
+            (" ", Some("_")),
+            ("{ a}", Some("_a")),
+            (" {a} ", Some("_a_")),
+            ("{}", Some("")),
+            ("V double  space", None),
+            ("R Ana Def>Max", None),
+            ("", None),
+        ] {
+            assert_eq!(w("VirtualIn", title).as_deref(), saved, "{title:?}");
+        }
     }
 
     #[test]

@@ -9,7 +9,7 @@
 use super::ast::{Module, Value};
 use crate::connectors::{
     BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, bool_params, builtin, clock_params,
-    file_params, message_params, save_rewrite_error,
+    file_params, message_params, save_rewrite_error, title_save_rewrite, title_underscored,
 };
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
@@ -45,10 +45,74 @@ fn mirrored_type<'m>(module: &'m Module, block: &super::ast::BlockDecl) -> Optio
         .map(|e| e.block_type.as_str())
 }
 
+/// Refuse a title a Loxone Config save would rewrite (`"Max<Min"` on a
+/// VirtualIn becomes `"Max_Min"`): the next save would show the object as
+/// renamed. Labels of managed blocks and hardware declarations, and
+/// `.title` claims on externs.
+fn validate_titles(module: &Module) -> Result<()> {
+    let text = |v: &Value| match v {
+        Value::Str(s) => Some(s.clone()),
+        Value::Ref(name) => module.lets().find_map(|l| match &l.value {
+            Value::Str(s) if l.name == *name => Some(s.clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let labels = module.blocks().filter_map(|b| {
+        Some((
+            format!("block `{}`", b.slug),
+            &b.block_type,
+            b.title.clone()?,
+        ))
+    });
+    let owned = module.owned().filter_map(|o| {
+        Some((
+            format!("block `{}`", o.slug),
+            &o.block_type,
+            o.title.clone()?,
+        ))
+    });
+    let claims = module
+        .attrs()
+        .filter(|a| a.attr == super::ast::Attr::Title)
+        .filter_map(|a| {
+            let ty = &module.externs().find(|e| e.slug == a.slug)?.block_type;
+            Some((format!("`{}.title`", a.slug), ty, text(&a.value)?))
+        });
+    for (what, block_type, title) in labels.chain(owned).chain(claims) {
+        if title_underscored(block_type).is_none() {
+            continue;
+        }
+        let lit = Value::Str(title.clone());
+        let err = if title.is_empty() {
+            format!(
+                "{what}: an empty title: a Loxone Config save names the object \
+                 `noname <UUID>`. Write a title."
+            )
+        } else {
+            match title_save_rewrite(block_type, &title) {
+                None => continue,
+                Some(w) if w.is_empty() => format!(
+                    "{what}: title {lit}: a Loxone Config save leaves the object without a \
+                     title. Write a title."
+                ),
+                Some(w) => format!(
+                    "{what}: title {lit}: a Loxone Config save writes it as {}. Write that \
+                     instead.",
+                    Value::Str(w)
+                ),
+            }
+        };
+        return Err(Error::Compile(err));
+    }
+    Ok(())
+}
+
 /// Check every managed block's type, port names, and wire directions
 /// against the builtin table. Extern ports are open-world (they exist or
 /// not in the base config) and are checked by `compile` instead.
 pub fn validate_ports(module: &Module) -> Result<()> {
+    validate_titles(module)?;
     // Types and parameter bindings.
     for block in module.blocks() {
         if builtin(&block.block_type).is_none() {

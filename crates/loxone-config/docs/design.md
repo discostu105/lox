@@ -229,3 +229,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
 | D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
 | D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
+| D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |

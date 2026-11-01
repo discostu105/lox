@@ -494,7 +494,7 @@ impl Desugar<'_> {
             block_type: ty.to_string(),
             // The canvas shows the block type; the label carries the
             // sub-expression so the rule stays readable in Loxone Config.
-            title: Some(node.to_string()),
+            title: Some(expr_label(node)),
             args,
             comment: None,
             close_comment: None,
@@ -504,6 +504,16 @@ impl Desugar<'_> {
             port: out_port.to_string(),
         }
     }
+}
+
+/// The label of an expression's block: the sub-expression as written,
+/// with what a Loxone Config save would turn into `_` spelled so that the
+/// save keeps it: `<=` as `≤`, `<` as `＜`, `%` as `％`.
+fn expr_label(node: &Expr) -> String {
+    node.to_string()
+        .replace("<=", "≤")
+        .replace('<', "＜")
+        .replace('%', "％")
 }
 
 fn wire(port: &str, src: PortRef) -> ArgItem {
