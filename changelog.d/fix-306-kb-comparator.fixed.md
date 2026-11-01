@@ -1,0 +1,1 @@
+- **`loxl types`** and the LSP hover no longer link Greater and Less to the Comparator page of the Loxone knowledge base, which documents another block. The knowledge base has no page for these two.
