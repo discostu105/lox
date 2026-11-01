@@ -301,6 +301,74 @@ fn an_entry_is_adopted_and_edited_from_source() {
     assert_eq!(out, text(&base()).replace(" CalType=\"10\"", ""));
 }
 
+#[test]
+fn an_entry_whose_mode_is_gone_is_adopted_without_switches() {
+    // A user mode deleted since (the corpus has one), and the cooling
+    // mode, which this config lacks.
+    let entry = |n: u8, cal_type: &str| {
+        format!(
+            "\t\t\t<C Type=\"CalendarEntry\" V=\"178\" U=\"0000000{n}-0000-0000-ffff000000000002\" \
+             Title=\"E{n}\" Nio=\"2\" WF=\"16384\" CalType=\"{cal_type}\" Month=\"5\" Day=\"1\" \
+             Month2=\"1\" Day2=\"1\" WeekDayInMonth=\"1\">\r\n\
+             \t\t\t\t<Co K=\"I\" U=\"0000000{n}-0000-0001-00ff000000000002\"/>\r\n\
+             \t\t\t\t<Co K=\"Q\" U=\"0000000{n}-0000-0002-01ff000000000002\"/>\r\n\
+             \t\t\t</C>\r\n"
+        )
+    };
+    let folder_end = "\t\t\t</C>\r\n\t\t</C>\r\n\t\t<C Type=\"Page\"";
+    let xml = text(&base()).replacen(
+        folder_end,
+        &format!(
+            "\t\t\t</C>\r\n{}{}\t\t</C>\r\n\t\t<C Type=\"Page\"",
+            entry(7, "-7"),
+            entry(8, "11")
+        ),
+        1,
+    );
+    let base = LoxoneDoc::parse(xml.as_bytes()).unwrap();
+    for (n, cal_type) in [(7, "-7"), (8, "11")] {
+        let mut lock = Lockfile::new();
+        let adopted = adopt_one(
+            &base,
+            &format!("0000000{n}-0000-0000-ffff000000000002"),
+            "e",
+            &Module { items: Vec::new() },
+            &mut lock,
+        )
+        .unwrap();
+        let m = Module {
+            items: adopted.items,
+        };
+        let src = m.to_text();
+        assert_eq!(
+            src,
+            format!(
+                "e = CalendarEntry(\n\t\"E{n}\",\n\t# Its operating mode (CalType {cal_type}) is not \
+                 in the config. Without `switches:` it stays; name a mode to switch that one.\n\
+                 \ton: 05-01,\n)\n"
+            )
+        );
+        // The source checks, and compiles to the same bytes.
+        let parsed = Module::parse(&src).unwrap();
+        parsed.validate().unwrap();
+        let same = compile(&base, &parsed, &mut lock.clone(), &opts()).unwrap();
+        assert_eq!(text(&same), text(&base));
+        // Pointed at a mode the config has.
+        let edited = Module::parse(
+            &src.replace("\ton: 05-01,", "\tswitches: \"Urlaub Süd\",\n\ton: 05-01,"),
+        )
+        .unwrap();
+        let out = text(&compile(&base, &edited, &mut lock, &opts()).unwrap());
+        assert_eq!(
+            out,
+            text(&base).replace(
+                &format!("Title=\"E{n}\" Nio=\"2\" WF=\"16384\" CalType=\"{cal_type}\""),
+                &format!("Title=\"E{n}\" Nio=\"2\" WF=\"16384\" CalType=\"-1\"")
+            )
+        );
+    }
+}
+
 /// The error a module gets from `loxl check`.
 fn check_err(src: &str) -> String {
     Module::parse(src)

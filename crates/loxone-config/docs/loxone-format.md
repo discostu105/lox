@@ -993,6 +993,8 @@ wires. Attributes, in the save's order:
 
 - `CalType` — the `Mode=` number of the operating mode the entry
   switches on; absent for 0, the holiday mode. User modes are negative.
+  A deleted mode leaves the number behind: 1 corpus entry
+  (`wiki_bewaesserung`) has `CalType="-7"` with no `Mode="-7"`.
 - `Mode` — the kind of date. No other value occurs:
   - absent: a fixed date every year (`Month`, `Day`);
   - `1`: relative to Easter Sunday (`EasterOffset` in days, which may be

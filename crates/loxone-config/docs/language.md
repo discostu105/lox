@@ -694,7 +694,10 @@ an error that names `from: 10-01, to: 04-30`. `Mode`, `Month`, `Day`,
 or 4 is no date. `loxl fmt` rewrites a built-in mode's number and the
 stored date. The entries Loxone Config made are taken over with
 `adopt --uuid`, which writes their mode with `switches:` and their date
-as a date; edits change only what the source states. Its `I` and `Q`
+as a date; edits change only what the source states. An entry whose
+mode is gone from the config (a deleted user mode) is adopted without
+`switches:`, with a comment that names its `CalType`: it keeps that
+number until `switches:` names a mode. Its `I` and `Q`
 are never wired in the corpus; the mode's `Q` is the output to use.
 
 ### `<-` — wire onto an extern port
