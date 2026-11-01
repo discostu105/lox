@@ -16,7 +16,9 @@ blocks too: `inst.block`), hover with the base object an extern resolves to,
 completion of ports, types, argument keys and signal names, formatting
 (*Format Document*), the outline, *Find All References*, *Rename Symbol*
 (fragments and lockfile together) and quick fixes for "did you mean", old
-spellings, bare durations and a file without its `page` line.
+spellings, bare durations and a file without its `page` line. A lint finding
+gets a quick fix that adds `# lint: allow <kind>` above its declaration, and an
+unused allow one that removes it.
 
 Install by linking the folder into your extensions directory, and install
 the language client once (without it the extension still highlights, and

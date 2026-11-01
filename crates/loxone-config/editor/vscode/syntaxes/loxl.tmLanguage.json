@@ -28,6 +28,7 @@
     { "include": "#portref" },
     { "include": "#string" },
     { "include": "#bool" },
+    { "include": "#date" },
     { "include": "#number" }
   ],
   "repository": {
@@ -50,6 +51,11 @@
       "comment": "on/off, the boolean literals (D80)",
       "name": "constant.language.boolean.loxl",
       "match": "(?<![\\w.])(on|off)(?![\\w.])"
+    },
+    "date": {
+      "comment": "a calendar entry's date: on: 12-31, from: 2026-07-04 (D126)",
+      "name": "constant.numeric.date.loxl",
+      "match": "(?<![\\w.:-])(?:[0-9]{4}-)?[0-9]{2}-[0-9]{2}(?![\\w.:-])"
     },
     "number": {
       "match": "(?<![\\w.])(-?[0-9]+(?:\\.[0-9]+)?)(ms|min|h|s|K|%)?(?![\\w.])",

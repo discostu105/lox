@@ -1415,24 +1415,19 @@ b = melder(quelle: vi_b, titel: name_b)\n";
     .unwrap_err();
     assert!(err.to_string().contains("{titl}"), "{err}");
 
-    // Braces around anything not slug-shaped pass through verbatim.
+    // Braces around anything not slug-shaped pass through verbatim, and
+    // then reach the title check: a save drops braces.
     let verbatim = src.replace("{titel} (scharf)", "{titel} {2x} {}");
-    let out2 = compile(
+    let err = compile(
         &base(),
         &Module::parse(&verbatim).unwrap(),
         &mut Lockfile::new(),
         &opts(),
     )
-    .unwrap();
+    .unwrap_err();
     assert!(
-        out2.objects()
-            .iter()
-            .any(|o| o.title.as_deref() == Some("Melder Keller {2x} {}")),
-        "{:?}",
-        out2.objects()
-            .iter()
-            .map(|o| o.title.clone())
-            .collect::<Vec<_>>()
+        err.to_string().contains("\"Melder Keller {2x} {}\""),
+        "{err}"
     );
 }
 
@@ -4673,4 +4668,32 @@ fn renaming_an_instance_renames_its_scoped_references() {
     assert!(text.contains("I1: c.Q"), "{text}");
     assert!(text.contains("I2: c.aus.Q"), "{text}");
     Module::parse(&text).unwrap();
+}
+
+#[test]
+fn expression_labels_keep_what_a_save_rewrites() {
+    // A save turns `<` and `%` in a title into `_` (#342); the labels
+    // spell them with characters it keeps.
+    let src = "\
+extern a = VirtualIn(iname: \"VI1\")\n\
+extern b = VirtualIn(iname: \"VI2\")\n\
+knapp = a.Q <= 5 and b.Q < 70%\n";
+    let out = compile(
+        &base(),
+        &Module::parse(src).unwrap(),
+        &mut Lockfile::new(),
+        &opts(),
+    )
+    .unwrap();
+    let mut titles: Vec<_> = out
+        .objects()
+        .iter()
+        .filter_map(|o| o.title.clone())
+        .filter(|t| t.contains("a.Q") || t.contains("b.Q"))
+        .collect();
+    titles.sort();
+    assert_eq!(
+        titles,
+        ["a.Q ≤ 5", "a.Q ≤ 5 and b.Q ＜ 70％", "b.Q ＜ 70％"]
+    );
 }

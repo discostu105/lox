@@ -241,6 +241,10 @@ pub fn summary(ty: &str) -> Option<&'static str> {
 }
 
 /// The knowledge-base page of a type, where this repo documents it.
+///
+/// Greater and Less have no page: the KB lists Equal, Unequal, Greater or
+/// Equal and Less or Equal, and its `comparator` page is a block with an
+/// on and an off value.
 pub fn kb_page(ty: &str) -> Option<&'static str> {
     Some(match ty {
         "And" => "and",
@@ -250,7 +254,6 @@ pub fn kb_page(ty: &str) -> Option<&'static str> {
         "NotEqual" => "unequal",
         "GreaterEqual" => "greater-or-equal",
         "LessEqual" => "less-or-equal",
-        "Greater" | "Less" => "comparator",
         "Formula" => "formula",
         "Memory" => "memory-flags",
         "Monoflop" => "monoflop",
@@ -342,5 +345,7 @@ mod tests {
             kb_url("OnDelay").as_deref(),
             Some("https://www.loxone.com/enen/kb/switch-on-delay/")
         );
+        assert_eq!(kb_page("Greater"), None);
+        assert_eq!(kb_page("Less"), None);
     }
 }

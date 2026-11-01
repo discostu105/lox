@@ -894,6 +894,116 @@ a scratch copy of the output, and an analog one with `MinVal: 0`), a `VirtualOut
   recompiled probe diffs against the saved file in one line only, the finding below.
 - **Finding:** the save dropped `MinVal="0"` on the analog `VirtualIn`, as on physical inputs.
 
+## Hardware settings and statistics (session 51, D101) — passed
+
+Ran 2026-11-01 on a hand-edited scratch copy of the house config (research
+only, never compiled from source). The plain open and save of the
+unedited copy gave an empty diff first. The save kept each edit:
+
+- `StatsType="11"` with `StatsAutoDel="1"` added to a TreeAsensor, and
+  `StatsType="11"` alone on another.
+- `StatsType="7"` added to a TreeSensor.
+- `StatsType` and `StatsAutoDel` removed from an I/O that had both.
+- `Installation`, `SwitchBoard` (also from `""`) rewritten on a
+  `LoxTree`, `Installation` on a `LoxAIR`. The save also added `TId=` to
+  both, as on every plain save.
+
+## Hardware declarations (session 52, D101) — passed
+
+Ran 2026-11-01. A module took over one Tree device of the house config
+by serial, four of its I/Os by designation and its Tree extension by
+UUID: titles, `Desc` added on the device and a sensor, `Installation`,
+`Unit`, `MinTime`, a room and category, `Statistics: on` and `off`, a
+wire into an actor, the extension's place and board. The compile opened
+and saved with an empty semantic diff, and a recompile of the save was
+byte-identical. Removing the declarations left every value as written.
+
+## Numeric settings at 0 (sessions 61 and 62, #312) — passed, three findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Two probes set
+every numeric setting the source can set to 0: on four fresh `VirtualIn`s (analog and digital), fresh
+HTTP and UDP inputs and commands, a virtual output command, a Modbus server, device, analog and digital
+sensor and actuator, three calendar entries, and on the base's analog and digital inputs (`AI1`–`AI4`,
+`I1`) through extern settings.
+
+- Of the 68 attributes written as 0, the save dropped 64: every range, correction, timing, Modbus and
+  calendar number. **Heal:** a bound 0 on those compiles to no attribute. The recompiled probes differ from the
+  saved files only in the findings below.
+- **Finding:** a Modbus server keeps `Timeout="0"`.
+- **Finding:** a virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`.
+- **Finding:** a digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
+
+## Values a save rewrites (sessions 63 and 64, #332) — passed, five findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Session 63 minted
+eleven virtual HTTP inputs (`Poll` and `Timeout` at 1, 5, 9, 10, 11, 9.5/10.5, -5, 999999999, 3600/60000,
+`Allowedtimeouts` -1 and 1000), ten digital `VirtualIn`s (`MaxVal` 0.5, 2, 5, -1; `MinVal` 1, -1;
+`DefVal` 1, 2, 0.5; a range 2 to 5 with `DefVal` 3) and three analog ones with a range upside down or a
+default outside it. Session 64 minted twelve more HTTP inputs for rounding and the upper ends (`Poll`
+10.4 to 12.5, 600.5, 604800, 604801; `Timeout` 10.6 to 4000.5, 2147483647, 2147483648, 4294967296,
+99999999999; `Allowedtimeouts` 2.5, 3.5, 99999999999) and two digital inputs (`MaxVal` 1 with `MinVal`
+0, `DefVal` -1).
+
+- **Finding:** `Poll`, `Timeout` and `Allowedtimeouts` are 32-bit whole numbers: a fraction is cut off,
+  a larger number wraps around.
+- **Finding:** `Poll` goes up to 10 and down to 604800. `Timeout` goes up to 10 and has no upper end
+  below 2147483647. `Allowedtimeouts` keeps any whole number.
+- **Finding:** a digital `VirtualIn` always has `MaxVal="1"` and no `MinVal`. Its `DefVal` stays as
+  written, also outside 0 to 1.
+- An analog `VirtualIn` keeps its range and default as written.
+- **Finding:** a save turned `<` in two `VirtualIn` titles into `_` (`R Ana Max<Min` became
+  `R Ana Max_Min`), and kept `>`. Filed as #342.
+- **Heal:** compile refuses a value the save rewrites and names the value the save writes. Every value
+  the save kept compiles as before.
+
+## Titles a save rewrites (sessions 80 to 83, #342) — passed, findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Session 80
+minted a digital `VirtualIn` and an `And` per printable ASCII punctuation character and per `ä`, `ß`,
+`€`, `°`, `µ`, `²`, `é` and an emoji, and one object with all of them in its title for every virtual,
+Modbus, calendar and mode type, a `Formula`, a created page and a `.title` claim on a base `Actor`.
+Session 81 did the same for every other block type the compiler creates, and a `Mode` and a
+`CalendarEntry` per character. Session 82 checked mood names, `LightController2` per character, tabs,
+line breaks, spaces at the ends and empty titles.
+
+- **Finding:** a save drops `{`, `}`, tabs and line breaks, and turns each space or tab at either end
+  into `_`. `"{ a}"` became `"_a"`, `"a\t "` became `"a__"`.
+- **Finding:** `%`, `<` and `|` become `_` on every block type and on the virtual and Modbus I/Os.
+  `LightController2` keeps `<`. `Mode` keeps `<` but turns `,`, `:`, `;` and `=` into `_`.
+  `CalendarEntry` also turns `/` into `_`.
+- **Finding:** a page, a Modbus server and a mood name keep every character.
+- **Finding:** an empty title comes back as `noname <UUID>`; one the save empties (`"{}"`) loses its
+  `Title=`.
+- **Heal:** compile and check refuse such a title and name the title the save writes.
+- Session 83 compiled expressions with `<`, `<=` and `%`, whose block labels now read `≤`, `＜` and
+  `％`. The save kept every label. It dropped a `Def="0"` on a `Less` block's `Input2` (`p1.Q < 0`),
+  filed separately.
+
+## Receive timeout of a UDP command (sessions 84 to 86, #346) — passed, three findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.
+The base was the redacted library config `examples/library/energy`. Session 84 opened a probe with a
+virtual UDP input and two commands, and a virtual HTTP input with one command, under `oracle.sh up`
+and edited them in the property panel.
+
+- **Finding:** the UDP command's *Validierung* shows *Zeitüberschreitung Empfang [s]* and
+  *Standardwert*. A timeout above 0 adds *Wert bei Zeitüberschreitung* (*Standardwert* or *Letzten
+  Wert beibehalten*). The save wrote timeout 7 as `MaxTime="7000"`, *Standardwert* 3.5 as
+  `DefVal="3.5"` and *Letzten Wert beibehalten* as `ValOT="1"`, each in a fixed place. A timeout set
+  back to 0 dropped `MaxTime` and kept `DefVal`. Nothing else changed on the commands.
+- **Finding:** the HTTP command's *Validierung* has no receive timeout, only *Validierung überwachen*
+  and *Wertebereichsprüfung*.
+- **Heal:** `MaxTime` (ms), `DefVal` and `ValOT` are settings of `VirtualUdpInCmd`. Session 85 minted
+  five commands with them: the save changed nothing but `ValOT="0"`, which it dropped, so a bound 0
+  compiles to no attribute.
+- **Finding:** session 86 minted odd values. `MaxTime` and `ValOT` are 32-bit whole numbers:
+  `MaxTime` `1500.5` became `1500`, `0.4` and `ValOT` `0.5` went, `3000000000` became `-1294967296`.
+  `MaxTime="-3000"`, `ValOT="2"` and `"-1"` and `DefVal="0.001"` stayed. **Heal:** compile refuses a
+  value the save rewrites.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone
