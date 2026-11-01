@@ -88,6 +88,10 @@ pub enum Item {
     /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
     /// active or not, its conditions and its actions.
     Rule(RuleDecl),
+    /// What a hardware declaration owns, after [`Module::expand`]: the
+    /// declaration became an extern of its object and this. Never parsed
+    /// or printed.
+    Owned(OwnedDecl),
     /// A whole-line `#` comment, stored verbatim (text after the `#`) so
     /// formatting is non-destructive. Statements carry their own trailing
     /// comments; argument lists carry theirs as [`ArgItem`]s.
@@ -502,6 +506,10 @@ pub enum MatchSpec {
     /// declaring file's `page` statement narrows the candidates; a still
     /// ambiguous match is refused (keep `uuid:` for those).
     Mirrors(String),
+    /// `serial: "B0A1B2C3"` — a hardware device by its own serial: the
+    /// `Serial=` of a Tree device or an extension, the MAC an Air device's
+    /// `IP=` encodes. Compared without case and `:`.
+    Serial(String),
 }
 
 impl fmt::Display for MatchSpec {
@@ -511,6 +519,7 @@ impl fmt::Display for MatchSpec {
             MatchSpec::IName(v) => write!(f, "iname: {}", quote(v)),
             MatchSpec::Title(v) => write!(f, "title: {}", quote(v)),
             MatchSpec::Mirrors(v) => write!(f, "mirrors: {v}"),
+            MatchSpec::Serial(v) => write!(f, "serial: {}", quote(v)),
         }
     }
 }
@@ -570,6 +579,24 @@ impl BlockDecl {
             _ => None,
         })
     }
+}
+
+/// The attributes a hardware declaration owns (`x = TreeSensor("Klingel",
+/// device: taster, iname: "I0", Desc: "…")`): written on every compile,
+/// with no original kept, so the statement's removal leaves them as they
+/// are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedDecl {
+    pub slug: String,
+    pub block_type: String,
+    /// The slug of the device an I/O belongs to.
+    pub device: Option<String>,
+    /// The label: the object's `Title=`.
+    pub title: Option<String>,
+    pub room: Option<Value>,
+    pub category: Option<Value>,
+    /// Settings (`Desc`, `Unit`, `MinTime`, `StatsType`, …), in source order.
+    pub settings: Vec<(String, Value)>,
 }
 
 /// `defaults <Type>(Port: value, …)` — the parameter values every
@@ -2098,6 +2125,14 @@ impl Module {
         })
     }
 
+    /// What hardware declarations own (only in an expanded module).
+    pub fn owned(&self) -> impl Iterator<Item = &OwnedDecl> {
+        self.items.iter().filter_map(|i| match i {
+            Item::Owned(o) => Some(o),
+            _ => None,
+        })
+    }
+
     pub fn blocks(&self) -> impl Iterator<Item = &BlockDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Block(b) => Some(b),
@@ -2381,7 +2416,7 @@ impl Module {
                 // line on both sides comes from the family change.
                 Item::Page(_) => 10,
                 // Not printed (skipped below).
-                Item::FragmentEnd => 10,
+                Item::FragmentEnd | Item::Owned(_) => 10,
                 Item::Test(_) => 11,
                 Item::Tiles(_) => 12,
                 Item::Access(_) => 13,
@@ -2407,7 +2442,7 @@ impl Module {
                 skip -= 1;
                 continue;
             }
-            if matches!(item, Item::FragmentEnd) {
+            if matches!(item, Item::FragmentEnd | Item::Owned(_)) {
                 continue;
             }
             let mut disc = family(item);
@@ -2448,7 +2483,7 @@ impl Module {
     fn write_item(&self, i: usize, item: &Item, depth: usize, out: &mut String) -> usize {
         let mut skip = 0;
         match item {
-            Item::FragmentEnd => {}
+            Item::FragmentEnd | Item::Owned(_) => {}
             Item::Extern(e) => {
                 out.push_str(&format!(
                     "extern {} = {}({}){}\n",

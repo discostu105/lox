@@ -894,6 +894,30 @@ a scratch copy of the output, and an analog one with `MinVal: 0`), a `VirtualOut
   recompiled probe diffs against the saved file in one line only, the finding below.
 - **Finding:** the save dropped `MinVal="0"` on the analog `VirtualIn`, as on physical inputs.
 
+## Hardware settings and statistics (session 51, D101) — passed
+
+Ran 2026-11-01 on a hand-edited scratch copy of the house config (research
+only, never compiled from source). The plain open and save of the
+unedited copy gave an empty diff first. The save kept each edit:
+
+- `StatsType="11"` with `StatsAutoDel="1"` added to a TreeAsensor, and
+  `StatsType="11"` alone on another.
+- `StatsType="7"` added to a TreeSensor.
+- `StatsType` and `StatsAutoDel` removed from an I/O that had both.
+- `Installation`, `SwitchBoard` (also from `""`) rewritten on a
+  `LoxTree`, `Installation` on a `LoxAIR`. The save also added `TId=` to
+  both, as on every plain save.
+
+## Hardware declarations (session 52, D101) — passed
+
+Ran 2026-11-01. A module took over one Tree device of the house config
+by serial, four of its I/Os by designation and its Tree extension by
+UUID: titles, `Desc` added on the device and a sensor, `Installation`,
+`Unit`, `MinTime`, a room and category, `Statistics: on` and `off`, a
+wire into an actor, the extension's place and board. The compile opened
+and saved with an empty semantic diff, and a recompile of the save was
+byte-identical. Removing the declarations left every value as written.
+
 ## Numeric settings at 0 (sessions 61 and 62, #312) — passed, three findings
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix

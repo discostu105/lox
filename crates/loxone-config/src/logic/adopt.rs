@@ -179,7 +179,7 @@ fn adopt_one_expanded(
              monitor's own meter). Adopt that block instead."
         )));
     }
-    if builtin(&o.block_type).is_none() {
+    if builtin(&o.block_type).is_none() && !crate::hardware::is_hardware(&o.block_type) {
         return Err(fail(format!(
             "cannot adopt {ident}: `{}` is not a type loxl can manage yet. Keep it as an extern.",
             o.block_type
@@ -198,6 +198,15 @@ fn adopt_one_expanded(
         .iter()
         .find(|(_, le)| le.uuid == uuid)
         .map(|(s, _)| s.clone());
+    if let Some((x, _)) = lock
+        .externals
+        .iter()
+        .find(|(_, le)| le.uuid == uuid && le.owned)
+    {
+        return Err(fail(format!(
+            "{ident} is declared as `{x}` already. There is nothing to adopt."
+        )));
+    }
     if let Some(x) = &promoted {
         if x != slug {
             return Err(fail(format!(
@@ -245,6 +254,9 @@ fn adopt_one_expanded(
         )));
     }
     taken.insert(slug.to_string());
+    if crate::hardware::is_hardware(&o.block_type) {
+        return super::adopt_hardware::adopt(doc, o, slug, raw, module, lock, taken);
+    }
     // An object of the object tree: a virtual input, a device
     // with what hangs below it.
     if container_type(&o.block_type).is_some() || periphery(&o.block_type).is_some() {
@@ -388,10 +400,12 @@ fn adopt_one_expanded(
                     MatchSpec::IName(_) => "iname",
                     MatchSpec::Title(_) => "title",
                     MatchSpec::Mirrors(_) => "mirrors",
+                    MatchSpec::Serial(_) => "serial",
                 }
                 .to_string(),
                 title_at_match: obj.title.clone(),
                 iname_at_match: obj.iname.clone(),
+                owned: false,
             },
         );
         new_slugs.push(fin.clone());
@@ -645,10 +659,12 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                     MatchSpec::IName(_) => "iname",
                     MatchSpec::Title(_) => "title",
                     MatchSpec::Mirrors(_) => "mirrors",
+                    MatchSpec::Serial(_) => "serial",
                 }
                 .to_string(),
                 title_at_match: o.title.clone(),
                 iname_at_match: o.iname.clone(),
+                owned: false,
             },
         );
     }

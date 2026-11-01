@@ -262,9 +262,9 @@ impl Module {
                     if binding.port == "device" {
                         // The device an I/O hangs below,
                         // checked by `validate_ports`.
-                        if crate::periphery::device_types(&b.block_type).is_empty() {
+                        if !crate::periphery::is_device_binding(&b.block_type, "device") {
                             return compile_err(format!(
-                                "`device:` names the virtual or Modbus device an I/O hangs below, \
+                                "`device:` names the device an I/O hangs below, \
                                              but {} has no device (in `{} = {}(…)`)",
                                 b.block_type, b.slug, b.block_type
                             ));

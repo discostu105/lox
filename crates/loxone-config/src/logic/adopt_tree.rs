@@ -20,7 +20,7 @@ use crate::xml::{Element, Node};
 
 /// A value as source text writes it: a number where the attribute holds
 /// one (the parser canonicalizes the same way), a string otherwise.
-fn value_of(raw: &str) -> Value {
+pub(super) fn value_of(raw: &str) -> Value {
     let numeric = {
         let digits = raw.strip_prefix('-').unwrap_or(raw);
         let mut parts = digits.splitn(2, '.');
@@ -260,6 +260,7 @@ pub(super) fn adopt_device(
                 matched_by: "uuid".to_string(),
                 title_at_match: o.title.clone(),
                 iname_at_match: o.iname.clone(),
+                owned: false,
             },
         );
         new_externs.push(candidate.clone());

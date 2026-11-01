@@ -60,6 +60,7 @@ pub(crate) mod coverage;
 pub mod diff;
 pub mod doc;
 pub mod error;
+pub(crate) mod hardware;
 pub mod layout;
 #[doc(hidden)]
 pub mod library;

@@ -1,0 +1,3 @@
+- **`loxl compile`** takes over existing hardware by declaration: `taster = TreeDevice("Taster", serial: "…")` and `klingel = TreeSensor("Klingel", device: taster, iname: "I0", …)`. The source owns the title, room, category and the settings it states, including `Statistics: on`/`off`. Tree and Air devices and their inputs and outputs, and the Tree and Air extensions, are supported. Removing a declaration leaves the hardware as it is.
+- **`loxl adopt --uuid <device>`** declares a Tree or Air device with every input and output below it.
+- **`extern … (serial: "…")`** matches a device by its own serial.

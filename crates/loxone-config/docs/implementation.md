@@ -27,6 +27,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `src/autopilot_caps.rs` | GENERATED (`scripts/autopilot_caps.py`): the Miniserver's condition and action codes per app control type | codes only, no localized texts |
 | `src/settings.rs` | settings of physical inputs and outputs the source may claim (description, unit, correction, timing) | only attributes the corpus shows on these types; the original is kept in the lock |
 | `src/periphery.rs` | virtual devices and Modbus: the object-tree objects a source can create, and their I/Os | |
+| `src/hardware.rs` | the Tree and Air devices and extensions a declaration can take over, the I/O types below each, the statistics values | never creates or deletes hardware |
 | `src/archive.rs` | feature `archive`: backup ZIPs, the LoxCC codec, `stage_upload_zip` | bytes only, no transport; other entries copied raw |
 | `src/catalogue.rs` | `LoxAPP3.json`: carries a compile's renames, rooms, categories, deletions and new entries into the app catalogue | new entries only for types in `KNOWN` |
 | `src/permissions.rs` | `permissions.bin`: which principals may see and use which object | |
@@ -42,12 +43,13 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `parser.rs` | line-oriented lexer and parser; only a block's `( … )` argument list spans lines | errors carry 1-based line numbers; v0 keywords give migration errors |
 | `ast.rs`, `ast/check.rs` | `Module`, `Item`, declarations, `Binding`s, typed `Value`; canonical `to_text()`; `Module::validate` (names, references, per-statement checks) | `parse(to_text(m)) == m` |
 | `validate.rs` | builtin-table checks (`validate_ports`): types, port names, wire directions, "did you mean" | needs no base config; shared by `check` and `compile` |
+| `hardware.rs` | hardware declarations lowered into externs, port statements and owned records | runs last in expansion |
 | `template.rs` | template expansion into plain statements | the lockfile and compiler only see the expanded form |
 | `defaults.rs` | `defaults <Type>(…)`: applied during expansion; factoring for decompile and adopt; fitting a block `adopt --uuid` brings in | compiles like the values written on each block |
 | `desugar.rs` | expressions into gate and comparator blocks; arithmetic into one `Formula` | runs after expansion, before port validation |
-| `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims) | teardown and rebuild converge; deterministic |
+| `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims), `owned.rs` (what hardware declarations own) | teardown and rebuild converge; deterministic |
 | `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |
-| `adopt.rs`, `adopt_tree.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
+| `adopt.rs`, `adopt_tree.rs`, `adopt_hardware.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os; a Tree or Air device with its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
 | `rename.rs` | `loxl rename`: slug rename across module and lockfile, synthetic slugs included | output unchanged except titles the slug feeds |
 | `lint.rs` | advisory lints: unused names, values out of range, bare durations (`unit-suffix`, fixable), blocks whose outputs feed nothing in the compiled config, `# lint: allow` comments | never part of compile; `lint --fix` keeps the compile output byte-identical |
 | `tiles.rs` | Touch Pure Flex tiles: tile arguments → functions, rewrite of claimed `<btns>`, tile lints | unlisted tiles and layout kept byte for byte |

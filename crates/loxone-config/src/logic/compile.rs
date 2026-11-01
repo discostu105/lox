@@ -52,6 +52,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod claims;
 mod emit;
+mod owned;
 mod plan;
 mod teardown;
 mod wires;
@@ -314,6 +315,8 @@ fn compile_expanded(
 
     claims::apply_claims(&mut doc, lock, &cx)?;
     claims::retire_claims(lock, &prior);
+
+    owned::apply_owned(&mut doc, lock, &cx)?;
 
     apply_features(&mut doc, base, lock, &mut minter, &cx)?;
 
@@ -852,6 +855,10 @@ fn resolve_externs(
                         MatchSpec::Mirrors(_) => {
                             mirror_uuid.is_some() && ref_attr(o) == mirror_uuid
                         }
+                        MatchSpec::Serial(v) => doc
+                            .element_at(&o.path)
+                            .and_then(crate::doc::element_serial)
+                            .is_some_and(|s| crate::doc::same_serial(&s, v)),
                     }
                     && ext.room.as_ref().is_none_or(|want| {
                         iodata_ref(o, "Pr")
@@ -954,6 +961,7 @@ fn resolve_externs(
                         matched_by: matcher_kind(&ext.match_spec).to_string(),
                         title_at_match: only.title.clone(),
                         iname_at_match: only.iname.clone(),
+                        owned: false,
                     },
                 );
                 out.insert(ext.slug.clone(), only.uuid.clone());
@@ -972,6 +980,10 @@ fn resolve_externs(
     let declared: BTreeSet<&str> = module.externs().map(|e| e.slug.as_str()).collect();
     lock.externals
         .retain(|slug, _| declared.contains(slug.as_str()));
+    let owned: BTreeSet<&str> = module.owned().map(|o| o.slug.as_str()).collect();
+    for (slug, e) in lock.externals.iter_mut() {
+        e.owned = owned.contains(slug.as_str());
+    }
     Ok(out)
 }
 
@@ -1003,6 +1015,7 @@ fn matcher_kind(m: &MatchSpec) -> &'static str {
         MatchSpec::IName(_) => "iname",
         MatchSpec::Title(_) => "title",
         MatchSpec::Mirrors(_) => "mirrors",
+        MatchSpec::Serial(_) => "serial",
     }
 }
 

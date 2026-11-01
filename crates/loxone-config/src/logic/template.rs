@@ -119,6 +119,7 @@ pub(crate) fn visit_refs(
         | Item::Instance(_)
         | Item::Page(_)
         | Item::FragmentEnd
+        | Item::Owned(_)
         | Item::Access(_)
         | Item::Schedule(_)
         | Item::Moods(_)
@@ -413,6 +414,7 @@ impl Module {
             }
         }
         super::defaults::apply(&mut items, &defaults);
+        super::hardware::lower(&mut items)?;
         Ok(Module { items })
     }
 

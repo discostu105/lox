@@ -38,21 +38,26 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
     } else {
         attr_params(block_type)
     };
-    // Device settings (#197) joined in v9.
-    let settings =
-        if version >= 9 || (version == 8 && !crate::settings::DEVICE_TYPES.contains(&block_type)) {
-            crate::settings::names(block_type)
-        } else {
-            Vec::new()
-        };
+    // Device settings (#197) joined in v9, the extensions' and the
+    // statistics of hardware inputs and outputs in v11.
+    let extension = matches!(block_type, "LoxTree" | "LoxAIR");
+    let settings = if (version >= 9 && (version >= 11 || !extension))
+        || (version == 8 && !crate::settings::DEVICE_TYPES.contains(&block_type))
+    {
+        crate::settings::names(block_type)
+    } else {
+        Vec::new()
+    };
+    let stats = version >= 11 && crate::hardware::stats_value(block_type).is_some();
     params
         .iter()
         .map(move |p| attr_name(block_type, p))
         .chain(settings)
+        .chain(stats.then_some("StatsType"))
         .chain((block_type == "AutopilotRule").then_some("APC"))
 }
 
-const FINGERPRINT_VERSION: u8 = 10;
+const FINGERPRINT_VERSION: u8 = 11;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -578,7 +583,16 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 9: the current version without a PulseAt's fire time
+/// Fingerprint version 10: the current version without the settings of
+/// Tree and Air extensions and the statistics of hardware inputs and
+/// outputs.
+/// Accepted by `loxl drift` like [`semantic_fingerprint_v9`].
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v10(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 10)
+}
+
+/// Fingerprint version 9: version 10 without a PulseAt's fire time
 /// (`Sec=`, #248).
 /// `loxl drift` accepts every older version, so an upgrade alone does not
 /// read as drift. The next compile records the current version.
@@ -665,7 +679,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         7 => b"lxir-fingerprint-v7".to_vec(),
         8 => b"lxir-fingerprint-v8".to_vec(),
         9 => b"lxir-fingerprint-v9".to_vec(),
-        _ => b"lxir-fingerprint-v10".to_vec(),
+        10 => b"lxir-fingerprint-v10".to_vec(),
+        _ => b"lxir-fingerprint-v11".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));
