@@ -1,1 +1,0 @@
-- **Lox Logic** sets a virtual UDP command's receive timeout: `MaxTime: 30s`, with `DefVal:` (the value then) or `ValOT: 1` (keep the last value). Compile refuses a timeout a Loxone Config save would cut to whole milliseconds.

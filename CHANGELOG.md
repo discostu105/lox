@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.72.0] — 2026-11-01
+
+### Changed
+- **loxl** names the operating mode a calendar entry switches on like rules and schedules do: `CalendarEntry("Heizperiode", switches: heating, …)`, `switches: party`, `switches: "Urlaub"`. The stored number (`CalType: 10`) is an error that names the replacement, with a quick fix in the language server; `loxl fmt` rewrites a built-in mode's number and `adopt` writes `switches:`. The compiled config does not change.
+
+### Fixed
+- **Lox Logic** sets a virtual UDP command's receive timeout: `MaxTime: 30s`, with `DefVal:` (the value then) or `ValOT: 1` (keep the last value). Compile refuses a timeout a Loxone Config save would cut to whole milliseconds.
+
 ## [0.71.1] — 2026-11-01
 
 ### Fixed
