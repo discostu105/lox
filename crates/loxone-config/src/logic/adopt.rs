@@ -198,7 +198,11 @@ fn adopt_one_expanded(
         .iter()
         .find(|(_, le)| le.uuid == uuid)
         .map(|(s, _)| s.clone());
-    if let Some((x, _)) = lock.externals.iter().find(|(_, le)| le.uuid == uuid && le.owned) {
+    if let Some((x, _)) = lock
+        .externals
+        .iter()
+        .find(|(_, le)| le.uuid == uuid && le.owned)
+    {
         return Err(fail(format!(
             "{ident} is declared as `{x}` already. There is nothing to adopt."
         )));

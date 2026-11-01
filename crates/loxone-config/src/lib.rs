@@ -57,10 +57,10 @@ pub mod catalogue;
 pub mod cli;
 pub mod connectors;
 pub(crate) mod coverage;
-pub(crate) mod hardware;
 pub mod diff;
 pub mod doc;
 pub mod error;
+pub(crate) mod hardware;
 pub mod layout;
 #[doc(hidden)]
 pub mod library;

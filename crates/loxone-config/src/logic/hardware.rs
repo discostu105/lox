@@ -117,7 +117,10 @@ pub(super) fn lower(items: &mut Vec<Item>) -> Result<()> {
         let (slug, what) = match item {
             Item::Wire(w) => (&w.to.slug, format!("`{}.{} <- …`", w.to.slug, w.to.port)),
             Item::ExprWire(w) => (&w.to.slug, format!("`{}.{} <- …`", w.to.slug, w.to.port)),
-            Item::Set(s) => (&s.target.slug, format!("`{}.{} = …`", s.target.slug, s.target.port)),
+            Item::Set(s) => (
+                &s.target.slug,
+                format!("`{}.{} = …`", s.target.slug, s.target.port),
+            ),
             Item::Attr(a) if a.attr == Attr::Title && hw.contains_key(&a.slug) => {
                 return Err(Error::Compile(format!(
                     "`{}.title`: a hardware declaration's title is its label. Write it as \
@@ -312,7 +315,10 @@ taster.room = "Flur"
                     o.slug,
                     o.title,
                     o.room.as_ref().map(|v| v.to_string()),
-                    o.settings.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>()
+                    o.settings
+                        .iter()
+                        .map(|(k, _)| k.as_str())
+                        .collect::<Vec<_>>()
                 ),
                 other => format!("{other:?}"),
             })
@@ -340,7 +346,9 @@ taster.room = "Flur"
 k = TreeSensor("K", device: t)"#)
             .contains("iname:")
         );
-        assert!(err(r#"k = TreeSensor("K", device: t, iname: "I0")"#).contains("names no hardware"));
+        assert!(
+            err(r#"k = TreeSensor("K", device: t, iname: "I0")"#).contains("names no hardware")
+        );
         assert!(
             err(r#"t = LoxAIRDevice("T", serial: "B0")
 k = TreeSensor("K", device: t, iname: "I0")"#)

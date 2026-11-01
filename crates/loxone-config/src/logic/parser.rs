@@ -1350,7 +1350,11 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             }
             let constrained = room.is_some() || category.is_some() || device.is_some();
             if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
-                let k = if matches!(match_spec, MatchSpec::Uuid(_)) { "uuid" } else { "serial" };
+                let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
+                    "uuid"
+                } else {
+                    "serial"
+                };
                 return Err(err(format!(
                     "`{k}:` matches exactly, so room, category and device are not allowed with it"
                 )));

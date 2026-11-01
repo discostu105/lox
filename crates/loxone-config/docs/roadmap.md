@@ -14,9 +14,9 @@ git and the [changelog](../../../CHANGELOG.md). This page says where the crate i
   ([simulator.md](simulator.md)), so more modules can carry their own `test … end` blocks.
 - **Agents as authors.** The language, `loxl types`, the template library and [agents.md](agents.md) are
   written so an agent can write a module and prove it with `loxl test` and `loxl diff`.
-- **Hardware in source.** Take over existing Air, Tree and extension devices with their I/Os and
-  settings (#317), and create Tree devices and extensions from a verified type table (#320). Pairing
-  stays in Loxone Config.
+- **Hardware in source.** Existing Air and Tree devices and the Tree and Air extensions are taken over
+  by declaration, with their I/Os and settings. Next: other extensions, and creating Tree devices and
+  extensions from a verified type table (#320). Pairing stays in Loxone Config.
 - **Editors.** `loxl lsp` and the VS Code extension; a tree-sitter grammar would reach other editors.
 
 ## Non-goals

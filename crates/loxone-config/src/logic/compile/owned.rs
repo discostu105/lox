@@ -43,10 +43,10 @@ pub(super) fn apply_owned(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild
                 Attr::Room => o.room.is_some(),
                 Attr::Category => o.category.is_some(),
             })
-        }) || o
-            .settings
-            .iter()
-            .any(|(k, _)| lock.set_originals.contains_key(&crate::settings::key(uuid, k)));
+        }) || o.settings.iter().any(|(k, _)| {
+            lock.set_originals
+                .contains_key(&crate::settings::key(uuid, k))
+        });
         if claimed {
             return Err(Error::Compile(format!(
                 "`{}` declares the {} ({uuid}) another statement claims an attribute of. \
@@ -112,7 +112,10 @@ fn write_owned(
                 continue;
             };
             if *v == Value::Bool(true) {
-                c.set_attr("StatsType", stats_value(&o.block_type).expect("lowering checked"));
+                c.set_attr(
+                    "StatsType",
+                    stats_value(&o.block_type).expect("lowering checked"),
+                );
             } else {
                 c.remove_attr("StatsType");
                 c.remove_attr("StatsAutoDel");

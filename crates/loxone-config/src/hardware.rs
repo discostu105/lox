@@ -14,7 +14,12 @@ const DEVICES: &[(&str, &[&str])] = &[
     ),
     (
         "LoxAIRDevice",
-        &["LoxAIRsensor", "LoxAIRAsensor", "LoxAIRactor", "LoxAIRAactor"],
+        &[
+            "LoxAIRsensor",
+            "LoxAIRAsensor",
+            "LoxAIRactor",
+            "LoxAIRAactor",
+        ],
     ),
     // The Tree and Air extensions: their devices are declared on their own.
     ("LoxTree", &[]),

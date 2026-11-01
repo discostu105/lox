@@ -254,7 +254,10 @@ pub(super) fn adopt(
                 .iter()
                 .any(|i| matches!(i, Item::Attr(a) if a.slug == s && a.attr == attr))
         };
-        for (attr, xml, ty) in [(Attr::Room, "Pr", "Place"), (Attr::Category, "Cr", "Category")] {
+        for (attr, xml, ty) in [
+            (Attr::Room, "Pr", "Place"),
+            (Attr::Category, "Cr", "Category"),
+        ] {
             if claimed(attr) {
                 continue;
             }

@@ -103,7 +103,10 @@ fn a_declaration_owns_what_it_states_and_converges() {
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
 
     assert_eq!(attr(&out, DEVICE, "Title").as_deref(), Some("Taster Bad"));
-    assert_eq!(attr(&out, DEVICE, "Installation").as_deref(), Some("Neben der Tür"));
+    assert_eq!(
+        attr(&out, DEVICE, "Installation").as_deref(),
+        Some("Neben der Tür")
+    );
     assert_eq!(attr(&out, DEVICE, "Desc").as_deref(), Some("Touch"));
     assert_eq!(attr(&out, BUTTON, "Title").as_deref(), Some("Klingel"));
     assert_eq!(attr(&out, BUTTON, "MinTime").as_deref(), Some("20"));
@@ -168,13 +171,17 @@ fn refusals_name_the_fix() {
     ));
     assert!(e.contains("argument list"), "{e}");
     // An I/O of another device.
-    let e = refusal("tree = LoxTree(\"Tree\", serial: \"13000003\")\nx = TreeSensor(\"T\", device: tree, iname: \"I0\")\n");
+    let e = refusal(
+        "tree = LoxTree(\"Tree\", serial: \"13000003\")\nx = TreeSensor(\"T\", device: tree, iname: \"I0\")\n",
+    );
     assert!(e.contains("TreeDevice"), "{e}");
     // The extension has no room binding to rewrite.
     let e = refusal("tree = LoxTree(\"Tree\", serial: \"13000003\")\ntree.room = \"Bad\"\n");
     assert!(e.contains("Loxone Config"), "{e}");
     // A setting the type does not have.
-    let e = refusal(&format!("{dev}taster2 = TreeDevice(\"T\", serial: \"B0A1B2C3\", MinTime: 5)\n"));
+    let e = refusal(&format!(
+        "{dev}taster2 = TreeDevice(\"T\", serial: \"B0A1B2C3\", MinTime: 5)\n"
+    ));
     assert!(e.contains("MinTime"), "{e}");
 }
 
@@ -189,7 +196,10 @@ fn adopting_a_device_takes_its_ios_and_changes_nothing() {
         items: adopted.items,
     }
     .to_text();
-    assert!(text.contains(r#"taster = TreeDevice("Taster Flur", serial: "B0A1B2C3""#), "{text}");
+    assert!(
+        text.contains(r#"taster = TreeDevice("Taster Flur", serial: "B0A1B2C3""#),
+        "{text}"
+    );
     assert!(text.contains(r#"iname: "AI0""#), "{text}");
     assert!(text.contains("Statistics: on"), "{text}");
     assert!(text.contains(r#"taster_taste.room = "Flur""#), "{text}");

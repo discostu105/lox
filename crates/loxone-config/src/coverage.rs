@@ -136,7 +136,12 @@ pub fn coverage(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Co
         .objects
         .values()
         .map(|o| o.uuid.as_str())
-        .chain(lock.externals.values().filter(|e| e.owned).map(|e| e.uuid.as_str()))
+        .chain(
+            lock.externals
+                .values()
+                .filter(|e| e.owned)
+                .map(|e| e.uuid.as_str()),
+        )
         .collect();
     let externs: BTreeMap<&str, &str> = lock
         .externals
