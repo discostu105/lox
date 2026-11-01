@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.74.0] — 2026-11-01
+
+### Changed
+- **loxl** writes a calendar entry's date as a date: `on: 12-31` (a day every year), `easter: 1` (days after Easter Sunday), `from: 2026-07-04, to: 2026-09-05` (one period) and `from: 10-01, to: 04-30` (every year). The stored attributes (`Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30`, `From: 6393`, `EasterOffset:`, `WeekDayInMonth:`) are an error that names the replacement, with a quick fix in the language server; `loxl fmt` rewrites them and `adopt` writes the date. The compiled config does not change.
+
 ## [0.73.0] — 2026-11-01
 
 ### Added
