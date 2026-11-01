@@ -10,6 +10,25 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.76.0] — 2026-11-01
+
+### Added
+- **`loxl test`** simulates more shading and meter behavior: push & hold, long and double click, toggle and Pos on Automatic Shading, the central shading block, the meters' day, month and year readings and their reset, and on the Lighting Controller a mix's brighter value and DisP during motion.
+- **`lox logic compile`** sets up light controller circuits from source: `Circuit1: "dimmer"` (or `"switch"`)
+  on a `LightController2` names the circuit after the actuator `AQ1` drives and makes its moods dim, as the
+  mood editor in Loxone Config does. `lox logic lint` warns when a mood sets a percentage on a circuit
+  that is no dimmer.
+- **`lox logic decompile`** and **`lox logic adopt`** lift push notifications (`OutputRefLM`) and their
+  recipients, and circuits, so a config with notifications can be taken over from a real file.
+
+### Changed
+- **loxl** knows the documented units, canvas labels and ranges of the alarms, the room controller, the
+  meters, the NFC Code Touch, the intercom, the irrigation and the math and counter blocks. `adopt` and
+  `decompile` write their time parameters with a suffix (`PulseTime: 3s`), and `loxl lint` flags bare
+  numbers there; `loxl lint --fix` rewrites them without changing the compiled output.
+- **Lox Logic** knows the units of the Modbus and UDP timing settings, read off Loxone Config: a Modbus server's `Timeout` in milliseconds, a Modbus sensor's `ModbusPollingCycle` in seconds and `MaxTime` in milliseconds, a virtual UDP command's `MinTime` in milliseconds (`MaxTime: 5min` compiles to `300000`). `loxl lint --fix` and adopt write them with a suffix. A Modbus sensor's `MinTime` stays a bare number.
+- **`loxl check`** (and `lox logic check`) reports every independent error in one run, sorted by file and line, instead of stopping at the first. One missing name or unknown block type is reported once, not at every use. `--json` gives each error its own `path` and `line`; the language server shows each one as its own diagnostic.
+
 ## [0.75.1] — 2026-11-01
 
 ### Added

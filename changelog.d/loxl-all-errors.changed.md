@@ -1,1 +1,0 @@
-- **`loxl check`** (and `lox logic check`) reports every independent error in one run, sorted by file and line, instead of stopping at the first. One missing name or unknown block type is reported once, not at every use. `--json` gives each error its own `path` and `line`; the language server shows each one as its own diagnostic.
