@@ -262,6 +262,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   The source owns title, room, category and the stated settings; nothing is restored when the line
   goes, and the element is never deleted. Bind ports in the argument list. `loxl adopt --uuid
   <device>` declares an existing device with all its I/O. Pairing stays in Loxone Config.
+- **A Tree device can be created:** `melder = TreeDevice("Melder", kind: "PresenceSensorTree", tree:
+  tree1)`, for the kinds in `tree_kinds.rs` only. It is added unpaired; pair it in Loxone Config.
+  Delete it with `removed melder`. Never delete other hardware.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.

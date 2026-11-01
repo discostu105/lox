@@ -110,6 +110,11 @@ pub struct Lockfile {
     /// source owns its name. An entry lives as long as its declaration.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rules: BTreeMap<String, String>,
+    /// Tree devices the compiler created, by declaration slug: the UUID
+    /// each was given. A device leaves this map when the source deletes it
+    /// (`removed <slug>`) or takes it over by `serial:` or `uuid:`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hardware: BTreeMap<String, String>,
 }
 
 /// One attribute claim. Values are decoded: a title as text, a room

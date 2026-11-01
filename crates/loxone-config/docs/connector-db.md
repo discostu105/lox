@@ -324,6 +324,37 @@ corpus wires prove the directions. The table lives in
 `src/periphery.rs` together with the settings each type binds and the
 folder or device it goes into. Checked in Loxone Config.
 
+## Tree devices
+
+`tree_kinds.rs` is the table of Tree devices a declaration can create (`kind:`,
+[D102](decisions/0102-created-tree-devices.md)). The element of a Tree device holds its I/Os, so a kind
+is admitted as a whole element, not port by port:
+
+1. Every corpus instance of its `TreeType` has the same I/O: types, designations (`IName`), sub-types and
+   connector keys. At least three instances.
+2. Nothing in it is specific to one installation, apart from UUIDs, titles and the settings a
+   declaration states.
+3. A config with one created by the compiler opens and saves in Loxone Config with an empty semantic
+   diff, and the created element stays byte for byte.
+
+| Kind (`TId`) | `TreeType` | Corpus instances (configs) | I/O | Saved |
+|---|---|---|---|---|
+| `TouchTree` | 32771 | 14 (7) | Online, `I1`–`I5`, `AI1`–`AI3`, `Q1` | sessions 54, 55 |
+| `PresenceSensorTree` | 32794 | 12 (6) | Online, `I1`–`I3`, `AI1`–`AI3`, `AQ1`, `AQ2` | sessions 54, 55 |
+| `CorridorLightTree` (LED Ceiling Light RGBW) | 32774 | 7 (3) | Online, `I1`, `AI1`, `AQ1` | sessions 54, 55 |
+| `ValveTree` (Valve Actuator) | 32769 | 7 (2) | Online, `AQ1`, `I1`–`I4` | sessions 54, 55 |
+
+The table holds each element in the form a save writes, with the English default titles. The format
+facts are in [loxone-format.md](loxone-format.md#tree-devices-created-offline).
+
+Not admitted:
+
+- LED Spot RGBW Tree (32790, 22 instances): all from one installation's two configs, and the title of
+  its output follows the device's title.
+- Nano 2 Relay Tree (32793, 5 instances): its `ApiActor` carries an `AiT` that differs per instance,
+  and a configuration blob.
+- Any kind with fewer than three corpus instances or more than one I/O shape.
+
 ## Growing the table
 
 Add configs to the corpus (any installation helps, since one house uses few types), run the command
