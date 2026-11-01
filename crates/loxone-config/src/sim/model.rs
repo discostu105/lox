@@ -241,6 +241,28 @@ pub enum Model {
         rise: Pulse,
         fall: Pulse,
     },
+    /// `WipingRelay` (kb/wiping-relay).
+    WipingRelay {
+        pulse: Pulse,
+        tr: Edge,
+    },
+    /// `Int` is Loxone's *Integer* (kb/integer).
+    Int,
+    /// `AMemory` is Loxone's *Analogue Memory* (kb/analogue-memory).
+    AMemory {
+        held: f64,
+        set: Edge,
+    },
+    /// `Counter` is Loxone's *Up Counter* (kb/counter).
+    Counter {
+        v: f64,
+        c: Edge,
+    },
+    /// `UpDownCounter` (kb/up-down-counter): the count only.
+    UpDownCounter {
+        v: Option<f64>,
+        c: Edge,
+    },
     /// An operating mode (`Mode`, built-in number from its fixed UUID).
     /// Monday (4) … Sunday (10) follow the simulated clock; every other
     /// mode is off unless a test sets it.
@@ -400,6 +422,23 @@ impl Model {
                 rise: Pulse::default(),
                 fall: Pulse::default(),
             },
+            "WipingRelay" => Model::WipingRelay {
+                pulse: Pulse::default(),
+                tr: Edge::default(),
+            },
+            "Int" => Model::Int,
+            "AMemory" => Model::AMemory {
+                held: 0.0,
+                set: Edge::default(),
+            },
+            "Counter" => Model::Counter {
+                v: 0.0,
+                c: Edge::default(),
+            },
+            "UpDownCounter" => Model::UpDownCounter {
+                v: None,
+                c: Edge::default(),
+            },
             "Mode" => {
                 if wired("I") {
                     return Support::Unsupported(
@@ -454,6 +493,11 @@ impl Model {
             Model::Threshold { .. } => &["Input", "On", "Off", "PulseTime"],
             Model::SrFlipFlop { .. } => &["InputS", "InputR", "InputTrigger"],
             Model::EdgeDetection { .. } => &["Input", "PulseTime"],
+            Model::WipingRelay { .. } => &["InputTrigger", "TimeOn"],
+            Model::Int => &["Input", "Mode"],
+            Model::AMemory { .. } => &["Input", "Trigger", "Reset"],
+            Model::Counter { .. } => &["Trigger", "Reset", "EndValue", "Mode"],
+            Model::UpDownCounter { .. } => &["Trigger", "InputDir", "Reset", "StartValue"],
             Model::Mode { .. } => &[],
             Model::DayTimer { .. } => &["InputTrigger", "Reset", "Manual", "PulseTime"],
         }
@@ -478,8 +522,15 @@ impl Model {
             | Model::PushButton { .. }
             | Model::SrFlipFlop { .. }
             | Model::PulseAt { .. }
+            | Model::WipingRelay { .. }
             | Model::Mode { .. } => &["Q"],
-            Model::Arith(_) | Model::Add4 | Model::Formula(_) => &["AQ"],
+            Model::Arith(_)
+            | Model::Add4
+            | Model::Formula(_)
+            | Model::Int
+            | Model::AMemory { .. }
+            | Model::UpDownCounter { .. } => &["AQ"],
+            Model::Counter { .. } => &["Q", "AQ"],
             Model::Switch { .. } | Model::PushSwitch { .. } => &["Q", "Qon", "Qoff"],
             Model::FixedMeter { .. } | Model::Meter { .. } => &["OPf", "OMr"],
             Model::MeterBi { .. } => &["OPf", "OMr1", "OMr2"],
@@ -966,6 +1017,90 @@ impl Model {
                 io.set_bool("Edge", p);
                 io.set_bool("RisingEdge", r);
                 io.set_bool("FallingEdge", f);
+            }
+            // A rising edge at Tr switches Q on for TH, a new edge restarts
+            // the pulse (kb/wiping-relay).
+            Model::WipingRelay { pulse, tr } => {
+                let (rising, _) = tr.update(io.i(0).on());
+                if rising {
+                    pulse.start(now, io.i(1).v);
+                }
+                let q = pulse.on(now);
+                io.set_bool("Q", q);
+            }
+            // Ro 0 always rounds down; Ro 1 rounds down when the first
+            // decimal is below 5, else up (kb/integer). The page speaks of
+            // positive numbers only.
+            Model::Int => {
+                let (v, ro) = (io.i(0).v, io.i(1).v);
+                if v < 0.0 {
+                    return Err(format!("rounding the negative value {v} is undocumented"));
+                }
+                let r = match ro {
+                    0.0 => v.floor(),
+                    1.0 => (v + 0.5).floor(),
+                    _ => return Err(format!("rounding mode {ro} is undocumented (0 or 1)")),
+                };
+                io.set("AQ", r);
+            }
+            // A rising edge at Set puts V on the output, where it stays;
+            // Off resets the output (kb/analogue-memory).
+            Model::AMemory { held, set } => {
+                let (rising, _) = set.update(io.i(1).on());
+                if io.i(2).on() {
+                    if rising {
+                        return Err("Set rising while Off is on is undocumented".into());
+                    }
+                    *held = 0.0;
+                } else if rising {
+                    *held = io.i(0).v;
+                }
+                let v = *held;
+                io.set("AQ", v);
+            }
+            // A pulse at C counts V up by 1; Lr is on when V reaches the
+            // limit L (0: the largest count); M 1 stops there, M 0 loops.
+            // Off resets and dominates (kb/counter).
+            Model::Counter { v, c } => {
+                let (rising, _) = c.update(io.i(0).on());
+                let limit = match io.i(2).v {
+                    0.0 => 2_147_483_647.0,
+                    l => l,
+                };
+                if io.i(1).on() {
+                    *v = 0.0;
+                } else if rising {
+                    if *v < limit {
+                        *v += 1.0;
+                    } else {
+                        match io.i(3).v {
+                            1.0 => {}
+                            0.0 => {
+                                return Err(
+                                    "how the count loops past the limit is undocumented".into()
+                                );
+                            }
+                            m => return Err(format!("mode {m} is undocumented (0 or 1)")),
+                        }
+                    }
+                }
+                let n = *v;
+                io.set_bool("Q", n == limit);
+                io.set("AQ", n);
+            }
+            // A pulse at C counts V by 1, up while Dir is 0, down while it
+            // is 1; R sets V to the start value Sv (kb/up-down-counter).
+            Model::UpDownCounter { v, c } => {
+                let (rising, _) = c.update(io.i(0).on());
+                let start = io.i(3).v;
+                let n = v.get_or_insert(start);
+                if io.i(2).on() {
+                    *n = start;
+                } else if rising {
+                    *n += if io.i(1).on() { -1.0 } else { 1.0 };
+                }
+                let n = *n;
+                io.set("AQ", n);
             }
             Model::Mode { number } => {
                 let on = match number {

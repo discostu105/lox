@@ -260,6 +260,32 @@ copied).
 sets, order and UUIDs, in a wired chain with parameters on every block
 ([oracle-sessions.md](oracle-sessions.md)).
 
+### The simple-logic batch (#316)
+
+The most frequent page blocks of the public corpus that Lox Logic could only reference: virtual status,
+wiping relay, arithmetic, averaging, rounding, counters, text pulses and analog memory. Each type has one
+connector order across all its corpus instances, but the corpus holds them only in pre-17 generations (V70
+to V174). Oracle session 37 minted all thirteen in that order and saved them in Loxone Config 17.2; session
+38 minted them in the saved order and they came back unchanged.
+
+| Type | Ports (element order) | Basis |
+|---|---|---|
+| `StateV` | I, AQ | 239 instances in 22 files, one order. `I` sink ×236; `AQ` never wired, all three legacy dbs Output |
+| `WipingRelay` | InputTrigger, Remanence, TimeOn, Q | 68 instances, one order. `InputTrigger` sink ×68, `Q` source ×68; `TimeOn` Def on every instance *and* sink ×2 → Input; `Remanence` inert-flag. In no legacy db |
+| `Mult`, `Add`, `Sub`, `Div` | Input1, Input2, AQ | 59 + 12 + 18 + 7 instances, one shared order. Inputs sink on every instance, `AQ` source |
+| `Avg` | Input, Reset, Remanence, Time(P), Max, AQ | 18 instances (V109–V145) lack `Reset`; the newest (V151) has it, and the save keeps it. `Reset` both legacy dbs Input; `Max` Def everywhere plus sink ×2; `Time` Def-only; `Remanence` inert-flag |
+| `Int` | Input, Mode, AQ | 5 instances. `Mode` never wired and never `Def` → inert-flag Input |
+| `UpDownCounter` | Trigger, InputDir, Reset, OnValue, OffValue, Remanence(P), StartValue, Q, AQ | 9 instances (V126, V141) in another order: **the save reorders it**, keeping every UUID. `Trigger`/`Reset`/`OnValue` sink ×9, `Q` source; `Remanence` Def-only; `InputDir`/`OffValue`/`StartValue` inert-flag; `AQ` both legacy dbs Output |
+| `HourCounter` | InputEnable, Reset, InputResetAll, Unit(P), Maintenance, Q, AQ, AQl, AQr, AQs, OutputAPI | 3 instances (V137, one file). **The save appends `OutputAPI`.** `InputEnable`/`InputResetAll` sink, `Maintenance` Def plus sink, `Unit` Def-only, `Q`/`AQ`/`AQr` source, `AQl` both legacy dbs Output; `Reset` both dbs Input; `AQs` and `OutputAPI` are in no db and never wired → inert-flag Input |
+| `Counter` | Trigger, Reset, Remanence, EndValue, Mode, Q, AQ | 6 instances (V99). `Trigger`/`Reset` sink, `EndValue` Def plus sink, `Q`/`AQ` source; `Remanence`/`Mode` inert-flag |
+| `PulseBy` | Text, Time(P), Pulse | 15 instances (V172, V174). `Text` sink, `Pulse` source, `Time` Def-only |
+| `AMemory` | Input, Trigger, Reset, Remanence, AQ | 38 instances. `Input`/`Trigger` sink ×38, `Reset` sink ×7, `AQ` source; `Remanence` inert-flag |
+
+Content Loxone Config owns on these types, carried verbatim: `Tx=`, `NTXT=` and `linkC=` on `StateV`
+(`Analog=`, `StatsType=` and the display children are carried for every type), and `WTA=` on `PulseBy`, which holds
+a search pattern (corpus values such as `*10001*`). The block takes up to four patterns, and where the
+others are stored is unknown, so the search patterns stay with Loxone Config.
+
 ### VirtualIn
 
 `Q`, `Qm` — both Output. 175 corpus instances from Config 3.x to 17;

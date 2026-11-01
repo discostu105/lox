@@ -933,6 +933,29 @@ mood editor). The details are in #261. Results:
   nothing.
 - **DisP** (`EnMove`) 1 ignored motion; at 0 motion worked again.
 
+## The simple-logic batch (sessions 37–38, #316) — passed
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. Base:
+`examples/library/shading/shading.Loxone`. One page minted StateV, WipingRelay, Mult, Add, Sub, Div, Avg,
+Int, UpDownCounter, HourCounter, Counter, PulseBy and AMemory, each in its corpus connector order, with
+parameters, inputs wired from virtual inputs, and every output wired into a `Formula`.
+
+- **Session 37:** the semantic diff was empty and every wire survived. Eleven types came back with the
+  identical connector keys, order and UUIDs; Avg kept the `Reset` that only the newest corpus generation
+  has. Two were rewritten, keeping every existing UUID:
+  - UpDownCounter's connectors were reordered to `Trigger, InputDir, Reset, OnValue, OffValue, Remanence,
+    StartValue, Q, AQ`.
+  - HourCounter gained `OutputAPI` with a GUI-minted UUID, plus two special states and `IoData`.
+
+  The save added `Analog="false"`, `Tx="false"`, `IoData` and `Display` to StateV and `WTA=""` to PulseBy.
+  The tables took the saved order.
+- **Canvas labels:** the canvas rows of the wired inputs named `InputTrigger` Tr on WipingRelay, `Reset`
+  Off on Counter and `InputResetAll` Off on HourCounter, which Loxone's documentation lacks
+  ([loxone-format.md](loxone-format.md), *Canvas labels of input keys*). The other rows matched it.
+- **Session 38:** the thirteen types minted in the saved order came back with identical connector keys,
+  order and UUIDs, and an empty semantic diff. A recompile onto the saved file was byte-identical, and so was
+  a compile of the module `loxl adopt` made from it.
+
 ## The first scripted run
 
 First scripted run 2026-08-26: the full r50 rebuild (1929 objects,
