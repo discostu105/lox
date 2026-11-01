@@ -23,7 +23,7 @@
 //! `SID="778"`) and refuses a value that prefix has never been seen to
 //! carry — refuse, never guess. Only a `Circuit<n>:` parameter in source
 //! sets a kind, and only switch (0) or dimmer (1), the two the mood
-//! editor was seen to write (D96).
+//! editor was seen to write.
 
 use crate::doc::{LoxoneDoc, ObjectSummary};
 use crate::xml::Element;
