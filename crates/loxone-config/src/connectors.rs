@@ -1156,6 +1156,7 @@ const OMITTED_WHEN_ZERO: &[&str] = &[
     "MinChange",
     "MinTime",
     "MaxTime",
+    "ValOT",
     "ResetTime",
     "AverageTime",
     "Repeat",
@@ -1212,6 +1213,8 @@ pub fn omitted_value(block_type: &str, attr: &str, value: &str) -> bool {
 /// - A virtual HTTP input's `Poll`, `Timeout` and `Allowedtimeouts` are
 ///   32-bit whole numbers: a fraction is cut off, a larger number wraps.
 ///   `Poll` then goes up to 10 and down to 604800, `Timeout` up to 10.
+/// - A virtual UDP command's `MaxTime` and `ValOT` are 32-bit whole
+///   numbers the same way, with no bounds.
 /// - A digital `VirtualIn` has `MaxVal` 1 and `MinVal` 0.
 pub fn save_rewrite(
     block_type: &str,
@@ -1234,6 +1237,17 @@ pub fn save_rewrite(
                     "a virtual HTTP input's timeout is whole milliseconds, at least 10",
                 ),
                 _ => (n, "allowed timeouts are a whole number"),
+            }
+        }
+        ("VirtualUdpInCmd", "MaxTime" | "ValOT") => {
+            let v = value.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+            let n = (v.trunc() as i64) as i32;
+            match attr {
+                "MaxTime" => (
+                    n,
+                    "a virtual UDP command's receive timeout is whole milliseconds",
+                ),
+                _ => (n, "`ValOT` is a whole number"),
             }
         }
         ("VirtualIn", "MaxVal") if digital => (1, "a digital VirtualIn's range is 0 to 1"),
@@ -1952,6 +1966,16 @@ mod tests {
         assert_eq!(w("VirtualIn", "DefVal", "2", true), None);
         assert_eq!(w("VirtualIn", "MaxVal", "5", false), None);
         assert_eq!(w("ModbusServer", "Timeout", "0", false), None);
+        // Oracle session 86: a UDP command's receive timeout settings.
+        let udp = |a: &str, v: &str| w("VirtualUdpInCmd", a, v, false);
+        assert_eq!(udp("MaxTime", "1500.5").as_deref(), Some("1500"));
+        assert_eq!(udp("MaxTime", "0.4").as_deref(), Some("0"));
+        assert_eq!(udp("MaxTime", "3000000000").as_deref(), Some("-1294967296"));
+        assert_eq!(udp("MaxTime", "-3000"), None);
+        assert_eq!(udp("MaxTime", "7000"), None);
+        assert_eq!(udp("ValOT", "0.5").as_deref(), Some("0"));
+        assert_eq!(udp("ValOT", "1"), None);
+        assert_eq!(udp("DefVal", "0.001"), None);
     }
 
     #[test]

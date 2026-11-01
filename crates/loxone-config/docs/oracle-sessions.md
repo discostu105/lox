@@ -982,6 +982,28 @@ line breaks, spaces at the ends and empty titles.
   `％`. The save kept every label. It dropped a `Def="0"` on a `Less` block's `Input2` (`p1.Q < 0`),
   filed separately.
 
+## Receive timeout of a UDP command (sessions 84 to 86, #346) — passed, three findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.
+The base was the redacted library config `examples/library/energy`. Session 84 opened a probe with a
+virtual UDP input and two commands, and a virtual HTTP input with one command, under `oracle.sh up`
+and edited them in the property panel.
+
+- **Finding:** the UDP command's *Validierung* shows *Zeitüberschreitung Empfang [s]* and
+  *Standardwert*. A timeout above 0 adds *Wert bei Zeitüberschreitung* (*Standardwert* or *Letzten
+  Wert beibehalten*). The save wrote timeout 7 as `MaxTime="7000"`, *Standardwert* 3.5 as
+  `DefVal="3.5"` and *Letzten Wert beibehalten* as `ValOT="1"`, each in a fixed place. A timeout set
+  back to 0 dropped `MaxTime` and kept `DefVal`. Nothing else changed on the commands.
+- **Finding:** the HTTP command's *Validierung* has no receive timeout, only *Validierung überwachen*
+  and *Wertebereichsprüfung*.
+- **Heal:** `MaxTime` (ms), `DefVal` and `ValOT` are settings of `VirtualUdpInCmd`. Session 85 minted
+  five commands with them: the save changed nothing but `ValOT="0"`, which it dropped, so a bound 0
+  compiles to no attribute.
+- **Finding:** session 86 minted odd values. `MaxTime` and `ValOT` are 32-bit whole numbers:
+  `MaxTime` `1500.5` became `1500`, `0.4` and `ValOT` `0.5` went, `3000000000` became `-1294967296`.
+  `MaxTime="-3000"`, `ValOT="2"` and `"-1"` and `DefVal="0.001"` stayed. **Heal:** compile refuses a
+  value the save rewrites.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

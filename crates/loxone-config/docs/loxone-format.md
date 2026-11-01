@@ -717,6 +717,14 @@ Virtual inputs, virtual and Modbus devices are not page blocks. They live in fix
   `Analog` on the HTTP and UDP commands and `CloseAfterSend`, so adopt writes `off` for a missing one
   ([D113](decisions/0113-adopt-writes-off.md)).
 - A save writes no numeric setting at 0, see [*Numbers at 0*](#numbers-at-0).
+- A `VirtualUdpInCmd`'s receive timeout (property panel *Validierung › Zeitüberschreitung Empfang
+  [s]*) is `MaxTime=`, in ms and absent when off. What the value becomes then (*Wert bei
+  Zeitüberschreitung*) is `ValOT=`: absent for *Standardwert*, `"1"` for *Letzten Wert
+  beibehalten*. The default value (*Standardwert*) is `DefVal=`, absent at 0. A save writes them as
+  `…WF, ValOT, Check, …, DestValHigh, DefVal, MinVal, …, MinTime, MaxTime`. A
+  `VirtualHttpInCmd`'s panel has no receive timeout, and the corpus has none of the three on one
+  (186 of them). Corpus: 28 of 247 UDP commands have `ValOT="1"`, one `MaxTime`. Oracle sessions 84
+  to 86.
 
 Lox Logic creates these objects ([D54](decisions/0054-virtual-inputs.md),
 [D64](decisions/0064-virtual-modbus-devices.md)). Source: corpus (175 `VirtualIn`s); oracle sessions 18, 26
@@ -730,7 +738,7 @@ explicit `"0"`. This holds for these settings, on every type that has them:
 - range and default: `MinVal`, `MaxVal`, `DefVal`
 - analog correction: `SourceValLow`, `DestValLow`, `SourceValHigh`, `DestValHigh`
 - timing: `MinChange`, `MinTime`, `MaxTime`, `ResetTime`, `AverageTime`, `Repeat`, `RepeatRate`
-- `CmdOnMethod`, `Allowedtimeouts`, `Port`, `Channel`, `DimmType`
+- `CmdOnMethod`, `Allowedtimeouts`, `Port`, `Channel`, `DimmType`, `ValOT`
 - Modbus: `ModbusAddress`, `ModbusDataType`, `ModbusCmd`, `ModbusPollingCycle`, `ModbusCoilQuantity`
 - calendar entries: `CalType`, `Mode`, `From`, `To`, `EasterOffset`, `WeekDayInMonth`
 
@@ -761,6 +769,9 @@ A save puts some settings into a fixed form:
   and `999999999` become `604800`.
 - `Timeout` goes up to 10, and is kept above the documented 8000: `60000` and `2147483647` stay.
 - `Allowedtimeouts` keeps any whole number, `-1` and `1000` included.
+- A virtual UDP command's `MaxTime` and `ValOT` are 32-bit whole numbers the same way, with no
+  bounds: `MaxTime` `1500.5` becomes `1500`, `0.4` goes (0), `3000000000` becomes `-1294967296`, and
+  `-3000` stays. `ValOT` keeps `2` and `-1`, and `0.5` goes. Its `DefVal` stays as written (`0.001`).
 - A digital `VirtualIn` has `MaxVal="1"` and no `MinVal` (0), whatever it was: `0`, `0.5`, `2`, `5`
   and `-1` become `MaxVal="1"`, a `MinVal` of `1`, `-1` or `2` goes. Its `DefVal` stays as written,
   also outside 0 to 1 (`2`, `-1`, `0.5`). Thirteen corpus files of `ControlList Version` 74 and 75
@@ -769,8 +780,8 @@ A save puts some settings into a fixed form:
   `DefVal` outside the range included.
 
 Lox Logic refuses a value a save would rewrite, and names the value the save writes
-([D114](decisions/0114-refuse-what-a-save-rewrites.md)). Source: oracle sessions 61 to 64 (Loxone
-Config 17.2.8.28); corpus.
+([D114](decisions/0114-refuse-what-a-save-rewrites.md)). Source: oracle sessions 61 to 64 and 86
+(Loxone Config 17.2.8.28); corpus.
 
 ### Titles a save rewrites
 
@@ -815,6 +826,7 @@ The unit a setting's attribute is in, where a Loxone knowledge-base page states 
 | `VirtualHttpIn` | `Poll` | Polling cycle | s | 10…604800 | `kb-virtual-http-input`, *Properties* |
 | `VirtualHttpIn` | `Timeout` | Timeout | ms | 10…8000 | `kb-virtual-http-input`, *Properties* |
 | `VirtualHttpIn` | `Allowedtimeouts` | Number of permitted timeouts | none | 0…100 | `kb-virtual-http-input`, *Properties* |
+| `VirtualUdpInCmd` | `MaxTime` | Zeitüberschreitung Empfang [s] | ms | 0 or more | oracle session 84 |
 
 The attributes match the properties by name. The corpus agrees: all 19 `VirtualHttpIn`s have
 `Timeout="4000"` (the mint default), and every `Poll` is 10 or more (10 to 3600).

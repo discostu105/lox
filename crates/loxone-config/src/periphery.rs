@@ -214,6 +214,9 @@ pub const PERIPHERY: &[PeripheryType] = &[
         home: Home::Device(&["VirtualUdpIn"]),
         ports: IN_CMD,
         iname: Some("VCI"),
+        // The receive timeout (oracle session 84): `MaxTime` (ms, absent
+        // when off), what the value becomes then — `ValOT="1"` keeps the
+        // last value, without it the default value `DefVal` (absent at 0).
         settings: &[
             "Check",
             "Signed",
@@ -222,15 +225,19 @@ pub const PERIPHERY: &[PeripheryType] = &[
             "DestValLow",
             "SourceValHigh",
             "DestValHigh",
+            "DefVal",
             "MinVal",
             "MaxVal",
             "MinChange",
             "MinTime",
+            "MaxTime",
+            "ValOT",
         ],
         required: &["Check"],
         mint_attrs: &[
             ("Nio", Some("2")),
             ("WF", Some("16384")),
+            ("ValOT", None),
             ("Check", None),
             ("Signed", Some("true")),
             ("Analog", Some("true")),
@@ -238,10 +245,12 @@ pub const PERIPHERY: &[PeripheryType] = &[
             ("DestValLow", None),
             ("SourceValHigh", Some("100")),
             ("DestValHigh", Some("100")),
+            ("DefVal", None),
             ("MinVal", Some("-10000")),
             ("MaxVal", Some("10000")),
             ("MinChange", Some("0.25")),
             ("MinTime", Some("1000")),
+            ("MaxTime", None),
         ],
         mint_children: &[
             IODATA,
