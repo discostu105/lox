@@ -113,319 +113,30 @@ fn validate_titles(module: &Module) -> Result<()> {
 /// against the builtin table. Extern ports are open-world (they exist or
 /// not in the base config) and are checked by `compile` instead.
 pub fn validate_ports(module: &Module) -> Result<()> {
-    validate_titles(module)?;
+    let mut errors = crate::error::Errors::default();
+    errors.check(validate_titles(module));
     // Types and parameter bindings.
     for block in module.blocks() {
-        if builtin(&block.block_type).is_none() {
-            let hint = suggest(&block.block_type, BUILTIN_TYPES.iter().copied());
-            return Err(Error::Compile(format!(
-                "block `{}`: type `{}` is not in the verified builtin table and \
-                 cannot be created{hint}",
-                block.slug, block.block_type
-            )));
-        }
-        let mut mirrors = None;
-        // `At:` is a fixed time of day; a time function fires on its own.
-        if block.block_type == "PulseAt"
-            && block.params().any(|(k, _)| k == "At")
-            && let Some((_, v)) = block.params().find(|(k, _)| *k == "Pulse")
-            && !matches!(module.resolve_value(v).as_deref(), Ok("time"))
-        {
-            return Err(Error::Compile(format!(
-                "block `{}`: `At:` sets a fixed time of day, but `Pulse: {v}` is a time \
-                 function. Remove `At:`, or write `Pulse: \"time\"`",
-                block.slug
-            )));
-        }
-        for (key, v) in block.params() {
-            // A file holds program text — nothing else takes one.
-            if let Value::File { .. } = v
-                && !file_params(&block.block_type).contains(&key)
-            {
-                return Err(Error::Compile(format!(
-                    "block `{}`: `{key}: {v}`: only program text (`Code:` on a Code16 program block) \
-                     takes a file. Write other values inline",
-                    block.slug
-                )));
-            }
-            // A time of day (`At: 19:00`) binds a time-of-day parameter,
-            // and such a parameter takes nothing else (#248).
-            let clock = clock_params(&block.block_type).contains(&key);
-            let resolved = match v {
-                Value::Ref(name) => module.lets().find(|l| l.name == *name).map(|l| &l.value),
-                v => Some(v),
-            };
-            match resolved {
-                Some(Value::Clock(_)) if !clock => {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `{key}: {v}`: only the fire time of a timed block \
-                         (`At:` on PulseAt) takes a time of day",
-                        block.slug
-                    )));
-                }
-                Some(other) if clock && !matches!(other, Value::Clock(_)) => {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `{key}: {v}` takes a time of day, `{key}: 19:00` \
-                         or `{key}: 06:30:15`",
-                        block.slug
-                    )));
-                }
-                _ => {}
-            }
-            // A text-boolean attribute (`Analog:` on VirtualIn) is `on` or
-            // `off` and nothing else.
-            if bool_params(&block.block_type).contains(&key) {
-                match resolved {
-                    Some(Value::Bool(_)) | None => {}
-                    Some(Value::Str(t)) if t == "true" || t == "false" => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: {}",
-                            block.slug,
-                            super::parser::bool_hint(key, t)
-                        )));
-                    }
-                    Some(_) => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: `{key}: {v}` is not on or off. Write \
-                             `{key}: on` or `{key}: off`",
-                            block.slug
-                        )));
-                    }
-                }
-            }
-            // A value a save rewrites (`Poll: 5` on a virtual HTTP
-            // input) would show as changed after every save. Whether a
-            // VirtualIn without `Analog:` is digital is known only
-            // against the base, so the compile checks that one.
-            let digital = block.params().any(|(k, v)| {
-                k == "Analog"
-                    && module
-                        .resolve_value_for(v, &block.block_type, &block.slug, k)
-                        .is_ok_and(|s| s == "false")
-            });
-            if let Ok(value) = module.resolve_value_for(v, &block.block_type, &block.slug, key)
-                && let Some(e) = save_rewrite_error(
-                    &block.slug,
-                    &block.block_type,
-                    key,
-                    (&value, &v.to_string()),
-                    digital,
-                )
-            {
-                return Err(Error::Compile(e));
-            }
-            // A choice is one of its words, as a string.
-            if let Some(choices) = choice_values(&block.block_type, key) {
-                let ok =
-                    matches!(resolved, Some(Value::Str(w)) if choices.iter().any(|(c, _)| c == w));
-                if resolved.is_some() && !ok {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `{key}: {v}` is not a choice of `{key}:`. Write one of {}",
-                        block.slug,
-                        crate::connectors::choice_list(choices)
-                    )));
-                }
-            }
-            // A text attribute takes a string (a number reads as one).
-            if text_params(&block.block_type).contains(&key) {
-                match resolved {
-                    Some(Value::Str(t)) if t.is_empty() && !empty_ok(&block.block_type, key) => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: `{key}:` is empty. Leave it out to keep the value \
-                             Loxone Config has",
-                            block.slug
-                        )));
-                    }
-                    Some(Value::Str(_) | Value::Number(_)) | None => {}
-                    Some(_) => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: `{key}: {v}` takes text, `{key}: \"…\"`",
-                            block.slug
-                        )));
-                    }
-                }
-            }
-            // A light controller's circuit kind (`Circuit1: "dimmer"`).
-            if let Some(n) = crate::connectors::circuit_param(&block.block_type, key) {
-                let kinds = crate::connectors::CIRCUIT_KINDS;
-                let fits = match resolved {
-                    Some(Value::Str(k)) => kinds.iter().any(|(s, _)| s == k),
-                    Some(_) => false,
-                    None => true, // a template parameter, checked where it is bound
-                };
-                if !fits {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `{key}: {v}` is not a circuit kind. Write \
-                         `{key}: \"switch\"` or `{key}: \"dimmer\"` (AQ{n})",
-                        block.slug
-                    )));
-                }
-                continue;
-            }
-            if block.block_type == "LightController2"
-                && let Some(n) = key
-                    .strip_prefix("Circuit")
-                    .and_then(|n| n.parse::<usize>().ok())
-            {
-                return Err(Error::Compile(format!(
-                    "block `{}`: `{key}:` cannot be set from source: no real config shows \
-                     circuit AQ{n}'s settings yet, so Lox Logic offers Circuit1 … Circuit5. \
-                     Set it up in Loxone Config's mood editor",
-                    block.slug
-                )));
-            }
-            // Attribute parameters (e.g. `Formula:` on Formula blocks)
-            // bind like any parameter but are not connectors.
-            if attr_params(&block.block_type).contains(&key) {
-                continue;
-            }
-            // Message parameters live on the `<LoggerMailer>` child:
-            // texts, and a duration for `MinimumTime`.
-            if message_params(&block.block_type).contains(&key) {
-                if key == "MinimumTime"
-                    && !matches!(v, Value::Number(_) | Value::Unit { .. } | Value::Ref(_))
-                {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `MinimumTime: {v}` takes a duration \
-                         (`MinimumTime: 1h`, or seconds as a number)",
-                        block.slug
-                    )));
-                }
-                continue;
-            }
-            // `mirrors:` on a minted ref names the mirrored object — an
-            // identity binding, not a connector.
-            if is_ref_type(&block.block_type) && key == "mirrors" {
-                let Value::Ref(target) = v else {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `mirrors:` takes the name of an extern or \
-                         managed block, not a literal",
-                        block.slug
-                    )));
-                };
-                if !module.externs().any(|e| &e.slug == target)
-                    && !module.blocks().any(|b| &b.slug == target)
-                {
-                    return Err(Error::Compile(format!(
-                        "block `{}` mirrors `{target}`, but no extern or managed \
-                         block of this module has that name",
-                        block.slug
-                    )));
-                }
-                mirrors = Some(target);
-                continue;
-            }
-            // `device:` on an I/O names its device: a managed block or
-            // an extern of one of the types it may hang below.
-            if crate::periphery::is_device_binding(&block.block_type, key) {
-                let Value::Ref(target) = v else {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: `device:` takes the name of the device (an extern \
-                         or managed block), not a literal",
-                        block.slug
-                    )));
-                };
-                let ty = module
-                    .blocks()
-                    .find(|b| &b.slug == target)
-                    .map(|b| b.block_type.as_str())
-                    .or_else(|| {
-                        module
-                            .externs()
-                            .find(|e| &e.slug == target)
-                            .map(|e| e.block_type.as_str())
-                    });
-                let allowed = crate::periphery::device_types(&block.block_type);
-                match ty {
-                    None => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: `device: {target}`. No extern or managed block \
-                             of this module has that name",
-                            block.slug
-                        )));
-                    }
-                    Some(t) if !allowed.contains(&t) => {
-                        return Err(Error::Compile(format!(
-                            "block `{}`: a {} hangs below a {}, but `{target}` is a {t}",
-                            block.slug,
-                            block.block_type,
-                            allowed.join(" or ")
-                        )));
-                    }
-                    Some(_) => {}
-                }
-                continue;
-            }
-            // The mode a calendar entry switches on, and its raw number
-            // (refused against the base, which numbers the modes), and
-            // its date (checked with the module).
-            if crate::logic::calendar::is_switches(&block.block_type, key)
-                || crate::logic::calendar::is_date_key(&block.block_type, key)
-                || (block.block_type == "CalendarEntry" && key == crate::logic::calendar::CAL_TYPE)
-            {
-                continue;
-            }
-            known_port(module, &block.slug, key)?;
-            // A suffixed value must fit the port's documented unit.
-            module.resolve_value_for(v, &block.block_type, &block.slug, key)?;
-        }
-        if !crate::periphery::device_types(&block.block_type).is_empty()
-            && !block.params().any(|(k, _)| k == "device")
-        {
-            return Err(Error::Compile(format!(
-                "block `{}`: a {} hangs below its device. Name it with `device: <slug>` \
-                 (a {} of this module, managed or extern)",
-                block.slug,
-                block.block_type,
-                crate::periphery::device_types(&block.block_type).join(" or ")
-            )));
-        }
-        if is_ref_type(&block.block_type) {
-            if mirrors.is_none() {
-                return Err(Error::Compile(format!(
-                    "block `{}`: a new {} mirrors another object. Name the target with \
-                     `mirrors: <name>`, or use `extern` to reference an existing one in the base",
-                    block.slug, block.block_type
-                )));
-            }
-            // A message ref shows a notification and nothing else.
-            if block.block_type == "OutputRefLM"
-                && let Some(target) = mirrors
-            {
-                let t = module
-                    .externs()
-                    .find(|e| &e.slug == target)
-                    .map(|e| e.block_type.as_str());
-                if t != Some(MESSAGE_REF_TARGET) {
-                    return Err(Error::Compile(format!(
-                        "block `{}`: an OutputRefLM mirrors a push notification, so \
-                         `{target}` must be an extern `{MESSAGE_REF_TARGET}(…)`",
-                        block.slug
-                    )));
-                }
-            }
-            // Oracle session 11: a save rewrites a ref's Title= to the
-            // mirrored object's title — a label of our own would be a lie.
-            if block.title.is_some() {
-                return Err(Error::Compile(format!(
-                    "block `{}`: a {}'s title is derived from its `mirrors:` \
-                     target by Loxone Config. Remove the label",
-                    block.slug, block.block_type
-                )));
-            }
-        }
+        errors.check(check_block(module, block));
     }
+    // Statements about a block of an unknown type are not checked: its
+    // declaration's error covers them.
+    let typed = |slug: &str| {
+        module
+            .blocks()
+            .any(|b| b.slug == slug && builtin(&b.block_type).is_some())
+    };
 
     // Port assignments on externs: the extern's declared type documents
     // the port's unit as well as a managed block's would.
     for set in module.sets() {
         if let Some(e) = module.externs().find(|e| e.slug == set.target.slug) {
-            module.resolve_value_for(
+            errors.check(module.resolve_value_for(
                 &set.value,
                 &e.block_type,
                 &set.target.slug,
                 &set.target.port,
-            )?;
+            ));
         }
     }
 
@@ -443,8 +154,8 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 super::ast::TestItem::Expect(e) => &e.port,
                 _ => continue,
             };
-            if module.blocks().any(|b| b.slug == port.slug) {
-                known_port(module, &port.slug, &port.port)?;
+            if typed(&port.slug) {
+                errors.check(known_port(module, &port.slug, &port.port));
             }
         }
     }
@@ -453,56 +164,373 @@ pub fn validate_ports(module: &Module) -> Result<()> {
     // statements alike: the port must exist and its direction must fit
     // (source = output; sink = input or param).
     for (from, to) in module.wire_pairs() {
-        // The reverse half of an API link drawn through a minted mirror
-        // (see `api_mirror_entry`). The sink's own direction is checked
-        // below (managed) or by compile (extern).
-        let reverse_api = to.port == "OutputAPI"
-            && module.blocks().any(|b| {
-                b.slug == from.slug
-                    && api_mirror_entry(&b.block_type, &from.port, mirrored_type(module, b))
-            });
-        for (endpoint, want) in [(&from, PortDir::Output), (&to, PortDir::Input)] {
-            let Some(block) = module.blocks().find(|b| b.slug == endpoint.slug) else {
-                continue; // extern — checked against the base config later
-            };
-            if reverse_api && want == PortDir::Output {
-                continue;
-            }
-            if attr_params(&block.block_type).contains(&endpoint.port.as_str()) {
+        errors.check(check_wire(module, &typed, &from, &to));
+    }
+    errors.finish()
+}
+
+/// One wire's endpoints on managed blocks (of a known type): the port
+/// exists and its direction fits.
+fn check_wire(
+    module: &Module,
+    typed: &impl Fn(&str) -> bool,
+    from: &super::ast::PortRef,
+    to: &super::ast::PortRef,
+) -> Result<()> {
+    // The reverse half of an API link drawn through a minted mirror
+    // (see `api_mirror_entry`). The sink's own direction is checked
+    // below (managed) or by compile (extern).
+    let reverse_api = to.port == "OutputAPI"
+        && module.blocks().any(|b| {
+            b.slug == from.slug
+                && api_mirror_entry(&b.block_type, &from.port, mirrored_type(module, b))
+        });
+    for (endpoint, want) in [(from, PortDir::Output), (to, PortDir::Input)] {
+        let Some(block) = module.blocks().find(|b| b.slug == endpoint.slug) else {
+            continue; // extern — checked against the base config later
+        };
+        if !typed(&block.slug) {
+            continue; // its type is reported already
+        }
+        if reverse_api && want == PortDir::Output {
+            continue;
+        }
+        if attr_params(&block.block_type).contains(&endpoint.port.as_str()) {
+            return Err(Error::Compile(format!(
+                "`{endpoint}` is an attribute parameter, not a connector. \
+                 It takes a value (`{port}: \"…\"`), never a wire",
+                port = endpoint.port,
+            )));
+        }
+        known_port(module, &block.slug, &endpoint.port)?;
+        let specs = builtin(&block.block_type).expect("type validated above");
+        let dir = specs
+            .iter()
+            .find(|s| s.key == endpoint.port)
+            .map(|s| s.dir)
+            .expect("port validated above");
+        let ok = match want {
+            // Api connectors are wire-bidirectional (see PortDir::Api).
+            PortDir::Output => matches!(dir, PortDir::Output | PortDir::Api),
+            // Wire sinks accept inputs, params, and Api connectors alike.
+            PortDir::Input | PortDir::Param | PortDir::Api => dir != PortDir::Output,
+        };
+        if !ok {
+            return Err(Error::Compile(format!(
+                "`{endpoint}` is an {} port and cannot be used as {}",
+                if dir == PortDir::Output {
+                    "output"
+                } else {
+                    "input"
+                },
+                if want == PortDir::Output {
+                    "a wire source"
+                } else {
+                    "a wire sink"
+                },
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// One managed block's type and parameter bindings.
+fn check_block(module: &Module, block: &super::ast::BlockDecl) -> Result<()> {
+    if builtin(&block.block_type).is_none() {
+        let hint = suggest(&block.block_type, BUILTIN_TYPES.iter().copied());
+        return Err(Error::Compile(format!(
+            "block `{}`: type `{}` is not in the verified builtin table and \
+             cannot be created{hint}",
+            block.slug, block.block_type
+        )));
+    }
+    let mut mirrors = None;
+    // `At:` is a fixed time of day; a time function fires on its own.
+    if block.block_type == "PulseAt"
+        && block.params().any(|(k, _)| k == "At")
+        && let Some((_, v)) = block.params().find(|(k, _)| *k == "Pulse")
+        && !matches!(module.resolve_value(v).as_deref(), Ok("time"))
+    {
+        return Err(Error::Compile(format!(
+            "block `{}`: `At:` sets a fixed time of day, but `Pulse: {v}` is a time \
+             function. Remove `At:`, or write `Pulse: \"time\"`",
+            block.slug
+        )));
+    }
+    for (key, v) in block.params() {
+        // A file holds program text — nothing else takes one.
+        if let Value::File { .. } = v
+            && !file_params(&block.block_type).contains(&key)
+        {
+            return Err(Error::Compile(format!(
+                "block `{}`: `{key}: {v}`: only program text (`Code:` on a Code16 program block) \
+                 takes a file. Write other values inline",
+                block.slug
+            )));
+        }
+        // A time of day (`At: 19:00`) binds a time-of-day parameter,
+        // and such a parameter takes nothing else (#248).
+        let clock = clock_params(&block.block_type).contains(&key);
+        let resolved = match v {
+            Value::Ref(name) => module.lets().find(|l| l.name == *name).map(|l| &l.value),
+            v => Some(v),
+        };
+        match resolved {
+            Some(Value::Clock(_)) if !clock => {
                 return Err(Error::Compile(format!(
-                    "`{endpoint}` is an attribute parameter, not a connector. \
-                     It takes a value (`{port}: \"…\"`), never a wire",
-                    port = endpoint.port,
+                    "block `{}`: `{key}: {v}`: only the fire time of a timed block \
+                     (`At:` on PulseAt) takes a time of day",
+                    block.slug
                 )));
             }
-            known_port(module, &block.slug, &endpoint.port)?;
-            let specs = builtin(&block.block_type).expect("type validated above");
-            let dir = specs
-                .iter()
-                .find(|s| s.key == endpoint.port)
-                .map(|s| s.dir)
-                .expect("port validated above");
-            let ok = match want {
-                // Api connectors are wire-bidirectional (see PortDir::Api).
-                PortDir::Output => matches!(dir, PortDir::Output | PortDir::Api),
-                // Wire sinks accept inputs, params, and Api connectors alike.
-                PortDir::Input | PortDir::Param | PortDir::Api => dir != PortDir::Output,
-            };
-            if !ok {
+            Some(other) if clock && !matches!(other, Value::Clock(_)) => {
                 return Err(Error::Compile(format!(
-                    "`{endpoint}` is an {} port and cannot be used as {}",
-                    if dir == PortDir::Output {
-                        "output"
-                    } else {
-                        "input"
-                    },
-                    if want == PortDir::Output {
-                        "a wire source"
-                    } else {
-                        "a wire sink"
-                    },
+                    "block `{}`: `{key}: {v}` takes a time of day, `{key}: 19:00` \
+                     or `{key}: 06:30:15`",
+                    block.slug
                 )));
             }
+            _ => {}
+        }
+        // A text-boolean attribute (`Analog:` on VirtualIn) is `on` or
+        // `off` and nothing else.
+        if bool_params(&block.block_type).contains(&key) {
+            match resolved {
+                Some(Value::Bool(_)) | None => {}
+                Some(Value::Str(t)) if t == "true" || t == "false" => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: {}",
+                        block.slug,
+                        super::parser::bool_hint(key, t)
+                    )));
+                }
+                Some(_) => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` is not on or off. Write \
+                         `{key}: on` or `{key}: off`",
+                        block.slug
+                    )));
+                }
+            }
+        }
+        // A value a save rewrites (`Poll: 5` on a virtual HTTP
+        // input) would show as changed after every save. Whether a
+        // VirtualIn without `Analog:` is digital is known only
+        // against the base, so the compile checks that one.
+        let digital = block.params().any(|(k, v)| {
+            k == "Analog"
+                && module
+                    .resolve_value_for(v, &block.block_type, &block.slug, k)
+                    .is_ok_and(|s| s == "false")
+        });
+        if let Ok(value) = module.resolve_value_for(v, &block.block_type, &block.slug, key)
+            && let Some(e) = save_rewrite_error(
+                &block.slug,
+                &block.block_type,
+                key,
+                (&value, &v.to_string()),
+                digital,
+            )
+        {
+            return Err(Error::Compile(e));
+        }
+        // A choice is one of its words, as a string.
+        if let Some(choices) = choice_values(&block.block_type, key) {
+            let ok = matches!(resolved, Some(Value::Str(w)) if choices.iter().any(|(c, _)| c == w));
+            if resolved.is_some() && !ok {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `{key}: {v}` is not a choice of `{key}:`. Write one of {}",
+                    block.slug,
+                    crate::connectors::choice_list(choices)
+                )));
+            }
+        }
+        // A text attribute takes a string (a number reads as one).
+        if text_params(&block.block_type).contains(&key) {
+            match resolved {
+                Some(Value::Str(t)) if t.is_empty() && !empty_ok(&block.block_type, key) => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}:` is empty. Leave it out to keep the value \
+                         Loxone Config has",
+                        block.slug
+                    )));
+                }
+                Some(Value::Str(_) | Value::Number(_)) | None => {}
+                Some(_) => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` takes text, `{key}: \"…\"`",
+                        block.slug
+                    )));
+                }
+            }
+        }
+        // A light controller's circuit kind (`Circuit1: "dimmer"`).
+        if let Some(n) = crate::connectors::circuit_param(&block.block_type, key) {
+            let kinds = crate::connectors::CIRCUIT_KINDS;
+            let fits = match resolved {
+                Some(Value::Str(k)) => kinds.iter().any(|(s, _)| s == k),
+                Some(_) => false,
+                None => true, // a template parameter, checked where it is bound
+            };
+            if !fits {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `{key}: {v}` is not a circuit kind. Write \
+                     `{key}: \"switch\"` or `{key}: \"dimmer\"` (AQ{n})",
+                    block.slug
+                )));
+            }
+            continue;
+        }
+        if block.block_type == "LightController2"
+            && let Some(n) = key
+                .strip_prefix("Circuit")
+                .and_then(|n| n.parse::<usize>().ok())
+        {
+            return Err(Error::Compile(format!(
+                "block `{}`: `{key}:` cannot be set from source: no real config shows \
+                 circuit AQ{n}'s settings yet, so Lox Logic offers Circuit1 … Circuit5. \
+                 Set it up in Loxone Config's mood editor",
+                block.slug
+            )));
+        }
+        // Attribute parameters (e.g. `Formula:` on Formula blocks)
+        // bind like any parameter but are not connectors.
+        if attr_params(&block.block_type).contains(&key) {
+            continue;
+        }
+        // Message parameters live on the `<LoggerMailer>` child:
+        // texts, and a duration for `MinimumTime`.
+        if message_params(&block.block_type).contains(&key) {
+            if key == "MinimumTime"
+                && !matches!(v, Value::Number(_) | Value::Unit { .. } | Value::Ref(_))
+            {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `MinimumTime: {v}` takes a duration \
+                     (`MinimumTime: 1h`, or seconds as a number)",
+                    block.slug
+                )));
+            }
+            continue;
+        }
+        // `mirrors:` on a minted ref names the mirrored object — an
+        // identity binding, not a connector.
+        if is_ref_type(&block.block_type) && key == "mirrors" {
+            let Value::Ref(target) = v else {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `mirrors:` takes the name of an extern or \
+                     managed block, not a literal",
+                    block.slug
+                )));
+            };
+            if !module.externs().any(|e| &e.slug == target)
+                && !module.blocks().any(|b| &b.slug == target)
+            {
+                return Err(Error::Compile(format!(
+                    "block `{}` mirrors `{target}`, but no extern or managed \
+                     block of this module has that name",
+                    block.slug
+                )));
+            }
+            mirrors = Some(target);
+            continue;
+        }
+        // `device:` on an I/O names its device: a managed block or
+        // an extern of one of the types it may hang below.
+        if crate::periphery::is_device_binding(&block.block_type, key) {
+            let Value::Ref(target) = v else {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `device:` takes the name of the device (an extern \
+                     or managed block), not a literal",
+                    block.slug
+                )));
+            };
+            let ty = module
+                .blocks()
+                .find(|b| &b.slug == target)
+                .map(|b| b.block_type.as_str())
+                .or_else(|| {
+                    module
+                        .externs()
+                        .find(|e| &e.slug == target)
+                        .map(|e| e.block_type.as_str())
+                });
+            let allowed = crate::periphery::device_types(&block.block_type);
+            match ty {
+                None => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `device: {target}`. No extern or managed block \
+                         of this module has that name",
+                        block.slug
+                    )));
+                }
+                Some(t) if !allowed.contains(&t) => {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: a {} hangs below a {}, but `{target}` is a {t}",
+                        block.slug,
+                        block.block_type,
+                        allowed.join(" or ")
+                    )));
+                }
+                Some(_) => {}
+            }
+            continue;
+        }
+        // The mode a calendar entry switches on, and its raw number
+        // (refused against the base, which numbers the modes), and
+        // its date (checked with the module).
+        if crate::logic::calendar::is_switches(&block.block_type, key)
+            || crate::logic::calendar::is_date_key(&block.block_type, key)
+            || (block.block_type == "CalendarEntry" && key == crate::logic::calendar::CAL_TYPE)
+        {
+            continue;
+        }
+        known_port(module, &block.slug, key)?;
+        // A suffixed value must fit the port's documented unit.
+        module.resolve_value_for(v, &block.block_type, &block.slug, key)?;
+    }
+    if !crate::periphery::device_types(&block.block_type).is_empty()
+        && !block.params().any(|(k, _)| k == "device")
+    {
+        return Err(Error::Compile(format!(
+            "block `{}`: a {} hangs below its device. Name it with `device: <slug>` \
+             (a {} of this module, managed or extern)",
+            block.slug,
+            block.block_type,
+            crate::periphery::device_types(&block.block_type).join(" or ")
+        )));
+    }
+    if is_ref_type(&block.block_type) {
+        if mirrors.is_none() {
+            return Err(Error::Compile(format!(
+                "block `{}`: a new {} mirrors another object. Name the target with \
+                 `mirrors: <name>`, or use `extern` to reference an existing one in the base",
+                block.slug, block.block_type
+            )));
+        }
+        // A message ref shows a notification and nothing else.
+        if block.block_type == "OutputRefLM"
+            && let Some(target) = mirrors
+        {
+            let t = module
+                .externs()
+                .find(|e| &e.slug == target)
+                .map(|e| e.block_type.as_str());
+            if t != Some(MESSAGE_REF_TARGET) {
+                return Err(Error::Compile(format!(
+                    "block `{}`: an OutputRefLM mirrors a push notification, so \
+                     `{target}` must be an extern `{MESSAGE_REF_TARGET}(…)`",
+                    block.slug
+                )));
+            }
+        }
+        // Oracle session 11: a save rewrites a ref's Title= to the
+        // mirrored object's title — a label of our own would be a lie.
+        if block.title.is_some() {
+            return Err(Error::Compile(format!(
+                "block `{}`: a {}'s title is derived from its `mirrors:` \
+                 target by Loxone Config. Remove the label",
+                block.slug, block.block_type
+            )));
         }
     }
     Ok(())

@@ -35,7 +35,9 @@ const COMMANDS: &[Command] = &[
   --json  Print the result as JSON. The exit code is still 1 on errors.
 
 Checks syntax, references, block types, ports and wire directions. No base config is needed.
-Parse errors carry line numbers.
+Reports every independent error at once (at most 50), each with its file and line, sorted.
+JSON: {"ok": false, "path": <first error's file>, "errors": [{"path", "line", "message"}, ...]},
+plus "truncated": <count> when errors were left out.
 With no path, checks the module of the lox.toml project in the current directory.
 "#,
     },
@@ -571,20 +573,32 @@ fn project_module() -> Result<String, AnyError> {
 
 /// Load a module from one file or a directory of `*.loxl` fragments.
 /// Directory fragments parse individually (errors name the file);
-/// name resolution runs once on the merged module.
-fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
+/// name resolution runs once on the merged module. Every fragment is
+/// parsed even when one fails, so all syntax errors come back at once.
+fn load_module(path: &str) -> Result<Module, Vec<Placed>> {
     let p = std::path::Path::new(path);
     if p.is_dir() {
         let mut fragments = Vec::new();
-        for f in module_dir_files(p)? {
+        let mut errors = Vec::new();
+        let files = module_dir_files(p).map_err(|(f, e)| vec![Placed::new(f, None, e)])?;
+        for f in files {
             let name = f.display().to_string();
-            let src = std::fs::read_to_string(&f)
-                .map_err(|e| (name.clone(), loxone_config::Error::Io(e)))?;
-            let mut fragment = Module::parse_fragment(&src).map_err(|e| (name.clone(), e))?;
-            fragment
-                .load_files(fragment_dir(&f))
-                .map_err(|e| (name.clone(), e))?;
-            fragments.push(fragment);
+            let loaded = std::fs::read_to_string(&f)
+                .map_err(loxone_config::Error::Io)
+                .and_then(|src| Module::parse_fragment(&src))
+                .and_then(|mut fragment| {
+                    fragment.load_files(fragment_dir(&f))?;
+                    Ok(fragment)
+                });
+            match loaded {
+                Ok(fragment) => fragments.push(fragment),
+                Err(e) => errors.extend(place(path, &name, e)),
+            }
+        }
+        // A fragment that does not parse declares nothing: name
+        // resolution would only report its names as undeclared.
+        if !errors.is_empty() {
+            return Err(errors);
         }
         let module = Module::from_fragments(fragments);
         // Validate the expanded view: module-level statements reference an
@@ -592,17 +606,94 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
         // expansion — mirroring what compile checks.
         module
             .with_expanded(|x| x.validate())
-            .map_err(|e| (error_place(path, &e), e))?;
+            .map_err(|e| place(path, path, e))?;
         Ok(module)
     } else {
         let src = std::fs::read_to_string(path)
-            .map_err(|e| (path.to_string(), loxone_config::Error::Io(e)))?;
-        let mut module = Module::parse(&src).map_err(|e| (error_place(path, &e), e))?;
+            .map_err(|e| vec![Placed::new(path.into(), None, loxone_config::Error::Io(e))])?;
+        let mut module = Module::parse(&src).map_err(|e| place(path, path, e))?;
         module
             .load_files(fragment_dir(p))
-            .map_err(|e| (path.to_string(), e))?;
+            .map_err(|e| vec![Placed::new(path.into(), None, e)])?;
         Ok(module)
     }
+}
+
+/// One error of a module, with the file and 1-based line it is about.
+struct Placed {
+    file: String,
+    line: Option<usize>,
+    error: loxone_config::Error,
+}
+
+impl Placed {
+    fn new(file: String, line: Option<usize>, error: loxone_config::Error) -> Placed {
+        Placed { file, line, error }
+    }
+}
+
+impl std::fmt::Display for Placed {
+    /// `file:line: message`. A parse error's message names its line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.error, self.line) {
+            (loxone_config::Error::Parse { .. }, _) | (_, None) => {
+                write!(f, "{}: {}", self.file, self.error)
+            }
+            (e, Some(line)) => write!(f, "{}:{line}: {e}", self.file),
+        }
+    }
+}
+
+/// Every error `e` stands for, placed: a parse error in `file` at its
+/// line, any other at the place in module `path` its names point to
+/// (else in `file`). Sorted by file, then line.
+fn place(path: &str, file: &str, e: loxone_config::Error) -> Vec<Placed> {
+    let order = module_files(path);
+    let mut out: Vec<Placed> = e
+        .into_list()
+        .into_iter()
+        .map(|e| match &e {
+            loxone_config::Error::Parse { line, .. } => Placed::new(file.into(), Some(*line), e),
+            _ => match error_line(path, &e) {
+                Some((f, line)) => Placed::new(f, Some(line), e),
+                None => Placed::new(file.into(), None, e),
+            },
+        })
+        .collect();
+    out.sort_by_key(|p| {
+        let rank = order
+            .iter()
+            .position(|f| f.display().to_string() == p.file)
+            .unwrap_or(usize::MAX);
+        (rank, p.line.unwrap_or(usize::MAX))
+    });
+    out
+}
+
+/// The `.loxl` files of module `path`, in order.
+fn module_files(path: &str) -> Vec<PathBuf> {
+    let p = Path::new(path);
+    if p.is_dir() {
+        module_dir_files(p).unwrap_or_default()
+    } else {
+        vec![p.to_path_buf()]
+    }
+}
+
+/// `errors` as one message, a line each, the first [`MAX_ERRORS`].
+fn placed_text(errors: &[Placed]) -> String {
+    let mut lines: Vec<String> = errors
+        .iter()
+        .take(loxone_config::MAX_ERRORS)
+        .map(|p| p.to_string())
+        .collect();
+    if errors.len() > loxone_config::MAX_ERRORS {
+        lines.push(format!(
+            "{} more errors not shown",
+            errors.len() - loxone_config::MAX_ERRORS
+        ));
+    }
+    lines.join("\n")
 }
 
 /// The file and 1-based line a module-level error is about: the fragment
@@ -616,23 +707,9 @@ fn error_line(path: &str, e: &loxone_config::Error) -> Option<(String, usize)> {
     ) {
         return None;
     }
-    let p = Path::new(path);
-    let files = if p.is_dir() {
-        module_dir_files(p).ok()?
-    } else {
-        vec![p.to_path_buf()]
-    };
+    let files = module_files(path);
     let (file, line) = loxone_config::lsp::analysis::locate_error(&files, &e.to_string())?;
     Some((file.display().to_string(), line))
-}
-
-/// `path` for an error message: `file:line` where [`error_line`] finds
-/// the place, else `path` itself.
-fn error_place(path: &str, e: &loxone_config::Error) -> String {
-    match error_line(path, e) {
-        Some((file, line)) => format!("{file}:{line}"),
-        None => path.to_string(),
-    }
 }
 
 /// The directory `file("…")` paths in a `.loxl` file resolve against:
@@ -644,7 +721,7 @@ fn fragment_dir(file: &Path) -> &Path {
 /// Load a module — one `.loxl` file, or a directory of fragments — the way
 /// every command here does (also used by lox's `config push`).
 pub fn read_module(path: &str) -> Result<Module, AnyError> {
-    load_module(path).map_err(|(p, e)| format!("{p}: {e}").into())
+    load_module(path).map_err(|e| placed_text(&e).into())
 }
 
 /// [`read_module`] without whole-module name resolution: statement-local
@@ -701,7 +778,7 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
             Ok((x, d))
         })
         .map(|(x, d)| (m, x, d))
-        .map_err(|e| (error_place(path, &e), e))
+        .map_err(|e| place(path, path, e))
     });
     let count = |m: &Module, f: fn(&loxone_config::logic::Item) -> bool| {
         m.items.iter().filter(|i| f(i)).count()
@@ -752,27 +829,41 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Err((epath, e)) if json => {
-            // Structured diagnostics: a 1-based line from the parser, or
-            // the place a semantic error names. The parser is fail-fast,
-            // so there is at most one error per run. `path` names the file
-            // the error is in; for a module directory, the fragment file.
-            let (epath, line) = match &e {
-                loxone_config::Error::Parse { line, .. } => (epath, Some(*line)),
-                _ => match error_line(path, &e) {
-                    Some((file, line)) => (file, Some(line)),
-                    None => (epath, None),
-                },
-            };
-            println!(
-                "{}",
-                serde_json::json!({ "ok": false, "path": epath, "errors": [
-                    { "line": line, "message": e.to_string() },
-                ]})
-            );
+        Err(errors) if json => {
+            // Structured diagnostics, every error found, by file and line:
+            // `path` names the file an error is in (for a module
+            // directory, the fragment), `line` is 1-based or null. The
+            // top-level `path` is the first error's file.
+            let shown = &errors[..errors.len().min(loxone_config::MAX_ERRORS)];
+            let list: Vec<serde_json::Value> = shown
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "path": p.file, "line": p.line, "message": p.error.to_string(),
+                    })
+                })
+                .collect();
+            let mut out = serde_json::json!({
+                "ok": false, "path": errors[0].file, "errors": list,
+            });
+            if errors.len() > shown.len() {
+                out["truncated"] = serde_json::json!(errors.len() - shown.len());
+            }
+            println!("{out}");
             Ok(ExitCode::FAILURE)
         }
-        Err((epath, e)) => Err(format!("{epath}: {e}").into()),
+        Err(errors) => {
+            for p in errors.iter().take(loxone_config::MAX_ERRORS) {
+                eprintln!("error: {p}");
+            }
+            if errors.len() > loxone_config::MAX_ERRORS {
+                eprintln!(
+                    "{} more errors not shown",
+                    errors.len() - loxone_config::MAX_ERRORS
+                );
+            }
+            Ok(ExitCode::FAILURE)
+        }
     }
 }
 
@@ -935,7 +1026,11 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         allow_removals,
         relayout,
     };
-    let compiled = compile(&base_doc, &m, &mut lock, &opts)?;
+    let compiled = compile(&base_doc, &m, &mut lock, &opts).map_err(|e| match e {
+        // Several errors: each on its own line, placed in the module.
+        loxone_config::Error::Many(_) => placed_text(&place(&module, &module, e)).into(),
+        e => AnyError::from(e),
+    })?;
     std::fs::write(&out, compiled.to_bytes())?;
     lock.save(&lock_path)?;
     println!(

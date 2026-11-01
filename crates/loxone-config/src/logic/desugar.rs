@@ -108,6 +108,8 @@ impl Module {
             labels.insert(a.slug.as_str(), text);
         }
 
+        // Each expression fails on its own.
+        let mut errors = crate::error::Errors::default();
         let mut items = Vec::with_capacity(self.items.len());
         let mut minted: Vec<String> = Vec::new();
         // Counters persist across expressions sharing one sink prefix, so
@@ -127,7 +129,9 @@ impl Module {
                         taken: &taken,
                         lets: &lets,
                     };
-                    let root = ctx.node(&w.expr)?;
+                    let Some(root) = errors.check(ctx.node(&w.expr)) else {
+                        continue;
+                    };
                     items.push(Item::Wire(WireDecl {
                         to: w.to.clone(),
                         from: root,
@@ -163,7 +167,9 @@ impl Module {
                             taken: &taken,
                             lets: &lets,
                         };
-                        let root = ctx.node(e)?;
+                        let Some(root) = errors.check(ctx.node(e)) else {
+                            continue;
+                        };
                         args.push(ArgItem::Binding(Binding {
                             port: x.port.clone(),
                             kind: BindingKind::Wire(root),
@@ -187,12 +193,15 @@ impl Module {
                         taken: &taken,
                         lets: &lets,
                     };
-                    let root = ctx.node(&x.expr)?;
+                    let Some(root) = errors.check(ctx.node(&x.expr)) else {
+                        continue;
+                    };
                     if root.slug != x.slug {
-                        return Err(Error::Compile(format!(
+                        errors.push(Error::Compile(format!(
                             "`{} = {}` is a bare port: an alias is not a block.",
                             x.slug, x.expr
                         )));
+                        continue;
                     }
                     if let Some(label) = labels.get(x.slug.as_str())
                         && let Some(Item::Block(top)) = items
@@ -208,6 +217,7 @@ impl Module {
                 other => items.push(other.clone()),
             }
         }
+        errors.finish()?;
         info.synthetic = minted.into_iter().collect();
         Ok((Module { items }, info))
     }

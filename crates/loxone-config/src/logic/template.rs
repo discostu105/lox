@@ -368,16 +368,18 @@ impl Module {
     /// resolution of the result is the caller's job ([`Module::validate`])
     /// — expansion only checks what it needs.
     pub fn expand(&self) -> Result<Module> {
+        let mut errors = crate::error::Errors::default();
         let mut templates: BTreeMap<&str, &TemplateDecl> = BTreeMap::new();
         for item in &self.items {
             if let Item::Template(t) = item {
                 if templates.insert(&t.name, t).is_some() {
-                    return Err(Error::Compile(format!("duplicate template `{}`", t.name)));
+                    errors.push(Error::Compile(format!("duplicate template `{}`", t.name)));
+                    continue;
                 }
                 if let Some(p) = &t.primary
                     && !t.body_slugs().any(|s| s == p)
                 {
-                    return Err(Error::Compile(format!(
+                    errors.push(Error::Compile(format!(
                         "template `{}`: `-> {p}` names no block of the body. Its blocks: {}",
                         t.name,
                         t.body_slugs().collect::<Vec<_>>().join(", ")
@@ -401,10 +403,12 @@ impl Module {
                 _ => continue,
             };
             if names.insert(name, ()).is_some() && matches!(item, Item::Instance(_)) {
-                return Err(Error::Compile(format!("duplicate name `{name}`")));
+                errors.push(Error::Compile(format!("duplicate name `{name}`")));
             }
         }
-        let defaults = super::defaults::by_type(&self.items)?;
+        let defaults = errors
+            .check(super::defaults::by_type(&self.items))
+            .unwrap_or_default();
         let scopes = Scopes::of(self);
         let mut items = Vec::new();
         for item in &self.items {
@@ -413,24 +417,30 @@ impl Module {
                 Item::Template(_) | Item::Defaults(_) => {}
                 Item::Instance(call) => {
                     let Some(t) = templates.get(call.block_type.as_str()) else {
-                        return Err(Error::Compile(format!(
+                        errors.push(Error::Compile(format!(
                             "`{} = {name}(…)` instantiates unknown template `{name}`",
                             call.slug,
                             name = call.block_type
                         )));
+                        continue;
                     };
-                    items.extend(self.instantiate(&scopes, t, call)?);
+                    if let Some(x) = errors.check(self.instantiate(&scopes, t, call)) {
+                        items.extend(x);
+                    }
                 }
                 other => {
                     let mut other = other.clone();
-                    visit_refs(&mut other, &mut |name, usage| {
+                    let resolved = visit_refs(&mut other, &mut |name, usage| {
                         *name = scopes.resolve(name, usage)?;
                         Ok(())
-                    })?;
-                    items.push(other);
+                    });
+                    if errors.check(resolved).is_some() {
+                        items.push(other);
+                    }
                 }
             }
         }
+        errors.finish()?;
         super::defaults::apply(&mut items, &defaults);
         super::hardware::lower(&mut items)?;
         Ok(Module { items })
@@ -445,16 +455,17 @@ impl Module {
         if scopes.instances.is_empty() {
             return Ok(());
         }
+        let mut errors = crate::error::Errors::default();
         for item in &self.items {
             let mut item = match item {
                 Item::Template(_) | Item::Instance(_) => continue,
                 other => other.clone(),
             };
-            visit_refs(&mut item, &mut |name, usage| {
+            errors.check(visit_refs(&mut item, &mut |name, usage| {
                 scopes.resolve(name, usage).map(|_| ())
-            })?;
+            }));
         }
-        Ok(())
+        errors.finish()
     }
 
     /// Whether the module declares a `kind` set named `name`.
@@ -501,6 +512,9 @@ impl Module {
         }
         let respell = |msg: String| respell_text(&msg, &scopes);
         match e {
+            Error::Many(list) => {
+                Error::Many(list.into_iter().map(|e| self.respell_error(e)).collect())
+            }
             Error::Compile(m) => Error::Compile(respell(m)),
             Error::Lock(m) => Error::Lock(respell(m)),
             Error::NoMatch { slug, spec } => Error::NoMatch {

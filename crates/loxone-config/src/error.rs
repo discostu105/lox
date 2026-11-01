@@ -54,6 +54,11 @@ pub enum Error {
     #[error("{0}")]
     Archive(String),
 
+    /// Several independent errors, in the order they were found. Each is
+    /// reported on its own line.
+    #[error("{}", join_lines(.0))]
+    Many(Vec<Error>),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -62,3 +67,64 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The most errors `loxl check` and the editor show for one module.
+/// Past this many, the rest are usually follow-ups of the first ones.
+pub const MAX_ERRORS: usize = 50;
+
+fn join_lines(errors: &[Error]) -> String {
+    errors
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+impl Error {
+    /// The errors this one stands for: the list of [`Error::Many`],
+    /// else the error itself.
+    pub fn into_list(self) -> Vec<Error> {
+        match self {
+            Error::Many(list) => list.into_iter().flat_map(Error::into_list).collect(),
+            e => vec![e],
+        }
+    }
+
+    /// `errors` as one result: `Ok` when empty, the error itself when
+    /// there is one, else [`Error::Many`].
+    pub fn collect(errors: Vec<Error>) -> Result<()> {
+        let mut errors: Vec<Error> = errors.into_iter().flat_map(Error::into_list).collect();
+        match errors.len() {
+            0 => Ok(()),
+            1 => Err(errors.pop().expect("one error")),
+            _ => Err(Error::Many(errors)),
+        }
+    }
+}
+
+/// Collects the errors of independent checks, so one run reports them
+/// all.
+#[derive(Debug, Default)]
+pub(crate) struct Errors(Vec<Error>);
+
+impl Errors {
+    /// Keep the error of `r`, if any; `r`'s value otherwise.
+    pub(crate) fn check<T>(&mut self, r: Result<T>) -> Option<T> {
+        match r {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.0.push(e);
+                None
+            }
+        }
+    }
+
+    pub(crate) fn push(&mut self, e: Error) {
+        self.0.push(e);
+    }
+
+    /// `Ok` when nothing failed, else every error collected.
+    pub(crate) fn finish(self) -> Result<()> {
+        Error::collect(self.0)
+    }
+}

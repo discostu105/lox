@@ -58,6 +58,8 @@ loxl templates                            # the template library (loxl templates
 #    block types, port names, and wire directions on managed blocks):
 loxl check modules/beschattung.loxl       # human-readable, line numbers
 loxl check --json modules/beschattung.loxl # machine-readable diagnostics
+#    Every independent error comes back in one run, sorted by file and
+#    line: fix them all, then check again (a later stage may find more).
 loxl fmt --write modules/beschattung.loxl # canonicalize (non-destructive)
 
 # 3. Compile against the current base:
@@ -311,7 +313,7 @@ it only when it matches what you intended.
 
 | Error contains | Meaning | Remedy |
 |---|---|---|
-| `line N` (from `check`) | syntax/reference error in the module | fix that line; `loxl fmt` shows canonical form |
+| `line N` (from `check`) | syntax/reference error in the module | fix that line; `loxl fmt` shows canonical form. `check` lists every error at once: fix them all before checking again |
 | `no object matches` | the extern's spec matches nothing of that type | check type and spelling; `loxl decompile` the base to see candidates |
 | `matches N objects` + candidate UUIDs | several objects match | pin one with `uuid: "<one of the candidates>"`; ask if unclear |
 | `not in the verified builtin table` | the compiler cannot create this type | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
