@@ -1205,6 +1205,64 @@ pub fn omitted_value(block_type: &str, attr: &str, value: &str) -> bool {
         || (is_zero(value) && omitted_when_zero(block_type, attr))
 }
 
+/// What a Loxone Config save writes instead of `value`, and the rule it
+/// follows, or `None` when a save keeps the value. `digital` says whether
+/// a `VirtualIn` is digital. Loxone Config 17.2 (see loxone-format.md):
+///
+/// - A virtual HTTP input's `Poll`, `Timeout` and `Allowedtimeouts` are
+///   32-bit whole numbers: a fraction is cut off, a larger number wraps.
+///   `Poll` then goes up to 10 and down to 604800, `Timeout` up to 10.
+/// - A digital `VirtualIn` has `MaxVal` 1 and `MinVal` 0.
+pub fn save_rewrite(
+    block_type: &str,
+    attr: &str,
+    value: &str,
+    digital: bool,
+) -> Option<(String, &'static str)> {
+    let (written, rule) = match (block_type, attr) {
+        ("VirtualHttpIn", "Poll" | "Timeout" | "Allowedtimeouts") => {
+            let v = value.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+            // Cut to a whole number, then to 32 bits, as the save does.
+            let n = (v.trunc() as i64) as i32;
+            match attr {
+                "Poll" => (
+                    n.clamp(10, 604_800),
+                    "a virtual HTTP input polls in whole seconds, from 10 to 604800",
+                ),
+                "Timeout" => (
+                    n.max(10),
+                    "a virtual HTTP input's timeout is whole milliseconds, at least 10",
+                ),
+                _ => (n, "allowed timeouts are a whole number"),
+            }
+        }
+        ("VirtualIn", "MaxVal") if digital => (1, "a digital VirtualIn's range is 0 to 1"),
+        ("VirtualIn", "MinVal") if digital => (0, "a digital VirtualIn's range is 0 to 1"),
+        _ => return None,
+    };
+    let same = match attr {
+        "MinVal" | "MaxVal" => value.trim().parse::<f64>().ok() == Some(f64::from(written)),
+        _ => value.trim() == written.to_string(),
+    };
+    (!same).then(|| (written.to_string(), rule))
+}
+
+/// The compile error for a value a save rewrites ([`save_rewrite`]):
+/// `value` as compiled, `source` as written (`4.5ms`).
+pub fn save_rewrite_error(
+    slug: &str,
+    block_type: &str,
+    attr: &str,
+    (value, source): (&str, &str),
+    digital: bool,
+) -> Option<String> {
+    let (written, rule) = save_rewrite(block_type, attr, value, digital)?;
+    Some(format!(
+        "block `{slug}`: `{attr}: {source}`: {rule}, so a Loxone Config save turns it into \
+         `{attr}: {written}`. Write that instead."
+    ))
+}
+
 /// The container a block type lives in when it is not drawn on a page:
 /// a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.
@@ -1751,6 +1809,53 @@ mod tests {
         assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
         assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
         assert_eq!(ref_link_type("And"), None);
+    }
+
+    #[test]
+    fn what_a_save_writes_instead() {
+        // Oracle sessions 61 to 64, Loxone Config 17.2.
+        let w = |t: &str, a: &str, v: &str, digital: bool| {
+            save_rewrite(t, a, v, digital).map(|(w, _)| w)
+        };
+        let http = |a: &str, v: &str| w("VirtualHttpIn", a, v, false);
+        for (v, poll, timeout) in [
+            ("0", Some("10"), Some("10")),
+            ("1", Some("10"), Some("10")),
+            ("9", Some("10"), Some("10")),
+            ("-5", Some("10"), Some("10")),
+            ("9.5", Some("10"), Some("10")),
+            ("10", None, None),
+            ("10.6", Some("10"), Some("10")),
+            ("12.5", Some("12"), Some("12")),
+            ("600.5", Some("600"), Some("600")),
+            ("604800", None, None),
+            ("604801", Some("604800"), None),
+            ("999999999", Some("604800"), None),
+            ("2147483647", Some("604800"), None),
+            ("2147483648", Some("10"), Some("10")),
+            ("4294967296", Some("10"), Some("10")),
+            ("99999999999", Some("604800"), Some("1215752191")),
+        ] {
+            assert_eq!(http("Poll", v).as_deref(), poll, "Poll {v}");
+            assert_eq!(http("Timeout", v).as_deref(), timeout, "Timeout {v}");
+        }
+        assert_eq!(http("Allowedtimeouts", "-1"), None);
+        assert_eq!(http("Allowedtimeouts", "1000"), None);
+        assert_eq!(http("Allowedtimeouts", "2.5").as_deref(), Some("2"));
+        assert_eq!(
+            http("Allowedtimeouts", "99999999999").as_deref(),
+            Some("1215752191")
+        );
+        // A digital VirtualIn's range is 0 to 1; its default is its own.
+        for v in ["0", "0.5", "2", "5", "-1"] {
+            assert_eq!(w("VirtualIn", "MaxVal", v, true).as_deref(), Some("1"));
+        }
+        assert_eq!(w("VirtualIn", "MaxVal", "1", true), None);
+        assert_eq!(w("VirtualIn", "MinVal", "0", true), None);
+        assert_eq!(w("VirtualIn", "MinVal", "-1", true).as_deref(), Some("0"));
+        assert_eq!(w("VirtualIn", "DefVal", "2", true), None);
+        assert_eq!(w("VirtualIn", "MaxVal", "5", false), None);
+        assert_eq!(w("ModbusServer", "Timeout", "0", false), None);
     }
 
     #[test]

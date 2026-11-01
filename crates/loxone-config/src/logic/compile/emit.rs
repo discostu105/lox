@@ -563,6 +563,21 @@ fn virtual_in_attrs(
         }
         None => carried("Analog").unwrap_or("false"),
     };
+    // A digital input's range is fixed at 0 to 1: a save rewrites any
+    // other bound range.
+    for name in ["MinVal", "MaxVal"] {
+        if let Some(v) = bound(name)
+            && let Some(e) = crate::connectors::save_rewrite_error(
+                slug,
+                "VirtualIn",
+                name,
+                (v, v),
+                analog == "false",
+            )
+        {
+            return Err(Error::Compile(e));
+        }
+    }
     let fresh: &[(&str, &str)] = if analog == "true" {
         &[("Analog", "true"), ("EnVal", "true")]
     } else {

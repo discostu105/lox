@@ -1,0 +1,1 @@
+- **`loxl compile`** and **`loxl check`** refuse a value that Loxone Config rewrites on save, and name the value it writes: a virtual HTTP input's `Poll` below 10 or above 604800, a `Timeout` below 10, a fraction on either or on `Allowedtimeouts`, and a digital `VirtualIn`'s `MaxVal` other than 1 or `MinVal` other than 0. Before, the next save showed them as changed.

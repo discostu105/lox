@@ -497,3 +497,75 @@ fn adopt_states_an_unticked_box_a_fresh_object_ticks() {
         }
     }
 }
+
+#[test]
+fn a_value_a_save_rewrites_is_refused() {
+    // Loxone Config raises Poll and Timeout to 10, cuts them to whole
+    // numbers, and fixes a digital VirtualIn's range at 0 to 1 (#332).
+    let base = base();
+    let run = |src: &str| {
+        Module::parse(src).map_err(|e| e.to_string()).and_then(|m| {
+            m.validate().map_err(|e| e.to_string())?;
+            loxone_config::logic::validate_ports(&m).map_err(|e| e.to_string())?;
+            compile(&base, &m, &mut Lockfile::default(), &opts())
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+    };
+    let http = |settings: &str| {
+        format!("h = VirtualHttpIn(\"H\", Address: \"http://192.0.2.10/s\", {settings})\n")
+    };
+    for (settings, want) in [
+        ("Poll: 5", "`Poll: 10`"),
+        ("Poll: 600.5", "`Poll: 600`"),
+        ("Poll: 200h", "`Poll: 604800`"),
+        ("Poll: 600, Timeout: 9", "`Timeout: 10`"),
+        ("Poll: 600, Timeout: 0", "`Timeout: 10`"),
+        ("Poll: 600, Timeout: 40.5ms", "`Timeout: 40`"),
+        ("Poll: 600, Allowedtimeouts: 2.5", "`Allowedtimeouts: 2`"),
+    ] {
+        let err = run(&http(settings)).unwrap_err();
+        assert!(err.contains(want), "{settings}: {err}");
+        assert!(err.contains("a Loxone Config save turns it into"), "{err}");
+    }
+    for ok in [
+        "Poll: 10",
+        "Poll: 168h",
+        "Poll: 10min, Timeout: 10s",
+        "Poll: 600, Allowedtimeouts: -1",
+    ] {
+        run(&http(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+
+    for (src, want) in [
+        ("VirtualIn(\"D\", MaxVal: 5)", "`MaxVal: 1`"),
+        ("VirtualIn(\"D\", Analog: off, MaxVal: 0)", "`MaxVal: 1`"),
+        ("VirtualIn(\"D\", MinVal: -1)", "`MinVal: 0`"),
+    ] {
+        let err = run(&format!("d = {src}\n")).unwrap_err();
+        assert!(err.contains(want), "{src}: {err}");
+    }
+    for ok in [
+        "VirtualIn(\"D\", MaxVal: 1, MinVal: 0, DefVal: 2)",
+        "VirtualIn(\"A\", Analog: on, MinVal: -1, MaxVal: 5)",
+    ] {
+        run(&format!("d = {ok}\n")).unwrap_or_else(|e| panic!("{ok}: {e}"));
+    }
+
+    // Without `Analog:`, an existing analog input stays analog.
+    let mut lock = Lockfile::default();
+    let analog = compile(
+        &base,
+        &Module::parse("d = VirtualIn(\"A\", Analog: on)\n").unwrap(),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+    compile(
+        &analog,
+        &Module::parse("d = VirtualIn(\"A\", MaxVal: 5)\n").unwrap(),
+        &mut lock,
+        &opts(),
+    )
+    .unwrap();
+}

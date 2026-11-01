@@ -228,3 +228,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D111 | [Unit suffixes on extern ports, template parameters and device settings](decisions/0111-unit-suffix-coverage.md) | accepted, extends [D87](decisions/0087-v2-tooling.md) |
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
 | D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
+| D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |

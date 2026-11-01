@@ -37,4 +37,5 @@ it back. The question was which other numbers behave the same.
 - **Treat absent and `"0"` as equal in the semantic diff only**: as in D91, it would hide the difference
   without making the output what Config writes.
 - **Clamp `Poll` and `Timeout` to 10 and `MaxVal` to 1 on a digital `VirtualIn`**: what Config does with
-  other small values is not checked yet (#332).
+  other small values is not checked yet (#332). [D114](0114-refuse-what-a-save-rewrites.md) settled it: compile
+  refuses those values.
