@@ -10,9 +10,10 @@
 
 use crate::error::{Error, Result};
 use crate::logic::ast::{
-    ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, MatchSpec, ModeName,
-    Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind, ScheduleClaim, SetDecl, SetKind,
-    SignalDecl, TemplateDecl, TemplateParam, TestItem, TilesClaim, TilesItem, Value, WireDecl,
+    AccessClaim, ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, MatchSpec,
+    ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind, ScheduleClaim, SetDecl,
+    SetKind, SignalDecl, TemplateDecl, TemplateParam, TestItem, TilesClaim, TilesItem, Value,
+    WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -57,6 +58,7 @@ pub(crate) fn visit_refs(
         Item::TilesClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::ScheduleClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::MoodsClaim(c) => f(&mut c.slug, RefUse::Object)?,
+        Item::AccessClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::Extern(e) => {
             if let MatchSpec::Mirrors(target) = &mut e.match_spec {
                 f(target, RefUse::Object)?;
@@ -432,6 +434,7 @@ impl Module {
             (SetKind::Moods, Item::Moods(m)) => m.name == name,
             (SetKind::Schedule, Item::Schedule(x)) => x.name == name,
             (SetKind::Tiles, Item::Tiles(x)) => x.name == name,
+            (_, Item::Access(a)) => a.right.set_kind() == kind && a.name == name,
             _ => false,
         })
     }
@@ -817,6 +820,12 @@ impl Module {
                 Item::TilesClaim(c) => out.push(Item::TilesClaim(TilesClaim {
                     slug: map_slug(&c.slug)?,
                     tiles: map_set(&c.to_string(), &c.tiles, SetKind::Tiles)?,
+                    comment: c.comment.clone(),
+                })),
+                Item::AccessClaim(c) => out.push(Item::AccessClaim(AccessClaim {
+                    slug: map_slug(&c.slug)?,
+                    right: c.right,
+                    set: map_set(&c.to_string(), &c.set, c.right.set_kind())?,
                     comment: c.comment.clone(),
                 })),
                 // Template-source commentary, not per-instance content.

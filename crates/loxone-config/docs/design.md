@@ -174,9 +174,9 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D46 | [Managed blocks carry the document's block version](decisions/0046-block-version.md) | accepted |
 | D47 | [A rebuilt block keeps the base's order](decisions/0047-block-order-kept.md) | accepted |
 | D48 | [A minted ref of a text value carries `Text="true"`](decisions/0048-text-ref-flag.md) | accepted |
-| D49 | [Access rights on NFC Code Touch blocks from source](decisions/0049-nfc-access-rights.md) | accepted |
+| D49 | [Access rights on NFC Code Touch blocks from source](decisions/0049-nfc-access-rights.md) | accepted, amended by [D83](decisions/0083-access-recipients-sets.md) |
 | D50 | [Placement keeps to the paper sheet](decisions/0050-placement-paper-sheet.md) | accepted |
-| D51 | [Push notifications from source](decisions/0051-push-notifications.md) | accepted |
+| D51 | [Push notifications from source](decisions/0051-push-notifications.md) | accepted, amended by [D83](decisions/0083-access-recipients-sets.md) |
 | D52 | [Documented port facts: units, labels, ranges](decisions/0052-port-facts.md) | accepted, amends [D27](decisions/0027-unit-suffixed-values.md) |
 | D53 | [DayTimer schedules from source](decisions/0053-daytimer-schedules.md) | accepted, amended by [D69](decisions/0069-operating-modes.md) |
 | D54 | [Minting virtual inputs](decisions/0054-virtual-inputs.md) | accepted, amended by [D64](decisions/0064-virtual-modbus-devices.md) and [D80](decisions/0080-v2-one-spelling.md) |
@@ -208,3 +208,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D80 | [Language v2, one spelling per value](decisions/0080-v2-one-spelling.md) | accepted |
 | D81 | [Named signals](decisions/0081-named-signals.md) | accepted |
 | D82 | [Template instances are named by the instance](decisions/0082-template-instance-names.md) | accepted |
+| D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |

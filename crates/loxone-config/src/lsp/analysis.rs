@@ -51,7 +51,7 @@ pub struct Span {
 pub struct Decl {
     pub slug: String,
     /// `extern`, `block`, `instance`, `let`, `template`, `schedule`,
-    /// `access`, `tiles`, `rule` or `moods`
+    /// `access`, `recipients`, `tiles`, `rule` or `moods`
     pub kind: &'static str,
     /// The block type (`extern`/`block`) or template (`instance`)
     pub ty: Option<String>,
@@ -92,6 +92,14 @@ pub fn replacement(message: &str) -> Option<(&str, &str)> {
     let (new, rest) = rest.split_once("` instead of `")?;
     let old = &rest[..rest.find('`')?];
     (!old.is_empty()).then_some((new, old))
+}
+
+/// The `CLAIM` of a diagnostic's "claim it with `CLAIM`": the statement
+/// the replacement needs next to it.
+pub fn claim_to_add(message: &str) -> Option<&str> {
+    let rest = &message[message.find("claim it with `")? + "claim it with `".len()..];
+    let claim = &rest[..rest.find('`')?];
+    (!claim.is_empty()).then_some(claim)
 }
 
 /// `s` is one identifier.
@@ -1135,7 +1143,15 @@ fn is_type_position(before: &str) -> bool {
 }
 
 const KEYWORD_DECLS: &[&str] = &[
-    "extern", "let", "template", "schedule", "access", "tiles", "rule", "moods",
+    "extern",
+    "let",
+    "template",
+    "schedule",
+    "access",
+    "recipients",
+    "tiles",
+    "rule",
+    "moods",
 ];
 
 /// The declarations in `text` (of `file`).

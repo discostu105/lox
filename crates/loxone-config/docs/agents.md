@@ -149,10 +149,11 @@ sensor.title = "Raumklima Bad"       # assign title, room, category;
 sensor.room = "Bad"                  # children in the device's room follow
 
 extern tuer = NfcCodeTouch(uuid: "…")
-access tuer                          # who may open it, under which schedule
+access bewohner                      # who may open, under which schedule
 	user "alice": "Always"           # users, groups and schedules
 	group "Residents": "Workdays"    # by title; the rest lose access
 end
+tuer.access = bewohner               # one set, any number of Code Touches
 
 extern regel = AutopilotRule(title: "Pumpe Ein")
 rule regel                           # an app rule: active, all
@@ -235,8 +236,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   is the app's name for the control. Only `Desc`, the low ends of the correction, `MinVal`,
   `ResetTime` and `AverageTime` can be added; the rest must already be on the object.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
-  `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and `recipients <it> … end`
-  (`user "<title>"`) says who gets it.
+  `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
+  (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.
 - **Schedules and modes.** A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
   `weekend off`, `holiday …`) with `timer.schedule = <set>`. Any operating mode can be named by title
   (`"Party" 18:00-24:00`). `party = Mode("Party")` creates a mode, and `party.Q` is on while it is
@@ -314,11 +315,13 @@ it only when it matches what you intended.
 | `numeric character references as literal text` (from `drift`) | a foreign XML writer left `&#xA;` text in programs, rules or descriptions; Loxone reads it verbatim | `loxl repair <cfg> --out <fixed>`, then compile against `<fixed>` as the base |
 | `no user titled` / `no group titled` / `no access schedule titled` | an `access` grant names nothing in the base | use the title as Loxone Config or the app shows it; create the user, group or schedule there first |
 | `users are titled` / `groups are titled` / `schedules are titled` | several objects share the title an `access` grant names | give them distinct titles in Loxone Config or the app |
-| `not an NFC Code Touch` | `access` on an extern of another type | declare `access` only on an `NfcCodeTouch` extern |
+| `access rights belong to an NFC Code Touch` | `.access` claimed on an extern of another type | claim `access` sets only on an `NfcCodeTouch` extern |
+| `but access rights are a named set` / `but recipients are a named set` | the v1 form `access <extern> … end` / `recipients <extern> … end` | rename the set as the error says and add the claim after its `end` (`<extern>.access = <extern>_access`); the language server does both |
+| `A block takes one` (`access`/`recipients`) | two claims of the same kind on one block | merge the sets into one; several blocks may share a set, a block takes one |
 | `which the base config does not have` (page) | no page has the title | fix the title, or create the page: `page "…" (room: "…")` |
 | `needs a real room for a page` | `page … (room: "Nicht zugeordnet")` | name the room the page belongs to |
 | `page "…" (…) is titled "…" in the base config` | a page Lox Logic created was renamed in Loxone Config | write the new title in the source (without arguments the page belongs to Loxone Config), or rename it back |
-| `not a push notification` / `mirrors a push notification` | `recipients` or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
+| `recipients belong to a push notification` / `mirrors a push notification` | a `.recipients` claim or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
 | `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
 | `a rule belongs to an Automatic Designer rule` / `not an Automatic Designer rule` | `rule` on a block of another type | declare `rule` only on an `AutopilotRule` extern |
 | `which Lox Logic cannot write` (rule) | the rule has conditions or actions Lox Logic cannot write (text values, the weather type, calls, speech output) | remove the declaration; edit that rule in the app |
@@ -344,8 +347,8 @@ run again.
   - wires it drew onto extern ports (`<-`) and `Def=` values it set on extern ports;
   - the title, room and category it claimed on externs, and that claim's followers;
   - tile programs it declared;
-  - access rights (`TIM=`) on Code Touches with an `access` declaration;
-  - recipients (`ACT=`) of notifications with a `recipients` declaration;
+  - access rights (`TIM=`) on Code Touches with an `access` claim;
+  - recipients (`ACT=`) of notifications with a `recipients` claim;
   - the `APC=`/`STA=` of rules with a `rule` declaration whose content changed;
   - the moods (`<LightscenesC>`) of controllers with a `moods` claim;
   - schedules of DayTimers with a `schedule` claim, and the settings it claimed.

@@ -1,6 +1,6 @@
 //! Users, groups and access rights: the model (`loxone_config::access`), the
 //! users/access section of the semantic diff, `permissions.bin`
-//! (`loxone_config::permissions`), and the Lox Logic's `access` declaration (D49).
+//! (`loxone_config::permissions`), and the Lox Logic `access` sets and claims.
 //!
 //! The fixture adds a synthetic *Users and Permissions* tree to
 //! examples/configs/pool.Loxone in memory, shaped like Loxone Config writes
@@ -675,10 +675,12 @@ fn opts() -> CompileOptions {
     }
 }
 
-/// `body` as the access declaration of the front door, compiled against
+/// `body` as the access set the front door claims, compiled against
 /// `base`.
 fn compile_access(base: &str, body: &str) -> loxone_config::Result<String> {
-    let m = Module::parse(&format!("{DOOR}\naccess front_door\n{body}end\n"))?;
+    let m = Module::parse(&format!(
+        "{DOOR}\naccess residents\n{body}end\n\nfront_door.access = residents\n"
+    ))?;
     let out = compile(&parse(base), &m, &mut Lockfile::new(), &opts())?;
     Ok(String::from_utf8(out.to_bytes()).unwrap())
 }
@@ -702,14 +704,17 @@ fn access_declarations_are_canonical() {
     let src = format!(
         "{DOOR}extern back_door = NfcCodeTouch(title: \"Back door\")\n\
          \n\
-         access front_door # main entrance\n\
+         access residents # main entrance\n\
          \t# residents first\n\
          \tuser \"alice\": \"Always\"\n\
          \tgroup \"Residents\": \"Workdays\" # weekdays only\n\
          end # door\n\
          \n\
-         access back_door\n\
-         end\n"
+         access nobody\n\
+         end\n\
+         \n\
+         front_door.access = residents # both doors\n\
+         back_door.access = residents\n"
     );
     let m = Module::parse(&src).unwrap();
     assert_eq!(m.to_text(), src);
@@ -722,7 +727,15 @@ fn access_declarations_are_canonical() {
             r#"group "Residents": "Workdays""#
         ]
     );
-    // `access` names a declaration only in front of a slug.
+    let claims: Vec<String> = m.access_claims().map(|c| c.to_string()).collect();
+    assert_eq!(
+        claims,
+        [
+            "front_door.access = residents",
+            "back_door.access = residents"
+        ]
+    );
+    // `access` names a set only in front of a slug.
     let m = Module::parse(
         "extern access = Switch(title: \"Freigabe\")\nlatch = Switch(On: access.Q)\naccess.On = 1\n",
     )
@@ -730,35 +743,99 @@ fn access_declarations_are_canonical() {
     assert_eq!(m.externs().next().unwrap().slug, "access");
 }
 
+/// The per-block form `access <code_touch>` of earlier versions names
+/// its replacement, which the language server applies.
+#[test]
+fn access_on_the_block_names_the_set_form() {
+    let err = |src: &str| Module::parse(src).unwrap_err().to_string();
+    let e = err(&format!(
+        "access front_door\n\tuser \"alice\": \"Always\"\nend\n{DOOR}"
+    ));
+    assert!(
+        e.contains(
+            "Write `access front_door_access` instead of `access front_door`, and claim it with \
+             `front_door.access = front_door_access`."
+        ),
+        "{e}"
+    );
+    let e = err("extern frost = Notification(title: \"Frost\")\nrecipients frost\nend\n");
+    assert!(
+        e.contains(
+            "Write `recipients frost_recipients` instead of `recipients frost`, and claim it \
+             with `frost.recipients = frost_recipients`."
+        ),
+        "{e}"
+    );
+}
+
+/// A template takes an access set as a set parameter and claims it in
+/// its body: the same rights as the claim at the top level.
+#[test]
+fn a_template_claims_an_access_set_through_a_parameter() {
+    let base = fixture();
+    let sets =
+        "access residents\n\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Workdays\"\nend\n";
+    let direct =
+        Module::parse(&format!("{DOOR}\n{sets}\nfront_door.access = residents\n")).unwrap();
+    let via = Module::parse(&format!(
+        "{DOOR}\n{sets}\ntemplate tuer(ct: NfcCodeTouch, rechte: access)\n\
+         \tct.access = rechte\nend\n\neingang = tuer(ct: front_door, rechte: residents)\n"
+    ))
+    .unwrap();
+    let out = |m: &Module| {
+        compile(&parse(&base), m, &mut Lockfile::new(), &opts())
+            .unwrap()
+            .to_bytes()
+    };
+    assert_eq!(out(&via), out(&direct));
+    // A set of the wrong kind is refused.
+    let e = Module::parse(&format!(
+        "{DOOR}\nrecipients familie\nend\n\ntemplate tuer(ct: NfcCodeTouch, rechte: access)\n\
+         \tct.access = rechte\nend\n\neingang = tuer(ct: front_door, rechte: familie)\n"
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("familie"), "{e}");
+}
+
 #[test]
 fn access_declarations_are_checked() {
     let err = |src: &str| Module::parse(src).unwrap_err().to_string();
+    assert!(err("access rights\n\tuser \"alice\"\nend\n").contains(
+        "Name the user and the access schedule by their titles (`user \"<title>\": \"<schedule>\"`)"
+    ));
+    assert!(err("access rights\n").contains("unclosed `access rights`"));
+    assert!(err("access\n").contains("expected `access <name>`"));
     assert!(
-        err(&format!("{DOOR}access front_door\n\tuser \"alice\"\nend\n"))
-            .contains("Name the user and the access schedule by their titles (`user \"<title>\": \"<schedule>\"`)")
+        err("template t(x: Switch)\naccess rights\nend\nend\n")
+            .contains("declared at the top level, not inside a template body")
     );
-    assert!(err(&format!("{DOOR}access front_door\n")).contains("unclosed `access front_door`"));
-    assert!(err("access\n").contains("expected `access <slug>`"));
+    let claim = "access rights\nend\nfront_door.access = rights\n";
+    assert!(err(claim).contains("undeclared slug `front_door`"));
     assert!(
-        err("template t(x: Switch)\naccess front_door\nend\nend\n")
-            .contains("not allowed inside a template body")
+        err(&format!(
+            "extern front_door = Switch(title: \"Freigabe\")\n{claim}"
+        ))
+        .contains("but `front_door` is a `Switch`")
     );
-    assert!(err("access front_door\nend\n").contains("undeclared slug `front_door`"));
     assert!(
-        err("extern front_door = Switch(title: \"Freigabe\")\naccess front_door\nend\n")
-            .contains("declared as `Switch`")
+        err(&format!("{DOOR}{claim}front_door.access = rights\n"))
+            .contains("duplicate assignment `front_door.access = …`")
+    );
+    assert!(
+        err(&format!("{DOOR}front_door.access = rights\n"))
+            .contains("no `access rights` set is declared")
     );
     assert!(
         err(&format!(
-            "{DOOR}access front_door\nend\naccess front_door\nend\n"
+            "{DOOR}recipients rights\nend\nfront_door.access = rights\n"
         ))
-        .contains("declared twice")
+        .contains("`rights` is a `recipients` set, not an `access` set")
     );
+    assert!(err("access rights\nend\naccess rights\nend\n").contains("duplicate name `rights`"));
     assert!(
-        err(&format!(
-            "{DOOR}access front_door\n\tuser \"alice\": \"Always\"\n\tuser \"alice\": \"Workdays\"\nend\n"
-        ))
-        .contains("user \"alice\" is listed twice")
+        err("access rights\n\tuser \"alice\": \"Always\"\n\tuser \"alice\": \"Workdays\"\nend\n")
+            .contains("user \"alice\" is listed twice")
     );
 }
 
@@ -900,7 +977,7 @@ fn access_titles_must_name_exactly_one_object() {
     assert!(e.contains(ALICE) && e.contains(BOB), "{e}");
     // Nothing is written when a title fails.
     let m = Module::parse(&format!(
-        "{DOOR}\naccess front_door\n\tuser \"bob\": \"Always\"\n\tuser \"carol\": \"Always\"\nend\n"
+        "{DOOR}\naccess two\n\tuser \"bob\": \"Always\"\n\tuser \"carol\": \"Always\"\nend\nfront_door.access = two\n"
     ))
     .unwrap();
     assert!(compile(&parse(&base), &m, &mut Lockfile::new(), &opts()).is_err());
@@ -955,7 +1032,7 @@ fn decompile_lifts_access_rights() {
     let text = m.to_text();
     assert!(
         text.contains(
-            "access front_door\n\tuser \"alice\": \"Always\"\n\tgroup \"Residents\": \"Workdays\"\nend\n"
+            "access front_door_access\n\tuser \"alice\": \"Always\"\n\tgroup \"Residents\": \"Workdays\"\nend\n\nfront_door.access = front_door_access\n"
         ),
         "{text}"
     );

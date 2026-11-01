@@ -1737,7 +1737,8 @@ mod tests {
             dir.join("pages/zz_access.loxl"),
             format!(
                 "extern front_door = NfcCodeTouch(uuid: \"{DOOR}\")\n\n\
-                 access front_door\n\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Always\"\nend\n"
+                 access residents\n\tuser \"alice\": \"Always\"\n\tuser \"bob\": \"Always\"\nend\n\n\
+                 front_door.access = residents\n"
             ),
         )
         .unwrap();

@@ -435,6 +435,43 @@ fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
 }
 
 #[test]
+fn an_access_section_on_the_block_offers_the_named_set_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let v1 = format!("{src}\naccess heizen\n\tuser \"christoph\"\nend\n");
+    let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &v1),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `access heizen_access`");
+    let edits = actions[0]["edit"]["changes"][uri(&pool)]
+        .as_array()
+        .unwrap();
+    assert_eq!(edits.len(), 2, "{edits:?}");
+    assert_eq!(edits[0]["newText"], "access heizen_access");
+    // The claim goes on its own line after the section's `end`.
+    assert_eq!(edits[1]["newText"], "\nheizen.access = heizen_access\n");
+    let after_end = v1.lines().count() as u32;
+    assert_eq!(
+        edits[1]["range"]["start"],
+        json!({"line": after_end, "character": 0})
+    );
+}
+
+#[test]
 fn an_expanded_instance_name_offers_the_scoped_one_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();

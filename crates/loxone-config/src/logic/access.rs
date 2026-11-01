@@ -7,26 +7,26 @@
 //! The same `<PRM>` may carry `ACT=`, the right to operate the block in the
 //! app; that one is not an access right and stays as it is.
 //!
-//! An `access <slug>` declaration owns every `TIM=` on its block, across
-//! all users and groups: compiling it grants what it lists, changes
-//! schedules, and revokes what it does not list. Blocks without a
-//! declaration are not touched. Users, groups and schedules stay with
-//! Loxone Config and the app; the declaration names them by title, and a
-//! title that is missing or not unique is an error. Like tiles the
-//! declaration keeps no lock state: withdrawing it leaves the rights as
-//! they are.
+//! An `access <name>` set claimed by a block (`<block>.access = <name>`)
+//! owns every `TIM=` on that block, across all users and groups: compiling
+//! it grants what the set lists, changes schedules, and revokes what it
+//! does not list. Blocks without a claim are not touched. Users, groups
+//! and schedules stay with Loxone Config and the app; the set names them by
+//! title, and a title that is missing or not unique is an error. Like tiles
+//! a claim keeps no lock state: withdrawing it leaves the rights as they
+//! are.
 //!
-//! A `recipients <slug>` declaration does the same for `ACT=` on a push
-//! notification (`Notification`): a user or group with `ACT=` on it gets
-//! the message. A new recipient gets `ACT="3"`, the value Loxone Config 17.2
-//! writes. An `ACT=` already there counts whatever its value (older configs
-//! have `ACT="1"`) and stays.
+//! A `recipients <name>` set claimed by a push notification
+//! (`Notification`) does the same for `ACT=`: a user or group with `ACT=`
+//! on it gets the message. A new recipient gets `ACT="3"`, the value Loxone
+//! Config 17.2 writes. An `ACT=` already there counts whatever its value
+//! (older configs have `ACT="1"`) and stays.
 //!
 //! The edit is the one Loxone Config makes (docs/loxone-format.md, *Users,
 //! groups and access rights*): a new right is a `<PRM REF TIM/>` appended
 //! to the list, `NUM=` counts the list, and nothing else of the user or
-//! group changes — not even `LastEdit=`. A declaration that matches the
-//! config writes nothing, so compiling it reproduces the bytes.
+//! group changes — not even `LastEdit=`. A claim that matches the config
+//! writes nothing, so compiling it reproduces the bytes.
 
 use super::ast::{ACCESS_BLOCK_TYPE, AccessDecl, Module, PrincipalKind, RightKind};
 use super::lint::{LintFinding, LintKind};
@@ -36,7 +36,7 @@ use crate::error::{Error, Result};
 use crate::xml::{Attr, Element, Node};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The rights one declaration wants on its block: principal UUID → the
+/// The rights one claim wants on its block: principal UUID → the
 /// value of `attr` (the schedule UUID for `TIM=`, `3` for `ACT=`).
 struct Plan {
     block: String,
@@ -52,7 +52,7 @@ pub(crate) fn apply(
     module: &Module,
     uuid_of: &BTreeMap<String, String>,
 ) -> Result<()> {
-    if module.access_decls().next().is_none() {
+    if module.access_claims().next().is_none() {
         return Ok(());
     }
     let model = AccessModel::read(doc);
@@ -65,25 +65,27 @@ pub(crate) fn apply(
     // Resolve everything first: a title that does not resolve writes nothing.
     let mut plans = Vec::new();
     let mut claimed: BTreeMap<&str, &str> = BTreeMap::new();
-    for a in module.access_decls() {
-        let kw = a.right.keyword();
-        let block = uuid_of[&a.slug].as_str();
-        if let Some(other) = claimed.insert(block, &a.slug) {
+    for c in module.access_claims() {
+        let kw = c.right.keyword();
+        let block = uuid_of[&c.slug].as_str();
+        if let Some(other) = claimed.insert(block, &c.slug) {
             return Err(Error::Compile(format!(
-                "`{kw} {}` and `{kw} {other}` are the same block ({block}). Keep one.",
-                a.slug
+                "`{c}` and `{other}.{kw} = …` are the same block ({block}). Keep one.",
             )));
         }
         let ty = types.get(block).map_or("", String::as_str);
-        if ty != a.right.block_type() {
+        if ty != c.right.block_type() {
             return Err(Error::Compile(format!(
-                "`{kw} {}`: the block ({block}) is a `{ty}`, not {} (`{}`)",
-                a.slug,
-                a.right.block_noun(),
-                a.right.block_type()
+                "`{c}`: the block ({block}) is a `{ty}`, not {} (`{}`)",
+                c.right.block_noun(),
+                c.right.block_type()
             )));
         }
-        plans.push(resolve(a, block, &model)?);
+        let set = module
+            .access_decls()
+            .find(|a| a.right == c.right && a.name == c.set)
+            .expect("Module::validate checks the claimed set");
+        plans.push(resolve(set, block, &model)?);
     }
 
     let principals: Vec<(String, Vec<usize>)> = model
@@ -107,7 +109,7 @@ pub(crate) fn apply(
 }
 
 fn resolve(a: &AccessDecl, block: &str, model: &AccessModel) -> Result<Plan> {
-    let ctx = format!("`{} {}`", a.right.keyword(), a.slug);
+    let ctx = format!("`{} {}`", a.right.keyword(), a.name);
     let mut want = BTreeMap::new();
     for g in a.grants() {
         let (what, candidates): (&str, Vec<(&str, Option<&str>)>) = match g.kind {
@@ -348,7 +350,7 @@ pub fn lint_access(doc: &LoxoneDoc) -> Vec<LintFinding> {
                 kind: LintKind::NoAccessRight,
                 slug: u.title.clone().unwrap_or_else(|| u.uuid.clone()),
                 detail: format!(
-                    "user with {} has no access right on any NFC Code Touch, so the tag or code opens nothing. Grant one in an `access <code_touch>` declaration or in the app.",
+                    "user with {} has no access right on any NFC Code Touch, so the tag or code opens nothing. Grant one in an `access` set the Code Touch claims, or in the app.",
                     has.join(" and ")
                 ),
             }

@@ -472,7 +472,7 @@ lox logic lsp                             # language server for editors (stdio):
 
 Exit codes: 0 ok, 1 a finding (check errors, a diff, drift, a failed test), 2 a usage error.
 
-Access rights on an NFC Code Touch can live in the module too: an `access` declaration lists the users and groups
+Access rights on an NFC Code Touch can live in the module too: an `access` set lists the users and groups
 that may open it, by title, each with its access schedule, and takes the right away from everyone else. Users,
 groups, schedules, tags and codes stay with Loxone Config and the app. `decompile` and `adopt` lift the rights the
 config has. Spec: the `access` section of the [language spec](crates/loxone-config/docs/language.md).
@@ -480,23 +480,28 @@ config has. Spec: the `access` section of the [language spec](crates/loxone-conf
 ```text
 extern haustuer = NfcCodeTouch(uuid: "…")
 
-access haustuer
+access bewohner
 	user "alice": "Always"
 	group "Residents": "Workdays"
 end
+
+haustuer.access = bewohner               # several Code Touches may share the set
 ```
 
 Push notifications work the same way. The notification is created in Loxone Config and named as an extern. An
-`OutputRefLM` block sends its message when its input turns on, and a `recipients` declaration lists who gets it.
+`OutputRefLM` block sends its message when its input turns on, and a `recipients` set, claimed with
+`frost.recipients = …`, lists who gets it.
 Spec: the push notifications section of the [language spec](crates/loxone-config/docs/language.md).
 
 ```text
 extern frost = Notification(title: "Frostwarnung Garten")
 warn = OutputRefLM(mirrors: frost, AI: zu_kalt.Q, On: "Frost im Garten", MinimumTime: 12h)
 
-recipients frost
+recipients familie
 	user "alice"
 end
+
+frost.recipients = familie
 ```
 
 A directory with a `lox.toml` is a project: inside it `compile` needs no flags and `check`/`fmt`/`drift`/`lint`
