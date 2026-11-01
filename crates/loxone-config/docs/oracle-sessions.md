@@ -878,6 +878,22 @@ Results:
 - **Lc1** toggled its circuit with M staying 0. The KB says −1 for a
   user-defined mood, so Lc stays refused.
 
+## Text-boolean attributes off (session 37, #298) — passed, one finding
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a reflink clone of the oracle
+prefix on its own display. The base was the redacted library config `examples/library/energy`. The probe
+minted four `VirtualIn`s (`Analog: off`, no `Analog:`, `Analog: off` with the attribute then deleted from
+a scratch copy of the output, and an analog one with `MinVal: 0`), a `VirtualOut` with
+`CloseAfterSend: off`, three `VirtualOutCmd`s (`Analog: off`, none, `on`), and a `VirtualUdpInCmd` and a
+`VirtualHttpInCmd` with `Signed: off, Analog: off`.
+
+- The digital `VirtualIn`s came back with `Analog="false"`, the stripped one included: a save writes it,
+  and adds it where it is missing.
+- On the commands and the output, the save dropped every `"false"` (`Signed`, `Analog`,
+  `CloseAfterSend`) and kept `Analog="true"`. **Heal:** `off` on those compiles to no attribute. The
+  recompiled probe diffs against the saved file in one line only, the finding below.
+- **Finding:** the save dropped `MinVal="0"` on the analog `VirtualIn`, as on physical inputs.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

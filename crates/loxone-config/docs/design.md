@@ -222,3 +222,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D87 | [Tooling for v2: unit-suffix lint, lint --fix, scoped names in the language server](decisions/0087-v2-tooling.md) | accepted |
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
+| D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |

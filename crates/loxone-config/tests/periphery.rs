@@ -326,3 +326,44 @@ fn a_virtual_input_is_adopted_in_its_place() {
     assert_eq!(lock.objects["eingang"].uuid, b);
     assert!(lock.objects["eingang"].page_uuid.is_none());
 }
+
+#[test]
+fn off_is_no_attribute_except_on_a_virtual_input() {
+    // A save drops `Signed="false"`, `Analog="false"` and
+    // `CloseAfterSend="false"` on the virtual commands and outputs, and
+    // writes `Analog="false"` on a digital VirtualIn (#298).
+    let src = |cmd: &str| {
+        format!(
+            "vi = VirtualIn(\"Taster\", Analog: off)\n\
+             out = VirtualOut(\"Aktor\", Address: \"http://192.0.2.11\", CloseAfterSend: off)\n\
+             out_cmd = VirtualOutCmd(\"Ein\", device: out, CmdOn: \"/on\", Analog: {cmd})\n\
+             udp = VirtualUdpIn(\"Kamera\", Port: 45999)\n\
+             udp_cmd = VirtualUdpInCmd(\"Person\", device: udp, Check: \"p\", Signed: off, Analog: off)\n\
+             http = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/s\", Poll: 600)\n\
+             http_cmd = VirtualHttpInCmd(\"Leistung\", device: http, Check: \"p\", Signed: off, Analog: off)\n"
+        )
+    };
+    let mut lock = Lockfile::default();
+    let module = Module::parse(&src("on")).unwrap();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let attr = |doc: &LoxoneDoc, slug: &str, name: &str| {
+        element(doc, &lock.objects[slug].uuid)
+            .attr(name)
+            .map(str::to_string)
+    };
+    assert_eq!(attr(&out, "vi", "Analog").as_deref(), Some("false"));
+    assert_eq!(attr(&out, "out", "CloseAfterSend"), None);
+    assert_eq!(attr(&out, "out_cmd", "Analog").as_deref(), Some("true"));
+    for slug in ["udp_cmd", "http_cmd"] {
+        assert_eq!(attr(&out, slug, "Signed"), None, "{slug}");
+        assert_eq!(attr(&out, slug, "Analog"), None, "{slug}");
+    }
+    // Switching a ticked box off removes the attribute; the result is
+    // stable.
+    let module = Module::parse(&src("off")).unwrap();
+    let mut lock2 = lock.clone();
+    let off = compile(&out, &module, &mut lock2, &opts()).unwrap();
+    assert_eq!(attr(&off, "out_cmd", "Analog"), None);
+    let again = compile(&off, &module, &mut lock2.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), off.to_bytes());
+}
