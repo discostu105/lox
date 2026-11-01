@@ -533,3 +533,163 @@ fn completion_after_an_instance_offers_its_blocks_and_primary_ports() {
     assert!(labels.contains(&"Q"), "{labels:?}");
     assert!(!labels.contains(&"ein"), "{labels:?}");
 }
+
+/// The labels of a completion response.
+fn labels(out: &[Value], id: u64) -> Vec<String> {
+    response(out, id)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["label"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn scoped_instance_names_hover_and_go_to_the_template_body() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = format!(
+        "{src}\ntemplate paar() -> ein\n\tein = Not()\n\taus = Or()\nend\npx = paar()\n\
+         lampe.On <- px.aus.Q\npumpe.Off <- px.Q\n"
+    );
+    let (bl, bc) = pos(&text, "px.aus.Q");
+    let (ql, qc) = pos(&text, "px.Q\n");
+    let (dl, dc) = pos(&text, "aus = Or");
+    let typing = format!("{text}x = Not(I: px.aus.\n");
+    let (cl, cc) = pos(&typing, "px.aus.\n");
+    let out = session(&[
+        open(&pool, &text),
+        at(1, "textDocument/definition", &pool, bl, bc + 4),
+        at(2, "textDocument/hover", &pool, bl, bc + 4),
+        at(3, "textDocument/definition", &pool, bl, bc + 7),
+        at(4, "textDocument/hover", &pool, bl, bc + 7),
+        at(5, "textDocument/hover", &pool, ql, qc + 3),
+        change(&pool, &typing),
+        at(6, "textDocument/completion", &pool, cl, cc + 7),
+    ]);
+    // `px.aus` and `px.aus.Q` lead to `aus` in the template body.
+    for id in [1, 3] {
+        let def = response(&out, id);
+        assert_eq!(def["uri"], uri(&pool));
+        assert_eq!(
+            def["range"]["start"],
+            json!({"line": dl, "character": dc}),
+            "{id}"
+        );
+    }
+    let hover = response(&out, 2)["contents"]["value"].as_str().unwrap();
+    assert!(hover.contains("aus = Or()"), "{hover}");
+    assert!(hover.contains("compiled as `px_aus`"), "{hover}");
+    let hover = response(&out, 4)["contents"]["value"].as_str().unwrap();
+    assert!(hover.starts_with("**Or.Q** — output"), "{hover}");
+    // `px.Q` is a port of the primary block, a Not.
+    let hover = response(&out, 5)["contents"]["value"].as_str().unwrap();
+    assert!(hover.starts_with("**Not.Q** — output"), "{hover}");
+    let got = labels(&out, 6);
+    assert!(got.contains(&"Q".to_string()), "{got:?}");
+    assert!(got.contains(&"I1".to_string()), "{got:?}");
+}
+
+#[test]
+fn completion_offers_argument_keys_and_signal_names() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let typing = format!(
+        "{src}\nwp_ok = heizen.Q and wasser.Q\ndefaults Monoflop(\n\t\n)\n\
+         m = Monoflop(Time: 5s, )\nt = Not(I: )\nn = Not(I: wp_ok.)\n"
+    );
+    let (dl, _) = pos(&typing, "defaults Monoflop(");
+    let (ml, mc) = pos(&typing, ", )");
+    let (tl, tc) = pos(&typing, "I: )");
+    let (sl, sc) = pos(&typing, "wp_ok.)");
+    let out = session(&[
+        open(&pool, &src),
+        change(&pool, &typing),
+        at(1, "textDocument/completion", &pool, dl + 1, 1),
+        at(2, "textDocument/completion", &pool, ml, mc + 2),
+        at(3, "textDocument/completion", &pool, tl, tc + 3),
+        at(4, "textDocument/completion", &pool, sl, sc + 6),
+    ]);
+    // `defaults` takes parameters only; a block also its inputs.
+    let got = labels(&out, 1);
+    assert!(got.contains(&"Time".to_string()), "{got:?}");
+    assert!(!got.contains(&"InputTrigger".to_string()), "{got:?}");
+    assert!(!got.contains(&"Q".to_string()), "{got:?}");
+    let got = labels(&out, 2);
+    assert!(got.contains(&"InputTrigger".to_string()), "{got:?}");
+    assert!(!got.contains(&"Q".to_string()), "{got:?}");
+    // A named signal is a name like a block's, with its top block's ports.
+    let got = labels(&out, 3);
+    assert!(got.contains(&"wp_ok".to_string()), "{got:?}");
+    let got = labels(&out, 4);
+    assert!(got.contains(&"Q".to_string()), "{got:?}");
+}
+
+#[test]
+fn a_bare_duration_offers_its_unit_suffix_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let text = format!("{src}\nm = Monoflop(InputTrigger: heizen.Q, Time: 300)\n");
+    let out = session(&[open(&pool, &src), change(&pool, &text), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().starts_with("unit-suffix"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+    let (l, c) = pos(&text, "Time: 300");
+    assert_eq!(d["range"]["start"], json!({"line": l, "character": c}));
+
+    let out = session(&[
+        open(&pool, &text),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(
+        actions[0]["edit"]["changes"][uri(&pool)][0]["newText"],
+        "Time: 5min"
+    );
+}
+
+#[test]
+fn a_file_on_the_default_page_offers_the_previous_page_as_a_quick_fix() {
+    let technik = project().join("pages/technik.loxl");
+    let src = std::fs::read_to_string(&technik).unwrap();
+    let text = src.replace("page \"Technik\"\n", "");
+    let out = session(&[
+        open(&technik, &src),
+        change(&technik, &text),
+        save(&technik),
+    ]);
+    let diags = diagnostics(&out, &technik).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().starts_with("default-page"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&technik, &text),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&technik)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    let edit = &actions[0]["edit"]["changes"][uri(&technik)][0];
+    assert_eq!(edit["newText"], "page \"Pool\"\n\n");
+    // Below the comments that head the file.
+    let first = text
+        .lines()
+        .position(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .unwrap();
+    assert_eq!(
+        edit["range"]["start"],
+        json!({"line": first, "character": 0})
+    );
+}

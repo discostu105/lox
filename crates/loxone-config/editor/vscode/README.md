@@ -3,16 +3,20 @@
 VS Code extension for `.loxl` modules: syntax highlighting
 (TextMate grammar), comment/bracket configuration, and snippets for every
 statement form — `page`, `let`, `extern`, blocks, `template`/`end` and
-instances, wires (plain and expression), `set`, attribute assignments
-(`x.room = …`), `removed`/`moved` — plus
+instances, wires (plain and expression), named signals, `defaults`, `set`,
+attribute assignments (`x.room = …`), the named sets (`tiles`, `schedule`,
+`moods`, `access`, `recipients`) with their claims, `rule`, `test`,
+`removed`/`moved` — plus
 unit-suffixed values (`30min`, `2700K`) and the expression operators
 (`and`/`or`/`not`, comparisons, arithmetic).
 
 It also starts the language server (`loxl lsp`) for `.loxl` files:
-diagnostics as you type and on save, go to definition, hover with the base
-object an extern resolves to, port and type completion, formatting
+diagnostics as you type and on save, go to definition (template instance
+blocks too: `inst.block`), hover with the base object an extern resolves to,
+completion of ports, types, argument keys and signal names, formatting
 (*Format Document*), the outline, *Find All References*, *Rename Symbol*
-(fragments and lockfile together) and quick fixes for "did you mean".
+(fragments and lockfile together) and quick fixes for "did you mean", old
+spellings, bare durations and a file without its `page` line.
 
 Install by linking the folder into your extensions directory, and install
 the language client once (without it the extension still highlights, and

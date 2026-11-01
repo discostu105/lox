@@ -11,8 +11,8 @@
 use crate::connectors::{BUILTIN_TYPES, PortDir, builtin};
 use crate::doc::{LoxoneDoc, ports};
 use crate::logic::{
-    CompileOptions, LintFinding, Module, compile, lint_access, lint_dead_outputs, lint_source,
-    lint_tiles, resolve_extern_uuids, validate_ports,
+    CompileOptions, LintFinding, Module, TemplateParam, compile, lint_access, lint_dead_outputs,
+    lint_source, lint_tiles, resolve_extern_uuids, validate_ports,
 };
 use crate::port_meta::port_meta;
 use crate::{Error, Lockfile, Project};
@@ -100,6 +100,15 @@ pub fn claim_to_add(message: &str) -> Option<&str> {
     let rest = &message[message.find("claim it with `")? + "claim it with `".len()..];
     let claim = &rest[..rest.find('`')?];
     (!claim.is_empty()).then_some(claim)
+}
+
+/// The `page "…"` line of a diagnostic's "Start the file with `page
+/// \"…\"`": the line to insert above the file's first statement.
+pub fn page_to_insert(message: &str) -> Option<&str> {
+    let rest =
+        &message[message.find("Start the file with `page ")? + "Start the file with `".len()..];
+    let line = &rest[..rest.find('`')?];
+    (line != "page \"…\"").then_some(line)
 }
 
 /// `s` is one identifier.
@@ -337,19 +346,25 @@ impl Workspace {
     /// else the declaration of the first declared one, else the first use
     /// of one, else the top of `fallback`.
     fn locate(&self, message: &str, decls: &[Decl], unit: &Unit, fallback: &Path) -> Span {
+        self.try_locate(message, decls, unit)
+            .unwrap_or_else(|| span(fallback, 0, 0, 0))
+    }
+
+    /// [`Self::locate`] without the fallback.
+    fn try_locate(&self, message: &str, decls: &[Decl], unit: &Unit) -> Option<Span> {
         // "`defaults Type(…)` …": that statement.
         if let Some(rest) = message.split("`defaults ").nth(1)
             && let Some(ty) = rest.split('(').next()
             && let Some(s) = self.first_text(&format!("defaults {ty}"), unit)
         {
-            return s;
+            return Some(s);
         }
         // "write `a.Q` instead of `a_ein.Q`": the old spelling, so the quick
         // fix applies.
         if let Some((_, old)) = replacement(message)
             && let Some(s) = self.first_text(old, unit)
         {
-            return s;
+            return Some(s);
         }
         let names: Vec<&str> = message
             .split('`')
@@ -364,22 +379,17 @@ impl Workspace {
         for d in &declared {
             for other in names.iter().filter(|n| **n != d.slug) {
                 if let Some(s) = self.port_use(&d.slug, other, unit) {
-                    return s;
+                    return Some(s);
                 }
                 if let Some(s) = self.inside_decl(d, other) {
-                    return s;
+                    return Some(s);
                 }
             }
         }
         if let Some(d) = declared.first() {
-            return d.span.clone();
+            return Some(d.span.clone());
         }
-        for n in &names {
-            if let Some(s) = self.first_use(n, unit) {
-                return s;
-            }
-        }
-        span(fallback, 0, 0, 0)
+        names.iter().find_map(|n| self.first_use(n, unit))
     }
 
     /// The first occurrence of `needle` in the unit's code (not in a
@@ -444,12 +454,55 @@ impl Workspace {
     }
 
     fn lint_span(&self, f: &LintFinding, decls: &[Decl], unit: &Unit, fallback: &Path) -> Span {
-        match decls.iter().find(|d| d.slug == f.slug) {
-            Some(d) => d.span.clone(),
+        // A `defaults` finding is named by its type.
+        let at = decls
+            .iter()
+            .find(|d| d.slug == f.slug)
+            .map(|d| d.span.clone())
+            .or_else(|| self.first_text(&format!("defaults {}", f.slug), unit));
+        // "write `Time: 5min` instead of `Time: 300`": the old text in the
+        // statement, so the quick fix applies.
+        if let (Some(at), Some((_, old))) = (&at, replacement(&f.detail))
+            && let Some(s) = self.text_in_statement(at, old)
+        {
+            return s;
+        }
+        match at {
+            Some(s) => s,
             None => self
                 .first_use(&f.slug, unit)
                 .unwrap_or_else(|| span(fallback, 0, 0, 0)),
         }
+    }
+
+    /// `needle` in the statement that starts at `at`, not inside a longer
+    /// name: on its line after `at`, or on the lines of its argument list.
+    fn text_in_statement(&self, at: &Span, needle: &str) -> Option<Span> {
+        let text = self.text(&at.file)?;
+        for (n, line) in text.split('\n').enumerate().skip(at.line).take(200) {
+            let code = code(line);
+            let from = if n == at.line { at.end } else { 0 };
+            let hit = code.match_indices(needle).find(|&(s, _)| {
+                s >= from
+                    && !code[..s].chars().next_back().is_some_and(is_ident)
+                    && !code[s + needle.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| is_ident(c) || c == '.')
+            });
+            if let Some((s, _)) = hit {
+                return Some(span(&at.file, n, s, s + needle.len()));
+            }
+            let ends = if n == at.line {
+                code.matches('(').count() <= code.matches(')').count()
+            } else {
+                code.trim_start().starts_with(')')
+            };
+            if ends {
+                break;
+            }
+        }
+        None
     }
 
     fn first_use(&self, name: &str, unit: &Unit) -> Option<Span> {
@@ -595,13 +648,66 @@ impl Workspace {
         }])
     }
 
-    /// The declaration of the name at (`line`, `byte`) in `path`.
+    /// The declaration of the name at (`line`, `byte`) in `path`. On
+    /// `inst.block` or `inst.block.Port`, the block in the template body.
     pub fn definition(&self, path: &Path, line: usize, byte: usize) -> Option<Span> {
         let text = self.text(path)?;
         let word = word_at(super::text::line(&text, line), byte)?;
         let unit = self.unit(path);
         let decls = self.decls(&unit);
-        find_decl(&decls, word.slug(), path).map(|d| d.span.clone())
+        let target = match word {
+            Word::Name { name, .. } => name.to_string(),
+            // The cursor on `block` of `inst.block`: the scoped block,
+            // else the owner of the port.
+            Word::Port { slug, port, .. } => {
+                let scoped = format!("{slug}.{port}");
+                if self.resolve(&decls, &scoped, path).is_some() {
+                    scoped
+                } else {
+                    slug.to_string()
+                }
+            }
+        };
+        self.resolve(&decls, &target, path).map(|d| d.span)
+    }
+
+    /// The declaration `name` stands for: a module-level name, or
+    /// `inst.block`, block `block` of the template `inst` instantiates.
+    /// A scoped block comes back under its compiled slug (`inst_block`)
+    /// with the span of its declaration in the template body.
+    fn resolve(&self, decls: &[Decl], name: &str, path: &Path) -> Option<Decl> {
+        let Some((inst, block)) = name.split_once('.') else {
+            return find_decl(decls, name, path).cloned();
+        };
+        let inst_decl = find_decl(decls, inst, path).filter(|d| d.kind == "instance")?;
+        let template = decls
+            .iter()
+            .find(|d| d.kind == "template" && Some(d.slug.as_str()) == inst_decl.ty.as_deref())?;
+        let text = self.text(&template.span.file)?;
+        let (body, _) = template_bodies(&text)
+            .into_iter()
+            .find(|(lines, _)| lines.start == template.span.line)?;
+        let d = decls.iter().find(|d| {
+            d.slug == block
+                && d.span.file == template.span.file
+                && d.span.line > body.start
+                && body.contains(&d.span.line)
+        })?;
+        Some(Decl {
+            slug: format!("{inst}_{block}"),
+            ..d.clone()
+        })
+    }
+
+    /// The block whose ports `decl.Port` names: an instance's primary
+    /// block (`licht.Q` is `licht.<primary>.Q`), else `decl` itself.
+    fn port_owner(&self, decls: &[Decl], decl: &Decl, path: &Path) -> Option<Decl> {
+        if decl.kind != "instance" {
+            return Some(decl.clone());
+        }
+        let t = self.template(decls, decl.ty.as_deref()?)?;
+        let primary = t.primary_block()?;
+        self.resolve(decls, &format!("{}.{primary}", decl.slug), path)
     }
 
     /// Hover text (Markdown) for the name at (`line`, `byte`).
@@ -613,7 +719,21 @@ impl Workspace {
         let decls = self.decls(&unit);
         let (start, end) = word.range();
         let here = span(path, line, start, end);
-        let Some(decl) = find_decl(&decls, word.slug(), path) else {
+        let decl = match word {
+            Word::Name { name, .. } => self.resolve(&decls, name, path),
+            Word::Port { slug, port, .. } => {
+                match self.resolve(&decls, &format!("{slug}.{port}"), path) {
+                    // `inst.block`: the scoped block itself.
+                    Some(d) => Some(d),
+                    None => {
+                        let owner = self.resolve(&decls, slug, path)?;
+                        let owner = self.port_owner(&decls, &owner, path)?;
+                        return Some((self.port_hover(&unit, &owner, port)?, here));
+                    }
+                }
+            }
+        };
+        let Some(decl) = decl else {
             // A block type: its ports.
             return match word {
                 Word::Name { name, .. } if builtin(name).is_some() => {
@@ -622,19 +742,22 @@ impl Workspace {
                 _ => None,
             };
         };
-        if let Word::Port { port, .. } = word {
-            return Some((self.port_hover(&unit, decl, port)?, here));
-        }
         let decl_text = super::text::line(&self.text(&decl.span.file)?, decl.span.line)
             .trim()
             .to_string();
         let mut md = format!("```loxl\n{decl_text}\n```\n");
+        if let Word::Port { slug, port, .. } = word {
+            md.push_str(&format!(
+                "\nBlock `{port}` of instance `{slug}`, compiled as `{}`.\n",
+                decl.slug
+            ));
+        }
         if decl.kind == "block"
-            && let Some(taken) = self.defaults_taken(&unit, decl)
+            && let Some(taken) = self.defaults_taken(&unit, &decl)
         {
             md.push_str(&taken);
         }
-        if let Some(obj) = self.object(&unit, decl) {
+        if let Some(obj) = self.object(&unit, &decl) {
             md.push_str(&obj);
         }
         Some((md, here))
@@ -761,20 +884,24 @@ impl Workspace {
         let decls = self.decls(&unit);
         if before[..partial].ends_with('.') {
             let slug_end = partial - 1;
+            // `slug.` or `inst.block.`
             let slug_start = before[..slug_end]
                 .char_indices()
                 .rev()
-                .take_while(|(_, c)| is_ident(*c))
+                .take_while(|(_, c)| is_ident(*c) || *c == '.')
                 .last()
                 .map_or(slug_end, |(i, _)| i);
             let slug = &before[slug_start..slug_end];
-            let Some(decl) = find_decl(&decls, slug, path) else {
+            let Some(decl) = self.resolve(&decls, slug, path) else {
                 return Vec::new();
             };
             if decl.kind == "instance" {
-                return self.instance_completions(&unit, &decls, decl);
+                return self.instance_completions(&unit, &decls, &decl);
             }
-            return self.port_completions(&unit, decl);
+            return self.port_completions(&unit, &decl);
+        }
+        if let Some(callee) = key_position(&text, line, &before[..partial]) {
+            return self.key_completions(&unit, &decls, &callee);
         }
         if is_type_position(&before[..partial]) {
             let mut out: Vec<Completion> = BUILTIN_TYPES
@@ -806,6 +933,59 @@ impl Workspace {
                 kind: d.kind,
                 detail: d.ty.clone(),
             })
+            .collect()
+    }
+
+    /// The argument keys a call takes: a `defaults` statement its type's
+    /// parameters, a block its inputs and parameters, an instance its
+    /// template's parameters.
+    fn key_completions(&self, unit: &Unit, decls: &[Decl], callee: &Callee) -> Vec<Completion> {
+        let (ty, dirs): (&str, &[PortDir]) = match callee {
+            Callee::Defaults(ty) => (ty, &[PortDir::Param]),
+            Callee::Block(ty) => (ty, &[PortDir::Input, PortDir::Param]),
+            Callee::Template(name) => {
+                let Some(t) = self.template(decls, name) else {
+                    return Vec::new();
+                };
+                return t
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let (name, detail) = match p {
+                            TemplateParam::Object { name, block_type } => {
+                                (name, block_type.clone())
+                            }
+                            TemplateParam::Value { name, default } => {
+                                (name, format!("= {default}"))
+                            }
+                            TemplateParam::Set { name, kind, .. } => {
+                                (name, kind.keyword().to_string())
+                            }
+                        };
+                        Completion {
+                            label: name.clone(),
+                            kind: "port",
+                            detail: Some(detail),
+                        }
+                    })
+                    .collect();
+            }
+        };
+        let block = Decl {
+            slug: String::new(),
+            kind: "block",
+            ty: Some(ty.to_string()),
+            span: span(Path::new(""), 0, 0, 0),
+        };
+        let keep: Vec<&str> = builtin(ty)
+            .unwrap_or_default()
+            .iter()
+            .filter(|p| dirs.contains(&p.dir))
+            .map(|p| p.key)
+            .collect();
+        self.port_completions(unit, &block)
+            .into_iter()
+            .filter(|c| keep.contains(&c.label.as_str()))
             .collect()
     }
 
@@ -890,6 +1070,21 @@ impl Workspace {
     pub fn symbols(&self, path: &Path) -> Vec<Decl> {
         scan(&self.text(path).unwrap_or_default(), path)
     }
+}
+
+/// The file and 1-based line a module error is about, found the way the
+/// language server places its diagnostics: by the names the message
+/// quotes. `None` when no file of the module mentions them.
+pub fn locate_error(files: &[PathBuf], message: &str) -> Option<(PathBuf, usize)> {
+    let ws = Workspace::default();
+    let unit = Unit {
+        files: files.to_vec(),
+        fragments: files.len() > 1,
+        project: None,
+    };
+    let decls = ws.decls(&unit);
+    ws.try_locate(message, &decls, &unit)
+        .map(|s| (s.file, s.line + 1))
 }
 
 /// `text` in canonical form (`loxl fmt`), if it parses.
@@ -1076,7 +1271,8 @@ enum Word<'a> {
         start: usize,
         end: usize,
     },
-    /// `slug.port`, the cursor on the port
+    /// `slug.port`, the cursor on the port; `slug` may be a scoped
+    /// `inst.block`
     Port {
         slug: &'a str,
         port: &'a str,
@@ -1086,13 +1282,6 @@ enum Word<'a> {
 }
 
 impl Word<'_> {
-    fn slug(&self) -> &str {
-        match self {
-            Word::Name { name, .. } => name,
-            Word::Port { slug, .. } => slug,
-        }
-    }
-
     fn range(&self) -> (usize, usize) {
         match *self {
             Word::Name { start, end, .. } | Word::Port { start, end, .. } => (start, end),
@@ -1106,7 +1295,12 @@ fn word_at(line: &str, byte: usize) -> Option<Word<'_>> {
     let i = list.iter().position(|&(s, e)| s <= byte && byte <= e)?;
     let (s, e) = list[i];
     if s > 0 && code[..s].ends_with('.') && i > 0 && list[i - 1].1 == s - 1 {
-        let (ps, pe) = list[i - 1];
+        // `inst.block.Port`: the owner is `inst.block`.
+        let mut ps = list[i - 1].0;
+        if i > 1 && ps > 0 && list[i - 2].1 == ps - 1 && code[..ps].ends_with('.') {
+            ps = list[i - 2].0;
+        }
+        let pe = list[i - 1].1;
         return Some(Word::Port {
             slug: &code[ps..pe],
             port: &code[s..e],
@@ -1168,6 +1362,108 @@ fn local_in(text: &str, line: usize, name: &str) -> bool {
     template_bodies(text)
         .iter()
         .any(|(lines, locals)| lines.contains(&line) && locals.iter().any(|l| l == name))
+}
+
+/// The call an argument list belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Callee {
+    /// `defaults Type(`
+    Defaults(String),
+    /// `name = Type(`
+    Block(String),
+    /// `name = template(`
+    Template(String),
+}
+
+/// `code` with the inside of its strings blanked, byte for byte, so
+/// parentheses in a label do not count.
+fn blank_strings(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let (mut in_str, mut escaped) = (false, false);
+    for c in code.chars() {
+        let keep = match c {
+            _ if escaped => {
+                escaped = false;
+                false
+            }
+            '\\' if in_str => {
+                escaped = true;
+                false
+            }
+            '"' => {
+                in_str = !in_str;
+                true
+            }
+            _ => !in_str,
+        };
+        if keep {
+            out.push(c);
+        } else {
+            out.extend(std::iter::repeat_n(' ', c.len_utf8()));
+        }
+    }
+    out
+}
+
+/// The call whose argument key goes at the end of `before` (the start of
+/// line `line` of `text` up to the word being typed): `before` is blank
+/// or ends after `(` or `,`, inside the argument list of a `defaults`
+/// statement, a block or an instance.
+fn key_position(text: &str, line: usize, before: &str) -> Option<Callee> {
+    let t = before.trim_end();
+    if !(t.trim_start().is_empty() || t.ends_with('(') || t.ends_with(',')) {
+        return None;
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut depth = 0usize;
+    for n in (line.saturating_sub(200)..=line).rev() {
+        let blanked = blank_strings(code(lines.get(n)?));
+        let part = if n == line {
+            &blanked[..before.len().min(blanked.len())]
+        } else {
+            &blanked[..]
+        };
+        for (i, c) in part.char_indices().rev() {
+            match c {
+                ')' => depth += 1,
+                '(' if depth > 0 => depth -= 1,
+                '(' => return callee(&part[..i]),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// The callee `head` (a line up to its `(`) opens: `defaults Type`,
+/// `[extern] name = Type` or `name = template`.
+fn callee(head: &str) -> Option<Callee> {
+    let head = head.trim_end();
+    let start = head.len()
+        - head
+            .chars()
+            .rev()
+            .take_while(|c| is_ident(*c))
+            .map(char::len_utf8)
+            .sum::<usize>();
+    let name = &head[start..];
+    if name.is_empty() {
+        return None;
+    }
+    let rest = head[..start].trim();
+    if rest == "defaults" {
+        return Some(Callee::Defaults(name.to_string()));
+    }
+    // An extern's arguments match an object; they are not its ports.
+    let lhs = rest.strip_suffix('=')?.trim();
+    if lhs.is_empty() || !lhs.chars().all(is_ident) {
+        return None;
+    }
+    Some(if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        Callee::Block(name.to_string())
+    } else {
+        Callee::Template(name.to_string())
+    })
 }
 
 /// `before` ends where a block type or template name goes: `name = `.

@@ -12,7 +12,9 @@
 //! documentation, an app-visible state block), which is why lint reports
 //! and never blocks a compile.
 
-use super::ast::{BindingKind, Item, MatchSpec, Module, TestItem, Value};
+use super::ast::{
+    ArgItem, Binding, BindingKind, Item, MatchSpec, Module, TestItem, Value, duration_value,
+};
 use crate::doc::{LoxoneDoc, ports};
 use crate::error::Result;
 use crate::lock::Lockfile;
@@ -42,6 +44,9 @@ pub enum LintKind {
     /// A `defaults` value no block takes: every block of the type binds
     /// the port itself, or the module has no block of the type.
     UnusedDefault,
+    /// A bare number on a port documented in seconds or minutes that a
+    /// unit suffix writes exactly (`Time: 300` is `5min`).
+    UnitSuffix,
 }
 
 impl LintKind {
@@ -57,6 +62,7 @@ impl LintKind {
             LintKind::OutOfRange => "out-of-range",
             LintKind::DefaultPage => "default-page",
             LintKind::UnusedDefault => "unused-default",
+            LintKind::UnitSuffix => "unit-suffix",
         }
     }
 }
@@ -66,6 +72,54 @@ pub struct LintFinding {
     pub kind: LintKind,
     pub slug: String,
     pub detail: String,
+}
+
+/// Bare numbers on ports documented in seconds or minutes, rewritten in
+/// `module` with their unit suffix: block and `defaults` parameters,
+/// template bodies included. The spelling is decompile's: the largest
+/// unit that writes the value as a whole number, and only when the
+/// compile reproduces the number exactly (`300` → `5min`, `0.02` →
+/// `20ms`). One finding per rewritten value. The compiled config does
+/// not change.
+pub fn fix_unit_suffixes(module: &mut Module) -> Vec<LintFinding> {
+    fn fix(slug: &str, block_type: &str, args: &mut [ArgItem], out: &mut Vec<LintFinding>) {
+        for arg in args {
+            let ArgItem::Binding(Binding {
+                port,
+                kind: BindingKind::Param(value),
+                ..
+            }) = arg
+            else {
+                continue;
+            };
+            let Value::Number(n) = &*value else { continue };
+            let Some(new) = duration_value(block_type, port, n) else {
+                continue;
+            };
+            out.push(LintFinding {
+                kind: LintKind::UnitSuffix,
+                slug: slug.to_string(),
+                detail: format!(
+                    "`{port}: {n}` reads better with its unit. Write `{port}: {new}` instead of \
+                     `{port}: {n}`."
+                ),
+            });
+            *value = new;
+        }
+    }
+    fn walk(items: &mut [Item], out: &mut Vec<LintFinding>) {
+        for item in items {
+            match item {
+                Item::Block(b) => fix(&b.slug, &b.block_type, &mut b.args, out),
+                Item::Defaults(d) => fix(&d.block_type, &d.block_type, &mut d.args, out),
+                Item::Template(t) => walk(&mut t.body, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&mut module.items, &mut out);
+    out
 }
 
 /// `defaults` values that reach no block: the blocks of the type, as
@@ -143,6 +197,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
     }
 
     findings.extend(unused_defaults(module)?);
+    findings.extend(fix_unit_suffixes(&mut module.clone()));
 
     let (flat, _) = module.expand()?.desugar()?;
     let mut object_refs: BTreeSet<&str> = BTreeSet::new();
@@ -329,7 +384,17 @@ fn lint_default_page(module: &Module, flat: &Module) -> Vec<LintFinding> {
         return Vec::new();
     }
     let mut findings = Vec::new();
+    // The page in force at the end of the files so far: what the blocks
+    // above a file's first `page` would take if `page` carried over.
+    let mut previous: Option<&str> = None;
     for (s, f) in src.iter().zip(&flat) {
+        let before = previous;
+        if let Some(t) = s.iter().rev().find_map(|i| match i {
+            Item::Page(p) => Some(p.title.as_str()),
+            _ => None,
+        }) {
+            previous = Some(t);
+        }
         // Placed blocks (not object-tree items) before the first `page`.
         let unpaged: Vec<&str> = f
             .iter()
@@ -364,12 +429,20 @@ fn lint_default_page(module: &Module, flat: &Module) -> Vec<LintFinding> {
             })
             .unwrap_or(first);
         let n = unpaged.len();
+        let fix = match before {
+            // The language server's quick fix inserts exactly this line.
+            Some(t) => format!(
+                "Start the file with `page {}` (the page of the file before it) or its own page.",
+                Value::Str(t.to_string())
+            ),
+            None => "Start the file with its `page \"…\"` line.".to_string(),
+        };
         findings.push(LintFinding {
             kind: LintKind::DefaultPage,
             slug: named.to_string(),
             detail: format!(
                 "{n} block{} before any `page` statement in its file go{} to the default page, \
-                 while other files name their page. Start the file with its `page \"…\"` line.",
+                 while other files name their page. {fix}",
                 if n == 1 { "" } else { "s" },
                 if n == 1 { "es" } else { "" },
             ),

@@ -6,10 +6,11 @@
 //! nothing here has semantics of its own.
 
 use loxone_config::logic::{
-    CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, Module, TestPlan,
-    TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile, decompile_pages,
-    lint_access, lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests,
-    read_results, rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
+    CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
+    TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
+    decompile_pages, fix_unit_suffixes, lint_access, lint_dead_outputs, lint_source, lint_tiles,
+    lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify, trace_tests,
+    valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -116,17 +117,27 @@ Needs a lox.toml project. Also rewrites the project's out file.
     },
     Command {
         name: "lint",
-        usage: &["loxl lint [<module.loxl | module-dir | project-dir>]"],
+        usage: &["loxl lint [--fix] [--summary] [<module.loxl | module-dir | project-dir>]"],
         summary: "Report unused and dead parts of a module",
-        details: r#"On any module, reports unused externs and constants, templates nothing uses and values
-outside a port's documented range. In a directory module it reports a file whose blocks come before
-its first `page` statement while other files name their page (those blocks go to the default page).
+        details: r#"On any module, reports unused externs and constants, templates nothing uses, values
+outside a port's documented range and bare time values that read better with their unit
+(`unit-suffix`: `Delay: 10800` is `Delay: 3h`). In a directory module it reports a file whose
+blocks come before its first `page` statement while other files name their page (those blocks go
+to the default page).
 In a lox.toml project it also reports:
   - managed blocks whose outputs feed nothing in the compiled config
   - Touch Pure Flex commands that reach several blocks, or none
   - users whose NFC tag or access code opens no NFC Code Touch
 
-The path defaults to the current directory. lint never changes a file.
+Findings are grouped by kind, each kind with its count.
+
+Options:
+  --fix       write the unit suffixes the `unit-suffix` findings name, in canonical form (as
+              `loxl fmt` writes it). The compile output does not change; in a project, lint
+              compiles before and after and writes nothing if the two differ.
+  --summary   print only the count of each kind
+
+The path defaults to the current directory. Without --fix, lint never changes a file.
 Exit 1 when there are findings. Some can be deliberate, so compile does not run lint.
 "#,
     },
@@ -575,16 +586,46 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
         // expansion — mirroring what compile checks.
         module
             .with_expanded(|x| x.validate())
-            .map_err(|e| (path.to_string(), e))?;
+            .map_err(|e| (error_place(path, &e), e))?;
         Ok(module)
     } else {
         let src = std::fs::read_to_string(path)
             .map_err(|e| (path.to_string(), loxone_config::Error::Io(e)))?;
-        let mut module = Module::parse(&src).map_err(|e| (path.to_string(), e))?;
+        let mut module = Module::parse(&src).map_err(|e| (error_place(path, &e), e))?;
         module
             .load_files(fragment_dir(p))
             .map_err(|e| (path.to_string(), e))?;
         Ok(module)
+    }
+}
+
+/// The file and 1-based line a module-level error is about: the fragment
+/// of a directory module (or the line of a single file) that declares or
+/// uses the names the message quotes. `None` for a parse error, whose
+/// message carries its line, and where no file names them.
+fn error_line(path: &str, e: &loxone_config::Error) -> Option<(String, usize)> {
+    if matches!(
+        e,
+        loxone_config::Error::Parse { .. } | loxone_config::Error::Io(_)
+    ) {
+        return None;
+    }
+    let p = Path::new(path);
+    let files = if p.is_dir() {
+        module_dir_files(p).ok()?
+    } else {
+        vec![p.to_path_buf()]
+    };
+    let (file, line) = loxone_config::lsp::analysis::locate_error(&files, &e.to_string())?;
+    Some((file.display().to_string(), line))
+}
+
+/// `path` for an error message: `file:line` where [`error_line`] finds
+/// the place, else `path` itself.
+fn error_place(path: &str, e: &loxone_config::Error) -> String {
+    match error_line(path, e) {
+        Some((file, line)) => format!("{file}:{line}"),
+        None => path.to_string(),
     }
 }
 
@@ -654,7 +695,7 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
             Ok((x, d))
         })
         .map(|(x, d)| (m, x, d))
-        .map_err(|e| (path.to_string(), e))
+        .map_err(|e| (error_place(path, &e), e))
     });
     let count = |m: &Module, f: fn(&loxone_config::logic::Item) -> bool| {
         m.items.iter().filter(|i| f(i)).count()
@@ -706,13 +747,16 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
             Ok(ExitCode::SUCCESS)
         }
         Err((epath, e)) if json => {
-            // Structured diagnostics: parse errors carry a 1-based line,
-            // semantic errors none. The parser is fail-fast, so there is
-            // at most one error per run. `path` names the file the error
-            // is in — for a module directory that is the fragment file.
-            let line = match &e {
-                loxone_config::Error::Parse { line, .. } => Some(*line),
-                _ => None,
+            // Structured diagnostics: a 1-based line from the parser, or
+            // the place a semantic error names. The parser is fail-fast,
+            // so there is at most one error per run. `path` names the file
+            // the error is in; for a module directory, the fragment file.
+            let (epath, line) = match &e {
+                loxone_config::Error::Parse { line, .. } => (epath, Some(*line)),
+                _ => match error_line(path, &e) {
+                    Some((file, line)) => (file, Some(line)),
+                    None => (epath, None),
+                },
             };
             println!(
                 "{}",
@@ -1328,11 +1372,16 @@ fn title_only_diff(a: &[u8], b: &[u8]) -> Result<usize, String> {
 }
 
 fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
-    let path = match args {
-        [] => ".".to_string(),
-        [p] if !p.starts_with('-') => p.to_string(),
-        _ => return Err(usage_error("lint")),
-    };
+    let (mut fix, mut summary, mut path) = (false, false, None);
+    for &a in args {
+        match a {
+            "--fix" => fix = true,
+            "--summary" => summary = true,
+            p if !p.starts_with('-') && path.is_none() => path = Some(p.to_string()),
+            _ => return Err(usage_error("lint")),
+        }
+    }
+    let path = path.unwrap_or_else(|| ".".to_string());
     // A project directory gets the full treatment (dead-output analysis
     // needs base + lock); a bare module gets the source-only lints.
     let p = Path::new(&path);
@@ -1345,30 +1394,112 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
         Some(prj) => (prj.module.display().to_string(), Some(prj)),
         None => (path.clone(), None),
     };
-    let module = read_module(&module_path)?;
+    let files: Vec<PathBuf> = if Path::new(&module_path).is_dir() {
+        module_dir_files(Path::new(&module_path)).map_err(|(p, e)| format!("{p}: {e}"))?
+    } else {
+        vec![PathBuf::from(&module_path)]
+    };
+    // The project's base and lockfile, read once.
+    let base = match &project {
+        Some(prj) => Some((
+            read_doc(&prj.base.display().to_string())?,
+            Lockfile::load(&prj.lock)?,
+        )),
+        None => None,
+    };
+    let compile_project = |module: &Module| -> Result<Option<(LoxoneDoc, Lockfile)>, AnyError> {
+        let (Some(prj), Some((base_doc, lock))) = (project.as_ref(), base.as_ref()) else {
+            return Ok(None);
+        };
+        let serial = prj
+            .serial
+            .clone()
+            .or_else(|| lock.target.miniserver_serial.clone())
+            .ok_or("no serial in the project file and none recorded in the lockfile")?;
+        let opts = CompileOptions {
+            machine: parse_serial(&serial)?,
+            accept_version: None,
+            relayout: Vec::new(),
+            mint_time_unix: 0,
+            page_title: prj.page.clone(),
+            allow_removals: false,
+        };
+        let mut lock = lock.clone();
+        let compiled = compile(base_doc, module, &mut lock, &opts)?;
+        Ok(Some((compiled, lock)))
+    };
 
-    let mut findings = lint_source(&module)?;
-    match &project {
-        Some(prj) => {
-            let base_doc = read_doc(&prj.base.display().to_string())?;
-            let lock = Lockfile::load(&prj.lock)?;
-            let serial = prj
-                .serial
-                .clone()
-                .or_else(|| lock.target.miniserver_serial.clone())
-                .ok_or("no serial in the project file and none recorded in the lockfile")?;
-            let opts = CompileOptions {
-                machine: parse_serial(&serial)?,
-                accept_version: None,
-                relayout: Vec::new(),
-                mint_time_unix: 0,
-                page_title: prj.page.clone(),
-                allow_removals: false,
+    if fix {
+        let mut fixed = Vec::new();
+        let mut count = 0;
+        for f in &files {
+            let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
+            let mut m =
+                Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?;
+            let n = fix_unit_suffixes(&mut m).len();
+            if n > 0 {
+                count += n;
+                fixed.push((f.clone(), m.to_text()));
+            }
+        }
+        if !fixed.is_empty() && project.is_some() {
+            // The fix only respells values: prove the compiled config and
+            // the lockfile stay byte-identical before writing.
+            let module = read_module(&module_path)?;
+            let mut fragments = Vec::new();
+            for f in &files {
+                let src = match fixed.iter().find(|(p, _)| p == f) {
+                    Some((_, text)) => text.clone(),
+                    None => std::fs::read_to_string(f)?,
+                };
+                let mut m = Module::parse_fragment(&src)?;
+                m.load_files(fragment_dir(f))?;
+                fragments.push(m);
+            }
+            let fixed_module = if Path::new(&module_path).is_dir() {
+                Module::from_fragments(fragments)
+            } else {
+                fragments.pop().unwrap_or_default()
             };
-            let mut lock_copy = lock.clone();
-            let compiled = compile(&base_doc, &module, &mut lock_copy, &opts)
-                .map_err(|e| format!("compile for dead-output analysis failed: {e}"))?;
-            findings.extend(lint_dead_outputs(&module, &lock, &compiled)?);
+            let before = compile_project(&module)
+                .map_err(|e| format!("compile before the fix failed: {e}"))?;
+            let after = compile_project(&fixed_module)
+                .map_err(|e| format!("compile after the fix failed: {e}"))?;
+            let same = match (&before, &after) {
+                (Some((d0, l0)), Some((d1, l1))) => {
+                    d0.to_bytes() == d1.to_bytes() && l0.to_json() == l1.to_json()
+                }
+                _ => true,
+            };
+            if !same {
+                return Err(
+                    "the fixed module compiles differently, so nothing was written. \
+                            Report this as a bug."
+                        .into(),
+                );
+            }
+        }
+        for (f, text) in &fixed {
+            std::fs::write(f, text).map_err(|e| format!("{}: {e}", f.display()))?;
+        }
+        if count > 0 {
+            println!(
+                "fixed: {count} unit-suffix value{} in {} file{}",
+                if count == 1 { "" } else { "s" },
+                fixed.len(),
+                if fixed.len() == 1 { "" } else { "s" }
+            );
+        }
+    }
+
+    let module = read_module(&module_path)?;
+    let mut findings = lint_source(&module)?;
+    match compile_project(&module)
+        .map_err(|e| format!("compile for dead-output analysis failed: {e}"))?
+    {
+        Some((compiled, _)) => {
+            let lock = &base.as_ref().expect("a project has a lockfile").1;
+            findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
         }
@@ -1381,12 +1512,11 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     }
     // Name the declaring file where the module is a directory of fragments.
     let locate: Vec<(PathBuf, Module)> = if Path::new(&module_path).is_dir() {
-        module_dir_files(Path::new(&module_path))
-            .map_err(|(p, e)| format!("{p}: {e}"))?
-            .into_iter()
+        files
+            .iter()
             .filter_map(|f| {
-                let src = std::fs::read_to_string(&f).ok()?;
-                Some((f, Module::parse_fragment(&src).ok()?))
+                let src = std::fs::read_to_string(f).ok()?;
+                Some((f.clone(), Module::parse_fragment(&src).ok()?))
             })
             .collect()
     } else {
@@ -1400,6 +1530,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
                 Item::Let(l) => l.name == finding.slug,
                 Item::Template(t) => t.name == finding.slug,
                 Item::Signal(x) => x.slug == finding.slug,
+                Item::Defaults(d) => d.block_type == finding.slug,
                 _ => false,
             });
             if declares {
@@ -1408,19 +1539,47 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
         String::new()
     };
-    for finding in &findings {
-        println!(
-            "{}{}: `{}` — {}",
-            file_of(finding),
-            finding.kind.label(),
-            finding.slug,
-            finding.detail
-        );
+    // Grouped by kind, in the order kinds first appear.
+    let mut kinds: Vec<(LintKind, Vec<&LintFinding>)> = Vec::new();
+    for f in &findings {
+        match kinds.iter_mut().find(|(k, _)| *k == f.kind) {
+            Some((_, list)) => list.push(f),
+            None => kinds.push((f.kind, vec![f])),
+        }
     }
+    let width = kinds
+        .iter()
+        .map(|(k, _)| k.label().len())
+        .max()
+        .unwrap_or(0);
+    for (kind, list) in &kinds {
+        if summary {
+            println!("{:width$}  {}", kind.label(), list.len());
+            continue;
+        }
+        println!("{} ({})", kind.label(), list.len());
+        for finding in list {
+            println!(
+                "  {}`{}` — {}",
+                file_of(finding),
+                finding.slug,
+                finding.detail
+            );
+        }
+    }
+    let fixable = findings
+        .iter()
+        .filter(|f| f.kind == LintKind::UnitSuffix)
+        .count();
     println!(
-        "lint: {} finding{}",
+        "lint: {} finding{}{}",
         findings.len(),
-        if findings.len() == 1 { "" } else { "s" }
+        if findings.len() == 1 { "" } else { "s" },
+        if fixable > 0 {
+            format!(" ({fixable} fixable with `loxl lint --fix`)")
+        } else {
+            String::new()
+        }
     );
     Ok(ExitCode::FAILURE)
 }

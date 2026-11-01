@@ -802,6 +802,10 @@ impl Parser {
         if self.open_template.is_none() {
             return Ok(());
         }
+        // `test = Not()` in a body is a reserved name, as at the top level.
+        if let [Tok::Ident(name), Tok::Eq, ..] = toks {
+            check_slug(name, lineno)?;
+        }
         // A named set is declared once, at the top level; a body claims one
         // through a set parameter.
         if let Some(kind) = set_head(toks) {

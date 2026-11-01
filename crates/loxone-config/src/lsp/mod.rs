@@ -335,7 +335,9 @@ impl<W: Write> Server<'_, W> {
     }
 
     /// Quick fixes: a diagnostic's "did you mean `X`?" on a misspelled
-    /// name replaces the name with `X`.
+    /// name, and its "write `X` instead of `Y`" (old spellings, the
+    /// `unit-suffix` lint), replace the text with `X`; the `default-page`
+    /// lint inserts the page line it names at the top of the file.
     fn code_actions(&self, params: &Value) -> Value {
         let Some(path) = path_of(&params["textDocument"]) else {
             return Value::Null;
@@ -394,6 +396,27 @@ impl<W: Write> Server<'_, W> {
                     "diagnostics": [d],
                     "isPreferred": true,
                     "edit": { "changes": { uri.clone(): edits } },
+                }));
+                continue;
+            }
+            // A file whose blocks take the default page: its `page` line
+            // above the first statement (the comments heading the file
+            // stay on top).
+            if let Some(page) = analysis::page_to_insert(msg) {
+                let first = text
+                    .split('\n')
+                    .position(|t| !t.split('#').next().unwrap_or("").trim().is_empty())
+                    .unwrap_or(0);
+                let at = json!({ "line": first, "character": 0 });
+                out.push(json!({
+                    "title": format!("Insert `{page}`"),
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                    "isPreferred": true,
+                    "edit": { "changes": { uri.clone(): [{
+                        "range": { "start": at, "end": at },
+                        "newText": format!("{page}\n\n"),
+                    }] } },
                 }));
                 continue;
             }

@@ -16,7 +16,7 @@ line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
            | bulk | page | test | tiles | tiles-claim | access | access-claim
            | recipients | recipients-claim | schedule | schedule-claim
-           | moods-claim | rule | defaults | blank ;
+           | moods | moods-claim | rule | defaults | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
@@ -119,8 +119,8 @@ access     = "access" slug [ comment ]             (* a named set of access righ
              "end" [ comment ] ;
 grant      = ( "user" | "group" ) string ":" string [ comment ] ;
                                     (* principal title : schedule title *)
-access-claim = slug "." "access" "=" slug [ comment ] ;
-                                    (* NFC Code Touch, extern *)
+access-claim = ref "." "access" "=" slug [ comment ] ;
+                                    (* NFC Code Touch, extern or managed *)
 recipients = "recipients" slug [ comment ]         (* a named set of recipients *)
              { comment | recipient }
              "end" [ comment ] ;
@@ -138,22 +138,41 @@ day        = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
            | string ;                      (* any operating mode by title *)
 interval   = time "-" time [ "=" number ] [ "activate" ] ;
 time       = hour ":" minute ;                     (* 00:00 … 24:00 *)
-schedule-claim = slug "." "schedule" "=" slug [ comment ] ;
+schedule-claim = ref "." "schedule" "=" slug [ comment ] ;
                                     (* DayTimer, extern or managed *)
-moods-claim = slug "." "moods" "=" slug [ comment ] ;
-                                    (* LightController2 *)
+moods      = "moods" slug [ comment ]              (* LightController2 moods *)
+             { comment | mood }
+             "end" [ comment ] ;
+mood       = string ":" mood-set { "," mood-set } [ comment ] ;
+mood-set   = ( "all" | "AQ" integer ) mood-value ;  (* `all` first; AQ1 … *)
+mood-value = "on" | "off" | integer "%"
+           | "rgb" "(" integer [ "%" ] "," integer [ "%" ] "," integer [ "%" ] ")"
+           | "temp" "(" integer [ "%" ] "," integer "K" ")"
+           | integer ;                             (* the stored value verbatim *)
+moods-claim = ref "." "moods" "=" slug [ comment ] ;
+                                    (* LightController2, extern or managed *)
 rule       = "rule" slug [ comment ]               (* Automatic Designer rule *)
              { comment | rule-line }
              "end" [ comment ] ;
 rule-line  = ( "active" | "inactive"
+             | "or"                                (* starts another group *)
              | "when" "time" clock                 (* 00:00 … 23:59, whole minutes *)
              | "when" "weekday" rule-day { rule-day }
-             | "when" ref "." ident cmp ( number | "on" | "off" )
-             | "when" "mode" mode-name [ "on" | "off" ]
-             | "or"                                (* starts another group *)
+             | "when" ref "." ident cmp-op ( number | bool )
+             | "when" "mode" mode-name [ bool ]
+             | "when" "weather" ident cmp-op ( number | bool )
+             | "when" "day" cmp-op integer         (* 1 … 31 *)
+             | "when" "daylight" [ bool ]
+             | "when" ( "sunrise" | "sunset" | "dawn" | "dusk" )
              | "when" "date" date                  (* bare *)
-             | "then" ref ( command-word | string )
-             | "then" "mode" mode-name ( "on" | "off" ) ) [ comment ] ;
+             | "then" "mode" mode-name bool
+             | "then" "wait" number time-unit
+             | "then" "notify" string string        (* subject, text *)
+             | "then" "mail" string string string   (* to, subject, text *)
+             | "then" "message" ( "info" | "warning" | "error" ) string string [ "admins" ]
+             | "then" ref ( command-word | string ) ) [ comment ] ;
+                                    (* after `then`, the action words win:
+                                       a block named `wait` is no target *)
 mode-name  = slug | string ;                       (* a Mode block, or a mode by title *)
 command-word = letter { letter | digit | "_" } ;  (* one word, bare: `then pumpe on`;
                                                       anything else stays quoted *)
@@ -212,6 +231,10 @@ Notes:
   - Decompile and adopt write the suffix on a port documented in seconds or minutes: the largest of
     `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
     and only when it compiles back to the same digits. Zero and the other ports stay bare.
+  - `loxl lint` reports a bare number that this rule would write with a suffix (`unit-suffix`:
+    `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults` and in template bodies.
+    `loxl lint --fix` writes the suffixes; the compile output stays byte-identical, and in a project
+    the fix is refused if it would not.
 - **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
   `moved`, `template`, `end`, `page`, `test`, `tick`, `expect`, `clock`, `tile`, the boolean
   literals `on` and `off`, the expression operators `and`, `or`, `not`, and v0's `block`, `wire`,
@@ -1215,8 +1238,9 @@ passwords) and memberships are not part of the language.
 
 Rules:
 
-- **Extern `NfcCodeTouch` only**, one claim per extern; two externs
-  resolving to the same block are a compile error.
+- **An `NfcCodeTouch` only**, an extern or a managed block, one claim per
+  block. Two claims that reach the same block (two externs resolving to it)
+  are a compile error.
 - **Each principal once** — a user or group listed twice in a set is a
   validation error.
 - **Access, not operation.** A right's `ACT=` (operating the block in
@@ -1512,7 +1536,7 @@ names it as an extern. Two things about it come from source:
   (`mirrors:` names the extern `Notification`) with the message parameters Loxone Config keeps in its
   `<LoggerMailer>` child.
   - `On:` is sent when `AI` turns on, `Off:` when it turns off. No text means no message.
-  - `MinimumTime:` is the least time between two messages, a duration (`12h`, `30m`, or seconds as a
+  - `MinimumTime:` is the least time between two messages, a duration (`12h`, `30min`, or seconds as a
     number) that compiles to milliseconds.
   - The parameters take values, never wires. The block's title follows the notification's, like every
     ref's.
@@ -1630,6 +1654,8 @@ quoted one-word rule command (`then pumpe "on"`) the bare word, and a `clock` ti
 - v1 spellings that v2 dropped get errors that name the replacement ("write `clock 07:30` instead of
   `clock "07:30"`"). The language server offers it as a quick fix.
 - A line that starts no statement gets an error listing every statement kind.
+- In a directory module an error of the module check names the fragment and its line
+  (`src/sued.loxl:12: compile error: …`); `check --json` gives them as `path` and `line`.
 
 Compile errors and their remedies are in [agents.md](agents.md#errors-and-remedies).
 
@@ -1690,6 +1716,11 @@ replacement. The compile output of a migrated file is byte-identical.
   of an instance that way too.
 - A named signal whose name equals an expression's generated prefix (`a_i1 = …` next to an
   expression on `a.I1`) is an error naming both; v1 let them share block names.
+- **Tooling**: `loxl lint` groups its findings by kind with counts (`--summary`: counts only) and
+  reports bare durations that read better with their unit (`unit-suffix`); `loxl lint --fix` writes
+  the suffixes. Module-check errors name the fragment and line. The language server hovers and
+  goes to the definition of `inst.block` and `inst.block.Port`, completes argument keys (in
+  `defaults` too) and signal names, and offers the `unit-suffix` and `default-page` fixes.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1700,7 +1731,8 @@ whose blocks relied on the previous file's `page` that `page` line, rename each
 `recipients <extern>_recipients` and add the claim
 (`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
 `notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
-(which also unquotes one-word `then` commands and puts short calls on one line).
+(which also unquotes one-word `then` commands and puts short calls on one line) and, if you like,
+`loxl lint --fix` for the unit suffixes.
 
 ## Versioning
 

@@ -183,20 +183,37 @@
           "captures": { "1": { "name": "constant.language.loxl" } }
         },
         {
-          "match": "^\\s*(when)\\s+(time)\\b",
+          "match": "^\\s*(or)\\s*(?=$|#)",
+          "captures": { "1": { "name": "keyword.operator.logical.loxl" } }
+        },
+        {
+          "comment": "a condition word, unless it is a block named so (`when time.Q == on`)",
+          "match": "^\\s*(when)\\s+(time|mode|weather|day|daylight|sunrise|sunset|dawn|dusk|date)\\b(?!\\.)",
           "captures": {
             "1": { "name": "keyword.control.when.loxl" },
             "2": { "name": "keyword.other.rule.loxl" }
           }
         },
         {
-          "begin": "^\\s*(when)\\s+(weekday)\\b",
+          "begin": "^\\s*(when)\\s+(weekday)\\b(?!\\.)",
           "beginCaptures": {
             "1": { "name": "keyword.control.when.loxl" },
             "2": { "name": "keyword.other.rule.loxl" }
           },
           "end": "(?=$|#)",
           "patterns": [{ "include": "#day" }]
+        },
+        {
+          "match": "^\\s*(when)\\b",
+          "captures": { "1": { "name": "keyword.control.when.loxl" } }
+        },
+        {
+          "comment": "after `then` the action words always win",
+          "match": "^\\s*(then)\\s+(wait|mode|notify|mail|message)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.then.loxl" },
+            "2": { "name": "keyword.other.rule.loxl" }
+          }
         },
         {
           "match": "^\\s*(then)\\s+([a-z][a-z0-9_]*)",
