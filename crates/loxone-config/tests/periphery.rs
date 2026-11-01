@@ -691,3 +691,52 @@ fn a_udp_command_takes_its_receive_timeout() {
     .to_string();
     assert!(err.contains("`MaxTime: 1`"), "{err}");
 }
+
+#[test]
+fn modbus_and_udp_timings_take_their_units() {
+    // Read off Loxone Config's property panel (#344): a Modbus server's
+    // `Timeout` in ms, the sensors' polling cycle in s, their `MaxTime`
+    // and a UDP command's `MinTime` in ms. A Modbus sensor's `MinTime`
+    // is not shown there and stays a bare number.
+    let src = "mb = ModbusServer(\"Wärmepumpe\", Address: \"192.0.2.12:502\", Timeout: 2s)\n\
+         mb_dev = ModbusDev(\"Regler\", device: mb)\n\
+         mb_temp = ModbusASensor(\"Vorlauf\", device: mb_dev, ModbusAddress: 1, \
+         ModbusPollingCycle: 1min, MinTime: 1000, MaxTime: 5min)\n\
+         mb_alarm = ModbusSensor(\"Alarm\", device: mb_dev, ModbusAddress: 2, MaxTime: 46s)\n\
+         udp = VirtualUdpIn(\"Kamera\", Port: 45999)\n\
+         udp_person = VirtualUdpInCmd(\"Person\", device: udp, Check: \"p\", MinTime: 25ms)\n";
+    let mut lock = Lockfile::default();
+    let out = compile(&base(), &Module::parse(src).unwrap(), &mut lock, &opts()).unwrap();
+    let attr = |slug: &str, name: &str| {
+        element(&out, &lock.objects[slug].uuid)
+            .attr(name)
+            .map(str::to_string)
+    };
+    assert_eq!(attr("mb", "Timeout").as_deref(), Some("2000"));
+    assert_eq!(attr("mb_temp", "ModbusPollingCycle").as_deref(), Some("60"));
+    assert_eq!(attr("mb_temp", "MinTime").as_deref(), Some("1000"));
+    assert_eq!(attr("mb_temp", "MaxTime").as_deref(), Some("300000"));
+    assert_eq!(attr("mb_alarm", "MaxTime").as_deref(), Some("46000"));
+    assert_eq!(attr("udp_person", "MinTime").as_deref(), Some("25"));
+
+    // Adopting writes the same spellings back.
+    let mut fresh = Lockfile::default();
+    let mut adopted = Module::default();
+    for (slug, name) in [("mb", "wp"), ("udp", "kamera")] {
+        let m = adopt_one(&out, &lock.objects[slug].uuid, name, &adopted, &mut fresh).unwrap();
+        adopted.items.extend(m.items);
+    }
+    let text = adopted.to_text();
+    for spelling in [
+        "Timeout: 2s",
+        "ModbusPollingCycle: 1min",
+        "MinTime: 1000,",
+        "MaxTime: 5min",
+        "MaxTime: 46s",
+        "MinTime: 25ms",
+    ] {
+        assert!(text.contains(spelling), "{spelling}: {text}");
+    }
+    let recompiled = compile(&out, &adopted, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+}

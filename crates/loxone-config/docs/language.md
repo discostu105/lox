@@ -257,8 +257,8 @@ Notes:
     (`zeit = 75`) and an instance's argument for it count when every use of the parameter in the
     body is a port of the same unit; an argument the instance forwards to its primary block counts
     by that block's port. A bulk line `(a, b).Port = 300` changes only as a whole.
-  - A setting with no unit in Loxone's documentation stays a bare number: the Modbus server's
-    `Timeout`, the Modbus sensors' `ModbusPollingCycle`, `MinTime` and `MaxTime`.
+  - A setting with no known unit stays a bare number: the Modbus sensors' `MinTime`. The units
+    of the device settings are in [loxone-format.md](loxone-format.md#units-of-the-settings).
     `loxl lint --fix` writes the suffixes; the compile output stays byte-identical, and in a project
     the fix is refused if it would not.
 - **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
