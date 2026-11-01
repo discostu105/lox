@@ -1927,13 +1927,16 @@ adds the kind to the allow already there), and on an `unused-allow` it removes t
 - an argument-free call on one line (`b = And()`, `c = Or("Oder")`);
 - a call on one line when it has at most three arguments (the label counts as one), no comments,
   and the line fits in 100 columns with its indentation (a tab counts four):
-  `b = And(I1: x.Q, I2: on)`;
+  `b = And(I1: x.Q, I2: on)`. Past three arguments the same holds when every argument but the label
+  is a number, a unit value, a time or `on`/`off`:
+  `s = ModbusASensor("Kompressor", ModbusAddress: 1100, ModbusDataType: 0, DestValHigh: 100)`;
 - any other call with the label and each argument on its own tab-indented line with a trailing
   comma, and the `)` on its own line;
 - a `tile` the same way one level deeper (`tile 2(click: "…", to: licht)` on one line, or a
   two-tab-indented list with the `)` on its own tab-indented line);
 - each grant of an `access` or `recipients` set on its own tab-indented line.
-- a `# lint: allow` comment directly above its statement, with no blank line between them.
+- a whole-line comment directly above the statement it was written above, with no blank line
+  between them. A blank line the source has below a comment stays (one, however many there were).
 
 Values keep their variant: numbers bare, strings quoted, constant references bare, port references
 dotted, unit values and `on`/`off` as written. Some values are canonicalized at parse time, so every
@@ -2019,8 +2022,10 @@ replacement. The compile output of a migrated file is byte-identical.
   `tiles`, `schedule` and `moods` were reserved in v1. `then wait|mode|notify|mail|message` is
   always the rule action; a block of that name as a `then` target is an error naming `loxl rename`.
 - **Short calls go on one line**: `fmt` writes a call with up to three arguments that fits in 100
-  columns on one line, and puts a blank line around every multi-line item. The compile output does
-  not change.
+  columns on one line, and puts a blank line around every multi-line item. A call of more arguments
+  goes on one line too when they are all numbers, unit values, times or `on`/`off`. A whole-line
+  comment stays attached to the statement below it unless a blank line separates them. The compile
+  output does not change.
 - **`tick` and `dt` take `let` constants** (`tick warten`, `tick 3 dt takt`).
 - **`when time`** reads the time like `clock` (`7:30` = `07:30`).
 - **Scoped names everywhere**: `(inst.block, x).room = …` and `mirrors: inst.block` (extern

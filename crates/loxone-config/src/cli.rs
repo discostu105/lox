@@ -8,7 +8,7 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_circuits,
+    decompile_pages, finish_lint, fix_unit_suffixes_text, lint_access, lint_circuits,
     lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
     rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
@@ -140,8 +140,8 @@ block, extern, instance or device). Text after the kind is free. An allow that c
 reported (`unused-allow`).
 
 Options:
-  --fix       write the unit suffixes the `unit-suffix` findings name, in canonical form (as
-              `loxl fmt` writes it). The compile output does not change; in a project, lint
+  --fix       write the unit suffixes the `unit-suffix` findings name, in place (the rest of
+              the file stays as written). The compile output does not change; in a project, lint
               compiles before and after and writes nothing if the two differ.
   --summary   print only the count of each kind
 
@@ -1547,18 +1547,22 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     if fix {
         let mut fixed = Vec::new();
         let mut count = 0;
+        let mut sources = Vec::new();
         let mut parsed = Vec::new();
         for f in &files {
             let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
             parsed.push(Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?);
+            sources.push(src);
         }
         // Externs and templates may live in another file of the module.
-        let whole = Module::from_fragments(parsed.clone());
-        for (f, mut m) in files.iter().zip(parsed) {
-            let n = fix_unit_suffixes_in(&mut m, &whole).len();
-            if n > 0 {
-                count += n;
-                fixed.push((f.clone(), m.to_text()));
+        let whole = Module::from_fragments(parsed);
+        for (f, src) in files.iter().zip(&sources) {
+            // Only the values change; the rest of the file stays as written.
+            let (found, text) =
+                fix_unit_suffixes_text(src, &whole).map_err(|e| format!("{}: {e}", f.display()))?;
+            if !found.is_empty() {
+                count += found.len();
+                fixed.push((f.clone(), text));
             }
         }
         if !fixed.is_empty() && project.is_some() {

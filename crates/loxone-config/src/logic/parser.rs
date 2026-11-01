@@ -735,6 +735,14 @@ impl Parser {
     /// Blank line, or a whole-line comment — kept verbatim as an item so
     /// formatting is non-destructive.
     fn comment_line(&mut self, comment: Option<String>) {
+        if comment.is_none() && !self.in_body() {
+            // A blank line below a comment keeps the two apart.
+            let items = sink(&mut self.open_template, &mut self.items);
+            if matches!(items.last(), Some(Item::Comment(_))) {
+                items.push(Item::Gap);
+            }
+            return;
+        }
         if let Some(text) = comment {
             if let Some(set) = self.open_set.as_mut() {
                 set.comment(text);

@@ -123,6 +123,100 @@ pub fn fix_unit_suffixes(module: &mut Module) -> Vec<LintFinding> {
 /// the module it belongs to, where the externs and templates the file
 /// uses are declared.
 pub fn fix_unit_suffixes_in(module: &mut Module, whole: &Module) -> Vec<LintFinding> {
+    unit_fixes(module, whole)
+        .into_iter()
+        .map(|f| f.finding)
+        .collect()
+}
+
+/// [`fix_unit_suffixes_in`] on the text of one file: the findings and the
+/// file with each value respelled in place, the rest of it as written. A
+/// file the in-place edit cannot reproduce (a quoted number, say) comes
+/// back in canonical form, as `loxl fmt` writes it.
+pub fn fix_unit_suffixes_text(src: &str, whole: &Module) -> Result<(Vec<LintFinding>, String)> {
+    let mut module = Module::parse_fragment(src)?;
+    let fixes = unit_fixes(&mut module, whole);
+    let text = patch_values(src, &fixes)
+        .filter(|t| Module::parse_fragment(t).is_ok_and(|m| m == module))
+        .unwrap_or_else(|| module.to_text());
+    Ok((fixes.into_iter().map(|f| f.finding).collect(), text))
+}
+
+/// One respelled value: its finding, and where it stands in the source,
+/// `<key>: <old>` or `<key> = <old>`.
+struct Fix {
+    finding: LintFinding,
+    key: Option<String>,
+    old: String,
+    new: String,
+}
+
+/// `src` with each fix applied to the next `<key>: <old>` or `<key> = <old>`
+/// outside comments and strings, in order. `None` when one is not found.
+fn patch_values(src: &str, fixes: &[Fix]) -> Option<String> {
+    let bytes = src.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut out = String::new();
+    let mut at = 0;
+    let mut fixes = fixes.iter().filter(|f| f.key.is_some()).peekable();
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(fix) = fixes.peek() else { break };
+        match bytes[i] {
+            b'#' => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b if word(b) && (i == 0 || !word(bytes[i - 1])) => {
+                let start = i;
+                while i < bytes.len() && word(bytes[i]) {
+                    i += 1;
+                }
+                if fix.key.as_deref() != Some(&src[start..i]) {
+                    continue;
+                }
+                let mut j = i;
+                while j < bytes.len() && bytes[j] == b' ' {
+                    j += 1;
+                }
+                if j >= bytes.len() || !matches!(bytes[j], b':' | b'=') {
+                    continue;
+                }
+                j += 1;
+                while j < bytes.len() && bytes[j] == b' ' {
+                    j += 1;
+                }
+                let end = j + fix.old.len();
+                if src.get(j..end) == Some(fix.old.as_str())
+                    && bytes.get(end).is_none_or(|&b| !word(b) && b != b'.')
+                {
+                    out.push_str(&src[at..j]);
+                    out.push_str(&fix.new);
+                    at = end;
+                    i = end;
+                    fixes.next();
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    if fixes.peek().is_some() {
+        return None;
+    }
+    out.push_str(&src[at..]);
+    Some(out)
+}
+
+/// The respelled values of [`fix_unit_suffixes_in`], in source order.
+fn unit_fixes(module: &mut Module, whole: &Module) -> Vec<Fix> {
     let externs: BTreeMap<String, String> = whole
         .externs()
         .map(|e| (e.slug.clone(), e.block_type.clone()))
@@ -245,11 +339,30 @@ fn suffix_for(uses: &[(String, String)], raw: &str) -> Option<Value> {
     found
 }
 
-fn unit_finding(slug: &str, old: String, new: String) -> LintFinding {
-    LintFinding {
-        kind: LintKind::UnitSuffix,
-        slug: slug.to_string(),
-        detail: format!("`{old}` reads better with its unit. Write `{new}` instead of `{old}`."),
+/// The fix of `<shown>: <old>` (`sep` `:`) or `<shown> = <old>` (`=`), found
+/// in the source after `key` (none: another fix already patches the text).
+fn unit_finding(
+    slug: &str,
+    shown: &str,
+    key: Option<&str>,
+    sep: &str,
+    old: &str,
+    new: &Value,
+) -> Fix {
+    let (o, n) = if sep == ":" {
+        (format!("{shown}: {old}"), format!("{shown}: {new}"))
+    } else {
+        (format!("{shown} = {old}"), format!("{shown} = {new}"))
+    };
+    Fix {
+        finding: LintFinding {
+            kind: LintKind::UnitSuffix,
+            slug: slug.to_string(),
+            detail: format!("`{o}` reads better with its unit. Write `{n}` instead of `{o}`."),
+        },
+        key: key.map(str::to_string),
+        old: old.to_string(),
+        new: new.to_string(),
     }
 }
 
@@ -260,13 +373,13 @@ fn fix_items(
     externs: &BTreeMap<String, String>,
     objects: &BTreeMap<String, String>,
     templates: &BTreeMap<String, TemplateUnits>,
-    out: &mut Vec<LintFinding>,
+    out: &mut Vec<Fix>,
 ) {
     fn fix_args(
         slug: &str,
         args: &mut [ArgItem],
         unit_of: impl Fn(&str, &str) -> Option<Value>,
-        out: &mut Vec<LintFinding>,
+        out: &mut Vec<Fix>,
     ) {
         for arg in args {
             let ArgItem::Binding(Binding {
@@ -281,11 +394,7 @@ fn fix_items(
             let Some(new) = unit_of(port, n) else {
                 continue;
             };
-            out.push(unit_finding(
-                slug,
-                format!("{port}: {n}"),
-                format!("{port}: {new}"),
-            ));
+            out.push(unit_finding(slug, port, Some(port), ":", n, &new));
             *value = new;
         }
     }
@@ -314,6 +423,7 @@ fn fix_items(
                 .or_insert(new);
         }
     }
+    let mut patched: BTreeSet<usize> = BTreeSet::new();
     for item in items.iter_mut() {
         match item {
             Item::Block(b) => fix_args(
@@ -334,11 +444,19 @@ fn fix_items(
                     None => set_value(s),
                 };
                 if let Some(new) = new {
-                    let target = s.target.to_string();
+                    let Value::Number(old) = &s.value else {
+                        unreachable!("only a number is respelled");
+                    };
+                    // A bulk line's value stands in the source once.
+                    let once = s.bulk.is_none_or(|line| patched.insert(line));
+                    let port = s.target.port.clone();
                     out.push(unit_finding(
                         &s.target.slug,
-                        format!("{target} = {}", s.value),
-                        format!("{target} = {new}"),
+                        &s.target.to_string(),
+                        once.then_some(port.as_str()),
+                        "=",
+                        old,
+                        &new,
                     ));
                     s.value = new;
                 }
@@ -365,11 +483,7 @@ fn fix_items(
                             && let Some(uses) = units.params.get(name.as_str())
                             && let Some(new) = suffix_for(uses, n)
                         {
-                            out.push(unit_finding(
-                                &t.name,
-                                format!("{name} = {n}"),
-                                format!("{name} = {new}"),
-                            ));
+                            out.push(unit_finding(&t.name, name, Some(name), "=", n, &new));
                             *default = new;
                         }
                     }
@@ -1034,6 +1148,8 @@ fn collect_allows(module: &Module) -> Vec<Allow> {
                     }
                     continue;
                 }
+                // A blank line keeps an allow on the statement below it.
+                Item::Gap => continue,
                 Item::Extern(e) => Some((e.slug.as_str(), false)),
                 Item::Block(b) => Some((b.slug.as_str(), false)),
                 Item::Instance(b) => Some((b.slug.as_str(), true)),

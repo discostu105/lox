@@ -355,7 +355,10 @@ extern c = VirtualIn(iname: \"VI3\")
         ),
         "{text}"
     );
-    // A plain comment keeps its blank lines.
-    assert!(text.contains("\n\n# a plain comment\n\nextern c"), "{text}");
+    // A plain comment stays with its statement too.
+    assert!(
+        text.contains("VI2\")\n# a plain comment\nextern c"),
+        "{text}"
+    );
     assert_eq!(Module::parse(&text).unwrap().to_text(), text);
 }
