@@ -34,6 +34,9 @@ pub struct Io<'a> {
     pub clock: &'a Clock,
     /// Operating-mode object UUID → active.
     pub modes: &'a HashMap<String, bool>,
+    /// What central blocks tell this block this cycle (a shade: the
+    /// `CentralShade`s whose `rec=` lists it).
+    pub central: &'a [ShadeCmd],
     /// Outputs written this cycle.
     pub out: Vec<(&'static str, f64)>,
 }
@@ -203,25 +206,19 @@ pub enum Model {
         end: Option<f64>,
     },
     /// `MeterDig` is Loxone's *Fixed Value Meter* (kb/fixed-value-meter).
-    FixedMeter {
-        mr: f64,
-        last: Option<(f64, f64)>,
-    },
+    FixedMeter(Box<Meter>),
     /// `MeterAbsUni` is Loxone's *Meter* (kb/meter).
-    Meter {
-        mr: f64,
-        last: Option<(f64, f64)>,
-        reading: Reading,
-    },
+    Meter(Box<Meter>),
     /// `MeterAbsBi` is Loxone's *Meter Bidirectional*
     /// (kb/meter-bidirectional).
-    MeterBi {
-        consumption: Reading,
-        delivery: Reading,
-    },
+    MeterBi(Box<[(Count, Reading); 2]>),
     /// `AutoJalousie` is Loxone's *Automatic Shading*
     /// (kb/automatic-blinds): complete open/close, safety and lock.
     Blind(Box<Blind>),
+    /// `CentralShade` is Loxone's *Automatic Shading Central*
+    /// (kb/shading-overview): Co, Cc and So for the shades of its `rec=`
+    /// list.
+    Central(Box<Central>),
     /// `LightController2` is Loxone's *Lighting Controller*
     /// (kb/lighting-controller): its motion mood from all off, Off,
     /// DisPc, M+/M−, T5/1–8, Mood, On, Buzzer, Alarm and output M.
@@ -367,20 +364,36 @@ impl Model {
                 },
                 Err(e) => return Support::Unsupported(e),
             },
-            "MeterDig" => Model::FixedMeter {
-                mr: 0.0,
-                last: None,
-            },
-            "MeterAbsUni" => Model::Meter {
-                mr: 0.0,
-                last: None,
-                reading: Reading::default(),
-            },
-            "MeterAbsBi" => Model::MeterBi {
-                consumption: Reading::default(),
-                delivery: Reading::default(),
-            },
+            "MeterDig" => Model::FixedMeter(Box::default()),
+            // The block's page names a "relative metering" property whose
+            // attribute is not established; `Acum="true"` is a candidate.
+            "MeterAbsUni" | "MeterAbsBi" if el.attr("Acum").is_some_and(|a| a != "false") => {
+                return Support::Unsupported(
+                    "it carries `Acum=`, probably the relative-metering property, whose \
+                     meaning in the file is unverified"
+                        .into(),
+                );
+            }
+            "MeterAbsUni" => Model::Meter(Box::default()),
+            "MeterAbsBi" => Model::MeterBi(Box::default()),
             "AutoJalousie" => Model::Blind(Box::default()),
+            "CentralShade" => {
+                let members: Vec<String> = el
+                    .attr("rec")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+                if members.is_empty() {
+                    return Support::Unsupported("it controls no shades (`rec=` is empty)".into());
+                }
+                Model::Central(Box::new(Central {
+                    members,
+                    ..Central::default()
+                }))
+            }
             "LightController2" => match Lights::new(el) {
                 Ok(l) => Model::Lights(Box::new(l)),
                 Err(e) => return Support::Unsupported(e),
@@ -446,10 +459,11 @@ impl Model {
             Model::PushButton { .. } => &["InputTrigger", "Reset", "InputDisable", "Time"],
             Model::PushSwitch { .. } => &["InputTrigger", "On", "Reset", "InputDisable", "Time"],
             Model::PulseAt { .. } => &["InputDisable", "Time"],
-            Model::FixedMeter { .. } => &["A", "R", "Ppwr", "Mro"],
-            Model::Meter { .. } => &["Pf", "Mr", "R", "Mro"],
-            Model::MeterBi { .. } => &["Pf", "Mr1", "Mr2", "R", "Mro1", "Mro2"],
+            Model::FixedMeter(_) => &["A", "R", "Ppwr", "Mro"],
+            Model::Meter(_) => &["Pf", "Mr", "R", "Mro"],
+            Model::MeterBi(_) => &["Pf", "Mr1", "Mr2", "R", "Mro1", "Mro2"],
             Model::Blind(_) => BLIND_READS,
+            Model::Central(_) => CENTRAL_READS,
             Model::Lights(_) => LIGHTS_READS,
             Model::Threshold { .. } => &["Input", "On", "Off", "PulseTime"],
             Model::SrFlipFlop { .. } => &["InputS", "InputR", "InputTrigger"],
@@ -481,8 +495,13 @@ impl Model {
             | Model::Mode { .. } => &["Q"],
             Model::Arith(_) | Model::Add4 | Model::Formula(_) => &["AQ"],
             Model::Switch { .. } | Model::PushSwitch { .. } => &["Q", "Qon", "Qoff"],
-            Model::FixedMeter { .. } | Model::Meter { .. } => &["OPf", "OMr"],
-            Model::MeterBi { .. } => &["OPf", "OMr1", "OMr2"],
+            Model::FixedMeter(_) | Model::Meter(_) => {
+                &["OPf", "OMr", "ORd", "ORld", "ORm", "ORlm", "ORy", "ORly"]
+            }
+            Model::MeterBi(_) => &[
+                "OPf", "OMr1", "ORd1", "ORld1", "ORm1", "ORlm1", "ORy1", "ORly1", "OMr2", "ORd2",
+                "ORld2", "ORm2", "ORlm2", "ORy2", "ORly2",
+            ],
             Model::Blind(_) => &[
                 "OutputUp",
                 "OutputDown",
@@ -490,6 +509,7 @@ impl Model {
                 "OutputSafety",
                 "OutputLock",
             ],
+            Model::Central(_) => &["OutOpen", "OutClose"],
             Model::Lights(_) => LIGHTS_WRITES,
             Model::Threshold { .. } => &["Q", "RisingEdge", "FallingEdge"],
             Model::EdgeDetection { .. } => &["Edge", "RisingEdge", "FallingEdge"],
@@ -829,27 +849,37 @@ impl Model {
             }
             // While S is 1, Pf is the power rating and the meter runs; the
             // reading comes from the switch-on duration (kb/fixed-value-meter).
-            Model::FixedMeter { mr, last } => {
-                meter_reset(io.i(1))?;
+            Model::FixedMeter(meter) => {
+                let (r, mro) = (io.i(1), io.i(3).v);
                 let s = io.i(0).v;
                 if s != 0.0 && s != 1.0 {
                     return Err(format!("S = {s}: only 0 and 1 are documented"));
                 }
                 let pf = if s == 1.0 { io.i(2).v } else { 0.0 };
-                integrate(mr, last, now, pf);
-                let mro = io.i(3).v;
+                meter.integrate(io, pf, r, mro)?;
                 io.set("OPf", pf);
-                io.set("OMr", *mr + mro);
+                meter.count.set(io, &METER_KEYS, mro);
             }
             // Pf alone: the block is the meter and integrates Pf over
             // hours; with Mr it maps the reading and passes Pf through
             // (kb/meter, *Meter reading and units*).
-            Model::Meter { mr, last, reading } => {
-                meter_reset(io.i(2))?;
-                let (pf, mr_in, mro) = (io.i(0), io.i(1), io.i(3).v);
-                let reading_v = if mr_in.connected {
-                    meter_power_needs_pf(pf)?;
-                    reading.update(mr_in.v)?
+            Model::Meter(meter) => {
+                let (pf, mr_in, r, mro) = (io.i(0), io.i(1), io.i(2), io.i(3).v);
+                let power = if mr_in.connected {
+                    meter_reset(r)?;
+                    let at = io.clock.secs;
+                    let before = meter.reading.0;
+                    let v = meter.reading.update(mr_in.v)?;
+                    meter.count.mr = v;
+                    meter
+                        .count
+                        .periods
+                        .add(at, at, before.map_or(0.0, |b| v - b))?;
+                    if pf.connected {
+                        pf.v
+                    } else {
+                        meter.estimate(now, mr_in.v, before)?
+                    }
                 } else {
                     if pf.v < 0.0 {
                         return Err(format!(
@@ -858,43 +888,41 @@ impl Model {
                             pf.v
                         ));
                     }
-                    integrate(mr, last, now, pf.v);
-                    *mr
+                    meter.integrate(io, pf.v, r, mro)?;
+                    pf.v
                 };
-                io.set("OPf", pf.v);
-                io.set("OMr", reading_v + mro);
+                io.set("OPf", power);
+                meter.count.set(io, &METER_KEYS, mro);
             }
             // Mrc/Mrd map the consumption and delivery readings, Pf passes
             // through (kb/meter-bidirectional). How the block splits a Pf
             // alone into the two readings is not on the block's page.
-            Model::MeterBi {
-                consumption,
-                delivery,
-            } => {
+            Model::MeterBi(sides) => {
                 meter_reset(io.i(3))?;
-                let (pf, mr1, mr2) = (io.i(0), io.i(1), io.i(2));
-                if !mr1.connected && !mr2.connected && pf.connected {
+                let pf = io.i(0);
+                if !io.i(1).connected && !io.i(2).connected && pf.connected {
                     return Err("Pf alone: how the block splits it into consumption and \
                                 delivery readings is undocumented"
                         .into());
                 }
                 meter_power_needs_pf(pf)?;
-                let c = if mr1.connected {
-                    consumption.update(mr1.v)?
-                } else {
-                    0.0
-                };
-                let d = if mr2.connected {
-                    delivery.update(mr2.v)?
-                } else {
-                    0.0
-                };
-                let (mro1, mro2) = (io.i(4).v, io.i(5).v);
+                let at = io.clock.secs;
+                for (k, (count, reading)) in sides.iter_mut().enumerate() {
+                    let input = io.i(1 + k);
+                    if input.connected {
+                        let before = reading.0;
+                        let v = reading.update(input.v)?;
+                        count.mr = v;
+                        count.periods.add(at, at, before.map_or(0.0, |b| v - b))?;
+                    }
+                }
                 io.set("OPf", pf.v);
-                io.set("OMr1", c + mro1);
-                io.set("OMr2", d + mro2);
+                let (mro1, mro2) = (io.i(4).v, io.i(5).v);
+                sides[0].0.set(io, &METER_BI_KEYS[0], mro1);
+                sides[1].0.set(io, &METER_BI_KEYS[1], mro2);
             }
             Model::Blind(b) => b.step(io)?,
+            Model::Central(c) => c.step(io)?,
             Model::Lights(l) => l.step(io)?,
             // O switches on above Von and off below Voff; with Von below
             // Voff the other way round; with both equal O is on only at
@@ -993,17 +1021,17 @@ impl Model {
 }
 
 /// Inputs of an `AutoJalousie` in [`Model::reads`] order; the first
-/// [`BLIND_REFUSED`] are inputs without a model, the last two of those
+/// [`BLIND_REFUSED`] are inputs without a model, the last of those
 /// taking a value.
 const BLIND_READS: &[&str] = &[
-    "InputTrigger",
-    "InputTriggerUp",
-    "InputTriggerDown",
     "AutoShade",
     "ReactAutoShade",
     "Gesture",
-    "ManualPosition",
     "ManualLamelle",
+    "InputTrigger",
+    "InputTriggerUp",
+    "InputTriggerDown",
+    "ManualPosition",
     "EndUp",
     "EndDown",
     "Shade",
@@ -1017,22 +1045,54 @@ const BLIND_READS: &[&str] = &[
     "Rdd",
     "Type",
     "Back",
+    "MinPulse",
+    "DblClk",
+    "MinMove",
+    "TimeBlock",
 ];
-const BLIND_REFUSED: usize = 8;
+const BLIND_REFUSED: usize = 4;
 
 /// Which way a blind is driven.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dir {
+pub enum Dir {
     Up,
     Down,
 }
 
-/// A running drive: its direction and when the output ends, in sim
-/// seconds.
+impl Dir {
+    fn label(self) -> &'static str {
+        match self {
+            Dir::Up => "Po",
+            Dir::Down => "Pc",
+        }
+    }
+}
+
+/// What a `CentralShade` tells the shades of its `rec=` list in one
+/// cycle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShadeCmd {
+    Complete(Dir),
+    SlightlyOpen,
+}
+
+/// A drive: its direction, when the output switches on (later than the
+/// command after a reversal, by the motor lock) and off, in sim seconds.
+/// `hold`: Po or Pc started it and is still held.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Drive {
     dir: Dir,
+    from: f64,
     until: f64,
+    hold: bool,
+}
+
+/// The last press on Po or Pc, for the double click.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Press {
+    dir: Dir,
+    rose: f64,
+    released: Option<f64>,
 }
 
 /// An `AutoJalousie`'s state. The position is the block's estimate from
@@ -1042,42 +1102,81 @@ pub struct Blind {
     pos: f64,
     drive: Option<Drive>,
     last_now: f64,
+    /// The direction of the last drive and when its output went off.
+    last_end: Option<(Dir, f64)>,
+    press: Option<Press>,
+    /// After Tg stopped a drive: the direction its next press drives.
+    tg_next: Option<Dir>,
+    /// The last value seen on Pos: a change moves.
+    pos_in: Option<f64>,
     co: Edge,
     cc: Edge,
     so: Edge,
+    tg: Edge,
+    po: Edge,
+    pc: Edge,
     /// Wa or Dwc as last acted on: `(wind, window)`.
     safety: (bool, bool),
     stop_held: bool,
 }
 
+/// The parameters a drive needs.
+#[derive(Debug, Clone, Copy)]
+struct Times {
+    opd: f64,
+    cld: f64,
+    rdd: bool,
+    mld: f64,
+}
+
 impl Blind {
+    /// The position, and whether the blind moves (or waits for the motor
+    /// lock to move).
+    pub fn state(&self) -> (f64, bool) {
+        (self.pos, self.drive.is_some())
+    }
+
     /// Complete open runs Op for the whole Opd "regardless of the current
     /// position" (a reference run); complete close runs Cl only for "the
     /// determined remaining run time", or the whole Cld with Rdd
     /// (kb/automatic-blinds, *Complete movement, end positions and
     /// remanence*; parameter Rdd).
-    fn complete(&self, dir: Dir, now: f64, opd: f64, cld: f64, rdd: bool) -> Drive {
+    fn complete(&mut self, dir: Dir, now: f64, t: Times) {
         let len = match dir {
-            Dir::Up => opd,
-            Dir::Down if rdd => cld,
-            Dir::Down => (1.0 - self.pos) * cld,
+            Dir::Up => t.opd,
+            Dir::Down if t.rdd => t.cld,
+            Dir::Down => (1.0 - self.pos) * t.cld,
         };
-        Drive {
-            dir,
-            until: now + len,
-        }
+        self.start(dir, now, len, t.mld);
     }
 
-    fn start(&mut self, d: Drive) -> Result<(), String> {
-        if let Some(run) = self.drive
-            && run.dir != d.dir
-        {
-            return Err("a move reverses a running one: the motor lock between \
-                        direction changes (Mld) is not simulated"
-                .into());
+    /// Start a drive of `len` seconds. Mld is the "duration of motor lock
+    /// between direction changes": a drive against the running or the
+    /// last one starts Mld after that one's output went off. A drive the
+    /// same way continues the running one.
+    fn start(&mut self, dir: Dir, now: f64, len: f64, mld: f64) {
+        if self.drive.is_some_and(|d| d.dir != dir) {
+            self.stop(now);
         }
-        self.drive = Some(d);
-        Ok(())
+        let from = match (self.drive, self.last_end) {
+            (Some(d), _) => d.from.max(now),
+            (None, Some((last, end))) if last != dir => (end + mld).max(now),
+            _ => now,
+        };
+        self.drive = Some(Drive {
+            dir,
+            from,
+            until: from + len,
+            hold: false,
+        });
+    }
+
+    fn stop(&mut self, now: f64) {
+        if let Some(d) = self.drive.take()
+            && now + EPS >= d.from
+        {
+            self.last_end = Some((d.dir, now));
+        }
     }
 
     fn step(&mut self, io: &mut Io) -> Result<(), String> {
@@ -1085,20 +1184,22 @@ impl Blind {
         let v = |k: usize| io.i(k);
         for (k, key) in BLIND_READS[..BLIND_REFUSED].iter().enumerate() {
             let input = v(k);
-            // Pos and Slat take a value, the others a pulse.
-            if input.on() || (k >= 6 && input.connected) {
+            // Slat takes a value, the others a pulse.
+            if input.on() || (k == BLIND_REFUSED - 1 && input.connected) {
                 return Err(not_simulated("AutoJalousie", key));
             }
         }
         let (opd, cld) = (v(15).v, v(16).v);
         let (wap, rdd, kind, rd) = (v(17).v, v(18).on(), v(19).v, v(20).v);
+        let (tlc, tdc, min_td, mld) = (v(21).v, v(22).v, v(23).v, v(24).v);
+        let times = Times { opd, cld, rdd, mld };
         if opd <= 0.0 || cld <= 0.0 {
             return Err("an opening or closing duration of 0 is undocumented".into());
         }
         // The position follows the drive since the last cycle, linearly
         // over Opd and Cld — the reading of "remaining run time".
         if let Some(d) = self.drive {
-            let ran = d.until.min(now) - self.last_now;
+            let ran = d.until.min(now) - d.from.max(self.last_now);
             if ran > 0.0 {
                 self.pos = match d.dir {
                     Dir::Up => (self.pos - ran / opd).max(0.0),
@@ -1107,6 +1208,7 @@ impl Blind {
             }
             if now + EPS >= d.until {
                 self.drive = None;
+                self.last_end = Some((d.dir, d.until));
             }
         }
         self.last_now = now;
@@ -1115,13 +1217,104 @@ impl Blind {
         let (co, _) = self.co.update(v(8).on());
         let (cc, _) = self.cc.update(v(9).on());
         let (so, _) = self.so.update(v(10).on());
+        let (tg, _) = self.tg.update(v(4).on());
+        let (po, po_fell) = self.po.update(v(5).on());
+        let (pc, pc_fell) = self.pc.update(v(6).on());
         let (wind, window, stop) = (v(11).on(), v(12).on(), v(13).on());
+        let target = v(7);
+        let moved_to = match self.pos_in.replace(target.v) {
+            Some(was) if target.connected && (target.v - was).abs() > EPS => Some(target.v),
+            _ => None,
+        };
+
+        // Push & hold: the drive lasts while the button is held, at least
+        // minTd ("minimum travel time at pulse on input (Po) or (Pc)").
+        for (fell, dir) in [(po_fell, Dir::Up), (pc_fell, Dir::Down)] {
+            if !fell {
+                continue;
+            }
+            if let Some(p) = &mut self.press
+                && p.dir == dir
+                && p.released.is_none()
+            {
+                p.released = Some(now);
+            }
+            if let Some(d) = &mut self.drive
+                && d.hold
+                && d.dir == dir
+            {
+                d.hold = false;
+                d.until = (d.from + min_td).max(now);
+                if now + EPS >= d.until {
+                    self.stop(now);
+                }
+            }
+        }
+        // Held for Tlc, a press becomes the complete open or close
+        // ("long-click duration on inputs (Po), (Pc) for complete open /
+        // close").
+        if let Some(d) = self.drive
+            && d.hold
+            && let Some(p) = self.press
+            && tlc > 0.0
+            && now - p.rose + EPS >= tlc
+        {
+            let at = (p.rose + tlc).max(d.from);
+            let until = match d.dir {
+                Dir::Up => at + opd,
+                Dir::Down if rdd => at + cld,
+                Dir::Down => now + (1.0 - self.pos) * cld,
+            };
+            self.drive = Some(Drive {
+                hold: false,
+                until,
+                ..d
+            });
+            self.press = None;
+        }
+        if let Some(d) = self.drive
+            && d.hold
+        {
+            if disabled {
+                return Err(format!(
+                    "DisPc while {} is held is undocumented",
+                    d.dir.label()
+                ));
+            }
+            let end = match d.dir {
+                Dir::Up => self.pos <= 0.0,
+                Dir::Down => self.pos >= 1.0,
+            };
+            if end {
+                return Err(format!(
+                    "{} held up to the end position: whether the output keeps \
+                     driving is undocumented",
+                    d.dir.label()
+                ));
+            }
+        }
 
         // Off dominates and "overrules the safetyActive, as not even
         // moving to the safety position is allowed" (Structure File,
         // Jalousie `locked`): it stops, and locks while held.
+        if stop || wind || window {
+            self.press = None;
+            self.tg_next = None;
+            if moved_to.is_some() {
+                return Err("Pos changes while the block is locked (Off, Wa or Dwc): \
+                            whether it moves once the lock ends is undocumented"
+                    .into());
+            }
+            if !io.central.is_empty() {
+                return Err(
+                    "a central command reaches a locked shade (Off, Wa or Dwc): \
+                            whether it acts is undocumented"
+                        .into(),
+                );
+            }
+        }
         if stop {
-            self.drive = None;
+            self.stop(now);
             self.stop_held = true;
         } else {
             if self.stop_held && (wind || window) {
@@ -1147,35 +1340,191 @@ impl Blind {
                 // end of Wa "automatic conditions are not re-evaluated": the
                 // lock lifts and nothing moves.
                 if (window && !was_window) || (wind && !was_wind && wap == 0.0) {
-                    self.start(self.complete(Dir::Up, now, opd, cld, rdd))?;
+                    self.complete(Dir::Up, now, times);
                 } else if wind && !was_wind {
                     if wap != 1.0 {
                         return Err(format!("Wap = {wap}: only 0 and 1 are documented"));
                     }
-                    self.start(self.complete(Dir::Down, now, opd, cld, rdd))?;
+                    self.complete(Dir::Down, now, times);
                 }
                 self.safety = (wind, window);
             }
-            if !wind && !window && !disabled {
-                // Co and Cc: "If in motion, stops."
-                if (co || cc) && self.drive.is_some() {
-                    self.drive = None;
-                } else if co {
-                    self.start(self.complete(Dir::Up, now, opd, cld, rdd))?;
-                } else if cc {
-                    self.start(self.complete(Dir::Down, now, opd, cld, rdd))?;
+            if !wind && !window {
+                // DisPc disables "Tg, Po, Pc, Co, Cc, So, T5"; "central
+                // commands are not blocked by an active (DisPc) input"
+                // (kb/shading-overview), nor is Pos.
+                let pulses = if disabled {
+                    [false; 6]
+                } else {
+                    [co, cc, so, tg, po, pc]
+                };
+                let n = pulses.iter().filter(|&&b| b).count()
+                    + usize::from(moved_to.is_some())
+                    + io.central.len();
+                if n > 1 {
+                    return Err("two commands in one cycle (of Co, Cc, So, Tg, Po, Pc, Pos \
+                                and a central block) are undocumented"
+                        .into());
+                }
+                let [co, cc, so, tg, po, pc] = pulses;
+                if n == 1 && !tg {
+                    self.tg_next = None;
+                }
+                if n == 1 && !(po || pc) {
+                    self.press = None;
+                }
+                if co || cc {
+                    // Co and Cc: "If in motion, stops."
+                    if self.drive.is_some() {
+                        self.stop(now);
+                    } else {
+                        self.complete(if co { Dir::Up } else { Dir::Down }, now, times);
+                    }
                 } else if so {
-                    self.slightly_open(now, kind, rd, opd, cld)?;
+                    self.slightly_open(now, kind, rd, times)?;
+                } else if tg {
+                    self.toggle(now, times)?;
+                } else if po || pc {
+                    let dir = if po { Dir::Up } else { Dir::Down };
+                    self.press_button(dir, now, times, tlc, tdc)?;
+                } else if let Some(p) = moved_to {
+                    self.move_to(p, now, times)?;
+                } else if let Some(&cmd) = io.central.first() {
+                    // The central block's Co and Cc: "Stopping not possible".
+                    if self.drive.is_some() {
+                        return Err("a central command while the shade moves is \
+                                    undocumented"
+                            .into());
+                    }
+                    match cmd {
+                        ShadeCmd::Complete(dir) => self.complete(dir, now, times),
+                        ShadeCmd::SlightlyOpen => self.slightly_open(now, kind, rd, times)?,
+                    }
                 }
             }
         }
-        let dir = self.drive.map(|d| d.dir);
-        let pos = self.pos;
+        let dir = self.drive.filter(|d| now + EPS >= d.from).map(|d| d.dir);
         io.set_bool("OutputUp", dir == Some(Dir::Up));
         io.set_bool("OutputDown", dir == Some(Dir::Down));
-        io.set("OutputPos", pos);
+        io.set("OutputPos", self.pos);
         io.set_bool("OutputSafety", wind || window);
         io.set_bool("OutputLock", stop);
+        Ok(())
+    }
+
+    /// Tg "toggles between open, stop, close": a press stops a moving
+    /// shade, and the next one drives the other way, completely (the
+    /// reading of "open" and "close"). Where the cycle starts on a shade
+    /// at rest is undocumented.
+    fn toggle(&mut self, now: f64, t: Times) -> Result<(), String> {
+        if let Some(d) = self.drive {
+            self.stop(now);
+            self.tg_next = Some(match d.dir {
+                Dir::Up => Dir::Down,
+                Dir::Down => Dir::Up,
+            });
+            return Ok(());
+        }
+        match self.tg_next.take() {
+            Some(dir) => {
+                self.complete(dir, now, t);
+                Ok(())
+            }
+            None => Err("Tg on a shade at rest: where its open, stop, close cycle \
+                         starts is undocumented"
+                .into()),
+        }
+    }
+
+    /// A press on Po or Pc: "partial open (close) with push & hold". A
+    /// second press within Tdc of the first (Tdc 0: none) and a press held
+    /// for Tlc (0: every press) start the complete open or close.
+    fn press_button(
+        &mut self,
+        dir: Dir,
+        now: f64,
+        t: Times,
+        tlc: f64,
+        tdc: f64,
+    ) -> Result<(), String> {
+        let name = dir.label();
+        if tdc > 0.0
+            && let Some(p) = self.press
+            && p.dir == dir
+        {
+            if now - p.rose + EPS < tdc {
+                self.press = None;
+                self.complete(dir, now, t);
+                return Ok(());
+            }
+            if p.released.is_some_and(|r| now - r + EPS < tdc) {
+                return Err(format!(
+                    "a second press on {name} within Tdc of releasing the first but \
+                     not of pressing it: whether that is a double click is undocumented"
+                ));
+            }
+        }
+        if self.drive.is_some() {
+            return Err(format!("{name} while the shade moves is undocumented"));
+        }
+        self.press = None;
+        if tlc <= 0.0 {
+            self.complete(dir, now, t);
+            return Ok(());
+        }
+        if dir == Dir::Down && t.rdd {
+            return Err("Pc with Rdd: whether a partial close drives the whole Cld \
+                        is undocumented"
+                .into());
+        }
+        let end = match dir {
+            Dir::Up => self.pos <= 0.0,
+            Dir::Down => self.pos >= 1.0,
+        };
+        if end {
+            return Err(format!(
+                "{name} at the end position: whether the output drives is undocumented"
+            ));
+        }
+        self.start(dir, now, f64::INFINITY, t.mld);
+        if let Some(d) = &mut self.drive {
+            d.hold = true;
+        }
+        self.press = Some(Press {
+            dir,
+            rose: now,
+            released: None,
+        });
+        Ok(())
+    }
+
+    /// Pos (%): "move the shading to the specified position", 0 open …
+    /// 100 closed like the Pos output, when the value changes. The run
+    /// time is the share of Opd or Cld.
+    fn move_to(&mut self, p: f64, now: f64, t: Times) -> Result<(), String> {
+        if !(0.0..=100.0).contains(&p) {
+            return Err(format!("Pos = {p}: the range is 0 … 100 %"));
+        }
+        let target = p / 100.0;
+        if target <= 0.0 || target >= 1.0 {
+            return Err(format!(
+                "Pos = {p} %: whether that is a complete open or close (a reference \
+                 run, Rdd) is undocumented"
+            ));
+        }
+        if self.drive.is_some() {
+            return Err("Pos while the shade moves is undocumented".into());
+        }
+        if target > self.pos {
+            if t.rdd {
+                return Err("Pos closing with Rdd: whether a partial close drives the \
+                            whole Cld is undocumented"
+                    .into());
+            }
+            self.start(Dir::Down, now, (target - self.pos) * t.cld, t.mld);
+        } else if target < self.pos {
+            self.start(Dir::Up, now, (self.pos - target) * t.opd, t.mld);
+        }
         Ok(())
     }
 
@@ -1183,14 +1532,7 @@ impl Blind {
     /// according to parameter (Rd)", open 0.1 … closed 1.0
     /// (kb/automatic-blinds). Venetian blinds tilt their slats, which is
     /// not simulated.
-    fn slightly_open(
-        &mut self,
-        now: f64,
-        kind: f64,
-        rd: f64,
-        opd: f64,
-        cld: f64,
-    ) -> Result<(), String> {
+    fn slightly_open(&mut self, now: f64, kind: f64, rd: f64, t: Times) -> Result<(), String> {
         if !matches!(kind as i64, 1 | 2 | 4 | 5 | 6) || kind.fract() != 0.0 {
             return Err(format!(
                 "So on shading type {kind}: venetian blinds tilt their slats, \
@@ -1203,20 +1545,77 @@ impl Blind {
         if self.drive.is_some() {
             return Err("So while the blind moves is undocumented".into());
         }
-        let d = if rd > self.pos {
-            Drive {
-                dir: Dir::Down,
-                until: now + (rd - self.pos) * cld,
-            }
-        } else {
-            Drive {
-                dir: Dir::Up,
-                until: now + (self.pos - rd) * opd,
-            }
-        };
-        if d.until > now {
-            self.start(d)?;
+        if rd > self.pos {
+            self.start(Dir::Down, now, (rd - self.pos) * t.cld, t.mld);
+        } else if rd < self.pos {
+            self.start(Dir::Up, now, (self.pos - rd) * t.opd, t.mld);
         }
+        Ok(())
+    }
+}
+
+/// Inputs of a `CentralShade` in [`Model::reads`] order; the first
+/// [`CENTRAL_REFUSED`] are inputs without a model, the last two of those
+/// taking a value.
+const CENTRAL_READS: &[&str] = &[
+    "InputTrigger",
+    "InputTriggerUp",
+    "InputTriggerDown",
+    "AutoShade",
+    "ReactAutoShade",
+    "Safety",
+    "Stop",
+    "Gesture",
+    "ManualPosition",
+    "ManualLamelle",
+    "EndUp",
+    "EndDown",
+    "Shade",
+    "InputDisable",
+];
+const CENTRAL_REFUSED: usize = 10;
+
+/// A `CentralShade`'s state: its shades and the command of this cycle.
+/// No and Nc (`OutOpen`, `OutClose`) count its shades; the simulator
+/// computes them from the shades.
+#[derive(Debug, Clone, Default)]
+pub struct Central {
+    pub members: Vec<String>,
+    pub cmd: Option<ShadeCmd>,
+    co: Edge,
+    cc: Edge,
+    so: Edge,
+}
+
+impl Central {
+    fn step(&mut self, io: &mut Io) -> Result<(), String> {
+        self.cmd = None;
+        let v = |k: usize| io.i(k);
+        for (k, key) in CENTRAL_READS[..CENTRAL_REFUSED].iter().enumerate() {
+            let input = v(k);
+            if input.on() || (k >= CENTRAL_REFUSED - 2 && input.connected) {
+                return Err(not_simulated("CentralShade", key));
+            }
+        }
+        let (co, _) = self.co.update(v(10).on());
+        let (cc, _) = self.cc.update(v(11).on());
+        let (so, _) = self.so.update(v(12).on());
+        // DisPc disables "Tg, Po, Pc, Co, Cc, So, T5" (kb/shading-overview).
+        if v(13).on() {
+            return Ok(());
+        }
+        if usize::from(co) + usize::from(cc) + usize::from(so) > 1 {
+            return Err("two of Co, Cc and So in one cycle are undocumented".into());
+        }
+        self.cmd = if co {
+            Some(ShadeCmd::Complete(Dir::Up))
+        } else if cc {
+            Some(ShadeCmd::Complete(Dir::Down))
+        } else if so {
+            Some(ShadeCmd::SlightlyOpen)
+        } else {
+            None
+        };
         Ok(())
     }
 }
@@ -1446,16 +1845,9 @@ impl Lights {
                 let mood = &self.moods[ix];
                 let q = mood.qs.get(n).copied().unwrap_or(0);
                 let v = mood_output(&mood.name, n, q, self.named[n])?;
-                if v == 0.0 {
-                    continue;
-                }
-                if on.is_some_and(|w| w != v) {
-                    return Err(format!(
-                        "a mix with two values on AQ{}: which one it shows is untested",
-                        n + 1
-                    ));
-                }
-                on = Some(v);
+                // "If an output is used by two lighting moods, the higher
+                // brightness of the output takes priority" (kb, *Moods*).
+                on = Some(on.map_or(v, |w: f64| w.max(v)));
             }
             *slot = on.unwrap_or(0.0);
         }
@@ -1528,23 +1920,35 @@ impl Lights {
                 "presence mood Pm = {pm}: how its ID names a mood is undocumented"
             ));
         }
-        // DisP: motion is ignored while it is 1 (live: Mo did not switch
-        // on, and did once DisP was 0 again).
+        // DisP "disables inputs (P) and (Mo) when 1" (live: Mo did not
+        // switch on, and did once DisP was 0 again). "Lights activated by
+        // presence (P) are switched off immediately. If lights were
+        // activated by motion (Mo), (Moet) timer is started on rising edge
+        // at (DisP) … If the extend time of (Met) is shorter than (Moet),
+        // (Met) is used instead" (kb): with both masked, the end of P
+        // switches off and the end of Mo starts Moet; a Moet already
+        // running starts again.
         let (dis_rose, dis_fell) = self.dis_edge.update(dis);
-        if (dis
-            && (presence.on()
-                || self.auto
-                || self.off_at.is_some()
-                || (motion_in.on() && (self.lit() || self.suppressed_until.is_some()))))
-            || ((dis_rose || dis_fell) && motion_in.on())
+        let sensed = motion_in.on() || presence.on();
+        let by_motion = self.auto && self.manual_at.is_none();
+        if (dis_rose && self.lit() && !by_motion && (sensed || self.off_at.is_some()))
+            || (dis && sensed && (self.suppressed_until.is_some() || (self.lit() && !self.auto)))
+            || (dis_fell && (sensed || self.auto || self.off_at.is_some()))
         {
             return Err(
-                "DisP with P, with the motion mood on or timing out, with motion \
-                        while lights are on or held back, or changing during motion is \
-                        not simulated"
+                "DisP over a mood chosen by hand during motion, with motion while \
+                        the automatic is held back, or ending during motion, presence or \
+                        while the motion mood shows is not simulated"
                     .into(),
             );
         }
+        if dis_rose && by_motion && !motion_in.on() && !presence.on() && self.off_at.is_some() {
+            self.off_at = Some(now + moet.min(met));
+        }
+        let presence = Input {
+            v: f64::from(u8::from(presence.on() && !dis)),
+            ..presence
+        };
         let motion = motion_in.on() && !dis;
         if motion && presence.on() {
             return Err("Mo and P at once is not simulated".into());
@@ -2222,13 +2626,15 @@ impl Reading {
     }
 }
 
-/// R resets "meter reading outputs" on a pulse and locks while on; which
-/// outputs and to what is not documented.
+/// R with a mapped meter reading: what a reset does to a reading the
+/// physical meter keeps sending is undocumented.
 fn meter_reset(r: Input) -> Result<(), String> {
     if r.on() {
-        return Err("R is on: which readings a reset clears, and to what, is \
-                    undocumented"
-            .into());
+        return Err(
+            "R is on at a meter that maps readings (Mr): what a reset does \
+                    to them is undocumented"
+                .into(),
+        );
     }
     Ok(())
 }
@@ -2238,18 +2644,206 @@ fn meter_reset(r: Input) -> Result<(), String> {
 /// edge" — edges the simulator does not see.
 fn meter_power_needs_pf(pf: Input) -> Result<(), String> {
     if !pf.connected {
-        return Err("Mr without Pf: the power from meter readings is not simulated".into());
+        return Err(
+            "Mr without Pf at a bidirectional meter: how the power of two \
+                    readings combines is undocumented"
+                .into(),
+        );
     }
     Ok(())
 }
 
-/// Add the energy since the last cycle: the power of the last cycle times
-/// the time in hours ("the units for Pf/Mr must be hour-related", kb/meter).
-fn integrate(mr: &mut f64, last: &mut Option<(f64, f64)>, now: f64, pf: f64) {
-    if let Some((t, p)) = *last {
-        *mr += p * (now - t) / 3600.0;
+/// The outputs of a meter's count: the reading, then today, yesterday,
+/// this month, last month, this year, last year.
+const METER_KEYS: [&str; 7] = ["OMr", "ORd", "ORld", "ORm", "ORlm", "ORy", "ORly"];
+const METER_BI_KEYS: [[&str; 7]; 2] = [
+    ["OMr1", "ORd1", "ORld1", "ORm1", "ORlm1", "ORy1", "ORly1"],
+    ["OMr2", "ORd2", "ORld2", "ORm2", "ORlm2", "ORy2", "ORly2"],
+];
+
+/// What a meter has counted: its reading and the period readings.
+#[derive(Debug, Clone, Default)]
+pub struct Count {
+    mr: f64,
+    periods: Periods,
+}
+
+impl Count {
+    /// Mro "is added to output (Mr)" only: the period readings are
+    /// amounts, not readings.
+    fn set(&self, io: &mut Io, keys: &[&'static str; 7], mro: f64) {
+        io.set(keys[0], self.mr + mro);
+        for (key, v) in keys[1..].iter().zip(self.periods.values()) {
+            io.set(key, v);
+        }
     }
-    *last = Some((now, pf));
+}
+
+/// A unidirectional meter's state.
+#[derive(Debug, Clone, Default)]
+pub struct Meter {
+    count: Count,
+    /// When the last cycle ran, and the power it counted with.
+    last: Option<(f64, f64)>,
+    reading: Reading,
+    reset: Edge,
+    /// Mr without Pf: the last value received and when, and the power
+    /// estimated from it.
+    received: Option<(f64, f64)>,
+    power: f64,
+}
+
+impl Meter {
+    /// Add the energy since the last cycle: the power of the last cycle
+    /// times the time in hours ("the units for Pf/Mr must be
+    /// hour-related", kb/meter). R: "Pulse: Meter reading outputs are
+    /// reset. On: Block is locked" — a rising edge clears the reading and
+    /// every period reading ("reset: Resets all values to 0", Structure
+    /// File, Meter); while R is on the meter counts nothing.
+    fn integrate(&mut self, io: &Io, pf: f64, r: Input, mro: f64) -> Result<(), String> {
+        let (rose, _) = self.reset.update(r.on());
+        if rose && mro != 0.0 {
+            return Err(format!(
+                "R with Mro = {mro}: whether a reset reading shows 0 or Mro is undocumented"
+            ));
+        }
+        let now = io.now;
+        if let Some((t, p)) = self.last {
+            let amount = p * (now - t) / 3600.0;
+            self.count.mr += amount;
+            let to = io.clock.secs;
+            self.count.periods.add(to - (now - t), to, amount)?;
+        }
+        self.last = Some((now, if r.on() { 0.0 } else { pf }));
+        if rose {
+            self.count = Count::default();
+        }
+        Ok(())
+    }
+
+    /// Mr alone: "The power is estimated using the difference between the
+    /// last two meter readings and their time interval. If the same or a
+    /// smaller meter value is received, power is set to zero. The power
+    /// output remains unchanged until a new meter value is received"
+    /// (kb/meter). A value is received when it changes; the power has the
+    /// unit of the reading per hour, as for Pf alone.
+    fn estimate(&mut self, now: f64, v: f64, accepted: Option<f64>) -> Result<f64, String> {
+        match self.received {
+            None => self.received = Some((now, v)),
+            Some((t, was)) if (v - was).abs() > EPS => {
+                if v > was {
+                    if accepted.is_some_and(|a| was < a) {
+                        return Err("Mr rises after a discarded reading: which two readings \
+                                    the power comes from is undocumented"
+                            .into());
+                    }
+                    self.power = (v - was) / ((now - t) / 3600.0);
+                } else {
+                    self.power = 0.0;
+                }
+                self.received = Some((now, v));
+            }
+            Some(_) => {}
+        }
+        Ok(self.power)
+    }
+}
+
+/// The period readings: today, this month and this year by the simulated
+/// clock's calendar, and the previous day, month and year (kb/meter
+/// outputs Rd … Rly; "Meter reading today", Structure File, Meter
+/// `totalDay`). Each counts what was metered in its period; at its end
+/// the amount moves to the previous one. A simulation starts with
+/// nothing metered.
+#[derive(Debug, Clone, Default)]
+pub struct Periods([Period; 3]);
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Period {
+    key: Option<i64>,
+    cur: f64,
+    prev: f64,
+}
+
+impl Periods {
+    /// Count `amount`, metered evenly over the clock seconds `from..to`
+    /// (at `to` when they are equal).
+    fn add(&mut self, from: f64, to: f64, amount: f64) -> Result<(), String> {
+        for (g, period) in self.0.iter_mut().enumerate() {
+            let mut t = from;
+            while t + EPS < to {
+                let k = period_key(g, t);
+                period.roll(g, k)?;
+                let end = period_end(g, k).min(to);
+                period.cur += amount * (end - t) / (to - from);
+                t = end;
+            }
+            period.roll(g, period_key(g, to))?;
+            if to <= from + EPS {
+                period.cur += amount;
+            }
+        }
+        Ok(())
+    }
+
+    fn values(&self) -> [f64; 6] {
+        let [d, m, y] = self.0;
+        [d.cur, d.prev, m.cur, m.prev, y.cur, y.prev]
+    }
+}
+
+impl Period {
+    fn roll(&mut self, g: usize, k: i64) -> Result<(), String> {
+        match self.key {
+            Some(was) if k == was + 1 => {
+                self.prev = self.cur;
+                self.cur = 0.0;
+            }
+            Some(was) if k > was => {
+                self.prev = 0.0;
+                self.cur = 0.0;
+            }
+            Some(was) if k < was => {
+                return Err(format!(
+                    "the clock went back to an earlier {}: the meter's period readings \
+                     are undefined",
+                    ["day", "month", "year"][g]
+                ));
+            }
+            _ => {}
+        }
+        self.key = Some(k);
+        Ok(())
+    }
+}
+
+/// The day (0), month (1) or year (2) a clock time falls in.
+fn period_key(g: usize, secs: f64) -> i64 {
+    let day = (secs / 86_400.0).floor() as i64;
+    let (y, m, _) = super::clock::civil_from_days(day);
+    match g {
+        0 => day,
+        1 => y * 12 + m - 1,
+        _ => y,
+    }
+}
+
+/// When the period `k` of granularity `g` ends, in clock seconds.
+fn period_end(g: usize, k: i64) -> f64 {
+    use super::clock::days_from_civil;
+    let day = match g {
+        0 => k + 1,
+        1 => {
+            let (y, m) = (k.div_euclid(12), k.rem_euclid(12) + 1);
+            if m == 12 {
+                days_from_civil(y + 1, 1, 1)
+            } else {
+                days_from_civil(y, m + 1, 1)
+            }
+        }
+        _ => days_from_civil(k + 1, 1, 1),
+    };
+    day as f64 * 86_400.0
 }
 
 /// The built-in mode number from a mode's fixed UUID

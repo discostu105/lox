@@ -664,7 +664,7 @@ fn meters_refuse_reset_and_undocumented_inputs() {
         + &obj(
             3,
             "MeterAbsUni",
-            &["Pf", "Mr<p2-AQ", "R", "Mro", "OPf", "OMr"],
+            &["Pf<p1-AQ", "Mr<p2-AQ", "R<p1-AQ", "Mro", "OPf", "OMr"],
         )
         + &obj(
             4,
@@ -676,20 +676,26 @@ fn meters_refuse_reset_and_undocumented_inputs() {
         + &obj(
             5,
             "MeterDig",
-            &["A", "R<p1-AQ", "Ppwr", "Mro", "OPf", "OMr"],
+            &["A", "R<p1-AQ", "Ppwr", "Mro=1", "OPf", "OMr"],
         )
-        + &obj(6, "MeterDig", &["A", "R", "Ppwr", "Mro", "ORd"])));
+        + &obj(6, "MeterDig", &["A", "R", "Ppwr", "Mro", "ORw"])
+        + &obj_attrs(7, "MeterAbsUni", " Acum=\"true\"", &["Mr", "OMr"])));
     let mut sim = Simulator::new(&d);
     sim.set("p1-AQ", 1.0);
     sim.tick(1.0);
     let err = sim.check("p3-OMr").unwrap_err();
-    assert!(err.contains("Mr without Pf"), "{err}");
+    assert!(
+        err.contains("R is on at a meter that maps readings"),
+        "{err}"
+    );
     let err = sim.check("p4-OMr1").unwrap_err();
     assert!(err.contains("Pf alone"), "{err}");
     let err = sim.check("p5-OMr").unwrap_err();
-    assert!(err.contains("R is on"), "{err}");
-    let err = sim.check("p6-ORd").unwrap_err();
-    assert!(err.contains("output `ORd` is not simulated"), "{err}");
+    assert!(err.contains("R with Mro = 1"), "{err}");
+    let err = sim.check("p6-ORw").unwrap_err();
+    assert!(err.contains("output `ORw` is not simulated"), "{err}");
+    let err = sim.check("p7-OMr").unwrap_err();
+    assert!(err.contains("`Acum=`"), "{err}");
 }
 
 #[test]
@@ -850,8 +856,11 @@ fn blind_window_opens_and_slightly_open_moves_to_rd() {
     sim.tick(30.0);
     assert_eq!(sim.read("p7-OutputDown"), 0.0);
     assert!((sim.read("p7-OutputPos") - 0.6).abs() < 1e-9);
+    // Opening right after closing waits for the motor lock Mld (0.5 s).
     sim.set("p5-AQ", 1.0);
     sim.tick(0.1);
+    assert_eq!(sim.read("p7-OutputUp"), 0.0);
+    sim.tick(0.4);
     assert_eq!(sim.read("p7-OutputUp"), 1.0);
     sim.set("p5-AQ", 0.0);
     sim.tick(0.1);
@@ -861,7 +870,7 @@ fn blind_window_opens_and_slightly_open_moves_to_rd() {
 
 #[test]
 fn blind_refuses_its_unmodelled_inputs_and_outputs() {
-    let d = doc(&(vin(8) + &blind(7, &["InputTrigger<p8-AQ"])));
+    let d = doc(&(vin(8) + &blind(7, &["Gesture<p8-AQ"])));
     let mut sim = Simulator::new(&d);
     let err = sim.check("p7-OutputLPos").unwrap_err();
     assert!(
@@ -874,7 +883,7 @@ fn blind_refuses_its_unmodelled_inputs_and_outputs() {
     sim.tick(1.0);
     let err = sim.check("p7-OutputPos").unwrap_err();
     assert!(
-        err.contains("its input Tg (`InputTrigger`) is not simulated"),
+        err.contains("its input T5 (`Gesture`) is not simulated"),
         "{err}"
     );
 }
@@ -1501,4 +1510,368 @@ fn lights_alarm_flashes_every_circuit_and_returns_to_the_mood() {
     sim.tick(0.1);
     let err = sim.check("p20-Scene").unwrap_err();
     assert!(err.contains("Alarm without Afi and MaxAbr"), "{err}");
+}
+
+#[test]
+fn meter_period_readings_follow_the_calendar() {
+    let d = doc(&(vin(1)
+        + &obj(
+            2,
+            "MeterDig",
+            &[
+                "A<p1-AQ", "R", "Ppwr=2", "Mro", "OPf", "OMr", "ORd", "ORld", "ORm", "ORlm", "ORy",
+                "ORly",
+            ],
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.check("p2-ORld").unwrap();
+    let periods = |sim: &Simulator| {
+        ["ORd", "ORld", "ORm", "ORlm", "ORy", "ORly"]
+            .map(|k| (sim.read(&format!("p2-{k}")) * 1000.0).round() / 1000.0)
+    };
+    sim.set_clock("2026-03-31 22:59:59").unwrap();
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0);
+    sim.tick(3600.0);
+    // 2 kW for the last hour of March: now yesterday and last month.
+    assert_eq!(periods(&sim), [0.0, 2.0, 0.0, 2.0, 2.0, 0.0]);
+    sim.tick(1800.0);
+    assert_eq!(periods(&sim), [1.0, 2.0, 1.0, 2.0, 3.0, 0.0]);
+    assert_eq!(sim.read("p2-OMr"), 3.0);
+    // A tick across midnight splits by time.
+    sim.set_clock("23:30").unwrap();
+    sim.tick(3600.0);
+    assert_eq!(periods(&sim), [1.0, 2.0, 3.0, 2.0, 5.0, 0.0]);
+    // A jump over a whole day: yesterday metered nothing.
+    sim.set_clock("2026-04-04 12:00").unwrap();
+    sim.tick(1.0);
+    assert_eq!(periods(&sim)[1], 0.0);
+    sim.set_clock("2026-04-01 12:00").unwrap();
+    sim.tick(1.0);
+    let err = sim.check("p2-ORd").unwrap_err();
+    assert!(
+        err.contains("the clock went back to an earlier day"),
+        "{err}"
+    );
+}
+
+#[test]
+fn meter_reset_clears_the_readings_and_locks() {
+    let d = doc(&(vin(1)
+        + &vin(2)
+        + &obj(
+            3,
+            "MeterDig",
+            &["A<p1-AQ", "R<p2-AQ", "Ppwr=2", "Mro", "OPf", "OMr", "ORd"],
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.check("p3-OMr").unwrap();
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0);
+    sim.tick(3600.0);
+    assert_eq!(sim.read("p3-OMr"), 2.0);
+    sim.set("p2-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!((sim.read("p3-OMr"), sim.read("p3-ORd")), (0.0, 0.0));
+    sim.tick(3600.0);
+    assert_eq!(sim.read("p3-OMr"), 0.0, "locked while R is on");
+    assert_eq!(sim.read("p3-OPf"), 2.0);
+    sim.set("p2-AQ", 0.0);
+    sim.tick(1.0);
+    sim.tick(1800.0);
+    assert_eq!((sim.read("p3-OMr"), sim.read("p3-ORd")), (1.0, 1.0));
+}
+
+#[test]
+fn meter_estimates_the_power_from_readings() {
+    let d = doc(&(vin(1)
+        + &obj(
+            2,
+            "MeterAbsUni",
+            &["Pf", "Mr<p1-AQ", "R", "Mro", "OPf", "OMr", "ORd"],
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.check("p2-OPf").unwrap();
+    sim.set("p1-AQ", 100.0);
+    sim.tick(1.0);
+    sim.tick(1799.0);
+    assert_eq!(sim.read("p2-OPf"), 0.0);
+    sim.set("p1-AQ", 101.0);
+    sim.tick(1.0);
+    // 1 kWh in half an hour.
+    assert_eq!(sim.read("p2-OPf"), 2.0);
+    assert_eq!((sim.read("p2-OMr"), sim.read("p2-ORd")), (101.0, 1.0));
+    sim.tick(600.0);
+    assert_eq!(sim.read("p2-OPf"), 2.0, "unchanged until a new value");
+    sim.set("p1-AQ", 99.0);
+    sim.tick(1.0);
+    assert_eq!((sim.read("p2-OPf"), sim.read("p2-OMr")), (0.0, 101.0));
+    sim.set("p1-AQ", 103.0);
+    sim.tick(1.0);
+    let err = sim.check("p2-OPf").unwrap_err();
+    assert!(err.contains("after a discarded reading"), "{err}");
+}
+
+/// [`blind`] with Tg, Po and Pc wired from virtual inputs 8, 9 and 10.
+fn push_blind(extra: &[&str]) -> String {
+    let mut ports = vec![
+        "InputTrigger<p8-AQ",
+        "InputTriggerUp<p9-AQ",
+        "InputTriggerDown<p10-AQ",
+    ];
+    ports.extend_from_slice(extra);
+    (8..=10).map(vin).collect::<String>() + &blind(7, &ports)
+}
+
+fn moving(sim: &Simulator) -> (f64, f64) {
+    (sim.read("p7-OutputUp"), sim.read("p7-OutputDown"))
+}
+
+fn position(sim: &Simulator) -> f64 {
+    (sim.read("p7-OutputPos") * 10_000.0).round() / 10_000.0
+}
+
+#[test]
+fn blind_push_and_hold_moves_while_held_at_least_min_td() {
+    let d = doc(&push_blind(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p7-OutputPos").unwrap();
+    sim.tick(1.0);
+    // Held for a second: Cl while held.
+    sim.set("p10-AQ", 1.0);
+    sim.tick(0.1);
+    assert_eq!(moving(&sim), (0.0, 1.0));
+    sim.tick(1.0);
+    sim.set("p10-AQ", 0.0);
+    sim.tick(0.1);
+    assert_eq!(moving(&sim), (0.0, 0.0));
+    assert_eq!(position(&sim), 0.022);
+    // A short press drives minTd (0.4 s).
+    sim.tick(1.0);
+    pulse(&mut sim, "p10-AQ");
+    sim.tick(0.2);
+    assert_eq!(moving(&sim), (0.0, 1.0));
+    sim.tick(0.2);
+    assert_eq!(moving(&sim), (0.0, 0.0));
+    assert_eq!(position(&sim), 0.03);
+    // Pressing while it moves is refused.
+    sim.tick(1.0);
+    sim.set("p10-AQ", 1.0);
+    sim.tick(0.1);
+    sim.set("p10-AQ", 0.0);
+    sim.set("p9-AQ", 1.0);
+    sim.tick(0.1);
+    let err = sim.check("p7-OutputPos").unwrap_err();
+    assert!(err.contains("Po while the shade moves"), "{err}");
+}
+
+#[test]
+fn blind_long_and_double_click_travel_completely() {
+    let d = doc(&push_blind(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p7-OutputPos").unwrap();
+    // Double click on Pc within Tdc (0.3 s): complete close.
+    sim.tick(1.0);
+    pulse(&mut sim, "p10-AQ");
+    sim.tick(0.1);
+    pulse(&mut sim, "p10-AQ");
+    sim.tick(10.0);
+    assert_eq!(moving(&sim), (0.0, 1.0));
+    sim.tick(40.0);
+    assert_eq!((moving(&sim), position(&sim)), ((0.0, 0.0), 1.0));
+    // Po held for Tlc (3 s): the complete open, a whole Opd from then.
+    sim.set("p9-AQ", 1.0);
+    sim.tick(0.1);
+    sim.tick(3.0);
+    sim.set("p9-AQ", 0.0);
+    sim.tick(0.1);
+    assert_eq!(moving(&sim), (1.0, 0.0));
+    sim.tick(59.8);
+    assert_eq!(moving(&sim), (1.0, 0.0));
+    sim.tick(0.1);
+    assert_eq!((moving(&sim), position(&sim)), ((0.0, 0.0), 0.0));
+    // Po at the open end is refused.
+    pulse(&mut sim, "p9-AQ");
+    let err = sim.check("p7-OutputPos").unwrap_err();
+    assert!(err.contains("Po at the end position"), "{err}");
+}
+
+#[test]
+fn blind_toggle_stops_then_drives_the_other_way() {
+    let d = doc(&push_blind(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p7-OutputPos").unwrap();
+    pulse(&mut sim, "p2-AQ");
+    sim.tick(9.9);
+    pulse(&mut sim, "p8-AQ");
+    assert_eq!(moving(&sim), (0.0, 0.0));
+    assert_eq!(position(&sim), 0.2);
+    // The next press opens, after the motor lock (Mld 0.5 s).
+    sim.tick(0.1);
+    pulse(&mut sim, "p8-AQ");
+    sim.tick(0.2);
+    assert_eq!(moving(&sim), (0.0, 0.0));
+    sim.tick(0.1);
+    assert_eq!(moving(&sim), (1.0, 0.0));
+    sim.tick(60.0);
+    assert_eq!((moving(&sim), position(&sim)), ((0.0, 0.0), 0.0));
+    // Where the cycle starts at rest is undocumented.
+    pulse(&mut sim, "p8-AQ");
+    let err = sim.check("p7-OutputPos").unwrap_err();
+    assert!(err.contains("Tg on a shade at rest"), "{err}");
+}
+
+#[test]
+fn blind_pos_moves_by_run_time_when_it_changes() {
+    let d = doc(&(vin(8) + &blind(7, &["ManualPosition<p8-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p7-OutputPos").unwrap();
+    sim.tick(1.0);
+    sim.set("p8-AQ", 50.0);
+    sim.tick(0.1);
+    assert_eq!(moving(&sim), (0.0, 1.0));
+    sim.tick(25.0);
+    assert_eq!((moving(&sim), position(&sim)), ((0.0, 0.0), 0.5));
+    sim.tick(1.0);
+    sim.set("p8-AQ", 20.0);
+    sim.tick(0.1);
+    sim.tick(18.0);
+    assert_eq!((moving(&sim), position(&sim)), ((0.0, 0.0), 0.2));
+    sim.set("p8-AQ", 100.0);
+    sim.tick(0.1);
+    let err = sim.check("p7-OutputPos").unwrap_err();
+    assert!(err.contains("Pos = 100 %"), "{err}");
+}
+
+/// Two roller blinds `o3` (DisPc on) and `o4` (Opd 60 s, Cld 50 s) and
+/// a `CentralShade` `o5` over both, Co and Cc wired from virtual inputs
+/// 1 and 2.
+fn central() -> String {
+    let shade = |n| {
+        obj(
+            n,
+            "AutoJalousie",
+            &[
+                if n == 3 {
+                    "InputDisable=1"
+                } else {
+                    "InputDisable"
+                },
+                "TimeEnd=60",
+                "TimeEndDown=50",
+                "Type=1",
+                "OutputUp",
+                "OutputDown",
+                "OutputPos",
+            ],
+        )
+    };
+    vin(1)
+        + &vin(2)
+        + &shade(3)
+        + &shade(4)
+        + &obj_attrs(
+            5,
+            "CentralShade",
+            " rec=\"o3,o4\"",
+            &["EndUp<p1-AQ", "EndDown<p2-AQ", "OutOpen", "OutClose"],
+        )
+}
+
+#[test]
+fn central_shade_drives_its_shades_and_counts_them() {
+    let d = doc(&central());
+    let mut sim = Simulator::new(&d);
+    sim.tick(1.0);
+    sim.check("p5-OutOpen").unwrap();
+    assert_eq!(
+        (sim.read("p5-OutOpen"), sim.read("p5-OutClose")),
+        (2.0, 0.0)
+    );
+    // Cc reaches both shades, the one with DisPc on too.
+    pulse(&mut sim, "p2-AQ");
+    assert_eq!(
+        (sim.read("p3-OutputDown"), sim.read("p4-OutputDown")),
+        (1.0, 1.0)
+    );
+    let err = sim.check("p5-OutClose").unwrap_err();
+    assert!(
+        err.contains("moves or rests between open and closed"),
+        "{err}"
+    );
+    sim.check("p3-OutputPos").unwrap();
+    sim.tick(50.0);
+    sim.check("p5-OutClose").unwrap();
+    assert_eq!(
+        (sim.read("p5-OutOpen"), sim.read("p5-OutClose")),
+        (0.0, 2.0)
+    );
+    // Co: a whole Opd.
+    sim.tick(1.0);
+    pulse(&mut sim, "p1-AQ");
+    sim.tick(60.0);
+    assert_eq!(
+        (sim.read("p5-OutOpen"), sim.read("p5-OutClose")),
+        (2.0, 0.0)
+    );
+}
+
+#[test]
+fn central_shade_refuses_unmodelled_shades_and_inputs() {
+    let d = doc(&(central().replace("rec=\"o3,o4\"", "rec=\"o3,o1\"")));
+    let err = Simulator::new(&d).check("p5-OutOpen").unwrap_err();
+    assert!(
+        err.contains("its shade VirtualIn \"VirtualIn1\" (o1) has no model"),
+        "{err}"
+    );
+    let d = doc(&(vin(6)
+        + &central().replace(
+            "<Co K=\"OutOpen\"",
+            "<Co K=\"Stop\" U=\"p5-Stop\"><In Input=\"p6-AQ\"/></Co>\r\n<Co K=\"OutOpen\"",
+        )));
+    let mut sim = Simulator::new(&d);
+    sim.set("p6-AQ", 1.0);
+    sim.tick(1.0);
+    let err = sim.check("p4-OutputPos").unwrap_err();
+    assert!(err.contains("CentralShade"), "{err}");
+    assert!(err.contains("(`Stop`) is not simulated"), "{err}");
+}
+
+#[test]
+fn lights_mix_shows_the_brighter_value() {
+    let d = doc(&mood_lights(&[]));
+    let mut sim = Simulator::new(&d);
+    sim.check("p20-AQ1").unwrap();
+    long_click(&mut sim, "p13-AQ", 1.0);
+    assert_eq!(sim.read("p20-AQ1"), 20.0);
+    assert_eq!(long_click(&mut sim, "p14-AQ", 1.0).1, -3.0);
+    assert_eq!(sim.read("p20-AQ1"), 40.0);
+}
+
+#[test]
+fn lights_disp_ends_motion_after_moet_and_presence_at_once() {
+    let d = doc(&(vin(5) + &vin(6) + &lights(4, 100, &["EnMove<p5-AQ", "Presence<p6-AQ"])));
+    let mut sim = Simulator::new(&d);
+    sim.check("p4-AQ1").unwrap();
+    sim.set("p1-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ1"), 100.0);
+    // DisP during motion: off Moet (60 s) after its rising edge.
+    sim.set("p5-AQ", 1.0);
+    sim.tick(1.0);
+    sim.tick(59.0);
+    assert_eq!(sim.read("p4-AQ1"), 100.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ1"), 0.0);
+    sim.set("p1-AQ", 0.0);
+    sim.tick(1.0);
+    sim.set("p5-AQ", 0.0);
+    sim.tick(1.0);
+    // Lights on by presence go off with DisP at once.
+    sim.set("p6-AQ", 1.0);
+    sim.tick(1.0);
+    assert_eq!(sim.read("p4-AQ1"), 100.0);
+    sim.set("p5-AQ", 1.0);
+    sim.tick(0.1);
+    assert_eq!(sim.read("p4-AQ1"), 0.0);
 }

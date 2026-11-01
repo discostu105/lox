@@ -15,7 +15,7 @@ pub mod model;
 
 use crate::doc::{LoxoneDoc, PortView, ports};
 use clock::Clock;
-use model::{FanIn, Input, Io, Model, Support};
+use model::{FanIn, Input, Io, Model, ShadeCmd, Support};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 struct Object {
@@ -60,6 +60,10 @@ pub struct Simulator {
     /// and read the previous cycle's values.
     order: Vec<usize>,
     modes: Vec<usize>,
+    /// Shade → the `CentralShade`s whose `rec=` lists it.
+    centrals_of: HashMap<usize, Vec<usize>>,
+    /// The command each central block gives this cycle.
+    shade_cmds: HashMap<usize, ShadeCmd>,
     clock: Clock,
     /// Simulated seconds since the start.
     now: f64,
@@ -98,11 +102,55 @@ impl Simulator {
             faults: HashMap::new(),
             order: Vec::new(),
             modes: Vec::new(),
+            centrals_of: HashMap::new(),
+            shade_cmds: HashMap::new(),
             clock: Clock::default(),
             now: 0.0,
         };
+        sim.link_centrals();
         sim.order();
         sim
+    }
+
+    /// Find the shades of each `CentralShade`. A central block with a
+    /// shade that has no model is not simulated.
+    fn link_centrals(&mut self) {
+        for c in 0..self.objects.len() {
+            let Some(Model::Central(central)) = self.objects[c].model() else {
+                continue;
+            };
+            let mut members = Vec::new();
+            let mut why = None;
+            for uuid in &central.members {
+                match self.by_uuid.get(uuid) {
+                    Some(&ix) if matches!(self.objects[ix].model(), Some(Model::Blind(_))) => {
+                        members.push(ix)
+                    }
+                    Some(&ix) => {
+                        why = Some(format!(
+                            "its shade {} has no model",
+                            self.objects[ix].describe()
+                        ))
+                    }
+                    None => why = Some(format!("its shade {uuid} is not in the config")),
+                }
+            }
+            match why {
+                Some(why) => self.objects[c].support = Support::Unsupported(why),
+                None => {
+                    for ix in members {
+                        self.centrals_of.entry(ix).or_default().push(c);
+                    }
+                }
+            }
+        }
+    }
+
+    fn members(&self, ix: usize) -> &[String] {
+        match self.objects[ix].model() {
+            Some(Model::Central(c)) => &c.members,
+            _ => &[],
+        }
     }
 
     fn order(&mut self) {
@@ -135,6 +183,7 @@ impl Simulator {
                     d.insert(j);
                 }
             }
+            d.extend(self.centrals_of.get(&i).into_iter().flatten().copied());
             for &j in &d {
                 users.entry(j).or_default().push(i);
             }
@@ -199,6 +248,7 @@ impl Simulator {
     pub fn tick(&mut self, dt: f64) {
         self.now += dt;
         self.clock.secs += dt;
+        self.shade_cmds.clear();
         let mut active = HashMap::new();
         for pos in 0..self.order.len() {
             let ix = self.order[pos];
@@ -211,6 +261,43 @@ impl Simulator {
                 let at = self.clock_text();
                 self.faults.insert(ix, format!("at {at}: {e}"));
             }
+        }
+        self.count_shades();
+    }
+
+    /// No and Nc of every central block: its shades at rest fully open
+    /// (position 0) and fully closed (1). [`Simulator::need`] refuses them
+    /// while a shade moves or rests in between.
+    fn count_shades(&mut self) {
+        for c in 0..self.objects.len() {
+            if self.faults.contains_key(&c)
+                || !matches!(self.objects[c].model(), Some(Model::Central(_)))
+            {
+                continue;
+            }
+            let (mut open, mut closed) = (0.0, 0.0);
+            for uuid in self.members(c) {
+                if let Some((pos, false)) = self.shade_state(uuid) {
+                    if pos <= 0.0 {
+                        open += 1.0;
+                    } else if pos >= 1.0 {
+                        closed += 1.0;
+                    }
+                }
+            }
+            for (key, n) in [("OutOpen", open), ("OutClose", closed)] {
+                if let Some(p) = self.objects[c].ports.get(key) {
+                    self.values.insert(p.uuid.clone(), n);
+                }
+            }
+        }
+    }
+
+    /// A shade's position and whether it moves.
+    fn shade_state(&self, uuid: &str) -> Option<(f64, bool)> {
+        match self.objects[*self.by_uuid.get(uuid)?].model() {
+            Some(Model::Blind(b)) => Some(b.state()),
+            _ => None,
         }
     }
 
@@ -240,17 +327,30 @@ impl Simulator {
         let obj = &self.objects[ix];
         let m = obj.model().expect("ordered objects are modelled");
         let ins: Vec<Input> = m.reads().iter().map(|k| self.input(ix, k)).collect();
+        let central: Vec<ShadeCmd> = self
+            .centrals_of
+            .get(&ix)
+            .into_iter()
+            .flatten()
+            .filter_map(|c| self.shade_cmds.get(c).copied())
+            .collect();
         let mut io = Io {
             ins: &ins,
             now: self.now,
             clock: &self.clock,
             modes,
+            central: &central,
             out: Vec::new(),
         };
         let Support::Model(m) = &mut self.objects[ix].support else {
             unreachable!("checked above")
         };
         m.step(&mut io)?;
+        if let Model::Central(c) = m
+            && let Some(cmd) = c.cmd
+        {
+            self.shade_cmds.insert(ix, cmd);
+        }
         let out = io.out;
         let obj = &self.objects[ix];
         for (key, v) in out {
@@ -390,6 +490,37 @@ impl Simulator {
                 m.writes().join(", ")
             ));
         }
+        self.need_block(*ix, seen)?;
+        if matches!(m, Model::Central(_)) {
+            // No and Nc count the shades fully open and fully closed; what
+            // counts as open or closed in between is undocumented.
+            for uuid in self.members(*ix) {
+                let j = self.by_uuid[uuid];
+                if let Some(fault) = self.faults.get(&j) {
+                    return Err(format!("{} failed {fault}", self.objects[j].describe()));
+                }
+                self.need_block(j, seen)?;
+                if let Some((pos, moving)) = self.shade_state(uuid)
+                    && (moving || (pos > 0.0 && pos < 1.0))
+                {
+                    return Err(format!(
+                        "{}: its shade {} moves or rests between open and closed, and \
+                         whether No and Nc count it is undocumented",
+                        obj.describe(),
+                        self.objects[j].describe()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The logic a modelled block's outputs depend on: the inputs it
+    /// reads, the operating modes it follows, the central blocks that
+    /// command it.
+    fn need_block(&self, ix: usize, seen: &mut HashSet<String>) -> Result<(), String> {
+        let obj = &self.objects[ix];
+        let m = obj.model().expect("a modelled block");
         for k in m.reads() {
             if let Some(p) = obj.ports.get(*k) {
                 self.need(&p.uuid, seen)?;
@@ -403,6 +534,12 @@ impl Simulator {
             {
                 self.need(&q.uuid, seen)?;
             }
+        }
+        for &c in self.centrals_of.get(&ix).into_iter().flatten() {
+            if let Some(fault) = self.faults.get(&c) {
+                return Err(format!("{} failed {fault}", self.objects[c].describe()));
+            }
+            self.need_block(c, seen)?;
         }
         Ok(())
     }
@@ -439,6 +576,19 @@ impl Simulator {
                         .and_then(|&j| self.objects[j].ports.get("Q"))
                     {
                         stack.push(q.uuid.clone());
+                    }
+                }
+                // A shade's central blocks, and a central block's shades.
+                let linked = self.centrals_of.get(ix).into_iter().flatten().copied();
+                let members = self.members(*ix).iter().map(|u| self.by_uuid[u]);
+                for j in linked.chain(members) {
+                    let o = &self.objects[j];
+                    if let Some(jm) = o.model() {
+                        for k in jm.reads() {
+                            if let Some(p) = o.ports.get(*k) {
+                                stack.push(p.uuid.clone());
+                            }
+                        }
                     }
                 }
             }

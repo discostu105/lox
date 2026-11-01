@@ -200,7 +200,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D65 | [Settings of physical inputs and outputs from source](decisions/0065-physical-io-settings.md) | accepted |
 | D66 | [Blocks minted from source in the app](decisions/0066-app-blocks.md) | accepted |
 | D67 | [Deleting a rule from source](decisions/0067-deleting-rules.md) | accepted |
-| D68 | [`loxl test` runs in a simulator of its own](decisions/0068-own-simulator.md) | accepted, supersedes the simulator part of [D36](decisions/0036-tests-in-module.md) |
+| D68 | [`loxl test` runs in a simulator of its own](decisions/0068-own-simulator.md) | accepted, supersedes the simulator part of [D36](decisions/0036-tests-in-module.md), amended by [D106](decisions/0106-simulator-readings.md) |
 | D69 | [Operating modes from source](decisions/0069-operating-modes.md) | accepted |
 | D70 | [Users stay the Miniserver's](decisions/0070-users-stay-miniserver.md) | accepted |
 | D71 | [Several objects in one statement, device settings, Air serials](decisions/0071-multi-object-statements.md) | accepted |
@@ -223,3 +223,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
+| D106 | [The simulator takes the plain reading of a block's page](decisions/0106-simulator-readings.md) | accepted, amends [D68](decisions/0068-own-simulator.md) |
