@@ -245,6 +245,35 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                     }
                 }
             }
+            // A light controller's circuit kind (`Circuit1: "dimmer"`).
+            if let Some(n) = crate::connectors::circuit_param(&block.block_type, key) {
+                let kinds = crate::connectors::CIRCUIT_KINDS;
+                let fits = match resolved {
+                    Some(Value::Str(k)) => kinds.iter().any(|(s, _)| s == k),
+                    Some(_) => false,
+                    None => true, // a template parameter, checked where it is bound
+                };
+                if !fits {
+                    return Err(Error::Compile(format!(
+                        "block `{}`: `{key}: {v}` is not a circuit kind. Write \
+                         `{key}: \"switch\"` or `{key}: \"dimmer\"` (AQ{n})",
+                        block.slug
+                    )));
+                }
+                continue;
+            }
+            if block.block_type == "LightController2"
+                && let Some(n) = key
+                    .strip_prefix("Circuit")
+                    .and_then(|n| n.parse::<usize>().ok())
+            {
+                return Err(Error::Compile(format!(
+                    "block `{}`: `{key}:` cannot be set from source: no real config shows \
+                     circuit AQ{n}'s settings yet, so Lox Logic offers Circuit1 … Circuit5. \
+                     Set it up in Loxone Config's mood editor",
+                    block.slug
+                )));
+            }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.
             if attr_params(&block.block_type).contains(&key) {

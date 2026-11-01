@@ -270,7 +270,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   Delete it with `removed melder`. Never delete other hardware.
 - **Push notifications** are created in Loxone Config and named as an extern `Notification(…)`.
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
-  (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.
+  (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it. `loxl adopt` lifts
+  both.
 - **Schedules and modes.** A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
   `weekend off`, `holiday …`) with `timer.schedule = <set>`. `party = Mode("Party")` creates a mode,
   and `party.Q` is on while it is active. Rules and schedules name a mode one way: a built-in one in a
@@ -284,7 +285,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
 - **Light moods.** Values per circuit kind are `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`. Claim a set
   in a room template to give every room the same moods. Switch buttons go to `Sel1`…`Sel8`: `Sel<n>`
   selects the mood with scene id n, the n-th mood created. `loxl adopt` lifts existing moods into sets
-  (`<slug>_moods`); start from those instead of retyping them.
+  (`<slug>_moods`); start from those instead of retyping them. A controller created from source
+  dims only with its circuits declared: `Circuit1: "dimmer"` names the circuit after the actuator
+  `AQ1` drives (wire it first).
 - **Taking over GUI logic.** Use `loxl adopt`, then confirm with `loxl diff --exit-code` that the
   takeover changed nothing. Adopting an extern `--as` its own slug promotes it, and its wires move
   into the declaration. `loxl coverage` lists what is not managed yet, including attributes of managed
@@ -298,7 +301,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   input in the way. A lighting controller simulates motion, DisP, Off, M+/M−, T5 (single, double and
   triple clicks, long clicks and mixing, the 30 s rule), Mood, On, Buzzer, Lc1–8, MBr, Alarm (set Afi
   and MaxAbr) and output M, as a Miniserver did in a live test. A circuit without an actuator reads 1
-  for any percentage, and a controller created from source has none.
+  for any percentage, and a controller created from source has none until `Circuit<n>:` declares
+  it: `loxl lint` reports it as `no-actuator`.
 
 ## Errors and remedies
 
@@ -353,6 +357,7 @@ it only when it matches what you intended.
 | `unit-suffix` (from `lint`) | a bare time value on a port documented in milliseconds, seconds or minutes (`Delay: 10800`), also in a port assignment or a template parameter | `loxl lint --fix` writes the unit (`Delay: 3h`); the compile output does not change. The language server offers it as a quick fix |
 | `default-page` (from `lint`) | a fragment of a directory module without its own `page` line, while others have one | add the `page` line; the language server offers the previous file's page as a quick fix |
 | `dead-outputs` (from `lint`) | a block, extern or device whose outputs reach nothing in the compiled config: no wire, not shown in the app as a value, no statistic, no energy flow, no message | wire it, delete it, or keep it with `# lint: allow dead-outputs <reason>` on the line above |
+| `no-actuator` (from `lint`) | a mood gives a percentage to a lighting circuit without an actuator: the Miniserver switches it on instead of dimming | declare the circuit (`Circuit1: "dimmer"`, with `AQ1` wired to the actuator), assign the actuator in Loxone Config's mood editor (the next base has it), or write `on` |
 | `tile-dead-command` (from `lint`) | Touch Pure Flex commands for a block type that no block linked to the device has | link a block of that type, empty the tiles (`tile 2()`), or `# lint: allow tile-dead-command` above the extern |
 | `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration; the language server offers "Remove this allow" |
 | `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |

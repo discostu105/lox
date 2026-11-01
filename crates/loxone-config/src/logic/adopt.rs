@@ -682,6 +682,29 @@ const KNOWN_ATTRS: &[&str] = &[
 /// `Err(reason)` unless rebuilding this block from its lifted declaration
 /// reproduces everything on the element (modulo the documented
 /// normalizations).
+/// Whether a `<LoggerMailer>` is exactly what the rebuild writes for a
+/// message ref on `target`: the notification, non-empty texts, the least
+/// time between messages and `NL="1"`, in that order, and nothing else.
+fn rebuilt_message(lm: &Element, target: Option<&str>) -> bool {
+    let names: Vec<&str> = lm.attrs.iter().map(|a| a.name.as_str()).collect();
+    let texts = ["On", "Off"].into_iter().filter(|k| names.contains(k));
+    let want: Vec<&str> = ["RefNotification"]
+        .into_iter()
+        .chain(texts)
+        .chain(["MinimumTime", "NL"])
+        .collect();
+    names == want
+        && lm.attr("RefNotification") == target
+        && lm.attr("NL") == Some("1")
+        && ["On", "Off"]
+            .iter()
+            .all(|k| lm.attr(k).is_none_or(|t| !t.is_empty()))
+        && lm
+            .children
+            .iter()
+            .all(|n| matches!(n, Node::Text(t) if t.trim().is_empty()))
+}
+
 fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<(), String> {
     for a in &el.attrs {
         let known = KNOWN_ATTRS.contains(&a.name.as_str())
@@ -690,7 +713,9 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             || carried_attrs(&o.block_type).contains(&a.name.as_str())
             // Validity state travels with the formula (observed:
             // Valid="false" on every Formula=); the rebuild re-emits it.
-            || (a.name == "Valid" && o.block_type == "Formula");
+            || (a.name == "Valid" && o.block_type == "Formula")
+            // A message ref's target: the rebuild writes it from `mirrors:`.
+            || (a.name == "Ref" && o.block_type == "OutputRefLM");
         if !known {
             return Err(format!(
                 "attribute `{}=\"{}\"` is not understood by the rebuild and would be lost",
@@ -717,6 +742,15 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             Node::Element(c)
                 if GUI_OWNED_CHILDREN.contains(&c.name.as_str())
                     || carried_children(&o.block_type).contains(&c.name.as_str()) =>
+            {
+                continue;
+            }
+            // A message ref's message, as the rebuild writes it from
+            // `mirrors:` and the message parameters.
+            Node::Element(c)
+                if c.name == "LoggerMailer"
+                    && o.block_type == "OutputRefLM"
+                    && rebuilt_message(c, el.attr("Ref")) =>
             {
                 continue;
             }

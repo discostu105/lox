@@ -9,6 +9,7 @@ extern deckenlicht = Actor(iname: "Q1") # periphery
 extern led_streifen = TreeAactor(title: "LED-Streifen") # periphery
 
 licht_wohnzimmer = LightController2(
+	Circuit1: "switch",
 	InputTriggerUp: taste_rechts_unten.Q,
 	InputTriggerDown: taste_links_unten.Q,
 	Move: bewegung.Q,

@@ -1701,6 +1701,35 @@ its own evidence; these are leads, marked by how far they hold.
     Tree* gets `CapAI1="31"`. The confirm also turned the stock mood *Viel
     Licht* on that output from `1` into a colour temperature (80 %,
     4700 K). Source: oracle session 33.
+  - **The mood editor's circuits** (*Lichtkreise* tab, oracle session 45,
+    Loxone Config 17.2.8.28, [D96](decisions/0096-circuits-from-source.md)):
+    - Opening the editor and pressing OK writes `NameAI<n-1>=` and
+      `PresM<n-1>="65535"` for each wired output `AQ<n>`, in index order
+      after `Nio=` and before `uuidSeqencing=`. The name is the title of
+      the actuator the output drives: relays *Aktor (Relais) 2* and *3*, a
+      Tree actuator *LED-Streifen*. (Session 33's circuit came out as the
+      device title, *RGBW 24V Dimmer Tree*; that actuator was later
+      retitled.) The same confirm dropped `WF="16384"` and rewrote
+      `<HCL>`.
+    - A Tree actuator with `CCap="31"` wired directly came out a
+      *Schalter* without `CapAI`, unlike session 33's colour circuit.
+    - *Typ* offers *Schalter*, *Dimmer 0-100%*, *Dimmer 0-10V*, *Dimmer
+      1-10V*, *RGB*, *Lumitech DMX* and *Smart-Aktor*. It is stored only
+      as the mood prefix (`Q<n> >> 28`): switching `Lc1` from *Schalter*
+      to *Dimmer 0-100%* rewrote `Q1` of every mood to `268435456`
+      (prefix 1, value 0), the stock *Viel Licht* included. Corpus: named
+      circuits with prefix 1 (14) and prefix 0 (10) have no `CapAI`; every
+      `CapAI` (16, 23, 24, 31) sits on prefix 6. The prefixes of the
+      0–10 V, 1–10 V, DMX and Smart-Aktor kinds are unknown.
+    - Editing a name sets bit `n-1` of `COName=` (Lc2 and Lc3 renamed:
+      `COName="6"`), written after `SpStates=`. An unwired circuit can be
+      named (`NameAI2="Spot"`, with `PresM2`).
+    - Circuits written into a compiled file before its first save (session
+      46): the save keeps `NameAI`/`PresM` and every mood prefix, and adds
+      `COName` with a bit per circuit it did not name itself (`3` for two,
+      `1` for one), next to the first-save lists. The editor then shows
+      *Dimmer 0-100%* with the mood's 80 % and *Schalter* with *Ein*. A
+      recompile onto that save is byte-identical.
   - **Activation.** The Miniserver recalls a mood live with
     `changeTo/<SID>`.
 - **Only eight Program blocks run.** Reported: the Miniserver executes

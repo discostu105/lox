@@ -1698,6 +1698,25 @@ pub fn message_params(block_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// Circuit parameters of a LightController2: `Circuit<n>:` declares the
+/// kind of the circuit behind output `AQ<n>`, as the mood editor's
+/// *Lichtkreise* tab sets it. Only the circuits whose `NameAI`/`PresM`
+/// attributes real configs show are offered (`AQ1` … `AQ5`).
+pub const CIRCUIT_PARAMS: &[&str] = &["Circuit1", "Circuit2", "Circuit3", "Circuit4", "Circuit5"];
+
+/// The circuit number `Circuit<n>:` declares on `block_type`, if it is a
+/// circuit parameter.
+pub fn circuit_param(block_type: &str, key: &str) -> Option<usize> {
+    if block_type != "LightController2" || !CIRCUIT_PARAMS.contains(&key) {
+        return None;
+    }
+    key.strip_prefix("Circuit")?.parse().ok()
+}
+
+/// The circuit kinds source can declare and the mood prefix each stores
+/// (`Q<n> >> 28`): the editor's *Schalter* and *Dimmer 0-100%*.
+pub const CIRCUIT_KINDS: &[(&str, u32)] = &[("switch", 0), ("dimmer", 1)];
+
 /// Attribute parameters holding program text — the only bindings that
 /// take a `file("…")` value: a PicoC program is hundreds of lines,
 /// which the line-oriented Lox Logic cannot hold inline.

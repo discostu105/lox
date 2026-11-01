@@ -461,7 +461,7 @@ lox logic adopt current.Loxone --out-dir pages/ --out-lock haus.lock.json  # tak
 lox logic adopt current.Loxone --uuid <uuid> --as <slug> --module pages/ --lock haus.lock.json
 lox logic decompile current.Loxone        # the Lox Logic view of every page (read-only)
 lox logic rename old_name new_name        # rename across sources and lockfile, identities kept
-lox logic lint                            # findings by kind: unused names, dead outputs, tags that open nothing, bare durations; --summary: counts
+lox logic lint                            # findings by kind: unused names, dead outputs, tags that open nothing, bare durations, dimming without an actuator; --summary: counts
 lox logic lint --fix                      # write unit suffixes (`Delay: 3h`); the compiled config stays byte-identical
 lox logic test                            # `test … end` blocks in the Lox Logic simulator
 lox logic test --filter nacht --trace     # … cycle by cycle: what a test sets, every value change, each expect

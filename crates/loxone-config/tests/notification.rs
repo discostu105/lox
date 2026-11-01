@@ -344,3 +344,86 @@ fn recipients_revoke_what_the_declaration_leaves_out() {
     let back = compile_src(&granted, &recipients("\tuser \"carol\"\n"), &mut lock).unwrap();
     assert!(back == base, "revoking did not restore the base");
 }
+
+// ── decompile and adopt (#296) ──────────────────────────────────────────────
+
+const FROST_MESSAGE: &str = "warn = OutputRefLM(mirrors: frost, AI: cover.Q, On: \"Frost\", Off: \"Kein Frost\", MinimumTime: 12h)\n";
+
+#[test]
+fn decompile_lifts_the_message_and_the_recipients() {
+    use loxone_config::logic::{DecompileOptions, DecompileScope, decompile};
+    let out = compiled(&format!(
+        "{FROST_MESSAGE}{}",
+        recipients("\tuser \"carol\"\n\tgroup \"Family\"\n")
+    ));
+    for scope in [DecompileScope::Full, DecompileScope::ManagedOnly] {
+        let (m, _) = decompile(
+            &parse(&out),
+            &DecompileOptions {
+                scope,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let text = m.to_text();
+        for want in [
+            "extern frost_2 = Notification(title: \"Frost\")",
+            "= OutputRefLM(\n\tmirrors: frost_2,\n\tOn: \"Frost\",\n\tOff: \"Kein Frost\",\n\tMinimumTime: 12h,",
+            "recipients frost_2_recipients\n\tuser \"carol\"\n\tgroup \"Family\"\nend\n",
+            "frost_2.recipients = frost_2_recipients\n",
+        ] {
+            assert!(text.contains(want), "{scope:?}: {want}\n{text}");
+        }
+    }
+}
+
+#[test]
+fn an_adopted_config_keeps_its_notifications() {
+    let out = compiled(&format!(
+        "{FROST_MESSAGE}{}",
+        recipients("\tuser \"carol\"\n")
+    ));
+    let (m, mut lock, report) = loxone_config::logic::adopt(&parse(&out)).unwrap();
+    assert_eq!(m.access_decls().count(), 1, "{}", m.to_text());
+    assert!(report.refused.is_empty(), "{:?}", report.refused);
+    assert!(
+        m.blocks().any(|b| b.block_type == "OutputRefLM"),
+        "{}",
+        m.to_text()
+    );
+    let again = compile(&parse(&out), &m, &mut lock, &opts()).unwrap();
+    assert!(
+        again.to_bytes() == out.as_bytes(),
+        "adopted and compiled, the config changed"
+    );
+}
+
+#[test]
+fn notifications_sharing_recipients_share_a_set() {
+    use loxone_config::logic::{DecompileOptions, decompile};
+    // A second notification carol gets too.
+    let second = fixture()
+        .replacen(
+            "<C Type=\"Notification\"",
+            "<C Type=\"Notification\" V=\"175\" U=\"60000009-0000-0090-ffff504f94112233\" Title=\"Regen\" WF=\"16384\" Entries=\"10\">\r\n\t\t</C>\r\n\t\t<C Type=\"Notification\"",
+            1,
+        )
+        .replacen(
+            &format!("<PH NUM=\"1\">\r\n\t\t\t\t\t\t<PRM REF=\"{NOTIFICATION}\" ACT=\"1\"/>"),
+            &format!(
+                "<PH NUM=\"2\">\r\n\t\t\t\t\t\t<PRM REF=\"{NOTIFICATION}\" ACT=\"1\"/>\r\n\t\t\t\t\t\t<PRM REF=\"60000009-0000-0090-ffff504f94112233\" ACT=\"3\"/>"
+            ),
+            1,
+        );
+    let (m, _) = decompile(&parse(&second), &DecompileOptions::default()).unwrap();
+    let text = m.to_text();
+    assert_eq!(m.access_decls().count(), 1, "{text}");
+    assert!(
+        text.contains("frost.recipients = regen_recipients"),
+        "{text}"
+    );
+    assert!(
+        text.contains("regen.recipients = regen_recipients"),
+        "{text}"
+    );
+}

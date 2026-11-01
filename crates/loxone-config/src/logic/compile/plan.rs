@@ -349,11 +349,13 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
         let attrs = attr_params(&block.block_type);
         for (k, v) in block.params() {
             // `mirrors:` is an identity binding, not a value —
-            // resolved separately below.
+            // resolved separately below. Circuit kinds are written by
+            // `moods::apply`.
             if (is_ref_type(&block.block_type) && k == "mirrors")
                 || crate::periphery::is_device_binding(&block.block_type, k)
                 || crate::logic::calendar::is_switches(&block.block_type, k)
                 || crate::logic::calendar::is_date_key(&block.block_type, k)
+                || crate::connectors::circuit_param(&block.block_type, k).is_some()
             {
                 continue;
             }

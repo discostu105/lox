@@ -1711,7 +1711,30 @@ A controller created from source has no moods until Loxone Config saves it. A cl
 writes what that save would (the stock "Viel Licht" and "Aus" with their defaults), then the set.
 Its circuits have no actuator either: Loxone Config writes `NameAI<n>=` only from its mood editor. On
 the Miniserver such a circuit is a switch, and a percentage reads 1 on its output
-([loxone-format.md](loxone-format.md)). Dimming needs the circuits set up in Loxone Config.
+([loxone-format.md](loxone-format.md)). Declare the circuits in source, or set them up in Loxone
+Config.
+
+#### Circuits
+
+```text
+licht = LightController2("Licht", Circuit1: "dimmer", Circuit2: "switch")
+dimmer.I <- licht.AQ1
+relais.I <- licht.AQ2
+```
+
+`Circuit<n>:` declares the circuit behind `AQ<n>` the way the mood editor's *Lichtkreise* tab does:
+
+- **`"switch"`** (*Schalter*) or **`"dimmer"`** (*Dimmer 0-100%*). The kind is stored in every mood's
+  value of that circuit, so changing it clears those values, as the editor does. A `moods` claim then
+  writes them anew.
+- **The name.** A circuit without one is named after the actuator `AQ<n>` drives: a relay or Tree
+  actuator, wired directly or through an `OutputRef`. A name the circuit has already, from Loxone
+  Config or an earlier compile, stays.
+- A controller without moods first gets the stock moods, as with a claim.
+- Refused: `AQ<n>` driving nothing, more than one object, something other than an actuator, or a
+  colour actuator (RGB and tunable white circuits stay with Loxone Config), and `Circuit6` and above.
+
+`loxl decompile` and `loxl adopt` lift the named switch and dimmer circuits of a managed controller.
 
 - The lock pins the UUID of every mood the compiler created until a base carries it
   ([lockfile-spec.md](lockfile-spec.md)).
@@ -1786,8 +1809,10 @@ the right type (here `Notification`), one claim per extern, each
 principal once, titles that name exactly one user or group, no lock
 state, sets declared at the top level, the v1 form `recipients <extern>`
 an error naming the replacement — and a recipient takes no schedule.
-Decompile does not lift recipients, and leaves `OutputRefLM` blocks with
-the GUI.
+`loxl decompile` and `loxl adopt` lift both: a notification with recipients or an `OutputRefLM` becomes
+an extern, its recipients a set and a claim (notifications with the same recipients share one set,
+named after the first, `<slug>_recipients`), and each `OutputRefLM` whose message names its own
+notification a managed block with `mirrors:` and its message.
 
 ## Name resolution and validation
 
@@ -1869,6 +1894,12 @@ Touch Pure Flex controller the finding names what to wire. Two or more inputs of
 device, virtual HTTP or UDP input) that feed nothing are one finding on the device.
 The dead commands of one Touch Pure Flex and command type are one `tile-dead-command` finding.
 
+`no-actuator` reports a mood set that gives a lighting circuit a percentage while the circuit has no
+actuator. Loxone Config assigns the actuator in its mood editor. Without one the Miniserver treats
+the circuit as a switch, so `AQ1 40%` turns the light on and does not dim it. A controller created
+from source has no actuators. Declare the circuit (`Circuit1: "dimmer"`), assign the actuator in
+Loxone Config, or write `on`.
+
 A finding that is deliberate stays out of the report with an allow comment on the line right above
 the declaration:
 
@@ -1882,9 +1913,9 @@ the declaration below it: a block, extern, instance (all its blocks), device (al
 constant, template, signal or `defaults`. Inside a template body it covers that block in every
 instance. An allow that covers no finding, names no kind or stands above no declaration is reported
 as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
-`tile-broadcast`, `tile-dead-command`, `no-access-right`) are not judged. The language server offers
-both as quick fixes: on a finding it inserts the allow comment above the declaration (or adds the
-kind to the allow already there), and on an `unused-allow` it removes the comment.
+`tile-broadcast`, `tile-dead-command`, `no-access-right`, `no-actuator`) are not judged. The language
+server offers both as quick fixes: on a finding it inserts the allow comment above the declaration (or
+adds the kind to the allow already there), and on an `unused-allow` it removes the comment.
 
 ## Canonical form
 
