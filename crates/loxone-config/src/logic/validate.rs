@@ -9,7 +9,7 @@
 use super::ast::{Module, Value};
 use crate::connectors::{
     BUILTIN_TYPES, MESSAGE_REF_TARGET, PortDir, attr_params, bool_params, builtin, clock_params,
-    file_params, message_params,
+    file_params, message_params, save_rewrite_error,
 };
 use crate::error::{Error, Result};
 use crate::port_meta::port_meta;
@@ -115,6 +115,27 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                         )));
                     }
                 }
+            }
+            // A value a save rewrites (`Poll: 5` on a virtual HTTP
+            // input) would show as changed after every save. Whether a
+            // VirtualIn without `Analog:` is digital is known only
+            // against the base, so the compile checks that one.
+            let digital = block.params().any(|(k, v)| {
+                k == "Analog"
+                    && module
+                        .resolve_value_for(v, &block.block_type, &block.slug, k)
+                        .is_ok_and(|s| s == "false")
+            });
+            if let Ok(value) = module.resolve_value_for(v, &block.block_type, &block.slug, key)
+                && let Some(e) = save_rewrite_error(
+                    &block.slug,
+                    &block.block_type,
+                    key,
+                    (&value, &v.to_string()),
+                    digital,
+                )
+            {
+                return Err(Error::Compile(e));
             }
             // Attribute parameters (e.g. `Formula:` on Formula blocks)
             // bind like any parameter but are not connectors.

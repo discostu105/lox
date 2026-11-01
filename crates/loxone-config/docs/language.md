@@ -228,6 +228,10 @@ Notes:
   ends and timing of the virtual and Modbus objects and physical inputs, `ModbusDataType: 0`, …)
   compiles to no attribute, which is how a save stores it. A Modbus server's `Timeout: 0` stays
   `Timeout="0"`.
+- A value that a Loxone Config save would rewrite is an error that names what the save writes: a
+  virtual HTTP input's `Poll` is a whole number of seconds from 10 to 604800, its `Timeout` whole
+  milliseconds from 10, its `Allowedtimeouts` a whole number; a digital `VirtualIn`'s `MaxVal` is 1 and
+  its `MinVal` 0.
 - A number may carry a **unit suffix**, written immediately adjacent: `40s`, `250ms`, `90min`,
   `1.5h`, `2700K`, `70%`. `loxl types <Type>` shows each port's documented unit.
   - Time units scale exactly into the port's unit. That is seconds by default (`1.5h` compiles to

@@ -934,6 +934,30 @@ sensor and actuator, three calendar entries, and on the base's analog and digita
 - **Finding:** a virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`.
 - **Finding:** a digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
 
+## Values a save rewrites (sessions 63 and 64, #332) — passed, five findings
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
+on its own display. The base was the redacted library config `examples/library/energy`. Session 63 minted
+eleven virtual HTTP inputs (`Poll` and `Timeout` at 1, 5, 9, 10, 11, 9.5/10.5, -5, 999999999, 3600/60000,
+`Allowedtimeouts` -1 and 1000), ten digital `VirtualIn`s (`MaxVal` 0.5, 2, 5, -1; `MinVal` 1, -1;
+`DefVal` 1, 2, 0.5; a range 2 to 5 with `DefVal` 3) and three analog ones with a range upside down or a
+default outside it. Session 64 minted twelve more HTTP inputs for rounding and the upper ends (`Poll`
+10.4 to 12.5, 600.5, 604800, 604801; `Timeout` 10.6 to 4000.5, 2147483647, 2147483648, 4294967296,
+99999999999; `Allowedtimeouts` 2.5, 3.5, 99999999999) and two digital inputs (`MaxVal` 1 with `MinVal`
+0, `DefVal` -1).
+
+- **Finding:** `Poll`, `Timeout` and `Allowedtimeouts` are 32-bit whole numbers: a fraction is cut off,
+  a larger number wraps around.
+- **Finding:** `Poll` goes up to 10 and down to 604800. `Timeout` goes up to 10 and has no upper end
+  below 2147483647. `Allowedtimeouts` keeps any whole number.
+- **Finding:** a digital `VirtualIn` always has `MaxVal="1"` and no `MinVal`. Its `DefVal` stays as
+  written, also outside 0 to 1.
+- An analog `VirtualIn` keeps its range and default as written.
+- **Finding:** a save turned `<` in two `VirtualIn` titles into `_` (`R Ana Max<Min` became
+  `R Ana Max_Min`), and kept `>`. Filed as #342.
+- **Heal:** compile refuses a value the save rewrites and names the value the save writes. Every value
+  the save kept compiles as before.
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

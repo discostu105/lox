@@ -737,7 +737,8 @@ explicit `"0"`. This holds for these settings, on every type that has them:
 Exceptions:
 
 - A Modbus server keeps `Timeout="0"`.
-- A virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`.
+- A virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`, see [*Values a save
+  rewrites*](#values-a-save-rewrites).
 - A digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
 
 Elsewhere `"0"` is a value like any other: real configs hold `Typ="0"` and `Sec="0"` on `PulseAt`, `Tp="0"`
@@ -747,6 +748,29 @@ Lox Logic writes a bound 0 as no attribute ([D112](decisions/0112-zero-is-no-att
 (131 files: none of these settings holds `"0"` on `VirtualIn`, the virtual commands, the Modbus objects,
 calendar entries or the physical inputs and outputs; `MinVal` is absent on 112 of 171 `VirtualIn`s,
 `ModbusDataType` on 149 of 339 Modbus sensors); oracle sessions 37, 61 and 62 (Loxone Config 17.2.8.28).
+
+### Values a save rewrites
+
+A save puts some settings into a fixed form:
+
+- A virtual HTTP input's `Poll`, `Timeout` and `Allowedtimeouts` are 32-bit whole numbers. A fraction
+  is cut off (`10.6` and `10.5` become `10`, `600.5` becomes `600`), and a larger number wraps
+  around: `99999999999` becomes `1215752191`, and `2147483648` (negative) and `4294967296` (0) end
+  as `Timeout="10"`.
+- Then `Poll` goes up to 10 and down to 604800 (one week): `0`, `5`, `9`, `-5` become `10`, `604801`
+  and `999999999` become `604800`.
+- `Timeout` goes up to 10, and is kept above the documented 8000: `60000` and `2147483647` stay.
+- `Allowedtimeouts` keeps any whole number, `-1` and `1000` included.
+- A digital `VirtualIn` has `MaxVal="1"` and no `MinVal` (0), whatever it was: `0`, `0.5`, `2`, `5`
+  and `-1` become `MaxVal="1"`, a `MinVal` of `1`, `-1` or `2` goes. Its `DefVal` stays as written,
+  also outside 0 to 1 (`2`, `-1`, `0.5`). Thirteen corpus files of `ControlList Version` 74 and 75
+  hold digital ones with `MinVal="-10000"` and `MaxVal="10000"`; none of a later version does.
+- An analog `VirtualIn` keeps its range and default as written, `MaxVal` below `MinVal` and a
+  `DefVal` outside the range included.
+
+Lox Logic refuses a value a save would rewrite, and names the value the save writes
+([D114](decisions/0114-refuse-what-a-save-rewrites.md)). Source: oracle sessions 61 to 64 (Loxone
+Config 17.2.8.28); corpus.
 
 ### Units of the settings
 
