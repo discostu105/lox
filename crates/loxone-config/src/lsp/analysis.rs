@@ -824,6 +824,9 @@ impl Workspace {
         let ty = decl.ty.as_deref()?;
         if let Some(spec) = builtin(ty).and_then(|s| s.iter().find(|p| p.key == port)) {
             let mut md = format!("**{ty}.{port}** — {}", dir_name(spec.dir));
+            if let Some(d) = crate::port_doc::describe(ty, port) {
+                md.push_str(&format!("\n\n{d}\n"));
+            }
             if let Some(m) = port_meta(ty, port) {
                 for (k, v) in [
                     ("label", m.label),
@@ -1041,11 +1044,15 @@ impl Workspace {
         let ty = decl.ty.as_deref().unwrap_or("");
         let detail = |key: &str, dir: Option<PortDir>| {
             let label = port_meta(ty, key).and_then(|m| m.label);
-            match (dir, label) {
-                (Some(d), Some(l)) => Some(format!("{} ({l})", dir_name(d))),
-                (Some(d), None) => Some(dir_name(d).to_string()),
-                (None, _) => None,
-            }
+            let head = match (dir, label) {
+                (Some(d), Some(l)) => format!("{} ({l})", dir_name(d)),
+                (Some(d), None) => dir_name(d).to_string(),
+                (None, _) => return None,
+            };
+            Some(match crate::port_doc::describe(ty, key) {
+                Some(doc) => format!("{head} — {doc}"),
+                None => head,
+            })
         };
         let spec = builtin(ty);
         let keys: Vec<String> = match (decl.kind, self.base_ports(unit, decl)) {

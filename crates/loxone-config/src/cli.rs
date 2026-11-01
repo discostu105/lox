@@ -2379,6 +2379,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                     "max": meta.and_then(|m| m.max),
                     "documented_default": meta.and_then(|m| m.default),
                     "observed_default": loxone_config::observed_defaults::observed_default(t, spec.key),
+                    "description": loxone_config::port_doc::describe(t, spec.key),
                 })
             })
             .collect();
@@ -2470,6 +2471,9 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                     default,
                 );
                 println!("{}", line.trim_end());
+                if let Some(d) = port["description"].as_str() {
+                    println!("      {d}");
+                }
             }
             for a in desc["attr_params"].as_array().into_iter().flatten() {
                 let a = s(a);

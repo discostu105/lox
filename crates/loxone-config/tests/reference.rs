@@ -32,6 +32,22 @@ fn types_say_what_a_block_is_for_and_search_by_purpose() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v[0]["type"], "Monoflop");
     assert!(v[0]["summary"].as_str().unwrap().starts_with("Monoflop"));
+    assert_eq!(
+        v[0]["ports"][0]["description"],
+        "Trigger: a pulse switches Q on for Time."
+    );
+}
+
+#[test]
+fn types_describe_each_documented_port() {
+    let (ok, out) = loxl(&["types", "NfcCodeTouch"]);
+    assert!(ok);
+    assert!(
+        out.contains("  Lr                 input\n      Turns the status LEDs red.\n"),
+        "{out}"
+    );
+    // An undocumented port has no description line.
+    assert!(out.contains("  Disable            input\n  Lr"), "{out}");
 }
 
 #[test]

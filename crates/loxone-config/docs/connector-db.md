@@ -13,6 +13,7 @@ each admitted type.
 | lox-cli `docs/schemas/connector-map.json` (195 types) | `type → {c: [order], t: {key: I/O/P}}` | good ordering info; several corrupt entries (see findings) |
 | lox-sim `block_signature` (237 types, extracted via [`tools/extract-sim-signature.py`](../tools/extract-sim-signature.py)) | (inputs, outputs, params) per type | best direction coverage; some simulator-internal key names diverge from XML keys; no index order |
 | Loxone TechDoc, as scraped by lox-cli into `docs/schemas/loxone-block-types-full.json` | per type: connectors with direction, unit, canvas label, range, default (`%d` patterns for numbered ports) | weakest tier: never admits or decides a direction; the only source for **units**, generated into `src/port_meta.rs` by [`tools/extract-port-meta.py`](../tools/extract-port-meta.py), cross-checked against table and corpus on every run |
+| Loxone knowledge-base pages (reference `kb-block-pages`) | per type: inputs, outputs, parameters by abbreviation, with summary and description | the source of the one-line **port descriptions** in `src/port_doc.rs`, checked by [`tools/check-port-docs.py`](../tools/check-port-docs.py); never admits or decides anything |
 
 ## Reproducing the run
 

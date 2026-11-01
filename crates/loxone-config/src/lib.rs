@@ -72,6 +72,7 @@ pub mod moods;
 pub mod observed_defaults;
 pub(crate) mod periphery;
 pub mod permissions;
+pub(crate) mod port_doc;
 pub(crate) mod port_meta;
 pub mod project;
 pub mod render;
