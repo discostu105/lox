@@ -10,6 +10,15 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.73.0] — 2026-11-01
+
+### Added
+- **loxl**: a named signal takes a label of its own: `beschatten.title = "Beschatten Süd"` on the line
+  below it sets the top block's title, which is otherwise the expression text (#288).
+- **loxl decompile**, **loxl adopt**: the blocks an expression or named signal compiled to come back as
+  that expression, signal and `let`, where they compile to the same blocks. Adopt marks them
+  expression-owned in the lock.
+
 ## [0.72.0] — 2026-11-01
 
 ### Changed
