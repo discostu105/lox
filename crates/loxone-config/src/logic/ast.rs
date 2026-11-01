@@ -2612,6 +2612,14 @@ impl Module {
                 continue;
             }
             let mut disc = family(item);
+            // A signal's `.title` stays on the line below the signal.
+            if let Item::Attr(a) = item
+                && a.attr == Attr::Title
+                && i > 0
+                && matches!(&self.items[i - 1], Item::Signal(x) if x.slug == a.slug)
+            {
+                disc = family(&self.items[i - 1]);
+            }
             let mut text = String::new();
             skip = self.write_item(i, item, depth, &mut text);
             let mut multiline = text.trim_end_matches('\n').contains('\n');

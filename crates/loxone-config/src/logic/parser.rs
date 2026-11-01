@@ -2692,6 +2692,16 @@ fn check_slug(s: &str, lineno: usize) -> Result<String> {
     }
 }
 
+/// `text` read as a whole expression, or `None`: decompile reads a block's
+/// label back as the expression it was desugared from.
+pub(crate) fn expr_text(text: &str) -> Option<Expr> {
+    if text.contains('#') {
+        return None;
+    }
+    let (toks, _) = lex(text, 1).ok()?;
+    parse_expr(&toks, 1).ok()
+}
+
 /// Parse the RHS of `<-` as an expression. Precedence, loosest to
 /// tightest: `or` < `and` < `not` < comparison < `+ -` < `* /`; parens
 /// group; comparisons take plain operands and do not chain. Arithmetic

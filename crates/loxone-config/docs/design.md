@@ -156,7 +156,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D21 | [The drift baseline is a fingerprint of what the diff compares](decisions/0021-drift-baseline.md) | accepted |
 | D22 | [The Loxone Config release is a qualification pin](decisions/0022-config-version-pin.md) | accepted, amended by [D46](decisions/0046-block-version.md) |
 | D23 | [Templates are macro expansion with locked identities](decisions/0023-templates.md) | accepted, amended by [D82](decisions/0082-template-instance-names.md) |
-| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md) and [D81](decisions/0081-named-signals.md) |
+| D24 | [Expressions are sugar over discrete blocks, owned by their statement](decisions/0024-expressions.md) | accepted, amended by [D26](decisions/0026-expressions-in-arguments.md), [D35](decisions/0035-arithmetic-formula.md), [D81](decisions/0081-named-signals.md) and [D123](decisions/0123-decompile-lifts-expressions.md) |
 | D25 | [Projects are a `lox.toml`, and there is no `import`](decisions/0025-projects-lox-toml.md) | accepted |
 | D26 | [Expressions bind in argument lists too](decisions/0026-expressions-in-arguments.md) | accepted |
 | D27 | [Values with a unit suffix, scaled at compile](decisions/0027-unit-suffixed-values.md) | accepted, amended by [D52](decisions/0052-port-facts.md) |
@@ -213,7 +213,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D78 | [A block's own blocks stay with it](decisions/0078-owned-sub-blocks.md) | accepted |
 | D79 | [A PulseAt's fire time from source; what the compile carries](decisions/0079-pulseat-fire-time.md) | accepted |
 | D80 | [Language v2, one spelling per value](decisions/0080-v2-one-spelling.md) | accepted |
-| D81 | [Named signals](decisions/0081-named-signals.md) | accepted |
+| D81 | [Named signals](decisions/0081-named-signals.md) | accepted, amended by [D122](decisions/0122-signal-title.md) and [D123](decisions/0123-decompile-lifts-expressions.md) |
 | D82 | [Template instances are named by the instance](decisions/0082-template-instance-names.md) | accepted |
 | D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |
 | D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |
@@ -231,3 +231,6 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
 | D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md) |
 | D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |
+| D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
+| D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
+| D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |

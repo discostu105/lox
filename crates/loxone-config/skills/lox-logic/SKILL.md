@@ -65,6 +65,7 @@ end
 - `name = <expression>` (`and`/`or`/`not`, comparisons, `+ - * /`) is a named signal. Its top block
   is `name` (`name.Q`; arithmetic is a Formula, `name.AQ`). Reference it in tests instead of an inline
   expression's synthetic slug. Deleting it needs `removed name`. `name = a.Q` alone is refused.
+  `name.title = "…"` on the next line labels its top block (default: the expression text).
 - A template instance is named by itself: `flur.Q` is its primary block (the only block, or the one
   `template t(…) -> <block>` names), `flur.taster.Q` any other block. Never write the lock key
   `flur_taster`. A set goes in by a set parameter: `template raum(stimmungen: moods = standard)`.

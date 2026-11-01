@@ -297,8 +297,12 @@ fn named_signal_misuse_is_reported() {
         "targets named signal `warm`",
     );
     fails(
-        "warm = sonne.Q and wind_alarm.Q\nwarm.title = \"x\"",
-        "targets named signal `warm`",
+        "warm = sonne.Q and wind_alarm.Q\nwarm.room = \"x\"",
+        "takes only a `.title`",
+    );
+    fails(
+        "warm = sonne.Q and wind_alarm.Q\nwarm.title = \"x\"\nwarm.title = \"y\"",
+        "duplicate assignment `warm.title = …`",
     );
     // One namespace with every other name.
     fails(
@@ -320,6 +324,79 @@ fn named_signal_misuse_is_reported() {
         "template t()\n\twarm = sonne.Q and wind_alarm.Q\nend\nx = t(I1: sonne.Q)",
         "named signal `warm`",
     );
+}
+
+#[test]
+fn a_signal_title_labels_its_top_block() {
+    let m = module(
+        "let titel = \"Beschatten\"\n\
+         beschatten = sonne.Q and aussentemp.Q >= schwelle\n\
+         \n\
+         beschatten.title = titel\n\
+         warm = aussentemp.Q >= 30\n\
+         warm.title = \"Warm\"  # eigener Titel\n",
+    );
+    // fmt keeps each title right below its signal.
+    let text = m.to_text();
+    assert!(
+        text.contains(
+            "beschatten = sonne.Q and aussentemp.Q >= schwelle\nbeschatten.title = titel\n\
+             warm = aussentemp.Q >= 30\nwarm.title = \"Warm\" # eigener Titel\n"
+        ),
+        "{text}"
+    );
+    assert_eq!(Module::parse(&text).unwrap().to_text(), text, "fixpoint");
+
+    let (plain, _) = m.expand().unwrap().desugar().unwrap();
+    let title = |slug: &str| {
+        plain
+            .blocks()
+            .find(|b| b.slug == slug)
+            .and_then(|b| b.title.clone())
+    };
+    assert_eq!(title("beschatten").as_deref(), Some("Beschatten"));
+    assert_eq!(title("warm").as_deref(), Some("Warm"));
+    // The sub-blocks keep their expression text.
+    assert_eq!(
+        title("beschatten__ge1").as_deref(),
+        Some("aussentemp.Q >= schwelle")
+    );
+    assert_eq!(plain.attrs().count(), 0, "the statements are consumed");
+
+    // Only the label changes: the lock keys stay the same.
+    let mut a = Lockfile::new();
+    compile(&base(), &module(SIGNAL), &mut a, &opts()).unwrap();
+    let mut b = Lockfile::new();
+    let titled = module(&format!("{SIGNAL}beschatten.title = \"Beschatten\"\n"));
+    let out = compile(&base(), &titled, &mut b, &opts()).unwrap();
+    assert_eq!(
+        a.objects.keys().collect::<Vec<_>>(),
+        b.objects.keys().collect::<Vec<_>>()
+    );
+    let uuid = &b.objects["beschatten"].uuid;
+    let top = out.objects().into_iter().find(|o| &o.uuid == uuid).unwrap();
+    assert_eq!(top.title.as_deref(), Some("Beschatten"));
+}
+
+#[test]
+fn a_template_body_signal_takes_a_title() {
+    let m = module(
+        "template fassade(jalousie: AutoJalousie, name = \"Süd\")\n\
+         \twarm = sonne.Q and aussentemp.Q >= 28\n\
+         \twarm.title = \"Warm {name}\"\n\
+         \tjalousie.AutoShade <- warm.Q\n\
+         end\n\
+         \n\
+         sued = fassade(jalousie: jal_sued)\n",
+    );
+    let (plain, _) = m.expand().unwrap().desugar().unwrap();
+    let top = plain.blocks().find(|b| b.slug == "sued_warm").unwrap();
+    assert_eq!(top.title.as_deref(), Some("Warm Süd"));
+    // Only a body signal takes one.
+    let err = Module::parse("template t()\n\tx = Or()\n\tx.title = \"X\"\nend\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("named signals and their titles"), "{err}");
 }
 
 #[test]
@@ -347,4 +424,38 @@ fn renaming_a_signal_rekeys_its_sub_blocks() {
             ),
         ]
     );
+}
+
+#[test]
+fn adopt_lifts_expressions_and_signals_back() {
+    use loxone_config::logic::{DecompileOptions, adopt, decompile};
+    let src = format!(
+        "{SIGNAL}beschatten.title = \"Beschatten\"\n\
+         warm = aussentemp.Q >= 30\n\
+         jal_sued.Safety <- not wind_alarm.Q\n"
+    );
+    let out = compile(&base(), &module(&src), &mut Lockfile::new(), &opts()).unwrap();
+
+    let (view, _) = decompile(&out, &DecompileOptions::default()).unwrap();
+    let text = view.to_text();
+    // The names come from the config: the extern's from its title, an
+    // unlabelled signal's from its expression text.
+    for line in [
+        "let schwelle = 28\n",
+        "AutoShade: beschatten.Q, Safety: not wind_alarm.Q,",
+        "beschatten = sonnenschein.Q and aussentemp.Q >= schwelle\n\
+         beschatten.title = \"Beschatten\"\n",
+        "aussentemp_q_30 = aussentemp.Q >= 30\n",
+    ] {
+        assert!(text.contains(line), "{line:?} missing in\n{text}");
+    }
+    assert!(!text.contains("And("), "{text}");
+
+    // The adoption compiles back to the same file, the sub-blocks
+    // expression-owned.
+    let (adopted, lock, _) = adopt(&out).unwrap();
+    assert!(lock.objects["beschatten__ge1"].expr_owned);
+    assert!(!lock.objects["beschatten"].expr_owned);
+    let again = compile(&out, &adopted, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(out.to_bytes(), again.to_bytes());
 }

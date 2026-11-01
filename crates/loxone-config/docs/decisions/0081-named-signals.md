@@ -1,6 +1,6 @@
 # D81: Named signals
 
-Status: accepted (2026-10-31), amends [D24](0024-expressions.md)
+Status: accepted (2026-10-31), amends [D24](0024-expressions.md), amended by [D122](0122-signal-title.md) and [D123](0123-decompile-lifts-expressions.md)
 
 ## Context
 
