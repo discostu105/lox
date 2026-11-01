@@ -1,6 +1,6 @@
 # D86: Contextual words, one-line calls and the v2 polish
 
-Status: accepted (2026-11-01)
+Status: accepted (2026-11-01), amended by [D125](0125-fmt-short-values-comments-fix-in-place.md)
 
 ## Context
 

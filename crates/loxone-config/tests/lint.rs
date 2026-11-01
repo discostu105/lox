@@ -345,3 +345,31 @@ fn a_module_error_names_the_fragment_and_line() {
     assert!(v["path"].as_str().unwrap().ends_with("sued.loxl"), "{v}");
     assert_eq!(v["errors"][0]["line"], line, "{v}");
 }
+
+#[test]
+fn lint_fix_patches_the_value_in_place() {
+    use loxone_config::logic::{Module, fix_unit_suffixes_text};
+    // Not canonical, and a comment that names the same value.
+    let src = "\
+extern a = VirtualIn(iname: \"VI1\")
+# Time: 300 stays in the comment.
+m = Monoflop(  InputTrigger: a.Q,
+\tTime:   300   )
+n = Monoflop(Time: 300) # five minutes
+";
+    let whole = Module::parse_fragment(src).unwrap();
+    let (found, text) = fix_unit_suffixes_text(src, &whole).unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(
+        text,
+        src.replace("Time:   300", "Time:   5min")
+            .replace("Time: 300)", "Time: 5min)")
+    );
+
+    // A value the scan cannot place falls back to the canonical form.
+    let quoted = "m = Monoflop(Time: \"300\")\n";
+    let whole = Module::parse_fragment(quoted).unwrap();
+    let (found, text) = fix_unit_suffixes_text(quoted, &whole).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(text, "m = Monoflop(Time: 5min)\n");
+}

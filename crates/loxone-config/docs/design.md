@@ -218,8 +218,8 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D83 | [Access rights and recipients are named sets](decisions/0083-access-recipients-sets.md) | accepted |
 | D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |
 | D85 | [`defaults <Type>(…)` states a type's shared parameters once](decisions/0085-defaults.md) | accepted |
-| D86 | [Contextual words, one-line calls and the v2 polish](decisions/0086-v2-polish.md) | accepted |
-| D87 | [Tooling for v2: unit-suffix lint, lint --fix, scoped names in the language server](decisions/0087-v2-tooling.md) | accepted |
+| D86 | [Contextual words, one-line calls and the v2 polish](decisions/0086-v2-polish.md) | accepted, amended by [D125](decisions/0125-fmt-short-values-comments-fix-in-place.md) |
+| D87 | [Tooling for v2: unit-suffix lint, lint --fix, scoped names in the language server](decisions/0087-v2-tooling.md) | accepted, amended by [D125](decisions/0125-fmt-short-values-comments-fix-in-place.md) |
 | D88 | [One documented line per port](decisions/0088-port-descriptions.md) | accepted |
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D90 | [One check run reports every error](decisions/0090-all-errors.md) | accepted |
@@ -240,6 +240,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
 | D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
 | D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
+| D125 | [One-line calls of short values, attached comments, `lint --fix` in place](decisions/0125-fmt-short-values-comments-fix-in-place.md) | accepted, amends [D86](decisions/0086-v2-polish.md) and [D87](decisions/0087-v2-tooling.md) |
 | D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |
 | D127 | [Adopt takes over a calendar entry whose mode is gone](decisions/0127-calendar-entry-gone-mode.md) | accepted, amends [D115](decisions/0115-calendar-entry-mode.md) |
 | D128 | [A connector's 0 is no `Def=`](decisions/0128-no-def-at-zero.md) | accepted, amends [D30](decisions/0030-observed-defaults.md), extends [D112](decisions/0112-zero-is-no-attribute.md) |

@@ -8,7 +8,7 @@
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
-    decompile_pages, finish_lint, fix_unit_suffixes_in, lint_access, lint_circuits,
+    decompile_pages, finish_lint, fix_unit_suffixes_text, lint_access, lint_circuits,
     lint_dead_outputs, lint_source, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
     rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
@@ -140,8 +140,8 @@ block, extern, instance or device). Text after the kind is free. An allow that c
 reported (`unused-allow`).
 
 Options:
-  --fix       write the unit suffixes the `unit-suffix` findings name, in canonical form (as
-              `loxl fmt` writes it). The compile output does not change; in a project, lint
+  --fix       write the unit suffixes the `unit-suffix` findings name, in place (the rest of
+              the file stays as written). The compile output does not change; in a project, lint
               compiles before and after and writes nothing if the two differ.
   --summary   print only the count of each kind
 
@@ -210,7 +210,8 @@ Passwords and codes show as names, counts and short hashes, never as stored.
         details: r#"Options:
   --lock <lock.json>  Lockfile to compare against (default: the lox.toml project's)
 
-Exit 0 when in sync. Exit 1 when the config changed since the last adopt or compile.
+Exit 0 when in sync, also for the config the last compile started from (its output is not
+pushed yet). Exit 1 when the config changed since the last adopt or compile.
 Moved blocks and the changes Loxone Config makes on every save don't count.
 Run `loxl diff` to see what changed.
 "#,
@@ -1547,18 +1548,22 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
     if fix {
         let mut fixed = Vec::new();
         let mut count = 0;
+        let mut sources = Vec::new();
         let mut parsed = Vec::new();
         for f in &files {
             let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
             parsed.push(Module::parse_fragment(&src).map_err(|e| format!("{}: {e}", f.display()))?);
+            sources.push(src);
         }
         // Externs and templates may live in another file of the module.
-        let whole = Module::from_fragments(parsed.clone());
-        for (f, mut m) in files.iter().zip(parsed) {
-            let n = fix_unit_suffixes_in(&mut m, &whole).len();
-            if n > 0 {
-                count += n;
-                fixed.push((f.clone(), m.to_text()));
+        let whole = Module::from_fragments(parsed);
+        for (f, src) in files.iter().zip(&sources) {
+            // Only the values change; the rest of the file stays as written.
+            let (found, text) =
+                fix_unit_suffixes_text(src, &whole).map_err(|e| format!("{}: {e}", f.display()))?;
+            if !found.is_empty() {
+                count += found.len();
+                fixed.push((f.clone(), text));
             }
         }
         if !fixed.is_empty() && project.is_some() {
@@ -2364,6 +2369,17 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     let current = loxone_config::diff::semantic_fingerprint(&doc);
     if &current == recorded {
         println!("in sync: {config} matches {lock_path}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    // The config the last compile started from: nothing changed it since,
+    // its output is only not pushed yet.
+    if lock.target.source_config_sha256.as_deref()
+        == Some(loxone_config::lock::sha256_hex(&doc.to_bytes()).as_str())
+    {
+        println!(
+            "in sync: {config} is the config the last compile of {lock_path} started from. \
+             Its output is not pushed yet."
+        );
         return Ok(ExitCode::SUCCESS);
     }
     // A lock written by an older Lox Logic records an older form, blind
