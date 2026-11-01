@@ -469,6 +469,55 @@ fn a_calendar_mode_number_offers_its_day_word_as_a_quick_fix() {
 }
 
 #[test]
+fn a_stored_calendar_date_offers_the_date_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    for (entry, old) in [
+        (
+            "heizperiode = CalendarEntry(\"Heizperiode\", switches: heating, Mode: 4, Month: 10, \
+             Day: 1, Month2: 4, Day2: 30)",
+            "Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30",
+        ),
+        (
+            "heizperiode = CalendarEntry(\n\t\"Heizperiode\",\n\tswitches: heating,\n\tMode: 4,\n\
+             \tMonth: 10,\n\tDay: 1,\n\tMonth2: 4,\n\tDay2: 30,\n\tWeekDayInMonth: 1,\n)",
+            "Mode: 4,\n\tMonth: 10,\n\tDay: 1,\n\tMonth2: 4,\n\tDay2: 30,\n\tWeekDayInMonth: 1",
+        ),
+    ] {
+        let stored = format!("{src}\n{entry}\n");
+        let out = session(&[open(&pool, &src), change(&pool, &stored), save(&pool)]);
+        let diags = diagnostics(&out, &pool).clone();
+        let d = diags
+            .iter()
+            .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+            .unwrap_or_else(|| panic!("{diags:?}"));
+        let out = session(&[
+            open(&pool, &stored),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+                "textDocument": {"uri": uri(&pool)},
+                "range": d["range"],
+                "context": {"diagnostics": [d]},
+            }}),
+        ]);
+        let actions = response(&out, 1).as_array().unwrap();
+        assert_eq!(actions.len(), 1, "{entry}: {actions:?}");
+        assert_eq!(actions[0]["title"], "Change to `from: 10-01, to: 04-30`");
+        let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+        assert_eq!(edit["newText"], "from: 10-01, to: 04-30");
+        let (l, c) = pos(&stored, old);
+        assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+        let end = &stored[..stored.find(old).unwrap() + old.len()];
+        let (l, c) = (
+            end.matches('\n').count(),
+            end[end.rfind('\n').map_or(0, |n| n + 1)..]
+                .encode_utf16()
+                .count(),
+        );
+        assert_eq!(edit["range"]["end"], json!({"line": l, "character": c}));
+    }
+}
+
+#[test]
 fn a_mode_title_offers_its_slug_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
@@ -696,6 +745,26 @@ fn completion_offers_argument_keys_and_signal_names() {
     assert!(got.contains(&"wp_ok".to_string()), "{got:?}");
     let got = labels(&out, 4);
     assert!(got.contains(&"Q".to_string()), "{got:?}");
+}
+
+#[test]
+fn completion_offers_a_calendar_entrys_mode_and_date() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let typing = format!("{src}\nh = CalendarEntry(\"H\", )\n");
+    let (l, c) = pos(&typing, ", )");
+    let out = session(&[
+        open(&pool, &src),
+        change(&pool, &typing),
+        at(1, "textDocument/completion", &pool, l, c + 2),
+    ]);
+    let got = labels(&out, 1);
+    for key in ["switches", "on", "easter", "from", "to"] {
+        assert!(got.contains(&key.to_string()), "{key}: {got:?}");
+    }
+    for key in ["Mode", "Month", "From", "WeekDayInMonth"] {
+        assert!(!got.contains(&key.to_string()), "{key}: {got:?}");
+    }
 }
 
 #[test]

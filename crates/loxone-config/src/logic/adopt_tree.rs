@@ -331,8 +331,27 @@ pub(super) fn adopt_device(
                 kind: BindingKind::Param(mode),
                 comment: None,
             }));
+            // Its date, as a date (`from: 10-01, to: 04-30`).
+            let date =
+                crate::logic::calendar::lift_date(|n| el.attr_decoded(n).map(|v| v.into_owned()))
+                    .map_err(|why| {
+                    fail(format!(
+                        "cannot adopt CalendarEntry \"{}\": {why}",
+                        o.title.as_deref().unwrap_or("")
+                    ))
+                })?;
+            for (port, v) in date {
+                args.push(ArgItem::Binding(Binding {
+                    port: port.to_string(),
+                    kind: BindingKind::Param(v),
+                    comment: None,
+                }));
+            }
         }
         for name in settings {
+            if crate::logic::calendar::is_raw_date(&o.block_type, name) {
+                continue;
+            }
             // A setting a save leaves out at 0 or unticked reads as such
             // where a fresh mint would fill in something else.
             let v = el

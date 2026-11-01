@@ -206,7 +206,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D71 | [Several objects in one statement, device settings, Air serials](decisions/0071-multi-object-statements.md) | accepted |
 | D72 | [Light controllers in the app catalogue](decisions/0072-light-controllers-catalogue.md) | accepted |
 | D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) and [D110](decisions/0110-mode-reference-spelling.md) |
-| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted, amended by [D115](decisions/0115-calendar-entry-mode.md) |
+| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted, amended by [D115](decisions/0115-calendar-entry-mode.md) and [D126](decisions/0126-calendar-entry-date.md) |
 | D75 | [A redacted copy](decisions/0075-redacted-copy.md) | accepted |
 | D76 | [Weather, dates and messages in rules](decisions/0076-weather-date-message-rules.md) | accepted |
 | D77 | [A stale constant under a wire](decisions/0077-stale-constant-under-wire.md) | accepted |
@@ -234,3 +234,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
 | D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
 | D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
+| D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |

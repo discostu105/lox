@@ -1018,7 +1018,7 @@ impl Module {
                 ));
             }
         }
-        Ok(())
+        crate::logic::calendar::check_date(self, b)
     }
 
     /// A schedule's days: a slug names a `Mode` of the module, and each

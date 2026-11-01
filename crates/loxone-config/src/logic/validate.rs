@@ -284,8 +284,10 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 continue;
             }
             // The mode a calendar entry switches on, and its raw number
-            // (refused against the base, which numbers the modes).
+            // (refused against the base, which numbers the modes), and
+            // its date (checked with the module).
             if crate::logic::calendar::is_switches(&block.block_type, key)
+                || crate::logic::calendar::is_date_key(&block.block_type, key)
                 || (block.block_type == "CalendarEntry" && key == crate::logic::calendar::CAL_TYPE)
             {
                 continue;

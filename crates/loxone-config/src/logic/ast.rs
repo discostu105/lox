@@ -133,6 +133,10 @@ pub enum Value {
     /// on a text-boolean attribute (`connectors::bool_params`, e.g.
     /// `Analog:` on VirtualIn).
     Bool(bool),
+    /// A calendar date, `YYYY-MM-DD` or a day of the year `MM-DD`, kept
+    /// as written (two-digit month and day). Binds only a calendar
+    /// entry's `on:`, `from:` and `to:`.
+    Date(String),
 }
 
 /// Seconds since midnight of a `HH:MM[:SS]` time of day, `None` unless
@@ -432,6 +436,7 @@ impl Value {
             Value::File { text, .. } => text.as_deref().map(Cow::Borrowed),
             Value::Clock(t) => clock_seconds(t).map(|s| Cow::Owned(s.to_string())),
             Value::Bool(b) => Some(Cow::Borrowed(if *b { "1" } else { "0" })),
+            Value::Date(d) => Some(Cow::Borrowed(d)),
         }
     }
 }
@@ -446,6 +451,7 @@ impl fmt::Display for Value {
             Value::File { path, .. } => write!(f, "file({})", quote(path)),
             Value::Clock(t) => f.write_str(t),
             Value::Bool(b) => f.write_str(if *b { "on" } else { "off" }),
+            Value::Date(d) => f.write_str(d),
         }
     }
 }
@@ -2028,7 +2034,8 @@ impl ModeSpellings {
     /// Rewrite every mode reference of `module` in its one spelling.
     /// `loxl fmt` runs it with the spellings of the whole module. A
     /// calendar entry's built-in mode number (`CalType: 10`) becomes its
-    /// day word (`switches: heating`).
+    /// day word (`switches: heating`), and its stored date (`Mode: 4,
+    /// Month: 10, …`) its date (`from: 10-01, to: 04-30`).
     pub fn apply(&self, module: &mut Module) {
         for item in &mut module.items {
             match item {
@@ -2055,6 +2062,7 @@ impl ModeSpellings {
                             *v = new;
                         }
                     }
+                    crate::logic::calendar::rewrite_raw_date(b);
                 }
                 Item::Rule(r) => {
                     for st in &mut r.body {

@@ -97,6 +97,38 @@ pub fn replacement(message: &str) -> Option<(&str, &str)> {
     (!old.is_empty()).then_some((new, old))
 }
 
+/// Where `old`, a list of arguments (`Mode: 4, Month: 10`), stands in
+/// `text` from byte `from` on, written over several lines: each `, `
+/// matches a comma and any white space. The byte range, `None` when it
+/// is not there.
+pub fn find_arguments(text: &str, from: usize, old: &str) -> Option<(usize, usize)> {
+    let parts: Vec<&str> = old.split(", ").collect();
+    let mut search = from;
+    while let Some(at) = text.get(search..)?.find(parts[0]) {
+        let start = search + at;
+        let mut end = start + parts[0].len();
+        let fits = parts[1..].iter().all(|p| {
+            let Some(rest) = text[end..].strip_prefix(',') else {
+                return false;
+            };
+            let gap = rest.len() - rest.trim_start().len();
+            if !rest[gap..].starts_with(p) {
+                return false;
+            }
+            end += 1 + gap + p.len();
+            true
+        });
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
+        let whole = !text[..start].chars().next_back().is_some_and(word)
+            && !text[end..].chars().next().is_some_and(word);
+        if fits && whole {
+            return Some((start, end));
+        }
+        search = start + 1;
+    }
+    None
+}
+
 /// The `CLAIM` of a diagnostic's "claim it with `CLAIM`": the statement
 /// the replacement needs next to it.
 pub fn claim_to_add(message: &str) -> Option<&str> {
@@ -1064,10 +1096,25 @@ impl Workspace {
             .filter(|p| dirs.contains(&p.dir))
             .map(|p| p.key)
             .collect();
-        self.port_completions(unit, &block)
+        let mut out: Vec<Completion> = self
+            .port_completions(unit, &block)
             .into_iter()
             .filter(|c| keep.contains(&c.label.as_str()))
-            .collect()
+            .filter(|c| !crate::logic::calendar::is_raw_date(ty, &c.label))
+            .collect();
+        // A calendar entry's mode and date, not its stored attributes.
+        if ty == crate::logic::calendar::BLOCK_TYPE {
+            out.extend(
+                crate::logic::calendar::SOURCE_KEYS
+                    .iter()
+                    .map(|(key, detail)| Completion {
+                        label: (*key).to_string(),
+                        kind: "port",
+                        detail: Some((*detail).to_string()),
+                    }),
+            );
+        }
+        out
     }
 
     /// After `instance.`: the template's blocks (`licht.taster`) and the
