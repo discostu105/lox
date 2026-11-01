@@ -101,15 +101,168 @@ pub struct LintFinding {
     pub detail: String,
 }
 
-/// Bare numbers on ports documented in seconds or minutes, rewritten in
-/// `module` with their unit suffix: block and `defaults` parameters,
-/// template bodies included. The spelling is decompile's: the largest
-/// unit that writes the value as a whole number, and only when the
-/// compile reproduces the number exactly (`300` → `5min`, `0.02` →
-/// `20ms`). One finding per rewritten value. The compiled config does
-/// not change.
+/// Bare numbers on ports documented in milliseconds, seconds or minutes,
+/// rewritten in `module` with their unit suffix: block and `defaults`
+/// parameters, port assignments on externs, template bodies, template
+/// value-parameter defaults and the arguments of instances. The spelling
+/// is decompile's: the largest unit that writes the value as a whole
+/// number, and only when the compile reproduces the number exactly
+/// (`300` → `5min`, `0.02` → `20ms`). One finding per rewritten value.
+/// The compiled config does not change.
 pub fn fix_unit_suffixes(module: &mut Module) -> Vec<LintFinding> {
-    fn fix(slug: &str, block_type: &str, args: &mut [ArgItem], out: &mut Vec<LintFinding>) {
+    let whole = module.clone();
+    fix_unit_suffixes_in(module, &whole)
+}
+
+/// [`fix_unit_suffixes`] for one file of a directory module: `whole` is
+/// the module it belongs to, where the externs and templates the file
+/// uses are declared.
+pub fn fix_unit_suffixes_in(module: &mut Module, whole: &Module) -> Vec<LintFinding> {
+    let externs: BTreeMap<String, String> = whole
+        .externs()
+        .map(|e| (e.slug.clone(), e.block_type.clone()))
+        .collect();
+    let templates: BTreeMap<String, TemplateUnits> = whole
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Template(t) => Some((t.name.clone(), TemplateUnits::of(t, &externs))),
+            _ => None,
+        })
+        .collect();
+    let mut out = Vec::new();
+    fix_items(
+        &mut module.items,
+        &externs,
+        &BTreeMap::new(),
+        &templates,
+        &mut out,
+    );
+    out
+}
+
+/// What a template's ports and parameters are in, for the unit-suffix
+/// fix: its primary block's type (call-site bindings that name no
+/// parameter forward there), and per value parameter the ports it binds.
+struct TemplateUnits {
+    primary_type: Option<String>,
+    /// A value parameter's uses as `(type, port)`; absent when the
+    /// parameter appears anywhere else (a title, an expression, another
+    /// instance), where a suffix would not be reproduced.
+    params: BTreeMap<String, Vec<(String, String)>>,
+}
+
+impl TemplateUnits {
+    fn of(t: &super::ast::TemplateDecl, externs: &BTreeMap<String, String>) -> TemplateUnits {
+        use super::ast::TemplateParam;
+        let body_types: BTreeMap<&str, &str> = t
+            .body
+            .iter()
+            .filter_map(|i| match i {
+                Item::Block(b) => Some((b.slug.as_str(), b.block_type.as_str())),
+                _ => None,
+            })
+            .collect();
+        let object_types: BTreeMap<&str, &str> = t
+            .params
+            .iter()
+            .filter_map(|p| match p {
+                TemplateParam::Object { name, block_type } => {
+                    Some((name.as_str(), block_type.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        let body_text = Module {
+            items: t.body.clone(),
+        }
+        .to_text();
+        let mut params = BTreeMap::new();
+        for p in &t.params {
+            let TemplateParam::Value { name, .. } = p else {
+                continue;
+            };
+            let is_param = |v: &Value| matches!(v, Value::Ref(r) if r == name);
+            let mut uses = Vec::new();
+            for item in &t.body {
+                match item {
+                    Item::Block(b) => {
+                        for (port, v) in b.params() {
+                            if is_param(v) {
+                                uses.push((b.block_type.clone(), port.to_string()));
+                            }
+                        }
+                    }
+                    Item::Set(s) if is_param(&s.value) => {
+                        let slug = s.target.slug.as_str();
+                        if let Some(ty) = object_types
+                            .get(slug)
+                            .copied()
+                            .or_else(|| externs.get(slug).map(String::as_str))
+                        {
+                            uses.push((ty.to_string(), s.target.port.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Every mention of the name in the body is one of the uses
+            // above: nothing else reads the value.
+            let mentions = body_text
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .filter(|w| w == name)
+                .count();
+            if !uses.is_empty() && mentions == uses.len() {
+                params.insert(name.clone(), uses);
+            }
+        }
+        TemplateUnits {
+            primary_type: t
+                .primary_block()
+                .and_then(|p| body_types.get(p))
+                .map(|ty| ty.to_string()),
+            params,
+        }
+    }
+}
+
+/// The suffixed spelling of `raw` on every one of `uses`, when they all
+/// agree.
+fn suffix_for(uses: &[(String, String)], raw: &str) -> Option<Value> {
+    let mut found: Option<Value> = None;
+    for (ty, port) in uses {
+        let v = duration_value(ty, port, raw)?;
+        if found.as_ref().is_some_and(|f| *f != v) {
+            return None;
+        }
+        found = Some(v);
+    }
+    found
+}
+
+fn unit_finding(slug: &str, old: String, new: String) -> LintFinding {
+    LintFinding {
+        kind: LintKind::UnitSuffix,
+        slug: slug.to_string(),
+        detail: format!("`{old}` reads better with its unit. Write `{new}` instead of `{old}`."),
+    }
+}
+
+/// [`fix_unit_suffixes`] over one item list: the module's, or a template
+/// body with its object parameters' types in `objects`.
+fn fix_items(
+    items: &mut [Item],
+    externs: &BTreeMap<String, String>,
+    objects: &BTreeMap<String, String>,
+    templates: &BTreeMap<String, TemplateUnits>,
+    out: &mut Vec<LintFinding>,
+) {
+    fn fix_args(
+        slug: &str,
+        args: &mut [ArgItem],
+        unit_of: impl Fn(&str, &str) -> Option<Value>,
+        out: &mut Vec<LintFinding>,
+    ) {
         for arg in args {
             let ArgItem::Binding(Binding {
                 port,
@@ -120,33 +273,117 @@ pub fn fix_unit_suffixes(module: &mut Module) -> Vec<LintFinding> {
                 continue;
             };
             let Value::Number(n) = &*value else { continue };
-            let Some(new) = duration_value(block_type, port, n) else {
+            let Some(new) = unit_of(port, n) else {
                 continue;
             };
-            out.push(LintFinding {
-                kind: LintKind::UnitSuffix,
-                slug: slug.to_string(),
-                detail: format!(
-                    "`{port}: {n}` reads better with its unit. Write `{port}: {new}` instead of \
-                     `{port}: {n}`."
-                ),
-            });
+            out.push(unit_finding(
+                slug,
+                format!("{port}: {n}"),
+                format!("{port}: {new}"),
+            ));
             *value = new;
         }
     }
-    fn walk(items: &mut [Item], out: &mut Vec<LintFinding>) {
-        for item in items {
-            match item {
-                Item::Block(b) => fix(&b.slug, &b.block_type, &mut b.args, out),
-                Item::Defaults(d) => fix(&d.block_type, &d.block_type, &mut d.args, out),
-                Item::Template(t) => walk(&mut t.body, out),
-                _ => {}
-            }
+    let set_type = |slug: &str| objects.get(slug).or_else(|| externs.get(slug)).cloned();
+    // The new value of a port assignment, `None` when it keeps its number.
+    let set_value = |s: &super::ast::SetDecl| -> Option<Value> {
+        let Value::Number(n) = &s.value else {
+            return None;
+        };
+        duration_value(&set_type(&s.target.slug)?, &s.target.port, n)
+    };
+    // A bulk line `(a, b).Port = 300` stays one line: its statements
+    // change together, or not at all.
+    let mut bulk: BTreeMap<usize, Option<Value>> = BTreeMap::new();
+    for item in items.iter() {
+        if let Item::Set(s) = item
+            && let Some(line) = s.bulk
+        {
+            let new = set_value(s);
+            bulk.entry(line)
+                .and_modify(|v| {
+                    if *v != new {
+                        *v = None;
+                    }
+                })
+                .or_insert(new);
         }
     }
-    let mut out = Vec::new();
-    walk(&mut module.items, &mut out);
-    out
+    for item in items.iter_mut() {
+        match item {
+            Item::Block(b) => fix_args(
+                &b.slug,
+                &mut b.args,
+                |port, n| duration_value(&b.block_type, port, n),
+                out,
+            ),
+            Item::Defaults(d) => fix_args(
+                &d.block_type,
+                &mut d.args,
+                |port, n| duration_value(&d.block_type, port, n),
+                out,
+            ),
+            Item::Set(s) => {
+                let new = match s.bulk {
+                    Some(line) => bulk.get(&line).cloned().flatten(),
+                    None => set_value(s),
+                };
+                if let Some(new) = new {
+                    let target = s.target.to_string();
+                    out.push(unit_finding(
+                        &s.target.slug,
+                        format!("{target} = {}", s.value),
+                        format!("{target} = {new}"),
+                    ));
+                    s.value = new;
+                }
+            }
+            Item::Instance(call) => {
+                let Some(t) = templates.get(&call.block_type) else {
+                    continue;
+                };
+                fix_args(
+                    &call.slug,
+                    &mut call.args,
+                    |port, n| match t.params.get(port) {
+                        Some(uses) => suffix_for(uses, n),
+                        None => duration_value(t.primary_type.as_deref()?, port, n),
+                    },
+                    out,
+                );
+            }
+            Item::Template(t) => {
+                if let Some(units) = templates.get(&t.name) {
+                    for p in &mut t.params {
+                        if let super::ast::TemplateParam::Value { name, default } = p
+                            && let Value::Number(n) = &*default
+                            && let Some(uses) = units.params.get(name.as_str())
+                            && let Some(new) = suffix_for(uses, n)
+                        {
+                            out.push(unit_finding(
+                                &t.name,
+                                format!("{name} = {n}"),
+                                format!("{name} = {new}"),
+                            ));
+                            *default = new;
+                        }
+                    }
+                }
+                let objects: BTreeMap<String, String> = t
+                    .params
+                    .iter()
+                    .filter_map(|p| match p {
+                        super::ast::TemplateParam::Object { name, block_type } => {
+                            Some((name.clone(), block_type.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                fix_items(&mut t.body, externs, &objects, templates, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// `defaults` values that reach no block: the blocks of the type, as
@@ -945,6 +1182,47 @@ pub fn finish_lint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unit_suffix_fix_covers_extern_sets_and_template_bodies() {
+        let src = "\
+extern jal = AutoJalousie(title: \"Süd\")
+extern jal2 = AutoJalousie(title: \"Nord\")
+extern vi = VirtualIn(iname: \"VI1\")
+
+jal.TimeEnd = 120
+(jal, jal2).AutoShadeTime = 120
+(jal, vi).TimeEnd = 90
+
+template t(j: AutoJalousie, lauf = 60) -> m
+\tm = Monoflop(Time: 300)
+\tj.TimeEndDown = 75
+\tj.TimeEnd = lauf
+end
+
+x = t(j: jal2, lauf: 30, Time: 600)
+";
+        let mut m = Module::parse(src).unwrap();
+        let found = fix_unit_suffixes(&mut m);
+        let text = m.to_text();
+        assert!(text.contains("jal.TimeEnd = 2min\n"), "{text}");
+        // Minutes: 120 min is 2h.
+        assert!(text.contains("(jal, jal2).AutoShadeTime = 2h\n"), "{text}");
+        // One member has no documented unit: the line keeps its number.
+        assert!(text.contains("(jal, vi).TimeEnd = 90\n"), "{text}");
+        assert!(text.contains("Time: 5min"), "{text}");
+        assert!(text.contains("j.TimeEndDown = 75s"), "{text}");
+        assert!(text.contains("lauf = 1min)"), "{text}");
+        assert!(text.contains("lauf: 30s"), "{text}");
+        // Forwarded onto the primary block.
+        assert!(text.contains("Time: 10min"), "{text}");
+        assert_eq!(found.len(), 8, "{found:?}");
+        assert!(found.iter().any(|f| f.detail
+            == "`jal.TimeEnd = 120` reads better with its unit. Write `jal.TimeEnd = 2min` \
+                instead of `jal.TimeEnd = 120`."));
+        // A second pass finds nothing.
+        assert!(fix_unit_suffixes(&mut m).is_empty());
+    }
 
     #[test]
     fn source_lints_find_unused_names() {

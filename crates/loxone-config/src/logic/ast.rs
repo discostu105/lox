@@ -225,7 +225,7 @@ impl fmt::Display for Unit {
     }
 }
 
-/// The duration `raw` (a `Def=` value) of a port documented in seconds or
+/// The duration `raw` (a `Def=` value) of a port documented in milliseconds, seconds or
 /// minutes, spelled with the largest time suffix that writes it as a whole
 /// number (`300` s → `5min`, `0.3` s → `300ms`, `7200` s → `2h`). `None`
 /// for a port of any other unit or none documented, for zero, and where no
@@ -233,6 +233,7 @@ impl fmt::Display for Unit {
 pub(crate) fn duration_value(block_type: &str, port: &str, raw: &str) -> Option<Value> {
     let pu = port_unit(block_type, port)?;
     let per_ms: u128 = match pu {
+        PortUnit::Milliseconds => 1,
         PortUnit::Seconds => 1000,
         PortUnit::Minutes => 60_000,
         _ => return None,
@@ -292,6 +293,9 @@ pub(crate) fn scale_for_port(
     match port_unit {
         None => scale_by_unit(number, unit).ok_or_else(overflow),
         Some(PortUnit::Seconds) if is_time => scale_by_unit(number, unit).ok_or_else(overflow),
+        Some(PortUnit::Milliseconds) if is_time => scale_by_unit(number, unit)
+            .and_then(|seconds| scale_decimal(&seconds, 1000, 0))
+            .ok_or_else(overflow),
         Some(PortUnit::Minutes) if is_time => {
             let seconds = scale_by_unit(number, unit).ok_or_else(overflow)?;
             divide_exact(&seconds, 60).ok_or_else(|| {
@@ -368,6 +372,11 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 /// `250`÷1000 → `0.25`). `None` when the digits overflow the exact range.
 pub(crate) fn scale_by_unit(number: &str, unit: Unit) -> Option<String> {
     let (mul, shift) = unit.factor();
+    scale_decimal(number, mul, shift)
+}
+
+/// `number · mul / 10^shift` as an exact decimal literal.
+fn scale_decimal(number: &str, mul: u128, shift: u32) -> Option<String> {
     let (neg, rest) = match number.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, number),
@@ -2879,6 +2888,24 @@ mod tests {
         assert_eq!(scale_for_port("-30", Unit::Min, minutes).unwrap(), "-30");
         let err = scale_for_port("10", Unit::S, minutes).unwrap_err();
         assert!(err.contains("exact number of minutes"), "{err}");
+        let ms = Some(PortUnit::Milliseconds);
+        assert_eq!(scale_for_port("4", Unit::S, ms).unwrap(), "4000");
+        assert_eq!(scale_for_port("250", Unit::Ms, ms).unwrap(), "250");
+        assert_eq!(scale_for_port("1.5", Unit::Min, ms).unwrap(), "90000");
+        assert_eq!(
+            duration_value("VirtualHttpIn", "Timeout", "4000"),
+            Some(Value::Unit {
+                number: "4".into(),
+                unit: Unit::S
+            })
+        );
+        assert_eq!(
+            duration_value("VirtualHttpIn", "Timeout", "250"),
+            Some(Value::Unit {
+                number: "250".into(),
+                unit: Unit::Ms
+            })
+        );
 
         assert_eq!(
             scale_for_port("70", Unit::Pct, Some(PortUnit::Percent)).unwrap(),

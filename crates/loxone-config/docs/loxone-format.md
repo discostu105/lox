@@ -746,6 +746,29 @@ Lox Logic writes a bound 0 as no attribute ([D112](decisions/0112-zero-is-no-att
 calendar entries or the physical inputs and outputs; `MinVal` is absent on 112 of 171 `VirtualIn`s,
 `ModbusDataType` on 149 of 339 Modbus sensors); oracle sessions 37, 61 and 62 (Loxone Config 17.2.8.28).
 
+### Units of the settings
+
+The unit a setting's attribute is in, where a Loxone knowledge-base page states it. The table is
+`src/settings_meta.rs`; value suffixes scale into these units.
+
+| Object | Attribute | Property | Unit | Range | Source |
+|---|---|---|---|---|---|
+| `VirtualHttpIn` | `Poll` | Polling cycle | s | 10…604800 | `kb-virtual-http-input`, *Properties* |
+| `VirtualHttpIn` | `Timeout` | Timeout | ms | 10…8000 | `kb-virtual-http-input`, *Properties* |
+| `VirtualHttpIn` | `Allowedtimeouts` | Number of permitted timeouts | none | 0…100 | `kb-virtual-http-input`, *Properties* |
+
+The attributes match the properties by name. The corpus agrees: all 19 `VirtualHttpIn`s have
+`Timeout="4000"` (the mint default), and every `Poll` is 10 or more (10 to 3600).
+
+No Loxone page states the unit of these settings, so they stay bare numbers:
+
+- `ModbusServer` `Timeout`. Reference `kb-modbus-tcp` (German; there is no English page) names the
+  server's timeout and the sensors' polling cycle, without units. The Modbus Air and Modbus
+  Extension pages document only RS-485 timing ("Timeout: 1000ms" in Auto mode), not these
+  attributes.
+- `ModbusASensor` and `ModbusSensor` `ModbusPollingCycle`, `MinTime`, `MaxTime`.
+- `VirtualUdpInCmd` `MinTime`.
+
 ## Settings of physical inputs and outputs
 
 Inputs and outputs of extensions, Tree and Air devices and 1-Wire sensors carry their settings as attributes:

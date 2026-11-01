@@ -1372,6 +1372,7 @@ pub fn file_params(block_type: &str) -> &'static [&'static str] {
 /// time suffixes scale into seconds, `%`/`K` are annotations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortUnit {
+    Milliseconds,
     Seconds,
     Minutes,
     Percent,
@@ -1383,6 +1384,7 @@ pub enum PortUnit {
 impl PortUnit {
     pub fn describe(self) -> String {
         match self {
+            PortUnit::Milliseconds => "milliseconds".into(),
             PortUnit::Seconds => "seconds".into(),
             PortUnit::Minutes => "minutes".into(),
             PortUnit::Percent => "percent".into(),
@@ -1396,6 +1398,7 @@ impl PortUnit {
 pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
     let unit = crate::port_meta::port_meta(block_type, port)?.unit?;
     Some(match unit {
+        "ms" => PortUnit::Milliseconds,
         "s" => PortUnit::Seconds,
         "min" => PortUnit::Minutes,
         "%" => PortUnit::Percent,

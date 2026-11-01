@@ -230,17 +230,25 @@ Notes:
   `1.5h`, `2700K`, `70%`. `loxl types <Type>` shows each port's documented unit.
   - Time units scale exactly into the port's unit. That is seconds by default (`1.5h` compiles to
     `Def="5400"`, byte-identical to `5400`), minutes on a minutes port (`AutoShadeTime: 2h` compiles
-    to `120`). A value that is not an exact decimal number of minutes (`10s`) is an error there.
+    to `120`), milliseconds on a milliseconds port (`VirtualHttpIn`'s `Timeout: 4s` compiles to
+    `4000`). A value that is not an exact decimal number of minutes (`10s`) is an error there.
   - `%` and `K` (color temperature) have factor 1. They are accepted only on a port documented in
     that unit, or on an undocumented one. A time suffix on a `%`, `K` or `°` port is an error.
   - A suffixed `let` scales per use, into each port's unit.
   - The suffix is part of the canonical spelling: `1.5h` stays `1.5h` through `fmt`.
   - An unknown suffix is a parse error. A quoted `"40s"` stays a string.
-  - Decompile and adopt write the suffix on a port documented in seconds or minutes: the largest of
+  - Decompile and adopt write the suffix on a port documented in milliseconds, seconds or minutes:
+    the largest of
     `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
     and only when it compiles back to the same digits. Zero and the other ports stay bare.
   - `loxl lint` reports a bare number that this rule would write with a suffix (`unit-suffix`:
-    `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults` and in template bodies.
+    `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults`, on extern port assignments
+    (`x.Time = 300` → `x.Time = 5min`) and in template bodies. A template value parameter
+    (`zeit = 75`) and an instance's argument for it count when every use of the parameter in the
+    body is a port of the same unit; an argument the instance forwards to its primary block counts
+    by that block's port. A bulk line `(a, b).Port = 300` changes only as a whole.
+  - A setting with no unit in Loxone's documentation stays a bare number: the Modbus server's
+    `Timeout`, the Modbus sensors' `ModbusPollingCycle`, `MinTime` and `MaxTime`.
     `loxl lint --fix` writes the suffixes; the compile output stays byte-identical, and in a project
     the fix is refused if it would not.
 - **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
