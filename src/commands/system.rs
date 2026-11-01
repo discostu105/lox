@@ -1103,3 +1103,46 @@ fn print_sd_table(sd: &SdTestResult) {
         println!("│  SD card:          {}", sd.raw);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardware::{HwEntry, HwStatus, counts};
+
+    fn entry(status: HwStatus, name: &str, serial: Option<&str>, program: Option<&str>) -> HwEntry {
+        HwEntry {
+            status,
+            name: name.into(),
+            kind: "TreeDevice".into(),
+            place: None,
+            serial: serial.map(String::from),
+            program_serial: program.map(String::from),
+            uuid: None,
+            online: None,
+            firmware: Some("15.0.1.1".into()),
+        }
+    }
+
+    #[test]
+    fn hw_table_shows_the_serial_change_and_the_counts() {
+        let entries = [
+            entry(
+                HwStatus::SerialChanged,
+                "Kitchen",
+                Some("B0000002"),
+                Some("B0000001"),
+            ),
+            entry(HwStatus::Missing, "Hall", None, Some("B0000003")),
+            entry(HwStatus::Ok, "Bath", Some("B0000004"), Some("B0000004")),
+        ];
+        let text = hw_table(&entries, &counts(&entries), "base.Loxone", true);
+        assert!(text.starts_with("Program file: base.Loxone\n\nSTATUS"));
+        assert!(text.contains("B0000001 → B0000002"));
+        assert!(text.contains("missing         Hall"));
+        assert!(text.contains("B0000003"));
+        assert!(text.ends_with("\n3 devices: 1 serial changed, 1 missing, 1 ok\n"));
+        let bare = hw_table(&entries[2..], &counts(&entries[2..]), "x", false);
+        assert!(!bare.contains("STATUS"));
+        assert!(bare.contains("—"));
+    }
+}

@@ -2244,6 +2244,32 @@ async fn logic_tools_run_the_cli_in_the_project() {
 
     let (out, _) = call(&client, "config_sync", json!({ "project": p })).await;
     assert_eq!(out["json"]["args"], "-o json config sync .");
+
+    let (out, _) = call(&client, "logic_coverage", json!({ "project": p })).await;
+    assert_eq!(out["json"]["args"], "logic coverage --json");
+    let (out, _) = call(
+        &client,
+        "logic_test",
+        json!({ "project": p, "filter": "x" }),
+    )
+    .await;
+    let args = out["json"]["args"].as_str().unwrap();
+    assert!(
+        args.starts_with("logic test ") && args.contains("x"),
+        "{args}"
+    );
+    let (out, err) = call(
+        &client,
+        "logic_decompile",
+        json!({ "project": p, "config": "a.Loxone" }),
+    )
+    .await;
+    assert!(!err, "{}", out);
+    let args = out["json"]["args"].as_str().unwrap();
+    assert!(
+        args.starts_with("logic decompile ") && args.contains("a.Loxone"),
+        "{args}"
+    );
 }
 
 #[cfg(unix)]
