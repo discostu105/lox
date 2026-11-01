@@ -10,6 +10,19 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.75.1] — 2026-11-01
+
+### Added
+- **Lox Logic block settings** come from source: the name the app shows (`Desc:`), a memory flag's type
+  (`Type: "text"`), when a PulseAt fires (`Pulse: "sunset"`), a blind's sunshine flag (`Sun: on`), a
+  DayTimer's on/off texts and a meter's units. `loxl decompile` and `loxl adopt` lift them, and
+  `loxl types <Type>` lists them
+  - `loxl coverage` names the parameter that claims each carried attribute and no longer lists values a
+    save writes on its own
+
+### Fixed
+- **`loxl compile`** writes no `Def="0"` on a block input, as Loxone Config saves it: a comparison with 0 (`x.Q < 0`), a parameter of 0 and `x.Port = 0` no longer show as changed after a save. `loxl test` reads an unset parameter as 0, as Loxone Config does, and `loxl decompile` states it (`Time: 0`) where Config's default is not 0.
+
 ## [0.75.0] — 2026-11-01 — push guards and hardware status; create Tree devices
 
 `lox config push` now guards against deleting rules edited in the app, and `lox config sync` checks a project
