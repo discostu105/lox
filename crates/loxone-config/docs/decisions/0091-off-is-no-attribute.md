@@ -1,6 +1,7 @@
 # D91: `off` is no attribute, except on a virtual input
 
-Status: accepted (2026-11-01), amends [D80](0080-v2-one-spelling.md)
+Status: accepted (2026-11-01), amends [D80](0080-v2-one-spelling.md), amended by
+[D113](0113-adopt-writes-off.md)
 
 ## Context
 
@@ -26,7 +27,8 @@ those attributes as changed, and the next compile wrote them back.
 - On the other text-boolean attributes, a bound `off` writes no attribute. On an existing object it
   removes a ticked one. `connectors::omitted_when_off` names them.
 - Decompile and adopt are unchanged: an absent attribute lifts as nothing, which leaves the box with the
-  GUI. They never produce `off` on these attributes from a real config.
+  GUI. They never produce `off` on these attributes from a real config. (Since D113 they write `off`
+  where a new object would tick the box.)
 
 ## Rejected
 

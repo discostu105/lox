@@ -219,7 +219,9 @@ Notes:
     `Analog:`, `VirtualHttpInCmd`'s `Signed:`/`Analog:`, …) they compile to that text. Such an
     attribute takes only `on`/`off`; `Analog: "true"` is an error naming `Analog: on`.
   - Except on a `VirtualIn`, `off` compiles to no attribute, which is how Loxone Config stores an
-    unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`.
+    unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`. Decompile and adopt write `off`
+    for an unticked box that a new object would tick (`Signed`, `Analog` on the HTTP and UDP commands,
+    `CloseAfterSend`).
   - A number stays a number: `1` is never rewritten to `on`.
   - The formula backend rejects them; write `1`/`0`.
 - **0 on a setting** that Loxone Config leaves out at 0 (`MinVal: 0` on a `VirtualIn`, the range, low

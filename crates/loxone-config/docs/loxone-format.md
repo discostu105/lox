@@ -713,7 +713,9 @@ Virtual inputs, virtual and Modbus devices are not page blocks. They live in fix
   Version` 74 to 267): all 167 `VirtualIn`s have `Analog=`, 53 of them `"false"`, in every version. Two
   saves of the house config made before Lox Logic minted anything (Version 273) have 16 digital ones, all
   `Analog="false"`. The commands and outputs have 1,501 such attribute slots: none is `"false"`, 505 are
-  absent. Oracle session 37 checked both directions.
+  absent. Oracle session 37 checked both directions. A fresh object from Lox Logic ticks `Signed` and
+  `Analog` on the HTTP and UDP commands and `CloseAfterSend`, so adopt writes `off` for a missing one
+  ([D113](decisions/0113-adopt-writes-off.md)).
 - A save writes no numeric setting at 0, see [*Numbers at 0*](#numbers-at-0).
 
 Lox Logic creates these objects ([D54](decisions/0054-virtual-inputs.md),
