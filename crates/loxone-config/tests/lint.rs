@@ -253,6 +253,78 @@ fn lint_fix_writes_unit_suffixes_and_keeps_the_compiled_config() {
 }
 
 #[test]
+fn lint_fix_covers_extern_sets_templates_and_device_settings() {
+    let dir = make_project("lint-fix-wide");
+    std::fs::write(
+        dir.join("src/_vorlagen.loxl"),
+        "template verz(zeit = 300, titel = \"Verz\")\n\
+         \tm = Monoflop(\"{titel}\", Time: zeit)\n\
+         end\n\n\
+         # `zeit` also feeds a port without a unit, where a suffix reads differently.\n\
+         template beschriftet(zeit = 300) -> m\n\
+         \tm = Monoflop(Time: zeit)\n\
+         \tn = Equal(Input1: m.Q, Input2: zeit)\n\
+         end\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/sued.loxl"),
+        format!(
+            "page \"Beschattung\"\n\n{SUED}\n\
+             a = verz(zeit: 120, InputTrigger: sonne.Q)\n\
+             b = beschriftet(zeit: 120, InputTrigger: a.Q)\n\
+             jal_sued.InputTrigger <- b.Q\n\
+             zaehler = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/\", Poll: 60, \
+             Timeout: 4000)\n"
+        ),
+    )
+    .unwrap();
+    let out = loxl(&dir, &["compile", "--out", "out.Loxone"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let before = std::fs::read(dir.join("out.Loxone")).unwrap();
+    let lock = std::fs::read_to_string(dir.join("haus.lock.json")).unwrap();
+
+    let out = loxl(&dir, &["lint", "--fix"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        stdout.starts_with("fixed: 4 unit-suffix values in 2 files\n"),
+        "{stdout}{stderr}"
+    );
+    let vorlagen = std::fs::read_to_string(dir.join("src/_vorlagen.loxl")).unwrap();
+    assert!(
+        vorlagen.contains("template verz(zeit = 5min,"),
+        "{vorlagen}"
+    );
+    assert!(
+        vorlagen.contains("template beschriftet(zeit = 300) -> m"),
+        "{vorlagen}"
+    );
+    let sued = std::fs::read_to_string(dir.join("src/sued.loxl")).unwrap();
+    assert!(sued.contains("verz(zeit: 2min,"), "{sued}");
+    assert!(sued.contains("beschriftet(zeit: 120,"), "{sued}");
+    // Documented in seconds and in milliseconds.
+    assert!(sued.contains("Poll: 1min"), "{sued}");
+    assert!(sued.contains("Timeout: 4s"), "{sued}");
+
+    let out = loxl(&dir, &["compile", "--out", "out.Loxone"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read(dir.join("out.Loxone")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("haus.lock.json")).unwrap(),
+        lock
+    );
+}
+
+#[test]
 fn a_module_error_names_the_fragment_and_line() {
     let dir = make_project("check-located");
     std::fs::write(

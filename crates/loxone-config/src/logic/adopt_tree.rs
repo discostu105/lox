@@ -314,7 +314,9 @@ pub(super) fn adopt_device(
                         {
                             Value::Bool(v == "true") // `on`/`off`
                         } else {
-                            value_of(&v)
+                            // A duration reads in its unit (`4s`, not `4000`).
+                            crate::logic::ast::duration_value(&o.block_type, name, &v)
+                                .unwrap_or_else(|| value_of(&v))
                         },
                     ),
                     comment: None,

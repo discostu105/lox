@@ -470,6 +470,14 @@ impl Workspace {
         {
             return s;
         }
+        // A port assignment (`x.Time = 300`) is its own statement, away
+        // from the extern's declaration.
+        if let Some((_, old)) = replacement(&f.detail)
+            && old.contains(" = ")
+            && let Some(s) = self.first_text(old, unit)
+        {
+            return s;
+        }
         match at {
             Some(s) => s,
             None => self
