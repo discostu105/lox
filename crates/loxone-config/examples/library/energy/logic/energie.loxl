@@ -13,21 +13,9 @@ netz = MeterAbsBi(
 	Mr2: total_meter_reading_delivery.Q,
 )
 
-photovoltaik = MeterAbsUni(
-	Pf: total_active_power_2.Q,
-	Mr: total_meter_reading_consumption_2.Q,
-)
-
+photovoltaik = MeterAbsUni(Pf: total_active_power_2.Q, Mr: total_meter_reading_consumption_2.Q)
 energiefluss = EFM()
-netz_opf_1 = Formula(
-	Formula: "I1*(-1)",
-	Input1: netz.OPf,
-)
-
-pv_ueberschuss = AnalogThresholdTrigger(
-	Input: netz_opf_1.AQ,
-	On: 3,
-	Off: 0.5,
-)
+netz_opf_1 = Formula(Formula: "I1*(-1)", Input1: netz.OPf)
+pv_ueberschuss = AnalogThresholdTrigger(Input: netz_opf_1.AQ, On: 3, Off: 0.5)
 
 heizstab.I <- pv_ueberschuss.Q

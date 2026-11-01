@@ -7,22 +7,10 @@ co2 = VirtualIn("CO2")
 fenster = VirtualIn("Fenster offen")
 feuchte = VirtualIn("Luftfeuchte")
 
-heizung = heizung_hysterese(
-	temperatur: temperatur,
-)
-
-frost = frostschutz(
-	temperatur: temperatur,
-)
-
-lueftung = lueftung_co2(
-	co2: co2,
-	fenster: fenster,
-)
-
-keller = entfeuchter(
-	feuchte: feuchte,
-)
+heizung = heizung_hysterese(temperatur: temperatur)
+frost = frostschutz(temperatur: temperatur)
+lueftung = lueftung_co2(co2: co2, fenster: fenster)
+keller = entfeuchter(feuchte: feuchte)
 
 test "heizung_hysterese: zwischen den Schwellen bleibt der Zustand"
 	temperatur.Q = 19

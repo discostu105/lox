@@ -6,4 +6,5 @@ extern jalousie = JalousieUpDown2(uuid: "70000011-0011-0001-ffff000000000001")
 
 kein_regen = Not(I: regen.AQ)
 schliessen = And("Sonne ohne Regen", I1: sonne.AQ, I2: kein_regen.Q)
+
 jalousie.InputTriggerDown <- schliessen.Q

@@ -574,8 +574,7 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
         // instance's blocks (`a.b`), which only exist after template
         // expansion — mirroring what compile checks.
         module
-            .expand()
-            .and_then(|x| x.validate())
+            .with_expanded(|x| x.validate())
             .map_err(|e| (path.to_string(), e))?;
         Ok(module)
     } else {
@@ -647,13 +646,15 @@ fn cmd_check(args: &[&str]) -> Result<ExitCode, AnyError> {
     // directions against the builtin table. Counts describe the source;
     // the deep checks run on the desugared form (what compile will see).
     let checked = load_module(path).and_then(|m| {
-        m.expand()
-            .and_then(|x| x.validate().map(|()| x))
-            .and_then(|x| x.desugar())
-            .and_then(|(x, d)| x.validate().map(|()| (x, d)))
-            .and_then(|(x, d)| loxone_config::logic::validate_ports(&x).map(|()| (x, d)))
-            .map(|(x, d)| (m, x, d))
-            .map_err(|e| (path.to_string(), e))
+        m.with_expanded(|x| {
+            x.validate()?;
+            let (x, d) = x.desugar()?;
+            x.validate()?;
+            loxone_config::logic::validate_ports(&x)?;
+            Ok((x, d))
+        })
+        .map(|(x, d)| (m, x, d))
+        .map_err(|e| (path.to_string(), e))
     });
     let count = |m: &Module, f: fn(&loxone_config::logic::Item) -> bool| {
         m.items.iter().filter(|i| f(i)).count()
@@ -999,8 +1000,10 @@ fn cmd_test(args: &[&str]) -> Result<ExitCode, AnyError> {
 
     // Tests may reference template-expanded and expression-owned slugs;
     // plan on the same flattened view the compiler used.
-    let (flat, _) = m.expand()?.desugar()?;
-    let mut plan = plan_tests(&flat, &lock_copy, &compiled, filter.as_deref())?;
+    let mut plan = m.with_expanded(|x| {
+        let (flat, _) = x.desugar()?;
+        plan_tests(&flat, &lock_copy, &compiled, filter.as_deref())
+    })?;
     plan.respell(&m);
     if plan.runs.is_empty() {
         match &filter {

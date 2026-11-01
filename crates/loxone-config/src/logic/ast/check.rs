@@ -485,7 +485,15 @@ impl Module {
                     }
                     numeric(&e.port, &e.value)?;
                 }
-                TestItem::Tick(_) | TestItem::Clock(_) | TestItem::Comment(_) => {}
+                TestItem::Tick(tick) => {
+                    self.value_refs(names, &tick.amount)?;
+                    if let Some(dt) = &tick.dt {
+                        self.value_refs(names, dt)?;
+                    }
+                    tick.count(|name| self.lets().find(|l| l.name == name).map(|l| &l.value))
+                        .map_err(|e| Error::Compile(format!("test {}: {e}", quote(&t.name))))?;
+                }
+                TestItem::Clock(_) | TestItem::Comment(_) => {}
             }
         }
         Ok(())

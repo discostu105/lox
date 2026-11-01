@@ -327,7 +327,7 @@ fn decompile_folds_consumer_wires_to_the_target() {
     // OutputRef's AI names the actor port its AQ feeds.
     assert!(view.contains("Input: "), "{view}");
     assert!(
-        view.contains(".Qm,"),
+        view.contains(".Qm)"),
         "read must name the target port: {view}"
     );
     assert!(view.contains("Qm <- halter.Q"), "{view}");

@@ -32,29 +32,17 @@ page "Pool"
 # ein Wert wird Parameter (Def=), `slug.Port` wird Draht, ein Ausdruck
 # desugart in diskrete Blöcke (D26).
 
-heizbedarf = Less(
-	"Wasser unter Soll",
-	Input1: wassertemp.Q,
-	Input2: heiz_grenze,
-)
+heizbedarf = Less("Wasser unter Soll", Input1: wassertemp.Q, Input2: heiz_grenze)
 
 # Einheiten (D27): ms/s/min/h skalieren exakt in Sekunden, K und %
 # annotieren mit Faktor 1 — `80%` kompiliert zu Def="80".
 
-weit_offen = GreaterEqual(
-	"Abdeckung weit offen",
-	Input1: abdeckung.Q,
-	Input2: 80%,
-)
+weit_offen = GreaterEqual("Abdeckung weit offen", Input1: abdeckung.Q, Input2: 80%)
 
 # Fan-in: mehrere Drähte auf DENSELBEN Port sind erlaubt, solange die
 # Quellen verschieden sind; dazu ein Ausdruck als Argument.
 
-anforderung = Or(
-	I1: heizbedarf.Q,
-	I1: weit_offen.Q,
-	I2: pv_ueberschuss.Q >= 1500,
-)
+anforderung = Or(I1: heizbedarf.Q, I1: weit_offen.Q, I2: pv_ueberschuss.Q >= 1500)
 
 # Attribut-Parameter: `Formula:` liegt im XML als Element-Attribut,
 # bindet aber wie jeder Parameter — nur ein Draht ist unmöglich.
@@ -68,18 +56,12 @@ mitteltemp = Formula(
 
 # Zeit-Einheiten am Parameter: 45min → Def="2700", 1.5h → Def="5400".
 
-takt = PulseGen(
-	"Umwälz-Takt",
-	TimeHigh: 45min,
-	TimeLow: 1.5h,
-)
+takt = PulseGen("Umwälz-Takt", TimeHigh: 45min, TimeLow: 1.5h)
 
 # `==`/`!=` vergleichen auch digitale Signale; das Memory hält den
 # Vergleichswert.
 
-speicher = Memory(
-	Input: waermepumpe.Q == 1,
-)
+speicher = Memory(Input: waermepumpe.Q == 1)
 
 # --- template (D23): Titel-Interpolation, Defaults, Forwarding ---------
 # Ein Ein-Block-Template ist ein zusammengesetzter Block: "{titel}"
@@ -141,29 +123,13 @@ netz_hoch = GreaterEqual(
 # Speise-Draht (AI <- Ziel-Ausgang) steht explizit in der Quelle. Ein
 # Draht, der den Ref selbst nennt, bleibt wörtlich (kein D34-Umweg).
 
-wasser_spiegel = InputRef(
-	mirrors: wassertemp,
-	AI: wassertemp.Q,
-)
-
-kalt_technik = Less(
-	"Wasser kalt (Technik)",
-	Input1: wasser_spiegel.AQ,
-	Input2: frost_grenze,
-)
+wasser_spiegel = InputRef(mirrors: wassertemp, AI: wassertemp.Q)
+kalt_technik = Less("Wasser kalt (Technik)", Input1: wasser_spiegel.AQ, Input2: frost_grenze)
 
 # Millisekunden-Einheiten: 250ms → Def="0.25".
 
-blitz = PulseGen(
-	"Störblitz",
-	TimeHigh: 250ms,
-	TimeLow: 750ms,
-)
-
-stoerung = And(
-	I1: kalt_technik.Q,
-	I2: blitz.Q,
-)
+blitz = PulseGen("Störblitz", TimeHigh: 250ms, TimeLow: 750ms)
+stoerung = And(I1: kalt_technik.Q, I2: blitz.Q)
 
 stoerlampe.On <- stoerung.Q
 

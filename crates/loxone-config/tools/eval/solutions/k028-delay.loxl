@@ -3,5 +3,11 @@ page "Bad"
 extern licht = LightController2(uuid: "60000004-0004-0001-ffff000000000001")
 extern luefter = VirtualOut(title: "Lüfter Bad")
 
-nachlauf = OnPulseDelay("Lüfter-Nachlauf", InputTrigger: licht.AQ1, Delay: 0, Time: 10min)
+nachlauf = OnPulseDelay(
+	"Lüfter-Nachlauf",
+	InputTrigger: licht.AQ1,
+	Delay: 0,
+	Time: 10min,
+)
+
 luefter.I1 <- nachlauf.Q

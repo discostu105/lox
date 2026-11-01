@@ -1609,7 +1609,7 @@ a = paar(x: vi)\n";
             .any(|i| matches!(i, Item::Removed(x) if x.slug == "a_weg"))
     );
     assert!(
-        m.to_text().contains("c = weiter(\n\ty: a.aus,\n)\n"),
+        m.to_text().contains("c = weiter(y: a.aus)\n"),
         "{}",
         m.to_text()
     );
@@ -2452,7 +2452,7 @@ heiss.Input1 <- sonne.Q
     assert!(err.contains("inverted in Loxone Config"), "{err}");
     let (module, mut lock, _) = adopt(&existing).unwrap();
     let mut text = module.to_text();
-    text = text.replace("\tInput2: 50,", "\tInput1: 5,\n\tInput2: 50,");
+    text = text.replace("Input2: 50", "Input1: 5, Input2: 50");
     let m = Module::parse(&text).unwrap();
     let err = compile(&existing, &m, &mut lock, &opts())
         .unwrap_err()
@@ -3122,7 +3122,7 @@ jal_sued.AutoShade <- gate.Q\n";
     // Canonical form keeps the expression as written and is a fixpoint.
     let text = module.to_text();
     assert!(
-        text.contains("\tI1: sonne.Q and aussentemp.Q >= schwelle,"),
+        text.contains("I1: sonne.Q and aussentemp.Q >= schwelle,"),
         "{text}"
     );
     assert_eq!(

@@ -4,14 +4,7 @@ extern licht = VirtualOutCmd(title: "Licht Flur")
 
 page "Logik"
 
-dunkel = Less(
-	Input1: helligkeit.Q,
-	Input2: 50,
-)
-
-an = And(
-	I1: bewegung.Q,
-	I2: dunkel.Q,
-)
+dunkel = Less(Input1: helligkeit.Q, Input2: 50)
+an = And(I1: bewegung.Q, I2: dunkel.Q)
 
 licht.I <- an.Q

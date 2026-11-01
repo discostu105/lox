@@ -412,13 +412,24 @@ fn finish_defaults(call: BlockDecl, lineno: usize) -> Result<DefaultsDecl> {
 
 /// A closed call becomes a block declaration, or a template instantiation
 /// when the callee is lowercase.
-fn finish_call(call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
+fn finish_call(mut call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
     let lower = call
         .block_type
         .chars()
         .next()
         .is_some_and(|c| c.is_ascii_lowercase());
     if !lower {
+        // `mirrors: inst.block` names a block of a template instance: an
+        // object, written like a port reference (as a tile's `to:`).
+        for arg in &mut call.args {
+            if let ArgItem::Binding(b) = arg
+                && b.port == "mirrors"
+                && let BindingKind::Wire(r) = &b.kind
+                && r.port.starts_with(|c: char| c.is_ascii_lowercase())
+            {
+                b.kind = BindingKind::Param(Value::Ref(scoped(&r.slug, &r.port, lineno)?));
+            }
+        }
         return Ok(Item::Block(call));
     }
     let err = |msg: String| Error::Parse { line: lineno, msg };
@@ -836,6 +847,11 @@ impl Parser {
     /// statement about an object.
     fn statement(&mut self, toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<()> {
         let err = |msg: String| Error::Parse { line: lineno, msg };
+        // `tick = …`: a declaration named by a reserved word says so,
+        // whatever the word would start elsewhere.
+        if let [Tok::Ident(name), Tok::Eq, ..] = toks {
+            check_slug(name, lineno)?;
+        }
         match &toks[0] {
             Tok::Ident(kw) if kw == "template" => {
                 if self.open_template.is_some() {
@@ -1244,7 +1260,24 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             // `mirrors:` takes a bare slug; everything else is a
             // quoted string.
             let mut pairs = Vec::new();
-            let mut it = rest.iter();
+            // `mirrors: inst.block` names a block of a template instance.
+            let mut joined: Vec<Tok> = Vec::with_capacity(rest.len());
+            let mut i = 0;
+            while i < rest.len() {
+                match (&rest[i], rest.get(i + 1), rest.get(i + 2)) {
+                    (Tok::Ident(a), Some(Tok::Dot), Some(Tok::Ident(b)))
+                        if joined.last() == Some(&Tok::Colon) =>
+                    {
+                        joined.push(Tok::Ident(format!("{a}.{b}")));
+                        i += 3;
+                    }
+                    (t, _, _) => {
+                        joined.push(t.clone());
+                        i += 1;
+                    }
+                }
+            }
+            let mut it = joined.iter();
             loop {
                 match (it.next(), it.next(), it.next()) {
                     (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
@@ -1272,7 +1305,7 @@ fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<
             }
             let mut pairs = pairs.into_iter();
             let match_spec = match pairs.next() {
-                Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_slug(&v, lineno)?),
+                Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_ref(&v, lineno)?),
                 Some(("mirrors", _, false)) => {
                     return Err(err("`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
                         .into()));
@@ -1412,6 +1445,10 @@ fn mode_name(tok: &Tok, lineno: usize, usage: &str) -> Result<ModeName> {
 /// `when <slug>.<state> <op> <value>`, the weather, day, daylight, sun
 /// and date conditions, `or`, `then <slug> "<command>"`,
 /// `then mode <mode> on|off`, `then notify|mail|wait|message`.
+/// The action words of `then <word> …`: in that place they are the action,
+/// never a block.
+const RULE_ACTIONS: &[&str] = &["wait", "mode", "notify", "mail", "message"];
+
 fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<RuleStmt> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let usage = "A rule line is `active`, `inactive`, `when time HH:MM`, \
@@ -1435,22 +1472,57 @@ fn parse_rule_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
 fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtKind> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let kind = match toks {
+        // `when <slug>.<state>` first: the dot tells a block named like a
+        // condition word (`mode`, `day`) from the condition.
         [
             Tok::Ident(w),
-            Tok::Ident(k),
-            Tok::Num(h),
-            Tok::Colon,
-            Tok::Num(m),
-        ] if w == "when" && k == "time" => {
-            let bad = || err(format!("`{h}:{m}` is not a time of day (00:00 … 23:59)"));
-            if m.len() != 2 || h.is_empty() || h.len() > 2 {
-                return Err(bad());
+            Tok::Ident(target),
+            Tok::Dot,
+            Tok::Ident(state),
+            Tok::Cmp(op),
+            value,
+        ] if w == "when" => {
+            let value = match value {
+                Tok::Num(n) => n.clone(),
+                Tok::Ident(v) if v == "on" || v == "off" => v.clone(),
+                _ => {
+                    return Err(err(format!(
+                        "`when {target}.{state} {}` compares with a number, `on` or `off`",
+                        op.symbol()
+                    )));
+                }
+            };
+            RuleStmtKind::State {
+                target: check_ref(target, lineno)?,
+                state: state.clone(),
+                op: *op,
+                value,
             }
-            let (h, m): (u16, u16) = (h.parse().map_err(|_| bad())?, m.parse().map_err(|_| bad())?);
-            if h > 23 || m > 59 {
-                return Err(bad());
+        }
+        // The same time-of-day lexeme as `At: 19:00` and a test's `clock`.
+        [Tok::Ident(w), Tok::Ident(k), Tok::Str(t)] if w == "when" && k == "time" => {
+            return Err(err(
+                match super::ast::clock_seconds(t).and_then(super::ast::clock_text) {
+                    Some(c) => format!(
+                        "a time takes no quotes. Write `when time {c}` instead of `when time \"{t}\"`."
+                    ),
+                    None => format!("expected `when time HH:MM` (`when time 07:30`). {usage}"),
+                },
+            ));
+        }
+        [Tok::Ident(w), Tok::Ident(k), time @ ..]
+            if w == "when" && k == "time" && clock_toks(time).is_some() =>
+        {
+            let Value::Clock(text) = clock_value(time, "when time", lineno)? else {
+                unreachable!("clock_value returns a clock")
+            };
+            let secs = super::ast::clock_seconds(&text).expect("canonical");
+            if !secs.is_multiple_of(60) {
+                return Err(err(format!(
+                    "`when time {text}`: a rule's time condition is a whole minute. Write `HH:MM`."
+                )));
             }
-            RuleStmtKind::Time(h * 60 + m)
+            RuleStmtKind::Time((secs / 60) as u16)
         }
         [Tok::Ident(w), Tok::Ident(k), days @ ..] if w == "when" && k == "weekday" => {
             let mut words = Vec::new();
@@ -1486,31 +1558,6 @@ fn parse_rule_when(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
             RuleStmtKind::Mode {
                 mode: mode_name(mode, lineno, usage)?,
                 on,
-            }
-        }
-        [
-            Tok::Ident(w),
-            Tok::Ident(target),
-            Tok::Dot,
-            Tok::Ident(state),
-            Tok::Cmp(op),
-            value,
-        ] if w == "when" => {
-            let value = match value {
-                Tok::Num(n) => n.clone(),
-                Tok::Ident(v) if v == "on" || v == "off" => v.clone(),
-                _ => {
-                    return Err(err(format!(
-                        "`when {target}.{state} {}` compares with a number, `on` or `off`",
-                        op.symbol()
-                    )));
-                }
-            };
-            RuleStmtKind::State {
-                target: check_ref(target, lineno)?,
-                state: state.clone(),
-                op: *op,
-                value,
             }
         }
         [
@@ -1619,6 +1666,14 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
                 Tok::UnitNum(n, u) if matches!(u, Unit::Ms | Unit::S | Unit::Min | Unit::H) => {
                     format!("{n}{}", u.suffix())
                 }
+                Tok::Ident(_) | Tok::Str(_) => {
+                    return Err(err(
+                        "`then wait` takes a duration: `5s`, `500ms`, `2min`, `1h`. A block \
+                         named `wait` cannot be a rule target: rename the block \
+                         (`loxl rename wait <new>`)."
+                            .into(),
+                    ));
+                }
                 _ => {
                     return Err(err(
                         "`then wait` takes a duration: `5s`, `500ms`, `2min`, `1h`".into(),
@@ -1667,6 +1722,16 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
         }
         // `then pumpe on` — a one-word command is bare; `then x "on"`
         // canonicalizes to it.
+        // The action words win their place: a block named like one
+        // cannot be the target of `then <slug> <command>`.
+        [Tok::Ident(w), Tok::Ident(target), _]
+            if w == "then" && RULE_ACTIONS.contains(&target.as_str()) =>
+        {
+            return Err(err(format!(
+                "`then {target} …` is the {target} action, so a block named `{target}` cannot \
+                 be a rule target. Rename the block (`loxl rename {target} <new>`)."
+            )));
+        }
         [
             Tok::Ident(w),
             Tok::Ident(target),
@@ -1920,12 +1985,8 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 [n] => (n, None),
                 [n, Tok::Ident(kw), v] if kw == "dt" => {
                     let dt = match value_of(v, lineno)? {
-                        v @ (Value::Number(_) | Value::Unit { .. }) => v,
-                        other => {
-                            return Err(err(format!(
-                                "`dt {other}`: the tick length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
-                            )));
-                        }
+                        v @ (Value::Number(_) | Value::Unit { .. } | Value::Ref(_)) => v,
+                        other => return Err(err(super::ast::dt_error(&other))),
                     };
                     (n, Some(dt))
                 }
@@ -1937,35 +1998,8 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     ));
                 }
             };
-            let (n, duration) = match n_tok {
-                Tok::Num(n) => {
-                    let n: u64 = n.parse().map_err(|_| {
-                        err(format!(
-                            "`tick {n}`: the tick count is a positive integer or a duration (`tick 5min`)"
-                        ))
-                    })?;
-                    (n, None)
-                }
-                // `tick 5min` — that much simulated time at the step's dt.
-                Tok::UnitNum(number, unit)
-                    if matches!(unit, Unit::Ms | Unit::S | Unit::Min | Unit::H) =>
-                {
-                    let duration = Value::Unit {
-                        number: number.clone(),
-                        unit: *unit,
-                    };
-                    let dt_secs = dt.as_ref().and_then(|v| v.literal());
-                    let total = duration.literal().expect("lexed exactly");
-                    let n = whole_ratio(&total, dt_secs.as_deref().unwrap_or("1")).ok_or_else(
-                        || {
-                            let dt = dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
-                            err(format!(
-                                "`tick {duration}` is not a whole number of `dt {dt}` ticks. Make the duration a multiple of dt."
-                            ))
-                        },
-                    )?;
-                    (n, Some(duration))
-                }
+            let amount = match n_tok {
+                Tok::Num(_) | Tok::UnitNum(..) | Tok::Ident(_) => value_of(n_tok, lineno)?,
                 _ => {
                     return Err(err(
                         "expected `tick <n>` with a plain tick count, or `tick <duration>` \
@@ -1974,15 +2008,14 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     ));
                 }
             };
-            if n == 0 {
-                return Err(err("`tick 0` advances nothing. Use at least 1.".into()));
-            }
-            Ok(TestItem::Tick(TickDecl {
-                n,
-                duration,
+            let tick = TickDecl {
+                amount,
                 dt,
                 comment,
-            }))
+            };
+            // Literals are checked here; a `let` constant when the test runs.
+            tick.count(|_| None).map_err(err)?;
+            Ok(TestItem::Tick(tick))
         }
         [Tok::Ident(kw), rest @ ..] if kw == "expect" => {
             let [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), cmp_tok, val] = rest else {
@@ -2308,22 +2341,22 @@ fn parse_bulk(
 ) -> Result<Vec<Item>> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     let mut items = Vec::new();
-    let mut slugs: Vec<&String> = Vec::new();
-    for (k, t) in inner.iter().enumerate() {
-        match t {
-            Tok::Ident(s) if k % 2 == 0 => {
-                if slugs.contains(&s) {
-                    return Err(err(format!("`{s}` is listed twice")));
-                }
-                slugs.push(s);
-            }
-            Tok::Comma if k % 2 == 1 && k + 1 < inner.len() => {}
+    let mut slugs: Vec<String> = Vec::new();
+    for part in inner.split(|t| *t == Tok::Comma) {
+        // A slug, or `inst.block` for a block of a template instance.
+        let slug = match part {
+            [Tok::Ident(s)] => s.clone(),
+            [Tok::Ident(a), Tok::Dot, Tok::Ident(b)] => scoped(a, b, lineno)?,
             _ => {
                 return Err(err(format!(
                     "expected `(<slug>, <slug>, …).{tp} = <value>`"
                 )));
             }
+        };
+        if slugs.contains(&slug) {
+            return Err(err(format!("`{slug}` is listed twice")));
         }
+        slugs.push(slug);
     }
     if slugs.is_empty() {
         return Err(err(format!(
@@ -2512,23 +2545,6 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             e => BindingKind::Expr(e),
         },
     })
-}
-
-/// `a / b` for two exact non-negative decimal literals, when it is a
-/// whole number.
-fn whole_ratio(a: &str, b: &str) -> Option<u64> {
-    let split = |d: &str| -> Option<(u128, u32)> {
-        let (int, frac) = d.split_once('.').unwrap_or((d, ""));
-        Some((format!("{int}{frac}").parse().ok()?, frac.len() as u32))
-    };
-    let ((ma, sa), (mb, sb)) = (split(a)?, split(b)?);
-    let scale = sa.max(sb);
-    let ma = ma.checked_mul(10u128.checked_pow(scale - sa)?)?;
-    let mb = mb.checked_mul(10u128.checked_pow(scale - sb)?)?;
-    if mb == 0 || ma % mb != 0 {
-        return None;
-    }
-    u64::try_from(ma / mb).ok()
 }
 
 /// A `YYYY-MM-DD` token run (`2026`, `-`, `01`, `-`, `03`), validated;
@@ -3009,17 +3025,42 @@ jal.TargetPos = 70
     }
 
     #[test]
-    fn single_line_calls_canonicalize_to_one_argument_per_line() {
-        let m = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I2: x.Qm)\n")
-            .unwrap();
+    fn short_calls_go_on_one_line_long_ones_one_argument_per_line() {
+        let m = Module::parse(
+            "extern x = VirtualIn(iname: \"VI1\")\nb = And(\n\tI1: x.Q,\n\tI2: x.Qm,\n)\n",
+        )
+        .unwrap();
         let text = m.to_text();
-        assert!(
-            text.contains("b = And(\n\tI1: x.Q,\n\tI2: x.Qm,\n)"),
-            "{text}"
-        );
+        assert!(text.contains("b = And(I1: x.Q, I2: x.Qm)\n"), "{text}");
         let again = Module::parse(&text).unwrap();
         assert_eq!(m, again);
         assert_eq!(again.to_text(), text);
+        // Four arguments (the label counts), a comment in the list, or a
+        // line over 100 columns: one argument per line.
+        for src in [
+            "b = And(\"L\", I1: x.Q, I2: x.Qm, Off: 1)\n",
+            "b = And(\n\tI1: x.Q, # why\n\tI2: x.Qm,\n)\n",
+            "b = And(\n\t# why\n\tI1: x.Q,\n)\n",
+            "b = And(\n\tI1: x.Q,\n) # why\n",
+            "b = And(\"A label long enough to push this call past the limit of one hundred columns\", I1: x.Q, I2: x.Qm)\n",
+        ] {
+            let text = Module::parse_fragment(src).unwrap().to_text();
+            assert!(text.contains("b = And(\n"), "{src}: {text}");
+        }
+        // A trailing comment after a one-line call stays on its line.
+        let src = "b = And(I1: x.Q) # why\n";
+        assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
+        // Indentation counts: in a template body a tab is four columns.
+        let call = format!("g = And(\"{}\", I1: x.Q, I2: x.Qm)", "l".repeat(68));
+        assert_eq!(call.len(), 98);
+        let top = Module::parse_fragment(&format!("{call}\n"))
+            .unwrap()
+            .to_text();
+        assert_eq!(top, format!("{call}\n"));
+        let body = format!("template t()\n\t{call}\nend\n");
+        let text = Module::parse_fragment(&body).unwrap().to_text();
+        assert!(text.contains("\tg = And(\n\t\t\"lll"), "{text}");
+        assert_eq!(Module::parse_fragment(&text).unwrap().to_text(), text);
         // Argument-free calls stay on one line.
         let m = Module::parse("b = And()\nc = Or(\"Oder\")\n").unwrap();
         let text = m.to_text();
@@ -3079,7 +3120,7 @@ sonne.Qm = 30 # override
         let m = Module::parse("extern s = VirtualIn(iname: \"VI1\")\ns.Q = \"28\"\n").unwrap();
         assert!(m.to_text().contains("s.Q = 28"), "{}", m.to_text());
         let m = Module::parse("b = GreaterEqual(Input2: \"28\")\n").unwrap();
-        assert!(m.to_text().contains("Input2: 28,"), "{}", m.to_text());
+        assert!(m.to_text().contains("Input2: 28)"), "{}", m.to_text());
     }
 
     #[test]
@@ -3093,7 +3134,7 @@ sonne.Qm = 30 # override
         )
         .unwrap();
         let text = m.to_text();
-        for needle in ["nachlauf = 90min", "Time: 1.5h,", "TimeHigh: 250ms,"] {
+        for needle in ["nachlauf = 90min", "Time: 1.5h)", "TimeHigh: 250ms,"] {
             assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
         }
         assert_eq!(Module::parse(&text).unwrap(), m);
@@ -3124,7 +3165,7 @@ sonne.Qm = 30 # override
             let m = Module::parse(&format!("t = Monoflop(Time: {src})\n")).unwrap();
             let (_, v) = m.blocks().next().unwrap().params().next().unwrap();
             assert_eq!(m.resolve_value(v).unwrap(), want, "{src}");
-            assert!(m.to_text().contains(&format!("Time: {src},")), "{src}");
+            assert!(m.to_text().contains(&format!("Time: {src})")), "{src}");
         }
 
         // Units work in expressions and template defaults.
@@ -3313,9 +3354,9 @@ sonne.Qm = 30 # override
     fn page_statements_parse_and_roundtrip() {
         let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
                    page \"Beschattung\" # Süd\n\n\
-                   gate = Not(\n\tI: wind.Q,\n)\n\n\
+                   gate = Not(I: wind.Q)\n\n\
                    page \"Regeln\"\n\n\
-                   halt = Or(\n\tI1: gate.Q,\n)\n";
+                   halt = Or(I1: gate.Q)\n";
         let m = Module::parse(src).unwrap();
         assert_eq!(m.to_text(), src);
         let pages: Vec<_> = m
@@ -3345,8 +3386,8 @@ sonne.Qm = 30 # override
     #[test]
     fn on_off_are_digital_literals() {
         let src = "let an = on\n\n\
-                   b = And(\n\tI1: x.Q,\n\tI2: on,\n)\n\n\
-                   c = GreaterEqual(\n\tInput1: x.AQ,\n\tInput2: off,\n)\n\n\
+                   b = And(I1: x.Q, I2: on)\n\
+                   c = GreaterEqual(Input1: x.AQ, Input2: off)\n\n\
                    x.Value = an\n";
         let m = Module::parse_fragment(src).unwrap();
         assert_eq!(m.to_text(), src);
@@ -3370,7 +3411,7 @@ sonne.Qm = 30 # override
         );
         // A number stays a number: no 1 -> on canonicalization.
         let m = Module::parse_fragment("b = And(I2: 1)\n").unwrap();
-        assert!(m.to_text().contains("I2: 1,"));
+        assert!(m.to_text().contains("I2: 1)"));
         // Reserved: neither can name anything.
         for src in ["on = And()\n", "let off = 1\n"] {
             let e = Module::parse_fragment(src).unwrap_err();
@@ -3386,7 +3427,7 @@ sonne.Qm = 30 # override
         );
         assert!(Module::parse_fragment("f = Formula(Formula: \"true\")\n").is_ok());
         // Template value parameters take on/off as defaults.
-        let src = "template t(an = on)\n\tg = And(\n\t\tI1: x.Q,\n\t\tI2: an,\n\t)\nend\n";
+        let src = "template t(an = on)\n\tg = And(I1: x.Q, I2: an)\nend\n";
         assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
     }
 
@@ -3411,7 +3452,7 @@ sonne.Qm = 30 # override
             .body
             .iter()
             .filter_map(|i| match i {
-                TestItem::Tick(t) => Some(t.n),
+                TestItem::Tick(t) => t.count(|_| None).unwrap(),
                 _ => None,
             })
             .collect();

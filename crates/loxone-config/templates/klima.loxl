@@ -21,35 +21,17 @@ end
 template frostschutz(temperatur: any, grenze = 5)
 	# Frostschutz: ein unter `grenze` °C.
 
-	ausgang = Less(
-		Input1: temperatur.Q,
-		Input2: grenze,
-	)
+	ausgang = Less(Input1: temperatur.Q, Input2: grenze)
 end
 
 template lueftung_co2(co2: any, fenster: any, grenze = 1000, verzoegerung = 5min, titel = "CO2 hoch") -> ausgang
 	# Lüften, wenn CO2 `verzoegerung` lang über `grenze` ppm liegt und das
 	# Fenster zu ist.
 
-	hoch = Greater(
-		Input1: co2.Q,
-		Input2: grenze,
-	)
-
-	lange = OnDelay(
-		"{titel}",
-		InputTrigger: hoch.Q,
-		Time: verzoegerung,
-	)
-
-	zu = Not(
-		I: fenster.Q,
-	)
-
-	ausgang = And(
-		I1: lange.Q,
-		I2: zu.Q,
-	)
+	hoch = Greater(Input1: co2.Q, Input2: grenze)
+	lange = OnDelay("{titel}", InputTrigger: hoch.Q, Time: verzoegerung)
+	zu = Not(I: fenster.Q)
+	ausgang = And(I1: lange.Q, I2: zu.Q)
 end
 
 template entfeuchter(feuchte: any, ein = 65, aus = 55, titel = "Entfeuchter")

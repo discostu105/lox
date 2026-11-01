@@ -4,14 +4,7 @@ extern markise = VirtualOutCmd(title: "Markise einfahren")
 
 page "Logik"
 
-windig = Greater(
-	Input1: wind.Q,
-	Input2: 40,
-)
-
-einfahren = Or(
-	I1: windig.Q,
-	I2: regen.Q,
-)
+windig = Greater(Input1: wind.Q, Input2: 40)
+einfahren = Or(I1: windig.Q, I2: regen.Q)
 
 markise.I <- einfahren.Q

@@ -7,5 +7,7 @@ schedule abends
 end
 
 uhr = DayTimer("Gartenlicht abends")
+
 uhr.schedule = abends
+
 licht.I1 <- uhr.AQ

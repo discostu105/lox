@@ -5,6 +5,19 @@ extern licht = LightController2(uuid: "60000005-0005-0001-ffff000000000001")
 
 # 5 minutes after the door opened, enable a 1 s on / 1 s off flasher for
 # 6 s — three flashes.
-offen = OnPulseDelay("Tür 5 min offen", InputTrigger: tuer.Q, Delay: 5min, Time: 6s)
-blinker = PulseGen("Flurlicht blinken", InputEnable: offen.Q, TimeHigh: 1s, TimeLow: 1s)
+
+offen = OnPulseDelay(
+	"Tür 5 min offen",
+	InputTrigger: tuer.Q,
+	Delay: 5min,
+	Time: 6s,
+)
+
+blinker = PulseGen(
+	"Flurlicht blinken",
+	InputEnable: offen.Q,
+	TimeHigh: 1s,
+	TimeLow: 1s,
+)
+
 licht.I1 <- blinker.Q

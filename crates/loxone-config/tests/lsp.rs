@@ -211,7 +211,7 @@ fn errors_land_on_the_name_they_are_about() {
     assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
 
     // A value next to a wire on one port (D77): the port key in the call.
-    let both = src.replace("\tInput1: wasser.Q,", "\tInput1: 3,\n\tInput1: wasser.Q,");
+    let both = src.replace("Input1: wasser.Q,", "Input1: 3, Input1: wasser.Q,");
     let out = session(&[open(&pool, &both)]);
     let d = diagnostics(&out, &pool);
     assert_eq!(d.len(), 1, "{d:?}");
@@ -226,7 +226,7 @@ fn errors_land_on_the_name_they_are_about() {
     );
 
     // A duplicate argument: the same.
-    let dup = src.replace("\tInput2: solltemp,", "\tInput2: solltemp,\n\tInput2: 4,");
+    let dup = src.replace("Input2: solltemp)", "Input2: solltemp, Input2: 4)");
     let out = session(&[open(&pool, &dup)]);
     let d = diagnostics(&out, &pool);
     let (l, c) = pos(&dup, "Input2: solltemp");
@@ -356,7 +356,13 @@ fn rename_in_a_project_rewrites_the_fragments_and_the_lockfile() {
         .iter()
         .map(|e| e["newText"].as_str().unwrap())
         .collect();
-    assert_eq!(edited, ["heizung = Less(", "pumpe.On <- heizung.Q"]);
+    assert_eq!(
+        edited,
+        [
+            "heizung = Less(\"Wasser unter Soll\", Input1: wasser.Q, Input2: solltemp)",
+            "pumpe.On <- heizung.Q"
+        ]
+    );
     let lock_text = changes[&uri(&lock)].as_array().unwrap()[0]["newText"]
         .as_str()
         .unwrap();

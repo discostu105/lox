@@ -76,6 +76,8 @@ impl Module {
             })
             .collect();
 
+        check_prefixes(self)?;
+
         // `let` constants, for inlining into formula text.
         let lets: BTreeMap<&str, &Value> =
             self.lets().map(|l| (l.name.as_str(), &l.value)).collect();
@@ -174,6 +176,54 @@ impl Module {
         info.synthetic = minted.into_iter().collect();
         Ok((Module { items }, info))
     }
+}
+
+/// Each expression names its blocks `<prefix><op><n>`: `<sink>_<port>__`
+/// for an expression into a port, `<signal>__` for a named signal. Two
+/// statements with one prefix (the signal `a_i1` and an expression on
+/// `a.I1`) would share their blocks' names, and with them which
+/// statement owns, moves and removes them, so that is an error naming both.
+fn check_prefixes(module: &Module) -> Result<()> {
+    let mut seen: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut claim = |prefix: String, sink: String, what: String| -> Result<()> {
+        match seen.get(&prefix) {
+            Some((other_sink, other)) if *other_sink != sink => Err(Error::Compile(format!(
+                "{other} and {what} would both name their blocks `{prefix}<op><n>`. Rename \
+                 one of them (`loxl rename <old> <new>`)."
+            ))),
+            Some(_) => Ok(()),
+            None => {
+                seen.insert(prefix, (sink, what));
+                Ok(())
+            }
+        }
+    };
+    for item in &module.items {
+        match item {
+            Item::ExprWire(w) => claim(
+                format!("{}_{}__", w.to.slug, w.to.port.to_lowercase()),
+                w.to.to_string(),
+                format!("the expression on `{}`", w.to),
+            )?,
+            Item::Block(b) => {
+                for (port, _) in b.expr_bindings() {
+                    let sink = format!("{}.{port}", b.slug);
+                    claim(
+                        format!("{}_{}__", b.slug, port.to_lowercase()),
+                        sink.clone(),
+                        format!("the expression on `{sink}`"),
+                    )?;
+                }
+            }
+            Item::Signal(x) => claim(
+                format!("{}__", x.slug),
+                x.slug.clone(),
+                format!("the named signal `{}`", x.slug),
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 impl Expr {

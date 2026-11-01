@@ -4,19 +4,8 @@ extern sirene = VirtualOutCmd(title: "Sirene")
 
 page "Logik"
 
-einbruch = And(
-	I1: tuer.Q,
-	I2: abwesend.Q,
-)
-
-zuhause = Not(
-	I: abwesend.Q,
-)
-
-alarm = SRFlipFlop(
-	"Einbruchalarm",
-	InputS: einbruch.Q,
-	InputR: zuhause.Q,
-)
+einbruch = And(I1: tuer.Q, I2: abwesend.Q)
+zuhause = Not(I: abwesend.Q)
+alarm = SRFlipFlop("Einbruchalarm", InputS: einbruch.Q, InputR: zuhause.Q)
 
 sirene.I <- alarm.Q

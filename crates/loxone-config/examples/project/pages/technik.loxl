@@ -3,10 +3,6 @@
 
 page "Technik"
 
-netz_warnung = GreaterEqual(
-	"Netzbezug über 3 kW",
-	Input1: netz.Q,
-	Input2: 3000,
-)
+netz_warnung = GreaterEqual("Netzbezug über 3 kW", Input1: netz.Q, Input2: 3000)
 
 lampe.On <- netz_warnung.Q

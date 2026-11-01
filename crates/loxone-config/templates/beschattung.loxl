@@ -11,39 +11,16 @@ template markise_schutz(wind: any, regen: any, grenze = 40, freigabe = 10min, ti
 	# Einfahren sofort bei Wind über `grenze` km/h oder Regen; wieder
 	# freigeben erst nach `freigabe` ohne beides.
 
-	windig = Greater(
-		Input1: wind.Q,
-		Input2: grenze,
-	)
-
-	gefahr = Or(
-		I1: windig.Q,
-		I2: regen.Q,
-	)
-
-	ausgang = OffDelay(
-		"{titel}",
-		InputTrigger: gefahr.Q,
-		Time: freigabe,
-	)
+	windig = Greater(Input1: wind.Q, Input2: grenze)
+	gefahr = Or(I1: windig.Q, I2: regen.Q)
+	ausgang = OffDelay("{titel}", InputTrigger: gefahr.Q, Time: freigabe)
 end
 
 template sonnenschutz(helligkeit: any, aussentemp: any, lux = 30000, temperatur = 24) -> ausgang
 	# Sonnenschutz: beschatten, wenn die Helligkeit über `lux` und die
 	# Außentemperatur über `temperatur` °C liegt.
 
-	hell = Greater(
-		Input1: helligkeit.Q,
-		Input2: lux,
-	)
-
-	warm = Greater(
-		Input1: aussentemp.Q,
-		Input2: temperatur,
-	)
-
-	ausgang = And(
-		I1: hell.Q,
-		I2: warm.Q,
-	)
+	hell = Greater(Input1: helligkeit.Q, Input2: lux)
+	warm = Greater(Input1: aussentemp.Q, Input2: temperatur)
+	ausgang = And(I1: hell.Q, I2: warm.Q)
 end

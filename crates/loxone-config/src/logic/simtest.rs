@@ -220,9 +220,30 @@ fn plan_one(
                     None => 1.0,
                 };
                 if dt <= 0.0 {
-                    return compile_err(format!("`tick {} dt {dt}`: dt must be positive", tick.n));
+                    return compile_err(format!(
+                        "`tick {} dt {dt}`: dt must be positive",
+                        tick.amount
+                    ));
                 }
-                cur.ticks = Some((tick.n, dt));
+                let lets = |name: &str| module.lets().find(|l| l.name == name).map(|l| &l.value);
+                let n = match tick.count(lets) {
+                    Ok(Some(n)) => n,
+                    Ok(None) => {
+                        let name = [Some(&tick.amount), tick.dt.as_ref()]
+                            .into_iter()
+                            .flatten()
+                            .find_map(|v| match v {
+                                Value::Ref(r) if lets(r).is_none() => Some(r.as_str()),
+                                _ => None,
+                            })
+                            .unwrap_or("?");
+                        return compile_err(format!(
+                            "undeclared constant `{name}` (declare it with `let {name} = …`)"
+                        ));
+                    }
+                    Err(e) => return compile_err(e),
+                };
+                cur.ticks = Some((n, dt));
             }
             TestItem::Expect(e) => {
                 if cur.ticks.is_none() {

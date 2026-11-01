@@ -4,6 +4,7 @@
 
 bewegung_flur = VirtualIn("Bewegung Flur")
 taster_flur = VirtualIn("Taster Flur")
+
 helligkeit = VirtualIn(
 	"Helligkeit außen",
 	Analog: on,
@@ -34,6 +35,7 @@ co2_buero = VirtualIn(
 
 fenster_buero = VirtualIn("Fenster Büro offen")
 regen = VirtualIn("Regensensor")
+
 wind = VirtualIn(
 	"Windgeschwindigkeit",
 	Analog: on,
@@ -44,6 +46,7 @@ wind = VirtualIn(
 haustuer = VirtualIn("Haustür offen")
 abwesend = VirtualIn("Abwesend")
 wassermelder = VirtualIn("Wassermelder Keller")
+
 feuchte_keller = VirtualIn(
 	"Luftfeuchte Keller",
 	Analog: on,
@@ -54,6 +57,7 @@ feuchte_keller = VirtualIn(
 taster_rollladen_auf = VirtualIn("Taster Rollladen auf")
 taster_rollladen_ab = VirtualIn("Taster Rollladen ab")
 bewegung_diele = VirtualIn("Bewegung Diele")
+
 helligkeit_diele = VirtualIn(
 	"Helligkeit Diele",
 	Analog: on,
@@ -63,11 +67,7 @@ helligkeit_diele = VirtualIn(
 
 taster_diele_aus = VirtualIn("Taster Diele aus")
 heizstab_an = VirtualIn("Heizstab an")
-
-aktoren = VirtualOut(
-	"Aktoren",
-	Address: "http://192.0.2.20",
-)
+aktoren = VirtualOut("Aktoren", Address: "http://192.0.2.20")
 
 licht_flur = VirtualOutCmd(
 	"Licht Flur",
