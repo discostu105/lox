@@ -26,6 +26,7 @@ struct Seen<'a> {
     access_claimed: BTreeSet<&'a str>,
     schedules_claimed: BTreeSet<&'a str>,
     moods_claimed: BTreeSet<&'a str>,
+    members_claimed: BTreeSet<&'a str>,
     rules_declared: BTreeSet<&'a str>,
     rule_titles: BTreeSet<&'a str>,
 }
@@ -293,6 +294,7 @@ impl Module {
             Item::ScheduleClaim(c) => self.check_schedule_claim(sc, c, seen)?,
             Item::Moods(t) => check_moods(t)?,
             Item::MoodsClaim(c) => self.check_moods_claim(sc, c, seen)?,
+            Item::MembersClaim(c) => self.check_members_claim(sc, c, seen)?,
             Item::Rule(r) => self.check_rule(sc, r, seen)?,
             Item::Page(p) if p.title.is_empty() => {
                 return compile_err("`page \"\"`: the page title must not be empty".into());
@@ -1210,6 +1212,82 @@ impl Module {
         Ok(())
     }
 
+    /// `central.members = (a, b)` claims a central block's members: each
+    /// one an extern or managed block of the type the central commands.
+    fn check_members_claim<'a>(
+        &self,
+        sc: &Scope,
+        c: &'a MembersClaim,
+        seen: &mut Seen<'a>,
+    ) -> Result<()> {
+        let (names, flattened) = (&sc.names, sc.flattened);
+        // The declared type of an extern or managed block; `None` for a
+        // name a template body takes from its instance.
+        let type_of = |slug: &str, what: &str| -> Result<Option<&str>> {
+            match names.get(slug) {
+                Some(NameKind::Extern) => Ok(Some(
+                    self.externs()
+                        .find(|e| e.slug == slug)
+                        .map_or("", |e| e.block_type.as_str()),
+                )),
+                Some(NameKind::Block) => Ok(Some(self.block_type_of(slug))),
+                None if !flattened => Ok(None),
+                Some(kind) => compile_err(format!(
+                    "`{c}`: `{slug}` is {}, not {what} (an extern or a managed block)",
+                    kind.describe()
+                )),
+                None => compile_err(format!(
+                    "`{c}`: undeclared slug `{slug}`. Declare it as an extern or a block"
+                )),
+            }
+        };
+        let member_type = match type_of(&c.slug, "a central block")? {
+            Some(ty) => match central_member_type(ty) {
+                Some(m) => Some(m),
+                None => {
+                    return compile_err(format!(
+                        "`{c}`: members belong to a `CentralLight` or a `CentralShade`, \
+                         but `{}` is a `{ty}`",
+                        c.slug
+                    ));
+                }
+            },
+            None => None,
+        };
+        for m in &c.members {
+            if *m == c.slug {
+                return compile_err(format!("`{c}`: a central block is not its own member"));
+            }
+            if let (Some(want), Some(ty)) = (member_type, type_of(m, "a block")?)
+                && ty != want
+            {
+                return compile_err(format!(
+                    "`{c}`: the members of a {} are `{want}` blocks, but `{m}` is a `{ty}`",
+                    self.type_of_central(&c.slug).unwrap_or("central block")
+                ));
+            }
+        }
+        if !seen.members_claimed.insert(&c.slug) {
+            return compile_err(format!(
+                "duplicate assignment `{}.members = …`. Write the whole list once",
+                c.slug
+            ));
+        }
+        Ok(())
+    }
+
+    /// The declared type of `slug`, extern or managed.
+    fn type_of_central(&self, slug: &str) -> Option<&str> {
+        self.externs()
+            .find(|e| e.slug == slug)
+            .map(|e| e.block_type.as_str())
+            .or_else(|| {
+                self.blocks()
+                    .find(|b| b.slug == slug)
+                    .map(|b| b.block_type.as_str())
+            })
+    }
+
     /// `controller.moods = set` claims a LightController2's moods.
     fn check_moods_claim<'a>(
         &self,
@@ -1599,6 +1677,7 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::ExprWire(_)
             | Item::Set(_)
             | Item::MoodsClaim(_)
+            | Item::MembersClaim(_)
             | Item::ScheduleClaim(_)
             | Item::TilesClaim(_)
             | Item::AccessClaim(_)

@@ -2431,7 +2431,11 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 11] = [
+    let older: [(Form, &str); 12] = [
+        (
+            d::semantic_fingerprint_v12,
+            "central block members and energy flow units",
+        ),
         (d::semantic_fingerprint_v11, "app names and block settings"),
         (
             d::semantic_fingerprint_v10,

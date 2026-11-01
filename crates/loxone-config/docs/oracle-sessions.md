@@ -1091,6 +1091,41 @@ set (`AQ1 80%`, `AQ2 on`), and `Circuit1: "dimmer"` on `L2` with relay Q4, opene
   Compiled again onto the save, the file came back byte-identical.
 
 Not tested: whether the Miniserver dims such a circuit. That needs an upload.
+## Central block members, alarm members, energy units (sessions 47 to 50, #278, #253) — passed, findings
+
+Ran 2026-11-01 with Loxone Config 17.2 under `oracle.sh`, offline, on a private prefix and display. Each probe was
+a public corpus config with `rec=`, `Objects=` or the units edited by hand, opened and saved. The facts are in
+[loxone-format.md](loxone-format.md) (*Objects*).
+
+Session 47: a CentralLight (base `gh_eisber_lox-cli_usecase-shorter-night-lighting`) and a CentralShade (base
+`Patio_Door_Shading`) with `rec=` reversed, with a block of another type, a duplicate, a UUID of no object, an
+empty list, and reordered with one member dropped.
+
+- The order stays as written, and so do the other type and the duplicate.
+- **Finding:** a UUID that names no object is dropped, and `rec=""` is removed.
+- Nothing else in the file changed.
+
+Session 48: `rec=` written at the end of the element, and the `Objects=` of an Alarm (base *Retrofit Burglar Alarm*)
+reordered, with a hidden ref's UUID dropped from the list, and with the ref element removed instead.
+
+- **Finding:** the save moved `rec=` right before `SpStates=`.
+- `Objects=` stays in the order written.
+- **Finding:** the list does not own its hidden refs. They are `InputRef`s (`WF="22528"`) wired into the alarm's
+  hidden inputs. Dropping the UUID left the ref in the file, still wired. Removing the ref kept its UUID in the
+  list, dangling, and removed the ref's wire. So `Objects=` stays refused.
+
+Session 49: the units of an EFM (base `Hotwater_Heating_Rod`) changed, one removed, one empty.
+
+- The changed values stay, and no absent unit is added back.
+- **Finding:** the empty `Un2=""` is dropped, and the units are written in the order `UnSt Un1 Un2`, before
+  `StatsType=`.
+
+Session 50: two compiled files opened and saved: the light base with `.members` reordered with one dropped, plus a
+new managed CentralLight with members, and the shade base with `.members = (left, right)`.
+
+- The semantic diff was empty, `rec=` included. The save added `SpStates=` after `rec=` on the new central.
+- Compiled again onto the saved files, both came back byte-identical.
+
 ## Units of Modbus and UDP settings (session 70, #344) — passed
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run --keep`, in a private copy of the

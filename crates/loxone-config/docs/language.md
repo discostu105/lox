@@ -16,7 +16,7 @@ line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
            | bulk | page | test | tiles | tiles-claim | access | access-claim
            | recipients | recipients-claim | schedule | schedule-claim
-           | moods | moods-claim | rule | defaults | blank ;
+           | moods | moods-claim | members-claim | rule | defaults | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 allow      = "#" "lint:" "allow" kind { [ "," ] kind } [ any-text ] ;
@@ -77,7 +77,7 @@ template   = "template" slug "(" [ params ] ")" [ "->" slug ] [ comment ]
                                     (* "-> block": the primary block *)
              { comment | block-head | arg-line | signal | wire | set
              | tiles-claim | schedule-claim | moods-claim | access-claim
-             | recipients-claim }
+             | recipients-claim | members-claim }
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
@@ -154,6 +154,8 @@ mood-value = "on" | "off" | integer "%"
            | integer ;                             (* the stored value verbatim *)
 moods-claim = ref "." "moods" "=" slug [ comment ] ;
                                     (* LightController2, extern or managed *)
+members-claim = ref "." "members" "=" "(" [ ref { "," ref } ] ")" [ comment ] ;
+                                    (* CentralLight or CentralShade *)
 rule       = "rule" slug [ comment ]               (* Automatic Designer rule *)
              { comment | rule-line }
              "end" [ comment ] ;
@@ -268,7 +270,8 @@ Notes:
 - **Contextual words** are keywords only in their place and ordinary names everywhere else. One
   rule covers them: the section kinds `tiles`, `schedule`, `moods`, `access`, `recipients`, `rule`
   and `defaults` are keywords at the start of a line in front of a name or type (`moods kueche`,
-  `defaults Monoflop(…)`) and after the dot of a claim (`x.moods = kueche`); `moods = Not()` is a
+  `defaults Monoflop(…)`) and after the dot of a claim (`x.moods = kueche`), as is `members`
+  (`zentral.members = (a, b)`); `moods = Not()` is a
   block and `moods.Q` its output. The rule words `wait`, `mode`, `notify`, `mail` and `message` are
   keywords after `then` in a rule body (`then wait 5s`, `then mode urlaub on`), so a block of that
   name cannot be a rule action's target; the error names `loxl rename`. Conditions carry a dot
@@ -474,6 +477,7 @@ except a value a save writes when nothing is set.
 | `PwrN:` | meters | text | Anzeigename of the power value |
 | `Un1:`, `Un2:` | meters | text | Einheit of the two values |
 | `UnSt:`, `MaxLvl:` | `MeterAbsSt` | text, a number | storage unit, Max. Speicherstand |
+| `Un1:`, `Un2:`, `UnSt:` | `EFM` | text | power, energy and storage units, such as `<v.3>kW` |
 
 ```text
 merker = Memory("Anrufer", Desc: "Letzter Anrufer", Type: "text", Input: tel.TQ1)
@@ -486,11 +490,13 @@ zaehler = MeterDig("Strom", PwrN: "Leistung", Un1: "kW", Un2: "kWh", Input: s0.Q
 - A text setting refuses `""`, except `On:` and `Off:`, where empty is
   what a save writes. Leave the setting out to keep what Loxone Config has.
 - Some attributes stay with Loxone Config and are refused by name: the
-  member lists of alarms and central blocks (`Objects=`, `Entries=`,
-  `CentralOut=`, `rec=`), a meter's energy flow monitor (`Rec=`),
-  statistics settings (`StatsType=`), a virtual input's hidden `MinChange=`,
-  `MinTime=`, `ValOT=` and `Idx=`, and a program's `Task="1"`, which every
-  save writes.
+  member lists of alarms (`Objects=`, `Entries=`, `CentralOut=`), a
+  meter's energy flow monitor (`Rec=`), statistics settings
+  (`StatsType=`), a virtual input's hidden `MinChange=`, `MinTime=`,
+  `ValOT=` and `Idx=`, the settings of a room controller, an irrigation
+  and a `TpfController` that no document or real config explains, and a
+  program's `Task="1"`, which every save writes. A central block's
+  members (`rec=`) are a claim: [`.members`](#members--the-blocks-a-central-block-drives).
 - `loxl types <Type>` lists the settings a type takes and their values.
 
 `Code:` on `Code16` holds the PicoC program. A program is hundreds
@@ -865,7 +871,7 @@ relais.SwitchBoardPos = 3
 The statement is the assignment on each listed object, in that order —
 a port, a setting or `title`/`room`/`category`. A block of a template instance is listed as
 `inst.block` (`(sued.hoch, nord).room = "Garten"`). `fmt` keeps it as one
-line. A name may be listed once; `.tiles`, `.schedule` and `.moods` take
+line. A name may be listed once; `.tiles`, `.schedule`, `.moods` and `.members` take
 one object.
 
 ### `.title` / `.room` / `.category` — assign an extern object
@@ -1109,7 +1115,7 @@ ships tested templates for common automations; copy a file into the
 module directory to call them.
 
 The body may contain only block declarations, named signals, wires, sets, claims (`.moods`, `.schedule`,
-`.tiles`, `.access`, `.recipients`, through a set parameter) and comments. No nesting, no template-local
+`.tiles`, `.access`, `.recipients`, through a set parameter, and `.members`) and comments. No nesting, no template-local
 `let`/`extern`. `template` and `end` are reserved words; `use` is reserved for the old-syntax error.
 
 ### `defaults` — the parameters every block of a type shares
@@ -1817,6 +1823,37 @@ an error naming the replacement — and a recipient takes no schedule.
 an extern, its recipients a set and a claim (notifications with the same recipients share one set,
 named after the first, `<slug>_recipients`), and each `OutputRefLM` whose message names its own
 notification a managed block with `mirrors:` and its message.
+
+### `.members` — the blocks a central block drives
+
+```text
+extern licht_kueche = LightController2(title: "Licht Küche")
+licht_wohnen = LightController2("Licht Wohnen")
+alle_lichter = CentralLight("Alle Lichter")
+
+alle_lichter.members = (licht_wohnen, licht_kueche)
+```
+
+A claim `<central>.members = (a, b, …)` makes those blocks the members of one `CentralLight`
+or `CentralShade`, a managed block or an extern:
+
+- The members of a `CentralLight` are `LightController2` blocks, those of a `CentralShade`
+  `AutoJalousie` blocks, each an extern or a managed block. Another type, a block listed twice and
+  the central block itself are errors.
+- The list is written in the order given, which is the order the app lists them in. Loxone Config
+  keeps it as written.
+- `()` empties the list.
+- One claim per central block. The claim is allowed in a template body, with object parameters as
+  members.
+- Removing the claim leaves the members as last written.
+
+`loxl decompile` and `loxl adopt` lift the members of every central block they lift, with members
+they do not lift as externs. A list Loxone Config could not have written (an object missing, another
+type, a block twice) stays there, with a `# members <slug>: not lifted — …` comment that says why.
+`loxl diff` compares the members of every central block.
+
+The member lists of an `Alarm` or `SmokeAlarm` (`Objects=`) stay with Loxone Config: they name hidden
+refs, wired to the alarm, that the list does not own ([loxone-format.md](loxone-format.md)).
 
 ## Name resolution and validation
 

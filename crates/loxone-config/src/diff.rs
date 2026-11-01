@@ -39,8 +39,11 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
         attr_params(block_type)
             .into_iter()
             .filter(|p| version >= 12 || !since_v12(block_type, p))
+            .filter(|p| version >= 13 || !since_v13(block_type, p))
             .collect()
     };
+    // A central block's members (`rec=`) joined in v13.
+    let members = version >= 13 && crate::connectors::central_member_type(block_type).is_some();
     // Device settings (#197) joined in v9, the extensions' and the
     // statistics of hardware inputs and outputs in v11.
     let extension = matches!(block_type, "LoxTree" | "LoxAIR");
@@ -57,6 +60,7 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
         .map(move |p| attr_name(block_type, p))
         .chain(settings)
         .chain(stats.then_some("StatsType"))
+        .chain(members.then_some("rec"))
         .chain((block_type == "AutopilotRule").then_some("APC"))
 }
 
@@ -75,7 +79,13 @@ fn since_v12(block_type: &str, param: &str) -> bool {
         )
 }
 
-const FINGERPRINT_VERSION: u8 = 12;
+/// The attribute parameters that joined the comparison in v13 (#253): the
+/// energy flow monitor's units.
+fn since_v13(block_type: &str, _param: &str) -> bool {
+    block_type == "EFM"
+}
+
+const FINGERPRINT_VERSION: u8 = 13;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -601,7 +611,16 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 11: the current version without the attributes
+/// Fingerprint version 12: the current version without the members of
+/// central blocks and the energy flow monitor's units (#278, #253).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v12(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 12)
+}
+
+/// Fingerprint version 11: version 12 without the attributes
 /// claimed by `Desc:`, `Type:`, `Pulse:`, `Sun:`, a day timer's texts and the
 /// meters' names and units (#253).
 /// `loxl drift` accepts every older version, so an upgrade alone does not
@@ -707,7 +726,8 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
         9 => b"lxir-fingerprint-v9".to_vec(),
         10 => b"lxir-fingerprint-v10".to_vec(),
         11 => b"lxir-fingerprint-v11".to_vec(),
-        _ => b"lxir-fingerprint-v12".to_vec(),
+        12 => b"lxir-fingerprint-v12".to_vec(),
+        _ => b"lxir-fingerprint-v13".to_vec(),
     };
     let mut objects = doc.objects();
     objects.sort_by(|a, b| a.uuid.cmp(&b.uuid));

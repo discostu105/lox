@@ -216,6 +216,29 @@ pub fn update(
                 applied.push(change(what));
             }
         }
+        // A central block's members: `details.controls`, the `rec=`
+        // list in order.
+        if let (Some(el_now), Some(el_was)) = (shown, was.shown(&uuid))
+            && crate::connectors::central_member_type(el_now.attr("Type").unwrap_or("")).is_some()
+        {
+            let members = |el: &Element| el.attr("rec").unwrap_or("").to_string();
+            let (from, to) = (members(el_was), members(el_now));
+            if from != to {
+                let count = |r: &str| r.split(',').filter(|u| !u.is_empty()).count();
+                let what = format!("members {} → {}", count(&from), count(&to));
+                let span = field("details")
+                    .and_then(|d| object(body, d.value.start).ok())
+                    .and_then(|(d, _)| d.into_iter().find(|m| m.key == "controls"))
+                    .map(|m| m.value);
+                match span {
+                    Some(r) => {
+                        edits.push((r, central_controls(&to)));
+                        applied.push(change(what));
+                    }
+                    None => left.push(change(what)),
+                }
+            }
+        }
         if new.favorite != old.favorite
             && let Some(m) = field("isFavorite")
         {
@@ -726,17 +749,11 @@ fn entry_any_icon(el: &Element, objs: &Objects) -> Option<String> {
         // A central block lists its members (`rec=`, in order); one
         // without members is not known.
         t @ ("CentralLight" | "CentralShade") => {
-            let members: Vec<String> = el
-                .attr("rec")
-                .filter(|r| !r.is_empty())?
-                .split(',')
-                .enumerate()
-                .map(|(i, u)| format!(r#"{{"id":{i},"uuid":{}}}"#, json_str(u)))
-                .collect();
+            let rec = el.attr("rec").filter(|r| !r.is_empty())?;
             let sp = sp();
             let details = format!(
-                r#"{{"jLockable":true,"controls":[{}],"parameterConnections":0}}"#,
-                members.join(",")
+                r#"{{"jLockable":true,"controls":{},"parameterConnections":0}}"#,
+                central_controls(rec)
             );
             icon = false;
             match (t, &sp[..]) {
@@ -1301,6 +1318,18 @@ impl<'d> Objects<'d> {
     fn shown(&self, uuid: &str) -> Option<&'d Element> {
         self.shown.get(uuid).map(|&i| self.shown_in_order[i].1)
     }
+}
+
+/// A central block's `details.controls`: its members (`rec=`) in order,
+/// numbered from 0.
+fn central_controls(rec: &str) -> String {
+    let members: Vec<String> = rec
+        .split(',')
+        .filter(|u| !u.is_empty())
+        .enumerate()
+        .map(|(i, u)| format!(r#"{{"id":{i},"uuid":{}}}"#, json_str(u)))
+        .collect();
+    format!("[{}]", members.join(","))
 }
 
 fn json_str(s: &str) -> String {
@@ -1892,6 +1921,53 @@ mod tests {
         assert_eq!(value_format("<v.12>"), None);
         assert_eq!(value_format("<v.1> <v.2>"), None);
         assert_eq!(value_format("kein Wert"), None);
+    }
+
+    #[test]
+    fn a_central_blocks_members_follow_its_list() {
+        let central = "0f000000-0000-0030-ffff000000000000";
+        let (a, b) = (
+            "0f000000-0000-0031-ffff000000000000",
+            "0f000000-0000-0032-ffff000000000000",
+        );
+        let el = |rec: &str| {
+            format!(
+                r#"<C Type="CentralLight" U="{central}" Title="Zentral" rec="{rec}"><IoData Visu="true" Pr="{ROOM}" Cr="{CAT}"/></C>"#
+            )
+        };
+        let entry = |controls: &str| {
+            format!(
+                ",\"U:{central}\":{{\"name\":\"Zentral\",\"type\":\"CentralLightController\",\
+                 \"uuidAction\":\"{central}\",\"room\":\"{ROOM}\",\"cat\":\"{CAT}\",\
+                 \"details\":{{\"jLockable\":true,\"controls\":{controls},\"parameterConnections\":0}}}}"
+            )
+        };
+        let cat = catalogue(&entry(&format!(
+            "[{{\"id\":0,\"uuid\":\"{a}\"}},{{\"id\":1,\"uuid\":\"{b}\"}}]"
+        )));
+        let u = update(
+            &cat,
+            &doc("Licht", ROOM, &el(&format!("{a},{b}"))),
+            &doc("Licht", ROOM, &el(b)),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(whats(&u).0, ["members 2 → 1"]);
+        assert!(
+            u.text
+                .contains(&entry(&format!("[{{\"id\":0,\"uuid\":\"{b}\"}}]"))),
+            "{}",
+            u.text
+        );
+        // An unchanged list leaves the entry alone.
+        let u = update(
+            &cat,
+            &doc("Licht", ROOM, &el(&format!("{a},{b}"))),
+            &doc("Licht", ROOM, &el(&format!("{a},{b}"))),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(u.text, cat);
     }
 
     #[test]

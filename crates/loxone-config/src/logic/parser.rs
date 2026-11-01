@@ -2297,6 +2297,12 @@ fn parse_ident_statement(
         ] => Err(err(format!(
             "`{ts}.{tp} = {vs}.{vp}`: wire a port with `<-`, as in `{ts}.{tp} <- {vs}.{vp}`"
         ))),
+        // central.members = (a, b, …) — the blocks a central block
+        // commands, in order.
+        [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, rest @ ..] if tp == "members" => {
+            items.push(parse_members(ts, rest, comment, lineno)?);
+            Ok(())
+        }
         // slug.<kind> = name — the claim of a named set, the same for every
         // kind (`tiles`, `schedule`, `moods`, `access`, `recipients`). Like
         // other statements on a block it may sit in a template body, where the
@@ -2388,6 +2394,11 @@ fn parse_wire(
             "`{ts}.moods` takes a mood set (`{ts}.moods = <name>`), never a wire"
         )));
     }
+    if tp == "members" {
+        return Err(err(format!(
+            "`{ts}.members` takes a list of blocks (`{ts}.members = (a, b)`), never a wire"
+        )));
+    }
     let to = PortRef {
         slug: ts.to_string(),
         port: tp.to_string(),
@@ -2404,6 +2415,35 @@ fn parse_wire(
         ))),
         expr => Ok(Item::ExprWire(ExprWireDecl { to, expr, comment })),
     }
+}
+
+/// `central.members = (a, b, …)`: a central block's members, in order.
+/// A member is a slug or `inst.block`; `()` is no members.
+fn parse_members(ts: &str, rest: &[Tok], comment: Option<String>, lineno: usize) -> Result<Item> {
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let usage = || err(format!("expected `{ts}.members = (<slug>, <slug>, …)`"));
+    let [Tok::LParen, inner @ .., Tok::RParen] = rest else {
+        return Err(usage());
+    };
+    let mut members: Vec<String> = Vec::new();
+    if !inner.is_empty() {
+        for part in inner.split(|t| *t == Tok::Comma) {
+            let slug = match part {
+                [Tok::Ident(s)] => check_ref(s, lineno)?,
+                [Tok::Ident(a), Tok::Dot, Tok::Ident(b)] => scoped(a, b, lineno)?,
+                _ => return Err(usage()),
+            };
+            if members.contains(&slug) {
+                return Err(err(format!("`{slug}` is listed twice")));
+            }
+            members.push(slug);
+        }
+    }
+    Ok(Item::MembersClaim(MembersClaim {
+        slug: check_slug(ts, lineno)?,
+        members,
+        comment,
+    }))
 }
 
 /// `slug = <expr>`: a named signal. The expression must be one —
@@ -2461,7 +2501,7 @@ fn parse_bulk(
             "expected `(<slug>, <slug>, …).{tp} = <value>`"
         )));
     }
-    if matches!(tp, "tiles" | "schedule" | "moods") {
+    if matches!(tp, "tiles" | "schedule" | "moods" | "members") {
         return Err(err(format!(
             "`.{tp}` takes one object. Write one statement per object."
         )));

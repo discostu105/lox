@@ -1,6 +1,6 @@
 # D95: Block settings from source
 
-Status: accepted (2026-11-01)
+Status: accepted (2026-11-01), extended by [D98](0098-central-members.md)
 
 ## Context
 
@@ -28,7 +28,8 @@ in Loxone Config. Issues: #253, #278, #279.
 - **What has no field, or no known meaning, is refused by name** (`connectors::unclaimed_reason`):
   - The member lists of alarms and central blocks (`Objects=`, `Entries=`, `CentralOut=`, `rec=`).
     They mix block UUIDs with hidden refs, the corpus has few of them, and no save has shown how
-    Loxone Config keeps an edited list. #278 stays open for them.
+    Loxone Config keeps an edited list. #278 stays open for them. [D98](0098-central-members.md)
+    later made the central blocks' `rec=` a claim and kept the alarm's lists refused.
   - A meter's `Rec=`, which names its energy flow monitor, and `StatsType=` (always 8).
   - A virtual input's `MinChange=`, `MinTime=`, `ValOT=` and `Idx=`: no pane shows them.
   - A one-off PulseAt date: `Sec=` of a day or more stays with Loxone Config.

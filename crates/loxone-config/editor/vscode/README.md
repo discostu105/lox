@@ -5,7 +5,8 @@ VS Code extension for `.loxl` modules: syntax highlighting
 statement form — `page`, `let`, `extern`, blocks, `template`/`end` and
 instances, wires (plain and expression), named signals, `defaults`, `set`,
 attribute assignments (`x.room = …`), the named sets (`tiles`, `schedule`,
-`moods`, `access`, `recipients`) with their claims, `rule`, `test`,
+`moods`, `access`, `recipients`) with their claims, a central block's
+`.members`, `rule`, `test`,
 `removed`/`moved` — plus
 unit-suffixed values (`30min`, `2700K`) and the expression operators
 (`and`/`or`/`not`, comparisons, arithmetic).

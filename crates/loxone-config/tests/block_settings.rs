@@ -263,8 +263,13 @@ fn the_diff_sees_the_settings() {
 #[test]
 fn settings_only_loxone_config_knows_are_refused_by_name() {
     for (src, want) in [
-        ("s = SmokeAlarm(Objects: \"x\")\n", "member list"),
+        ("s = SmokeAlarm(Objects: \"x\")\n", "hidden refs"),
+        ("s = Alarm(Entries: 40)\n", "no field"),
         ("c = CentralShade(rec: \"x\")\n", "member list"),
+        ("e = EFM(StatsType: 8)\n", "statistics"),
+        ("h = HeatIRoomController2(ExT: 3)\n", "not documented"),
+        ("i = Irrigation(TRK_NE: 50)\n", "not documented"),
+        ("t = TpfController(PRE: 16)\n", "not documented"),
         ("v = VirtualIn(MinTime: 1)\n", "no field"),
         ("p = Code16(Task: 1)\n", "every save"),
     ] {
@@ -274,4 +279,31 @@ fn settings_only_loxone_config_knows_are_refused_by_name() {
             "{src}: {e}"
         );
     }
+}
+
+/// The energy flow monitor's units (oracle session 49): written as given,
+/// carried while unbound.
+#[test]
+fn energy_flow_units_are_written_as_given() {
+    let doc =
+        LoxoneDoc::parse(&std::fs::read("examples/library/energy/energy.Loxone").unwrap()).unwrap();
+    let (module, mut lock, _) = loxone_config::logic::adopt(&doc).unwrap();
+    let text = module.to_text();
+    let label = "EFM(\"Energiefluss\"";
+    assert!(text.contains(label), "{text}");
+    let src = text.replace(
+        label,
+        &format!("{label}, Un1: \"<v.2>W\", Un2: \"<v.1>kWh\", UnSt: \"<v>%\""),
+    );
+    let out = compile(&doc, &Module::parse(&src).unwrap(), &mut lock, &opts()).unwrap();
+    for (n, v) in [("Un1", "<v.2>W"), ("Un2", "<v.1>kWh"), ("UnSt", "<v>%")] {
+        let got = attrs(&out, "Energiefluss")
+            .into_iter()
+            .find(|(a, _)| a == n)
+            .map(|(_, v)| loxone_config::xml::unescape(&v).into_owned());
+        assert_eq!(got.as_deref(), Some(v), "{n}");
+    }
+    let (lifted, _) = decompile(&out, &DecompileOptions::default()).unwrap();
+    assert!(lifted.to_text().contains("Un1: \"<v.2>W\""));
+    assert!(err("e = EFM(Un1: \"\")\n").contains("empty"));
 }

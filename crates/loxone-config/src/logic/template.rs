@@ -11,9 +11,9 @@
 use crate::error::{Error, Result};
 use crate::logic::ast::{
     AccessClaim, ArgItem, AttrDecl, Binding, BindingKind, BlockDecl, Day, Expr, ExprWireDecl, Item,
-    MatchSpec, ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind,
-    ScheduleClaim, ScheduleItem, SetDecl, SetKind, SignalDecl, TemplateDecl, TemplateParam,
-    TestItem, TilesClaim, TilesItem, Value, WireDecl,
+    MatchSpec, MembersClaim, ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem,
+    RuleStmtKind, ScheduleClaim, ScheduleItem, SetDecl, SetKind, SignalDecl, TemplateDecl,
+    TemplateParam, TestItem, TilesClaim, TilesItem, Value, WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -58,6 +58,12 @@ pub(crate) fn visit_refs(
         Item::TilesClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::ScheduleClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::MoodsClaim(c) => f(&mut c.slug, RefUse::Object)?,
+        Item::MembersClaim(c) => {
+            f(&mut c.slug, RefUse::Object)?;
+            for m in &mut c.members {
+                f(m, RefUse::Object)?;
+            }
+        }
         Item::AccessClaim(c) => f(&mut c.slug, RefUse::Object)?,
         Item::Extern(e) => {
             if let MatchSpec::Mirrors(target) = &mut e.match_spec {
@@ -895,6 +901,15 @@ impl Module {
                 Item::MoodsClaim(c) => out.push(Item::MoodsClaim(MoodsClaim {
                     slug: map_slug(&c.slug)?,
                     moods: map_set(&c.to_string(), &c.moods, SetKind::Moods)?,
+                    comment: c.comment.clone(),
+                })),
+                Item::MembersClaim(c) => out.push(Item::MembersClaim(MembersClaim {
+                    slug: map_slug(&c.slug)?,
+                    members: c
+                        .members
+                        .iter()
+                        .map(|m| map_slug(m))
+                        .collect::<Result<_>>()?,
                     comment: c.comment.clone(),
                 })),
                 Item::ScheduleClaim(c) => out.push(Item::ScheduleClaim(ScheduleClaim {
