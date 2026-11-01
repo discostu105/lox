@@ -57,6 +57,13 @@ fn section_kinds_are_names_outside_their_section_head() {
     for word in ["tile", "tick", "page", "on", "and"] {
         let e = parse_err(&format!("{word} = Not()\n"));
         assert!(e.contains("reserved word"), "{word}: {e}");
+        // The same error inside a template body, not "not allowed in a body".
+        let e = parse_err(&format!("template t()\n\t{word} = Not()\nend\n"));
+        assert!(e.contains("reserved word"), "{word} in a body: {e}");
+    }
+    for word in ["test", "let", "extern"] {
+        let e = parse_err(&format!("template t()\n\t{word} = Not()\nend\n"));
+        assert!(e.contains("reserved word"), "{word} in a body: {e}");
     }
 }
 

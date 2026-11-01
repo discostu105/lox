@@ -140,7 +140,8 @@ loxl compile --base current.Loxone --module modules/beschattung.loxl \
              --lock modules/beschattung.lock.json --out out.Loxone \
              --serial 504F94112233
 loxl rename alter_name neuer_name    # rename in sources and lockfile, identities kept
-loxl lint                            # unused names, blocks whose outputs feed nothing
+loxl lint                            # findings by kind: unused names, dead outputs, bare durations, …
+loxl lint --fix                      # write unit suffixes (`Delay: 3h`); compile output unchanged
 loxl diff current.Loxone out.Loxone  # semantic diff; --summary for a commit message, --json
 loxl render out.Loxone --page Beschattung --out page.svg   # a page as SVG
 loxl compile --relayout Beschattung  # place a page's managed blocks afresh
@@ -266,12 +267,15 @@ Miniserver) and credentials are out of scope; they live in [`lox`](https://githu
 - diagnostics as you type (`loxl check` and the lints), and on save in a `lox.toml` project, a compile
   against the base config that writes nothing
 - go to definition across a module's fragments
-- hover: the object an extern resolves to, and a type's ports
-- completion of ports after `name.` and of block types after `name =`
+- hover: the object an extern resolves to, a type's ports, the template body block behind
+  `inst.block`
+- completion of ports after `name.` (and `inst.block.`), of block types after `name =`, of argument
+  keys inside a call or `defaults`, and of signal names
 - formatting and the outline
 - find references and rename of module-level names (in a project, rename runs `loxl rename`, which
   also updates the lockfile)
-- quick fixes for "did you mean `X`?"
+- quick fixes for "did you mean `X`?", old spellings, bare durations (`unit-suffix`) and a fragment
+  without its `page` line (`default-page`)
 
 `editor/vscode/` is the VS Code extension: highlighting, snippets and the client that starts the server
 (see [editor/vscode/README.md](editor/vscode/README.md)). Other editors run `loxl lsp` (or

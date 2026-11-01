@@ -78,10 +78,8 @@ fn lint_reports_and_clears() {
     let out = loxl(&dir, &["lint"]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(!out.status.success(), "expected findings: {stdout}");
-    assert!(
-        stdout.contains("dead-outputs: `verwaist`"),
-        "stdout: {stdout}"
-    );
+    assert!(stdout.contains("dead-outputs (1)\n"), "stdout: {stdout}");
+    assert!(stdout.contains("`verwaist` — "), "stdout: {stdout}");
     // Findings name their declaring fragment.
     assert!(stdout.contains("sued.loxl"), "stdout: {stdout}");
 
@@ -96,7 +94,8 @@ fn lint_reports_and_clears() {
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(!out.status.success(), "expected findings: {stdout}");
-    assert!(stdout.contains("unused-extern: `lonely`"), "{stdout}");
+    assert!(stdout.contains("unused-extern (1)\n"), "{stdout}");
+    assert!(stdout.contains("_periphery.loxl: `lonely` — "), "{stdout}");
     assert!(stdout.contains("_periphery.loxl"), "{stdout}");
     assert!(!stdout.contains("dead-outputs"), "{stdout}");
     assert!(stderr.contains("dead-output analysis skipped"), "{stderr}");
@@ -143,8 +142,14 @@ fn a_file_without_its_page_in_a_paged_module_is_flagged() {
     let out = loxl(&dir, &["lint", "src"]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(!out.status.success(), "expected findings: {stdout}");
+    assert!(stdout.contains("default-page (1)\n"), "{stdout}");
     assert!(
-        stdout.contains("sued.loxl: default-page: `beschatten` — 1 block before any `page`"),
+        stdout.contains("sued.loxl: `beschatten` — 1 block before any `page`"),
+        "{stdout}"
+    );
+    // The fix names the page the file before it ends on.
+    assert!(
+        stdout.contains("Start the file with `page \"Beschattung\"`"),
         "{stdout}"
     );
     // With its own `page` line the file is clean.
@@ -156,4 +161,115 @@ fn a_file_without_its_page_in_a_paged_module_is_flagged() {
     let out = loxl(&dir, &["lint", "src"]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(!stdout.contains("default-page"), "{stdout}");
+}
+
+#[test]
+fn lint_groups_by_kind_and_summarizes() {
+    let dir = make_project("lint-summary");
+    std::fs::write(
+        dir.join("src/_periphery.loxl"),
+        format!(
+            "{PERIPHERY}extern lonely = VirtualIn(iname: \"VI4\")\n\
+             extern solo = VirtualIn(iname: \"VI5\")\nlet nie = 3\n"
+        ),
+    )
+    .unwrap();
+    let out = loxl(&dir, &["lint", "src"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(!out.status.success(), "{stdout}");
+    let extern_at = stdout.find("unused-extern (2)\n").expect(&stdout);
+    let let_at = stdout.find("unused-let (1)\n").expect(&stdout);
+    assert!(extern_at < let_at, "{stdout}");
+    assert!(stdout.ends_with("lint: 3 findings\n"), "{stdout}");
+
+    let out = loxl(&dir, &["lint", "--summary", "src"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(!out.status.success(), "{stdout}");
+    assert_eq!(
+        stdout, "unused-extern  2\nunused-let     1\nlint: 3 findings\n",
+        "{stdout}"
+    );
+}
+
+#[test]
+fn lint_fix_writes_unit_suffixes_and_keeps_the_compiled_config() {
+    let dir = make_project("lint-fix");
+    std::fs::write(
+        dir.join("src/sued.loxl"),
+        format!(
+            "page \"Beschattung\"\n\n{SUED}\n\
+             puls = Monoflop(InputTrigger: sonne.Q, Time: 300)\n\
+             kurz = Monoflop(InputTrigger: puls.Q, Time: 0.02)\n\
+             krumm = Monoflop(InputTrigger: kurz.Q, Time: 0.0005)\n\
+             jal_sued.InputTrigger <- krumm.Q\n"
+        ),
+    )
+    .unwrap();
+    assert!(
+        loxl(&dir, &["compile", "--out", "out.Loxone"])
+            .status
+            .success()
+    );
+    let before = std::fs::read(dir.join("out.Loxone")).unwrap();
+    let lock = std::fs::read_to_string(dir.join("haus.lock.json")).unwrap();
+
+    let out = loxl(&dir, &["lint"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("unit-suffix (2)\n"), "{stdout}");
+    assert!(
+        stdout.contains("Write `Time: 5min` instead of `Time: 300`."),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("(2 fixable with `loxl lint --fix`)"),
+        "{stdout}"
+    );
+
+    let out = loxl(&dir, &["lint", "--fix"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        stdout.starts_with("fixed: 2 unit-suffix values in 1 file\n"),
+        "{stdout}{stderr}"
+    );
+    assert!(!stdout.contains("unit-suffix ("), "{stdout}");
+    let src = std::fs::read_to_string(dir.join("src/sued.loxl")).unwrap();
+    assert!(src.contains("Time: 5min)"), "{src}");
+    assert!(src.contains("Time: 20ms)"), "{src}");
+    // Half a millisecond has no exact suffix spelling: it stays a number.
+    assert!(src.contains("Time: 0.0005)"), "{src}");
+
+    // Same config, same lockfile.
+    assert!(
+        loxl(&dir, &["compile", "--out", "out.Loxone"])
+            .status
+            .success()
+    );
+    assert_eq!(std::fs::read(dir.join("out.Loxone")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("haus.lock.json")).unwrap(),
+        lock
+    );
+}
+
+#[test]
+fn a_module_error_names_the_fragment_and_line() {
+    let dir = make_project("check-located");
+    std::fs::write(
+        dir.join("src/sued.loxl"),
+        format!("{SUED}\nnord = Not(I: nirgends.Q)\n"),
+    )
+    .unwrap();
+    let out = loxl(&dir, &["check", "src"]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!out.status.success());
+    let line = SUED.lines().count() + 2;
+    assert!(
+        stderr.contains(&format!("sued.loxl:{line}: compile error:")),
+        "{stderr}"
+    );
+    let out = loxl(&dir, &["check", "--json", "src"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["path"].as_str().unwrap().ends_with("sued.loxl"), "{v}");
+    assert_eq!(v["errors"][0]["line"], line, "{v}");
 }

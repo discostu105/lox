@@ -43,7 +43,7 @@
       "\tAI1: ${4:source.AQ},",
       ")"
     ],
-    "description": "PicoC program block; the program text comes from a file next to this .loxl file (D40)"
+    "description": "PicoC program block; the program text comes from a file next to this .loxl file"
   },
   "template": {
     "prefix": "template",
@@ -55,7 +55,7 @@
       "\t)",
       "end"
     ],
-    "description": "Reusable body, expanded per instance with locked identities (D23); `-> block` names the primary block, the instance itself (D82)"
+    "description": "Reusable body, expanded per instance with locked identities; `-> block` names the primary block, the instance itself"
   },
   "instance": {
     "prefix": "instance",
@@ -68,33 +68,33 @@
   },
   "wire": {
     "prefix": "wire",
-    "body": "${1:extern}.${2:AutoShade} <- ${3:source}.${4:Q}",
+    "body": "${1:jal}.${2:AutoShade} <- ${3:source}.${4:Q}",
     "description": "Wire a source output onto an extern port (wires into managed blocks go in their argument list)"
   },
   "wire with expression": {
     "prefix": "wireexpr",
-    "body": "${1:extern}.${2:On} <- ${3:a}.Q ${4|and,or|} ${5:b}.Q >= ${6:limit}",
-    "description": "Expression on a wire; each operator becomes a managed gate block with a deterministic slug (D24)"
+    "body": "${1:jal}.${2:On} <- ${3:a}.Q ${4|and,or|} ${5:b}.Q >= ${6:limit}",
+    "description": "Expression on a wire; each operator becomes a managed gate block with a deterministic slug"
   },
   "signal": {
     "prefix": "signal",
     "body": "${1:name} = ${2:a}.Q ${3|and,or|} ${4:b}.AQ >= ${5:limit}",
-    "description": "Named signal: the expression's top block is `name` (`name.Q`, a Formula's `name.AQ`), its sub-blocks `name__<op><n>` (D81)"
+    "description": "Named signal: the expression's top block is `name` (`name.Q`, a Formula's `name.AQ`), its sub-blocks `name__<op><n>`"
   },
   "set": {
     "prefix": "set",
-    "body": "${1:extern}.${2:TargetPos} = ${3:70}",
+    "body": "${1:jal}.${2:TargetPos} = ${3:70}",
     "description": "Write a parameter (Def=) on an extern port; the original is restored when the line is removed"
   },
   "attribute": {
     "prefix": "attr",
-    "body": "${1:extern}.${2|title,room,category|} = \"${3}\"",
-    "description": "Assign an extern's title, room or category (D39); a room/category change carries along the children that shared it"
+    "body": "${1:jal}.${2|title,room,category|} = \"${3}\"",
+    "description": "Assign an extern's title, room or category; a room/category change carries along the children that shared it"
   },
   "unit value": {
     "prefix": "unit",
     "body": "${1:Time}: ${2:30}${3|ms,s,min,h,K,%|}",
-    "description": "Unit-suffixed value in a binding (30min, 250ms, 2700K, 70%) — compiled to the port's base unit (D27)"
+    "description": "Unit-suffixed value in a binding (30min, 250ms, 2700K, 70%) — compiled to the port's base unit"
   },
   "let": {
     "prefix": "let",
@@ -110,5 +110,86 @@
     "prefix": "moved",
     "body": "moved ${1:old_slug} -> ${2:new_slug}",
     "description": "Rename a managed block's slug while keeping its identity (UUIDs survive)"
+  },
+  "tiles": {
+    "prefix": "tiles",
+    "body": [
+      "tiles ${1:name}",
+      "\ttile ${2:3}(",
+      "\t\tclick: \"${3:SET(As;Tg;pulse)}\",",
+      "\t\tto: ${4:slug},",
+      "\t)",
+      "end",
+      "",
+      "${5:flex}.tiles = ${1:name}"
+    ],
+    "description": "A named set of Touch Pure Flex tile programs and a claim that writes them onto one device"
+  },
+  "schedule": {
+    "prefix": "schedule",
+    "body": [
+      "schedule ${1:name}",
+      "\t${2:weekdays} ${3:06:00-22:00}",
+      "\t${4:weekend} ${5:off}",
+      "end",
+      "",
+      "${6:timer}.schedule = ${1:name}"
+    ],
+    "description": "A named weekly DayTimer program and a claim that writes it onto one timer"
+  },
+  "moods": {
+    "prefix": "moods",
+    "body": [
+      "moods ${1:name}",
+      "\t\"${2:Viel Licht}\": all on",
+      "\t\"${3:Lesen}\": AQ1 ${4:80%}",
+      "end",
+      "",
+      "${5:licht}.moods = ${1:name}"
+    ],
+    "description": "Named light moods of a lighting controller (the off mood is implicit) and a claim"
+  },
+  "access": {
+    "prefix": "access",
+    "body": [
+      "access ${1:name}",
+      "\t${2|user,group|} \"${3:alice}\": \"${4:Always}\"",
+      "end",
+      "",
+      "${5:tuer}.access = ${1:name}"
+    ],
+    "description": "A named set of access rights (user or group: access schedule) and a claim on an NFC Code Touch; users not listed lose access"
+  },
+  "recipients": {
+    "prefix": "recipients",
+    "body": [
+      "recipients ${1:name}",
+      "\t${2|user,group|} \"${3:alice}\"",
+      "end",
+      "",
+      "${4:meldung}.recipients = ${1:name}"
+    ],
+    "description": "A named set of recipients and a claim on a push notification; nobody else gets it"
+  },
+  "rule": {
+    "prefix": "rule",
+    "body": [
+      "rule ${1:slug} \"${2:Name}\"",
+      "\twhen ${3:time} ${4:07:00}",
+      "\tthen ${5:target} ${6:on}",
+      "end"
+    ],
+    "description": "An Automatic Designer rule: every `when` must hold, the `then`s run in order, `or` starts another group"
+  },
+  "test": {
+    "prefix": "test",
+    "body": [
+      "test \"${1:Name}\"",
+      "\t${2:source}.${3:Q} = ${4:on}",
+      "\ttick ${5:1s}",
+      "\texpect ${6:target}.${7:Q} == ${8:on}",
+      "end"
+    ],
+    "description": "A simulated test: set inputs, advance time, check outputs (`loxl test`)"
   }
 }

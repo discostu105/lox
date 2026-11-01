@@ -46,11 +46,18 @@ registrations) and this compiler. The compiler owns four kinds of edit and recor
    compile restores them when the claim leaves the source ([D39](decisions/0039-attribute-claims.md),
    [D43](decisions/0043-title-claim-carries-refs.md)).
 
-Three declarations write content of Loxone Config without recording it: the tiles of a Touch Pure Flex
-([D41](decisions/0041-touch-pure-flex-tiles.md)), the access rights on an NFC Code Touch
-([D49](decisions/0049-nfc-access-rights.md)) and the recipients of a push notification
-([D51](decisions/0051-push-notifications.md)). They own what they declare while they declare it. Removed,
-they leave the last written state in place.
+Some declarations write content of Loxone Config without recording that content in the lockfile:
+
+- the named sets and their claims: the tiles of a Touch Pure Flex
+  ([D41](decisions/0041-touch-pure-flex-tiles.md)), the access rights on an NFC Code Touch
+  ([D49](decisions/0049-nfc-access-rights.md)), the recipients of a push notification
+  ([D51](decisions/0051-push-notifications.md)), the schedule of a DayTimer
+  ([D53](decisions/0053-daytimer-schedules.md)) and the moods of a lighting controller
+  ([D58](decisions/0058-lighting-moods.md)), each a set and its claims
+  ([D83](decisions/0083-access-recipients-sets.md)),
+- the rules of the Automatic Designer ([D57](decisions/0057-automatic-designer-rules.md)).
+
+They own what they declare while they declare it. Removed, they leave the last written state in place.
 
 Everything else belongs to the other writers and passes through unchanged. One part of a managed block is
 shared: its position on the page. Loxone Config may move it, and the compile takes the move over
@@ -212,3 +219,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D84 | [A `page` statement governs its own file](decisions/0084-page-per-fragment.md) | accepted |
 | D85 | [`defaults <Type>(…)` states a type's shared parameters once](decisions/0085-defaults.md) | accepted |
 | D86 | [Contextual words, one-line calls and the v2 polish](decisions/0086-v2-polish.md) | accepted |
+| D87 | [Tooling for v2: unit-suffix lint, lint --fix, scoped names in the language server](decisions/0087-v2-tooling.md) | accepted |

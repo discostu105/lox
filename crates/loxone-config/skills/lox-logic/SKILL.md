@@ -32,6 +32,7 @@ loxl templates                                  # ready-made, tested templates
 loxl types Monoflop                             # a type's ports before using it
 $EDITOR pages/<page>.loxl                       # declare blocks, wires, parameters
 loxl check --json pages/                        # types, ports, directions; no base needed
+loxl lint                                       # advisory findings by kind; --fix writes unit suffixes
 loxl compile                                    # in a lox.toml project; else --base --module --lock --out
 loxl diff --summary current.Loxone out.Loxone   # show this to the human
 loxl test                                       # the module's `test … end` blocks, simulated
@@ -69,6 +70,12 @@ end
   `flur_taster`. A set goes in by a set parameter: `template raum(stimmungen: moods = standard)`.
 - `defaults <Type>(Port: value, …)` gives every managed block of the type the values it does not bind
   itself. Values only, one per type. Look for it at the top of a file before repeating a value.
+- Tiles, schedules, light moods, access rights and notification recipients are named sets:
+  `access bewohner … end` declares one, `tuer.access = bewohner` claims it for one block, and many
+  blocks may claim one set. A set owns what it lists: users missing from an `access` set lose access,
+  recipients missing from a `recipients` set get no message.
+- Write time values with their unit (`Delay: 3h`, `Time: 500ms`). `loxl lint` names bare ones
+  (`unit-suffix`), and `loxl lint --fix` writes the units without changing the compiled config.
 - Deleting a block needs `removed <slug>`; renaming a slug needs `loxl rename` or
   `moved <old> -> <new>`. Without them the compile refuses, on purpose.
 - To take over logic drawn in Loxone Config, use `loxl adopt`, then check with

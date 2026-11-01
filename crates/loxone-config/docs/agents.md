@@ -118,75 +118,85 @@ loxl diff --exit-code current.Loxone out.Loxone   # must be empty
 
 ## The language in 30 seconds
 
-See [language.md](language.md) for the full spec.
+See [language.md](language.md) for the full spec. The sample is in canonical form (`loxl fmt`) and
+passes `loxl check`.
 
 ```text
-# comment (all comments survive formatting)
-let schwelle = 28                    # named constant
+# Comments survive formatting.
 
-extern sonne = VirtualIn(iname: "VI3")           # existing object, not yours
-party = VirtualIn("Partymodus")      # a new app switch, minted into the
-                                     # "Virtual Inputs" folder
+let schwelle = 28 # a named constant
+
+extern sonne = VirtualIn(iname: "VI3") # an existing object: yours to use, not to own
 extern jal = AutoJalousie(title: "Beschattung Süd")
+extern pumpe = PushButton(title: "Pumpe")
 
-temp_hoch = GreaterEqual(            # yours, compiler-owned; the argument
-	"Temp über 28",                  # list is the block's whole input side:
-	Input1: sonne.Q,                 # port reference  -> wire into Input1
-	Input2: schwelle,                # literal or let  -> Def= parameter
-)
-beschatten = And(                    # gates are fixed 2-input
-	I1: temp_hoch.Q,
-	I2: sonne.Q,
-)
+party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folder
 
-jal.AutoShade <- beschatten.Q        # wire onto an extern port
-heiss = sonne.Q >= 30 and not party.Q  # a named signal: gate blocks,
-                                     # the top one is `heiss` (`heiss.Q`)
-jal.TargetPos = 70                   # Def= on an extern port; original
-                                     # auto-restored when the line is removed
-extern sensor = LoxAIRDevice(uuid: "…")  # a device (created in Loxone Config)
-sensor.title = "Raumklima Bad"       # assign title, room, category;
-sensor.room = "Bad"                  # children in the device's room follow
+# Managed blocks. The argument list is the whole input side: a port
+# reference wires, a value or constant sets the parameter.
+
+temp_hoch = GreaterEqual("Temp über 28", Input1: sonne.Q, Input2: schwelle)
+beschatten = And(I1: temp_hoch.Q, I2: sonne.Q)
+
+jal.AutoShade <- beschatten.Q # a wire onto an extern port
+
+heiss = sonne.Q >= 30 and not party.Q # a named signal: its top block is `heiss`
+
+jal.TargetPos = 70 # an extern parameter, restored when the line goes
+
+defaults Monoflop(Time: 5min) # for every Monoflop that does not bind `Time`
+
+nachlauf = Monoflop(InputTrigger: heiss.Q)
+
+extern sensor = LoxAIRDevice(uuid: "…") # a device created in Loxone Config
+
+sensor.title = "Raumklima Bad"
+sensor.room = "Bad" # its inputs and outputs in the old room follow
+
+# A named set and its claims: who may open, under which schedule. One
+# set serves any number of Code Touches. Users not listed lose access.
+
+access bewohner
+	user "alice": "Always"
+	group "Residents": "Workdays"
+end
 
 extern tuer = NfcCodeTouch(uuid: "…")
-access bewohner                      # who may open, under which schedule
-	user "alice": "Always"           # users, groups and schedules
-	group "Residents": "Workdays"    # by title; the rest lose access
-end
-tuer.access = bewohner               # one set, any number of Code Touches
+
+tuer.access = bewohner
+
+# An app rule: all `when`s must hold, the `then`s run in order. `or`
+# starts another group of conditions.
 
 extern regel = AutopilotRule(title: "Pumpe Ein")
-rule regel                           # an app rule: active, all
-	active                           # `when`s must hold, `then`s in order
+
+rule regel
+	active
 	when weekday weekdays
 	when time 09:00
+	or
+	when pumpe.active == on
 	then pumpe on
 end
 
-rule party "Party-Licht"             # a block's state, a mode,
-	active                           # `or` for another group
-	when bewegung.active == on
+rule party_licht "Party-Licht" # a named rule: the config's rule of that name, else a new one
+	inactive
 	when mode "Party"
-	or
-	when helligkeit.value < 20
 	then mode "Party" off
 end
 
-rule mittag "Pumpe Mittag"           # a named rule: the config's
-	inactive                         # rule of that name, else created
-	when time 12:30
-	then pumpe on
-end
-
-moods wohnen                         # light moods, by name; the off
-	"Viel Licht": all on             # mood ("Aus") is implicit
+moods wohnen # light moods by name; the off mood ("Aus") is implicit
+	"Viel Licht": all on
 	"Lesen": AQ1 80%, AQ3 temp(60%, 2700K)
 end
-extern licht = LightController2(title: "Lichtsteuerung")
-licht.moods = wohnen                 # also inside a template body
 
-removed old_gate                     # confirmed delete of a managed block
-moved beschatten -> schatten_gate    # slug rename, UUIDs survive
+extern licht = LightController2(title: "Lichtsteuerung")
+
+licht.moods = wohnen
+
+removed alt_gate # a confirmed delete of a managed block
+
+moved alt_schatten -> beschatten # a rename that keeps the UUIDs
 ```
 
 The value decides what an argument means: `Port: slug.Port` wires that source in, anything else sets
@@ -200,7 +210,7 @@ a declared block, so deleting the line needs `removed x`.
 
 A template instance names its blocks through the instance. `bad.Q` is the output of its primary block
 (the body's only block, or the one `template t(…) -> <block>` names), and `bad.melder.Q` of any other
-block. The lock keys are `bad_melder`; source never writes those. A `moods`, `schedule` or `tiles` set
+block. The lock keys are `bad_melder`; source never writes those. A `moods`, `schedule`, `tiles`, `access` or `recipients` set
 goes into a template by a set parameter: `template raum(stimmungen: moods = standard)`, called as
 `raum(stimmungen: kueche)`.
 
@@ -316,6 +326,8 @@ it only when it matches what you intended.
 | `` `defaults` … is not a value `` / `takes no label string` | a wire, expression or label in `defaults` | write it on each block; `defaults` takes values only |
 | `says which object a block is` | `device:`/`mirrors:` in `defaults` | write it on each block |
 | `cannot adopt` + `would set it to` (from `adopt --uuid`) | the adopted block leaves a defaulted port unset | take the port out of the `defaults` statement and bind it on the other blocks, or set the port on the block in Loxone Config |
+| `unit-suffix` (from `lint`) | a bare time value on a port documented in seconds or minutes (`Delay: 10800`) | `loxl lint --fix` writes the unit (`Delay: 3h`); the compile output does not change. The language server offers it as a quick fix |
+| `default-page` (from `lint`) | a fragment of a directory module without its own `page` line, while others have one | add the `page` line; the language server offers the previous file's page as a quick fix |
 | `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
 | `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
