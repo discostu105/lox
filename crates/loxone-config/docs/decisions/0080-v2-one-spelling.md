@@ -1,6 +1,6 @@
 # D80: Language v2, one spelling per value
 
-Status: accepted (2026-10-31)
+Status: accepted (2026-10-31), amended by [D91](0091-off-is-no-attribute.md)
 
 ## Context
 

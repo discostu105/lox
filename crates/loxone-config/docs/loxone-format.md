@@ -706,9 +706,19 @@ Virtual inputs, virtual and Modbus devices are not page blocks. They live in fix
 - A `VirtualIn` has the connectors `[Q, Qm]`, both sources, and the attribute order `Type, IName, V, U, Title,
   Cl, Nio, WF, …`. A fresh one is `Cl="238,238,238"`, `Analog="false"`, with the children and defaults listed
   in *What a first save adds*.
+- The ticked boxes `Signed=`, `Analog=` (on `VirtualHttpInCmd`, `VirtualUdpInCmd`, `VirtualOutCmd`) and
+  `CloseAfterSend=` (on `VirtualOut`) are `"true"` or absent. An unticked box has no attribute, and a save
+  drops an explicit `"false"`. A `VirtualIn`'s `Analog=` is always there: a digital one is
+  `Analog="false"`, and a save adds it where it is missing. Corpus (131 `.Loxone` files, `ControlList
+  Version` 74 to 267): all 167 `VirtualIn`s have `Analog=`, 53 of them `"false"`, in every version. Two
+  saves of the house config made before Lox Logic minted anything (Version 273) have 16 digital ones, all
+  `Analog="false"`. The commands and outputs have 1,501 such attribute slots: none is `"false"`, 505 are
+  absent. Oracle session 37 checked both directions.
+- A save drops `MinVal="0"` on an analog `VirtualIn`, as on physical inputs.
 
 Lox Logic creates these objects ([D54](decisions/0054-virtual-inputs.md),
-[D64](decisions/0064-virtual-modbus-devices.md)). Source: corpus (175 `VirtualIn`s); oracle sessions 18 and 26.
+[D64](decisions/0064-virtual-modbus-devices.md)). Source: corpus (175 `VirtualIn`s); oracle sessions 18, 26
+and 37.
 
 ## Settings of physical inputs and outputs
 

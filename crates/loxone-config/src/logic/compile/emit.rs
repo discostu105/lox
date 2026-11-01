@@ -329,6 +329,17 @@ fn element_attrs(
             }
         }
     }
+    // An unticked box of a virtual command or output has no attribute:
+    // a bound `off` removes it.
+    for name in bool_params(&block.block_type) {
+        if omitted_when_off(&block.block_type, name)
+            && managed_attrs
+                .get(&(block.slug.clone(), (*name).to_string()))
+                .is_some_and(|v| v == "false")
+        {
+            el.remove_attr(name);
+        }
+    }
     Ok(el)
 }
 

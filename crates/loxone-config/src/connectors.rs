@@ -1122,8 +1122,8 @@ pub fn clock_params(block_type: &str) -> &'static [&'static str] {
 
 /// Attribute parameters stored as the text `true`/`false`: written
 /// `on`/`off` in source, they take nothing else. Real configs (150)
-/// hold no other value on any of them; a save leaves
-/// `Signed=`/`Analog=` out on a command whose box is unticked.
+/// hold no other value on any of them. Off is written two ways, see
+/// [`omitted_when_off`].
 pub fn bool_params(block_type: &str) -> &'static [&'static str] {
     match block_type {
         "VirtualIn" | "VirtualOutCmd" => &["Analog"],
@@ -1131,6 +1131,16 @@ pub fn bool_params(block_type: &str) -> &'static [&'static str] {
         "VirtualOut" => &["CloseAfterSend"],
         _ => &[],
     }
+}
+
+/// Whether a save writes this text-boolean attribute only when it is
+/// on: an unticked box has no attribute, and a save drops an explicit
+/// `"false"`, so `off` compiles to no attribute. That holds for every
+/// [`bool_params`] entry except a VirtualIn's `Analog=`: a save writes
+/// `Analog="false"` on a digital one, and adds it where it is missing
+/// (corpus and Loxone Config 17.2, see loxone-format.md).
+pub fn omitted_when_off(block_type: &str, attr: &str) -> bool {
+    block_type != "VirtualIn" && bool_params(block_type).contains(&attr)
 }
 
 /// The container a block type lives in when it is not drawn on a page:

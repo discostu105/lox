@@ -218,6 +218,8 @@ Notes:
   - On an attribute that Loxone Config stores as the text `"true"`/`"false"` (`VirtualIn`'s
     `Analog:`, `VirtualHttpInCmd`'s `Signed:`/`Analog:`, …) they compile to that text. Such an
     attribute takes only `on`/`off`; `Analog: "true"` is an error naming `Analog: on`.
+  - Except on a `VirtualIn`, `off` compiles to no attribute, which is how Loxone Config stores an
+    unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`.
   - A number stays a number: `1` is never rewritten to `on`.
   - The formula backend rejects them; write `1`/`0`.
 - A number may carry a **unit suffix**, written immediately adjacent: `40s`, `250ms`, `90min`,
