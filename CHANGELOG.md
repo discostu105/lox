@@ -10,6 +10,15 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.70.0] — 2026-11-01
+
+### Changed
+- **loxl** names each operating mode one way in rules and schedules: a built-in mode in a schedule by its day word (`mon`), a mode the module declares or externs by its slug (`when mode party`, and now `party 18:00-24:00` in a schedule), any other by its title. Another spelling is an error that names the replacement, with a quick fix in the language server; `loxl fmt` on a module directory, `decompile` and `adopt` write the one spelling. The compiled config does not change.
+- **`loxl lint`**: a `dead-outputs` finding on a room controller or a Touch Pure Flex controller that drives nothing says what to wire: the heating or cooling output to the valve actuators, or the controller to the API Connector of a Touch Pure Flex.
+
+### Fixed
+- **`loxl adopt`** and **`loxl decompile`** write `Signed: off`, `Analog: off` or `CloseAfterSend: off` for an unticked box on a virtual HTTP or UDP command or a virtual output. Before, they wrote nothing, and the box came out ticked when the source was compiled onto another config.
+
 ## [0.69.0] — 2026-11-01 — hardware in source
 
 Tree and Air devices, with their inputs and outputs, can now be taken over in Lox Logic. Pairing stays in Loxone Config.

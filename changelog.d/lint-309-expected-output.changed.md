@@ -1,1 +1,0 @@
-- **`loxl lint`**: a `dead-outputs` finding on a room controller or a Touch Pure Flex controller that drives nothing says what to wire: the heating or cooling output to the valve actuators, or the controller to the API Connector of a Touch Pure Flex.

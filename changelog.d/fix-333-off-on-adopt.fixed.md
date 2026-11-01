@@ -1,1 +1,0 @@
-- **`loxl adopt`** and **`loxl decompile`** write `Signed: off`, `Analog: off` or `CloseAfterSend: off` for an unticked box on a virtual HTTP or UDP command or a virtual output. Before, they wrote nothing, and the box came out ticked when the source was compiled onto another config.
