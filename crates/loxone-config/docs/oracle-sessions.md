@@ -1029,6 +1029,23 @@ and edited them in the property panel.
   `MaxTime="-3000"`, `ValOT="2"` and `"-1"` and `DefVal="0.001"` stayed. **Heal:** compile refuses a
   value the save rewrites.
 
+## `Def="0"` on block connectors (sessions 90 and 91, #352) — passed, one finding
+
+Ran 2026-11-01 with Loxone Config 17.2.8.28, in a private copy of the oracle prefix on its own display.
+The base was the redacted library config `examples/library/energy`.
+
+- Session 90 compiled 22 connectors at 0 on 15 types: the six comparators (one through an expression,
+  `v.Q < 0`, one as `0.0`), `And.I1`, `Or.I1`, `Formula.Input1`, `Monoflop.Time`, `PulseGen` `TimeHigh`
+  and `TimeLow`, `AnalogThresholdTrigger` `On`, `Off` and `PulseTime`, `OffDelay.Time`, `OnDelay.Time`,
+  `PButtonT.Time`, `StairwayLS.TimeHigh`, `EdgeDetection.PulseTime` and `AnalogMultiplexer2.Input1`. The
+  save dropped every `Def="0"` and nothing else. It kept `Def="1"`, and a `Monoflop` and an
+  `AnalogThresholdTrigger` minted without `Def=` stayed without one.
+- **Finding:** session 91 opened a `Monoflop` minted without `Def=` on `Time` (GUI default 2). The property
+  panel shows *Duration* 0. A missing `Def=` is 0 on a connector, not the type's default.
+- **Heal:** compile writes no `Def=` at 0, the simulator reads a missing one as 0, and decompile states
+  `Port: 0` where the GUI default is not 0 ([D128](decisions/0128-no-def-at-zero.md)). A block minted
+  without a parameter has it at 0 (#362).
+
 ## LightController2 on a Miniserver, live (2026-10-31)
 
 Ran 2026-10-31 on a Miniserver (firmware 17.2.8.28), not in Loxone

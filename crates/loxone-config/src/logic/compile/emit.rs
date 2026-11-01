@@ -375,7 +375,10 @@ fn push_connectors(
         let mut co = Element::new("Co");
         co.set_attr("K", key);
         if let Some(def) = managed_defs.get(&(block.slug.clone(), key.clone())) {
-            co.set_attr("Def", def);
+            // A bound 0 is no attribute, as a save writes it.
+            if crate::connectors::def_written(def) {
+                co.set_attr("Def", def);
+            }
         } else if let Some(stale) = res.and_then(|r| r.stale_defs.get(key))
             && block.bindings().any(|b| {
                 b.port == *key

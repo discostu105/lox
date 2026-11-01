@@ -208,7 +208,12 @@ rendered inline (`<Key>2B35</Key>`).
   wires ([connector-db.md](connector-db.md)). Source: oracle session 25.
 - `Nc` — number of incoming wires (= count of `<In>` children); omitted
   when zero.
-- `Def` — the port's parameter value; omitted at type default. A wired
+- `Def` — the port's parameter value. A missing `Def=` is 0, on every block
+  type: a save writes none at 0 and drops a `Def="0"` (oracle session 90, 22
+  connectors on 15 types), and Loxone Config shows 0 for a `Monoflop` without
+  one, whose GUI default is 2 (session 91). The GUI writes every other
+  default when it places a block; no real config holds `Def="0"` on a
+  connector ([D128](decisions/0128-no-def-at-zero.md)). A wired
   `<Co>` can carry one too (the Loxcall library entry: an `Equal`'s
   `Input1` with `Def="2"` and an `<In>`): Loxone Config keeps the value
   when a wire is drawn onto the port. The wire supplies the input; the
@@ -389,8 +394,7 @@ Evidence: the house config (all 113 uuid-pinned ref externs resolved,
   An empty `Off` text is not written. The GUI's defaults for `On`/`Off` are `<v>`.
   Inputs and outputs that log, mail or notify carry the same child with
   other `Ref…=` attributes (`RefLogger`, `RefMailer`, …); Lox Logic compares
-  all of it (`message <attr>` in the diff). A `Def="0"` is not written on
-  a comparator input; Config leaves the input open.
+  all of it (`message <attr>` in the diff).
 - **Recipients are `ACT=` rights** on the notification: ticking a user
   in Config 17.2 appends `<PRM REF="<Notification>" ACT="3"/>` to the
   user's `<PH>` list and raises `NUM=` — the same edit as an access

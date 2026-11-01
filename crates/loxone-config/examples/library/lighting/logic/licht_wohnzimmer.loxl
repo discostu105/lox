@@ -15,6 +15,20 @@ licht_wohnzimmer = LightController2(
 	Brightness: helligkeit.AQ,
 	Presence: praesenz.Q,
 	BrightnessLimit: 80,
+	MoveOn: 0,
+	MoveIgnore: 0,
+	Step: 0,
+	Steptime: 0,
+	Max: 0,
+	MaxP: 0,
+	MoveTimeout: 0,
+	SceneMixTime: 0,
+	FadingTime: 0,
+	AlarmClockPeriod: 0,
+	DayMinTemp: 0,
+	DayMaxTemp: 0,
+	AlarmPeriod: 0,
+	AlarmBrightness: 0,
 )
 
 deckenlicht.I <- licht_wohnzimmer.AQ1

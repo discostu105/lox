@@ -19,8 +19,9 @@ object.
   read the previous cycle's values.
 - An input gets, in this order: what the test set; its wires (negated
   when the connector carries `Inv=`); the constant 1 for an unwired
-  `Inv=`; its `Def=` value; the documented default (`port_meta`) when
-  `Def=` is omitted; else 0.
+  `Inv=`; its `Def=` value; 0 when `Def=` is omitted, as in Loxone Config;
+  the documented default (`port_meta`) for a port the object has no
+  connector for.
 - A test may set any port: an input, a parameter or a block's output.
   The value holds until the test sets it again and overrides whatever
   the block computes.

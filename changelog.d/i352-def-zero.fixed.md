@@ -1,0 +1,1 @@
+- **`loxl compile`** writes no `Def="0"` on a block input, as Loxone Config saves it: a comparison with 0 (`x.Q < 0`), a parameter of 0 and `x.Port = 0` no longer show as changed after a save. `loxl test` reads an unset parameter as 0, as Loxone Config does, and `loxl decompile` states it (`Time: 0`) where Config's default is not 0.

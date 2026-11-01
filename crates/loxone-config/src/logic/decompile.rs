@@ -1660,6 +1660,21 @@ impl Scan<'_> {
                             comment: None,
                         }));
                     }
+                } else if wires.is_empty()
+                    && crate::observed_defaults::observed_default(&o.block_type, &p.key)
+                        .or_else(|| {
+                            crate::port_meta::port_meta(&o.block_type, &p.key)
+                                .and_then(|m| m.default)
+                        })
+                        .is_some_and(crate::connectors::def_written)
+                {
+                    // No `Def=` is 0, not the default a reader would
+                    // assume: a save writes none at 0.
+                    args.push(ArgItem::Binding(Binding {
+                        port: p.key.clone(),
+                        kind: BindingKind::Param(Value::from_literal("0")),
+                        comment: None,
+                    }));
                 }
                 args.extend(wires.into_iter().map(ArgItem::Binding));
             }

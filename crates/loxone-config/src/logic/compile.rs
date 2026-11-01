@@ -1520,14 +1520,17 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
         .and_then(|co| co.attr_decoded("Def").map(|v| v.into_owned()))
 }
 
-/// Whether `port_uuid` keys a setting a save writes only when it is not 0
-/// ([`crate::connectors::omitted_when_zero`]): absent, it reads as 0.
+/// Whether an absent value of `port_uuid` reads as 0: always on a
+/// connector's `Def=` ([`crate::connectors::def_written`]), and on a
+/// setting a save writes only when it is not 0
+/// ([`crate::connectors::omitted_when_zero`]).
 fn zero_when_absent(doc: &LoxoneDoc, port_uuid: &str) -> bool {
-    crate::settings::split_key(port_uuid).is_some_and(|(owner, name)| {
-        find_c(&doc.xml.root, owner).is_some_and(|c| {
+    match crate::settings::split_key(port_uuid) {
+        Some((owner, name)) => find_c(&doc.xml.root, owner).is_some_and(|c| {
             crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name)
-        })
-    })
+        }),
+        None => true,
+    }
 }
 
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
@@ -1566,7 +1569,12 @@ fn apply_def(
         )));
     }
     let original = co.attr_decoded("Def").map(|v| v.into_owned());
-    set_attr_ordered(co, "Def", value, &["U"]);
+    // A 0 is no attribute, as a save writes it.
+    if crate::connectors::def_written(value) {
+        set_attr_ordered(co, "Def", value, &["U"]);
+    } else {
+        co.remove_attr("Def");
+    }
     Ok(original)
 }
 

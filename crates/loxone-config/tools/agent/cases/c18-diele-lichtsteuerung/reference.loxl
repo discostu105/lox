@@ -12,6 +12,7 @@ lichtsteuerung = LightController2(
 	Reset: taster_aus.Q,
 	BrightnessLimit: 50,
 	MoveOn: 120,
+	MoveTimeout: 3600,
 )
 
 licht.I <- lichtsteuerung.AQ1

@@ -248,6 +248,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`. On a block, `device:` names
   the device (by slug) the I/O hangs in. Write Loxone's `\v` as `"\\v"`. `loxl adopt --uuid <device>`
   takes over an existing device with its I/O.
+- **State every parameter the block needs.** One the source leaves out is 0 in Loxone Config, not the
+  default `loxl types` shows: a `Monoflop` without `Time` pulses for 0 s, a `LightController2` without
+  `MoveTimeout` has it at 0.
 - **Shared parameters: `defaults <Type>(Port: value, …)`.** Every managed block of the type takes
   these values for the ports it does not bind (`defaults ModbusASensor(ModbusPollingCycle: 60)`).
   Values only, one statement per type, at the top level. A block's own binding wins. Decompile and
