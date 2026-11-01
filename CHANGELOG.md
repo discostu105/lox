@@ -10,6 +10,13 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.60.1] — 2026-11-01
+
+### Changed
+- **`loxl`** error messages are shorter and say what to do: no decision IDs, internal terms or `docs/` pointers.
+- **`loxl <command> --help`** (and `loxl help <command>`) shows the help of one command: what it does and one line per option. `loxl help` is a short overview with one line per command
+- **`loxl drift`** reports a lockfile written by an older Lox Logic in one short message
+
 ## [0.60.0] — 2026-10-31
 
 ### Added

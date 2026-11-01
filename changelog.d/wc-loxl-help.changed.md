@@ -1,2 +1,0 @@
-- **`loxl <command> --help`** (and `loxl help <command>`) shows the help of one command: what it does and one line per option. `loxl help` is a short overview with one line per command
-- **`loxl drift`** reports a lockfile written by an older Lox Logic in one short message

@@ -1,1 +1,0 @@
-- **`loxl`** error messages are shorter and say what to do: no decision IDs, internal terms or `docs/` pointers.
