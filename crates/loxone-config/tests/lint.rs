@@ -129,3 +129,31 @@ fn values_outside_the_documented_range_are_flagged() {
         ]
     );
 }
+
+#[test]
+fn a_file_without_its_page_in_a_paged_module_is_flagged() {
+    // `sued.loxl` has no `page`; the file before it names one. Its
+    // blocks go to the default page, not to that file's page.
+    let dir = make_project("lint-default-page");
+    std::fs::write(
+        dir.join("src/a_nord.loxl"),
+        "page \"Beschattung\"\n\nnord = Not(\n\tI: sonne.Q,\n)\n",
+    )
+    .unwrap();
+    let out = loxl(&dir, &["lint", "src"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(!out.status.success(), "expected findings: {stdout}");
+    assert!(
+        stdout.contains("sued.loxl: default-page: `beschatten` — 1 block before any `page`"),
+        "{stdout}"
+    );
+    // With its own `page` line the file is clean.
+    std::fs::write(
+        dir.join("src/sued.loxl"),
+        format!("page \"Beschattung\"\n\n{SUED}"),
+    )
+    .unwrap();
+    let out = loxl(&dir, &["lint", "src"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(!stdout.contains("default-page"), "{stdout}");
+}

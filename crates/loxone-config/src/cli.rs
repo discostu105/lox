@@ -70,7 +70,7 @@ In a lox.toml project, opening or saving a file also compiles the module in memo
   --out <out.Loxone>       Where to write the compiled config
   --serial <12-hex>        Miniserver serial (default: lox.toml, then the lockfile)
   --time <unix-seconds>    Creation time for new UUIDs (default: now)
-  --page <title>           Page for blocks before the first `page` statement
+  --page <title>           Page for blocks before a file's first `page` statement
                            (default: lox.toml, then the config's first page)
   --allow-removals         Delete managed blocks that are missing from the module
   --accept-version <v>     Accept a base saved by a different Loxone Config release
@@ -118,7 +118,9 @@ Needs a lox.toml project. Also rewrites the project's out file.
         name: "lint",
         usage: &["loxl lint [<module.loxl | module-dir | project-dir>]"],
         summary: "Report unused and dead parts of a module",
-        details: r#"On any module, reports unused externs and constants, and templates nothing uses.
+        details: r#"On any module, reports unused externs and constants, templates nothing uses and values
+outside a port's documented range. In a directory module it reports a file whose blocks come before
+its first `page` statement while other files name their page (those blocks go to the default page).
 In a lox.toml project it also reports:
   - managed blocks whose outputs feed nothing in the compiled config
   - Touch Pure Flex commands that reach several blocks, or none
@@ -556,7 +558,7 @@ fn project_module() -> Result<String, AnyError> {
 fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
     let p = std::path::Path::new(path);
     if p.is_dir() {
-        let mut items = Vec::new();
+        let mut fragments = Vec::new();
         for f in module_dir_files(p)? {
             let name = f.display().to_string();
             let src = std::fs::read_to_string(&f)
@@ -565,9 +567,9 @@ fn load_module(path: &str) -> Result<Module, (String, loxone_config::Error)> {
             fragment
                 .load_files(fragment_dir(&f))
                 .map_err(|e| (name.clone(), e))?;
-            items.extend(fragment.items);
+            fragments.push(fragment);
         }
-        let module = Module { items };
+        let module = Module::from_fragments(fragments);
         // Validate the expanded view: module-level statements reference an
         // instance's blocks (`a.b`), which only exist after template
         // expansion — mirroring what compile checks.
@@ -605,7 +607,7 @@ pub fn read_module(path: &str) -> Result<Module, AnyError> {
 /// adoption declares it, so the module only resolves after the append.
 fn read_module_lenient(path: &str) -> Result<Module, AnyError> {
     let p = std::path::Path::new(path);
-    let mut items = Vec::new();
+    let mut fragments = Vec::new();
     let files = if p.is_dir() {
         module_dir_files(p).map_err(|(p, e)| format!("{p}: {e}"))?
     } else {
@@ -618,9 +620,9 @@ fn read_module_lenient(path: &str) -> Result<Module, AnyError> {
         fragment
             .load_files(fragment_dir(&f))
             .map_err(|e| format!("{}: {e}", f.display()))?;
-        items.extend(fragment.items);
+        fragments.push(fragment);
     }
-    Ok(Module { items })
+    Ok(Module::from_fragments(fragments))
 }
 
 /// A `.Loxone` file, or (feature `archive`) a backup ZIP holding one.
@@ -1394,6 +1396,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
                 Item::Block(b) | Item::Instance(b) => b.slug == finding.slug,
                 Item::Let(l) => l.name == finding.slug,
                 Item::Template(t) => t.name == finding.slug,
+                Item::Signal(x) => x.slug == finding.slug,
                 _ => false,
             });
             if declares {
@@ -1698,13 +1701,14 @@ fn cmd_adopt_one(
         .map_err(|e| format!("{}: {e}", target.display()))?
         .to_text();
 
-    let mut merged = Module { items: Vec::new() };
+    let mut fragments = Vec::new();
     for (f, _, text) in &files {
         let mut m = Module::parse_fragment(text).map_err(|e| format!("{}: {e}", f.display()))?;
         m.load_files(fragment_dir(f))
             .map_err(|e| format!("{}: {e}", f.display()))?;
-        merged.items.extend(m.items);
+        fragments.push(m);
     }
+    let merged = Module::from_fragments(fragments);
     // The checks `loxl check` runs: references resolve in the expanded,
     // desugared module (template instances and expressions included).
     let (desugared, _) = merged.expand()?.desugar()?;

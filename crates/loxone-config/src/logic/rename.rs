@@ -143,6 +143,7 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub_comment(&mut t.end_comment);
         }
         Item::Page(p) => sub_comment(&mut p.comment),
+        Item::FragmentEnd => {}
         Item::Test(t) => {
             for stmt in &mut t.body {
                 match stmt {

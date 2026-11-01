@@ -117,6 +117,7 @@ pub(crate) fn visit_refs(
         | Item::Template(_)
         | Item::Instance(_)
         | Item::Page(_)
+        | Item::FragmentEnd
         | Item::Access(_)
         | Item::Schedule(_)
         | Item::Moods(_)

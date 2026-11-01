@@ -24,7 +24,8 @@ pub(super) fn plan_blocks(
                 .and_then(|el| el.attr("U"))
                 .map(String::from)
         });
-    // `page "Title"` statements govern the blocks that follow them.
+    // `page "Title"` statements govern the blocks that follow them, up to
+    // the next `page` or the end of their file (D84).
     // The statement is authoritative: the named page must exist in the
     // base, and a governed block whose pin no longer matches a page with
     // that title moves. Placement is positional, so synthetic expression
@@ -35,6 +36,7 @@ pub(super) fn plan_blocks(
         for item in &module.items {
             match item {
                 Item::Page(p) => current = Some(p.title.as_str()),
+                Item::FragmentEnd => current = None,
                 Item::Block(b) => {
                     if let Some(t) = current {
                         declared_page.insert(b.slug.as_str(), t);

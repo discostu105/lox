@@ -966,13 +966,15 @@ fn resolve_externs(
 }
 
 /// The `page` statement in force at each extern's declaration site
-/// — `mirrors:` disambiguation is positional page governance.
+/// (scoped to its file like block placement) — `mirrors:`
+/// disambiguation is positional page governance.
 fn extern_pages(module: &Module) -> BTreeMap<&str, &str> {
     let mut page_of_extern: BTreeMap<&str, &str> = BTreeMap::new();
     let mut current: Option<&str> = None;
     for item in &module.items {
         match item {
             Item::Page(p) => current = Some(p.title.as_str()),
+            Item::FragmentEnd => current = None,
             Item::Extern(e) => {
                 if let Some(t) = current {
                     page_of_extern.insert(e.slug.as_str(), t);

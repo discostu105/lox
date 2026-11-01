@@ -36,6 +36,9 @@ pub enum LintKind {
     NoAccessRight,
     /// A parameter value outside the port's documented range.
     OutOfRange,
+    /// Page blocks above their file's first `page` statement in a
+    /// directory module whose other files use `page`.
+    DefaultPage,
 }
 
 impl LintKind {
@@ -49,6 +52,7 @@ impl LintKind {
             LintKind::TileDeadCommand => "tile-dead-command",
             LintKind::NoAccessRight => "no-access-right",
             LintKind::OutOfRange => "out-of-range",
+            LintKind::DefaultPage => "default-page",
         }
     }
 }
@@ -252,7 +256,73 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             });
         }
     }
+    findings.extend(lint_default_page(module, &flat));
     Ok(findings)
+}
+
+/// A file of a directory module whose blocks come before its first `page`
+/// statement, while another file names a page: those blocks go to the
+/// default page (a `page` governs only its own file). Usually the file
+/// lacks its `page` line. One finding per file, named by its first
+/// declaration. `flat` is `module` expanded and desugared: both keep the
+/// fragment boundaries, so their file segments align.
+fn lint_default_page(module: &Module, flat: &Module) -> Vec<LintFinding> {
+    fn segments(m: &Module) -> Vec<&[Item]> {
+        m.items.split(|i| matches!(i, Item::FragmentEnd)).collect()
+    }
+    let (src, flat) = (segments(module), segments(flat));
+    let paged = |seg: &[Item]| seg.iter().any(|i| matches!(i, Item::Page(_)));
+    if src.len() < 2 || !src.iter().any(|s| paged(s)) || src.len() != flat.len() {
+        return Vec::new();
+    }
+    let mut findings = Vec::new();
+    for (s, f) in src.iter().zip(&flat) {
+        // Placed blocks (not object-tree items) before the first `page`.
+        let unpaged: Vec<&str> = f
+            .iter()
+            .take_while(|i| !matches!(i, Item::Page(_)))
+            .filter_map(|i| match i {
+                Item::Block(b) if !crate::connectors::object_tree(&b.block_type) => {
+                    Some(b.slug.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let Some(&first) = unpaged.first() else {
+            continue;
+        };
+        let named = s
+            .iter()
+            .take_while(|i| !matches!(i, Item::Page(_)))
+            .find_map(|i| match i {
+                Item::Block(b) if !crate::connectors::object_tree(&b.block_type) => {
+                    Some(b.slug.as_str())
+                }
+                Item::Instance(b)
+                    if unpaged.iter().any(|u| {
+                        u.strip_prefix(b.slug.as_str())
+                            .is_some_and(|r| r.starts_with('_'))
+                    }) =>
+                {
+                    Some(b.slug.as_str())
+                }
+                Item::Signal(x) => Some(x.slug.as_str()),
+                _ => None,
+            })
+            .unwrap_or(first);
+        let n = unpaged.len();
+        findings.push(LintFinding {
+            kind: LintKind::DefaultPage,
+            slug: named.to_string(),
+            detail: format!(
+                "{n} block{} before any `page` statement in its file go{} to the default page, \
+                 while other files name their page. Start the file with its `page \"…\"` line.",
+                if n == 1 { "" } else { "s" },
+                if n == 1 { "es" } else { "" },
+            ),
+        });
+    }
+    findings
 }
 
 /// Blocks whose outputs feed nothing (family parents excepted) — checked against the *compiled*
