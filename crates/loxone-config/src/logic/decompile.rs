@@ -48,6 +48,7 @@
 //! `iname` when it is unique for the type (INames are locale-stable),
 //! else `title` when unique, else the exact `uuid`.
 
+use crate::connectors::central_member_type;
 use crate::connectors::{
     BUILTIN_TYPES, MESSAGE_REF_TARGET, attr_name, attr_params, attr_save_default, bool_params,
     carried_children, choice_values, clock_params, container_type, file_params, text_params,
@@ -56,9 +57,9 @@ use crate::doc::{LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
-    BindingKind, BlockDecl, DefaultsDecl, ExprWireDecl, ExternDecl, Item, MatchSpec, Module,
-    MoodLine, MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind,
-    RuleDecl, SetKind, Unit, Value, WireDecl, clock_text, duration_value,
+    BindingKind, BlockDecl, DefaultsDecl, ExprWireDecl, ExternDecl, Item, MatchSpec, MembersClaim,
+    Module, MoodLine, MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE,
+    RightKind, RuleDecl, SetKind, Unit, Value, WireDecl, clock_text, duration_value,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -254,6 +255,9 @@ pub(super) struct Lift {
     /// Each controller with moods of its own: the index of the set it
     /// claims, or why its moods cannot be written as one.
     pub(super) mood_claims: BTreeMap<usize, std::result::Result<usize, String>>,
+    /// Each lifted central block with members: the member objects in
+    /// order, or why the list cannot be written as a claim.
+    central_members: BTreeMap<usize, std::result::Result<Vec<usize>, String>>,
     /// Every name the lift gave out, statement keywords included.
     names: BTreeSet<String>,
     /// The read-only view, which leaves out values at their usual default.
@@ -364,6 +368,7 @@ impl Lift {
         let notifications = cx.notifications(&managed, &access, &mut lifted, &mut externs);
         let liftable_rules = cx.liftable_rules(&mut lifted, &mut externs);
         let mood_lines = cx.mood_controllers(&mut lifted, &mut externs);
+        let central_members = cx.central_members(&mut lifted, &mut externs);
         let (mut slugs, slug_of, obj_of_slug) = cx.assign_slugs(&managed, &externs, hints);
         let (mood_sets, mood_claims) = cx.mood_sets(&mut slugs, &slug_of, mood_lines);
         let (match_specs, devices) = cx.match_specs(&slug_of, &managed, &externs);
@@ -416,6 +421,7 @@ impl Lift {
             rule_decls,
             mood_sets,
             mood_claims,
+            central_members,
             names: slugs.used,
             full_view: opts.scope == DecompileScope::Full,
             exprs: exprs::ExprLift::default(),
@@ -550,6 +556,28 @@ impl Lift {
         }
     }
 
+    /// The member claims of a bucket's central blocks; a list that
+    /// cannot be written as one gets a comment saying why.
+    fn push_members(&self, b: &Bucket, items: &mut Vec<Item>) {
+        for i in b.externs.iter().chain(&b.blocks) {
+            let Some(members) = self.central_members.get(i) else {
+                continue;
+            };
+            let slug = self.slug_of[&self.objects[*i].uuid].clone();
+            items.push(match members {
+                Ok(members) => Item::MembersClaim(MembersClaim {
+                    slug,
+                    members: members
+                        .iter()
+                        .map(|m| self.slug_of[&self.objects[*m].uuid].clone())
+                        .collect(),
+                    comment: None,
+                }),
+                Err(why) => Item::Comment(format!(" members {slug}: not lifted — {why}")),
+            });
+        }
+    }
+
     /// A rule declared by its name: no `extern` line for it.
     fn named_rule(&self, i: usize) -> bool {
         self.rule_decls.get(&i).is_some_and(|d| d.title.is_some())
@@ -629,6 +657,7 @@ impl Lift {
         self.push_access(page, b, false, &mut items);
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
+        self.push_members(b, &mut items);
         items
     }
 
@@ -739,6 +768,14 @@ impl Lift {
                         Ok(())
                     });
                 }
+                // A central's members may live on another page.
+                for i in b.externs.iter().chain(&b.blocks) {
+                    if let Some(Ok(members)) = self.central_members.get(i) {
+                        for m in members {
+                            reference(&self.slug_of[&self.objects[*m].uuid]);
+                        }
+                    }
+                }
                 // A rule's targets may live on another page.
                 for i in &b.externs {
                     if let Some(decl) = self.rule_decls.get(i) {
@@ -777,6 +814,7 @@ impl Lift {
             self.push_access(page, &b, true, &mut items);
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
+            self.push_members(&b, &mut items);
 
             let module = Module { items };
             module.validate()?;
@@ -1312,6 +1350,66 @@ impl Scan<'_> {
             mood_lines.push((i, lines));
         }
         mood_lines
+    }
+
+    /// The members (`rec=`) of each central block in the view. Members
+    /// outside it join as externs. A list that names a missing object,
+    /// one of another type or one object twice is left to Loxone Config:
+    /// a save keeps such a list as it is (oracle session 47).
+    fn central_members(
+        &self,
+        lifted: &mut [bool],
+        externs: &mut Vec<usize>,
+    ) -> BTreeMap<usize, std::result::Result<Vec<usize>, String>> {
+        let Scan {
+            doc,
+            objects,
+            ref obj_index,
+            ..
+        } = *self;
+        let mut out = BTreeMap::new();
+        for (i, o) in objects.iter().enumerate() {
+            let Some(want) = central_member_type(&o.block_type) else {
+                continue;
+            };
+            if !lifted[i] {
+                continue;
+            }
+            let Some(rec) = doc
+                .element_at(&o.path)
+                .and_then(|el| el.attr("rec"))
+                .filter(|r| !r.is_empty())
+            else {
+                continue;
+            };
+            let mut members: Vec<usize> = Vec::new();
+            let mut why = None;
+            for u in rec.split(',') {
+                match obj_index.get(u) {
+                    None => why = Some(format!("{u} is not in the config")),
+                    Some(&m) if objects[m].block_type != want => {
+                        why = Some(format!("{u} is a {}, not a {want}", objects[m].block_type));
+                    }
+                    Some(&m) if members.contains(&m) => why = Some(format!("{u} is listed twice")),
+                    Some(&m) => members.push(m),
+                }
+                if why.is_some() {
+                    break;
+                }
+            }
+            if let Some(why) = why {
+                out.insert(i, Err(why));
+                continue;
+            }
+            for &m in &members {
+                if !lifted[m] {
+                    lifted[m] = true;
+                    externs.push(m);
+                }
+            }
+            out.insert(i, Ok(members));
+        }
+        out
     }
 
     /// Slug assignment: managed first (document order), then externs

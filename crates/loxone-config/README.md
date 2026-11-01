@@ -54,6 +54,8 @@ what you changed.
   gives the set to an NFC Code Touch. Users left out lose access. Users, tags and codes stay with Loxone Config and the app.
 - **Lighting moods.** `moods wohnen … end` declares moods with circuit values, and `licht.moods = wohnen`
   gives them to a lighting controller. Moods keep their identity by name, so switches keep working.
+- **Central blocks.** `alle.members = (licht_eg, licht_og)` sets the lighting controllers or blinds a
+  `CentralLight` or `CentralShade` drives, in the order the app lists them.
 - **PicoC programs.** `Code: file("hue.c")` on a `Code16` block takes the program from a file.
 - **Also:** DayTimer schedules, Automatic Designer rules, Touch Pure Flex tiles, operating modes,
   virtual inputs, push notifications and the settings of physical inputs and outputs. The full list is

@@ -1,7 +1,7 @@
 //! Lox Logic abstract syntax and canonical text emission.
 
 pub use crate::access::PrincipalKind;
-use crate::connectors::{PortUnit, port_unit};
+use crate::connectors::{PortUnit, central_member_type, port_unit};
 use crate::error::{Error, Result};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -85,6 +85,9 @@ pub enum Item {
     /// `<controller>.moods = <name>` — write a mood set onto a
     /// LightController2, extern or managed.
     MoodsClaim(MoodsClaim),
+    /// `<central>.members = (a, b, …)` — the blocks a CentralLight or
+    /// CentralShade commands, in order.
+    MembersClaim(MembersClaim),
     /// `rule <slug>` … `end` — what an extern Automatic Designer rule does:
     /// active or not, its conditions and its actions.
     Rule(RuleDecl),
@@ -1827,6 +1830,26 @@ impl fmt::Display for MoodsClaim {
     }
 }
 
+/// `<central>.members = (a, b, …)` — the member list (`rec=`) of a
+/// CentralLight (LightController2 members) or a CentralShade
+/// (AutoJalousie members), in the order written. An empty list `()`
+/// leaves the central without members. Each member is a managed block or
+/// an extern. No lock state: withdrawing the claim leaves the last
+/// written list in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MembersClaim {
+    pub slug: String,
+    pub members: Vec<String>,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for MembersClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.members = ({})", self.slug, self.members.join(", "))
+    }
+}
+
 /// `rule <slug>` … `end` — an extern Automatic Designer rule
 /// (`AutopilotRule`) as source: whether it is active, the
 /// conditions that must all hold, and the commands it then sends. The
@@ -2442,6 +2465,13 @@ impl Module {
         })
     }
 
+    pub fn members_claims(&self) -> impl Iterator<Item = &MembersClaim> {
+        self.items.iter().filter_map(|i| match i {
+            Item::MembersClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
     pub fn schedule_claims(&self) -> impl Iterator<Item = &ScheduleClaim> {
         self.items.iter().filter_map(|i| match i {
             Item::ScheduleClaim(c) => Some(c),
@@ -2631,6 +2661,7 @@ impl Module {
                 | Item::TilesClaim(_)
                 | Item::ScheduleClaim(_)
                 | Item::MoodsClaim(_)
+                | Item::MembersClaim(_)
                 | Item::AccessClaim(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
@@ -2899,6 +2930,9 @@ impl Module {
                 out.push_str(&format!("end{}\n", tail(&t.end_comment)));
             }
             Item::MoodsClaim(c) => {
+                out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+            }
+            Item::MembersClaim(c) => {
                 out.push_str(&format!("{c}{}\n", tail(&c.comment)));
             }
             Item::Rule(r) => {

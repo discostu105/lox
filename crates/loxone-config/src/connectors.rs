@@ -1171,6 +1171,7 @@ pub fn attr_params(block_type: &str) -> Vec<&'static str> {
         "DayTimer" => &["On", "Off"],
         "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2"],
         "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "MaxLvl"],
+        "EFM" => &["Un1", "Un2", "UnSt"],
         t => crate::periphery::periphery(t).map_or(&[], |p| p.settings),
     };
     let mut v = own.to_vec();
@@ -1276,6 +1277,7 @@ pub fn text_params(block_type: &str) -> &'static [&'static str] {
         "DayTimer" => &["On", "Off", "Desc"],
         "MeterDig" | "MeterAbsUni" | "MeterAbsBi" => &["PwrN", "Un1", "Un2", "Desc"],
         "MeterAbsSt" => &["PwrN", "Un1", "Un2", "UnSt", "Desc"],
+        "EFM" => &["Un1", "Un2", "UnSt"],
         t if DESC_TYPES.contains(&t) => &["Desc"],
         _ => &[],
     }
@@ -1287,13 +1289,43 @@ pub fn empty_ok(block_type: &str, param: &str) -> bool {
     matches!((block_type, param), ("DayTimer", "On" | "Off"))
 }
 
+/// The member type a central block takes: LightController2 under a
+/// CentralLight, AutoJalousie under a CentralShade.
+pub fn central_member_type(central_type: &str) -> Option<&'static str> {
+    match central_type {
+        "CentralLight" => Some("LightController2"),
+        "CentralShade" => Some("AutoJalousie"),
+        _ => None,
+    }
+}
+
 /// Attributes Loxone Config keeps that the source does not claim, with
 /// the reason. Binding one is refused by name.
 pub fn unclaimed_reason(block_type: &str, attr: &str) -> Option<&'static str> {
     Some(match (block_type, attr) {
-        ("Alarm" | "SmokeAlarm", "Objects" | "Entries" | "CentralOut")
-        | ("CentralLight" | "CentralShade", "rec") => {
-            "the block's member list is edited in Loxone Config; Lox Logic does not write it yet"
+        ("CentralLight" | "CentralShade", "rec") => {
+            "it is the member list; write it as `<slug>.members = (<slug>, …)`"
+        }
+        // Oracle session 48: the hidden refs of the members are wired into
+        // the alarm's own inputs, and a save neither adds nor removes them.
+        ("Alarm" | "SmokeAlarm", "Objects") => {
+            "the alarm's members come with hidden refs wired into the block, \
+             which Loxone Config creates; Lox Logic does not write them"
+        }
+        ("Alarm" | "SmokeAlarm", "Entries" | "CentralOut") => {
+            "Loxone Config shows no field for it and its meaning is not documented"
+        }
+        ("EFM", "StatsType") => "the statistics settings are not documented yet",
+        (
+            "HeatIRoomController2",
+            "SourceCap" | "ExT" | "custRU" | "custRI" | "srcName" | "PrioH" | "PrioC" | "Cap"
+            | "DefFan" | "DefFanNP",
+        ) => "its meaning is not documented, and real configs show too few values to tell",
+        ("HeatIRoomController2", "UUIDTimer" | "Objects" | "linkC") => {
+            "it names objects Loxone Config keeps for the block"
+        }
+        ("Irrigation", "TRK_NE" | "TRK_MAX") | ("TpfController", "PRE") => {
+            "its meaning is not documented, and real configs show too few values to tell"
         }
         ("VirtualIn", "MinChange" | "MinTime" | "ValOT" | "Idx") => {
             "Loxone Config shows no field for it and its meaning is not documented"

@@ -611,7 +611,7 @@ fn seeded_minter(lock: &Lockfile, opts: &CompileOptions) -> Minter {
 
 /// The writes kept in their own modules, last of all: Touch Pure Flex
 /// tiles, DayTimer schedules, access rights, Automatic
-/// Designer rules and LightController2 moods.
+/// Designer rules, central block members and LightController2 moods.
 fn apply_features(
     doc: &mut LoxoneDoc,
     base: &LoxoneDoc,
@@ -653,6 +653,8 @@ fn apply_features(
     // LightController2 moods: the claimed `<LightscenesC>` list; a
     //     new mood mints its UUID (pinned in the lock until the base has
     //     it).
+    // Central blocks: the claimed `rec=` member lists.
+    super::members::apply(doc, module, &uuid_of)?;
     let minted_moods = std::mem::take(&mut lock.moods);
     lock.moods = super::moods::apply(doc, module, &uuid_of, &minted_moods, minter)?;
     if minter.counter() != mint_mark {

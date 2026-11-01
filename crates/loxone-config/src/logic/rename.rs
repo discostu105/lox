@@ -284,6 +284,13 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub(&mut c.moods);
             sub_comment(&mut c.comment);
         }
+        Item::MembersClaim(c) => {
+            sub(&mut c.slug);
+            for m in &mut c.members {
+                sub(m);
+            }
+            sub_comment(&mut c.comment);
+        }
         Item::Comment(text) => sub_text(text, old, new),
     }
 }

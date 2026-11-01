@@ -274,6 +274,9 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it. `loxl adopt` lifts
   both.
+- **Central blocks.** `zentral.members = (licht_1, licht_2)` lists the `LightController2`s of a
+  `CentralLight` (or the `AutoJalousie`s of a `CentralShade`) in order. An alarm's member list stays
+  with Loxone Config.
 - **Schedules and modes.** A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
   `weekend off`, `holiday …`) with `timer.schedule = <set>`. `party = Mode("Party")` creates a mode,
   and `party.Q` is on while it is active. Rules and schedules name a mode one way: a built-in one in a
@@ -385,6 +388,7 @@ it only when it matches what you intended.
 | `page "…" (…) is titled "…" in the base config` | a page Lox Logic created was renamed in Loxone Config | write the new title in the source (without arguments the page belongs to Loxone Config), or rename it back |
 | `recipients belong to a push notification` / `mirrors a push notification` | a `.recipients` claim or an `OutputRefLM` on something other than a `Notification` | name an extern `Notification(…)`; create the notification in Loxone Config first |
 | `a recipient takes no schedule` | `user "x": "…"` in a `recipients` body | write `user "x"` |
+| `members belong to a` / `the members of a … are` | `.members` on a block that is no central block, or a member of the wrong type | claim `.members` on a `CentralLight` (members `LightController2`) or `CentralShade` (members `AutoJalousie`) |
 | `a rule belongs to an Automatic Designer rule` / `not an Automatic Designer rule` | `rule` on a block of another type | declare `rule` only on an `AutopilotRule` extern |
 | `which Lox Logic cannot write` (rule) | the rule has conditions or actions Lox Logic cannot write (text values, the weather type, calls, speech output) | remove the declaration; edit that rule in the app |
 | `` knows no action code (`descID`) `` | a `then` to a block type/command no rule of the config uses yet | create one rule action of that kind in the app once; the compile copies its code |

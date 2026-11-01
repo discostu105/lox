@@ -559,6 +559,11 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
             Item::MoodsClaim(c) => {
                 object_refs.insert(&c.slug);
             }
+            // A central uses its members.
+            Item::MembersClaim(c) => {
+                object_refs.insert(&c.slug);
+                object_refs.extend(c.members.iter().map(String::as_str));
+            }
             // A rule uses its own block, its action targets, the blocks
             // its conditions watch and the modes it names.
             Item::Rule(r) => {

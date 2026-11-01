@@ -227,6 +227,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D95 | [Block settings from source: app name, memory type, pulse function, sunshine, texts and units](decisions/0095-block-settings.md) | accepted |
 | D96 | [Light controller circuits from source](decisions/0096-circuits-from-source.md) | accepted |
 | D97 | [Decompile lifts notifications and their recipients](decisions/0097-lift-notifications.md) | accepted |
+| D98 | [Central block members and energy units from source](decisions/0098-central-members.md) | accepted, extends [D95](decisions/0095-block-settings.md) |
 | D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
 | D102 | [Tree devices created from source](decisions/0102-created-tree-devices.md) | accepted |
 | D106 | [The simulator takes the plain reading of a block's page](decisions/0106-simulator-readings.md) | accepted, amends [D68](decisions/0068-own-simulator.md) |

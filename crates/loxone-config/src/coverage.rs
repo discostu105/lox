@@ -294,6 +294,11 @@ fn carried(doc: &LoxoneDoc, lock: &Lockfile, module: Option<&Module>) -> Vec<Car
                 }
             }
         }
+        for c in m.members_claims() {
+            if let Some(o) = lock.objects.get(&c.slug) {
+                claims.insert((o.uuid.clone(), "rec".to_string()));
+            }
+        }
     }
     let index = doc.index();
     let mut out: BTreeMap<(String, String), CarriedAttr> = BTreeMap::new();
@@ -443,6 +448,11 @@ impl Coverage {
                         && SCHEDULE_ATTRS.contains(&c.attr.as_str()) =>
                     {
                         "  claim with `<timer>.schedule = <set>`".to_string()
+                    }
+                    None if c.attr == "rec"
+                        && crate::connectors::central_member_type(&c.block_type).is_some() =>
+                    {
+                        "  claim with `<central>.members = (…)`".to_string()
                     }
                     None => String::new(),
                 };

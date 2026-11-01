@@ -41,6 +41,7 @@ mod defaults;
 mod desugar;
 mod hardware;
 mod lint;
+mod members;
 mod moods;
 mod parser;
 mod rename;
@@ -57,12 +58,12 @@ pub use adopt::{AdoptReport, AdoptedBlock, PageFragments, adopt, adopt_one, adop
 pub use ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Attr, AttrDecl,
     Binding, BindingKind, BlockDecl, ClockDecl, CmpOp, Day, DefaultsDecl, ExpectDecl, Expr,
-    ExprWireDecl, ExternDecl, Interval, Item, LetDecl, MatchSpec, ModeName, ModeSpellings, Module,
-    MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem, MovedDecl, Operand, PageDecl, PortRef,
-    RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl, RuleItem, RuleStmt, RuleStmtKind,
-    ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl, SetKind, SignalDecl,
-    TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim,
-    TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
+    ExprWireDecl, ExternDecl, Interval, Item, LetDecl, MatchSpec, MembersClaim, ModeName,
+    ModeSpellings, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem, MovedDecl,
+    Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl, RuleItem,
+    RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl,
+    SetKind, SignalDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
+    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids, unpaired_created};
 pub use decompile::{

@@ -188,10 +188,26 @@ rendered inline (`<Key>2B35</Key>`).
   - `Alarm` and `SmokeAlarm` list their members in `Objects=`, a comma
     list that mixes block UUIDs (music players, lighting and shading
     blocks, central blocks) with hidden refs. `Entries=` is 40 on every
-    corpus block; `CentralOut=` is 1 or 2, meaning unknown.
-    `CentralLight` and `CentralShade` list their members in `rec=`, a
-    comma list of `LightController2` or `AutoJalousie` UUIDs. Source:
-    corpus (4 alarms, 3 smoke alarms, 2 central lights, 1 central shade).
+    corpus block; `CentralOut=` is 1 or 2, meaning unknown. A save keeps
+    `Objects=` in the order written. The hidden refs are `InputRef`s
+    (`WF="22528"`) wired into the alarm's hidden inputs (`HI<n>`), and the
+    list does not own them: a UUID dropped from the list leaves its ref in
+    the file, still wired, and a ref removed from the file leaves its UUID
+    in the list, dangling. Source: corpus (4 alarms, 3 smoke alarms),
+    oracle session 48.
+  - `CentralLight` and `CentralShade` list their members in `rec=`, a
+    comma list of `LightController2` or `AutoJalousie` UUIDs. A save keeps
+    the list as written: its order, a UUID of another block type and one
+    listed twice. It drops a UUID that names no object, removes an empty
+    `rec=`, and moves a `rec=` written elsewhere right before `SpStates=`.
+    Every corpus list is in document order, so order is no evidence of how
+    Loxone Config adds members. `<central>.members` authors it. Source:
+    corpus (11 lists), oracle sessions 47, 48 and 50.
+  - `EFM` keeps its display units in `UnSt=` (the storage, `<v>%`),
+    `Un1=` (power, `<v.3>kW`) and `Un2=` (energy, `<v.1>kWh`), after
+    `SpStates=` and before `StatsType=`. A save keeps changed values,
+    adds none that are absent, drops an empty one, and writes them in the
+    order `UnSt Un1 Un2`. Source: corpus (3 monitors), oracle session 49.
   - `DayTimer` keeps its schedule as `<Entry>` child elements after the
     `<Co>` list (`N=` holds their count). `Analog=`/`DefValue=`/`On=`/
     `Off=` set the output behavior, `Modes=`/`UserModes=` the

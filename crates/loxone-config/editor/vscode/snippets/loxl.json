@@ -149,6 +149,13 @@
     ],
     "description": "Named light moods of a lighting controller (the off mood is implicit) and a claim"
   },
+  "members": {
+    "prefix": "members",
+    "body": [
+      "${1:zentral}.members = (${2:licht_1}, ${3:licht_2})"
+    ],
+    "description": "The lighting controllers or blinds a CentralLight or CentralShade drives, in order"
+  },
   "access": {
     "prefix": "access",
     "body": [
