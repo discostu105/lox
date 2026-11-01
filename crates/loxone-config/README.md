@@ -133,7 +133,7 @@ config the source owns and lists the blocks left to adopt.
 
 ```sh
 loxl help                            # or `lox logic help`
-loxl check modules/beschattung.loxl  # parse and validate, with line numbers
+loxl check modules/beschattung.loxl  # parse and validate: every error, with line numbers
 loxl fmt --write modules/beschattung.loxl
 loxl compile                         # in a lox.toml project: no flags needed
 loxl compile --base current.Loxone --module modules/beschattung.loxl \

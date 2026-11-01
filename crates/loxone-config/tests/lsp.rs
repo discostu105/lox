@@ -247,6 +247,49 @@ fn errors_land_on_the_name_they_are_about() {
 }
 
 #[test]
+fn every_error_is_its_own_diagnostic() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+
+    // Two independent name errors, and a second use of the undeclared
+    // name that is not reported again.
+    let two = src.replace("pumpe.On", "pumpi.On").replace(
+        "Input2: solltemp)",
+        "Input2: solltemp, Input2: 4)\nnoch = Not(I: pumpi.Q)",
+    );
+    let out = session(&[open(&pool, &two)]);
+    let d = diagnostics(&out, &pool);
+    assert_eq!(d.len(), 2, "{d:?}");
+    let starts: Vec<&Value> = d.iter().map(|x| &x["range"]["start"]).collect();
+    let (l, c) = pos(&two, "Input2: solltemp");
+    assert!(
+        starts.contains(&&json!({"line": l, "character": c})),
+        "{d:?}"
+    );
+    let (l, c) = pos(&two, "pumpi");
+    assert!(
+        starts.contains(&&json!({"line": l, "character": c})),
+        "{d:?}"
+    );
+
+    // Two syntax errors: one diagnostic on each line.
+    let syntax = src
+        .replace("pumpe.On <- heizen.Q", "pumpe.On <- <- heizen.Q")
+        .replace("page \"Pool\"", "page \"Pool\"\nx = = 3");
+    let out = session(&[open(&pool, &syntax)]);
+    let d = diagnostics(&out, &pool);
+    let lines: Vec<&Value> = d.iter().map(|x| &x["range"]["start"]["line"]).collect();
+    assert_eq!(
+        lines,
+        vec![
+            &json!(pos(&syntax, "x = = 3").0),
+            &json!(pos(&syntax, "<- <-").0)
+        ],
+        "{d:?}"
+    );
+}
+
+#[test]
 fn unused_names_are_warnings() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap() + "let spare = 3\n";

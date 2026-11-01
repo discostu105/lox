@@ -80,21 +80,51 @@ fn object_ref(names: &Names, r: &PortRef) -> Result<()> {
     }
 }
 
+/// The objects `item` references that `names` does not declare (an
+/// instance's `a.b` counts as declared: the expansion resolves it).
+fn undeclared(names: &Names, item: &Item) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut item = item.clone();
+    let _ = crate::logic::template::visit_refs(&mut item, &mut |name, usage| {
+        if usage == crate::logic::template::RefUse::LockKey {
+            return Ok(());
+        }
+        let declared = match name.split_once('.') {
+            Some((a, _)) => names.get(a) == Some(&NameKind::Instance),
+            None => names.contains_key(name.as_str()),
+        };
+        if !declared {
+            out.push(name.clone());
+        }
+        Ok(())
+    });
+    out
+}
+
 impl Module {
     /// Name uniqueness, reference resolution, and statement-level
     /// consistency (no base config needed). Port existence and directions
     /// on managed blocks are checked separately by
     /// [`crate::logic::validate_ports`].
+    ///
+    /// Statements are checked independently: every failing statement
+    /// reports its error ([`Error::Many`] for several). A statement whose
+    /// only undeclared names an earlier failing statement already used is
+    /// skipped, so one missing declaration is reported once.
     pub fn validate(&self) -> Result<()> {
-        let names = self.name_table()?;
-        self.check_scoped_names()?;
+        let mut errors = crate::error::Errors::default();
+        let names = self.name_table(&mut errors);
+        errors.check(self.check_scoped_names());
         // Tests are named by display string, in a namespace of their own.
         let mut test_names: BTreeSet<&str> = BTreeSet::new();
         for item in &self.items {
             if let Item::Test(t) = item
                 && !test_names.insert(t.name.as_str())
             {
-                return compile_err(format!("duplicate test name {}", quote(&t.name)));
+                errors.push(Error::Compile(format!(
+                    "duplicate test name {}",
+                    quote(&t.name)
+                )));
             }
         }
         // Whether every template and expression has already been lowered
@@ -105,21 +135,34 @@ impl Module {
             Item::Block(b) => b.bindings().any(|x| matches!(x.kind, BindingKind::Expr(_))),
             _ => false,
         });
-        crate::logic::defaults::by_type(&self.items)?;
+        errors.check(crate::logic::defaults::by_type(&self.items));
         let sc = Scope {
             names,
             flattened,
             modes: ModeSpellings::of([self]),
         };
         let mut seen = Seen::default();
+        // Undeclared names of statements that failed.
+        let mut reported: BTreeSet<String> = BTreeSet::new();
         for item in &self.items {
-            self.check_item(&sc, item, &mut seen)?;
+            let unknown = undeclared(&sc.names, item);
+            if !unknown.is_empty() && unknown.iter().all(|n| reported.contains(n)) {
+                continue;
+            }
+            if errors
+                .check(self.check_item(&sc, item, &mut seen))
+                .is_none()
+            {
+                reported.extend(unknown);
+            }
         }
-        self.check_lifecycle(&sc.names)
+        errors.check(self.check_lifecycle(&sc.names));
+        errors.finish()
     }
 
-    /// The declared names, each once.
-    fn name_table(&self) -> Result<Names<'_>> {
+    /// The declared names, each once; a duplicate is an error and keeps
+    /// its first declaration.
+    fn name_table(&self, errors: &mut crate::error::Errors) -> Names<'_> {
         // One namespace for externs, blocks, and constants.
         let mut names: BTreeMap<&str, NameKind> = BTreeMap::new();
         for item in &self.items {
@@ -135,8 +178,10 @@ impl Module {
                 Item::Moods(t) => (t.name.as_str(), NameKind::Moods),
                 _ => continue,
             };
-            if names.insert(name, kind).is_some() {
-                return compile_err(format!("duplicate name `{name}`"));
+            if names.contains_key(name) {
+                errors.push(Error::Compile(format!("duplicate name `{name}`")));
+            } else {
+                names.insert(name, kind);
             }
         }
         // Rights sets last: a set named like its block is the per-block
@@ -146,21 +191,21 @@ impl Module {
             match names.get(name) {
                 Some(NameKind::Extern | NameKind::Block) => {
                     let (kw, set) = (a.right.keyword(), format!("{name}_{}", a.right.keyword()));
-                    return compile_err(format!(
+                    errors.push(Error::Compile(format!(
                         "`{kw} {name}` names {} `{name}`, but {} are a named set the block claims. \
                          Write `{kw} {set}` instead of `{kw} {name}`, and claim it with \
                          `{name}.{kw} = {set}`.",
                         a.right.block_noun(),
                         a.right.rights_noun()
-                    ));
+                    )));
                 }
-                Some(_) => return compile_err(format!("duplicate name `{name}`")),
+                Some(_) => errors.push(Error::Compile(format!("duplicate name `{name}`"))),
                 None => {
                     names.insert(name, NameKind::Rights(a.right));
                 }
             }
         }
-        Ok(names)
+        names
     }
 
     /// The block type of a managed block, `…` if `slug` declares none.

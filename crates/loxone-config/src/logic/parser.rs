@@ -461,14 +461,94 @@ const STATEMENTS: &str = "expected a statement: `let <name> = <value>`, \
      `recipients <name>`, `defaults <Type>(…)`, `removed <slug>`, or \
      `moved <old> -> <new>`";
 
+/// Parse a whole file. A line that fails is reported and skipped, and
+/// parsing goes on at the next statement, so one run reports every
+/// syntax error ([`Error::Many`]). Lines that belong to a failed
+/// statement are skipped with it: the rest of its argument list, or its
+/// body up to `end`.
 pub fn parse(src: &str) -> Result<Module> {
     let mut parser = Parser::default();
+    let mut errors = crate::error::Errors::default();
+    let mut skip = Skip::None;
     for (i, raw) in src.lines().enumerate() {
         let lineno = i + 1;
-        let (toks, comment) = lex(raw, lineno)?;
-        parser.line(&toks, comment, lineno)?;
+        let Some((toks, comment)) = errors.check(lex(raw, lineno)) else {
+            continue;
+        };
+        if skip.line(&toks) {
+            continue;
+        }
+        let in_call = parser.open_call.is_some();
+        let opens_body = parser.open_template.is_none() && !parser.in_body() && !in_call;
+        if let Err(e) = parser.line(&toks, comment, lineno) {
+            errors.push(e);
+            let depth = paren_depth(&toks);
+            if in_call {
+                // A failed argument line: the list ends where its `)` is.
+                if depth < 0 {
+                    parser.drop_call();
+                }
+            } else if parser.open_call.is_none() && depth > 0 {
+                skip = Skip::Parens(depth);
+            } else if opens_body && opens_a_body(&toks) {
+                skip = Skip::Body;
+            }
+        }
     }
-    parser.finish(src.lines().count())
+    let module = errors.check(parser.finish(src.lines().count()));
+    errors.finish()?;
+    Ok(module.expect("no errors"))
+}
+
+/// Lines to skip after a statement failed, so its remaining lines are
+/// not read as statements of their own.
+enum Skip {
+    None,
+    /// The rest of an argument list: `(` still open.
+    Parens(i64),
+    /// The rest of a body, through its `end`.
+    Body,
+}
+
+impl Skip {
+    /// Whether to skip this line.
+    fn line(&mut self, toks: &[Tok]) -> bool {
+        match self {
+            Skip::None => false,
+            Skip::Parens(depth) => {
+                *depth += paren_depth(toks);
+                if *depth <= 0 {
+                    *self = Skip::None;
+                }
+                true
+            }
+            Skip::Body => {
+                if matches!(toks, [Tok::Ident(kw)] if kw == "end") {
+                    *self = Skip::None;
+                }
+                true
+            }
+        }
+    }
+}
+
+/// `(` minus `)` on a line.
+fn paren_depth(toks: &[Tok]) -> i64 {
+    toks.iter()
+        .map(|t| match t {
+            Tok::LParen => 1,
+            Tok::RParen => -1,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Whether a line starts a statement with a body closed by `end`.
+fn opens_a_body(toks: &[Tok]) -> bool {
+    set_head(toks).is_some()
+        || matches!(toks.first(), Some(Tok::Ident(kw)) if
+            matches!(kw.as_str(), "template" | "test" | "rule")
+                && !matches!(toks.get(1), Some(Tok::Eq | Tok::Dot | Tok::LArrow)))
 }
 
 /// The parser's state between lines: the items so far and the bodies
@@ -606,6 +686,13 @@ impl Parser {
         }
         self.refuse_in_template(toks, lineno)?;
         self.statement(toks, comment, lineno)
+    }
+
+    /// Give up on the open argument list after an error in it.
+    fn drop_call(&mut self) {
+        self.open_call = None;
+        self.open_tile = None;
+        self.open_defaults = false;
     }
 
     /// Inside an open argument list: arguments, comments, or `)`.

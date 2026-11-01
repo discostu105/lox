@@ -87,7 +87,7 @@ pub mod xml;
 
 pub use diff::DocDiff;
 pub use doc::LoxoneDoc;
-pub use error::{Error, Result};
+pub use error::{Error, MAX_ERRORS, Result};
 pub use lock::Lockfile;
 pub use logic::{CompileOptions, Module};
 pub use project::Project;

@@ -448,7 +448,7 @@ so the Lox Logic docs apply word for word: `loxl compile` is `lox logic compile`
 
 ```bash
 lox logic help                            # one line per command; `lox logic <cmd> --help` for its flags
-lox logic check pages/                    # parse + validate a module (line-numbered errors; --json)
+lox logic check pages/                    # parse + validate a module (every error, by file and line; --json)
 lox logic fmt --write pages/              # canonical formatting (--check for CI)
 lox logic compile                         # in a lox.toml project: base + module + lock → out.Loxone
 lox logic compile --base current.Loxone --module pages/ --lock haus.lock.json \

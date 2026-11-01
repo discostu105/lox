@@ -18,7 +18,7 @@ use crate::logic::{
     validate_ports,
 };
 use crate::port_meta::port_meta;
-use crate::{Error, Lockfile, Project};
+use crate::{Error, Lockfile, MAX_ERRORS, Project};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -262,23 +262,36 @@ impl Workspace {
     /// extern resolution, the lockfile, dead outputs — without writing
     /// anything.
     pub fn diagnostics(&self, unit: &Unit, deep: bool) -> BTreeMap<PathBuf, Vec<Diagnostic>> {
+        let mut out = self.diagnostics_unsorted(unit, deep);
+        for list in out.values_mut() {
+            list.sort_by_key(|d| (d.line, d.start));
+        }
+        out
+    }
+
+    /// [`Self::diagnostics`] in the order the checks find them.
+    fn diagnostics_unsorted(&self, unit: &Unit, deep: bool) -> BTreeMap<PathBuf, Vec<Diagnostic>> {
         let mut out: BTreeMap<PathBuf, Vec<Diagnostic>> =
             unit.files.iter().map(|f| (f.clone(), Vec::new())).collect();
         let decls = self.decls(unit);
-        let report = |e: &Error, file: &Path, out: &mut BTreeMap<PathBuf, Vec<Diagnostic>>| {
-            let (span, message) = match e {
-                Error::Parse { line, msg } => {
-                    let n = line.saturating_sub(1);
-                    let text = self.text(file).unwrap_or_default();
-                    let len = super::text::line(&text, n).len();
-                    (span(file, n, 0, len), msg.clone())
-                }
-                _ => (
-                    self.locate(&e.to_string(), &decls, unit, file),
-                    message_of(e),
-                ),
-            };
-            push(out, span, Severity::Error, message);
+        // Every error `e` stands for, each at its place (the first
+        // [`MAX_ERRORS`]).
+        let report = |e: Error, file: &Path, out: &mut BTreeMap<PathBuf, Vec<Diagnostic>>| {
+            for e in e.into_list().into_iter().take(MAX_ERRORS) {
+                let (span, message) = match &e {
+                    Error::Parse { line, msg } => {
+                        let n = line.saturating_sub(1);
+                        let text = self.text(file).unwrap_or_default();
+                        let len = super::text::line(&text, n).len();
+                        (span(file, n, 0, len), msg.clone())
+                    }
+                    _ => (
+                        self.locate(&e.to_string(), &decls, unit, file),
+                        message_of(&e),
+                    ),
+                };
+                push(out, span, Severity::Error, message);
+            }
         };
 
         let mut fragments = Vec::new();
@@ -291,7 +304,7 @@ impl Workspace {
             }) {
                 Ok(m) => fragments.push(m),
                 Err(e) => {
-                    report(&e, f, &mut out);
+                    report(e, f, &mut out);
                     failed = true;
                 }
             }
@@ -308,7 +321,7 @@ impl Workspace {
             validate_ports(&x)
         });
         if let Err(e) = checked {
-            report(&e, &first, &mut out);
+            report(e, &first, &mut out);
             return out;
         }
         let mut findings = lint_source(&module).unwrap_or_default();
@@ -352,7 +365,7 @@ impl Workspace {
                             findings.extend(lint_access(&compiled));
                             project_lints = true;
                         }
-                        Err(e) => report(&e, &first, &mut out),
+                        Err(e) => report(e, &first, &mut out),
                     }
                 }
             }
@@ -413,10 +426,24 @@ impl Workspace {
         {
             return Some(s);
         }
-        let names: Vec<&str> = message
-            .split('`')
-            .skip(1)
-            .step_by(2)
+        // "duplicate name `x`": the second declaration.
+        if let Some(rest) = message.split("duplicate name `").nth(1)
+            && let Some(name) = rest.split('`').next()
+            && let Some(d) = decls.iter().filter(|d| d.slug == name).nth(1)
+        {
+            return Some(d.span.clone());
+        }
+        let spans: Vec<&str> = message.split('`').skip(1).step_by(2).collect();
+        // A quoted statement (`b.I2 <- sw.Q`, `g.Gg = …`): where it is
+        // written.
+        if let Some(stmt) = spans.first().filter(|s| s.contains(' '))
+            && let Some(text) = stmt.split('…').next().map(str::trim)
+            && let Some(s) = self.first_text(text, unit)
+        {
+            return Some(s);
+        }
+        let names: Vec<&str> = spans
+            .iter()
             .map(|n| n.split('.').next().unwrap_or(n))
             .collect();
         let declared: Vec<&Decl> = names

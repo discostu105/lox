@@ -1954,6 +1954,16 @@ quoted one-word rule command (`then pumpe "on"`) the bare word, and a `clock` ti
 - A line that starts no statement gets an error listing every statement kind.
 - In a directory module an error of the module check names the fragment and its line
   (`src/sued.loxl:12: compile error: …`); `check --json` gives them as `path` and `line`.
+- One run reports every independent error, sorted by file and line (at most 50):
+  - A line with a syntax error is skipped, and parsing goes on at the next statement. The rest of
+    a failed argument list, or a failed body up to its `end`, is skipped with it.
+  - When a file has syntax errors, only those are reported. Its names would otherwise show up as
+    undeclared.
+  - Name, type and port errors are reported for each statement. A name that is not declared is
+    reported at its first use only. Statements about a block of an unknown type are not checked;
+    the type error covers them.
+  - The checks run in stages: syntax, then templates, then names, then types and ports. A stage
+    with errors stops the later ones.
 
 Compile errors and their remedies are in [agents.md](agents.md#errors-and-remedies).
 
