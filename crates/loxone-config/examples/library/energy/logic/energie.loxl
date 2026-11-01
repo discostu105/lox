@@ -14,7 +14,7 @@ netz = MeterAbsBi(
 )
 
 photovoltaik = MeterAbsUni(Pf: total_active_power_2.Q, Mr: total_meter_reading_consumption_2.Q)
-energiefluss = EFM()
+energiefluss = EFM(Pre: 0, Pri: 0, CO2: 0)
 
 pv_ueberschuss = AnalogThresholdTrigger(
 	Input: netz.OPf * -1,

@@ -133,6 +133,10 @@ The table (`connectors::builtin`) decides which types the compiler may create. G
    and nothing more: Loxone Config deletes unknown connectors on save.
 5. Add a test that pins the shape, and ideally a compile whose output you have opened and saved in
    Loxone Config.
+6. Regenerate `src/port_meta.rs` (`tools/extract-port-meta.py`, the command is in
+   [connector-db.md](connector-db.md)) so the new ports get their units, labels and ranges, regenerate
+   the library views if `decompile` now writes suffixes, and add the type's port descriptions to
+   `src/port_doc.rs`. `tools/check-port-docs.py` checks them against the knowledge-base page.
 
 ## Changing the language
 

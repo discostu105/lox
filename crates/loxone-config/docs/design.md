@@ -239,3 +239,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |
 | D127 | [Adopt takes over a calendar entry whose mode is gone](decisions/0127-calendar-entry-gone-mode.md) | accepted, amends [D115](decisions/0115-calendar-entry-mode.md) |
 | D128 | [A connector's 0 is no `Def=`](decisions/0128-no-def-at-zero.md) | accepted, amends [D30](decisions/0030-observed-defaults.md), extends [D112](decisions/0112-zero-is-no-attribute.md) |
+| D129 | [Port facts for the later-admitted types](decisions/0129-port-meta-regenerated.md) | accepted, follows [D52](decisions/0052-port-facts.md) and [D88](decisions/0088-port-descriptions.md) |
