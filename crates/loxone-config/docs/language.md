@@ -50,7 +50,8 @@ wire       = slug "." port "<-" ( ref "." port | expr ) [ comment ] ;
                                        desugars into gate blocks *)
 set        = slug "." port "=" value [ comment ] ;            (* extern target *)
 attr       = slug "." attr-name "=" ( string | number | const-ref ) [ comment ] ;
-                                    (* extern target, top-level only *)
+                                    (* extern target, top-level only; or
+                                       `.title` on a named signal *)
 attr-name  = "title" | "room" | "category" ;      (* lowercase: never a port key *)
 bulk       = "(" ref { "," ref } ")" "." ( port | attr-name ) "=" value [ comment ] ;
                                     (* each ref once; one line *)
@@ -813,9 +814,10 @@ minted ref (`mirrors:`) of a claimed extern carries the claimed title.
 
 Rules:
 
-- **Title: externs only.** A managed block's title is its label
+- **Title: externs and named signals.** A managed block's title is its label
   (`slug = Type("…", …)`); `.title` on it is a validation error naming
-  the remedy. Its `.room` and `.category` are allowed: the compile
+  the remedy. On a named signal `.title` sets the top block's label (see
+  [Named signals](#named-signals-slug--expr)). Its `.room` and `.category` are allowed: the compile
   writes them on every rebuild, with no lock state and no followers.
 - **Not what it is matched by.** `title:` matcher plus `.title`,
   `room:` plus `.room`, `category:` plus `.category` are refused: after
@@ -826,7 +828,8 @@ Rules:
   the same attribute are a compile error.
 - **Text, not units.** The value is a string, number or `let` reference;
   a unit value is an error.
-- **Top-level only** — not inside a `template` body.
+- **Top-level only** — not inside a `template` body, except a named
+  signal's `.title`.
 - `x.room <- …` is a parse error: attributes are assigned, never wired.
 
 ### `removed` — authorize deleting a managed block
@@ -881,6 +884,10 @@ page), also in a directory module where an earlier file names a page. Placement
 is positional, so the synthetic blocks of an expression land on the page the
 expression is written under. Objects of the object tree (a `VirtualIn`, a
 `Mode`, a device's I/O) have no page and ignore the statement.
+
+There is no statement that goes back to the default page. Put those blocks
+above the file's first `page`, or in a file of their own, or name the page:
+`page "<title>"` works for the default page too.
 
 The statement is **authoritative**. On every compile, each block it governs is pinned to a base page
 with the declared title:
@@ -1149,8 +1156,21 @@ The right side must be an expression:
 
 - A bare port (`x = a.Q`) is an error, since an alias is not a block. Write `a.Q` where `x.Q` would go.
 - A bare value (`x = 5`, `x = on`) is a constant; write `let x = 5`.
-- A signal's inputs are its expression. `<-`, port-`=` and attribute statements on a signal are
+- A signal's inputs are its expression. `<-`, port-`=`, `.room` and `.category` on a signal are
   errors, and a template body's only signal takes no call-site port forwards.
+
+**Label.** The top block's label is the expression text, unless a `.title` line gives it one:
+
+```text
+beschatten = sonne.Q and aussentemp.Q >= schwelle
+beschatten.title = "Beschatten Süd"
+```
+
+- The value is a string, number or `let` reference, as for an extern's `.title`. It is the label, not
+  a claim: nothing goes into the lockfile and the lock keys stay the same.
+- Only the top block takes it. The sub-blocks keep their expression text.
+- One `.title` per signal. `fmt` keeps it on the line below the signal.
+- In a template body a signal's `.title` may interpolate the parameters (`"Warm {name}"`).
 
 **Identity.** The top slug is written by hand, so it is **hand-owned**:
 
@@ -1165,6 +1185,16 @@ The sub-blocks are **expression-owned**, as inline: derived from the text, orpha
 automatically. A declared name in the `<slug>__` namespace is an error. In a template body a signal is
 body-local like a block: instance `sued` of `warm = …` gives `sued_warm` and `sued_warm__ge1` in the
 lock, and source names it `sued.warm` (`sued` when it is the primary block).
+
+**Decompile and adopt** write the blocks an expression compiled to as that expression again, if it
+compiles to the same blocks:
+
+- A chain used once, by a block or `<-` on its own page, goes back into that argument or wire.
+- Any other chain becomes a named signal, its label as `.title` when that is not the expression text.
+- A constant whose name a label shows comes back as `let`.
+- The operands take the names the labels give them, where the labels agree.
+
+Anything else, such as a gate drawn in Loxone Config, stays a declared block.
 
 ### `test` — a simulated scenario
 
@@ -1824,6 +1854,10 @@ replacement. The compile output of a migrated file is byte-identical.
 - The "expected a statement" error lists every statement kind.
 - **Named signals**: `wp_bedarf = a.Q and b.AQ >= 5` names an expression's result (see
   [Named signals](#named-signals-slug--expr)). New syntax only; no v1 file changes.
+  `wp_bedarf.title = "…"` gives the top block a label of its own.
+- **Decompile and adopt write expressions**: the gate chains and `Formula` blocks an expression or
+  a named signal compiled to come back as that expression, signal and `let`, where they compile to
+  the same blocks again. The rest stays declared blocks.
 - **Instance names**: a block of a template instance is `inst.block.Port`, its primary block (the
   body's only block, or the one `template t(…) -> block` names) is `inst.Port`. The expanded name
   `inst_block.Port` is an error naming the scoped one. The lock keys stay `inst_block`. Call-site

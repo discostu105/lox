@@ -56,11 +56,13 @@ use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
     ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
-    BindingKind, BlockDecl, DefaultsDecl, ExternDecl, Item, MatchSpec, Module, MoodLine,
-    MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl,
-    SetKind, Value, WireDecl, clock_text, duration_value,
+    BindingKind, BlockDecl, DefaultsDecl, ExprWireDecl, ExternDecl, Item, MatchSpec, Module,
+    MoodLine, MoodsClaim, MoodsDecl, MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind,
+    RuleDecl, SetKind, Value, WireDecl, clock_text, duration_value,
 };
 use std::collections::{BTreeMap, BTreeSet};
+
+mod exprs;
 
 /// A block another block owns: a `<C>` nested in a block whose
 /// child `<C>`s the compile carries verbatim ([`carried_children`]), such
@@ -246,6 +248,12 @@ pub(super) struct Lift {
     /// Each controller with moods of its own: the index of the set it
     /// claims, or why its moods cannot be written as one.
     pub(super) mood_claims: BTreeMap<usize, std::result::Result<usize, String>>,
+    /// Every name the lift gave out, statement keywords included.
+    names: BTreeSet<String>,
+    /// The read-only view, which leaves out values at their usual default.
+    full_view: bool,
+    /// The gate chains written as expressions and named signals.
+    pub(super) exprs: exprs::ExprLift,
 }
 
 /// One page's (or the periphery's) share of the lifted items, as indexes
@@ -277,7 +285,52 @@ struct SetsOf<'a, D> {
 }
 
 impl Lift {
+    /// The lift, with the gate chains of expressions folded back into
+    /// expressions and named signals where that compiles to the same
+    /// blocks.
     pub(super) fn build(doc: &LoxoneDoc, opts: &DecompileOptions) -> Lift {
+        let mut lift = Lift::scan(doc, opts, &BTreeMap::new());
+        // The labels name the operands. A second scan gives the objects
+        // those names, so the expressions read as their labels do.
+        let hints = lift.expr_hints();
+        if !hints.is_empty() {
+            lift = Lift::scan(doc, opts, &hints);
+        }
+        lift.lift_exprs();
+        lift.factor();
+        lift
+    }
+
+    /// The lift with every block declared: adopting one block.
+    pub(super) fn build_blocks(doc: &LoxoneDoc, opts: &DecompileOptions) -> Lift {
+        let mut lift = Lift::scan(doc, opts, &BTreeMap::new());
+        lift.factor();
+        lift
+    }
+
+    /// `defaults` from the declared blocks. Blocks an expression stands
+    /// for take no defaults: they are desugared after the defaults apply.
+    fn factor(&mut self) {
+        let declared: BTreeMap<usize, BlockDecl> = self
+            .block_decls
+            .iter()
+            .filter(|(i, _)| !self.exprs.replaces(**i))
+            .map(|(i, b)| (*i, b.clone()))
+            .collect();
+        let managed: Vec<usize> = self
+            .managed
+            .iter()
+            .copied()
+            .filter(|i| declared.contains_key(i))
+            .collect();
+        let (factored, defaults) = factor_defaults(&declared, &managed, |i| {
+            self.page_of.get(&self.objects[i].uuid).copied()
+        });
+        self.factored = factored;
+        self.defaults = defaults;
+    }
+
+    fn scan(doc: &LoxoneDoc, opts: &DecompileOptions, hints: &BTreeMap<String, String>) -> Lift {
         let objects = doc.objects();
         let idx = doc.index();
         let obj_index: BTreeMap<&str, usize> = objects
@@ -304,7 +357,7 @@ impl Lift {
         let with_rights = cx.access_blocks(&rights, &mut lifted, &mut externs);
         let liftable_rules = cx.liftable_rules(&mut lifted, &mut externs);
         let mood_lines = cx.mood_controllers(&mut lifted, &mut externs);
-        let (mut slugs, slug_of, obj_of_slug) = cx.assign_slugs(&managed, &externs);
+        let (mut slugs, slug_of, obj_of_slug) = cx.assign_slugs(&managed, &externs, hints);
         let (mood_sets, mood_claims) = cx.mood_sets(&mut slugs, &slug_of, mood_lines);
         let (match_specs, devices) = cx.match_specs(&slug_of, &managed, &externs);
         let extern_decls = cx.extern_decls(&slug_of, &externs, &match_specs, &devices);
@@ -315,9 +368,6 @@ impl Lift {
         let (block_decls, default_params_elided) = cx.block_decls(&slug_of, &managed);
         let wires = cx.extern_wires(&slug_of, &managed, touched);
         let rule_notes = cx.rule_notes(&externs);
-        let (factored, defaults) = factor_defaults(&block_decls, &managed, |i| {
-            page_of.get(&objects[i].uuid).copied()
-        });
 
         Lift {
             objects,
@@ -329,9 +379,9 @@ impl Lift {
             managed,
             externs,
             extern_decls,
+            factored: block_decls.clone(),
             block_decls,
-            factored,
-            defaults,
+            defaults: Vec::new(),
             match_specs,
             devices,
             wires,
@@ -343,6 +393,9 @@ impl Lift {
             rule_decls,
             mood_sets,
             mood_claims,
+            names: slugs.used,
+            full_view: opts.scope == DecompileScope::Full,
+            exprs: exprs::ExprLift::default(),
         }
     }
 
@@ -520,10 +573,16 @@ impl Lift {
             }),
             None => Item::Comment(" periphery (not placed on a page)".to_string()),
         }];
-        // One namespace: each `defaults` once, in its home bucket.
+        // One namespace: each `defaults` once, in its home bucket, and
+        // each constant in the first bucket that names it.
         for (d, home) in &self.defaults {
             if *home == page {
                 items.push(Item::Defaults(d.clone()));
+            }
+        }
+        for (l, pages) in &self.exprs.lets {
+            if pages.first() == Some(&page) {
+                items.push(Item::Let(l.clone()));
             }
         }
         for &i in &b.externs {
@@ -533,12 +592,7 @@ impl Lift {
             self.push_rule_notes(i, &mut items);
             items.push(Item::Extern(self.extern_decls[&i].clone()));
         }
-        for &i in &b.blocks {
-            items.push(Item::Block(self.factored[&i].clone()));
-        }
-        for &wi in &b.wires {
-            items.push(Item::Wire(self.wires[wi].0.clone()));
-        }
+        self.push_blocks(b, &mut items);
         self.push_access(page, b, false, &mut items);
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
@@ -599,7 +653,7 @@ impl Lift {
                 let blocks: Vec<&BlockDecl> = b
                     .blocks
                     .iter()
-                    .map(|i| &self.factored[i])
+                    .filter_map(|i| self.factored.get(i))
                     .filter(|x| x.block_type == d.block_type)
                     .collect();
                 let mut d = d.clone();
@@ -613,6 +667,11 @@ impl Lift {
                 });
                 if !d.args.is_empty() {
                     items.push(Item::Defaults(d));
+                }
+            }
+            for (l, pages) in &self.exprs.lets {
+                if pages.contains(&page) {
+                    items.push(Item::Let(l.clone()));
                 }
             }
             for &i in &b.externs {
@@ -629,24 +688,23 @@ impl Lift {
                 .externs
                 .iter()
                 .chain(&b.blocks)
+                .filter(|&&i| !self.exprs.absorbed.contains(&i))
                 .map(|&i| self.slug_of[&self.objects[i].uuid].as_str())
                 .collect();
             let mut foreign: Vec<usize> = Vec::new();
             {
                 let mut reference = |slug: &str| {
                     if !declared.contains(slug) {
-                        foreign.push(self.obj_of_slug[slug]);
+                        foreign.extend(self.obj_of_slug.get(slug).copied());
                     }
                 };
-                for &i in &b.blocks {
-                    for (_, src) in self.block_decls[&i].input_wires() {
-                        reference(&src.slug);
-                    }
-                }
-                for &wi in &b.wires {
-                    let w = &self.wires[wi].0;
-                    reference(&w.from.slug);
-                    reference(&w.to.slug);
+                let mut sources = Vec::new();
+                self.push_blocks(&b, &mut sources);
+                for mut item in sources {
+                    let _ = super::template::visit_refs(&mut item, &mut |slug, _| {
+                        reference(slug);
+                        Ok(())
+                    });
                 }
                 // A rule's targets may live on another page.
                 for i in &b.externs {
@@ -682,12 +740,7 @@ impl Lift {
                 declared.insert(self.slug_of[&self.objects[i].uuid].as_str());
             }
 
-            for &i in &b.blocks {
-                items.push(Item::Block(self.factored[&i].clone()));
-            }
-            for &wi in &b.wires {
-                items.push(Item::Wire(self.wires[wi].0.clone()));
-            }
+            self.push_blocks(&b, &mut items);
             self.push_access(page, &b, true, &mut items);
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
@@ -701,6 +754,29 @@ impl Lift {
             });
         }
         Ok(out)
+    }
+
+    /// A bucket's blocks and `<-` statements, with the gate chains of
+    /// expressions written as expressions.
+    fn push_blocks(&self, b: &Bucket, items: &mut Vec<Item>) {
+        for &i in &b.blocks {
+            if let Some(signal) = self.exprs.signals.get(&i) {
+                items.extend(signal.iter().cloned());
+            } else if !self.exprs.absorbed.contains(&i) {
+                items.push(Item::Block(self.factored[&i].clone()));
+            }
+        }
+        for &wi in &b.wires {
+            let w = &self.wires[wi].0;
+            items.push(match self.exprs.wire_exprs.get(&wi) {
+                Some(e) => Item::ExprWire(ExprWireDecl {
+                    to: w.to.clone(),
+                    expr: e.clone(),
+                    comment: w.comment.clone(),
+                }),
+                None => Item::Wire(w.clone()),
+            });
+        }
     }
 
     pub(super) fn report(&self) -> DecompileReport {
@@ -1174,13 +1250,29 @@ impl Scan<'_> {
         &self,
         managed: &[usize],
         externs: &[usize],
+        hints: &BTreeMap<String, String>,
     ) -> (SlugTable, BTreeMap<String, String>, BTreeMap<String, usize>) {
         let Scan { objects, .. } = *self;
         let mut slugs = SlugTable::default();
         let mut slug_of: BTreeMap<String, String> = BTreeMap::new();
         let mut obj_of_slug: BTreeMap<String, usize> = BTreeMap::new();
+        // The names an expression label gives its operands come first, so
+        // the lifted expression reads as its label does.
         for &i in managed.iter().chain(externs) {
             let o = &objects[i];
+            if let Some(hint) = hints.get(&o.uuid)
+                && super::rename::valid_slug(hint).is_ok()
+                && slugs.used.insert(hint.clone())
+            {
+                obj_of_slug.insert(hint.clone(), i);
+                slug_of.insert(o.uuid.clone(), hint.clone());
+            }
+        }
+        for &i in managed.iter().chain(externs) {
+            let o = &objects[i];
+            if slug_of.contains_key(&o.uuid) {
+                continue;
+            }
             let base = o.title.as_deref().or(o.iname.as_deref());
             let slug = slugs.assign(base.unwrap_or(&o.block_type));
             obj_of_slug.insert(slug.clone(), i);

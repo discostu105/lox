@@ -116,6 +116,10 @@ loxl compile --base current.Loxone --module modules/haus.loxl \
 loxl diff --exit-code current.Loxone out.Loxone   # must be empty
 ```
 
+Blocks an expression or named signal compiled to come back as that expression, where it compiles to
+the same blocks. A signal's name is not in the config, so an adopted signal is named after its label;
+rename it with `loxl rename`.
+
 ## The language in 30 seconds
 
 See [language.md](language.md) for the full spec. The sample is in canonical form (`loxl fmt`) and
@@ -206,7 +210,8 @@ its own argument list.
 A named signal `x = <expr>` names an expression's result. Its top block is `x` (`x.Q`; an arithmetic
 one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it instead of spelling an
 inline expression's synthetic slug (`jal_autoshade__and1`) in a test or a second consumer. `x` counts as
-a declared block, so deleting the line needs `removed x`.
+a declared block, so deleting the line needs `removed x`. Its top block's label is the expression text;
+`x.title = "Beschatten"` on the next line gives it another.
 
 A template instance names its blocks through the instance. `bad.Q` is the output of its primary block
 (the body's only block, or the one `template t(…) -> <block>` names), and `bad.melder.Q` of any other
@@ -327,7 +332,7 @@ it only when it matches what you intended.
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
 | `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
-| `targets named signal` | `<-`, port-`=` or an attribute on an `x = <expr>` signal | change the expression; its inputs are its operands |
+| `targets named signal` | `<-`, port-`=`, `.room` or `.category` on an `x = <expr>` signal | change the expression; its inputs are its operands. Only `.title` is allowed |
 | `an alias is not a block` | `x = a.Q`: a named signal needs an expression | use `a.Q` directly where `x.Q` would go |
 | `changed its top operator` | a named signal's top `and`/`or`/comparison changed, and with it its block type | give the signal a new name and add `removed <old>` |
 | `is old syntax` | a `block`/`wire`/`set`/`match`/`use` keyword from the old grammar | rewrite the line in the spelling the error shows |

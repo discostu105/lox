@@ -421,11 +421,14 @@ impl Module {
             // source's when it states them; its title
             // is its label.
             Some(NameKind::Block) if a.attr != Attr::Title => {}
+            // A named signal has no call to carry a label: `.title` is
+            // its top block's label.
+            Some(NameKind::Signal) if a.attr == Attr::Title => {}
             Some(NameKind::Signal) => {
                 return compile_err(format!(
-                    "`{target} = …` targets named signal `{}`, which takes no \
-                     attributes. Declare the blocks by hand to set one.",
-                    a.slug
+                    "`{target} = …` targets named signal `{}`, which takes only a \
+                     `.title`. Declare the blocks by hand to set its {}.",
+                    a.slug, a.attr
                 ));
             }
             Some(NameKind::Block) => {
@@ -1552,9 +1555,15 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::TilesClaim(_)
             | Item::AccessClaim(_)
             | Item::Comment(_) => {}
+            // A body signal's label.
+            Item::Attr(a)
+                if a.attr == Attr::Title
+                    && t.body
+                        .iter()
+                        .any(|i| matches!(i, Item::Signal(x) if x.slug == a.slug)) => {}
             _ => {
                 return compile_err(format!(
-                    "template `{}`: a body holds only block declarations, named signals, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
+                    "template `{}`: a body holds only block declarations, named signals and their titles, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
                     t.name
                 ));
             }

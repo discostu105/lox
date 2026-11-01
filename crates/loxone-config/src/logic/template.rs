@@ -10,7 +10,7 @@
 
 use crate::error::{Error, Result};
 use crate::logic::ast::{
-    AccessClaim, ArgItem, Binding, BindingKind, BlockDecl, Day, Expr, ExprWireDecl, Item,
+    AccessClaim, ArgItem, AttrDecl, Binding, BindingKind, BlockDecl, Day, Expr, ExprWireDecl, Item,
     MatchSpec, ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind,
     ScheduleClaim, ScheduleItem, SetDecl, SetKind, SignalDecl, TemplateDecl, TemplateParam,
     TestItem, TilesClaim, TilesItem, Value, WireDecl,
@@ -858,6 +858,15 @@ impl Module {
                     slug: map_slug(&x.slug)?,
                     expr: map_expr(&x.expr, &map_ref, &map_value)?,
                     comment: x.comment.clone(),
+                })),
+                // A body signal's label, interpolated like a block's.
+                Item::Attr(a) => out.push(Item::Attr(AttrDecl {
+                    slug: map_slug(&a.slug)?,
+                    value: match &a.value {
+                        Value::Str(s) => Value::Str(map_title(s)?),
+                        v => map_value(v)?,
+                    },
+                    ..a.clone()
                 })),
                 Item::Set(s) => out.push(Item::Set(SetDecl {
                     target: map_ref(&s.target)?,

@@ -276,7 +276,7 @@ fn adopt_one_expanded(
             opts.exclude.insert(other.uuid.clone());
         }
     }
-    let lift = Lift::build(doc, &opts);
+    let lift = Lift::build_blocks(doc, &opts);
     let [ti] = lift.managed[..] else {
         return Err(fail(format!(
             "cannot adopt {ident}: lift did not isolate it"
@@ -643,7 +643,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 layout: Some(Layout::of_element(el).expect("verified numeric")),
                 superseded_layout: None,
                 page_uuid: Some(lift.page_uuids[page].clone()),
-                expr_owned: false,
+                expr_owned: lift.exprs.absorbed.contains(&i),
                 states: Vec::new(),
             },
         );

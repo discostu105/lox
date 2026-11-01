@@ -1,7 +1,7 @@
 # D24: Expressions are sugar over discrete blocks, owned by their statement
 
-Status: accepted (2026-08-25), amended by [D26](0026-expressions-in-arguments.md) and
-[D35](0035-arithmetic-formula.md)
+Status: accepted (2026-08-25), amended by [D26](0026-expressions-in-arguments.md),
+[D35](0035-arithmetic-formula.md), [D81](0081-named-signals.md) and [D123](0123-decompile-lifts-expressions.md)
 
 ## Context
 
