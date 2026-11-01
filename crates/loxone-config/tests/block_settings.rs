@@ -289,11 +289,11 @@ fn energy_flow_units_are_written_as_given() {
         LoxoneDoc::parse(&std::fs::read("examples/library/energy/energy.Loxone").unwrap()).unwrap();
     let (module, mut lock, _) = loxone_config::logic::adopt(&doc).unwrap();
     let text = module.to_text();
-    let label = "EFM(\n\t\"Energiefluss\",\n";
+    let label = "EFM(\"Energiefluss\"";
     assert!(text.contains(label), "{text}");
     let src = text.replace(
         label,
-        &format!("{label}\tUn1: \"<v.2>W\",\n\tUn2: \"<v.1>kWh\",\n\tUnSt: \"<v>%\",\n"),
+        &format!("{label}, Un1: \"<v.2>W\", Un2: \"<v.1>kWh\", UnSt: \"<v>%\""),
     );
     let out = compile(&doc, &Module::parse(&src).unwrap(), &mut lock, &opts()).unwrap();
     for (n, v) in [("Un1", "<v.2>W"), ("Un2", "<v.1>kWh"), ("UnSt", "<v>%")] {
