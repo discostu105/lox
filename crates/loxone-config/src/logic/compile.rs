@@ -259,6 +259,15 @@ fn compile_expanded(
     // --- Resolve externs (against the untouched base).
     let extern_uuid = resolve_externs(&doc, module, lock)?;
     check_externs_unmanaged(&extern_uuid, module, lock)?;
+    // A calendar entry's raw mode number, named the way its replacement
+    //     reads (a user mode's number is only in the base).
+    let known: BTreeMap<String, String> = lock
+        .objects
+        .iter()
+        .map(|(s, o)| (s.clone(), o.uuid.clone()))
+        .chain(extern_uuid.iter().map(|(s, u)| (s.clone(), u.clone())))
+        .collect();
+    super::calendar::refuse_numbers(&doc, module, &known)?;
     let snap = teardown::snapshot_base(&doc, lock);
 
     // --- Tear down our previous output: managed objects, extern wires,
@@ -617,6 +626,9 @@ fn apply_features(
         .chain(managed.iter().map(|(s, b)| (s.clone(), b.uuid.clone())))
         .collect();
     super::tiles::apply(doc, module, &uuid_of)?;
+    // Calendar entries: `CalType=` from `switches:`, now that every mode
+    //     has its number.
+    super::calendar::apply(doc, module, &uuid_of)?;
     // DayTimer schedules: the claimed `Modes=`/`N=`/`<Entry>` set,
     //     on extern and managed timers alike; no lock state either.
     super::schedule::apply(doc, module, &uuid_of)?;

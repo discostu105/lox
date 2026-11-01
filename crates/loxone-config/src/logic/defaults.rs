@@ -166,9 +166,10 @@ pub(crate) fn factor(blocks: &mut [&mut BlockDecl]) -> Vec<DefaultsDecl> {
 }
 
 /// Ports a default may carry: values, not identity (`device:`,
-/// `mirrors:`).
+/// `mirrors:`, a calendar entry's `switches:`).
 fn factorable(block_type: &str, port: &str) -> bool {
     !(crate::periphery::is_device_binding(block_type, port)
+        || super::calendar::is_switches(block_type, port)
         || (port == "mirrors" && super::validate::is_ref_type(block_type)))
 }
 

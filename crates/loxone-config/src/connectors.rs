@@ -1170,7 +1170,6 @@ const OMITTED_WHEN_ZERO: &[&str] = &[
     "ModbusPollingCycle",
     "ModbusCoilQuantity",
     "DimmType",
-    "CalType",
     "Mode",
     "From",
     "To",
@@ -1961,7 +1960,7 @@ mod tests {
         assert!(omitted_value("VirtualIn", "MinVal", "0"));
         assert!(omitted_value("ModbusASensor", "ModbusDataType", "0"));
         assert!(omitted_value("VoltageIn", "MaxVal", "0.0"));
-        assert!(omitted_value("CalendarEntry", "CalType", "0"));
+        assert!(omitted_value("CalendarEntry", "EasterOffset", "0"));
         // A save keeps a Modbus server's 0 and raises an HTTP input's.
         assert!(!omitted_value("ModbusServer", "Timeout", "0"));
         assert!(!omitted_value("VirtualHttpIn", "Poll", "0"));

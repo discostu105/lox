@@ -34,6 +34,7 @@ mod adopt;
 mod adopt_hardware;
 mod adopt_tree;
 mod ast;
+mod calendar;
 mod compile;
 mod decompile;
 mod defaults;

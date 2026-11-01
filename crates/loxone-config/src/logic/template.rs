@@ -151,6 +151,14 @@ fn visit_args(
                 BindingKind::Param(Value::Ref(target)) if b.port == "mirrors" => {
                     f(target, RefUse::Object)?
                 }
+                // A calendar entry's `switches:` names a `Mode` by slug
+                // (a day word is no name).
+                BindingKind::Param(Value::Ref(target))
+                    if b.port == crate::logic::calendar::SWITCHES
+                        && !crate::logic::schedule::is_day(target) =>
+                {
+                    f(target, RefUse::Object)?
+                }
                 BindingKind::Param(_) => {}
             }
         }

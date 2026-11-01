@@ -206,7 +206,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D71 | [Several objects in one statement, device settings, Air serials](decisions/0071-multi-object-statements.md) | accepted |
 | D72 | [Light controllers in the app catalogue](decisions/0072-light-controllers-catalogue.md) | accepted |
 | D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) and [D110](decisions/0110-mode-reference-spelling.md) |
-| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted |
+| D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted, amended by [D115](decisions/0115-calendar-entry-mode.md) |
 | D75 | [A redacted copy](decisions/0075-redacted-copy.md) | accepted |
 | D76 | [Weather, dates and messages in rules](decisions/0076-weather-date-message-rules.md) | accepted |
 | D77 | [A stale constant under a wire](decisions/0077-stale-constant-under-wire.md) | accepted |
@@ -229,4 +229,5 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
 | D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
 | D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
+| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md) |
 | D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |

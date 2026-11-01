@@ -504,6 +504,8 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                                 "InputRef" | "OutputRef" | "OutputRefLM"
                             ))
                             || crate::periphery::is_device_binding(&b.block_type, k)
+                            || (crate::logic::calendar::is_switches(&b.block_type, k)
+                                && !crate::logic::schedule::is_day(name))
                         {
                             object_refs.insert(name);
                         } else {

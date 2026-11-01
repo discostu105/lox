@@ -441,6 +441,34 @@ fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
 }
 
 #[test]
+fn a_calendar_mode_number_offers_its_day_word_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let numbered = format!("{src}\nheizperiode = CalendarEntry(\"Heizperiode\", CalType: 10)\n");
+    let out = session(&[open(&pool, &src), change(&pool, &numbered), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &numbered),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `switches: heating`");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    let (l, c) = pos(&numbered, "CalType: 10");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
 fn a_mode_title_offers_its_slug_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();

@@ -625,14 +625,15 @@ A user-defined operating mode is an object of the object tree, like a virtual in
 - `adopt --uuid <mode> --as <slug>` takes over a user mode made in Loxone Config. It keeps its UUID
   and `Mode=` number; a new title is a rename. A built-in mode (`Mode=` ≥ 0) stays an extern.
 
-**One spelling per mode.** Rules (`when mode`, `then mode`) and schedule lines name a mode one way:
+**One spelling per mode.** Rules (`when mode`, `then mode`), schedule lines and a calendar entry's
+`switches:` name a mode one way:
 
-1. a built-in mode in a schedule by its day word (`mon`, `holiday`, `heating`, …);
+1. a built-in mode in a schedule or calendar entry by its day word (`mon`, `holiday`, `heating`, …);
 2. a mode the module declares or externs by its slug (`when mode party`, `party 18:00-24:00`);
 3. any other mode by its quoted title (`when mode "Urlaub"`).
 
-A slug that is a day word cannot name a mode in a schedule, since the day word wins; that mode keeps
-its title there. Another spelling is an error that states the line as it should read: write
+A slug that is a day word cannot name a mode in a schedule or calendar entry, since the day word
+wins; that mode keeps its title there. Another spelling is an error that states the line as it should read: write
 `party 18:00-24:00` instead of `"Party" 18:00-24:00`. `loxl check` catches what the source shows,
 `loxl compile` the rest (a mode an extern matches by UUID, a built-in mode by title). `loxl fmt` on a
 module directory rewrites the spellings the source shows; `decompile` and `adopt` write them.
@@ -640,15 +641,30 @@ module directory rewrites the spellings the source shows; `decompile` and `adopt
 ### Calendar entries — the *Betriebszeiten* that switch a mode on
 
 ```text
-ferien = CalendarEntry("Sommerferien", CalType: 2, Mode: 3, From: 6393, To: 6456)
-ostern = CalendarEntry("Ostermontag", Mode: 1, EasterOffset: 1)
-silvester = CalendarEntry("Silvester", CalType: -8, Month: 12, Day: 31)
+party = Mode("Party")
+ferien = CalendarEntry("Sommerferien", switches: vacation, Mode: 3, From: 6393, To: 6456)
+ostern = CalendarEntry("Ostermontag", switches: holiday, Mode: 1, EasterOffset: 1)
+silvester = CalendarEntry("Silvester", switches: party, Month: 12, Day: 31)
+heizperiode = CalendarEntry("Heizperiode", switches: heating, Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30)
 ```
 
 An entry of the *Betriebszeiten* calendar is an object of the object
-tree, minted into the `CalendarCaption` folder. `CalType` is the
-`Mode=` number of the mode it switches on (absent: 0, the holiday
-mode); `Mode` says what kind of date it is:
+tree, minted into the `CalendarCaption` folder. `switches:` names the
+operating mode it switches on, spelled as everywhere else (see
+[One spelling per mode](#operating-modes--minted-into-the-betriebsmodi-folder)):
+a built-in mode by one day word (`holiday`, `vacation`, `dayoff`,
+`mon` … `sun`, `heating`, `cooling`; not `weekdays`, which is several
+modes), a mode the module declares or externs by its slug, any other by
+its quoted title (`switches: "Urlaub"`). It compiles to the entry's
+`CalType=`, the mode's `Mode=` number (none for the holiday mode, 0).
+Without `switches:`, a fresh entry switches the holiday mode, and an
+adopted one keeps its mode.
+
+The stored number is no longer source: `CalType: 10` is an error that
+names the replacement, `switches: heating`. `loxl check` names it for a
+built-in mode, `loxl compile` for a user mode (negative numbers, which
+only the config resolves), and `loxl fmt` rewrites a built-in mode's
+number. `Mode` is not the mode: it says what kind of date the entry is:
 
 | `Mode` | Kind | Attributes |
 |---|---|---|
@@ -661,8 +677,8 @@ Other kinds do not occur among the corpus's 397 entries; the attributes
 are written as stated. A fresh entry carries the attributes Loxone
 Config writes for an unset date (`Month`/`Day`/`Month2`/`Day2` 1,
 `WeekDayInMonth="1"`). The entries Loxone Config made are taken over
-with `adopt --uuid`; edits change only the attributes the source
-states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
+with `adopt --uuid`, which writes their mode with `switches:`; edits
+change only the attributes the source states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
 is the output to use.
 
 ### `<-` — wire onto an extern port
@@ -1852,6 +1868,10 @@ replacement. The compile output of a migrated file is byte-identical.
   `party 18:00-24:00`), any other by title. `when mode "Party"` next to `party = Mode("Party")` is
   an error naming `when mode party`; `"Montag" 06:00-07:00` one naming `mon 06:00-07:00`. `fmt`,
   `decompile` and `adopt` write the one spelling.
+- **A calendar entry names its mode with `switches:`**, in the same one spelling
+  (`switches: heating`, `switches: party`, `switches: "Urlaub"`), instead of the stored number
+  `CalType: 10`. The number is an error naming the replacement; `fmt` rewrites a built-in mode's
+  number, `adopt` writes `switches:`.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1863,7 +1883,8 @@ whose blocks relied on the previous file's `page` that `page` line, rename each
 (`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
 `notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
 (which also unquotes one-word `then` commands, puts short calls on one line and names a mode the
-module declares by its slug; `loxl compile` names the modes it cannot see) and, if you like,
+module declares by its slug and a calendar entry's built-in `CalType:` by its day word; `loxl
+compile` names the modes it cannot see) and, if you like,
 `loxl lint --fix` for the unit suffixes.
 
 ## Versioning
