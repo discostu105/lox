@@ -371,12 +371,29 @@ impl<W: Write> Server<'_, W> {
                     "start": { "line": line, "character": self.enc.column(l, from) },
                     "end": { "line": line, "character": self.enc.column(l, to) },
                 });
+                let mut edits = vec![json!({ "range": range, "newText": new })];
+                // A set renamed off its block: "… and claim it with
+                // `x.access = x_access`" goes after the set's `end`.
+                if let Some(claim) = analysis::claim_to_add(msg)
+                    && let Some(end) = text
+                        .split('\n')
+                        .enumerate()
+                        .skip(line + 1)
+                        .find(|(_, t)| t.split('#').next().unwrap_or("").trim() == "end")
+                        .map(|(n, _)| n)
+                {
+                    let at = json!({ "line": end + 1, "character": 0 });
+                    edits.push(json!({
+                        "range": { "start": at, "end": at },
+                        "newText": format!("\n{claim}\n"),
+                    }));
+                }
                 out.push(json!({
                     "title": format!("Change to `{new}`"),
                     "kind": "quickfix",
                     "diagnostics": [d],
                     "isPreferred": true,
-                    "edit": { "changes": { uri.clone(): [{ "range": range, "newText": new }] } },
+                    "edit": { "changes": { uri.clone(): edits } },
                 }));
                 continue;
             }

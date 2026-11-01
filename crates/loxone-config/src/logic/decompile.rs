@@ -34,9 +34,10 @@
 //!
 //! The report counts what was not lifted.
 //!
-//! Access rights on NFC Code Touch blocks lift into `access` declarations,
-//! in both scopes, with an extern for every Code Touch that has
-//! any: adopting a config takes its access over unchanged.
+//! Access rights on NFC Code Touch blocks lift into `access` sets with a
+//! claim per Code Touch, in both scopes, with an extern for every Code
+//! Touch that has any: adopting a config takes its access over unchanged.
+//! Code Touches with the same rights share one set.
 //!
 //! LightController2 moods lift into `moods` sets with a claim per
 //! controller, in both scopes, again with an extern for every
@@ -54,9 +55,10 @@ use crate::connectors::{
 use crate::doc::{GUI_OWNED_ATTRS, LoxoneDoc, ObjectSummary, ports};
 use crate::error::Result;
 use crate::logic::ast::{
-    ACCESS_BLOCK_TYPE, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding, BindingKind,
-    BlockDecl, ExternDecl, Item, MatchSpec, Module, MoodLine, MoodsClaim, MoodsDecl, MoodsItem,
-    PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, Value, WireDecl, clock_text,
+    ACCESS_BLOCK_TYPE, AccessClaim, AccessDecl, AccessGrant, AccessItem, ArgItem, Binding,
+    BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, MoodLine, MoodsClaim, MoodsDecl,
+    MoodsItem, PageDecl, PortRef, RULE_BLOCK_TYPE, RightKind, RuleDecl, SetKind, Value, WireDecl,
+    clock_text,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -222,9 +224,12 @@ pub(super) struct Lift {
     /// Automatic Designer rule summaries (full view only): extern object
     /// index → `#` comment lines rendered from the rule's `APC=` payload.
     rule_notes: BTreeMap<usize, Vec<String>>,
-    /// The `access` declaration of each NFC Code Touch extern with access
-    /// rights, or why its rights cannot be written as one.
-    access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>>,
+    /// Access sets lifted from NFC Code Touches, each with the bucket it
+    /// is declared in: the earliest of its Code Touches'.
+    access_sets: Vec<(AccessDecl, Option<usize>)>,
+    /// Each Code Touch with access rights: the index of the set it claims,
+    /// or why its rights cannot be written as one.
+    access_claims: BTreeMap<usize, std::result::Result<usize, String>>,
     /// The `rule` declaration of each Automatic Designer rule whose
     /// payload reads as the documented shapes.
     rule_decls: BTreeMap<usize, RuleDecl>,
@@ -243,6 +248,25 @@ struct Bucket {
     externs: Vec<usize>,
     blocks: Vec<usize>,
     wires: Vec<usize>,
+}
+
+/// Sets lifted from the config, each with its home page, and per block
+/// the index of the set it claims or why it has none.
+type LiftedSets<D> = (
+    Vec<(D, Option<usize>)>,
+    BTreeMap<usize, std::result::Result<usize, String>>,
+);
+
+/// The lifted sets of one kind and a bucket to emit them for.
+struct SetsOf<'a, D> {
+    kind: SetKind,
+    page: Option<usize>,
+    bucket: &'a Bucket,
+    self_contained: bool,
+    /// Each set with its home bucket.
+    sets: &'a [(&'a D, Option<usize>)],
+    /// Each claiming block: the index of its set, or why it has none.
+    claims: &'a BTreeMap<usize, std::result::Result<usize, String>>,
 }
 
 impl Lift {
@@ -278,13 +302,8 @@ impl Lift {
         let (match_specs, devices) = cx.match_specs(&slug_of, &managed, &externs);
         let extern_decls = cx.extern_decls(&slug_of, &externs, &match_specs, &devices);
 
-        let access_decls: BTreeMap<usize, std::result::Result<AccessDecl, String>> = with_rights
-            .iter()
-            .map(|&i| {
-                let slug = &slug_of[&objects[i].uuid];
-                (i, access_decl(&access, &rights, &objects[i].uuid, slug))
-            })
-            .collect();
+        let (access_sets, access_claims) =
+            cx.access_sets(&mut slugs, &slug_of, &access, &rights, &with_rights);
         let rule_decls = cx.rule_decls(&slug_of, &liftable_rules);
         let (block_decls, default_params_elided) = cx.block_decls(&slug_of, &managed);
         let wires = cx.extern_wires(&slug_of, &managed, touched);
@@ -307,7 +326,8 @@ impl Lift {
             ref_wires_folded,
             default_params_elided,
             rule_notes,
-            access_decls,
+            access_sets,
+            access_claims,
             rule_decls,
             mood_sets,
             mood_claims,
@@ -327,26 +347,40 @@ impl Lift {
         }
     }
 
-    /// The `access` declarations of the given lifted objects; a
-    /// block whose rights cannot be written as one gets a comment saying
-    /// why.
-    fn push_access<'a>(&self, objs: impl IntoIterator<Item = &'a usize>, items: &mut Vec<Item>) {
-        for i in objs {
-            match self.access_decls.get(i) {
-                Some(Ok(decl)) => items.push(Item::Access(decl.clone())),
-                Some(Err(why)) => items.push(Item::Comment(format!(
-                    " access {}: not lifted — {why}",
-                    self.slug_of[&self.objects[*i].uuid]
-                ))),
-                None => {}
-            }
-        }
+    /// The access sets and claims of a bucket's Code Touches; a block
+    /// whose rights cannot be written as a set gets a comment saying why.
+    fn push_access(
+        &self,
+        page: Option<usize>,
+        b: &Bucket,
+        self_contained: bool,
+        items: &mut Vec<Item>,
+    ) {
+        let sets: Vec<(&AccessDecl, Option<usize>)> =
+            self.access_sets.iter().map(|(s, h)| (s, *h)).collect();
+        self.push_sets(
+            SetsOf {
+                kind: SetKind::Access,
+                page,
+                bucket: b,
+                self_contained,
+                sets: &sets,
+                claims: &self.access_claims,
+            },
+            |set| Item::Access(set.clone()),
+            |slug, set| {
+                Item::AccessClaim(AccessClaim {
+                    slug,
+                    right: RightKind::Access,
+                    set: set.name.clone(),
+                    comment: None,
+                })
+            },
+            items,
+        );
     }
 
-    /// The mood sets and claims of a bucket's controllers. A
-    /// `self_contained` module declares every set its claims name; in
-    /// one shared namespace each set is declared once, in its home
-    /// bucket.
+    /// The mood sets and claims of a bucket's controllers.
     fn push_moods(
         &self,
         page: Option<usize>,
@@ -354,33 +388,66 @@ impl Lift {
         self_contained: bool,
         items: &mut Vec<Item>,
     ) {
-        let claims: Vec<(usize, &std::result::Result<usize, String>)> = b
+        let sets: Vec<(&MoodsDecl, Option<usize>)> =
+            self.mood_sets.iter().map(|(s, h)| (s, *h)).collect();
+        self.push_sets(
+            SetsOf {
+                kind: SetKind::Moods,
+                page,
+                bucket: b,
+                self_contained,
+                sets: &sets,
+                claims: &self.mood_claims,
+            },
+            |set| Item::Moods(set.clone()),
+            |slug, set| {
+                Item::MoodsClaim(MoodsClaim {
+                    slug,
+                    moods: set.name.clone(),
+                    comment: None,
+                })
+            },
+            items,
+        );
+    }
+
+    /// The sets of one kind a bucket needs, then its blocks' claims. A
+    /// `self_contained` module declares every set its claims name; in
+    /// one shared namespace each set is declared once, in its home
+    /// bucket.
+    fn push_sets<D>(
+        &self,
+        of: SetsOf<'_, D>,
+        decl: impl Fn(&D) -> Item,
+        claim: impl Fn(String, &D) -> Item,
+        items: &mut Vec<Item>,
+    ) {
+        let claims: Vec<(usize, &std::result::Result<usize, String>)> = of
+            .bucket
             .externs
             .iter()
-            .chain(&b.blocks)
-            .filter_map(|i| Some((*i, self.mood_claims.get(i)?)))
+            .chain(&of.bucket.blocks)
+            .filter_map(|i| Some((*i, of.claims.get(i)?)))
             .collect();
-        for (k, (set, home)) in self.mood_sets.iter().enumerate() {
-            let wanted = if self_contained {
+        for (k, (set, home)) in of.sets.iter().enumerate() {
+            let wanted = if of.self_contained {
                 claims
                     .iter()
                     .any(|(_, c)| c.as_ref().is_ok_and(|ck| *ck == k))
             } else {
-                *home == page
+                *home == of.page
             };
             if wanted {
-                items.push(Item::Moods(set.clone()));
+                items.push(decl(set));
             }
         }
-        for (i, claim) in claims {
+        for (i, c) in claims {
             let slug = self.slug_of[&self.objects[i].uuid].clone();
-            items.push(match claim {
-                Ok(k) => Item::MoodsClaim(MoodsClaim {
-                    slug,
-                    moods: self.mood_sets[*k].0.name.clone(),
-                    comment: None,
-                }),
-                Err(why) => Item::Comment(format!(" moods {slug}: not lifted — {why}")),
+            items.push(match c {
+                Ok(k) => claim(slug, of.sets[*k].0),
+                Err(why) => {
+                    Item::Comment(format!(" {} {slug}: not lifted — {why}", of.kind.keyword()))
+                }
             });
         }
     }
@@ -454,7 +521,7 @@ impl Lift {
         for &wi in &b.wires {
             items.push(Item::Wire(self.wires[wi].0.clone()));
         }
-        self.push_access(b.externs.iter().chain(&b.blocks), &mut items);
+        self.push_access(page, b, false, &mut items);
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
         items
@@ -582,7 +649,7 @@ impl Lift {
             for &wi in &b.wires {
                 items.push(Item::Wire(self.wires[wi].0.clone()));
             }
-            self.push_access(b.externs.iter().chain(&b.blocks), &mut items);
+            self.push_access(page, &b, true, &mut items);
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
 
@@ -1085,6 +1152,45 @@ impl Scan<'_> {
         (mood_sets, mood_claims)
     }
 
+    /// The access sets of the Code Touches with rights, like the mood
+    /// sets: Code Touches with the same grants share one set, named after
+    /// the first (`<slug>_access`).
+    fn access_sets(
+        &self,
+        slugs: &mut SlugTable,
+        slug_of: &BTreeMap<String, String>,
+        model: &crate::access::AccessModel,
+        rights: &[crate::access::AccessRight<'_>],
+        with_rights: &[usize],
+    ) -> LiftedSets<AccessDecl> {
+        let Scan {
+            objects, page_of, ..
+        } = *self;
+        let mut sets: Vec<(AccessDecl, Option<usize>)> = Vec::new();
+        let mut claims: BTreeMap<usize, std::result::Result<usize, String>> = BTreeMap::new();
+        for &i in with_rights {
+            let uuid = &objects[i].uuid;
+            let page = page_of.get(uuid).copied();
+            let claim = access_grants(model, rights, uuid).map(|body| {
+                if let Some(k) = sets.iter().position(|(set, _)| set.body == body) {
+                    sets[k].1 = sets[k].1.min(page);
+                    return k;
+                }
+                let set = AccessDecl {
+                    right: RightKind::Access,
+                    name: slugs.assign(&format!("{}_access", slug_of[uuid])),
+                    body,
+                    comment: None,
+                    end_comment: None,
+                };
+                sets.push((set, page));
+                sets.len() - 1
+            });
+            claims.insert(i, claim);
+        }
+        (sets, claims)
+    }
+
     /// Match specs for every lifted object (managed ones may be needed
     /// as foreign externs in the per-page view). A ref whose `Ref=`
     /// target has a slug in this module says so semantically
@@ -1493,15 +1599,14 @@ impl Scan<'_> {
     }
 }
 
-/// The access rights on `block` as an `access` declaration: users,
+/// The access rights on `block` as the body of an `access` set: users,
 /// then groups, each in document order. Titles are the references, so a
 /// principal or schedule without a unique title cannot be written down.
-fn access_decl(
+fn access_grants(
     model: &crate::access::AccessModel,
     rights: &[crate::access::AccessRight<'_>],
     block: &str,
-    slug: &str,
-) -> std::result::Result<AccessDecl, String> {
+) -> std::result::Result<Vec<AccessItem>, String> {
     use crate::access::PrincipalKind;
     let unique = |what: &str, uuid: &str, titles: Vec<(&str, Option<&str>)>| {
         let title = titles
@@ -1550,13 +1655,7 @@ fn access_decl(
             comment: None,
         }));
     }
-    Ok(AccessDecl {
-        right: RightKind::Access,
-        slug: slug.to_string(),
-        body,
-        comment: None,
-        end_comment: None,
-    })
+    Ok(body)
 }
 
 /// Whether `s` can be written as a language identifier

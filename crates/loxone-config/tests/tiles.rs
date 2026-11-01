@@ -530,7 +530,7 @@ fn statement_level_refusals() {
         ("flex.tiles <- jal_nord.Q\n", "never a wire"),
         (
             "template x(d: TreeDevice)\n\ttiles t\nend\n",
-            "not allowed inside a template body",
+            "declared at the top level, not inside a template body",
         ),
     ] {
         let err = parse_err(src);

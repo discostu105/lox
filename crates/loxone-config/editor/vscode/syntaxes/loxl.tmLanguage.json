@@ -102,7 +102,7 @@
       },
       "patterns": [
         {
-          "match": "([a-z][a-z0-9_]*)\\s*(:)\\s*(moods|schedule|tiles|any)\\b",
+          "match": "([a-z][a-z0-9_]*)\\s*(:)\\s*(moods|schedule|tiles|access|recipients|any)\\b",
           "captures": {
             "1": { "name": "variable.parameter.loxl" },
             "2": { "name": "punctuation.separator.loxl" },
@@ -285,7 +285,7 @@
       ]
     },
     "access": {
-      "comment": "access <code_touch> … end with user/group \"<title>\": \"<schedule>\" grants (D49); recipients <notification> … end with user/group \"<title>\" (D51)",
+      "comment": "access <name> … end with user/group \"<title>\": \"<schedule>\" grants; recipients <name> … end with user/group \"<title>\" (D83); claimed with <slug>.access|recipients = <name>",
       "patterns": [
         {
           "match": "^\\s*(access|recipients)\\s+([a-z][a-z0-9_]*)\\s*(?=$|#)",
@@ -397,7 +397,7 @@
       }
     },
     "attr": {
-      "match": "^\\s*([a-z][a-z0-9_]*)(\\.)(title|room|category|tiles)\\s*(=)",
+      "match": "^\\s*([a-z][a-z0-9_]*)(\\.)(title|room|category|tiles|schedule|moods|access|recipients)\\s*(=)",
       "captures": {
         "1": { "name": "variable.other.loxl" },
         "2": { "name": "punctuation.accessor.loxl" },

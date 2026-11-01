@@ -21,7 +21,7 @@ struct Scope<'a> {
 struct Seen<'a> {
     attrs_seen: BTreeSet<(&'a str, Attr)>,
     tiles_claimed: BTreeSet<&'a str>,
-    access_declared: BTreeSet<&'a str>,
+    access_claimed: BTreeSet<&'a str>,
     schedules_claimed: BTreeSet<&'a str>,
     moods_claimed: BTreeSet<&'a str>,
     rules_declared: BTreeSet<&'a str>,
@@ -132,6 +132,27 @@ impl Module {
                 return compile_err(format!("duplicate name `{name}`"));
             }
         }
+        // Rights sets last: a set named like its block is the per-block
+        // form of earlier versions, which gets its replacement.
+        for a in self.access_decls() {
+            let name = a.name.as_str();
+            match names.get(name) {
+                Some(NameKind::Extern | NameKind::Block) => {
+                    let (kw, set) = (a.right.keyword(), format!("{name}_{}", a.right.keyword()));
+                    return compile_err(format!(
+                        "`{kw} {name}` names {} `{name}`, but {} are a named set the block claims. \
+                         Write `{kw} {set}` instead of `{kw} {name}`, and claim it with \
+                         `{name}.{kw} = {set}`.",
+                        a.right.block_noun(),
+                        a.right.rights_noun()
+                    ));
+                }
+                Some(_) => return compile_err(format!("duplicate name `{name}`")),
+                None => {
+                    names.insert(name, NameKind::Rights(a.right));
+                }
+            }
+        }
         Ok(names)
     }
 
@@ -200,7 +221,8 @@ impl Module {
             Item::Instance(call) => self.check_instance(names, call)?,
             Item::Tiles(t) => self.check_tiles(sc, t)?,
             Item::TilesClaim(c) => self.check_tiles_claim(names, c, seen)?,
-            Item::Access(a) => self.check_access(names, a, seen)?,
+            Item::Access(a) => self.check_access(a)?,
+            Item::AccessClaim(c) => self.check_access_claim(sc, c, seen)?,
             Item::Schedule(t) => {
                 crate::logic::schedule::program(t)
                     .map_err(|m| Error::Compile(format!("`schedule {}`: {m}", t.name)))?;
@@ -709,75 +731,10 @@ impl Module {
         Ok(())
     }
 
-    /// `access`/`recipients` on an NFC Code Touch or a notification.
-    fn check_access<'a>(
-        &self,
-        names: &Names,
-        a: &'a AccessDecl,
-        seen: &mut Seen<'a>,
-    ) -> Result<()> {
-        let access_declared = &mut seen.access_declared;
-        let (kw, ty_want, noun) = (
-            a.right.keyword(),
-            a.right.block_type(),
-            a.right.block_noun(),
-        );
-        let ctx = format!("`{kw} {}`", a.slug);
-        let what = match a.right {
-            RightKind::Access => "access rights with a schedule belong to",
-            RightKind::Recipients => "recipients belong to",
-        };
-        match names.get(a.slug.as_str()) {
-            // A managed block works as well: an adopted Code
-            // Touch keeps its rights in the source.
-            Some(kind @ (NameKind::Extern | NameKind::Block)) => {
-                let ty = if matches!(kind, NameKind::Extern) {
-                    self.externs()
-                        .find(|e| e.slug == a.slug)
-                        .map_or("", |e| e.block_type.as_str())
-                } else {
-                    self.blocks()
-                        .find(|b| b.slug == a.slug)
-                        .map_or("", |b| b.block_type.as_str())
-                };
-                if ty != ty_want {
-                    return compile_err(format!(
-                        "{ctx}: {what} {noun}, a `{ty_want}`, but `{}` is declared \
-                                     as `{ty}`",
-                        a.slug
-                    ));
-                }
-            }
-            Some(kind) => {
-                return compile_err(format!(
-                    "{ctx}: `{}` is {}. Declare {kw} on an extern: `extern {} = {ty_want}(…)`",
-                    a.slug,
-                    kind.describe(),
-                    a.slug
-                ));
-            }
-            None => {
-                let hint = crate::logic::validate::suggest(
-                    &a.slug,
-                    self.externs().map(|e| e.slug.as_str()),
-                );
-                return compile_err(format!(
-                    "{ctx}: undeclared slug `{}`{hint}. Declare the block as \
-                                 `extern {} = {ty_want}(…)`",
-                    a.slug, a.slug
-                ));
-            }
-        }
-        if !access_declared.insert(&a.slug) {
-            return compile_err(format!(
-                "{ctx} is declared twice. One declaration holds all {} of \
-                             the block",
-                match a.right {
-                    RightKind::Access => "access rights",
-                    RightKind::Recipients => "recipients",
-                }
-            ));
-        }
+    /// An `access`/`recipients` set: each principal once, with a schedule
+    /// exactly where the right takes one.
+    fn check_access(&self, a: &AccessDecl) -> Result<()> {
+        let ctx = format!("`{} {}`", a.right.keyword(), a.name);
         let mut principals: BTreeSet<(PrincipalKind, &str)> = BTreeSet::new();
         for g in a.grants() {
             match (a.right, &g.schedule) {
@@ -813,6 +770,87 @@ impl Module {
                     quote(&g.principal),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// `code_touch.access = set` / `notification.recipients = set`
+    /// claims a block's access rights or recipients.
+    fn check_access_claim<'a>(
+        &self,
+        sc: &Scope,
+        c: &'a AccessClaim,
+        seen: &mut Seen<'a>,
+    ) -> Result<()> {
+        let (names, flattened) = (&sc.names, sc.flattened);
+        let (kw, ty_want, noun) = (
+            c.right.keyword(),
+            c.right.block_type(),
+            c.right.block_noun(),
+        );
+        let rights = c.right.rights_noun();
+        let ty = match names.get(c.slug.as_str()) {
+            Some(NameKind::Extern) => self
+                .externs()
+                .find(|e| e.slug == c.slug)
+                .map_or("", |e| e.block_type.as_str()),
+            // A managed block works as well: an adopted Code Touch keeps
+            // its rights in the source.
+            Some(NameKind::Block) => self.block_type_of(&c.slug),
+            None if !flattened => ty_want,
+            Some(kind) => {
+                return compile_err(format!(
+                    "`{c}`: `{}` is {}. Claim {rights} on {noun} (`{ty_want}`), an extern or \
+                     a managed block",
+                    c.slug,
+                    kind.describe()
+                ));
+            }
+            None => {
+                let hint = crate::logic::validate::suggest(
+                    &c.slug,
+                    self.externs().map(|e| e.slug.as_str()),
+                );
+                return compile_err(format!(
+                    "`{c}`: undeclared slug `{}`{hint}. Declare the block as \
+                     `extern {} = {ty_want}(…)`",
+                    c.slug, c.slug
+                ));
+            }
+        };
+        if ty != ty_want {
+            return compile_err(format!(
+                "`{c}`: {rights} belong to {noun}, a `{ty_want}`, but `{}` is a `{ty}`",
+                c.slug
+            ));
+        }
+        match names.get(c.set.as_str()) {
+            Some(NameKind::Rights(r)) if *r == c.right => {}
+            Some(kind) => {
+                return compile_err(format!(
+                    "`{c}`: `{}` is {}, not {} set",
+                    c.set,
+                    kind.describe(),
+                    NameKind::Rights(c.right)
+                        .describe()
+                        .trim_end_matches(" set")
+                ));
+            }
+            None => {
+                let hint = crate::logic::validate::suggest(
+                    &c.set,
+                    self.access_decls()
+                        .filter(|a| a.right == c.right)
+                        .map(|a| a.name.as_str()),
+                );
+                return compile_err(format!("`{c}`: no `{kw} {}` set is declared{hint}", c.set));
+            }
+        }
+        if !seen.access_claimed.insert(&c.slug) {
+            return compile_err(format!(
+                "duplicate assignment `{}.{kw} = …`. A block takes one `{kw}` set",
+                c.slug
+            ));
         }
         Ok(())
     }
@@ -1277,6 +1315,7 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
             | Item::MoodsClaim(_)
             | Item::ScheduleClaim(_)
             | Item::TilesClaim(_)
+            | Item::AccessClaim(_)
             | Item::Comment(_) => {}
             _ => {
                 return compile_err(format!(

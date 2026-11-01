@@ -228,18 +228,20 @@ fn output_ref_lm_is_checked() {
 // ── recipients (D51) ────────────────────────────────────────────────────────
 
 fn recipients(body: &str) -> String {
-    format!("recipients frost\n{body}end\n")
+    format!("recipients familie\n{body}end\nfrost.recipients = familie\n")
 }
 
 #[test]
 fn recipients_declarations_are_canonical() {
     let src = format!(
         "{EXTERNS}\n\
-         recipients frost # Frostwarnung\n\
+         recipients familie # Frostwarnung\n\
          \t# die Familie\n\
          \tuser \"dana\"\n\
          \tgroup \"Family\" # alle\n\
-         end\n"
+         end\n\
+         \n\
+         frost.recipients = familie\n"
     );
     let m = Module::parse(&src).unwrap();
     assert_eq!(m.to_text(), src);
@@ -263,16 +265,19 @@ fn recipients_declarations_are_checked() {
     assert!(e.contains("a recipient takes no schedule"), "{e}");
     let e = error(&recipients("\tuser dana\n"));
     assert!(e.contains("expected `user \"<title>\"`"), "{e}");
-    let e = error("recipients cover\nend\n");
-    assert!(e.contains("declared as `VirtualIn`"), "{e}");
-    let e = error(&format!("{}{}", recipients(""), recipients("")));
-    assert!(e.contains("declared twice"), "{e}");
+    let e = error("recipients familie\nend\ncover.recipients = familie\n");
+    assert!(e.contains("but `cover` is a `VirtualIn`"), "{e}");
+    let e = error(&format!("{}frost.recipients = familie\n", recipients("")));
+    assert!(
+        e.contains("duplicate assignment `frost.recipients = …`"),
+        "{e}"
+    );
     let e = error(&recipients("\tuser \"dana\"\n\tuser \"dana\"\n"));
     assert!(e.contains("user \"dana\" is listed twice"), "{e}");
     let e = error(&recipients("\tuser \"dahna\"\n\tuser \"carol\"\n"));
     assert!(e.contains("no user titled \"dahna\""), "{e}");
     // An `access` body still needs its schedule.
-    let e = error("extern door = NfcCodeTouch(title: \"x\")\naccess door\n\tuser \"dana\"\nend\n");
+    let e = error("access rights\n\tuser \"dana\"\nend\n");
     assert!(e.contains("Name the user and the access schedule"), "{e}");
 }
 

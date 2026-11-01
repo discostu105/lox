@@ -197,8 +197,13 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub_comment(&mut c.comment);
         }
         // Principals and schedules are titles, never slugs.
+        Item::AccessClaim(c) => {
+            sub(&mut c.slug);
+            sub(&mut c.set);
+            sub_comment(&mut c.comment);
+        }
         Item::Access(a) => {
-            sub(&mut a.slug);
+            sub(&mut a.name);
             for stmt in &mut a.body {
                 match stmt {
                     AccessItem::Grant(g) => sub_comment(&mut g.comment),

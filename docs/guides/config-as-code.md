@@ -67,21 +67,25 @@ jal_sued.TargetPos = 70                              # a parameter
 
 ### Who may open a door
 
-Access rights on an NFC Code Touch can live in source too. An `access` declaration lists who may open it, each user
-or group by its title with an access schedule:
+Access rights on an NFC Code Touch can live in source too. An `access` set lists who may open, each user or group by
+its title with an access schedule, and a claim gives it to a Code Touch:
 
 ```text
 extern haustuer = NfcCodeTouch(uuid: "…")
+extern garage = NfcCodeTouch(uuid: "…")
 
-access haustuer
+access bewohner
 	user "alice": "Always"
 	group "Residents": "Workdays"
 end
+
+haustuer.access = bewohner
+garage.access = bewohner                 # one set, several doors
 ```
 
-The declaration owns that Code Touch's access: whoever it leaves out loses the right on the next push. Users, groups,
+The claim owns that Code Touch's access: whoever it leaves out loses the right on the next push. Users, groups,
 schedules, NFC tags and codes are still created in Loxone Config or the app. A title the config doesn't have stops
-the compile. `lox logic adopt` and `lox logic decompile` write the declarations for the rights the config has, and
+the compile. `lox logic adopt` and `lox logic decompile` write the sets and claims for the rights the config has, and
 `lox logic lint` names users whose tag or code opens no Code Touch.
 
 ### Switching times and app switches
@@ -113,9 +117,11 @@ extern frost = Notification(title: "Frostwarnung Garten")
 
 warn = OutputRefLM(mirrors: frost, AI: zu_kalt.Q, On: "Frost im Garten", MinimumTime: 12h)
 
-recipients frost
+recipients familie
 	user "alice"
 end
+
+frost.recipients = familie
 ```
 
 `On:` is sent when `AI` turns on, `Off:` (optional) when it turns off, and `MinimumTime:` keeps the messages apart.

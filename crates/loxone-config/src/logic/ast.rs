@@ -58,9 +58,13 @@ pub enum Item {
     /// `<device>.tiles = <name>` — write a tiles set onto an extern Touch
     /// Pure Flex.
     TilesClaim(TilesClaim),
-    /// `access <slug>` … `end` — who may open an extern NFC Code Touch,
-    /// and when.
+    /// `access <name>` … `end` — a named set of access rights (who may
+    /// open an NFC Code Touch, and when); `recipients <name>` … `end` — a
+    /// named set of push notification recipients.
     Access(AccessDecl),
+    /// `<code_touch>.access = <name>` or `<notification>.recipients =
+    /// <name>` — write an access or recipients set onto its block.
+    AccessClaim(AccessClaim),
     /// `schedule <name>` … `end` — a named DayTimer schedule.
     Schedule(ScheduleDecl),
     /// `<timer>.schedule = <name>` — write a schedule onto a DayTimer,
@@ -923,24 +927,30 @@ pub enum TemplateParam {
     },
 }
 
-/// The kinds of named set a template parameter can take. The
-/// sections still written per target (`access`, `recipients`) join here
-/// once they are named sets too.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kinds of named set: each is declared as `<kind> <name>` … `end`
+/// and written onto its block by a claim `<target>.<kind> = <name>`. A
+/// template parameter can take any of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SetKind {
     Moods,
     Schedule,
     Tiles,
+    Access,
+    Recipients,
 }
 
 impl SetKind {
+    /// Every kind, in the order messages list them.
+    pub const ALL: [SetKind; 5] = [
+        SetKind::Moods,
+        SetKind::Schedule,
+        SetKind::Tiles,
+        SetKind::Access,
+        SetKind::Recipients,
+    ];
+
     pub fn parse(s: &str) -> Option<SetKind> {
-        match s {
-            "moods" => Some(SetKind::Moods),
-            "schedule" => Some(SetKind::Schedule),
-            "tiles" => Some(SetKind::Tiles),
-            _ => None,
-        }
+        SetKind::ALL.into_iter().find(|k| k.keyword() == s)
     }
 
     pub fn keyword(self) -> &'static str {
@@ -948,7 +958,23 @@ impl SetKind {
             SetKind::Moods => "moods",
             SetKind::Schedule => "schedule",
             SetKind::Tiles => "tiles",
+            SetKind::Access => "access",
+            SetKind::Recipients => "recipients",
         }
+    }
+
+    /// The right an `access` or `recipients` set holds.
+    pub fn right(self) -> Option<RightKind> {
+        match self {
+            SetKind::Access => Some(RightKind::Access),
+            SetKind::Recipients => Some(RightKind::Recipients),
+            _ => None,
+        }
+    }
+
+    /// `moods|schedule|tiles|access|recipients`, for messages.
+    pub fn choices() -> String {
+        SetKind::ALL.map(SetKind::keyword).join("|")
     }
 }
 
@@ -1210,18 +1236,19 @@ impl fmt::Display for TilesClaim {
     }
 }
 
-/// `access <slug>` … `end` — the access rights (`TIM=`) on an extern NFC
-/// Code Touch: every user and group that may open it, each with the
-/// access schedule that says when. `recipients <slug>` … `end` — the
-/// recipients (`ACT=`) of an extern push notification. The
-/// declaration owns the block's whole set of these rights; users, groups
-/// and schedules stay with Loxone Config and the app and are named by
-/// title.
+/// `access <name>` … `end` — a named set of access rights (`TIM=`) for
+/// NFC Code Touches: every user and group that may open one, each with
+/// the access schedule that says when. `recipients <name>` … `end` — a
+/// named set of push notification recipients (`ACT=`). Like a `moods`
+/// set it declares nothing by itself; each claim
+/// `<block>.access = <name>` (`.recipients`) makes it the block's whole
+/// set of these rights. Users, groups and schedules stay with Loxone
+/// Config and the app and are named by title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessDecl {
-    /// Which right the declaration owns.
+    /// Which right the set holds.
     pub right: RightKind,
-    pub slug: String,
+    pub name: String,
     pub body: Vec<AccessItem>,
     /// Trailing `#` comment on the header line, verbatim.
     pub comment: Option<String>,
@@ -1235,6 +1262,24 @@ impl AccessDecl {
             AccessItem::Grant(g) => Some(g),
             AccessItem::Comment(_) => None,
         })
+    }
+}
+
+/// `<block>.access = <name>` or `<block>.recipients = <name>` — the
+/// access rights of an NFC Code Touch or the recipients of a push
+/// notification, extern or managed, become those of the named set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessClaim {
+    pub slug: String,
+    pub right: RightKind,
+    pub set: String,
+    /// Trailing `#` comment on the statement line, verbatim.
+    pub comment: Option<String>,
+}
+
+impl fmt::Display for AccessClaim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{} = {}", self.slug, self.right.keyword(), self.set)
     }
 }
 
@@ -1258,8 +1303,21 @@ pub enum RightKind {
 
 impl RightKind {
     pub fn keyword(self) -> &'static str {
+        self.set_kind().keyword()
+    }
+
+    /// The set kind that holds this right.
+    pub fn set_kind(self) -> SetKind {
         match self {
-            RightKind::Access => "access",
+            RightKind::Access => SetKind::Access,
+            RightKind::Recipients => SetKind::Recipients,
+        }
+    }
+
+    /// What the rights are called in messages.
+    pub fn rights_noun(self) -> &'static str {
+        match self {
+            RightKind::Access => "access rights",
             RightKind::Recipients => "recipients",
         }
     }
@@ -1773,6 +1831,8 @@ enum NameKind {
     Tiles,
     Schedule,
     Moods,
+    /// An `access` or `recipients` set.
+    Rights(RightKind),
 }
 
 impl NameKind {
@@ -1787,6 +1847,8 @@ impl NameKind {
             NameKind::Tiles => "a `tiles` set",
             NameKind::Schedule => "a `schedule`",
             NameKind::Moods => "a `moods` set",
+            NameKind::Rights(RightKind::Access) => "an `access` set",
+            NameKind::Rights(RightKind::Recipients) => "a `recipients` set",
         }
     }
 }
@@ -1977,6 +2039,13 @@ impl Module {
         })
     }
 
+    pub fn access_claims(&self) -> impl Iterator<Item = &AccessClaim> {
+        self.items.iter().filter_map(|i| match i {
+            Item::AccessClaim(c) => Some(c),
+            _ => None,
+        })
+    }
+
     pub fn lets(&self) -> impl Iterator<Item = &LetDecl> {
         self.items.iter().filter_map(|i| match i {
             Item::Let(l) => Some(l),
@@ -2110,7 +2179,8 @@ impl Module {
                 | Item::Attr(_)
                 | Item::TilesClaim(_)
                 | Item::ScheduleClaim(_)
-                | Item::MoodsClaim(_) => 3,
+                | Item::MoodsClaim(_)
+                | Item::AccessClaim(_) => 3,
                 Item::Let(_) => 4,
                 Item::Removed(_) => 5,
                 Item::Moved(_) => 6,
@@ -2282,11 +2352,14 @@ impl Module {
             Item::TilesClaim(c) => {
                 out.push_str(&format!("{c}{}\n", tail(&c.comment)));
             }
+            Item::AccessClaim(c) => {
+                out.push_str(&format!("{c}{}\n", tail(&c.comment)));
+            }
             Item::Access(a) => {
                 out.push_str(&format!(
                     "{} {}{}\n",
                     a.right.keyword(),
-                    a.slug,
+                    a.name,
                     tail(&a.comment)
                 ));
                 for stmt in &a.body {

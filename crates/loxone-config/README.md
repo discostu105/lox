@@ -50,8 +50,8 @@ what you changed.
 - **Units.** `Time: 30min`, `2700K` and `70%` compile to the port's base unit.
 - **Device assignment.** `sensor.title`, `sensor.room` and `sensor.category` set an object's title, room
   and category. A room change also moves the device's inputs and outputs that shared its room.
-- **Door access.** `access haustuer … end` on an NFC Code Touch lists who may open it and when. Users
-  left out lose access. Users, tags and codes stay with Loxone Config and the app.
+- **Door access.** `access bewohner … end` lists who may open and when, and `haustuer.access = bewohner`
+  gives the set to an NFC Code Touch. Users left out lose access. Users, tags and codes stay with Loxone Config and the app.
 - **Lighting moods.** `moods wohnen … end` declares moods with circuit values, and `licht.moods = wohnen`
   gives them to a lighting controller. Moods keep their identity by name, so switches keep working.
 - **PicoC programs.** `Code: file("hue.c")` on a `Code16` block takes the program from a file.

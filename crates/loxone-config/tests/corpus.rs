@@ -114,7 +114,7 @@ fn corpus_adoptions_rebuild_as_semantic_noops() {
     }
 }
 
-/// Access declarations (D49) are byte fixpoints: what decompile lifts from
+/// Access sets and claims are byte fixpoints: what decompile lifts from
 /// a config compiles back to exactly its bytes. Revoking every declared
 /// right and granting them again restores the same rights.
 #[test]
@@ -131,7 +131,7 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         // Every block as an extern: the declarations alone are under test.
         // (`NfcCodeTouch` is a managed type; with the default options a
         // keypad with wires lifts as a block, which this module of externs
-        // and access declarations would not carry.)
+        // and access sets would not carry.)
         let view_opts = DecompileOptions {
             managed_types: Default::default(),
             ..DecompileOptions::default()
@@ -145,9 +145,13 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         if access.is_empty() {
             continue;
         }
+        let claims: Vec<Item> = view
+            .access_claims()
+            .map(|c| Item::AccessClaim(c.clone()))
+            .collect();
         let externs: Vec<Item> = view
             .externs()
-            .filter(|e| access.iter().any(|a| a.slug == e.slug))
+            .filter(|e| view.access_claims().any(|c| c.slug == e.slug))
             .map(|e| Item::Extern(e.clone()))
             .collect();
         let module = |body: bool| Module {
@@ -161,6 +165,7 @@ fn corpus_access_declarations_are_byte_fixpoints() {
                     }
                     Item::Access(a)
                 }))
+                .chain(claims.iter().cloned())
                 .collect(),
         };
         let compiled = |doc: &LoxoneDoc, body: bool| {
@@ -170,7 +175,7 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         let out = compiled(&base, true);
         assert!(
             out.to_bytes() == bytes,
-            "{name}: the lifted access declarations do not reproduce the bytes"
+            "{name}: the lifted access sets do not reproduce the bytes"
         );
         let revoked = compiled(&base, false);
         let d = loxone_config::diff::diff(&base, &revoked);
@@ -183,7 +188,7 @@ fn corpus_access_declarations_are_byte_fixpoints() {
         configs += 1;
         decls += access.len();
     }
-    eprintln!("corpus: {decls} access declarations in {configs} configs are byte fixpoints");
+    eprintln!("corpus: {decls} access sets in {configs} configs are byte fixpoints");
 }
 
 #[test]

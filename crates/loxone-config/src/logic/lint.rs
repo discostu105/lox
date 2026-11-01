@@ -149,8 +149,8 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
                 object_refs.insert(&c.slug);
             }
             // Access rights use the Code Touch they are on.
-            Item::Access(a) => {
-                object_refs.insert(&a.slug);
+            Item::AccessClaim(c) => {
+                object_refs.insert(&c.slug);
             }
             Item::ScheduleClaim(c) => {
                 object_refs.insert(&c.slug);

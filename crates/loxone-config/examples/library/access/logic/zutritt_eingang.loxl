@@ -13,7 +13,9 @@ code_touch_eingang = NfcCodeTouch(
 api_connector.I <- code_touch_eingang.OutputAPI
 tueroeffner_haustuer.I <- code_touch_eingang.Q1
 
-access code_touch_eingang
+access code_touch_eingang_access
 	user "redacted-2": "Immer"
 	user "redacted-3": "Immer"
 end
+
+code_touch_eingang.access = code_touch_eingang_access

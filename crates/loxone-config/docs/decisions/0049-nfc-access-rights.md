@@ -1,6 +1,6 @@
 # D49: Access rights on NFC Code Touch blocks from source
 
-Status: accepted (2026-10-29)
+Status: accepted (2026-10-29), amended by [D83](0083-access-recipients-sets.md)
 
 ## Context
 

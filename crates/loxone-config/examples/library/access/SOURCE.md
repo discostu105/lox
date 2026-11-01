@@ -36,7 +36,7 @@ Files: [access.Loxone](access.Loxone),
 [logic/zutritt_eingang.loxl](logic/zutritt_eingang.loxl) (its Lox Logic view),
 [zutritt_eingang.svg](zutritt_eingang.svg) (the page as drawn).
 
-Worth a look: the `access` block at the end of the view, lifted from the users'
+Worth a look: the `access` set and its claim at the end of the view, lifted from the users'
 `<PRM REF="…" TIM="…"/>` rights. The redaction gives each user a name of its
 own, so the rights still name them apart. Users, codes and schedules stay with Loxone
 Config; the language only grants and revokes access.

@@ -14,8 +14,9 @@ Lox Logic is the text language for managed Loxone logic.
 module     = { line } ;
 line       = comment | let | extern | block-head | arg-line | signal
            | wire | set | attr | removed | moved | template | instance
-           | page | test | tiles | tiles-claim | access | schedule
-           | schedule-claim | rule | blank ;
+           | page | test | tiles | tiles-claim | access | access-claim
+           | recipients | recipients-claim | schedule | schedule-claim
+           | moods-claim | rule | blank ;
 
 comment    = "#" any-text ;                        (* whole line *)
 let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
@@ -66,13 +67,14 @@ page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list
 template   = "template" slug "(" [ params ] ")" [ "->" slug ] [ comment ]
                                     (* "-> block": the primary block *)
              { comment | block-head | arg-line | signal | wire | set
-             | tiles-claim | schedule-claim | moods-claim }
+             | tiles-claim | schedule-claim | moods-claim | access-claim
+             | recipients-claim }
              "end" [ comment ] ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
            | slug ":" set-kind [ "=" slug ]        (* set parameter, default *)
            | slug "=" ( number [ unit ] | string | bool ) ;  (* value parameter, default *)
-set-kind   = "moods" | "schedule" | "tiles" ;
+set-kind   = "moods" | "schedule" | "tiles" | "access" | "recipients" ;
 instance   = slug "=" slug "(" [ inst-args ] ")" [ comment ] ;
 inst-args  = param-name ":" ( ref | value ) { "," … } [ "," ] ;
 ref        = slug                                  (* a name; an instance stands
@@ -104,11 +106,19 @@ tiles-claim = slug "." "tiles" "=" slug [ comment ] ;
                                     (* extern TreeDevice; in a template body
                                        through a set parameter *)
 
-access     = "access" slug [ comment ]             (* NFC Code Touch *)
+access     = "access" slug [ comment ]             (* a named set of access rights *)
              { comment | grant }
              "end" [ comment ] ;
 grant      = ( "user" | "group" ) string ":" string [ comment ] ;
                                     (* principal title : schedule title *)
+access-claim = slug "." "access" "=" slug [ comment ] ;
+                                    (* NFC Code Touch, extern *)
+recipients = "recipients" slug [ comment ]         (* a named set of recipients *)
+             { comment | recipient }
+             "end" [ comment ] ;
+recipient  = ( "user" | "group" ) string [ comment ] ;
+recipients-claim = slug "." "recipients" "=" slug [ comment ] ;
+                                    (* Notification, extern *)
 schedule   = "schedule" slug [ comment ]           (* DayTimer schedule *)
              { comment | sched-line }
              "end" [ comment ] ;
@@ -196,9 +206,10 @@ Notes:
   literals `on` and `off`, and the expression
   operators `and`, `or`, `not` are reserved, as are v0's `block`,
   `wire`, `set`, and `use` (migration errors) — none can be declared as
-  a name. `access` is a keyword only where a line starts with `access
-  <slug>`; elsewhere it stays an ordinary slug (`access = Switch()`).
-  `rule` likewise, only in front of a slug.
+  a name. `access` and `recipients` are keywords only where a line
+  starts with `access <name>` or `recipients <name>`, and after the dot
+  of a claim (`x.access = …`); elsewhere they stay ordinary slugs
+  (`access = Switch()`). `rule` likewise, only in front of a slug.
 - An instantiation is distinguished from a block declaration by the case
   of the callee: `sued = fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
@@ -788,7 +799,7 @@ Parameters come in three forms:
   or physical; the ports the body uses are checked after expansion, against the type passed.
 - A **value parameter** (`pos = 70`) has a default and may be overridden with a literal or a `let`
   reference.
-- A **set parameter** (`stimmungen: moods = standard`) passes a `moods`, `schedule` or `tiles` set by
+- A **set parameter** (`stimmungen: moods = standard`) passes a `moods`, `schedule`, `tiles`, `access` or `recipients` set by
   its bare name (`stimmungen: kueche`) to a claim in the body (`lc.moods = stimmungen`). The set must
   be declared and of that kind. Without a default, the set must be given.
 
@@ -848,8 +859,8 @@ The template library (`templates/`, listed by `loxl templates`)
 ships tested templates for common automations; copy a file into the
 module directory to call them.
 
-The body may contain only block declarations, named signals, wires, sets, claims (`.moods`,
-`.schedule`, `.tiles`, through a set parameter) and comments. No nesting, no template-local
+The body may contain only block declarations, named signals, wires, sets, claims (`.moods`, `.schedule`,
+`.tiles`, `.access`, `.recipients`, through a set parameter) and comments. No nesting, no template-local
 `let`/`extern`. `template` and `end` are reserved words; `use` is reserved for the old-syntax error.
 
 ### Expressions — sugar over the discrete blocks
@@ -1104,46 +1115,58 @@ without targets reaches two or more linked blocks of its type,
 ### `access` — who may open an NFC Code Touch
 
 ```text
-extern front_door = NfcCodeTouch(uuid: "50000009-0000-0090-ffff504f94112233")
+extern haustuer = NfcCodeTouch(uuid: "50000009-0000-0090-ffff504f94112233")
+extern garage = NfcCodeTouch(uuid: "5000000a-0000-00a0-ffff504f94112233")
 
-access front_door
+access bewohner
 	user "alice": "Always"
 	user "bob": "Workdays"                       # an access schedule
 	group "Residents": "Always"
 end
+
+haustuer.access = bewohner
+garage.access = bewohner
 ```
 
-An `access` declaration owns the access rights (*Zutritt*) on one NFC
-Code Touch: every user and group it lists may open it under the access
-schedule named after the colon, and nobody else. Compiling it grants
-what it lists, moves a right to another schedule, and revokes the rights
-of users and groups it leaves out; an empty declaration revokes them
-all. Code Touches without a declaration keep their rights as they are.
+An `access` set names access rights (*Zutritt*): users and groups, each
+with the access schedule named after the colon. A claim
+`<code_touch>.access = <set>` makes the set the access rights of one NFC
+Code Touch: everyone it lists may open it under that schedule, and
+nobody else. Compiling a claim grants what the set lists, moves a right
+to another schedule, and revokes the rights of users and groups it
+leaves out; an empty set revokes them all. Several Code Touches may
+claim one set. Code Touches without a claim keep their rights as they
+are.
 
 Users, groups and access schedules (`SwitchingTimer`) stay with Loxone
-Config and the app. The declaration names them by title, exactly as
-written there; a title that names nothing, or more than one object of
-its kind, is a compile error. Their credentials (NFC tags, access codes,
+Config and the app. The set names them by title, exactly as written
+there; a title that names nothing, or more than one object of its kind,
+is a compile error. Their credentials (NFC tags, access codes,
 passwords) and memberships are not part of the language.
 
 Rules:
 
-- **Extern `NfcCodeTouch` only**, one declaration per extern; two
-  externs resolving to the same block are a compile error.
-- **Each principal once** — a user or group listed twice is a
+- **Extern `NfcCodeTouch` only**, one claim per extern; two externs
+  resolving to the same block are a compile error.
+- **Each principal once** — a user or group listed twice in a set is a
   validation error.
 - **Access, not operation.** A right's `ACT=` (operating the block in
   the app) is not an access right; compiling keeps it, and revoking
   access leaves it.
-- **No restore.** Like `tiles` a declaration keeps no lockfile
-  state: removing it leaves the last written rights in place.
-- **Top-level only** — not inside a template.
+- **No restore.** Like `tiles` a claim keeps no lockfile state:
+  removing it leaves the last written rights in place.
+- **Top-level sets.** The set is declared at the top level; a template
+  body claims one through a set parameter (`rechte: access`).
+- **A set is not the block.** `access haustuer … end`, where `haustuer`
+  is an extern or block, is the v1 form: an error that names the set and
+  the claim to write instead.
 
 `loxl decompile` and `loxl adopt` lift the access rights of every Code
-Touch that has any into a declaration, with the extern it needs. When a
+Touch that has any into a set `<slug>_access` and a claim, with the
+extern it needs. Code Touches with the same rights share one set. When a
 right names a user or group without a unique title, the Code Touch gets
-a `# access <slug>: not lifted — …` comment instead: a declaration
-without that right would revoke it.
+a `# access <slug>: not lifted — …` comment instead: a set without that
+right would revoke it.
 
 `loxl lint` (in a project) reports `no-access-right` for a user with an
 NFC tag or access code but no access right on any Code Touch, neither
@@ -1403,10 +1426,12 @@ warn = OutputRefLM(
 	MinimumTime: 12h,                            # optional, default 5 s
 )
 
-recipients frost
+recipients familie
 	user "alice"
 	group "Familie"
 end
+
+frost.recipients = familie
 ```
 
 A push notification (*Benachrichtigung*, type `Notification`) is
@@ -1421,27 +1446,30 @@ names it as an extern. Two things about it come from source:
     number) that compiles to milliseconds.
   - The parameters take values, never wires. The block's title follows the notification's, like every
     ref's.
-- **Who gets it.** A `recipients` declaration owns the recipients of one extern `Notification`: every
-  user and group it lists gets the message, and nobody else. It works like `access` without
-  schedules.
-  - Compiling grants what it lists (`ACT=` on the notification) and revokes the users and groups it
-    leaves out.
-  - Notifications without a declaration keep their recipients.
-  - Members of the *Full access* group get every notification whatever the declaration says. Loxone
+- **Who gets it.** A `recipients` set names users and groups. A claim
+  `<notification>.recipients = <set>` makes them the recipients of one extern `Notification`: everyone
+  the set lists gets the message, and nobody else. It works like `access` without schedules.
+  - Compiling grants what the set lists (`ACT=` on the notification) and revokes the users and groups
+    it leaves out.
+  - Several notifications may claim one set. Notifications without a claim keep their recipients.
+  - Members of the *Full access* group get every notification whatever the set says. Loxone
     Config shows them as inherited recipients.
 
-Rules for `recipients` are those of `access` — extern of the right type
-(here `Notification`), one declaration per extern, each principal once,
-titles that name exactly one user or group, no lock state, top-level
-only — and a recipient takes no schedule. Decompile does not lift
-recipients, and leaves `OutputRefLM` blocks with the GUI.
+Rules for `recipients` are those of `access` — a claim on an extern of
+the right type (here `Notification`), one claim per extern, each
+principal once, titles that name exactly one user or group, no lock
+state, sets declared at the top level, the v1 form `recipients <extern>`
+an error naming the replacement — and a recipient takes no schedule.
+Decompile does not lift recipients, and leaves `OutputRefLM` blocks with
+the GUI.
 
 ## Name resolution and validation
 
-- Externs, blocks, named signals, `let` constants, templates, `tiles`
-  sets and schedules share one namespace per module; duplicates are an error. An
-  `access` or `recipients` declaration names an extern and declares
-  nothing.
+- Externs, blocks, named signals, `let` constants, templates and
+  `tiles`, `schedule`, `moods`, `access` and `recipients` sets share one
+  namespace per module; duplicates are an error. A claim
+  (`x.access = bewohner`) declares nothing: it names an object and a set
+  of the claim's kind.
 - Every port reference (argument bindings, `<-`, `=`) must name a declared
   extern or block, or a block of a template instance (`inst.Port` for its
   primary block, `inst.block.Port` for any other); every
@@ -1507,7 +1535,7 @@ project's module and lock.
   comma, and the `)` on its own line;
 - a `tile` the same way one level deeper: `tile 2()` on one line, a tile with keys as a
   two-tab-indented list with the `)` on its own tab-indented line;
-- each grant of an `access` declaration on its own tab-indented line.
+- each grant of an `access` or `recipients` set on its own tab-indented line.
 
 Values keep their variant: numbers bare, strings quoted, constant references bare, port references
 dotted, unit values and `on`/`off` as written. Some values are canonicalized at parse time, so every
@@ -1558,11 +1586,19 @@ compile output of a migrated file is byte-identical.
   (`raum(stimmungen: kueche)`). The string forms `stimmungen = "standard"` and
   `stimmungen: "kueche"` are errors naming that spelling. `.schedule` and `.tiles` claims work in
   template bodies too. An object parameter takes no default.
+- **`access` and `recipients` are named sets**, like `tiles`, `schedule` and `moods`:
+  `access bewohner … end` declares a set, `haustuer.access = bewohner` claims it, and several Code
+  Touches (or notifications, `frost.recipients = familie`) may share one. The v1 form
+  `access haustuer … end` on the extern is an error naming the set and the claim. Decompile writes
+  `<slug>_access` sets. Set parameters take `access` and `recipients`.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
 `inst_block` as `inst.block` (or `inst` for the primary block) and turn
-string-valued set parameters into set parameters, then `loxl fmt`
+string-valued set parameters into set parameters, rename each
+`access <extern>` / `recipients <extern>` to `access <extern>_access` /
+`recipients <extern>_recipients` and add the claim
+(`<extern>.access = <extern>_access`) after its `end`, then `loxl fmt`
 (which also unquotes one-word `then` commands).
 
 ## Versioning
