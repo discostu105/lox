@@ -1,7 +1,7 @@
 # D30: The full view hides what the GUI wrote by default
 
 Status: accepted (2026-08-25), amended by [D128](0128-no-def-at-zero.md): a missing `Def=` is 0, not the
-default
+default, and by [D130](0130-new-blocks-get-gui-defaults.md): a new block gets the GUI defaults
 
 ## Context
 
@@ -20,6 +20,8 @@ only at a share of at least 90% and at least 10 occurrences.
   everything. The report counts what was left out.
 - The adoptable `ManagedOnly` view never leaves out a value; the rebuild writes the exact `Def=` back.
 - Minted blocks write no `Def=` for unbound parameters. On both sides, absence means default.
+  Wrong: a missing `Def=` is 0 ([D128](0128-no-def-at-zero.md)), and a new block now gets the
+  defaults Loxone Config places it with ([D130](0130-new-blocks-get-gui-defaults.md)).
 
 Corpus statistics are enough for view-only knowledge. A wrong entry can hide a value from a reader but never
 change what compiles. What the compiler may write still needs live verification. On the house config 486

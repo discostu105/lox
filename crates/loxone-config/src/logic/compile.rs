@@ -794,6 +794,9 @@ struct PlannedBlock {
     /// Drawn on a page (laid out, `Px=`/`Py=`); false for objects of the
     /// object tree.
     placed: bool,
+    /// A port the source leaves out gets its GUI default
+    /// ([`crate::lock::LockedObject::gui_defaults`]).
+    gui_defaults: bool,
 }
 
 struct ResolvedPort {

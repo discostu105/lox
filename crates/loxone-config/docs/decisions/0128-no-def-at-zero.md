@@ -1,7 +1,8 @@
 # D128: A connector's 0 is no `Def=`
 
 Status: accepted (2026-11-01), amends [D30](0030-observed-defaults.md), extends
-[D112](0112-zero-is-no-attribute.md)
+[D112](0112-zero-is-no-attribute.md), amended by [D130](0130-new-blocks-get-gui-defaults.md): a new block
+gets the GUI defaults, and decompile lifts `Port: 0` by them
 
 ## Context
 

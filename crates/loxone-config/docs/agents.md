@@ -250,9 +250,10 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`. On a block, `device:` names
   the device (by slug) the I/O hangs in. Write Loxone's `\v` as `"\\v"`. `loxl adopt --uuid <device>`
   takes over an existing device with its I/O.
-- **State every parameter the block needs.** One the source leaves out is 0 in Loxone Config, not the
-  default `loxl types` shows: a `Monoflop` without `Time` pulses for 0 s, a `LightController2` without
-  `MoveTimeout` has it at 0.
+- **A new block gets the defaults `loxl types` shows** on the ports the source leaves out, as
+  Loxone Config places it. A block that already exists (adopted, or created by an older compiler) has
+  0 there instead: a `Monoflop` without `Time` pulses for 0 s. `loxl lint` reports such ports
+  (`implicit-zero`); `loxl lint --fix` writes `Port: 0`. Where 0 is not meant, write the value.
 - **Shared parameters: `defaults <Type>(Port: value, …)`.** Every managed block of the type takes
   these values for the ports it does not bind (`defaults ModbusASensor(ModbusPollingCycle: 60)`).
   Values only, one statement per type, at the top level. A block's own binding wins. Decompile and
@@ -357,6 +358,7 @@ it only when it matches what you intended.
 | `says which object a block is` | `device:`/`mirrors:` in `defaults` | write it on each block |
 | `cannot adopt` + `would set it to` (from `adopt --uuid`) | the adopted block leaves a defaulted port unset | take the port out of the `defaults` statement and bind it on the other blocks, or set the port on the block in Loxone Config |
 | `unit-suffix` (from `lint`) | a bare time value on a port documented in milliseconds, seconds or minutes (`Delay: 10800`), also in a port assignment or a template parameter | `loxl lint --fix` writes the unit (`Delay: 3h`); the compile output does not change. The language server offers it as a quick fix |
+| `implicit-zero` (from `lint`) | a block that already exists has a port at 0 only because nothing sets it, while a new block would get Loxone Config's default (`Time` 2 on a `Monoflop`) | write the value you want; `loxl lint --fix` writes `Port: 0`, which keeps the compile output |
 | `default-page` (from `lint`) | a fragment of a directory module without its own `page` line, while others have one | add the `page` line; the language server offers the previous file's page as a quick fix |
 | `dead-outputs` (from `lint`) | a block, extern or device whose outputs reach nothing in the compiled config: no wire, not shown in the app as a value, no statistic, no energy flow, no message | wire it, delete it, or keep it with `# lint: allow dead-outputs <reason>` on the line above |
 | `no-actuator` (from `lint`) | a mood gives a percentage to a lighting circuit without an actuator: the Miniserver switches it on instead of dimming | declare the circuit (`Circuit1: "dimmer"`, with `AQ1` wired to the actuator), assign the actuator in Loxone Config's mood editor (the next base has it), or write `on` |

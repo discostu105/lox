@@ -55,6 +55,9 @@ pub enum LintKind {
     NoActuator,
     /// A `# lint: allow` comment that covers no finding.
     UnusedAllow,
+    /// A port of an existing block that is 0 only because nothing sets
+    /// it, while Loxone Config places the block with another value.
+    ImplicitZero,
 }
 
 impl LintKind {
@@ -73,11 +76,12 @@ impl LintKind {
             LintKind::UnitSuffix => "unit-suffix",
             LintKind::NoActuator => "no-actuator",
             LintKind::UnusedAllow => "unused-allow",
+            LintKind::ImplicitZero => "implicit-zero",
         }
     }
 
     /// Every kind.
-    pub const ALL: [LintKind; 13] = [
+    pub const ALL: [LintKind; 14] = [
         LintKind::UnusedExtern,
         LintKind::UnusedLet,
         LintKind::UnusedTemplate,
@@ -91,6 +95,7 @@ impl LintKind {
         LintKind::UnitSuffix,
         LintKind::NoActuator,
         LintKind::UnusedAllow,
+        LintKind::ImplicitZero,
     ];
 
     /// The kind with this label (`dead-outputs`).
@@ -1037,6 +1042,157 @@ pub fn lint_dead_outputs(
     Ok(findings)
 }
 
+/// A block whose ports are 0 although Loxone Config places the block with
+/// another value: the ports with their GUI defaults, in connector order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplicitZero {
+    pub slug: String,
+    pub ports: Vec<(String, &'static str)>,
+    /// Declared at the top of the module, where [`fix_implicit_zeros`]
+    /// can write the values; not a block a template creates.
+    pub fixable: bool,
+}
+
+/// The blocks of `module` that already exist (the lock knows them, from
+/// before blocks were created with the GUI defaults) and have a port that
+/// is 0 only because nothing sets it: in the compiled config it has no
+/// `Def=` and no wire, the source gives it no value, and its GUI default
+/// is not 0 ([`crate::gui_defaults`]). A reader of the source would
+/// assume the default. Ports Loxone Config inverts are its own.
+pub fn implicit_zeros(
+    module: &Module,
+    lock: &Lockfile,
+    compiled: &LoxoneDoc,
+) -> Result<Vec<ImplicitZero>> {
+    let (flat, _) = module.expand()?.desugar()?;
+    let index = compiled.index();
+    let mut out = Vec::new();
+    for b in flat.blocks() {
+        let defaults = crate::gui_defaults::gui_defaults(&b.block_type);
+        if defaults.is_empty() {
+            continue;
+        }
+        let Some(entry) = lock.objects.get(&b.slug) else {
+            continue; // created by the next compile, with the defaults
+        };
+        if entry.expr_owned || entry.gui_defaults {
+            continue;
+        }
+        let Some(el) = index
+            .by_uuid
+            .get(&entry.uuid)
+            .and_then(|p| compiled.element_at(p))
+        else {
+            continue;
+        };
+        let ports: Vec<(String, &'static str)> = defaults
+            .iter()
+            .filter(|(key, _)| !b.bindings().any(|x| x.port == *key))
+            .filter(|(key, _)| {
+                el.child_elements()
+                    .find(|c| c.name == "Co" && c.attr("K") == Some(key))
+                    .is_some_and(|co| {
+                        co.attr("Def").is_none()
+                            && co.attr("Inv").is_none()
+                            && !co.child_elements().any(|i| i.name == "In")
+                    })
+            })
+            .map(|(key, v)| (key.to_string(), *v))
+            .collect();
+        if !ports.is_empty() {
+            let fixable = module
+                .items
+                .iter()
+                .any(|i| matches!(i, Item::Block(d) if d.slug == b.slug));
+            out.push(ImplicitZero {
+                slug: b.slug.clone(),
+                ports,
+                fixable,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// [`implicit_zeros`] as `implicit-zero` findings, one per block.
+pub fn lint_implicit_zero(
+    module: &Module,
+    lock: &Lockfile,
+    compiled: &LoxoneDoc,
+) -> Result<Vec<LintFinding>> {
+    Ok(implicit_zeros(module, lock, compiled)?
+        .into_iter()
+        .map(|z| {
+            let names = |f: &dyn Fn(&(String, &str)) -> String| {
+                z.ports.iter().map(f).collect::<Vec<_>>().join(", ")
+            };
+            let (them, are) = if z.ports.len() == 1 {
+                ("it", "is")
+            } else {
+                ("them", "are")
+            };
+            LintFinding {
+                kind: LintKind::ImplicitZero,
+                slug: z.slug.clone(),
+                detail: format!(
+                    "{} {are} 0 in Loxone Config: the source gives {them} no value, and the \
+                     block has none. A new block would get {}. Write `{}`{} to keep 0, or \
+                     the value you want",
+                    names(&|(k, _)| format!("`{k}`")),
+                    names(&|(_, v)| v.to_string()),
+                    names(&|(k, _)| format!("{k}: 0")),
+                    if z.fixable {
+                        " (`loxl lint --fix` does)"
+                    } else {
+                        " in the template that creates the block"
+                    },
+                ),
+            }
+        })
+        .collect())
+}
+
+/// Write `Port: 0` into each block of `module` that [`implicit_zeros`]
+/// names, at the port's place in connector order. The compiled config
+/// does not change: a 0 writes no `Def=`. Only blocks declared at the top
+/// of `module` are fixed, not those a template creates. Returns how many
+/// values were written.
+pub fn fix_implicit_zeros(module: &mut Module, zeros: &[ImplicitZero]) -> usize {
+    let mut count = 0;
+    for item in &mut module.items {
+        let Item::Block(b) = item else { continue };
+        let Some(z) = zeros.iter().find(|z| z.slug == b.slug) else {
+            continue;
+        };
+        let specs = crate::connectors::builtin(&b.block_type).unwrap_or_default();
+        let at = |port: &str| specs.iter().position(|s| s.key == port);
+        for (port, _) in &z.ports {
+            if b.bindings().any(|x| x.port == *port) {
+                continue;
+            }
+            let mine = at(port);
+            let pos = b
+                .args
+                .iter()
+                .position(|a| match a {
+                    ArgItem::Binding(x) => at(&x.port) > mine,
+                    ArgItem::Comment(_) => false,
+                })
+                .unwrap_or(b.args.len());
+            b.args.insert(
+                pos,
+                ArgItem::Binding(Binding {
+                    port: port.clone(),
+                    kind: BindingKind::Param(Value::from_literal("0")),
+                    comment: None,
+                }),
+            );
+            count += 1;
+        }
+    }
+    count
+}
+
 /// What a controller is expected to drive, as its knowledge-base page
 /// says, for a `dead-outputs` finding on one that drives nothing.
 fn expected_use(block_type: &str) -> Option<&'static str> {
@@ -1200,6 +1356,7 @@ fn needs_project(kind: LintKind) -> bool {
             | LintKind::TileDeadCommand
             | LintKind::NoAccessRight
             | LintKind::NoActuator
+            | LintKind::ImplicitZero
     )
 }
 
