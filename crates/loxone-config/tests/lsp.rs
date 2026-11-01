@@ -441,6 +441,35 @@ fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
 }
 
 #[test]
+fn a_mode_title_offers_its_slug_as_a_quick_fix() {
+    let pool = project().join("pages/pool.loxl");
+    let src = std::fs::read_to_string(&pool).unwrap();
+    let titled =
+        format!("{src}\nparty = Mode(\"Party\")\n\nschedule abend\n\t\"Party\" 18:00-24:00\nend\n");
+    let out = session(&[open(&pool, &src), change(&pool, &titled), save(&pool)]);
+    let diags = diagnostics(&out, &pool).clone();
+    let d = diags
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("instead of"))
+        .unwrap_or_else(|| panic!("{diags:?}"));
+
+    let out = session(&[
+        open(&pool, &titled),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "textDocument/codeAction", "params": {
+            "textDocument": {"uri": uri(&pool)},
+            "range": d["range"],
+            "context": {"diagnostics": [d]},
+        }}),
+    ]);
+    let actions = response(&out, 1).as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(actions[0]["title"], "Change to `party 18:00-24:00`");
+    let edit = &actions[0]["edit"]["changes"][uri(&pool)][0];
+    let (l, c) = pos(&titled, "\"Party\" 18:00");
+    assert_eq!(edit["range"]["start"], json!({"line": l, "character": c}));
+}
+
+#[test]
 fn an_access_section_on_the_block_offers_the_named_set_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();

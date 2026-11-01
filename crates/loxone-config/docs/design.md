@@ -201,11 +201,11 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D66 | [Blocks minted from source in the app](decisions/0066-app-blocks.md) | accepted |
 | D67 | [Deleting a rule from source](decisions/0067-deleting-rules.md) | accepted |
 | D68 | [`loxl test` runs in a simulator of its own](decisions/0068-own-simulator.md) | accepted, supersedes the simulator part of [D36](decisions/0036-tests-in-module.md) |
-| D69 | [Operating modes from source](decisions/0069-operating-modes.md) | accepted |
+| D69 | [Operating modes from source](decisions/0069-operating-modes.md) | accepted, amended by [D110](decisions/0110-mode-reference-spelling.md) |
 | D70 | [Users stay the Miniserver's](decisions/0070-users-stay-miniserver.md) | accepted |
 | D71 | [Several objects in one statement, device settings, Air serials](decisions/0071-multi-object-statements.md) | accepted |
 | D72 | [Light controllers in the app catalogue](decisions/0072-light-controllers-catalogue.md) | accepted |
-| D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) |
+| D73 | [Rule conditions on states and modes, OR groups](decisions/0073-rule-conditions.md) | accepted, amended by [D76](decisions/0076-weather-date-message-rules.md) and [D110](decisions/0110-mode-reference-spelling.md) |
 | D74 | [Calendar entries](decisions/0074-calendar-entries.md) | accepted |
 | D75 | [A redacted copy](decisions/0075-redacted-copy.md) | accepted |
 | D76 | [Weather, dates and messages in rules](decisions/0076-weather-date-message-rules.md) | accepted |
@@ -224,5 +224,6 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
 | D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
+| D110 | [One spelling per operating mode](decisions/0110-mode-reference-spelling.md) | accepted, amends [D69](decisions/0069-operating-modes.md) and [D73](decisions/0073-rule-conditions.md) |
 | D111 | [Unit suffixes on extern ports, template parameters and device settings](decisions/0111-unit-suffix-coverage.md) | accepted, extends [D87](decisions/0087-v2-tooling.md) |
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |

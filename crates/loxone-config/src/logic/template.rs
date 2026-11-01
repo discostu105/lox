@@ -10,10 +10,10 @@
 
 use crate::error::{Error, Result};
 use crate::logic::ast::{
-    AccessClaim, ArgItem, Binding, BindingKind, BlockDecl, Expr, ExprWireDecl, Item, MatchSpec,
-    ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind, ScheduleClaim, SetDecl,
-    SetKind, SignalDecl, TemplateDecl, TemplateParam, TestItem, TilesClaim, TilesItem, Value,
-    WireDecl,
+    AccessClaim, ArgItem, Binding, BindingKind, BlockDecl, Day, Expr, ExprWireDecl, Item,
+    MatchSpec, ModeName, Module, MoodsClaim, Operand, PortRef, RuleItem, RuleStmtKind,
+    ScheduleClaim, ScheduleItem, SetDecl, SetKind, SignalDecl, TemplateDecl, TemplateParam,
+    TestItem, TilesClaim, TilesItem, Value, WireDecl,
 };
 use std::collections::BTreeMap;
 
@@ -113,6 +113,17 @@ pub(crate) fn visit_refs(
                 }
             }
         }
+        Item::Schedule(s) => {
+            for line in &mut s.body {
+                if let ScheduleItem::Line(l) = line {
+                    for d in &mut l.days {
+                        if let Day::Slug(slug) = d {
+                            f(slug, RefUse::Object)?;
+                        }
+                    }
+                }
+            }
+        }
         Item::Let(_)
         | Item::Defaults(_)
         | Item::Template(_)
@@ -121,7 +132,6 @@ pub(crate) fn visit_refs(
         | Item::FragmentEnd
         | Item::Owned(_)
         | Item::Access(_)
-        | Item::Schedule(_)
         | Item::Moods(_)
         | Item::Comment(_) => {}
     }

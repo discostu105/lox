@@ -16,7 +16,7 @@
 //! positionally — the structure is identical, only names differ.
 
 use super::ast::{
-    AccessItem, ArgItem, BindingKind, BlockDecl, Expr, Item, MatchSpec, ModeName, Module,
+    AccessItem, ArgItem, BindingKind, BlockDecl, Day, Expr, Item, MatchSpec, ModeName, Module,
     MoodsItem, Operand, RuleItem, RuleStmtKind, ScheduleItem, TemplateDecl, TestItem, TilesItem,
     Value,
 };
@@ -223,7 +223,14 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             sub(&mut t.name);
             for stmt in &mut t.body {
                 match stmt {
-                    ScheduleItem::Line(l) => sub_comment(&mut l.comment),
+                    ScheduleItem::Line(l) => {
+                        for d in &mut l.days {
+                            if let Day::Slug(slug) = d {
+                                sub(slug);
+                            }
+                        }
+                        sub_comment(&mut l.comment);
+                    }
                     ScheduleItem::Comment(text) => sub_text(text, old, new),
                 }
             }

@@ -261,9 +261,10 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
   `OutputRefLM(mirrors: <it>, AI: x.Q, On: "…")` sends one, and a `recipients <set> … end`
   (`user "<title>"`) claimed with `<it>.recipients = <set>` says who gets it.
 - **Schedules and modes.** A DayTimer's week is `schedule <set> … end` (`weekdays 06:00-08:00`,
-  `weekend off`, `holiday …`) with `timer.schedule = <set>`. Any operating mode can be named by title
-  (`"Party" 18:00-24:00`). `party = Mode("Party")` creates a mode, and `party.Q` is on while it is
-  active.
+  `weekend off`, `holiday …`) with `timer.schedule = <set>`. `party = Mode("Party")` creates a mode,
+  and `party.Q` is on while it is active. Rules and schedules name a mode one way: a built-in one in a
+  schedule by its day word (`mon`), one the module declares or externs by its slug
+  (`party 18:00-24:00`, `when mode party`), any other by title (`when mode "Urlaub"`).
 - **Users are never declared.** They belong to the Miniserver's user management; source names them by
   title.
 - **Light moods.** Values per circuit kind are `on`/`off`/`40%`/`rgb(r, g, b)`/`temp(…)`. Claim a set
@@ -304,7 +305,8 @@ it only when it matches what you intended.
 | `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or create the mode (`party = Mode("Party")`) |
 | `no <C Type="VirtualInCaption"> to hold a new VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then compile again |
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
-| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"` | write what the message names (the language server offers it as a quick fix) |
+| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"`, a mode by title that the module names by slug (`"Party"` for `party`), a built-in mode by title in a schedule (`"Montag"` for `mon`) | write what the message names (the language server offers it as a quick fix; `loxl fmt` on the module directory rewrites declared modes) |
+| `unknown day` | a schedule day that is no day word and no `Mode` of the module | fix the spelling, declare the mode (`extern x = Mode(title: "…")`), or quote its title |
 | `` Write `a.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name; `a.Q` when `b` is the primary block |
 | `has no primary block` | `a.Q` on an instance whose template has several blocks | name the block (`a.<block>.Q`), or mark one with `template t(…) -> <block>` |
 | `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |

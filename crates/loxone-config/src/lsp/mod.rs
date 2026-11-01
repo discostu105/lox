@@ -442,7 +442,7 @@ impl<W: Write> Server<'_, W> {
             return Value::Null;
         };
         let text = self.ws.text(&path).unwrap_or_default();
-        match analysis::format(&text) {
+        match analysis::format(&self.ws, &path) {
             Some(canonical) if canonical != text => {
                 let lines = text.split('\n').count();
                 json!([{

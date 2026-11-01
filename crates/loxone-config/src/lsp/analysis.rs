@@ -1105,9 +1105,21 @@ pub fn locate_error(files: &[PathBuf], message: &str) -> Option<(PathBuf, usize)
         .map(|s| (s.file, s.line + 1))
 }
 
-/// `text` in canonical form (`loxl fmt`), if it parses.
-pub fn format(text: &str) -> Option<String> {
-    Module::parse_fragment(text).ok().map(|m| m.to_text())
+/// The file at `path` in canonical form (`loxl fmt`), if it parses. Its
+/// operating modes are spelled by the slugs the whole unit gives them.
+pub fn format(ws: &Workspace, path: &Path) -> Option<String> {
+    let mut module = Module::parse_fragment(&ws.text(path)?).ok()?;
+    let unit = ws.unit(path);
+    let siblings: Vec<Module> = unit
+        .files
+        .iter()
+        .filter(|f| f.as_path() != path)
+        .filter_map(|f| Module::parse_fragment(&ws.text(f)?).ok())
+        .collect();
+    let spellings =
+        crate::logic::ModeSpellings::of(siblings.iter().chain(std::iter::once(&module)));
+    spellings.apply(&mut module);
+    Some(module.to_text())
 }
 
 fn push(
