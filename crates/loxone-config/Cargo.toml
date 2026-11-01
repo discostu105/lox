@@ -1,6 +1,6 @@
 [package]
 name = "loxone-config"
-version = "0.19.1"
+version = "0.20.0"
 edition = "2024"
 rust-version = "1.88"
 description = "The Loxone Config program file as a library — lossless .Loxone model, UUIDs, backup ZIPs, semantic diff — and Lox Logic, a text language compiled into it (compile/decompile/adopt, lockfile, simulated tests)"
