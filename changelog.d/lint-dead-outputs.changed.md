@@ -1,1 +1,0 @@
-- **`loxl lint`** no longer reports what is in use: values the app shows, statistics, energy flow meters, messages, modes and calendar entries. A device's unused inputs are one finding, and so are one Touch Pure Flex's dead commands of one type. On a house config this took 231 findings down to 22.

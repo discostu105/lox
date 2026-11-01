@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.68.0] — 2026-11-01
+
+### Added
+- **`loxl lint`**: a `# lint: allow <kind>` comment on the line above a declaration keeps a deliberate finding out of the report. An allow that covers nothing is reported as `unused-allow`.
+
+### Changed
+- **`loxl lint`** no longer reports what is in use: values the app shows, statistics, energy flow meters, messages, modes and calendar entries. A device's unused inputs are one finding, and so are one Touch Pure Flex's dead commands of one type. On a house config this took 231 findings down to 22.
+
 ## [0.67.0] — 2026-11-01
 
 ### Added
