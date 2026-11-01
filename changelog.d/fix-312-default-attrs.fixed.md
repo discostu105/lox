@@ -1,1 +1,0 @@
-- **`loxl compile`** writes a 0 on a setting such as `MinVal`, `ModbusDataType` or a calendar entry's `CalType` as no attribute, the way Loxone Config stores it, so a save no longer shows it as changed. Adopt writes such a missing setting as 0 where a new object would get another default.

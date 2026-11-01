@@ -10,6 +10,23 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.69.0] — 2026-11-01 — hardware in source
+
+Tree and Air devices, with their inputs and outputs, can now be taken over in Lox Logic. Pairing stays in Loxone Config.
+
+### Added
+- **`loxl compile`** takes over existing hardware by declaration: `taster = TreeDevice("Taster", serial: "…")` and `klingel = TreeSensor("Klingel", device: taster, iname: "I0", …)`. The source owns the title, room, category and the settings it states, including `Statistics: on`/`off`. Tree and Air devices and their inputs and outputs, and the Tree and Air extensions, are supported. Removing a declaration leaves the hardware as it is.
+- **`loxl adopt --uuid <device>`** declares a Tree or Air device with every input and output below it.
+- **`extern … (serial: "…")`** matches a device by its own serial.
+
+### Changed
+- **`loxl lint`** reports bare durations also on extern port assignments (`x.TimeEnd = 120`), template value parameters and instance arguments, and `--fix` writes their units across the files of a module. The compiled config does not change.
+- **Lox Logic** knows the units of the Virtual HTTP Input from Loxone's documentation: `Poll` in seconds, `Timeout` in milliseconds (`Timeout: 4s` compiles to `4000`). Modbus settings have no documented unit and stay bare numbers.
+
+### Fixed
+- **`loxl compile`** writes a 0 on a setting such as `MinVal`, `ModbusDataType` or a calendar entry's `CalType` as no attribute, the way Loxone Config stores it, so a save no longer shows it as changed. Adopt writes such a missing setting as 0 where a new object would get another default.
+- **`loxl types`** and the LSP hover no longer link Greater and Less to the Comparator page of the Loxone knowledge base, which documents another block. The knowledge base has no page for these two.
+
 ## [0.68.1] — 2026-11-01
 
 ### Fixed

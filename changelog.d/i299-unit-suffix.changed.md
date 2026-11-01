@@ -1,2 +1,0 @@
-- **`loxl lint`** reports bare durations also on extern port assignments (`x.TimeEnd = 120`), template value parameters and instance arguments, and `--fix` writes their units across the files of a module. The compiled config does not change.
-- **Lox Logic** knows the units of the Virtual HTTP Input from Loxone's documentation: `Poll` in seconds, `Timeout` in milliseconds (`Timeout: 4s` compiles to `4000`). Modbus settings have no documented unit and stay bare numbers.
