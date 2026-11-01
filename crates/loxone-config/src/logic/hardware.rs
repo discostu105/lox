@@ -415,6 +415,11 @@ k = TreeSensor("K", device: t)"#)
         assert!(
             err(r#"k = TreeSensor("K", device: t, iname: "I0")"#).contains("names no hardware")
         );
+        // Air devices are never created: their MAC comes from pairing (#322).
+        assert!(
+            err(r#"t = LoxAIRDevice("T", kind: "PresenceSensorTree")"#)
+                .contains("`kind:` does not apply")
+        );
         assert!(
             err(r#"t = LoxAIRDevice("T", serial: "B0")
 k = TreeSensor("K", device: t, iname: "I0")"#)
