@@ -185,7 +185,10 @@ rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
 port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
-value      = number [ unit ] | string | bool | const-ref | clock ;
+value      = number [ unit ] | string | bool | const-ref | clock | date | day-of-year ;
+day-of-year = digit digit "-" digit digit ;        (* MM-DD; a date and a day of the year
+                                                      bind only a calendar entry's
+                                                      `on:`, `from:`, `to:` *)
 bool       = "on" | "off" ;                        (* digital 1/0; "true"/"false" on a
                                                       text-boolean attribute *)
 clock      = digit [ digit ] ":" digit digit [ ":" digit digit ] ;
@@ -647,10 +650,10 @@ module directory rewrites the spellings the source shows; `decompile` and `adopt
 
 ```text
 party = Mode("Party")
-ferien = CalendarEntry("Sommerferien", switches: vacation, Mode: 3, From: 6393, To: 6456)
-ostern = CalendarEntry("Ostermontag", switches: holiday, Mode: 1, EasterOffset: 1)
-silvester = CalendarEntry("Silvester", switches: party, Month: 12, Day: 31)
-heizperiode = CalendarEntry("Heizperiode", switches: heating, Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30)
+ferien = CalendarEntry("Sommerferien", switches: vacation, from: 2026-07-04, to: 2026-09-05)
+ostern = CalendarEntry("Ostermontag", switches: holiday, easter: 1)
+silvester = CalendarEntry("Silvester", switches: party, on: 12-31)
+heizperiode = CalendarEntry("Heizperiode", switches: heating, from: 10-01, to: 04-30)
 ```
 
 An entry of the *Betriebszeiten* calendar is an object of the object
@@ -665,26 +668,34 @@ its quoted title (`switches: "Urlaub"`). It compiles to the entry's
 Without `switches:`, a fresh entry switches the holiday mode, and an
 adopted one keeps its mode.
 
-The stored number is no longer source: `CalType: 10` is an error that
-names the replacement, `switches: heating`. `loxl check` names it for a
-built-in mode, `loxl compile` for a user mode (negative numbers, which
-only the config resolves), and `loxl fmt` rewrites a built-in mode's
-number. `Mode` is not the mode: it says what kind of date the entry is:
+The date is one of four kinds, written bare like `when date`:
 
-| `Mode` | Kind | Attributes |
+| Source | Kind | Compiles to |
 |---|---|---|
-| absent | a fixed date, every year | `Month`, `Day` |
-| `1` | relative to Easter Sunday | `EasterOffset` (days) |
-| `3` | one period | `From`, `To` (days since 2009-01-01) |
-| `4` | a yearly range | `Month`, `Day` to `Month2`, `Day2` |
+| `on: 12-31` | a day every year (`MM-DD`) | no `Mode=`; `Month`, `Day` |
+| `easter: 1` | days after Easter Sunday (`easter: -2`: before it) | `Mode="1"`, `EasterOffset` |
+| `from: 2026-07-04, to: 2026-09-05` | one period (`YYYY-MM-DD`) | `Mode="3"`, `From`, `To` (days since 2009-01-01) |
+| `from: 10-01, to: 04-30` | a range every year (`MM-DD`), across New Year when `to` is earlier | `Mode="4"`, `Month`, `Day`, `Month2`, `Day2` |
 
-Other kinds do not occur among the corpus's 397 entries; the attributes
-are written as stated. A fresh entry carries the attributes Loxone
-Config writes for an unset date (`Month`/`Day`/`Month2`/`Day2` 1,
-`WeekDayInMonth="1"`). The entries Loxone Config made are taken over
-with `adopt --uuid`, which writes their mode with `switches:`; edits
-change only the attributes the source states. Its `I` and `Q` are never wired in the corpus; the mode's `Q`
-is the output to use.
+Month and day have two digits, and `02-29` is a day of the year. A
+period starts on 2009-01-01 or later. `on:` takes no year: for one day,
+write `from: 2026-12-24, to: 2026-12-24`. The attributes the kind does
+not read stay as they are, as in a Loxone Config save. Without a date,
+a fresh entry is 1 January (what Loxone Config writes for an unset
+date), and an adopted one keeps its date.
+
+The stored attributes are no longer source. `CalType: 10` is an error
+that names `switches: heating`: `loxl check` names it for a built-in
+mode, `loxl compile` for a user mode (negative numbers, which only the
+config resolves). `Mode: 4, Month: 10, Day: 1, Month2: 4, Day2: 30` is
+an error that names `from: 10-01, to: 04-30`. `Mode`, `Month`, `Day`,
+`Month2`, `Day2`, `From`, `To`, `EasterOffset` and `WeekDayInMonth`
+(1 on every entry) are all refused, and a `Mode` other than none, 1, 3
+or 4 is no date. `loxl fmt` rewrites a built-in mode's number and the
+stored date. The entries Loxone Config made are taken over with
+`adopt --uuid`, which writes their mode with `switches:` and their date
+as a date; edits change only what the source states. Its `I` and `Q`
+are never wired in the corpus; the mode's `Q` is the output to use.
 
 ### `<-` — wire onto an extern port
 
@@ -1910,6 +1921,10 @@ replacement. The compile output of a migrated file is byte-identical.
   (`switches: heating`, `switches: party`, `switches: "Urlaub"`), instead of the stored number
   `CalType: 10`. The number is an error naming the replacement; `fmt` rewrites a built-in mode's
   number, `adopt` writes `switches:`.
+- **A calendar entry states its date as a date**: `on: 12-31`, `easter: 1`,
+  `from: 2026-07-04, to: 2026-09-05` (one period), `from: 10-01, to: 04-30` (every year), instead
+  of the stored `Mode:`, `Month:`, `Day:`, `Month2:`, `Day2:`, `From:`, `To:`, `EasterOffset:` and
+  `WeekDayInMonth:`. They are an error naming the replacement; `fmt` and `adopt` write the date.
 
 Migrating a v1 project: `Analog|Signed|CloseAfterSend: "true"/"false"`
 → `on`/`off`, unquote `clock "…"` and `when date "…"`, rewrite
@@ -1921,7 +1936,8 @@ whose blocks relied on the previous file's `page` that `page` line, rename each
 (`<extern>.access = <extern>_access`) after its `end`, rename blocks named `wait`, `mode`,
 `notify`, `mail` or `message` that a rule sends commands to, then `loxl fmt`
 (which also unquotes one-word `then` commands, puts short calls on one line and names a mode the
-module declares by its slug and a calendar entry's built-in `CalType:` by its day word; `loxl
+module declares by its slug, a calendar entry's built-in `CalType:` by its day word and its
+stored date as a date; `loxl
 compile` names the modes it cannot see) and, if you like,
 `loxl lint --fix` for the unit suffixes.
 

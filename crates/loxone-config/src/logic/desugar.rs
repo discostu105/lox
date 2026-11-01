@@ -481,6 +481,11 @@ impl Desugar<'_> {
                  compute on plain numbers",
                 self.sink,
             ))),
+            Value::Date(_) => Err(Error::Compile(format!(
+                "`{v}` in the arithmetic on `{}` is a date. Formulas compute \
+                 on plain numbers",
+                self.sink,
+            ))),
             Value::Bool(_) => Err(Error::Compile(format!(
                 "`{v}` in the arithmetic on `{}` is a digital value, but formulas \
                  compute on plain numbers. Write `1` or `0`",

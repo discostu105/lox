@@ -629,6 +629,7 @@ fn apply_features(
     // Calendar entries: `CalType=` from `switches:`, now that every mode
     //     has its number.
     super::calendar::apply(doc, module, &uuid_of)?;
+    super::calendar::place_new_attrs(doc, base, module, &uuid_of);
     // DayTimer schedules: the claimed `Modes=`/`N=`/`<Entry>` set,
     //     on extern and managed timers alike; no lock state either.
     super::schedule::apply(doc, module, &uuid_of)?;

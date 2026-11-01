@@ -981,11 +981,20 @@ wires. Attributes, in the save's order:
   - `3`: one period (`From`, `To`: days since 2009-01-01; `2375` is 4
     July 2015);
   - `4`: a yearly range (`Month`, `Day` to `Month2`, `Day2`).
-- `Month`, `Day`, `Month2`, `Day2` — always present; `1` where the kind
-  does not use them. Some Easter entries carry a date there (the day
-  of some year the offset gave); it is carried as written.
-- `From`, `To`, `EasterOffset` — only with their kind.
-- `WeekDayInMonth` — always `1`.
+- `Month`, `Day`, `Month2`, `Day2` — present on every entry but 8
+  Easter entries; `1` where the kind does not use them. Some Easter
+  entries carry a date there (the day of some year the offset gave); it
+  is carried as written.
+- `From`, `To`, `EasterOffset` — with their kind. 3 fixed-date entries
+  (one entry in three configs) also carry an `EasterOffset`, which their
+  kind does not read: an entry that changes its kind keeps the
+  attributes of the old one.
+- `WeekDayInMonth` — `1` where present; 2 entries of `V="122"` lack it.
+
+The counts are from the corpus of 2026-11-01 (431 entries): 308 yearly
+ranges, 52 fixed dates, 40 periods (2 of them with `To` before
+`From`), 31 Easter entries. No other `Mode` occurs. In `From`/`To`,
+2009-01-01 is day 0.
 
 A save of fresh period, Easter and yearly-range entries changed nothing
 (oracle session 31); a fixed-date entry for the day switched its mode on

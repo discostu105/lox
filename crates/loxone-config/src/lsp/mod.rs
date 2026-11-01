@@ -396,6 +396,33 @@ impl<W: Write> Server<'_, W> {
             }
             let (start, end) = (&d["range"]["start"], &d["range"]["end"]);
             let line = start["line"].as_u64().unwrap_or(0) as usize;
+            // A list of arguments over several lines ("write `from:
+            // 10-01, to: 04-30` instead of `Mode: 4, Month: 10, …`"):
+            // replaced from its first argument to its last.
+            if let Some((new, old)) = analysis::replacement(msg)
+                && old.contains(", ")
+                && !text::line(&text, line).contains(old)
+            {
+                let line_start: usize = text.split('\n').take(line).map(|l| l.len() + 1).sum();
+                if let Some((from, to)) = analysis::find_arguments(&text, line_start, old) {
+                    let at = |b: usize| {
+                        let n = text[..b].matches('\n').count();
+                        let start = text[..b].rfind('\n').map_or(0, |i| i + 1);
+                        json!({ "line": n, "character": self.enc.column(&text[start..], b - start) })
+                    };
+                    out.push(json!({
+                        "title": format!("Change to `{new}`"),
+                        "kind": "quickfix",
+                        "diagnostics": [d],
+                        "isPreferred": true,
+                        "edit": { "changes": { uri.clone(): [{
+                            "range": { "start": at(from), "end": at(to) },
+                            "newText": new,
+                        }] } },
+                    }));
+                    continue;
+                }
+            }
             if end["line"].as_u64() != Some(line as u64) {
                 continue;
             }

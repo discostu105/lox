@@ -2461,7 +2461,11 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                     }
                     end += 1;
                 }
-                let kind = binding_kind(port, &toks[start..end], lineno)?;
+                let value = &toks[start..end];
+                let kind = match calendar_date(&call.block_type, port, value, lineno)? {
+                    Some(date) => BindingKind::Param(date),
+                    None => binding_kind(port, value, lineno)?,
+                };
                 if let BindingKind::Param(Value::Str(text)) = &kind
                     && (text == "true" || text == "false")
                     && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
@@ -2548,6 +2552,46 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
             e => BindingKind::Expr(e),
         },
     })
+}
+
+/// A calendar entry's `on:`, `from:` or `to:` date, `YYYY-MM-DD` or
+/// `MM-DD`, written bare like `when date 2026-12-24`; `None` for any other
+/// argument or shape (the check names the right one). A quoted date is
+/// refused with the bare one.
+fn calendar_date(
+    block_type: &str,
+    port: &str,
+    toks: &[Tok],
+    lineno: usize,
+) -> Result<Option<Value>> {
+    use crate::logic::calendar::{is_full_date, month_day, takes_date};
+    if !takes_date(block_type, port) {
+        return Ok(None);
+    }
+    let err = |msg: String| Error::Parse { line: lineno, msg };
+    let written = match toks {
+        [Tok::Str(d)] if is_full_date(d) || month_day(d).is_some() => {
+            return Err(err(format!(
+                "a date takes no quotes. Write `{port}: {d}` instead of `{port}: \"{d}\"`."
+            )));
+        }
+        [
+            Tok::Num(y),
+            Tok::Minus,
+            Tok::Num(m),
+            Tok::Minus,
+            Tok::Num(d),
+        ] => format!("{y}-{m}-{d}"),
+        [Tok::Num(m), Tok::Minus, Tok::Num(d)] => format!("{m}-{d}"),
+        _ => return Ok(None),
+    };
+    if is_full_date(&written) || month_day(&written).is_some() {
+        return Ok(Some(Value::Date(written)));
+    }
+    Err(err(format!(
+        "`{port}: {written}` is no date. Write a day of the year as MM-DD (`12-31`) and a \
+         day of the calendar as YYYY-MM-DD (`2026-07-05`)."
+    )))
 }
 
 /// A `YYYY-MM-DD` token run (`2026`, `-`, `01`, `-`, `03`), validated;
