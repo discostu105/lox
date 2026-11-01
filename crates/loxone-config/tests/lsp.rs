@@ -582,12 +582,28 @@ fn scoped_instance_names_hover_and_go_to_the_template_body() {
     assert!(hover.contains("compiled as `px_aus`"), "{hover}");
     let hover = response(&out, 4)["contents"]["value"].as_str().unwrap();
     assert!(hover.starts_with("**Or.Q** — output"), "{hover}");
+    // The port's line from Loxone's documentation.
+    assert!(
+        hover.contains("Output: on while any input is on."),
+        "{hover}"
+    );
     // `px.Q` is a port of the primary block, a Not.
     let hover = response(&out, 5)["contents"]["value"].as_str().unwrap();
     assert!(hover.starts_with("**Not.Q** — output"), "{hover}");
     let got = labels(&out, 6);
     assert!(got.contains(&"Q".to_string()), "{got:?}");
     assert!(got.contains(&"I1".to_string()), "{got:?}");
+    let q = response(&out, 6)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["label"] == "Q")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        q["detail"], "output (O) — Output: on while any input is on.",
+        "{q}"
+    );
 }
 
 #[test]

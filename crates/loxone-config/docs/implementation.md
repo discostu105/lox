@@ -18,6 +18,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `src/port_meta.rs` | GENERATED: documented port facts (unit, canvas label, range, default) from lox-cli's TechDoc scrape (`tools/extract-port-meta.py`, read from a path, never vendored) | units scale suffixes and refuse mismatches; labels only feed error hints; ranges only feed lint |
 | `src/canvas_labels.rs` | canvas labels of input keys that `port_meta` lacks, read off Loxone Config's canvas | hand-written; only entries checked in Loxone Config |
 | `src/blockdoc.rs` | one line per builtin type on what it is for (`loxl types`, LSP hover) | written for Lox Logic, not copied from Loxone |
+| `src/port_doc.rs` | one line per port from the type's knowledge-base page, with the abbreviation it maps to (`loxl types`, LSP hover and completion) | hand-written; `tools/check-port-docs.py` checks each abbreviation against the page |
 | `src/lock.rs` | `Lockfile` ([lockfile-spec.md](lockfile-spec.md)): load, save, `remove_object`/`rename_object`/`absorb_counters` | serialization is deterministic (BTreeMaps) |
 | `src/diff.rs` | UUID-keyed semantic diff with the `locale_suspect` heuristic; compares attribute parameters (`Formula=`) and canonical `APC=` rule payloads | `diff(a, a).is_empty()` |
 | `src/access.rs` | users, groups and access rights as a read model, for the users/access section of the diff | read only |

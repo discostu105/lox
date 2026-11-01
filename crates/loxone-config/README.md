@@ -148,7 +148,7 @@ loxl compile --relayout Beschattung  # place a page's managed blocks afresh
 loxl decompile --out-dir view/ current.Loxone              # one module per page
 loxl adopt current.Loxone --out-module modules/haus.loxl \
      --out-lock modules/haus.lock.json                      # take over existing blocks
-loxl types [<Type>]                  # block types the compiler can create: ports, units, ranges
+loxl types [<Type>]                  # block types the compiler can create: ports, what they do, units
 loxl types --search hysteresis       # search names and descriptions
 loxl templates [<name>]              # the template library
 loxl roundtrip current.Loxone        # byte-fidelity self-check

@@ -20,7 +20,7 @@ example module valid.
 3. **Never invent block types or port names.** Valid types for a block
    declaration (`slug = Type(…)`) are exactly the builtin table
    (`src/connectors.rs`) — list it with `loxl types`, and read one
-   type's ports, directions, units, canvas labels and ranges with
+   type's ports, what each does, directions, units, canvas labels and ranges with
    `loxl types <Type>` (`--json` for machines). Valid ports on an extern are whatever the base config actually has —
    discover them with `loxl decompile` / `loxl observe`, or read them from
    the error, which lists them (and suggests the closest name for typos).
@@ -49,7 +49,7 @@ loxl decompile current.Loxone            # full Lox Logic view, `page` sections
 loxl decompile --out-dir view/ current.Loxone   # one module per page
 loxl observe current.Loxone              # port evidence per block type
 loxl types --search delay                 # which type does what (name or purpose)
-loxl types Monoflop                       # purpose, ports, units, labels of a mintable type
+loxl types Monoflop                       # purpose, ports (with what each does), units, labels
 loxl templates                            # the template library (loxl templates <name> prints one)
 
 # 1. Edit the module (.loxl). Whole-line # comments are preserved.

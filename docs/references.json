@@ -160,10 +160,12 @@
       "publisher": "Loxone",
       "url": "https://www.loxone.com/enen/kb/",
       "pinned": false,
-      "covers": "Block inputs, outputs, parameters, units, ranges and defaults; the weakest tier of the connector table",
+      "covers": "Block inputs, outputs, parameters (the port descriptions), units, ranges and defaults; the weakest tier of the connector table",
       "used_by": [
         "crates/loxone-config/docs/connector-db.md",
-        "crates/loxone-config/docs/simulator.md"
+        "crates/loxone-config/docs/simulator.md",
+        "crates/loxone-config/src/port_doc.rs",
+        "crates/loxone-config/tools/check-port-docs.py"
       ]
     },
     {
@@ -205,7 +207,8 @@
       "pinned": false,
       "covers": "Per block type: connectors, units, labels, ranges, defaults (loxone-block-types-full.json)",
       "used_by": [
-        "crates/loxone-config/tools/extract-port-meta.py"
+        "crates/loxone-config/tools/extract-port-meta.py",
+        "crates/loxone-config/src/port_doc.rs"
       ]
     },
     {
