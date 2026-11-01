@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.78.0] — 2026-11-01
+
+### Added
+- **lox logic lint**: `implicit-zero` names an existing block whose port is 0 only because nothing sets it, while a new block would get a default (an adopted `Irrigation` without `Tv1`). `--fix` writes `Port: 0`, and the compile output stays the same.
+
+### Changed
+- **lox logic**: a block the compiler creates gets the defaults Loxone Config places it with on the ports the source leaves out, so a new `Monoflop` without `Time` pulses for 2 s instead of 0 s. Blocks that already exist keep their values.
+
 ## [0.77.0] — 2026-11-01
 
 ### Changed
