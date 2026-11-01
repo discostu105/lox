@@ -71,4 +71,4 @@ UUID. A schedule column is still ordered by `Mode=` number.
 ## Not covered
 
 A `CalendarEntry` names the mode it switches on by `CalType:` number, the stored attribute. Naming it by
-slug or day word there is a separate change.
+slug or day word there is a separate change: [D115](0115-calendar-entry-mode.md).

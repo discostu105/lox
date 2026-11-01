@@ -283,6 +283,13 @@ pub fn validate_ports(module: &Module) -> Result<()> {
                 }
                 continue;
             }
+            // The mode a calendar entry switches on, and its raw number
+            // (refused against the base, which numbers the modes).
+            if crate::logic::calendar::is_switches(&block.block_type, key)
+                || (block.block_type == "CalendarEntry" && key == crate::logic::calendar::CAL_TYPE)
+            {
+                continue;
+            }
             known_port(module, &block.slug, key)?;
             // A suffixed value must fit the port's documented unit.
             module.resolve_value_for(v, &block.block_type, &block.slug, key)?;

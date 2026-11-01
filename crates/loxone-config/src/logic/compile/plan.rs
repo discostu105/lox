@@ -352,6 +352,7 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
             // resolved separately below.
             if (is_ref_type(&block.block_type) && k == "mirrors")
                 || crate::periphery::is_device_binding(&block.block_type, k)
+                || crate::logic::calendar::is_switches(&block.block_type, k)
             {
                 continue;
             }

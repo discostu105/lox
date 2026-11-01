@@ -55,6 +55,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `tiles.rs` | Touch Pure Flex tiles: tile arguments → functions, rewrite of claimed `<btns>`, tile lints | unlisted tiles and layout kept byte for byte |
 | `access.rs` | access rights on NFC Code Touch blocks, and push notification recipients | an `access` declaration owns every `TIM=` on its block |
 | `schedule.rs` | DayTimer schedules from source | rewrites `Modes=`, the entries and their counts only |
+| `calendar.rs` | the mode a calendar entry switches on: `switches:` → `CalType=`, the refusal of the raw number | writes `CalType=` only, after every mode has its number |
 | `rule.rs` | Automatic Designer rules from source | writes only when the payload differs; edits the way the app does |
 | `moods.rs` | LightController2 mood claims | moods keep their identity by name |
 | `simtest.rs` | `loxl test`: plan the test bodies against the compiled config, run them in `sim`, map results back to `expect` lines | the lockfile is never written |

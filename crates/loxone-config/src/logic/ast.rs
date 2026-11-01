@@ -2010,11 +2010,52 @@ impl ModeSpellings {
         }
     }
 
+    /// The spelling a calendar entry's `switches:` should use for the
+    /// mode `v` names, if it is another: as in a schedule.
+    pub fn in_calendar(&self, v: &Value) -> Option<Value> {
+        let day = match v {
+            Value::Ref(w) if crate::logic::schedule::is_day(w) => return None,
+            Value::Ref(s) => Day::Slug(s.clone()),
+            Value::Str(t) => Day::Title(t.clone()),
+            _ => return None,
+        };
+        Some(match self.in_schedule(&day)? {
+            Day::Keyword(k) | Day::Slug(k) => Value::Ref(k),
+            Day::Title(t) => Value::Str(t),
+        })
+    }
+
     /// Rewrite every mode reference of `module` in its one spelling.
-    /// `loxl fmt` runs it with the spellings of the whole module.
+    /// `loxl fmt` runs it with the spellings of the whole module. A
+    /// calendar entry's built-in mode number (`CalType: 10`) becomes its
+    /// day word (`switches: heating`).
     pub fn apply(&self, module: &mut Module) {
         for item in &mut module.items {
             match item {
+                Item::Block(b) if b.block_type == "CalendarEntry" => {
+                    for arg in &mut b.args {
+                        let ArgItem::Binding(binding) = arg else {
+                            continue;
+                        };
+                        let BindingKind::Param(v) = &mut binding.kind else {
+                            continue;
+                        };
+                        if binding.port == crate::logic::calendar::CAL_TYPE
+                            && let Value::Number(n) = v
+                            && let Some(word) = n
+                                .parse()
+                                .ok()
+                                .and_then(crate::logic::calendar::builtin_value)
+                        {
+                            binding.port = crate::logic::calendar::SWITCHES.to_string();
+                            *v = word;
+                        } else if binding.port == crate::logic::calendar::SWITCHES
+                            && let Some(new) = self.in_calendar(v)
+                        {
+                            *v = new;
+                        }
+                    }
+                }
                 Item::Rule(r) => {
                     for st in &mut r.body {
                         if let RuleItem::Stmt(st) = st

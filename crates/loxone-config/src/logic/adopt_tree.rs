@@ -299,6 +299,39 @@ pub(super) fn adopt_device(
                 comment: None,
             }));
         }
+        // A calendar entry's mode, by its one spelling: a day word, the
+        // module's slug for it, or its title.
+        if o.block_type == "CalendarEntry" {
+            let number = el.attr("CalType").map_or(Ok(0), str::parse).map_err(|_| {
+                fail(format!(
+                    "CalendarEntry \"{}\": `CalType=\"{}\"` is no number",
+                    o.title.as_deref().unwrap_or(""),
+                    el.attr("CalType").unwrap_or("")
+                ))
+            })?;
+            let known: BTreeMap<String, String> = lock
+                .objects
+                .iter()
+                .map(|(s, lo)| (lo.uuid.clone(), s.clone()))
+                .chain(
+                    lock.externals
+                        .iter()
+                        .map(|(s, le)| (le.uuid.clone(), s.clone())),
+                )
+                .chain(slug_of.iter().map(|(u, s)| (u.clone(), s.clone())))
+                .collect();
+            let mode = crate::logic::calendar::lift(doc, number, &known).map_err(|why| {
+                fail(format!(
+                    "cannot adopt CalendarEntry \"{}\": {why}",
+                    o.title.as_deref().unwrap_or("")
+                ))
+            })?;
+            args.push(ArgItem::Binding(Binding {
+                port: crate::logic::calendar::SWITCHES.to_string(),
+                kind: BindingKind::Param(mode),
+                comment: None,
+            }));
+        }
         for name in settings {
             // A setting a save leaves out at 0 or unticked reads as such
             // where a fresh mint would fill in something else.

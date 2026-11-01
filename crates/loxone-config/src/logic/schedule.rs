@@ -71,8 +71,17 @@ pub(crate) fn unknown_day<'a>(word: &str, modes: impl IntoIterator<Item = &'a st
     )
 }
 
-fn mode_uuid(n: u8) -> String {
+pub(crate) fn mode_uuid(n: u8) -> String {
     format!("00000000-0000-{n:04x}-1500000000000000")
+}
+
+/// The `Mode=` number of the one built-in mode a day word names (`heating`:
+/// 10); `None` for a word that names several (`weekdays`) or none.
+pub(crate) fn builtin_number(word: &str) -> Option<i64> {
+    match DAYS.iter().find(|(k, _)| *k == word)?.1 {
+        [n] => Some(i64::from(*n) - 1),
+        _ => None,
+    }
 }
 
 /// The day word of a built-in operating mode, by its fixed UUID.

@@ -105,7 +105,9 @@ const CALENDAR: &[PortSpec] = &[port("I", Input), port("Q", Output)];
 pub const PERIPHERY: &[PeripheryType] = &[
     // A calendar entry (#211): on which dates an operating mode is on.
     // `CalType=` is the mode's `Mode=` number (absent: 0, the holiday
-    // mode); `Mode=` the kind — absent a fixed date (`Month`/`Day`), 1
+    // mode). It is no setting: the source names the mode with
+    // `switches:`, written by `logic::calendar` once the compiled
+    // document numbers every mode. `Mode=` is the kind — absent a fixed date (`Month`/`Day`), 1
     // relative to Easter (`EasterOffset` days; `Month`/`Day` the date in
     // the year of the save), 3 one period (`From`/`To`, days since
     // 2009-01-01), 4 every year from `Month`/`Day` to `Month2`/`Day2`.
@@ -118,7 +120,6 @@ pub const PERIPHERY: &[PeripheryType] = &[
         ports: CALENDAR,
         iname: None,
         settings: &[
-            "CalType",
             "Mode",
             "Month",
             "Day",
@@ -133,7 +134,6 @@ pub const PERIPHERY: &[PeripheryType] = &[
         mint_attrs: &[
             ("Nio", Some("2")),
             ("WF", Some("16384")),
-            ("CalType", None),
             ("Mode", None),
             ("Month", Some("1")),
             ("Day", Some("1")),
