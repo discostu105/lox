@@ -65,7 +65,8 @@ The KB pages are at `https://www.loxone.com/enen/kb/<page>/`.
 | `Xor` | Exclusive OR | kb `exclusive-or` | Q on when I1 and I2 differ; fan-in OR-linked | — |
 | `Not` | NOT | kb `not` | Q = not I | — |
 | `Equal`, `NotEqual`, `Greater`, `GreaterEqual`, `Less`, `LessEqual` | comparators | kb `comparator` family | Q = Input1 op Input2 | — |
-| `Add`, `Sub`, `Mult`, `Div`, `Add4` | arithmetic | kb `arithmetic-blocks` | AQ | division by 0 fails the block |
+| `Add`, `Sub`, `Mult`, `Div`, `Add4` | arithmetic | kb `add-2-way`, `subtract`, `multiply`, `divide` | AQ | division by 0 fails the block |
+| `Int` | Integer | kb `integer` | AQ: Ro 0 rounds down, Ro 1 rounds down below .5 and up from it | a negative value, Ro other than 0 or 1 (refused) |
 | `Formula` | Formula | kb `formula`; both decimal separators (loxone-format.md) | AQ from `Formula=`: `+ - * / ^`, comparisons, I1–I4, PI and the documented functions | the error output; a formula without a value fails the block |
 | `Memory` | Memory flag | kb `memory-flags` | AQ = Input when wired, else the held value; Q = AQ ≠ 0 | — |
 | `InputRef` | input reference | loxone-format.md *Refs* | AQ = AI; Q = I, or AI ≠ 0 when I is open (refs of block outputs wire AI only) | — |
@@ -77,6 +78,10 @@ The KB pages are at `https://www.loxone.com/enen/kb/<page>/`.
 | `PushButton` | Switch | kb `switch`, timing diagram | Tg toggles on its rising edge; On holds Q on; Off (`Reset`) wins and locks; DisPc disables all; the On/Off outputs pulse for one cycle | remanence, the API input |
 | `PButtonT` | Push-button | kb `push-button`, timing diagram | rising Tr: Q on for Don from the latest edge; Don 0: Q follows Tr; Off resets and locks; DisPc disables Tr and Off | remanence, the API input |
 | `SRFlipFlop` | SR flip-flop | kb `flipflop-sr`, timing diagram | S sets and dominates, R resets, a rising Tg toggles | remanence |
+| `WipingRelay` | Wiping relay | kb `wiping-relay` | a rising edge at Tr: Q on for TH from the latest edge | remanence |
+| `AMemory` | Analogue memory | kb `analogue-memory` | a rising edge at Set stores V at the output, which holds it; Off sets it to 0 | Set rising while Off is on (refused); remanence |
+| `Counter` | Up counter | kb `counter` | a rising edge at C counts V up by 1; Lr = (V = L), L 0 the largest count; M 1 stops at L; Off resets and dominates | M 0 at the limit (how it loops is undocumented: refused); remanence |
+| `UpDownCounter` | Up-down counter | kb `up-down-counter` | V starts at Sv; a rising edge at C counts up (Dir 0) or down (Dir 1); R sets V to Sv | output O (how it switches at Von and Voff is only in the timing diagram); remanence |
 | `EdgeDetection` | Edge detection | kb `edge-detection`, timing diagram | pulses of Pd at every edge (P), rising (On), falling (Off); a new edge restarts the pulse | — |
 | `AnalogThresholdTrigger` | Threshold switch | kb `threshold-switch` | hysteresis between Von and Voff (inverted when Von < Voff, only the exact value when equal); On/Off pulse for Pd | remanence |
 | `Switch2Button` | Push switch | kb `push-switch`, its table and timing diagram | Q pulses for Don on each edge at Tr, Qon on the rising, Qoff on the falling one; On latches Q until Off; Off switches off and, held, locks; DisPc disables Tr, On and Off. Qon and Qoff also pulse when On and Off switch Q: the diagram shows it, the output table does not (the model follows the diagram) | a Tr edge while Q still pulses or while On holds it (undocumented: refused); Don 0 (refused) |
@@ -96,7 +101,9 @@ its counts of open and closed shades count is undocumented), intelligent
 room controllers, alarms, access schedules (`SwitchingTimer`, not program
 logic), pulse generators (the enable input is
 undocumented), constants (where the value is stored is not a documented format
-fact) and all integrations. A test can still cover logic downstream of
+fact), the moving average (`Avg`: when it takes its readings is undocumented), the runtime counter
+(`HourCounter`), the virtual status (`StateV`: its output is undocumented), the text pulse (`PulseBy`:
+where its search patterns are stored is unknown) and all integrations. A test can still cover logic downstream of
 them by setting their outputs. A new model needs a KB page or a format
 fact behind every behavior it claims, and a test per behavior in
 `src/sim/tests.rs`.

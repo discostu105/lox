@@ -103,6 +103,46 @@ pub fn summary(ty: &str) -> Option<&'static str> {
             "Status: up to eight inputs map to a status text (TQ) and value (AQ) for \
              the app."
         }
+        "StateV" => {
+            "Virtual status: shows the value at I in the app, with statistics if \
+             enabled."
+        }
+        "WipingRelay" => {
+            "Wiping relay: a rising edge at InputTrigger switches Q on for TimeOn, a new \
+             edge restarts it."
+        }
+        "Mult" => "Multiply: AQ is Input1 times Input2.",
+        "Add" => "Add: AQ is Input1 plus Input2.",
+        "Sub" => "Subtract: AQ is Input1 minus Input2.",
+        "Div" => "Divide: AQ is Input1 divided by Input2.",
+        "Avg" => {
+            "Moving average: AQ averages the last Max readings of Input, one taken \
+             every Time; Reset passes Input through."
+        }
+        "Int" => {
+            "Integer: AQ is Input rounded down (Mode 0) or rounded to the nearest \
+             whole number (Mode 1)."
+        }
+        "UpDownCounter" => {
+            "Up-down counter: each pulse at Trigger counts AQ up, or down while \
+             InputDir is on; Q switches at OnValue and OffValue."
+        }
+        "HourCounter" => {
+            "Runtime counter: counts the time InputEnable is on (AQ), with a \
+             maintenance interval and its remaining time."
+        }
+        "Counter" => {
+            "Up counter: each pulse at Trigger counts AQ up; Q is on when AQ reaches \
+             EndValue; Reset clears it."
+        }
+        "PulseBy" => {
+            "Pulse by text: Pulse pulses for Time when the text at Text matches one \
+             of the block's search patterns."
+        }
+        "AMemory" => {
+            "Analog memory: a rising edge at Trigger stores Input in AQ and holds it; \
+             Reset sets AQ to 0."
+        }
         "VirtualIn" => {
             "Virtual input: a switch, button or value in the app or set over the API; \
              Q is its value."
@@ -232,6 +272,19 @@ pub fn kb_page(ty: &str) -> Option<&'static str> {
         "DayTimer" => "timerscheduler",
         "PulseAt" => "pulse-at",
         "State" => "status",
+        "StateV" => "virtual-status",
+        "WipingRelay" => "wiping-relay",
+        "Mult" => "multiply",
+        "Add" => "add-2-way",
+        "Sub" => "subtract",
+        "Div" => "divide",
+        "Avg" => "moving-average",
+        "Int" => "integer",
+        "UpDownCounter" => "up-down-counter",
+        "HourCounter" => "maintenance-counter",
+        "Counter" => "counter",
+        "PulseBy" => "pulse-by",
+        "AMemory" => "analogue-memory",
         "Code16" => "custom-script-programming",
         "AutoJalousie" => "automatic-blinds",
         "CentralShade" => "shading-overview",

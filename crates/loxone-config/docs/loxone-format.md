@@ -238,13 +238,17 @@ the XML by keys that often say something else (`EndUp` is *complete
 open*, not an end switch; `EnMove` is *DisP*, disable motion). The table
 maps each key to its label. Source: oracle session 34, which wired a `Not`
 into every fourth input of each block; the canvas lists wired rows in key
-order, so each wire pins one key to its label.
+order, so each wire pins one key to its label. Session 38 read the rows of
+blocks whose inputs were all wired (parameters with a value have no row).
 
 | Type | Key → label |
 |---|---|
 | `Switch2Button` (*Tastschalter*, push switch) | `InputTrigger` Tr, `On` On, `Reset` Off, `InputDisable` DisPc |
 | `PulseAt` (*Impuls um*) | `InputDisable` Off, `Remanence` Rem |
 | `MeterDig` (*Festwertzähler*, fixed value meter) | `A` S, `R` R |
+| `WipingRelay` (*Wischrelais*) | `InputTrigger` Tr |
+| `Counter` (*Aufwärtszähler*, up counter) | `Reset` Off |
+| `HourCounter` (*Betriebszeitzähler*, runtime counter) | `InputResetAll` Off |
 | `MeterAbsUni` (*Zähler*) | `Pf` Pf, `Mr` Mr, `R` R |
 | `MeterAbsBi` (*Zähler Bidirektional*) | `Pf` Pf, `Mr1` Mrc, `Mr2` Mrd, `R` R |
 | `AutoJalousie` | `InputTrigger` Tg, `InputTriggerUp` Po, `InputTriggerDown` Pc, `EndUp` Co, `EndDown` Cc, `Shade` So, `AutoShade` Sps, `EnAutoShade` DisSp, `ReactAutoShade` Spr, `Safety` Wa, `Window` Dwc, `Stop` Off, `ManualPosition` Pos, `ManualLamelle` Slat, `Gesture` T5, `InputDisable` DisPc, `Type` Type, `SO` Wap, `Rdd` Rdd, `Deadtime` Bld; `WP` has no row |
@@ -1503,8 +1507,12 @@ Logic mints these children itself, and the first save changes nothing.
   on an HTTP command, an empty `<IoData></IoData>`, `Display` defaults, `Tx="false"`,
   `ModbusCoilQuantity="1"`, `WF` on an output command and `WF="16384"` on a text input.
 - **`Mode`:** a fresh one is saved with `WF="147456"` (see *Operating modes*).
+- **`StateV`:** `Analog="false"`, `Tx="false"`, `<IoData Visu="true"/>`, `<Display Unit="&lt;v.1&gt;"
+  StateOnly="true"/>`. **`HourCounter`:** two special states, `<IoData Visu="true"/>`, and its connectors in
+  the type's order (an appended `OutputAPI`). **`PulseBy`:** `WTA=""`, which holds a search pattern (corpus
+  values such as `*10001*`). **`UpDownCounter`:** its connectors in the type's order.
 
-Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29 and 33.
+Source: oracle sessions 3, 8, 9, 14, 16, 18, 21, 25, 26, 28, 29, 33 and 38.
 
 ## The three writers
 

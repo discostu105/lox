@@ -364,6 +364,125 @@ pub(crate) fn entries(block_type: &str) -> Option<&'static [Entry]> {
             ),
             ("OutputAPI", "API", API),
         ],
+        "StateV" => &[("I", "I", "Input: the value the app shows.")],
+        "Mult" => &[
+            ("Input1-2", "V1-2", "Value #."),
+            ("AQ", "O", "Value 1 times value 2."),
+        ],
+        "Add" => &[
+            ("Input1-2", "V1-2", "Value #."),
+            ("AQ", "O", "Value 1 plus value 2."),
+        ],
+        "Sub" => &[
+            ("Input1-2", "V1-2", "Value #."),
+            ("AQ", "O", "Value 1 minus value 2."),
+        ],
+        "Div" => &[
+            ("Input1", "V1", "Value 1, the dividend."),
+            ("Input2", "V2", "Value 2, the divisor."),
+            ("AQ", "O", "Value 1 divided by value 2."),
+        ],
+        "Avg" => &[
+            ("Input", "V", "Value whose moving average is taken."),
+            (
+                "Reset",
+                "R",
+                "Reset: stops averaging; the output follows the input.",
+            ),
+            ("Remanence", "Rem", REM),
+            ("Time", "C", "Polling cycle: how often the input is read."),
+            ("Max", "N", "Number of readings averaged."),
+            ("AQ", "Avg", "Average of the readings."),
+        ],
+        "Int" => &[
+            ("Input", "V", "Value to round."),
+            (
+                "Mode",
+                "Ro",
+                "Rounding: 0 always rounds down, 1 rounds to the nearest whole number.",
+            ),
+            ("AQ", "R", "Result: the value as a whole number."),
+        ],
+        "UpDownCounter" => &[
+            ("Trigger", "C", "Count: each pulse counts up or down by 1."),
+            ("InputDir", "Dir", "Direction: 0 counts up, 1 counts down."),
+            (
+                "Reset",
+                "R",
+                "Reset: the output goes off and the count returns to the start value.",
+            ),
+            ("OnValue", "Von", "On-value of the output."),
+            ("OffValue", "Voff", "Off-value of the output."),
+            ("Remanence", "Rem", REM),
+            ("StartValue", "Sv", "Start value of the count."),
+            (
+                "Q",
+                "O",
+                "Output: switches at the on-value and the off-value.",
+            ),
+            ("AQ", "V", "Counter value."),
+        ],
+        "HourCounter" => &[
+            (
+                "InputEnable",
+                "En",
+                "Enable: the counters run while it is on.",
+            ),
+            (
+                "Reset",
+                "Rmc",
+                "Resets the maintenance counter to the maintenance interval.",
+            ),
+            ("InputResetAll", "Off", OFF),
+            (
+                "Unit",
+                "Tu",
+                "Time unit of the analog outputs: 0 s, 1 min, 2 h, 3 days.",
+            ),
+            (
+                "Maintenance",
+                "Mi",
+                "Maintenance interval in seconds; 0 leaves the output unused.",
+            ),
+            ("Q", "Me", "On when the maintenance interval is exceeded."),
+            ("AQ", "To", "Total operating time."),
+            ("AQl", "Lst", "Last start time."),
+            (
+                "AQr",
+                "Rtm",
+                "Time remaining until the maintenance interval.",
+            ),
+            ("OutputAPI", "API", API),
+        ],
+        "Counter" => &[
+            ("Trigger", "C", "Count: each pulse counts up by 1."),
+            ("Reset", "Off", OFF),
+            ("Remanence", "Rem", REM),
+            ("EndValue", "L", "Limit; 0 is the largest count."),
+            (
+                "Mode",
+                "M",
+                "0 starts over at the limit, 1 stops there until a reset.",
+            ),
+            ("Q", "Lr", "On when the count reaches the limit."),
+            ("AQ", "V", "Counter value."),
+        ],
+        "PulseBy" => &[
+            (
+                "Text",
+                "T",
+                "Text searched for the block's search patterns.",
+            ),
+            ("Time", "Pd", "Pulse duration."),
+            ("Pulse", "P", "Pulse when a search pattern is found."),
+        ],
+        "AMemory" => &[
+            ("Input", "V", "Value stored on a rising edge at Set."),
+            ("Trigger", "Set", "Set: a rising edge stores the value."),
+            ("Reset", "Off", "Off: a pulse resets the output."),
+            ("Remanence", "Rem", REM),
+            ("AQ", "V", "The stored value."),
+        ],
         "HeatIRoomController2" => HEAT_I_ROOM_CONTROLLER2,
         "Irrigation" => &[
             (

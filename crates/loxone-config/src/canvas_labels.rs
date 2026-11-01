@@ -14,6 +14,9 @@ pub fn label(block_type: &str, key: &str) -> Option<&'static str> {
         ],
         "PulseAt" => &[("InputDisable", "Off"), ("Remanence", "Rem")],
         "MeterDig" => &[("A", "S"), ("R", "R")],
+        "WipingRelay" => &[("InputTrigger", "Tr")],
+        "Counter" => &[("Reset", "Off")],
+        "HourCounter" => &[("InputResetAll", "Off")],
         "MeterAbsUni" => &[("Pf", "Pf"), ("Mr", "Mr"), ("R", "R")],
         "MeterAbsBi" => &[("Pf", "Pf"), ("Mr1", "Mrc"), ("Mr2", "Mrd"), ("R", "R")],
         "AutoJalousie" | "CentralShade" => &[

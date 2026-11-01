@@ -521,6 +521,73 @@ const STATE: &[PortSpec] = &[
     p("OutputAPI", Input),
 ];
 
+// The simple-logic batch (#316): the most frequent page blocks of the
+// public corpus that Lox Logic could not create. Shapes from the corpus
+// (every instance of a type has one connector order); the corpus holds
+// them only in pre-17 generations, so a Loxone Config 17.2 save of a
+// minted instance decided each descriptor (oracle-sessions.md, sessions
+// 38–39). Directions by corpus wires, else agreement of the legacy dbs
+// with zero corpus contradiction, else the inert-flag rule; Def-only
+// ports without wire evidence are Param (docs/connector-db.md).
+const STATE_V: &[PortSpec] = &[p("I", Input), p("AQ", Output)];
+const WIPING_RELAY: &[PortSpec] = &[
+    p("InputTrigger", Input),
+    p("Remanence", Input),
+    p("TimeOn", Input),
+    p("Q", Output),
+];
+const ARITH2: &[PortSpec] = &[p("Input1", Input), p("Input2", Input), p("AQ", Output)];
+const AVG: &[PortSpec] = &[
+    p("Input", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("Time", Param),
+    p("Max", Input),
+    p("AQ", Output),
+];
+const INT: &[PortSpec] = &[p("Input", Input), p("Mode", Input), p("AQ", Output)];
+const UP_DOWN_COUNTER: &[PortSpec] = &[
+    p("Trigger", Input),
+    p("InputDir", Input),
+    p("Reset", Input),
+    p("OnValue", Input),
+    p("OffValue", Input),
+    p("Remanence", Param),
+    p("StartValue", Input),
+    p("Q", Output),
+    p("AQ", Output),
+];
+const HOUR_COUNTER: &[PortSpec] = &[
+    p("InputEnable", Input),
+    p("Reset", Input),
+    p("InputResetAll", Input),
+    p("Unit", Param),
+    p("Maintenance", Input),
+    p("Q", Output),
+    p("AQ", Output),
+    p("AQl", Output),
+    p("AQr", Output),
+    p("AQs", Input),
+    p("OutputAPI", Input),
+];
+const COUNTER: &[PortSpec] = &[
+    p("Trigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("EndValue", Input),
+    p("Mode", Input),
+    p("Q", Output),
+    p("AQ", Output),
+];
+const PULSE_BY: &[PortSpec] = &[p("Text", Input), p("Time", Param), p("Pulse", Output)];
+const A_MEMORY: &[PortSpec] = &[
+    p("Input", Input),
+    p("Trigger", Input),
+    p("Reset", Input),
+    p("Remanence", Input),
+    p("AQ", Output),
+];
+
 // The house-control batch: eight logic types a large real config used
 // but Lox Logic could only reference. Connector set and order are
 // the Config 17.2 (V178) descriptor as the house's GUI-saved instances
@@ -1031,6 +1098,19 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "AnalogMultiplexer2",
     "SRFlipFlop",
     "State",
+    "StateV",
+    "WipingRelay",
+    "Mult",
+    "Add",
+    "Sub",
+    "Div",
+    "Avg",
+    "Int",
+    "UpDownCounter",
+    "HourCounter",
+    "Counter",
+    "PulseBy",
+    "AMemory",
     "VirtualIn",
     "HeatIRoomController2",
     "Irrigation",
@@ -1389,6 +1469,12 @@ pub fn carried_attrs(block_type: &str) -> &'static [&'static str] {
         "Alarm" => &["Entries", "CentralOut", "WaitAfterRestart", "Objects"],
         "SmokeAlarm" => &["Entries", "CentralOut", "Objects", "ST"],
         "EFM" => &["UnSt", "Un1", "Un2"],
+        // The virtual status dialog: text output, the documentation text,
+        // the blocks it is linked to.
+        "StateV" => &["Tx", "NTXT", "linkC"],
+        // A search pattern of the pulse-by dialog (corpus values such as
+        // `*10001*`); where its other three patterns go is unknown.
+        "PulseBy" => &["WTA"],
         "TpfController" => &["PRE"],
         "NfcCodeTouch" => &["Ref", "SpCdUuid", "OStr", "HSize", "AP", "NAUTT"],
         "Intercom" => &["Ref", "Objects", "ans", "OutName1", "OutName2", "OutName3"],
@@ -1553,6 +1639,16 @@ pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
         "AnalogMultiplexer2" => Some(ANALOG_MULTIPLEXER2),
         "SRFlipFlop" => Some(SR_FLIP_FLOP),
         "State" => Some(STATE),
+        "StateV" => Some(STATE_V),
+        "WipingRelay" => Some(WIPING_RELAY),
+        "Mult" | "Add" | "Sub" | "Div" => Some(ARITH2),
+        "Avg" => Some(AVG),
+        "Int" => Some(INT),
+        "UpDownCounter" => Some(UP_DOWN_COUNTER),
+        "HourCounter" => Some(HOUR_COUNTER),
+        "Counter" => Some(COUNTER),
+        "PulseBy" => Some(PULSE_BY),
+        "AMemory" => Some(A_MEMORY),
         "HeatIRoomController2" => Some(HEAT_I_ROOM_CONTROLLER2),
         "Irrigation" => Some(IRRIGATION),
         "Alarm" => Some(ALARM),
@@ -2050,6 +2146,44 @@ mod tests {
         let state = builtin("State").unwrap();
         assert_eq!(state.len(), 11);
         assert_eq!((state[9].key, state[9].dir), ("AQ", PortDir::Output));
+        // The simple-logic batch: Loxone Config 17.2 reorders the
+        // UpDownCounter of the corpus and appends OutputAPI to HourCounter.
+        let keys = |t| {
+            builtin(t)
+                .unwrap()
+                .iter()
+                .map(|p| p.key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            keys("UpDownCounter"),
+            [
+                "Trigger",
+                "InputDir",
+                "Reset",
+                "OnValue",
+                "OffValue",
+                "Remanence",
+                "StartValue",
+                "Q",
+                "AQ"
+            ]
+        );
+        let hc = builtin("HourCounter").unwrap();
+        assert_eq!((hc[10].key, hc[10].dir), ("OutputAPI", PortDir::Input));
+        assert_eq!(
+            keys("Avg"),
+            ["Input", "Reset", "Remanence", "Time", "Max", "AQ"]
+        );
+        for t in ["Mult", "Add", "Sub", "Div"] {
+            assert_eq!(keys(t), ["Input1", "Input2", "AQ"]);
+        }
+        assert_eq!(keys("StateV"), ["I", "AQ"]);
+        assert_eq!(
+            keys("WipingRelay"),
+            ["InputTrigger", "Remanence", "TimeOn", "Q"]
+        );
+        assert_eq!(keys("PulseBy"), ["Text", "Time", "Pulse"]);
         let dt = builtin("DayTimer").unwrap();
         assert_eq!(dt.len(), 13);
         assert_eq!((dt[3].key, dt[3].dir), ("PulseTime", PortDir::Param));
