@@ -1,1 +1,0 @@
-- **loxl adopt** takes over a calendar entry whose operating mode is gone from the config (a deleted user mode). It writes a comment instead of `switches:`, and the entry keeps its mode number until `switches:` names one. Before, adopt refused the entry.
