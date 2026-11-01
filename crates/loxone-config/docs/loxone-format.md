@@ -714,11 +714,37 @@ Virtual inputs, virtual and Modbus devices are not page blocks. They live in fix
   saves of the house config made before Lox Logic minted anything (Version 273) have 16 digital ones, all
   `Analog="false"`. The commands and outputs have 1,501 such attribute slots: none is `"false"`, 505 are
   absent. Oracle session 37 checked both directions.
-- A save drops `MinVal="0"` on an analog `VirtualIn`, as on physical inputs.
+- A save writes no numeric setting at 0, see [*Numbers at 0*](#numbers-at-0).
 
 Lox Logic creates these objects ([D54](decisions/0054-virtual-inputs.md),
 [D64](decisions/0064-virtual-modbus-devices.md)). Source: corpus (175 `VirtualIn`s); oracle sessions 18, 26
 and 37.
+
+### Numbers at 0
+
+A save writes a numeric setting only when it is not 0: an absent attribute is 0, and a save drops an
+explicit `"0"`. This holds for these settings, on every type that has them:
+
+- range and default: `MinVal`, `MaxVal`, `DefVal`
+- analog correction: `SourceValLow`, `DestValLow`, `SourceValHigh`, `DestValHigh`
+- timing: `MinChange`, `MinTime`, `MaxTime`, `ResetTime`, `AverageTime`, `Repeat`, `RepeatRate`
+- `CmdOnMethod`, `Allowedtimeouts`, `Port`, `Channel`, `DimmType`
+- Modbus: `ModbusAddress`, `ModbusDataType`, `ModbusCmd`, `ModbusPollingCycle`, `ModbusCoilQuantity`
+- calendar entries: `CalType`, `Mode`, `From`, `To`, `EasterOffset`, `WeekDayInMonth`
+
+Exceptions:
+
+- A Modbus server keeps `Timeout="0"`.
+- A virtual HTTP input raises `Poll="0"` and `Timeout="0"` to `"10"`.
+- A digital `VirtualIn` turns `MaxVal="0"` into `"1"`.
+
+Elsewhere `"0"` is a value like any other: real configs hold `Typ="0"` and `Sec="0"` on `PulseAt`, `Tp="0"`
+on `Memory`.
+
+Lox Logic writes a bound 0 as no attribute ([D112](decisions/0112-zero-is-no-attribute.md)). Source: corpus
+(131 files: none of these settings holds `"0"` on `VirtualIn`, the virtual commands, the Modbus objects,
+calendar entries or the physical inputs and outputs; `MinVal` is absent on 112 of 171 `VirtualIn`s,
+`ModbusDataType` on 149 of 339 Modbus sensors); oracle sessions 37, 61 and 62 (Loxone Config 17.2.8.28).
 
 ## Settings of physical inputs and outputs
 
@@ -734,6 +760,8 @@ Inputs and outputs of extensions, Tree and Air devices and 1-Wire sensors carry 
 
 - A save omits `Desc`, the low ends of the correction, `MinVal`, `ResetTime` and `AverageTime` at their
   defaults. It writes `Desc` right after `Type`, the others in a fixed order.
+- A save drops every numeric setting at 0, the high ends, `MaxVal`, `MinChange` and `MinTime` included
+  ([*Numbers at 0*](#numbers-at-0)).
 - Digital inputs have no analog correction.
 - With a unit set, the Miniserver formats the value (`8.2 °C`), and the app catalogue's format becomes
   `%.1f °C`.

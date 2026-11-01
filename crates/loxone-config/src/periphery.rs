@@ -488,6 +488,23 @@ pub fn folder(block_type: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether decompile states a missing setting as 0: a save leaves it out
+/// at 0, and a fresh mint needs it or would fill in another default, so
+/// lifting nothing would fail or change the value when the source is
+/// minted elsewhere.
+pub fn zero_when_missing(block_type: &str, name: &str) -> bool {
+    let Some(p) = periphery(block_type) else {
+        return false;
+    };
+    crate::connectors::omitted_when_zero(block_type, name)
+        && (p.required.contains(&name)
+            || p.mint_attrs
+                .iter()
+                .find(|(n, _)| *n == name)
+                .and_then(|(_, d)| *d)
+                .is_some_and(|d| !crate::connectors::is_zero(d)))
+}
+
 /// `device:` on a block names the device it hangs below — an
 /// identity binding like `mirrors:`, not a value.
 pub fn is_device_binding(block_type: &str, key: &str) -> bool {

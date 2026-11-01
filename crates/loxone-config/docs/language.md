@@ -222,6 +222,10 @@ Notes:
     unticked box. A `VirtualIn`'s `Analog: off` is `Analog="false"`.
   - A number stays a number: `1` is never rewritten to `on`.
   - The formula backend rejects them; write `1`/`0`.
+- **0 on a setting** that Loxone Config leaves out at 0 (`MinVal: 0` on a `VirtualIn`, the range, low
+  ends and timing of the virtual and Modbus objects and physical inputs, `ModbusDataType: 0`, …)
+  compiles to no attribute, which is how a save stores it. A Modbus server's `Timeout: 0` stays
+  `Timeout="0"`.
 - A number may carry a **unit suffix**, written immediately adjacent: `40s`, `250ms`, `90min`,
   `1.5h`, `2700K`, `70%`. `loxl types <Type>` shows each port's documented unit.
   - Time units scale exactly into the port's unit. That is seconds by default (`1.5h` compiles to

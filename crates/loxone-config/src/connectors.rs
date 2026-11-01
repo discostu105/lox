@@ -1143,6 +1143,68 @@ pub fn omitted_when_off(block_type: &str, attr: &str) -> bool {
     block_type != "VirtualIn" && bool_params(block_type).contains(&attr)
 }
 
+/// The numeric settings a save writes only when they are not 0: an
+/// absent attribute is 0, and a save drops an explicit `"0"`.
+const OMITTED_WHEN_ZERO: &[&str] = &[
+    "SourceValLow",
+    "DestValLow",
+    "SourceValHigh",
+    "DestValHigh",
+    "MinVal",
+    "MaxVal",
+    "DefVal",
+    "MinChange",
+    "MinTime",
+    "MaxTime",
+    "ResetTime",
+    "AverageTime",
+    "Repeat",
+    "RepeatRate",
+    "CmdOnMethod",
+    "Allowedtimeouts",
+    "Port",
+    "Channel",
+    "ModbusAddress",
+    "ModbusDataType",
+    "ModbusCmd",
+    "ModbusPollingCycle",
+    "ModbusCoilQuantity",
+    "DimmType",
+    "CalType",
+    "Mode",
+    "From",
+    "To",
+    "EasterOffset",
+    "WeekDayInMonth",
+];
+
+/// Whether a save writes this numeric setting only when it is not 0, so
+/// a bound 0 compiles to no attribute. That holds for every number the
+/// source can set on a virtual input, a virtual or Modbus object, a
+/// calendar entry and a physical input or output, except a Modbus
+/// server's `Timeout=` (a save keeps `"0"`) and a virtual HTTP input's
+/// `Poll=` and `Timeout=` (a save raises them to 10). Loxone Config
+/// 17.2, and no real config holds `"0"` on any of them (see
+/// loxone-format.md).
+pub fn omitted_when_zero(block_type: &str, attr: &str) -> bool {
+    let settable = block_type == "VirtualIn"
+        || crate::settings::SETTING_TYPES.contains(&block_type)
+        || crate::periphery::periphery(block_type).is_some_and(|p| p.settings.contains(&attr));
+    settable && OMITTED_WHEN_ZERO.contains(&attr)
+}
+
+/// Whether a setting's value is 0 as a number (`0`, `0.0`, `-0`).
+pub fn is_zero(value: &str) -> bool {
+    value.trim().parse::<f64>().is_ok_and(|v| v == 0.0)
+}
+
+/// Whether a save leaves out this attribute at this value: `off` on a
+/// box of [`omitted_when_off`], 0 on a number of [`omitted_when_zero`].
+pub fn omitted_value(block_type: &str, attr: &str, value: &str) -> bool {
+    (value == "false" && omitted_when_off(block_type, attr))
+        || (is_zero(value) && omitted_when_zero(block_type, attr))
+}
+
 /// The container a block type lives in when it is not drawn on a page:
 /// a minted object of such a type is appended to the base's one
 /// element of that type, never placed, and never governed by `page`.
@@ -1686,6 +1748,25 @@ mod tests {
         assert_eq!(ref_link_type("ApiActor"), Some((136, RefValue::Text)));
         assert_eq!(ref_link_type("Memory"), Some((320, RefValue::Digital)));
         assert_eq!(ref_link_type("And"), None);
+    }
+
+    #[test]
+    fn a_save_leaves_out_zero_on_numbers_it_drops() {
+        assert!(is_zero("0") && is_zero("0.0") && is_zero("-0"));
+        assert!(!is_zero("0.5") && !is_zero("") && !is_zero("false"));
+        assert!(omitted_value("VirtualIn", "MinVal", "0"));
+        assert!(omitted_value("ModbusASensor", "ModbusDataType", "0"));
+        assert!(omitted_value("VoltageIn", "MaxVal", "0.0"));
+        assert!(omitted_value("CalendarEntry", "CalType", "0"));
+        // A save keeps a Modbus server's 0 and raises an HTTP input's.
+        assert!(!omitted_value("ModbusServer", "Timeout", "0"));
+        assert!(!omitted_value("VirtualHttpIn", "Poll", "0"));
+        assert!(!omitted_value("VirtualHttpIn", "Timeout", "0"));
+        // Not a setting of the type, and not a number.
+        assert!(!omitted_value("Formula", "MinVal", "0"));
+        assert!(!omitted_value("VirtualOutCmd", "CmdOn", "0"));
+        // A month has no 0.
+        assert!(!omitted_value("CalendarEntry", "Month", "0"));
     }
 
     #[test]

@@ -367,3 +367,78 @@ fn off_is_no_attribute_except_on_a_virtual_input() {
     let again = compile(&off, &module, &mut lock2.clone(), &opts()).unwrap();
     assert_eq!(again.to_bytes(), off.to_bytes());
 }
+
+#[test]
+fn zero_is_no_attribute_on_a_number() {
+    // A save drops every numeric setting at 0, except a Modbus server's
+    // `Timeout="0"` (#312, Loxone Config 17.2).
+    let src = |min: &str| {
+        format!(
+            "vi = VirtualIn(\"Wert\", Analog: on, MinVal: {min}, MaxVal: 0, DefVal: 0)\n\
+             http = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/s\", Poll: 600)\n\
+             http_cmd = VirtualHttpInCmd(\"Leistung\", device: http, Check: \"p\", MinVal: 0, SourceValLow: 0)\n\
+             mb = ModbusServer(\"Wärmepumpe\", Address: \"192.0.2.12:502\", Timeout: 0)\n\
+             mb_dev = ModbusDev(\"Regler\", device: mb, Channel: 0)\n\
+             mb_temp = ModbusASensor(\"Vorlauf\", device: mb_dev, ModbusAddress: 0, ModbusDataType: 0, MaxTime: 0)\n"
+        )
+    };
+    let mut lock = Lockfile::default();
+    let module = Module::parse(&src("0")).unwrap();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    let attr = |doc: &LoxoneDoc, slug: &str, name: &str| {
+        element(doc, &lock.objects[slug].uuid)
+            .attr(name)
+            .map(str::to_string)
+    };
+    for (slug, name) in [
+        ("vi", "MinVal"),
+        ("vi", "MaxVal"),
+        ("vi", "DefVal"),
+        ("http_cmd", "MinVal"),
+        ("http_cmd", "SourceValLow"),
+        ("mb_dev", "Channel"),
+        ("mb_temp", "ModbusAddress"),
+        ("mb_temp", "ModbusDataType"),
+        ("mb_temp", "MaxTime"),
+    ] {
+        assert_eq!(attr(&out, slug, name), None, "{slug}.{name}");
+    }
+    assert_eq!(attr(&out, "mb", "Timeout").as_deref(), Some("0"));
+    assert_eq!(attr(&out, "http_cmd", "MaxVal").as_deref(), Some("10000"));
+
+    // Setting a value and back to 0 removes the attribute again.
+    let mut lock2 = lock.clone();
+    let five = compile(
+        &out,
+        &Module::parse(&src("5")).unwrap(),
+        &mut lock2,
+        &opts(),
+    )
+    .unwrap();
+    assert_eq!(attr(&five, "vi", "MinVal").as_deref(), Some("5"));
+    let zero = compile(&five, &module, &mut lock2, &opts()).unwrap();
+    assert_eq!(attr(&zero, "vi", "MinVal"), None);
+    let again = compile(&zero, &module, &mut lock2.clone(), &opts()).unwrap();
+    assert_eq!(again.to_bytes(), zero.to_bytes());
+
+    // Adopting states a missing number as 0 where a fresh object would
+    // get another default, so the source means the same anywhere.
+    let mut fresh = Lockfile::default();
+    let adopted = adopt_one(
+        &out,
+        &lock.objects["mb"].uuid,
+        "wp",
+        &Module::default(),
+        &mut fresh,
+    )
+    .unwrap();
+    let mut adopted_module = Module::default();
+    adopted_module.items.extend(adopted.items);
+    let text = adopted_module.to_text();
+    assert!(text.contains("ModbusDataType: 0"), "{text}");
+    assert!(text.contains("MaxTime: 0"), "{text}");
+    assert!(text.contains("Channel: 0"), "{text}");
+    assert!(text.contains("ModbusAddress: 0"), "{text}");
+    let recompiled = compile(&out, &adopted_module, &mut fresh, &opts()).unwrap();
+    assert_eq!(recompiled.to_bytes(), out.to_bytes());
+}

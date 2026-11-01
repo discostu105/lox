@@ -34,8 +34,8 @@
 
 use crate::connectors::{
     MESSAGE_REF_TARGET, PortDir, RefValue, VERIFIED_BLOCK_VERSIONS, adopt_only, attr_name,
-    attr_param, attr_params, bool_params, builtin, carried_attrs, carried_children, container_type,
-    message_params, object_tree, omitted_when_off, ref_link_type, save_defaults,
+    attr_param, attr_params, builtin, carried_attrs, carried_children, container_type,
+    message_params, object_tree, omitted_value, ref_link_type, save_defaults,
 };
 use crate::doc::{Counters, GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, WireView, ports};
 use crate::error::{Error, Result};
@@ -1474,6 +1474,16 @@ fn current_def(doc: &mut LoxoneDoc, port_uuid: &str) -> Option<String> {
         .and_then(|co| co.attr_decoded("Def").map(|v| v.into_owned()))
 }
 
+/// Whether `port_uuid` keys a setting a save writes only when it is not 0
+/// ([`crate::connectors::omitted_when_zero`]): absent, it reads as 0.
+fn zero_when_absent(doc: &LoxoneDoc, port_uuid: &str) -> bool {
+    crate::settings::split_key(port_uuid).is_some_and(|(owner, name)| {
+        find_c(&doc.xml.root, owner).is_some_and(|c| {
+            crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name)
+        })
+    })
+}
+
 /// Keep `Nc` equal to the number of `<In>` children (absent when zero),
 /// in Loxone's canonical position: after `Def`, before `U` (a save rewrites
 /// `K,Nc,Def,U` to `K,Def,Nc,U`).
@@ -1548,6 +1558,9 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
     let Some(c) = find_c_mut(&mut doc.xml.root, owner) else {
         return;
     };
+    // A save writes these numbers only when they are not 0.
+    let zero = value.is_some_and(crate::connectors::is_zero)
+        && crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name);
     let el = if name == "Unit" {
         match c.child_elements_mut().find(|e| e.name == "Display") {
             Some(d) => d,
@@ -1558,6 +1571,9 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
     };
     match value {
         None => {
+            el.remove_attr(name);
+        }
+        Some(_) if zero => {
             el.remove_attr(name);
         }
         Some(v) if el.attr(name).is_some() => el.set_attr(name, v),
