@@ -101,21 +101,32 @@ fn spelling(uuid: &str, title: &str, uuid_of: &BTreeMap<String, String>) -> Valu
 
 /// The `switches:` value for an entry whose `CalType=` is `number`, as
 /// adopt writes it. `slug_of` gives the module's slug for an object UUID.
+/// None when the config has no such mode: a user mode deleted since, or
+/// the heating or cooling mode of an older config (the other built-in
+/// modes are in every one, as in [`apply`]).
 pub(crate) fn lift(
     doc: &LoxoneDoc,
     number: i64,
     slug_of: &BTreeMap<String, String>,
-) -> std::result::Result<Value, String> {
+) -> Option<Value> {
     let modes = crate::doc::config_modes(doc);
     let Some((uuid, title, _)) = modes.iter().find(|(_, _, n)| *n == number) else {
-        return builtin_value(number)
-            .ok_or_else(|| format!("its operating mode {number} is not in the config"));
+        return builtin_value(number).filter(|_| number < 10);
     };
     let uuid_of: BTreeMap<String, String> = slug_of
         .iter()
         .map(|(u, s)| (s.clone(), u.clone()))
         .collect();
-    Ok(spelling(uuid, title, &uuid_of))
+    Some(spelling(uuid, title, &uuid_of))
+}
+
+/// The comment adopt writes in place of `switches:` on an entry whose
+/// mode `number` the config no longer has (see [`lift`]).
+pub(crate) fn gone_mode_comment(number: i64) -> String {
+    format!(
+        " Its operating mode ({CAL_TYPE} {number}) is not in the config. Without `{SWITCHES}:` \
+         it stays; name a mode to switch that one."
+    )
 }
 
 /// `CalType: <number>` on an entry, against the base: refused with the

@@ -34,7 +34,8 @@ five). It compiles to the same `CalType=`, and the holiday mode to no attribute.
   adopted one keeps the base's. The source does not state the mode then.
 - **`loxl fmt`** rewrites a built-in mode's number to its day word, and a title to the module's slug.
   **`adopt`** writes `switches:` always, `switches: holiday` included. `decompile` does not lift
-  calendar entries.
+  calendar entries. Amended by [D127](0127-calendar-entry-gone-mode.md): for a mode the config no
+  longer has, adopt writes a comment instead of `switches:`.
 
 The compile output and the lock do not change.
 

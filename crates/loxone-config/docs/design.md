@@ -229,9 +229,10 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |
 | D113 | [Adopt writes `off` where a new object would tick the box](decisions/0113-adopt-writes-off.md) | accepted |
 | D114 | [Compile refuses a value a save rewrites](decisions/0114-refuse-what-a-save-rewrites.md) | accepted |
-| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md) |
+| D115 | [A calendar entry names its mode with `switches:`](decisions/0115-calendar-entry-mode.md) | accepted, amends [D74](decisions/0074-calendar-entries.md), extends [D110](decisions/0110-mode-reference-spelling.md), amended by [D127](decisions/0127-calendar-entry-gone-mode.md) |
 | D120 | [Compile refuses a title a save rewrites](decisions/0120-refuse-titles-a-save-rewrites.md) | accepted, extends [D114](decisions/0114-refuse-what-a-save-rewrites.md) |
 | D122 | [A named signal's `.title` labels its top block](decisions/0122-signal-title.md) | accepted, amends [D81](decisions/0081-named-signals.md) |
 | D123 | [Decompile and adopt lift expressions back](decisions/0123-decompile-lifts-expressions.md) | accepted, amends [D24](decisions/0024-expressions.md) and [D81](decisions/0081-named-signals.md) |
 | D124 | [No `page default`](decisions/0124-no-page-default.md) | accepted, follows [D84](decisions/0084-page-per-fragment.md) |
 | D126 | [A calendar entry states its date as a date](decisions/0126-calendar-entry-date.md) | accepted, amends [D74](decisions/0074-calendar-entries.md) |
+| D127 | [Adopt takes over a calendar entry whose mode is gone](decisions/0127-calendar-entry-gone-mode.md) | accepted, amends [D115](decisions/0115-calendar-entry-mode.md) |
