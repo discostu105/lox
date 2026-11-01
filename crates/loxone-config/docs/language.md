@@ -610,11 +610,43 @@ states. They are written on every compile.
   binding the element has.
 - **Removing** a declaration from the source releases the hardware: the
   element keeps the values the source wrote last, and its wires from
-  the argument list leave. Nothing is ever deleted.
+  the argument list leave. Nothing is deleted, except a device the
+  source created (below) under `removed <slug>`.
 - `adopt --uuid <device>` declares the device with every I/O below it,
   with the values the config holds. An extern among them keeps its
   slug, and its statements move into its declaration. Adopting an I/O
   alone is an error. Pairing a device stays in Loxone Config.
+
+#### Creating a Tree device
+
+```text
+tree1 = LoxTree("Tree", serial: "13000003")
+melder = TreeDevice("Melder Flur", kind: "PresenceSensorTree", tree: tree1, branch: "left")
+bewegung = TreeSensor("Bewegung Flur", device: melder, iname: "I1", MinTime: 20)
+```
+
+`kind:` creates the device instead of matching one. The compile adds it
+to the Tree extension that `tree:` names, unpaired, and from then on
+the lockfile keeps it. Pair it with a Tree search in Loxone Config.
+
+- **Kinds:** `TouchTree`, `PresenceSensorTree`, `CorridorLightTree`
+  (LED Ceiling Light RGBW) and `ValveTree` (Valve Actuator). Any other
+  is an error; declare it by `serial:` once Loxone Config has paired it.
+- **`branch:`** is `"left"` or `"right"`. It can be left out when the
+  extension has one branch.
+- **Its I/O** is declared by `iname:` (`I1`, `AI1`, `AQ1`, …) with
+  `device:` naming it. The title is the kind's English default when the
+  declaration gives none.
+- **Not paired yet:** `loxl compile` and `lox config push` print a note
+  for each such device. How the Miniserver runs a device it has not
+  searched for is untested.
+- **Deleting** it takes `removed <slug>`; without it, a declaration
+  that leaves the source is an error. A device that feeds a wire drawn
+  in Loxone Config is not deleted. Declaring it by `uuid:` (or
+  `serial:` once paired) keeps it as a plain declaration.
+- A base without the device, an older one or one where it was deleted
+  in Loxone Config, gets it back under the same UUID.
+- No compile deletes any other hardware.
 
 ### Operating modes — minted into the "Betriebsmodi" folder
 

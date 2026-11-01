@@ -357,7 +357,15 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     } else {
         Lockfile::new()
     };
-    let mut compiled = compile_project(&project, &compile_base, &mut lock, opts)?.to_bytes();
+    let compiled_doc = compile_project(&project, &compile_base, &mut lock, opts)?;
+    for slug in loxone_config::logic::unpaired_created(&compiled_doc, &lock) {
+        say(&format!(
+            "Note: `{slug}` is a Tree device the source created, not paired yet. Pair it with a \
+             Tree search in Loxone Config; how the Miniserver runs a device it has not searched \
+             for is untested."
+        ));
+    }
+    let mut compiled = compiled_doc.to_bytes();
     lock.save(&scratch_lock)?;
     let (pending, kept_custom) = check_custom_changes(ms, opts, &live_xml, &mut compiled, &say)?;
     let compiled_path = file("push.Loxone");

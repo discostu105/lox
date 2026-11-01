@@ -81,6 +81,7 @@ pub(crate) mod scan;
 pub(crate) mod settings;
 pub(crate) mod settings_meta;
 pub mod sim;
+pub(crate) mod tree_kinds;
 pub mod uuid;
 pub mod xml;
 

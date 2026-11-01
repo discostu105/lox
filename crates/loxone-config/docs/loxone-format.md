@@ -945,6 +945,32 @@ The Tree and Air extensions (`LoxTree`, `LoxAIR`) carry `Installation`
 and `SwitchBoard` too. A save keeps both rewritten, a board also from
 `""` (oracle session 51).
 
+### Tree devices created offline
+
+Loxone Config adds a Tree device offline, before a Tree search finds it, with `Serial="00000000"`.
+A paired device carries its own 8-digit serial instead, and a declaration matches it by that
+(`serial:`). In the public corpus, 77 of 110 Tree devices have the zeros. A compile
+creates devices in this offline state ([D102](decisions/0102-created-tree-devices.md)). How a Miniserver
+runs a device it has not searched for yet is not verified. What a save writes on one (oracle sessions
+53–55, Config 17.2):
+
+- **Place.** A Tree extension's branches are `LoxCaption` children: `CaptionType="2"` the left branch,
+  `3` the right one, or the only one. The devices are children of their branch. A save keeps a device
+  appended at the end of a branch, an empty self-closing one included.
+- **`TId=`** names the kind, right after `Type=`: `TouchTree` (TreeType 32771), `PresenceSensorTree`
+  (32794), `CorridorLightTree` (32774), `ValveTree` (32769). A save adds it where it is missing.
+- **Attribute order.** `Type TId V U Title WF Serial Installation SwitchBoard SubType TreeType PG`, then
+  the rest. A save reorders to this; a Valve Actuator Tree gains `SwitchBoard=""` and
+  `SwitchBoardPos="1"`.
+- **`<IoData>`.** A save writes `<IoData></IoData>` (never self-closing) on the device and on actuators,
+  and `<IoData St="2"/>` on digital sensors and the online status, `St="4"` on analog sensors, adding
+  the element where it is missing. A `Pr=` without `Cr=` stays.
+- **The online status** (`Type="Online"`, `IName="S0"`) is titled after the kind (`Online Status
+  Touch Tree`), not the device. A save does not rename it; in the corpus, many carry the device's
+  title instead.
+- **`WF`** is 16384 or 16400 on corpus devices; bit `0x10` varies within one kind and one config. A
+  save keeps 16384.
+
 ## Time functions: per-project singletons
 
 The GUI's *Zeitfunktionen* periphery folder is a `TimeCaption` element

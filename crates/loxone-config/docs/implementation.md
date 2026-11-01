@@ -27,7 +27,8 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `src/autopilot_caps.rs` | GENERATED (`scripts/autopilot_caps.py`): the Miniserver's condition and action codes per app control type | codes only, no localized texts |
 | `src/settings.rs` | settings of physical inputs and outputs the source may claim (description, unit, correction, timing) | only attributes the corpus shows on these types; the original is kept in the lock |
 | `src/periphery.rs` | virtual devices and Modbus: the object-tree objects a source can create, and their I/Os | |
-| `src/hardware.rs` | the Tree and Air devices and extensions a declaration can take over, the I/O types below each, the statistics values | never creates or deletes hardware |
+| `src/hardware.rs` | the Tree and Air devices and extensions a declaration can take over, the I/O types below each, the statistics values | matches existing hardware only |
+| `src/tree_kinds.rs` | the Tree device kinds a declaration can create, each element as a save writes it | only verified kinds ([connector-db.md](connector-db.md#tree-devices)) |
 | `src/archive.rs` | feature `archive`: backup ZIPs, the LoxCC codec, `stage_upload_zip` | bytes only, no transport; other entries copied raw |
 | `src/catalogue.rs` | `LoxAPP3.json`: carries a compile's renames, rooms, categories, deletions and new entries into the app catalogue | new entries only for types in `KNOWN` |
 | `src/permissions.rs` | `permissions.bin`: which principals may see and use which object | |
@@ -47,7 +48,7 @@ the `archive` feature `zip`, `lz4_flex` and `crc32fast`.
 | `template.rs` | template expansion into plain statements | the lockfile and compiler only see the expanded form |
 | `defaults.rs` | `defaults <Type>(…)`: applied during expansion; factoring for decompile and adopt; fitting a block `adopt --uuid` brings in | compiles like the values written on each block |
 | `desugar.rs` | expressions into gate and comparator blocks; arithmetic into one `Formula` | runs after expansion, before port validation |
-| `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims), `owned.rs` (what hardware declarations own) | teardown and rebuild converge; deterministic |
+| `compile.rs`, `compile/` | the compiler ([design.md](design.md)): `plan.rs` (identity, page, container, values), `teardown.rs` (remove the previous output), `emit.rs` (managed `<C>` elements), `wires.rs`, `claims.rs` (extern assignments, settings, attribute claims), `owned.rs` (what hardware declarations own), `create.rs` (Tree devices the source creates, the guard against deleting hardware) | teardown and rebuild converge; deterministic |
 | `decompile.rs` | config → Lox Logic view (`decompile`, `decompile_pages`), `slugify`, the shared `Lift` | full view by default; `ManagedOnly` lifts only wires touching managed blocks |
 | `adopt.rs`, `adopt_tree.rs`, `adopt_hardware.rs` | `adopt`: a managed module and a lockfile that pins existing identities; a virtual or Modbus device with all its I/Os; a Tree or Air device with its I/Os | adopt then compile changes nothing; refused blocks stay untouched |
 | `rename.rs` | `loxl rename`: slug rename across module and lockfile, synthetic slugs included | output unchanged except titles the slug feeds |

@@ -944,6 +944,13 @@ fn cmd_compile(args: &[&str]) -> Result<ExitCode, AnyError> {
         compiled.counters().next_obj,
         lock_path.display()
     );
+    for slug in loxone_config::logic::unpaired_created(&compiled, &lock) {
+        eprintln!(
+            "note: `{slug}` is a Tree device the source created, not paired yet. Pair it with \
+             a Tree search in Loxone Config; how the Miniserver runs a device it has not \
+             searched for is untested."
+        );
+    }
     // Placement keeps to the sheet where it can (D50); say what it put
     // past it. An object that keeps its place in the base was put there in
     // Loxone Config, so it is not the compile's to report.

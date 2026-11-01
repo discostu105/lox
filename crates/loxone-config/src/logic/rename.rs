@@ -464,6 +464,10 @@ pub fn apply_rekeys(lock: &mut Lockfile, rekeys: &[Rekey]) -> Result<usize> {
                     lock.externals.insert(new.clone(), entry);
                     moved += 1;
                 }
+                // A created device keeps its UUID under the new slug.
+                if let Some(uuid) = lock.hardware.remove(old.as_str()) {
+                    lock.hardware.insert(new.clone(), uuid);
+                }
             }
             RekeyKind::Rule => {
                 if let Some(uuid) = lock.rules.remove(old.as_str()) {

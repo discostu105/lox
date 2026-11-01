@@ -32,7 +32,7 @@ use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, 
 use crate::error::{Error, Result};
 use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
 use crate::logic::ast::{
-    ArgItem, Binding, BindingKind, Item, MatchSpec, Module, PortRef, RULE_BLOCK_TYPE, WireDecl,
+    ArgItem, Binding, BindingKind, Item, Module, PortRef, RULE_BLOCK_TYPE, WireDecl,
 };
 use crate::logic::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED, owned_by_block};
 use crate::logic::validate::validate_ports;
@@ -395,14 +395,7 @@ fn adopt_one_expanded(
             fin.clone(),
             LockedExternal {
                 uuid: obj.uuid.clone(),
-                matched_by: match &lift.match_specs[i] {
-                    MatchSpec::Uuid(_) => "uuid",
-                    MatchSpec::IName(_) => "iname",
-                    MatchSpec::Title(_) => "title",
-                    MatchSpec::Mirrors(_) => "mirrors",
-                    MatchSpec::Serial(_) => "serial",
-                }
-                .to_string(),
+                matched_by: lift.match_specs[i].kind().to_string(),
                 title_at_match: obj.title.clone(),
                 iname_at_match: obj.iname.clone(),
                 owned: false,
@@ -654,14 +647,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
             lift.slug_of[&o.uuid].clone(),
             LockedExternal {
                 uuid: o.uuid.clone(),
-                matched_by: match &lift.match_specs[&i] {
-                    MatchSpec::Uuid(_) => "uuid",
-                    MatchSpec::IName(_) => "iname",
-                    MatchSpec::Title(_) => "title",
-                    MatchSpec::Mirrors(_) => "mirrors",
-                    MatchSpec::Serial(_) => "serial",
-                }
-                .to_string(),
+                matched_by: lift.match_specs[&i].kind().to_string(),
                 title_at_match: o.title.clone(),
                 iname_at_match: o.iname.clone(),
                 owned: false,

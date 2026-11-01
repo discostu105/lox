@@ -64,7 +64,7 @@ pub use ast::{
     TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl, TileDecl, TilesClaim,
     TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
 };
-pub use compile::{CompileOptions, compile, resolve_extern_uuids};
+pub use compile::{CompileOptions, compile, resolve_extern_uuids, unpaired_created};
 pub use decompile::{
     DecompileOptions, DecompileReport, DecompileScope, PageModule, decompile, decompile_pages,
     slugify,

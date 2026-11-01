@@ -224,6 +224,7 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D89 | [What dead-outputs counts as used, and `# lint: allow`](decisions/0089-lint-dead-outputs.md) | accepted |
 | D91 | [`off` is no attribute, except on a virtual input](decisions/0091-off-is-no-attribute.md) | accepted |
 | D101 | [Hardware declarations](decisions/0101-hardware-declarations.md) | accepted |
+| D102 | [Tree devices created from source](decisions/0102-created-tree-devices.md) | accepted |
 | D110 | [One spelling per operating mode](decisions/0110-mode-reference-spelling.md) | accepted, amends [D69](decisions/0069-operating-modes.md) and [D73](decisions/0073-rule-conditions.md) |
 | D111 | [Unit suffixes on extern ports, template parameters and device settings](decisions/0111-unit-suffix-coverage.md) | accepted, extends [D87](decisions/0087-v2-tooling.md) |
 | D112 | [0 is no attribute on a number a save leaves out](decisions/0112-zero-is-no-attribute.md) | accepted |

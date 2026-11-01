@@ -918,6 +918,31 @@ wire into an actor, the extension's place and board. The compile opened
 and saved with an empty semantic diff, and a recompile of the save was
 byte-identical. Removing the declarations left every value as written.
 
+## Tree devices added offline (sessions 53 and 54, D102) — passed, findings folded in
+
+Ran 2026-11-01 on scratch copies of the house config (research only). Corpus instances of the
+candidate Tree device kinds, without wires and with fresh UUIDs, were added by hand to the branch of
+one Tree extension, unpaired (`Serial="00000000"`).
+
+- The save kept every device and its I/O.
+- **Finding:** it added `TId=` after `Type=`, reordered the device's attributes, wrote `<IoData></IoData>`
+  on the device and on actuators, and added a missing `<IoData>` (`St="2"` digital, `St="4"` analog).
+- **Finding:** on a Valve Actuator Tree it added `SwitchBoard=""` and `SwitchBoardPos="1"`.
+- The online status kept the kind's title.
+- Session 54 repeated four kinds in the saved form, with connector UUIDs in the compiler's form: the
+  semantic diff held only the Valve Actuator Tree finding. The kind table carries the saved form.
+
+## Tree devices created by the compiler (sessions 55 and 56, D102) — passed
+
+Ran 2026-11-01 on a copy of the house config. A module declared both Tree extensions by serial and
+created one device of each kind, three on one extension's branch and one in the other's empty branch,
+and an input of one of them by designation.
+
+- Session 55: the compile opened and saved with an empty semantic diff. The created elements came back
+  byte for byte, and a recompile of the save was byte-identical.
+- Session 56: `removed` on two of them, compiled against that save. The save gave an empty semantic
+  diff.
+
 ## Numeric settings at 0 (sessions 61 and 62, #312) — passed, three findings
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 under `oracle.sh run`, in a private copy of the oracle prefix
