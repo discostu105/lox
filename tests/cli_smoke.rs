@@ -303,11 +303,21 @@ fn mcp_logic_tools_run_the_real_cli() {
         env!("CARGO_MANIFEST_DIR"),
         "/crates/loxone-config/examples/project"
     );
-    let meta = r#""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"smoke","version":"0"}}"#;
+    // Built with serde_json: a Windows path has backslashes to escape.
     let call = |id: u32, tool: &str| {
-        format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{tool}","arguments":{{"project":"{project}"}},{meta}}}}}"#
-        )
+        serde_json::json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {
+                "name": tool,
+                "arguments": { "project": project },
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                    "io.modelcontextprotocol/clientInfo": { "name": "smoke", "version": "0" }
+                }
+            }
+        })
+        .to_string()
     };
     let input = format!("{}\n{}\n", call(1, "logic_check"), call(2, "logic_compile"));
     let before = std::fs::read(format!("{project}/pool.lock.json")).unwrap();
