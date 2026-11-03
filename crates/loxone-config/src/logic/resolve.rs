@@ -139,6 +139,7 @@ impl Resolver<'_> {
                 }
             }
             Operand::Port(p) => self.check_ref(p, at)?,
+            Operand::Arith(x) => self.expr(x, at)?,
             Operand::Value(_) => {}
         }
         Ok(())

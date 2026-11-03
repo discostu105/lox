@@ -660,6 +660,7 @@ impl Lift {
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
         self.push_members(b, &mut items);
+        fold_extern_wires(&mut items);
         items
     }
 
@@ -805,6 +806,8 @@ impl Lift {
                         block_type: self.objects[i].block_type.clone(),
                         match_spec: self.match_specs[&i].clone(),
                         comment: None,
+                        args: Vec::new(),
+                        close_comment: None,
                     }
                 });
                 decl.comment = Some(origin);
@@ -817,6 +820,7 @@ impl Lift {
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
             self.push_members(&b, &mut items);
+            fold_extern_wires(&mut items);
 
             let module = Module { items };
             module.validate()?;
@@ -1678,6 +1682,8 @@ impl Scan<'_> {
                             MatchSpec::Mirrors(_) => None,
                             _ => mirror_note(i),
                         },
+                        args: Vec::new(),
+                        close_comment: None,
                     },
                 )
             })
@@ -2202,6 +2208,61 @@ pub(super) fn message_of<'a>(
             .iter()
             .any(|x| x.uuid == target && x.block_type == MESSAGE_REF_TARGET))
     .then_some(target)
+}
+
+/// Move every `<-` statement onto an extern the list declares into that
+/// extern's argument list, in the order the statements came. A wire onto
+/// an extern declared elsewhere (a per-page module's foreign extern is
+/// declared in the file, so it folds too) stays a statement.
+fn fold_extern_wires(items: &mut Vec<Item>) {
+    let externs: BTreeSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Extern(e) => Some(e.slug.clone()),
+            _ => None,
+        })
+        .collect();
+    if externs.is_empty() {
+        return;
+    }
+    let mut folded: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
+    items.retain(|item| {
+        let (to, binding) = match item {
+            Item::Wire(w) if externs.contains(&w.to.slug) => (
+                &w.to,
+                Binding {
+                    port: w.to.port.clone(),
+                    kind: if w.from.port.is_empty() {
+                        BindingKind::Param(Value::Ref(w.from.slug.clone()))
+                    } else {
+                        BindingKind::Wire(w.from.clone())
+                    },
+                    comment: w.comment.clone(),
+                },
+            ),
+            Item::ExprWire(w) if externs.contains(&w.to.slug) => (
+                &w.to,
+                Binding {
+                    port: w.to.port.clone(),
+                    kind: BindingKind::Expr(w.expr.clone()),
+                    comment: w.comment.clone(),
+                },
+            ),
+            _ => return true,
+        };
+        folded
+            .entry(to.slug.clone())
+            .or_default()
+            .push(binding);
+        false
+    });
+    for item in items.iter_mut() {
+        if let Item::Extern(e) = item
+            && let Some(more) = folded.remove(&e.slug)
+        {
+            e.args.extend(more.into_iter().map(ArgItem::Binding));
+        }
+    }
 }
 
 /// How source reads output `key` of `slug`, a `block_type`: the bare

@@ -75,11 +75,9 @@ c.Q = 3
 a = Not()
 ";
     let m = messages(Module::parse(src).unwrap_err());
-    assert_eq!(m.len(), 4, "{m:#?}");
+    assert_eq!(m.len(), 2, "{m:#?}");
     assert!(m[0].contains("duplicate name `a`"), "{m:#?}");
     assert!(m[1].contains("undeclared slug `nope`"), "{m:#?}");
-    assert!(m[2].contains("`b.In2 <- sw.Q`"), "{m:#?}");
-    assert!(m[3].contains("`c.Q = …`"), "{m:#?}");
 }
 
 #[test]
@@ -203,11 +201,7 @@ fn check_lists_every_error_by_file_and_line() {
         .collect();
     assert_eq!(
         places,
-        vec![
-            ("a.loxl".into(), 2),
-            ("a.loxl".into(), 4),
-            ("b.loxl".into(), 2)
-        ],
+        vec![("a.loxl".into(), 2), ("b.loxl".into(), 2)],
         "{v}"
     );
     assert_eq!(v["path"], errors[0]["path"]);
@@ -218,7 +212,7 @@ fn check_lists_every_error_by_file_and_line() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
         stderr.lines().filter(|l| l.starts_with("error: ")).count(),
-        3,
+        2,
         "{stderr}"
     );
 

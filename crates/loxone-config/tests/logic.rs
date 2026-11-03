@@ -2049,9 +2049,15 @@ fn full_view_folds_ref_plumbing_and_sorts_extern_wires() {
     assert_eq!(zeta.comment, None);
     // The Regensensor's only connection was plumbing — it is not lifted.
     assert!(m.externs().all(|e| e.slug != "regensensor"));
-    // Only the refs' real source wires survive the fold.
-    let pile: Vec<String> = m.extern_wires().map(|w| w.to.to_string()).collect();
+    // Only the refs' real source wires survive the fold, as bindings of
+    // the extern declarations.
+    let mut pile: Vec<String> = m
+        .externs()
+        .flat_map(|e| e.bindings().map(move |b| format!("{}.{}", e.slug, b.port)))
+        .collect();
+    pile.sort();
     assert_eq!(pile, ["alpha_ref.AI", "zeta_ref.In"]);
+    assert_eq!(m.extern_wires().count(), 0);
     // Still canonical, parseable text.
     let text = m.to_text();
     assert_eq!(Module::parse(&text).unwrap(), m);
@@ -3220,12 +3226,15 @@ fn expression_misuse_is_reported() {
         "claimed by the expression",
     );
 
-    // A managed sink refuses `<-` exactly like plain wires do.
-    let err = Module::parse(&format!(
-        "{head}gate = And(In1: a.Q, In2: b.Q)\ngate.I1 <- a.Q and b.Q\n"
+    // A managed sink takes `<-` too: the expression becomes an argument
+    // of the block once the module is expanded.
+    let m = Module::parse(&format!(
+        "{head}gate = And(In1: a.Q)\ngate.In2 <- a.Q and b.Q\n"
     ))
-    .unwrap_err();
-    assert!(err.to_string().contains("targets managed block"), "{err}");
+    .unwrap();
+    let flat = m.expand().unwrap();
+    let gate = flat.blocks().find(|b| b.slug == "gate").unwrap();
+    assert!(gate.expr_bindings().any(|(p, _)| p == "In2"), "{}", flat.to_text());
 }
 
 // ---------------------------------------------------------------------------

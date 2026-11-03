@@ -568,6 +568,8 @@ struct Parser {
     open_tile: Option<u32>,
     /// `open_call` carries a `defaults <Type>(…)` argument list.
     open_defaults: bool,
+    /// `open_call` carries an `extern <slug> = <Type>(…)` argument list.
+    open_extern: bool,
     /// A `rule` whose body is still open (until `end`).
     open_rule: Option<RuleDecl>,
 }
@@ -693,6 +695,7 @@ impl Parser {
         self.open_call = None;
         self.open_tile = None;
         self.open_defaults = false;
+        self.open_extern = false;
     }
 
     /// Inside an open argument list: arguments, comments, or `)`.
@@ -718,6 +721,11 @@ impl Parser {
             if std::mem::take(&mut self.open_defaults) {
                 let d = finish_defaults(self.open_call.take().unwrap(), lineno)?;
                 self.items.push(Item::Defaults(d));
+                return Ok(());
+            }
+            if std::mem::take(&mut self.open_extern) {
+                let e = finish_extern(self.open_call.take().unwrap(), lineno)?;
+                self.items.push(Item::Extern(e));
                 return Ok(());
             }
             let in_template = self.open_template.is_some();
@@ -1046,8 +1054,31 @@ impl Parser {
                     .push(Item::Let(parse_let(toks, comment, lineno)?));
             }
             Tok::Ident(kw) if kw == "extern" => {
-                self.items
-                    .push(Item::Extern(parse_extern(toks, comment, lineno)?));
+                let [_, Tok::Ident(slug), Tok::Eq, Tok::Ident(ty), Tok::LParen, rest @ ..] = toks
+                else {
+                    return Err(err(
+                        "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
+                         | mirrors: <slug>[, room: \"…\"][, category: \"…\"][, device: \"…\"]\
+                         [, <Port>: <source | value>, …])`"
+                            .into(),
+                    ));
+                };
+                let mut call = BlockDecl {
+                    slug: check_slug(slug, lineno)?,
+                    block_type: check_type(ty, lineno)?,
+                    title: None,
+                    args: Vec::new(),
+                    comment: None,
+                    close_comment: None,
+                };
+                let outcome = parse_call_args(&mut call, rest, lineno)?;
+                call.comment = comment;
+                if outcome.closed {
+                    self.items.push(Item::Extern(finish_extern(call, lineno)?));
+                } else {
+                    self.open_call = Some(call);
+                    self.open_extern = true;
+                }
             }
             Tok::Ident(kw) if kw == "removed" => {
                 let slug = match toks {
@@ -1126,6 +1157,9 @@ impl Parser {
             let what = match self.open_tile {
                 Some(i) => format!("tile {i}(…"),
                 None if self.open_defaults => format!("defaults {}(…", call.block_type),
+                None if self.open_extern => {
+                    format!("extern {} = {}(…", call.slug, call.block_type)
+                }
                 None => format!("{} = {}(…", call.slug, call.block_type),
             };
             return Err(Error::Parse {
@@ -1356,140 +1390,127 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
     }
 }
 
-/// `extern <slug> = <Type>(<matcher>[, <constraint>…])`.
-fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<ExternDecl> {
+/// A closed `extern <slug> = <Type>(…)` argument list: the lowercase keys
+/// are the matchers (one primary matcher — uuid, iname, title, serial or
+/// mirrors — then `room:`, `category:` and `device:`), the PascalCase keys
+/// are port bindings, wires and values onto the extern's ports.
+fn finish_extern(call: BlockDecl, lineno: usize) -> Result<ExternDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    match toks {
-        [
-            _,
-            Tok::Ident(slug),
-            Tok::Eq,
-            Tok::Ident(ty),
-            Tok::LParen,
-            rest @ ..,
-            Tok::RParen,
-        ] => {
-            // `kind: "value"` pairs, comma-separated: one primary
-            // matcher (uuid|iname|title|mirrors) first, then
-            // optional `room:` / `category:` constraints. Only
-            // `mirrors:` takes a bare slug; everything else is a
-            // quoted string.
-            let mut pairs = Vec::new();
-            // `mirrors: inst.block` names a block of a template instance.
-            let mut joined: Vec<Tok> = Vec::with_capacity(rest.len());
-            let mut i = 0;
-            while i < rest.len() {
-                match (&rest[i], rest.get(i + 1), rest.get(i + 2)) {
-                    (Tok::Ident(a), Some(Tok::Dot), Some(Tok::Ident(b)))
-                        if joined.last() == Some(&Tok::Colon) =>
-                    {
-                        joined.push(Tok::Ident(format!("{a}.{b}")));
-                        i += 3;
-                    }
-                    (t, _, _) => {
-                        joined.push(t.clone());
-                        i += 1;
-                    }
-                }
+    if call.title.is_some() {
+        return Err(err(format!(
+            "`extern {} = {}(…)` takes no label string. Match the object by its title: \
+             `title: \"…\"`.",
+            call.slug, call.block_type
+        )));
+    }
+    // (key, text, is_ident) per matcher, as the matcher list reads.
+    let mut pairs: Vec<(String, String, bool)> = Vec::new();
+    let mut args = Vec::new();
+    for arg in call.args {
+        let b = match arg {
+            ArgItem::Binding(b) => b,
+            comment => {
+                args.push(comment);
+                continue;
             }
-            let mut it = joined.iter();
-            loop {
-                match (it.next(), it.next(), it.next()) {
-                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
-                        pairs.push((k.as_str(), v.clone(), false));
-                    }
-                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Ident(v))) => {
-                        pairs.push((k.as_str(), v.clone(), true));
-                    }
-                    _ => {
-                        return Err(err(
-                            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
-                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
-                                     [, device: \"…\"])`"
-                                .into(),
-                        ));
-                    }
-                }
-                match it.next() {
-                    None => break,
-                    Some(Tok::Comma) => continue,
-                    Some(_) => {
-                        return Err(err("expected `,` between matchers".into()));
-                    }
-                }
+        };
+        if b.port.starts_with(|c: char| c.is_ascii_uppercase()) {
+            args.push(ArgItem::Binding(b));
+            continue;
+        }
+        let pair = match &b.kind {
+            BindingKind::Param(Value::Str(v)) => (b.port.clone(), v.clone(), false),
+            BindingKind::Param(Value::Number(v)) => (b.port.clone(), v.clone(), false),
+            BindingKind::Param(Value::Ref(v)) => (b.port.clone(), v.clone(), true),
+            // `mirrors: inst.block` reads as a port reference.
+            BindingKind::Wire(r) if r.port.starts_with(|c: char| c.is_ascii_lowercase()) => {
+                (b.port.clone(), format!("{}.{}", r.slug, r.port), true)
             }
-            let mut pairs = pairs.into_iter();
-            let match_spec = match pairs.next() {
-                Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_ref(&v, lineno)?),
-                Some(("mirrors", _, false)) => {
-                    return Err(err("`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
-                        .into()));
-                }
-                Some((k, _, true)) => {
-                    return Err(err(format!("`{k}:` takes a quoted string")));
-                }
-                Some(("uuid", v, _)) => MatchSpec::Uuid(v),
-                Some(("iname", v, _)) => MatchSpec::IName(v),
-                Some(("title", v, _)) => MatchSpec::Title(v),
-                Some(("serial", v, _)) => MatchSpec::Serial(v),
-                Some((other, _, _)) => {
-                    return Err(err(format!(
-                        "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
-                    )));
-                }
-                None => return Err(err("empty matcher list".into())),
-            };
-            let (mut room, mut category, mut device) = (None, None, None);
-            for (k, v, is_ident) in pairs {
-                if is_ident {
-                    return Err(err(format!("`{k}:` takes a quoted string")));
-                }
-                let slot = match k {
-                    "room" => &mut room,
-                    "category" => &mut category,
-                    "device" => &mut device,
-                    other => {
-                        return Err(err(format!(
-                            "unknown constraint `{other}` (expected room, category \
-                                     or device)"
-                        )));
-                    }
-                };
-                if slot.replace(v).is_some() {
-                    return Err(err(format!("duplicate `{k}:` constraint")));
-                }
-            }
-            let constrained = room.is_some() || category.is_some() || device.is_some();
-            if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
-                let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
-                    "uuid"
-                } else {
-                    "serial"
-                };
+            other => {
                 return Err(err(format!(
-                    "`{k}:` matches exactly, so room, category and device are not allowed with it"
+                    "`{}: {other}`: a matcher takes a quoted string (`mirrors:` a name)",
+                    b.port
                 )));
             }
-            if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
-                return Err(err(
-                    "room, category and device are not allowed with `mirrors:`. The file's `page` statement narrows it."
-                        .into(),
-                ));
-            }
-            Ok(ExternDecl {
-                slug: check_slug(slug, lineno)?,
-                block_type: check_type(ty, lineno)?,
-                match_spec,
-                room,
-                category,
-                device,
-                comment,
-            })
-        }
-        _ => Err(err(
-            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\")`".into(),
-        )),
+        };
+        pairs.push(pair);
     }
+    let mut pairs = pairs.into_iter();
+    let match_spec = match pairs.next() {
+        Some((k, v, true)) if k == "mirrors" => MatchSpec::Mirrors(check_ref(&v, lineno)?),
+        Some((k, _, false)) if k == "mirrors" => {
+            return Err(err(
+                "`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
+                    .into(),
+            ));
+        }
+        Some((k, _, true)) => {
+            return Err(err(format!("`{k}:` takes a quoted string")));
+        }
+        Some((k, v, _)) if k == "uuid" => MatchSpec::Uuid(v),
+        Some((k, v, _)) if k == "iname" => MatchSpec::IName(v),
+        Some((k, v, _)) if k == "title" => MatchSpec::Title(v),
+        Some((k, v, _)) if k == "serial" => MatchSpec::Serial(v),
+        Some((other, _, _)) => {
+            return Err(err(format!(
+                "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
+            )));
+        }
+        None => {
+            return Err(err(format!(
+                "`extern {} = {}(…)` names no matcher. Start with uuid, iname, title, serial or \
+                 mirrors.",
+                call.slug, call.block_type
+            )));
+        }
+    };
+    let (mut room, mut category, mut device) = (None, None, None);
+    for (k, v, is_ident) in pairs {
+        if is_ident {
+            return Err(err(format!("`{k}:` takes a quoted string")));
+        }
+        let slot = match k.as_str() {
+            "room" => &mut room,
+            "category" => &mut category,
+            "device" => &mut device,
+            other => {
+                return Err(err(format!(
+                    "unknown constraint `{other}` (expected room, category or device)"
+                )));
+            }
+        };
+        if slot.replace(v).is_some() {
+            return Err(err(format!("duplicate `{k}:` constraint")));
+        }
+    }
+    let constrained = room.is_some() || category.is_some() || device.is_some();
+    if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
+        let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
+            "uuid"
+        } else {
+            "serial"
+        };
+        return Err(err(format!(
+            "`{k}:` matches exactly, so room, category and device are not allowed with it"
+        )));
+    }
+    if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
+        return Err(err(
+            "room, category and device are not allowed with `mirrors:`. The file's `page` statement narrows it."
+                .into(),
+        ));
+    }
+    Ok(ExternDecl {
+        slug: call.slug,
+        block_type: call.block_type,
+        match_spec,
+        room,
+        category,
+        device,
+        args,
+        comment: call.comment,
+        close_comment: call.close_comment,
+    })
 }
 
 /// `page "<Title>"`, optionally `(room: "…"[, category: "…"])` to
@@ -2964,18 +2985,6 @@ impl ExprParser<'_> {
         matches!(self.peek(), Some(Tok::Ident(s)) if s == kw)
     }
 
-    /// Arithmetic mixed under `or`/`and`/`not` is deferred: the analog
-    /// `AQ` of a `Formula` feeding a boolean gate input is behavior we have
-    /// not verified against the Miniserver.
-    fn no_arith(&self, e: &Expr, kw: &str) -> Result<()> {
-        if matches!(e, Expr::Arith { .. }) {
-            return Err(self.err(format!(
-                "arithmetic under `{kw}` is not supported. Declare a `Formula` block and use its `AQ`."
-            )));
-        }
-        Ok(())
-    }
-
     /// A parenthesized group taking part in arithmetic must itself be
     /// arithmetic — gates and comparisons produce on/off, not numbers.
     fn ensure_arith(&self, e: &Expr) -> Result<()> {
@@ -3011,10 +3020,8 @@ impl ExprParser<'_> {
     fn or_level(&mut self) -> Result<Expr> {
         let mut e = self.and_level()?;
         while self.keyword("or") {
-            self.no_arith(&e, "or")?;
             self.pos += 1;
             let rhs = self.and_level()?;
-            self.no_arith(&rhs, "or")?;
             e = Expr::Or(Box::new(e), Box::new(rhs));
         }
         Ok(e)
@@ -3023,10 +3030,8 @@ impl ExprParser<'_> {
     fn and_level(&mut self) -> Result<Expr> {
         let mut e = self.unary()?;
         while self.keyword("and") {
-            self.no_arith(&e, "and")?;
             self.pos += 1;
             let rhs = self.unary()?;
-            self.no_arith(&rhs, "and")?;
             e = Expr::And(Box::new(e), Box::new(rhs));
         }
         Ok(e)
@@ -3036,10 +3041,23 @@ impl ExprParser<'_> {
         if self.keyword("not") {
             self.pos += 1;
             let x = self.unary()?;
-            self.no_arith(&x, "not")?;
             return Ok(Expr::Not(Box::new(x)));
         }
         self.primary()
+    }
+
+    /// One side of a comparison: a port, a number, a constant or
+    /// arithmetic. A boolean group is none of those.
+    fn cmp_side(&self, e: Expr, op: CmpOp) -> Result<Operand> {
+        match e {
+            Expr::Atom(o) => Ok(o),
+            Expr::Arith { .. } => Ok(Operand::Arith(Box::new(e))),
+            _ => Err(self.err(format!(
+                "`(…) {}`: a comparison takes ports, numbers, constants or arithmetic, not a \
+                 boolean group",
+                op.symbol()
+            ))),
+        }
     }
 
     fn primary(&mut self) -> Result<Expr> {
@@ -3050,17 +3068,11 @@ impl ExprParser<'_> {
                 return Err(self.err("missing `)` in the expression".into()));
             }
             self.pos += 1;
-            if let Some(Tok::Cmp(op)) = self.peek() {
-                return Err(self.err(format!(
-                    "`(…) {}`: a comparison takes ports, numbers or constants, not parenthesized expressions",
-                    op.symbol()
-                )));
-            }
-            if self.arith_op().is_none() {
+            if self.arith_op().is_none() && !matches!(self.peek(), Some(Tok::Cmp(_))) {
                 return Ok(e);
             }
-            // `(…) * x` — the group is the first factor of an arithmetic
-            // expression.
+            // `(…) * x` or `(…) >= 5` — the group is the first factor of
+            // an arithmetic expression.
             self.ensure_arith(&e)?;
             self.sum_from(e)?
         } else {
@@ -3068,20 +3080,10 @@ impl ExprParser<'_> {
         };
         if let Some(Tok::Cmp(op)) = self.peek() {
             let op = *op;
-            let Expr::Atom(lhs) = e else {
-                return Err(self.err(format!(
-                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
-                    op.symbol()
-                )));
-            };
+            let lhs = self.cmp_side(e, op)?;
             self.pos += 1;
-            let rhs = self.operand()?;
-            if self.arith_op().is_some() {
-                return Err(self.err(format!(
-                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
-                    op.symbol()
-                )));
-            }
+            let rhs = self.sum()?;
+            let rhs = self.cmp_side(rhs, op)?;
             if matches!(self.peek(), Some(Tok::Cmp(_))) {
                 return Err(self.err(
                     "comparisons do not chain (`a < b < c`). Write two comparisons joined with `and`."
@@ -3504,17 +3506,21 @@ sonne.Qm = 30 # override
     }
 
     #[test]
-    fn port_statements_on_managed_blocks_are_rejected() {
-        // `=` on a managed port: parameters belong in the argument list.
-        let e = Module::parse("b = And()\nb.In1 = 3\n").unwrap_err();
-        let msg = e.to_string();
-        assert!(msg.contains("targets managed block `b`"), "{msg}");
-        assert!(msg.contains("argument list"), "{msg}");
-        // `<-` on a managed port: wires belong in the argument list.
-        let e = Module::parse("a = And()\nb = And()\nb.In1 <- a.Q\n").unwrap_err();
-        let msg = e.to_string();
-        assert!(msg.contains("targets managed block `b`"), "{msg}");
-        assert!(msg.contains("In1: a.Q"), "{msg}");
+    fn port_statements_on_managed_blocks_become_arguments() {
+        // `=` and `<-` on a managed port are the block's arguments once
+        // the module is expanded; the source keeps the statements.
+        let m = Module::parse("a = And()\nb = And()\nb.In1 <- a.Q\nb.In2 = 3\n").unwrap();
+        assert!(m.to_text().contains("b.In1 <- a.Q\n"));
+        let flat = m.expand().unwrap();
+        let b = flat.blocks().find(|x| x.slug == "b").unwrap();
+        assert_eq!(
+            b.bindings()
+                .map(|x| format!("{}: {}", x.port, x.kind))
+                .collect::<Vec<_>>(),
+            ["In1: a.Q", "In2: 3"]
+        );
+        assert_eq!(flat.extern_wires().count(), 0);
+        assert_eq!(flat.sets().count(), 0);
     }
 
     #[test]

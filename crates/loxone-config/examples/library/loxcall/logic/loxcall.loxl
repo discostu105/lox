@@ -1,7 +1,13 @@
 page "_LoxCall"
 
-extern callstateoutput_2 = InputRef(uuid: "1713f389-0398-feb1-ffff4268f6c1aee9") # mirrors Memory "_CallStateOutput"
-extern callstateoutput_3 = InputRef(uuid: "1713f389-0398-fec1-ffff4268f6c1aee9") # mirrors Memory "_CallStateOutput"
+extern callstateoutput_2 = InputRef( # mirrors Memory "_CallStateOutput"
+	uuid: "1713f389-0398-feb1-ffff4268f6c1aee9",
+)
+
+extern callstateoutput_3 = InputRef( # mirrors Memory "_CallStateOutput"
+	uuid: "1713f389-0398-fec1-ffff4268f6c1aee9",
+)
+
 extern callstate = VirtualTextIn(iname: "VTI1") # periphery
 
 program = Code16(TextIn1: callstate)

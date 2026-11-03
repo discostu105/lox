@@ -500,11 +500,70 @@ pub struct ExternDecl {
     /// `iname`/`title` matching where identical devices repeat their I/O
     /// titles; unlike a room or a title, it does not change in the GUI.
     pub device: Option<String>,
+    /// Port bindings in the declaration (`AutoShade: beschatten`,
+    /// `TargetPos: 70`): the wires and assignments onto the extern's
+    /// ports, which [`Module::lowered`] turns into statements.
+    pub args: Vec<ArgItem>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
+    /// The comment on the closing `)` line of a multi-line declaration.
+    pub close_comment: Option<String>,
 }
 
 impl ExternDecl {
+    /// The matchers as argument bindings, for the formatter.
+    fn matcher_args(&self) -> Vec<ArgItem> {
+        let str_arg = |k: &str, v: &str| {
+            ArgItem::Binding(Binding {
+                port: k.to_string(),
+                kind: BindingKind::Param(Value::Str(v.to_string())),
+                comment: None,
+            })
+        };
+        let ref_arg = |k: &str, v: &str| {
+            ArgItem::Binding(Binding {
+                port: k.to_string(),
+                kind: BindingKind::Param(Value::Ref(v.to_string())),
+                comment: None,
+            })
+        };
+        let mut out = match &self.match_spec {
+            MatchSpec::Uuid(v) => vec![str_arg("uuid", v)],
+            MatchSpec::IName(v) => vec![str_arg("iname", v)],
+            MatchSpec::Title(v) => vec![str_arg("title", v)],
+            MatchSpec::Mirrors(v) => vec![ref_arg("mirrors", v)],
+            MatchSpec::Serial(v) => vec![str_arg("serial", v)],
+            MatchSpec::Create { kind, tree, branch } => {
+                let mut v = vec![str_arg("kind", kind), ref_arg("tree", tree)];
+                if let Some(b) = branch {
+                    v.push(str_arg("branch", b));
+                }
+                v
+            }
+            MatchSpec::Within { device, iname } => {
+                vec![ref_arg("device", device), str_arg("iname", iname)]
+            }
+        };
+        if let Some(r) = &self.room {
+            out.push(str_arg("room", r));
+        }
+        if let Some(c) = &self.category {
+            out.push(str_arg("category", c));
+        }
+        if let Some(d) = &self.device {
+            out.push(str_arg("device", d));
+        }
+        out
+    }
+
+    /// The port bindings of the declaration.
+    pub fn bindings(&self) -> impl Iterator<Item = &Binding> {
+        self.args.iter().filter_map(|a| match a {
+            ArgItem::Binding(b) => Some(b),
+            _ => None,
+        })
+    }
+
     /// The full match spec as source text: `title: "…", room: "…"`.
     pub fn spec(&self) -> String {
         let mut s = self.match_spec.to_string();
@@ -856,6 +915,10 @@ impl ArithOp {
 pub enum Operand {
     Port(PortRef),
     Value(Value),
+    /// Arithmetic on one side of a comparison (`x.AQ + 1 >= 5`): the
+    /// whole comparison then desugars into one `Formula` block, which
+    /// evaluates the comparison itself. Always an [`Expr::Arith`].
+    Arith(Box<Expr>),
 }
 
 impl fmt::Display for Operand {
@@ -863,7 +926,15 @@ impl fmt::Display for Operand {
         match self {
             Operand::Port(p) => p.fmt(f),
             Operand::Value(v) => v.fmt(f),
+            Operand::Arith(e) => e.fmt(f),
         }
+    }
+}
+
+impl Operand {
+    /// Whether the operand is arithmetic.
+    pub fn is_arith(&self) -> bool {
+        matches!(self, Operand::Arith(_))
     }
 }
 
@@ -883,14 +954,28 @@ impl Expr {
             }
             Expr::Not(x) => x.collect_operands(out),
             Expr::Cmp { lhs, rhs, .. } => {
-                out.push(lhs);
-                out.push(rhs);
+                for o in [lhs, rhs] {
+                    match o {
+                        Operand::Arith(e) => e.collect_operands(out),
+                        leaf => out.push(leaf),
+                    }
+                }
             }
             Expr::Arith { lhs, rhs, .. } => {
                 lhs.collect_operands(out);
                 rhs.collect_operands(out);
             }
             Expr::Atom(o) => out.push(o),
+        }
+    }
+
+    /// Whether a comparison compares arithmetic, or arithmetic stands
+    /// where a gate reads a signal: the node is one `Formula` block then.
+    pub fn is_formula(&self) -> bool {
+        match self {
+            Expr::Arith { .. } => true,
+            Expr::Cmp { lhs, rhs, .. } => lhs.is_arith() || rhs.is_arith(),
+            _ => false,
         }
     }
 
@@ -2793,13 +2878,17 @@ impl Module {
         match item {
             Item::FragmentEnd | Item::Owned(_) | Item::Gap => {}
             Item::Extern(e) => {
-                out.push_str(&format!(
-                    "extern {} = {}({}){}\n",
-                    e.slug,
-                    e.block_type,
-                    e.spec(),
-                    tail(&e.comment)
-                ));
+                let mut args = e.matcher_args();
+                args.extend(e.args.iter().cloned());
+                write_call(
+                    &format!("extern {} = {}", e.slug, e.block_type),
+                    None,
+                    &args,
+                    &e.comment,
+                    &e.close_comment,
+                    depth,
+                    out,
+                );
             }
             Item::Block(b) | Item::Instance(b) => {
                 write_call(

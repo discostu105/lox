@@ -41,6 +41,7 @@ mod defaults;
 mod desugar;
 mod hardware;
 mod lint;
+mod lower;
 mod members;
 mod migrate;
 mod moods;

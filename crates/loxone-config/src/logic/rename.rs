@@ -79,7 +79,7 @@ fn rename_item(item: &mut Item, old: &str, new: &str) {
             if let MatchSpec::Mirrors(target) = &mut e.match_spec {
                 sub(target);
             }
-            sub_comment(&mut e.comment);
+            rename_args(&mut e.args, &mut e.comment, &mut e.close_comment, old, new);
         }
         Item::Block(b) => {
             sub(&mut b.slug);
@@ -363,6 +363,7 @@ fn rename_operand(o: &mut Operand, old: &str, new: &str) {
     match o {
         Operand::Port(p) => sub_ref(&mut p.slug, old, new),
         Operand::Value(v) => rename_value(v, old, new),
+        Operand::Arith(e) => rename_expr(e, old, new),
     }
 }
 

@@ -6,10 +6,10 @@ extern temperatur = TreeAsensor(uuid: "218a0e3b-020e-4e40-ffffed57184a04d2") # p
 extern sonnenschein = TreeSensor(title: "Sonnenschein") # periphery
 extern taste_links_oben = TreeSensor(title: "Taste links oben") # periphery
 extern taste_links_unten = TreeSensor(title: "Taste links unten") # periphery
-extern raffstore_sued_ab = Actor(iname: "Q2") # periphery
-extern raffstore_sued_auf = Actor(iname: "Q1") # periphery
-extern raffstore_west_ab = Actor(iname: "Q4") # periphery
-extern raffstore_west_auf = Actor(iname: "Q3") # periphery
+extern raffstore_sued_ab = Actor(iname: "Q2", In: raffstore_sued.MotorDown) # periphery
+extern raffstore_sued_auf = Actor(iname: "Q1", In: raffstore_sued.MotorUp) # periphery
+extern raffstore_west_ab = Actor(iname: "Q4", In: raffstore_west.MotorDown) # periphery
+extern raffstore_west_auf = Actor(iname: "Q3", In: raffstore_west.MotorUp) # periphery
 
 wind_ueber_40_km_h = Greater(In1: windgeschwindigkeit, In2: 40)
 windalarm = Or(In1: wind_ueber_40_km_h, In2: windwarnung)
@@ -67,8 +67,3 @@ raffstore_west = AutoJalousie(
 	MinTravel: 0,
 	ReturnTime: 0,
 )
-
-raffstore_sued_ab.In <- raffstore_sued.MotorDown
-raffstore_sued_auf.In <- raffstore_sued.MotorUp
-raffstore_west_ab.In <- raffstore_west.MotorDown
-raffstore_west_auf.In <- raffstore_west.MotorUp

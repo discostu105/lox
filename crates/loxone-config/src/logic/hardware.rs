@@ -299,6 +299,8 @@ fn lower_one(
         category: None,
         device: device_serial,
         comment: None,
+        args: Vec::new(),
+        close_comment: None,
     })];
     let mut settings: Vec<(String, Value)> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -434,11 +436,6 @@ k = TreeSensor("K", device: t, iname: "I0")"#)
             err(r#"t = TreeDevice("T", serial: "B0")
 t.title = "X""#)
             .contains("label")
-        );
-        assert!(
-            err(r#"t = TreeDevice("T", serial: "B0")
-t.Installation = "X""#)
-            .contains("argument list")
         );
         assert!(
             err(r#"t = TreeDevice("T", serial: "B0")

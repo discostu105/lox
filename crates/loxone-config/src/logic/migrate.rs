@@ -129,11 +129,13 @@ fn fix_ref(r: &mut PortRef, block_type: &str) -> usize {
 
 fn fix_expr(e: &mut Expr, types: &BTreeMap<String, String>) -> usize {
     let mut n = 0;
-    let mut fix_operand = |o: &mut Operand| {
-        if let Operand::Port(p) = o {
+    let mut fix_operand = |o: &mut Operand| match o {
+        Operand::Port(p) => {
             let t = types.get(&p.slug).cloned().unwrap_or_default();
             n += fix_ref(p, &t);
         }
+        Operand::Arith(x) => n += fix_expr(x, types),
+        Operand::Value(_) => {}
     };
     match e {
         Expr::Or(a, b) | Expr::And(a, b) | Expr::Arith { lhs: a, rhs: b, .. } => {

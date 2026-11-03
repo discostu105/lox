@@ -4,7 +4,11 @@ extern temperatur = TreeAsensor(iname: "AI1") # periphery
 extern fenster_schlafzimmer = DigitalIn(iname: "I1") # periphery
 extern co2 = TreeAsensor(iname: "AI3") # periphery
 extern luftfeuchte = TreeAsensor(iname: "AI2") # periphery
-extern stellantrieb_schlafzimmer = TreeAactor(iname: "AQ1") # periphery
+
+extern stellantrieb_schlafzimmer = TreeAactor( # periphery
+	iname: "AQ1",
+	In: raumregelung_schlafzimmer.Heating,
+)
 
 raumregelung_schlafzimmer = HeatIRoomController2(
 	Mode: 1,
@@ -34,5 +38,3 @@ raumregelung_schlafzimmer = HeatIRoomController2(
 	WindowDelay: 0,
 	ExcessOffset: 0,
 )
-
-stellantrieb_schlafzimmer.In <- raumregelung_schlafzimmer.Heating
