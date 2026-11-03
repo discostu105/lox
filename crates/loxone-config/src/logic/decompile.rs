@@ -62,6 +62,8 @@ use crate::logic::ast::{
     RightKind, RuleDecl, SetKind, Unit, Value, WireDecl, clock_text, duration_value,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::{decompose_canonical, is_combining_mark};
 
 mod exprs;
 
@@ -2273,22 +2275,29 @@ impl SlugTable {
 }
 
 /// Turn a display title into a valid Lox Logic slug (`[a-z][a-z0-9_]*`).
-/// German umlauts transliterate (`ü`→`ue`); everything else non-alphanumeric
-/// collapses to `_`.
+/// German umlauts transliterate (`ü`→`ue`), other accented Latin letters
+/// lose their accent (`ž`→`z`), and everything else collapses to `_`.
+/// Composed and decomposed titles give the same slug.
 pub fn slugify(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
+    for c in name.nfc() {
         match c {
             'ä' | 'Ä' => out.push_str("ae"),
             'ö' | 'Ö' => out.push_str("oe"),
             'ü' | 'Ü' => out.push_str("ue"),
-            'ß' => out.push_str("ss"),
+            'ß' | 'ẞ' => out.push_str("ss"),
             c if c.is_ascii_alphanumeric() => out.push(c.to_ascii_lowercase()),
-            _ => {
-                if !out.ends_with('_') && !out.is_empty() {
-                    out.push('_');
+            // A mark left over after composition belongs to the letter
+            // before it.
+            c if is_combining_mark(c) => {}
+            c => match latin_base(c) {
+                Some(base) => out.push_str(&base),
+                None => {
+                    if !out.ends_with('_') && !out.is_empty() {
+                        out.push('_');
+                    }
                 }
-            }
+            },
         }
     }
     let out = out.trim_matches('_').to_string();
@@ -2297,6 +2306,42 @@ pub fn slugify(name: &str) -> String {
         Some(_) => format!("x{out}"),
         None => "x".to_string(),
     }
+}
+
+/// The lowercase ASCII spelling of a Latin letter with an accent: its
+/// canonical decomposition without the marks (`ž` = `z` + caron), or, for
+/// the letters that have none, the usual spelling (`ł`→`l`, `ø`→`o`).
+/// `None` for anything else, letters of other scripts included.
+fn latin_base(c: char) -> Option<String> {
+    let plain = match c {
+        'æ' | 'Æ' => "ae",
+        'ð' | 'Ð' | 'đ' | 'Đ' => "d",
+        'ø' | 'Ø' => "o",
+        'þ' | 'Þ' => "th",
+        'ħ' | 'Ħ' => "h",
+        'ı' => "i",
+        'ĳ' | 'Ĳ' => "ij",
+        'ĸ' => "k",
+        'ŀ' | 'Ŀ' | 'ł' | 'Ł' => "l",
+        'ŋ' | 'Ŋ' => "ng",
+        'œ' | 'Œ' => "oe",
+        'ŧ' | 'Ŧ' => "t",
+        'ſ' => "s",
+        _ => "",
+    };
+    if !plain.is_empty() {
+        return Some(plain.to_string());
+    }
+    let mut base = String::new();
+    let mut ascii = true;
+    decompose_canonical(c, |d| {
+        if d.is_ascii_alphanumeric() {
+            base.push(d.to_ascii_lowercase());
+        } else if !is_combining_mark(d) {
+            ascii = false;
+        }
+    });
+    (ascii && !base.is_empty()).then_some(base)
 }
 
 #[cfg(test)]
@@ -2310,6 +2355,41 @@ mod tests {
         assert_eq!(slugify("3. OG Licht"), "x3_og_licht");
         assert_eq!(slugify("Größe"), "groesse");
         assert_eq!(slugify("---"), "x");
+    }
+
+    #[test]
+    fn slugify_accented_latin() {
+        assert_eq!(slugify("Ložnice"), "loznice");
+        assert_eq!(slugify("Večerní režim"), "vecerni_rezim");
+        assert_eq!(slugify("Čas"), "cas");
+        assert_eq!(slugify("01.Ložnice"), "x01_loznice");
+        assert_eq!(slugify("Éclairage salon"), "eclairage_salon");
+        assert_eq!(slugify("Ação"), "acao");
+        assert_eq!(slugify("Đèn phòng khách"), "den_phong_khach");
+        assert_eq!(slugify("Łazienka"), "lazienka");
+        assert_eq!(slugify("Kjøkken"), "kjokken");
+        assert_eq!(slugify("Işık"), "isik");
+        assert_eq!(slugify("Œuvre Æsir Þing"), "oeuvre_aesir_thing");
+        assert_eq!(slugify("Temp °C"), "temp_c");
+    }
+
+    #[test]
+    fn slugify_decomposed_matches_composed() {
+        // NFD: `u` + U+0308, `z` + U+030C
+        assert_eq!(slugify("Beschattung Su\u{308}d"), "beschattung_sued");
+        assert_eq!(slugify("GRO\u{308}SSE"), "groesse");
+        assert_eq!(slugify("Loz\u{30c}nice"), "loznice");
+        // A mark with no letter before it is dropped, not a separator.
+        assert_eq!(slugify("a\u{301}\u{301}b"), "ab");
+        assert_eq!(slugify("\u{301}Licht"), "licht");
+    }
+
+    #[test]
+    fn slugify_other_scripts_stay_separators() {
+        assert_eq!(slugify("Свет в спальне"), "x");
+        assert_eq!(slugify("Φως σαλόνι"), "x");
+        assert_eq!(slugify("客厅灯"), "x");
+        assert_eq!(slugify("Licht Свет 2"), "licht_2");
     }
 
     #[test]
