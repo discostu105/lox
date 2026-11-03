@@ -62,6 +62,9 @@ pub enum LintKind {
     /// A `removed` or `moved` statement the lock has nothing left for:
     /// the removal or rename is done, or the slug never existed.
     StaleLifecycle,
+    /// A `<-` or `=` whose sink is a block the module declares: the
+    /// binding belongs in the block's argument list.
+    RemoteBinding,
 }
 
 impl LintKind {
@@ -82,11 +85,12 @@ impl LintKind {
             LintKind::UnusedAllow => "unused-allow",
             LintKind::ImplicitZero => "implicit-zero",
             LintKind::StaleLifecycle => "stale-lifecycle",
+            LintKind::RemoteBinding => "remote-binding",
         }
     }
 
     /// Every kind.
-    pub const ALL: [LintKind; 15] = [
+    pub const ALL: [LintKind; 16] = [
         LintKind::UnusedExtern,
         LintKind::UnusedLet,
         LintKind::UnusedTemplate,
@@ -102,6 +106,7 @@ impl LintKind {
         LintKind::UnusedAllow,
         LintKind::ImplicitZero,
         LintKind::StaleLifecycle,
+        LintKind::RemoteBinding,
     ];
 
     /// The kind with this label (`dead-outputs`).
@@ -610,6 +615,7 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
 
     findings.extend(unused_defaults(module)?);
     findings.extend(fix_unit_suffixes(&mut module.clone()));
+    findings.extend(remote_bindings(module));
 
     let (flat, _) = module.expand()?.desugar()?;
     let mut object_refs: BTreeSet<&str> = BTreeSet::new();
@@ -789,6 +795,59 @@ pub fn lint_source(module: &Module) -> Result<Vec<LintFinding>> {
     }
     findings.extend(lint_default_page(module, &flat));
     Ok(findings)
+}
+
+/// A `<-`, an expression wire or a port `=` whose sink is a block the
+/// module declares (at the top level or in a template body). It
+/// compiles like the argument, so the argument list is where a reader
+/// looks for it.
+fn remote_bindings(module: &Module) -> Vec<LintFinding> {
+    fn scan(items: &[Item], findings: &mut Vec<LintFinding>) {
+        let declared: BTreeMap<&str, &str> = items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Block(b) => Some((b.slug.as_str(), b.block_type.as_str())),
+                _ => None,
+            })
+            .collect();
+        for item in items {
+            let (sink, written, instead) = match item {
+                Item::Wire(w) if declared.contains_key(w.to.slug.as_str()) => (
+                    &w.to,
+                    format!("{} <- {}", w.to, w.from),
+                    format!("{}: {}", w.to.port, w.from),
+                ),
+                Item::ExprWire(w) if declared.contains_key(w.to.slug.as_str()) => (
+                    &w.to,
+                    format!("{} <- {}", w.to, w.expr),
+                    format!("{}: {}", w.to.port, w.expr),
+                ),
+                Item::Set(s) if declared.contains_key(s.target.slug.as_str()) => (
+                    &s.target,
+                    format!("{} = {}", s.target, s.value),
+                    format!("{}: {}", s.target.port, s.value),
+                ),
+                Item::Template(t) => {
+                    scan(&t.body, findings);
+                    continue;
+                }
+                _ => continue,
+            };
+            findings.push(LintFinding {
+                kind: LintKind::RemoteBinding,
+                slug: sink.slug.clone(),
+                detail: format!(
+                    "`{written}` binds a port of a block this module declares. Write `{instead}` \
+                     in `{} = {}(…)`",
+                    sink.slug,
+                    declared[sink.slug.as_str()]
+                ),
+            });
+        }
+    }
+    let mut findings = Vec::new();
+    scan(&module.items, &mut findings);
+    findings
 }
 
 /// A file of a directory module whose blocks come before its first `page`

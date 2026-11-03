@@ -545,16 +545,21 @@ fn pool_showcase_compiles_end_to_end() {
 
 #[test]
 fn sprachtour_compiles_end_to_end() {
-    // The systematic language tour (examples/logic/sprachtour.loxl): every
+    // The systematic language tour (examples/logic/sprachtour/): every
     // construct the narrative showcase does not cover — uuid/category
     // matchers, fan-in, the `Formula:` attribute parameter, template
     // interpolation/override/forwarding, both mirror forms (D32/D33),
     // mirror routing (D34), a second page, and attribute claims on
     // externs (D39).
     let base = LoxoneDoc::parse(&std::fs::read("examples/configs/pool.Loxone").unwrap()).unwrap();
-    let src = std::fs::read_to_string("examples/logic/sprachtour.loxl").unwrap();
-    let module = Module::parse(&src).unwrap();
-    assert_eq!(module.to_text(), src, "example stays canonical");
+    // One file per page; each stays canonical on its own.
+    let module = Module::from_fragments(["pool", "technik"].map(|file| {
+        let src =
+            std::fs::read_to_string(format!("examples/logic/sprachtour/{file}.loxl")).unwrap();
+        let fragment = Module::parse_fragment(&src).unwrap();
+        assert_eq!(fragment.to_text(), src, "{file} stays canonical");
+        fragment
+    }));
 
     let opts = CompileOptions {
         page_title: Some("Pool".into()),
@@ -2161,20 +2166,27 @@ fn mirrors_matcher_resolves_refs_by_their_target() {
     // Declared above the first `page` statement, nothing narrows the two
     // candidates — refused. (The fixture's own `page "Beschattung"`
     // governs everything appended below it, including `mirrors` above.)
-    let ungoverned = Module::parse(&format!(
-        "extern beschatten_ref = InputRef(mirrors: beschatten)\n\n{}",
-        std::fs::read_to_string("examples/logic/beschattung.loxl").unwrap()
-    ))
-    .unwrap();
+    let ungoverned = Module::from_fragments([
+        Module::parse_fragment("extern beschatten_ref = InputRef(mirrors: beschatten)\n").unwrap(),
+        Module::parse_fragment(
+            &std::fs::read_to_string("examples/logic/beschattung.loxl").unwrap(),
+        )
+        .unwrap(),
+    ]);
     let err = compile(&two_pages, &ungoverned, &mut lock0.clone(), &opts())
         .unwrap_err()
         .to_string();
     assert!(err.contains("beschatten_ref"), "{err}");
-    let governed = Module::parse(&format!(
-        "{}\npage \"Werkstatt\"\n\nextern beschatten_ref = InputRef(mirrors: beschatten)\n",
-        std::fs::read_to_string("examples/logic/beschattung.loxl").unwrap()
-    ))
-    .unwrap();
+    let governed = Module::from_fragments([
+        Module::parse_fragment(
+            &std::fs::read_to_string("examples/logic/beschattung.loxl").unwrap(),
+        )
+        .unwrap(),
+        Module::parse_fragment(
+            "page \"Werkstatt\"\n\nextern beschatten_ref = InputRef(mirrors: beschatten)\n",
+        )
+        .unwrap(),
+    ]);
     let mut lock_c = lock0.clone();
     compile(&two_pages, &governed, &mut lock_c, &opts()).unwrap();
     assert_eq!(
@@ -2340,23 +2352,30 @@ fn page_statements_place_and_move_blocks() {
         page.title.clone().unwrap()
     };
 
-    let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
-               vor = Or(In1: wind.Q)\n\n\
-               page \"Regeln\"\n\n\
+    let src = "page \"Regeln\"\n\n\
                danach = Not(In: wind.Q)\n";
-    let module = Module::parse(src).unwrap();
+    let paged = |second: &str| {
+        Module::from_fragments([
+            Module::parse_fragment(
+                "extern wind = VirtualIn(iname: \"VI2\")\n\nvor = Or(In1: wind.Q)\n",
+            )
+            .unwrap(),
+            Module::parse_fragment(second).unwrap(),
+        ])
+    };
+    let module = paged(src);
     let mut lock = Lockfile::new();
     let out = compile(&base_with_page("Regeln"), &module, &mut lock, &opts()).unwrap();
     assert_eq!(page_of(&out, &lock, "vor"), "Beschattung");
     assert_eq!(page_of(&out, &lock, "danach"), "Regeln");
 
     // Moving the statement's title re-pins the governed block in place.
-    let moved = Module::parse(&src.replace("page \"Regeln\"", "page \"Beschattung\"")).unwrap();
+    let moved = paged(&src.replace("page \"Regeln\"", "page \"Beschattung\""));
     let out = compile(&base_with_page("Regeln"), &moved, &mut lock, &opts()).unwrap();
     assert_eq!(page_of(&out, &lock, "danach"), "Beschattung");
 
     // A title no page in the base carries is a compile error.
-    let bad = Module::parse(&src.replace("page \"Regeln\"", "page \"Nirgendwo\"")).unwrap();
+    let bad = paged(&src.replace("page \"Regeln\"", "page \"Nirgendwo\""));
     let e = compile(&base_with_page("Regeln"), &bad, &mut lock.clone(), &opts()).unwrap_err();
     assert!(
         e.to_string()
@@ -2405,15 +2424,25 @@ fn adopt_pages_fragments_merge_to_the_single_module() {
     let stems: Vec<&str> = fragments.iter().map(|(s, _)| s.as_str()).collect();
     assert_eq!(stems, ["_periphery", "beschattung"]);
     // Each fragment opens with its `page` (the periphery has none), so
-    // the merge places every block as the single module does.
+    // the merge places every block as the single module does, whose
+    // one `page` line heads the whole file.
     let merged = Module::from_fragments(fragments.iter().map(|(_, m)| m.clone()));
     let unmarked: Vec<_> = merged
         .items
         .iter()
-        .filter(|i| !matches!(i, loxone_config::logic::Item::FragmentEnd))
+        .filter(|i| {
+            !matches!(
+                i,
+                loxone_config::logic::Item::FragmentEnd | loxone_config::logic::Item::Page(_)
+            )
+        })
         .cloned()
         .collect();
-    assert_eq!(unmarked, single.items);
+    assert!(matches!(
+        single.items[0],
+        loxone_config::logic::Item::Page(_)
+    ));
+    assert_eq!(unmarked, single.items[1..]);
     // Each fragment is parseable in fragment form (a lone fragment may
     // cross-reference sibling slugs, so full parse is not required).
     for (stem, m) in &fragments {
@@ -3249,7 +3278,7 @@ fn expression_misuse_is_reported() {
     fails("jal.AutoShade <- a.Q < b.Q < 5", "comparisons do not chain");
     fails(
         "jal.AutoShade <- (a.Q and b.Q) >= 5",
-        "not parenthesized expressions",
+        "arithmetic or a comparison",
     );
     fails("jal.AutoShade <- (a.Q and b.Q", "missing `)`");
     fails("jal.AutoShade <- a.Q b.Q", "unexpected trailing tokens");
@@ -3289,7 +3318,11 @@ fn expression_misuse_is_reported() {
     .unwrap();
     let flat = m.expand().unwrap();
     let gate = flat.blocks().find(|b| b.slug == "gate").unwrap();
-    assert!(gate.expr_bindings().any(|(p, _)| p == "In2"), "{}", flat.to_text());
+    assert!(
+        gate.expr_bindings().any(|(p, _)| p == "In2"),
+        "{}",
+        flat.to_text()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3641,13 +3674,39 @@ fn arithmetic_misuse_is_reported() {
         );
     };
 
-    // Arithmetic stands alone (v1) — under gates and comparisons it is
-    // deferred, with parse-time errors.
-    fails("jal.AutoShade <- a.Q and b.Q + 1", "arithmetic under `and`");
-    fails("jal.AutoShade <- b.Q + 1 or a.Q", "arithmetic under `or`");
-    fails("jal.AutoShade <- not a.Q + 1", "arithmetic under `not`");
-    fails("jal.AutoShade <- a.Q + 1 >= 5", "arithmetic under `>=`");
-    fails("jal.AutoShade <- a.Q >= b.Q + 1", "arithmetic under `>=`");
+    // Arithmetic under a comparison is one Formula block (the formula
+    // compares); under a gate the Formula's AQ feeds the gate.
+    let blocks = |line: &str| -> Vec<(String, String)> {
+        let (flat, _) = Module::parse(&format!("{head}{line}\n"))
+            .unwrap()
+            .expand()
+            .unwrap()
+            .desugar()
+            .unwrap();
+        flat.blocks()
+            .map(|b| {
+                let formula = b
+                    .bindings()
+                    .find(|x| x.port == "Formula")
+                    .map(|x| x.kind.to_string())
+                    .unwrap_or_default();
+                (b.block_type.clone(), formula)
+            })
+            .collect()
+    };
+    assert_eq!(
+        blocks("jal.AutoShade <- a.AQ + 1 >= 5"),
+        [("Formula".to_string(), "\"I1+1>=5\"".to_string())]
+    );
+    assert_eq!(
+        blocks("jal.AutoShade <- a.AQ >= b.AQ * 2"),
+        [("Formula".to_string(), "\"I1>=I2*2\"".to_string())]
+    );
+    let gated = blocks("jal.AutoShade <- a.Q and b.AQ + 1");
+    assert_eq!(gated.len(), 2, "{gated:?}");
+    assert!(gated.contains(&("Formula".to_string(), "\"I1+1\"".to_string())));
+    assert!(gated.iter().any(|(t, _)| t == "And"));
+    assert_eq!(blocks("jal.AutoShade <- not a.AQ + 1").len(), 2);
     fails(
         "jal.AutoShade <- (a.Q and b.Q) + 1",
         "cannot take part in arithmetic",

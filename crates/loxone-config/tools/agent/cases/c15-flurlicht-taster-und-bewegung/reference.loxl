@@ -1,9 +1,9 @@
+page "Logik"
+
 extern taster = VirtualIn(title: "Taster Flur")
 extern bewegung = VirtualIn(title: "Bewegung Flur")
 extern helligkeit = VirtualIn(title: "Helligkeit außen")
 extern licht = VirtualOutCmd(title: "Licht Flur")
-
-page "Logik"
 
 schalter = PushButton("Flurlicht", Toggle: taster.Q)
 dunkel = Less(In1: helligkeit.Q, In2: 50)

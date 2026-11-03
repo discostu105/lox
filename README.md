@@ -261,7 +261,7 @@ Write Miniserver logic as text, review it in a pull request, and compile it into
 
 ```text
 temp_hoch = GreaterEqual("Temp über 28", In1: aussentemp, In2: 28)
-jal_sued.AutoShade <- temp_hoch and sonne
+extern jal_sued = AutoJalousie(title: "Beschattung Süd", AutoShade: temp_hoch and sonne)
 ```
 
 - `lox logic compile` writes the same XML Loxone Config would have written, and pins every UUID it creates in a

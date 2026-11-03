@@ -31,10 +31,29 @@ const BASE: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n\
 \t</C>\r\n\
 </ControlList>";
 
+/// Two files of one module: `a` on the page "Küche", `b` on a page the
+/// source creates. The second file's `page` line is where the tests
+/// below vary the title and the arguments.
 const SRC: &str = "page \"K\u{fc}che\"\n\n\
                    a = Not()\n\n\
                    page \"K\u{fc}che Logik\" (room: \"K\u{fc}che\")\n\n\
                    b = Not(In: a.Q)\n";
+
+/// [`SRC`] (or a variation of it) as the module of its files: the text
+/// splits before every `page` line but the first.
+fn parse_paged(src: &str) -> Module {
+    let mut files: Vec<String> = Vec::new();
+    for line in src.lines() {
+        if line.starts_with("page \"") || files.is_empty() {
+            files.push(String::new());
+        }
+        let file = files.last_mut().unwrap();
+        file.push_str(line);
+        file.push('\n');
+    }
+    assert!(files.len() >= 2, "two page lines");
+    Module::from_fragments(files.iter().map(|f| Module::parse_fragment(f).unwrap()))
+}
 
 fn base() -> LoxoneDoc {
     LoxoneDoc::parse(BASE.as_bytes()).unwrap()
@@ -79,7 +98,7 @@ fn text(doc: &LoxoneDoc) -> String {
 
 #[test]
 fn a_missing_page_with_a_room_is_created_sorted_in() {
-    let module = Module::parse(SRC).unwrap();
+    let module = parse_paged(SRC);
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
 
@@ -146,13 +165,7 @@ fn a_created_page_follows_its_predecessor_in_title_order() {
         ),
     ] {
         let src = SRC.replace("K\u{fc}che Logik", title);
-        let out = compile(
-            &unsorted,
-            &Module::parse(&src).unwrap(),
-            &mut Lockfile::new(),
-            &opts(),
-        )
-        .unwrap();
+        let out = compile(&unsorted, &parse_paged(&src), &mut Lockfile::new(), &opts()).unwrap();
         let titles: Vec<String> = pages(&out).into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, want, "{title}");
     }
@@ -160,7 +173,7 @@ fn a_created_page_follows_its_predecessor_in_title_order() {
 
 #[test]
 fn a_page_loxone_config_has_is_used_not_created() {
-    let module = Module::parse(&SRC.replace("K\u{fc}che Logik", "Zentral")).unwrap();
+    let module = parse_paged(&SRC.replace("K\u{fc}che Logik", "Zentral"));
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
     assert_eq!(pages(&out), pages(&base()));
@@ -170,21 +183,15 @@ fn a_page_loxone_config_has_is_used_not_created() {
 
 #[test]
 fn without_a_room_a_missing_page_stays_an_error() {
-    let module = Module::parse(&SRC.replace(" (room: \"K\u{fc}che\")", "")).unwrap();
+    let module = parse_paged(&SRC.replace(" (room: \"K\u{fc}che\")", ""));
     let e = compile(&base(), &module, &mut Lockfile::new(), &opts()).unwrap_err();
     assert!(e.to_string().contains("(room: \"…\")"), "{e}");
 }
 
 #[test]
 fn room_and_category_are_checked() {
-    let compile_src = |src: String| {
-        compile(
-            &base(),
-            &Module::parse(&src).unwrap(),
-            &mut Lockfile::new(),
-            &opts(),
-        )
-    };
+    let compile_src =
+        |src: String| compile(&base(), &parse_paged(&src), &mut Lockfile::new(), &opts());
     let e = compile_src(SRC.replace("room: \"K\u{fc}che\"", "room: \"Keller\"")).unwrap_err();
     assert!(e.to_string().contains("no room titled \"Keller\""), "{e}");
     let e =
@@ -205,7 +212,7 @@ fn room_and_category_are_checked() {
 
 #[test]
 fn a_created_page_renamed_in_loxone_config_is_refused() {
-    let module = Module::parse(SRC).unwrap();
+    let module = parse_paged(SRC);
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
     let renamed = text(&out).replace("Title=\"K\u{fc}che Logik\"", "Title=\"Logik\"");
@@ -218,11 +225,10 @@ fn a_created_page_renamed_in_loxone_config_is_refused() {
     );
 
     // Following the rename in source releases the page to Loxone Config.
-    let followed = Module::parse(&SRC.replace(
+    let followed = parse_paged(&SRC.replace(
         "page \"K\u{fc}che Logik\" (room: \"K\u{fc}che\")",
         "page \"Logik\"",
-    ))
-    .unwrap();
+    ));
     let out = compile(&renamed, &followed, &mut lock, &opts()).unwrap();
     assert!(lock.pages.is_empty());
     assert_eq!(page_of(&out, &lock, "b"), "Logik");
@@ -313,7 +319,7 @@ fn a_fragment_without_a_page_in_a_paged_module_is_linted() {
     // A module without any `page` uses the default page throughout.
     let module = fragments(&["a = Not()\n", "b = Not(In: a.Q)\n"]);
     assert!(lint(&module).is_empty());
-    // A single file may open with default-page blocks.
-    let module = Module::parse("a = Not()\n\npage \"Zentral\"\n\nb = Not(In: a.Q)\n").unwrap();
-    assert!(lint(&module).is_empty());
+    // A `page` line below a statement is a parse error, not a lint.
+    let e = Module::parse("a = Not()\n\npage \"Zentral\"\n\nb = Not(In: a.Q)\n").unwrap_err();
+    assert!(e.to_string().contains("file's header"), "{e}");
 }

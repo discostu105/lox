@@ -10,17 +10,16 @@ use loxone_config::{Lockfile, LoxoneDoc};
 
 const EXAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
 
-fn run(source: &str) -> Vec<(String, bool, Vec<String>, Option<String>)> {
-    results(source, false)
+fn run(module: &Module) -> Vec<(String, bool, Vec<String>, Option<String>)> {
+    results(module, false)
         .into_iter()
         .map(|r| (r.name, r.pass, r.failures, r.error))
         .collect()
 }
 
-fn results(source: &str, trace: bool) -> Vec<TestResult> {
+fn results(module: &Module, trace: bool) -> Vec<TestResult> {
     let base_bytes = std::fs::read(format!("{EXAMPLES}/configs/pool.Loxone")).unwrap();
     let base = LoxoneDoc::parse(&base_bytes).unwrap();
-    let module = Module::parse(source).unwrap();
     let opts = CompileOptions {
         machine: parse_serial("504F94112233").unwrap(),
         mint_time_unix: 1_767_225_600,
@@ -30,10 +29,10 @@ fn results(source: &str, trace: bool) -> Vec<TestResult> {
         relayout: Vec::new(),
     };
     let mut lock = Lockfile::new();
-    let compiled = compile(&base, &module, &mut lock, &opts).unwrap();
+    let compiled = compile(&base, module, &mut lock, &opts).unwrap();
     let (flat, _) = module.expand().unwrap().desugar().unwrap();
     let mut plan = plan_tests(&flat, &lock, &compiled, None).unwrap();
-    plan.respell(&module);
+    plan.respell(module);
     if trace {
         trace_tests(&plan, &compiled, &lock)
     } else {
@@ -41,14 +40,45 @@ fn results(source: &str, trace: bool) -> Vec<TestResult> {
     }
 }
 
-fn example(name: &str) -> String {
-    std::fs::read_to_string(format!("{EXAMPLES}/logic/{name}.loxl")).unwrap()
+/// The source files of an example module: one file, or the files of
+/// its directory (one per page) in name order.
+fn example(name: &str) -> Vec<String> {
+    let dir = std::path::Path::new(EXAMPLES).join("logic").join(name);
+    if dir.is_dir() {
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "loxl"))
+            .collect();
+        files.sort();
+        return files
+            .iter()
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect();
+    }
+    vec![std::fs::read_to_string(format!("{EXAMPLES}/logic/{name}.loxl")).unwrap()]
+}
+
+fn module(files: &[String]) -> Module {
+    Module::from_fragments(files.iter().map(|f| Module::parse_fragment(f).unwrap()))
+}
+
+/// `files` with `from` replaced by `to` in the one file that has it.
+fn edited(files: &[String], from: &str, to: &str) -> Module {
+    let hits = files.iter().filter(|f| f.contains(from)).count();
+    assert_eq!(hits, 1, "the example changed");
+    module(
+        &files
+            .iter()
+            .map(|f| f.replacen(from, to, 1))
+            .collect::<Vec<_>>(),
+    )
 }
 
 #[test]
 fn example_tests_pass() {
     for name in ["pool", "sprachtour"] {
-        let results = run(&example(name));
+        let results = run(&module(&example(name)));
         assert_eq!(results.len(), 2, "{name}");
         for (test, pass, failures, error) in results {
             assert!(pass, "{name}: \"{test}\": {failures:?} {error:?}");
@@ -58,10 +88,8 @@ fn example_tests_pass() {
 
 #[test]
 fn a_wrong_expectation_fails_with_its_line() {
-    let source = example("sprachtour");
-    let marker = "expect hitze.Q == 1";
-    assert!(source.contains(marker), "the example changed");
-    let broken = source.replacen(marker, "expect hitze.Q == 0", 1);
+    let files = example("sprachtour");
+    let broken = edited(&files, "expect hitze.Q == 1", "expect hitze.Q == 0");
     let results = run(&broken);
     let (_, pass, failures, error) = &results[0];
     assert!(!pass && error.is_none());
@@ -73,10 +101,9 @@ fn a_wrong_expectation_fails_with_its_line() {
 
 #[test]
 fn a_trace_lists_sets_changes_and_outcomes_by_slug() {
-    let source = example("sprachtour");
-    let marker = "expect hitze.Q == 1";
-    let broken = source.replacen(marker, "expect hitze.Q == 0", 1);
-    assert!(results(&source, false)[0].trace.is_empty());
+    let files = example("sprachtour");
+    let broken = edited(&files, "expect hitze.Q == 1", "expect hitze.Q == 0");
+    assert!(results(&module(&files), false)[0].trace.is_empty());
     let r = &results(&broken, true)[0];
     let trace = r.trace.join("\n");
     assert!(trace.contains(": set "), "{trace}");

@@ -21,6 +21,9 @@ enum Tok {
     RParen,
     LBrace,
     RBrace,
+    /// `[` `]` — a list of sources on one input (`In1: [a, b]`).
+    LBracket,
+    RBracket,
     /// Comparison operators (expression sugar).
     Cmp(CmpOp),
     /// `~=` — approximately-equal, valid only in a test `expect`.
@@ -124,6 +127,14 @@ fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
             '}' => {
                 chars.next();
                 toks.push(Tok::RBrace);
+            }
+            '[' => {
+                chars.next();
+                toks.push(Tok::LBracket);
+            }
+            ']' => {
+                chars.next();
+                toks.push(Tok::RBracket);
             }
             '<' => {
                 chars.next();
@@ -470,11 +481,37 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut parser = Parser::default();
     let mut errors = crate::error::Errors::default();
     let mut skip = Skip::None;
-    for (i, raw) in src.lines().enumerate() {
+    // Lexed lines, `None` where lexing failed (the error is recorded).
+    let lines: Vec<Option<(Vec<Tok>, Option<String>)>> = src
+        .lines()
+        .enumerate()
+        .map(|(i, raw)| errors.check(lex(raw, i + 1)))
+        .collect();
+    let mut i = 0;
+    while i < lines.len() {
         let lineno = i + 1;
-        let Some((toks, comment)) = errors.check(lex(raw, lineno)) else {
+        let Some((mut toks, mut comment)) = lines[i].clone() else {
+            i += 1;
             continue;
         };
+        // A wrapped expression: the lines a statement continues on.
+        if !parser.in_body() {
+            while let Some(Some((next, next_comment))) = lines.get(i + 1)
+                && continues(&toks, next)
+            {
+                if comment.is_some() {
+                    errors.push(Error::Parse {
+                        line: lineno,
+                        msg: "a comment on a wrapped expression goes on its last line".into(),
+                    });
+                    break;
+                }
+                toks.extend(next.iter().cloned());
+                comment = next_comment.clone();
+                i += 1;
+            }
+        }
+        i += 1;
         if skip.line(&toks) {
             continue;
         }
@@ -498,6 +535,50 @@ pub fn parse(src: &str) -> Result<Module> {
     let module = errors.check(parser.finish(src.lines().count()));
     errors.finish()?;
     Ok(module.expect("no errors"))
+}
+
+/// Whether `next` continues the statement on `line`: the line ends with
+/// an operator or `<-`, or opens a parenthesized expression (`= (`,
+/// `<- (`, `: (` — not a call, whose `(` follows a name) that is still
+/// open, or the next line starts with `and`/`or` and goes on.
+fn continues(line: &[Tok], next: &[Tok]) -> bool {
+    if line.is_empty() || next.is_empty() {
+        return false;
+    }
+    let is_kw = |t: &Tok, kw: &str| matches!(t, Tok::Ident(w) if w == kw);
+    if (is_kw(&next[0], "and") || is_kw(&next[0], "or"))
+        && next.len() >= 2
+        && !matches!(next[1], Tok::Eq | Tok::Dot | Tok::LArrow)
+    {
+        return true;
+    }
+    let last = line.last().expect("non-empty");
+    match last {
+        Tok::Plus | Tok::Minus | Tok::Star | Tok::Slash | Tok::Cmp(_) | Tok::LArrow => true,
+        Tok::Ident(w) if matches!(w.as_str(), "and" | "or" | "not") => true,
+        _ => expr_paren_open(line),
+    }
+}
+
+/// Whether `line` has an unclosed `(` that opens an expression group
+/// rather than an argument list: the `(` follows no name.
+fn expr_paren_open(line: &[Tok]) -> bool {
+    let mut depth = 0i64;
+    let mut expr_open = false;
+    for (i, t) in line.iter().enumerate() {
+        match t {
+            Tok::LParen => {
+                depth += 1;
+                if depth == 1 {
+                    expr_open =
+                        !matches!(line.get(i.wrapping_sub(1)), Some(Tok::Ident(_)) | None) && i > 0;
+                }
+            }
+            Tok::RParen => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0 && expr_open
 }
 
 /// Lines to skip after a statement failed, so its remaining lines are
@@ -1055,7 +1136,14 @@ impl Parser {
                     .push(Item::Let(parse_let(toks, comment, lineno)?));
             }
             Tok::Ident(kw) if kw == "extern" => {
-                let [_, Tok::Ident(slug), Tok::Eq, Tok::Ident(ty), Tok::LParen, rest @ ..] = toks
+                let [
+                    _,
+                    Tok::Ident(slug),
+                    Tok::Eq,
+                    Tok::Ident(ty),
+                    Tok::LParen,
+                    rest @ ..,
+                ] = toks
                 else {
                     return Err(err(
                         "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
@@ -1106,6 +1194,24 @@ impl Parser {
                 }));
             }
             Tok::Ident(kw) if kw == "page" => {
+                // The file's header: once, before every other statement.
+                if let Some(Item::Page(p)) = self.items.iter().find(|i| matches!(i, Item::Page(_)))
+                {
+                    return Err(err(format!(
+                        "a second `page` in one file. A file belongs to one page: put the \
+                         blocks of page {} in a file of their own",
+                        Value::Str(p.title.clone())
+                    )));
+                }
+                if self
+                    .items
+                    .iter()
+                    .any(|i| !matches!(i, Item::Comment(_) | Item::Gap))
+                {
+                    return Err(err(
+                        "`page` is the file's header. Write it before the first statement".into(),
+                    ));
+                }
                 self.items
                     .push(Item::Page(parse_page(toks, comment, lineno)?));
             }
@@ -2649,34 +2755,80 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                 let start = i + 2;
                 let mut end = start;
                 let mut depth = 0usize;
+                let mut bracket = false;
                 while let Some(t) = toks.get(end) {
                     match t {
                         Tok::LParen => depth += 1,
                         Tok::RParen if depth == 0 => break,
                         Tok::RParen => depth -= 1,
-                        Tok::Comma if depth == 0 => break,
+                        Tok::LBracket if end == start => bracket = true,
+                        Tok::LBracket => {
+                            return Err(err(format!(
+                                "`[` inside the value of `{port}:`. A list is the whole value: \
+                                 `{port}: [a, b]`"
+                            )));
+                        }
+                        Tok::RBracket if bracket => {
+                            end += 1;
+                            break;
+                        }
+                        Tok::RBracket => return Err(err("`]` without `[`".into())),
+                        Tok::Comma if depth == 0 && !bracket => break,
                         _ => {}
                     }
                     end += 1;
                 }
                 let value = &toks[start..end];
-                let kind = match calendar_date(&call.block_type, port, value, lineno)? {
-                    Some(date) => BindingKind::Param(date),
-                    None => binding_kind(port, value, lineno)?,
-                };
-                if let BindingKind::Param(Value::Str(text)) = &kind
-                    && (text == "true" || text == "false")
-                    && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
-                {
-                    return Err(err(bool_hint(port, text)));
+                if bracket {
+                    // `In1: [a, b]` — several sources on one input,
+                    // one binding each.
+                    let Some(Tok::RBracket) = value.last() else {
+                        return Err(err(format!("missing `]` in the list of `{port}:`")));
+                    };
+                    let inner = &value[1..value.len() - 1];
+                    if inner.is_empty() {
+                        return Err(err(format!(
+                            "`{port}: []` names no source. A list holds the sources of one \
+                             input: `{port}: [a, b]`"
+                        )));
+                    }
+                    for element in split_top_level(inner) {
+                        let kind = binding_kind(port, element, lineno)?;
+                        if let BindingKind::Param(v) = &kind
+                            && !matches!(v, Value::Ref(_))
+                        {
+                            return Err(err(format!(
+                                "`{v}` in the list of `{port}:` is a value. A list holds sources: \
+                                 block names, `<slug>.<Port>` or expressions"
+                            )));
+                        }
+                        call.args.push(ArgItem::Binding(Binding {
+                            port: port.clone(),
+                            kind,
+                            comment: None,
+                        }));
+                    }
+                    pushed_binding = true;
+                    i = end;
+                } else {
+                    let kind = match calendar_date(&call.block_type, port, value, lineno)? {
+                        Some(date) => BindingKind::Param(date),
+                        None => binding_kind(port, value, lineno)?,
+                    };
+                    if let BindingKind::Param(Value::Str(text)) = &kind
+                        && (text == "true" || text == "false")
+                        && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
+                    {
+                        return Err(err(bool_hint(port, text)));
+                    }
+                    call.args.push(ArgItem::Binding(Binding {
+                        port: port.clone(),
+                        kind,
+                        comment: None,
+                    }));
+                    pushed_binding = true;
+                    i = end;
                 }
-                call.args.push(ArgItem::Binding(Binding {
-                    port: port.clone(),
-                    kind,
-                    comment: None,
-                }));
-                pushed_binding = true;
-                i = end;
             }
             Some(_) => {
                 return Err(err(
@@ -2691,6 +2843,27 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
             Some(_) => return Err(err("expected `,` between arguments".into())),
         }
     }
+}
+
+/// The comma-separated elements of a token run, commas inside
+/// parentheses kept.
+fn split_top_level(toks: &[Tok]) -> Vec<&[Tok]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i64;
+    for (i, t) in toks.iter().enumerate() {
+        match t {
+            Tok::LParen => depth += 1,
+            Tok::RParen => depth -= 1,
+            Tok::Comma if depth == 0 => {
+                out.push(&toks[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&toks[start..]);
+    out
 }
 
 /// Classify one binding's value tokens: a literal or constant is a
@@ -2989,7 +3162,7 @@ impl ExprParser<'_> {
     fn ensure_arith(&self, e: &Expr) -> Result<()> {
         if !matches!(e, Expr::Atom(_) | Expr::Arith { .. }) {
             return Err(self.err(
-                "a boolean group cannot take part in arithmetic, since gates and comparisons produce on/off, not numbers"
+                "a boolean group cannot take part in arithmetic or a comparison, since gates and comparisons produce on/off, not numbers"
                     .into(),
             ));
         }
@@ -3586,11 +3759,10 @@ sonne.Qm = 30 # override
 
     #[test]
     fn page_statements_parse_and_roundtrip() {
-        let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
+        let src = "# Süd\n\n\
                    page \"Beschattung\" # Süd\n\n\
-                   gate = Not(I: wind.Q)\n\n\
-                   page \"Regeln\"\n\n\
-                   halt = Or(In1: gate.Q)\n";
+                   extern wind = VirtualIn(iname: \"VI2\")\n\n\
+                   gate = Not(In: wind.Q)\n";
         let m = Module::parse(src).unwrap();
         assert_eq!(m.to_text(), src);
         let pages: Vec<_> = m
@@ -3601,7 +3773,13 @@ sonne.Qm = 30 # override
                 _ => None,
             })
             .collect();
-        assert_eq!(pages, ["Beschattung", "Regeln"]);
+        assert_eq!(pages, ["Beschattung"]);
+
+        // The file's header: once, before the first statement.
+        let e = Module::parse("gate = Not()\npage \"Regeln\"\n").unwrap_err();
+        assert!(e.to_string().contains("file's header"), "{e}");
+        let e = Module::parse("page \"A\"\n\npage \"B\"\n").unwrap_err();
+        assert!(e.to_string().contains("second `page`"), "{e}");
 
         // The title is a quoted string — a bare identifier is guided.
         let e = Module::parse("page Regeln\n").unwrap_err();

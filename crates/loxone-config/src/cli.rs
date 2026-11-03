@@ -1816,7 +1816,24 @@ fn cmd_decompile(args: &[&str]) -> Result<ExitCode, AnyError> {
         report
     } else {
         let (module, report) = decompile(&doc, &opts)?;
-        print!("{}", module.to_text());
+        if report.pages > 1 {
+            // A file holds one page: print the per-page files, each
+            // under the name `--out-dir` would give it.
+            let (pages, _) = decompile_pages(&doc, &opts)?;
+            for (i, p) in pages.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                println!("# ---- {}.loxl", p.slug);
+                print!("{}", p.module.to_text());
+            }
+            eprintln!(
+                "# {} pages, one file each: `--out-dir <dir>` writes them",
+                pages.len()
+            );
+        } else {
+            print!("{}", module.to_text());
+        }
         report
     };
     eprintln!(
@@ -1919,6 +1936,14 @@ fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
     } else {
         let out_module = out_module.as_ref().expect("checked above");
         let (module, lock, report) = adopt(&doc)?;
+        if report.pages > 1 {
+            return Err(format!(
+                "{path} has blocks on {} pages, and a file holds one page. Write one file per \
+                 page with `--out-dir <dir>`",
+                report.pages
+            )
+            .into());
+        }
         std::fs::write(out_module, module.to_text())?;
         (lock, report)
     };

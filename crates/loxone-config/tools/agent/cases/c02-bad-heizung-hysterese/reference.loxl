@@ -1,7 +1,7 @@
+page "Logik"
+
 extern raumtemp = VirtualIn(title: "Raumtemperatur Bad")
 extern heizung = VirtualOutCmd(title: "Heizung Bad")
-
-page "Logik"
 
 kalt = Less(In1: raumtemp.Q, In2: 20)
 warm = GreaterEqual(In1: raumtemp.Q, In2: 22)

@@ -6,8 +6,7 @@ extern heizungsmodus = Radio(title: "Heizungsmodus")
 
 extern anwesenheitsmodus_heizung = Radio(
 	title: "Anwesenheitsmodus Heizung",
-	Reset: o17795_2,
-	Reset: o17795_4,
+	Reset: [o17795_2, o17795_4],
 )
 
 extern bad_temperatur_2 = InputRef(mirrors: bad_temperatur)

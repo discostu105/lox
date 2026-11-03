@@ -26,7 +26,9 @@ allow      = "#" "lint:" "allow" kind { [ "," ] kind } [ any-text ] ;
 let        = "let" slug "=" ( number [ unit ] | string | bool | clock
              | ref "." port ) [ comment ] ;       (* a port: an alias *)
 extern     = "extern" slug "=" type "(" matcher
-             { "," constraint ":" string } ")" [ comment ] ;
+             { "," constraint ":" string } { "," arg } [ ")" ] [ comment ] ;
+                                    (* port bindings like a block's; the
+                                       list may span lines *)
 matcher    = ( "uuid" | "iname" | "title" ) ":" string
            | "mirrors" ":" ref ;
 constraint = "room" | "category" ;  (* not with "uuid"/"mirrors"; each at most once *)
@@ -42,8 +44,11 @@ arg        = string                                (* label; first argument only
            | port ":" binding ;
 binding    = value                                 (* Def= parameter *)
            | source                                (* wire from that source *)
-           | expr ;                                (* expression sugar:
+           | expr                                  (* expression sugar:
                                                       desugars into gate blocks *)
+           | "[" ( source | expr ) { "," ( source | expr ) } "]" ;
+                                                   (* fan-in: several sources
+                                                      on one input *)
 source     = ref "." port                          (* a port *)
            | ref ;                                 (* a block, extern or
                                                       alias: its default output *)
@@ -52,9 +57,9 @@ signal     = slug "=" expr [ comment ] ;            (* named signal: not a
                                                       bare operand; the top
                                                       block is `slug` *)
 wire       = slug "." port "<-" ( source | expr ) [ comment ] ;
-                                    (* extern target; an expression RHS
+                                    (* any sink; an expression RHS
                                        desugars into gate blocks *)
-set        = slug "." port "=" value [ comment ] ;            (* extern target *)
+set        = slug "." port "=" value [ comment ] ;            (* any sink *)
 attr       = slug "." attr-name "=" ( string | number | const-ref ) [ comment ] ;
                                     (* extern target, top-level only; or
                                        `.title` on a named signal *)
@@ -66,17 +71,19 @@ expr       = and-expr { "or" and-expr } ;
 and-expr   = unary { "and" unary } ;
 unary      = "not" unary | primary ;
 primary    = comparison | arith | "(" expr ")" ;
-comparison = operand cmp-op operand ;              (* no chaining *)
+comparison = ( operand | arith ) cmp-op ( operand | arith ) ;  (* no chaining *)
 cmp-op     = ">=" | ">" | "<=" | "<" | "==" | "!=" ;
-arith      = term { ("+" | "-") term } ;           (* standalone only:
-                                                      a whole RHS or binding *)
+arith      = term { ("+" | "-") term } ;           (* a whole RHS or binding,
+                                                      a side of a comparison,
+                                                      or a gate's operand *)
 term       = factor { ("*" | "/") factor } ;
 factor     = operand | "(" arith ")" ;
 operand    = source | number [ unit ] | bool | const-ref ;
 removed    = "removed" ref [ comment ] ;
 moved      = "moved" ref "->" ref [ comment ] ;
 page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
-                                                  (* placement, creation *)
+                                                  (* the file's header: once,
+                                                     before every other statement *)
 page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
 template   = "template" slug "(" [ params ] ")" [ "->" slug ] [ comment ]
@@ -220,6 +227,11 @@ Notes:
   argument items.
 - An argument list may close on the declaration line (a single-line call)
   or span lines; nothing may follow the closing `)` except a comment.
+- An expression may **wrap**: a statement continues on the next line when the line ends with an
+  operator or `<-`, when the next line starts with `and` or `or`, or while a parenthesis that opened
+  an expression group (`= (`, `<- (`, `In1: (`) is still open. A comment on a wrapped expression goes
+  on its last line. The formatter breaks a top-level `and`/`or` chain that runs past 100 columns
+  before each operator, one tab deeper than the statement.
 - Whitespace is insignificant except as a token separator. Indentation is
   conventional (the formatter uses one tab inside argument lists).
 - A dotted identifier (`slug.Port`) is a **port reference**. With three parts
@@ -331,7 +343,25 @@ extern status_alarm_ref = InputRef(mirrors: status_alarm)
 
 Declares a slug for an existing object in the base config. The compiler
 never creates, deletes, or moves externs; it only wires to their ports
-(`<-`) and assigns their parameters (`=`).
+and assigns their parameters.
+
+**Port bindings.** After the matcher, an extern takes port bindings like a block, with the same
+meaning: a source wires the port, a value sets its parameter, an expression desugars into blocks and
+wires its result in. Matcher keys are lowercase, ports PascalCase, so the two never collide.
+
+```text
+extern jal_sued = AutoJalousie(
+	title: "Beschattung Süd",
+	AutoShade: beschatten,
+	Safety: wind_alarm,
+	TargetPos: 70,
+)
+```
+
+The declaration is where a reader looks for what feeds an object, so this is the preferred spelling.
+The compile tracks the wires and the parameter's original value in the lockfile exactly as the
+statement forms [`<-`](#---wire-onto-a-port) and [`=`](#-on-a-port--write-a-parameter) do, which
+remain for a binding written in another file than the declaration.
 
 Match semantics: the object must have the declared type and match the spec. Exactly one object may
 match. Zero is a `NoMatch` error; several is an `AmbiguousMatch` error that lists the candidates.
@@ -574,8 +604,10 @@ hue = Code16("Philipps Hue Steuerung", Code: file("hue.c"), In1: rgb.AQ)
 
 Rules:
 
-- At most one parameter binding per port. Several wire bindings on one port are allowed when the
-  sources differ (fan-in).
+- At most one parameter binding per port. Several sources on one input are a **list**:
+  `In1: [heizbedarf, weit_offen]`, each a source or an expression. Loxone links them the way the
+  block links its inputs (an `Or` ORs them, an `And` ANDs them; the simulator table says which). A
+  repeated key (`In1: a, In1: b`) means the same and `fmt` writes the list.
 - A port takes a value or wires, never both: a wired input ignores its value, so
   `In1: 2, In1: x.AQ` is an error.
 - Loxone Config keeps a constant under a wire, and it comes back when the wire is removed. Source does
@@ -840,34 +872,33 @@ mode is gone from the config (a deleted user mode) is adopted without
 number until `switches:` names a mode. Its `I` and `Q`
 are never wired in the corpus; the mode's `Q` is the output to use.
 
-### `<-` — wire onto an extern port
+### `<-` — wire onto a port
 
 ```text
 jal_sued.AutoShade <- beschatten.Q
 jal_sued.Safety <- wind_alarm.Q
 ```
 
-Wires a source port onto an extern port. The source must be an output, or a bare name standing for
-its default output (`jal_sued.AutoShade <- beschatten`); the
-extern port is open-world — it must merely exist in the base config. These
-wires are recorded in the lockfile so removing the statement removes the
-wire again without touching GUI-drawn wires.
+Wires a source port onto a port of any object: the statement form of the binding `AutoShade:
+beschatten.Q` in the sink's declaration, with the same meaning. The source must be an output, or a
+bare name standing for its default output (`jal_sued.AutoShade <- beschatten`). On an extern the port
+is open-world (it must merely exist in the base config), and the wire is recorded in the lockfile so
+removing the statement removes the wire again without touching GUI-drawn wires. On a block or
+instance the module declares, the statement is folded into that block's argument list before the
+compile, so it compiles exactly like the argument; `loxl lint` reports it as `remote-binding`, since
+the argument list is where a reader looks. The form exists for a binding written in another file
+than the declaration.
 
-`<-` is for **extern targets only**: a wire into a managed block is
-written in that block's argument list — one canonical spelling per fact —
-so `<-` on a managed slug is a validation error pointing at the argument
-list.
-
-### `=` on a port — write a parameter on an extern port
+### `=` on a port — write a parameter
 
 ```text
 jal_sued.TargetPos = 70
 ```
 
-Rewrites the extern port's `Def=` (a 0 removes it); the original value is recorded in the
-lockfile and **restored** when the statement disappears from source.
-
-Like `<-`, this is for **extern targets only**. A managed block's
+Rewrites the port's `Def=` (a 0 removes it): the statement form of the binding `TargetPos: 70`. On
+an extern the original value is recorded in the lockfile and **restored** when the statement
+disappears from source. On a declared block it is folded into the argument list like `<-`, with the
+same lint. A managed block's
 parameters belong in its argument list — assigning a managed port is a
 validation error pointing there. Assigning a port reference
 (`x.Port = y.Q`) is a parse error suggesting `<-`.
@@ -1024,7 +1055,7 @@ lockfile is reported the same way.
 It is an error when the old slug is still declared or when moves are chained (`a -> b`, `b -> c`).
 `loxl rename` does all of this in one step.
 
-### `page` — place the following blocks on a named page
+### `page` — the file's page
 
 ```text
 page "Beschattung"
@@ -1034,18 +1065,13 @@ wp_ein = And(
 )
 ```
 
-Names the `<C Type="Page">` (by display title, as in the base config) that
-the block declarations after it are built on — until the next `page`
-statement or the end of the file. Blocks above a file's first `page` statement
-keep the default page (`--page`, the project file, or the document's first
-page), also in a directory module where an earlier file names a page. Placement
-is positional, so the synthetic blocks of an expression land on the page the
-expression is written under. Objects of the object tree (a `VirtualIn`, a
-`Mode`, a device's I/O) have no page and ignore the statement.
-
-There is no statement that goes back to the default page. Put those blocks
-above the file's first `page`, or in a file of their own, or name the page:
-`page "<title>"` works for the default page too.
+The file's header: at most one per file, before every other statement (comments may precede it). It
+names the `<C Type="Page">` (by display title, as in the base config) that every block the file
+declares is built on, the synthetic blocks of its expressions included. A file without a `page`
+line builds its blocks on the default page (`--page`, the project file, or the document's first
+page). Objects of the object tree (a `VirtualIn`, a `Mode`, a device's I/O) have no page and ignore
+the statement. A `page` below another statement, or a second one, is a parse error: a file belongs to
+one page, so blocks of two pages are two files.
 
 The statement is **authoritative**. On every compile, each block it governs is pinned to a base page
 with the declared title:
@@ -1058,6 +1084,9 @@ with the declared title:
 
 ```text
 page "Küche Logik" (room: "Küche")
+```
+
+```text
 page "Küche Logik" (room: "Küche", category: "Beleuchtung")
 ```
 
@@ -1067,7 +1096,7 @@ accept the unassigned room) and to `category:` (default: the unassigned category
 
 - A page that already has the title is used as is. The arguments apply only to creation.
 - Without `room:` a missing title stays an error, so a typo never creates a page.
-- Several statements for one page need the arguments once. Given twice, they must agree.
+- Several files for one page need the arguments once. Given twice, they must agree.
 
 The lockfile keeps a created page's UUID (`pages`), so recompiles before the push create the same
 page. Once the page is on the Miniserver it is an ordinary page: rename it, move it or give it a room
@@ -1076,16 +1105,17 @@ title in the source, or drop the arguments to hand the page to Loxone Config. Re
 never deletes the page.
 
 `page` is not allowed inside a template body — placement belongs to the
-module. The decompiler emits `page` statements as section headers (the
-periphery, which is not a page, keeps a `# periphery` comment), so a
-decompiled or adopted module records its placement in reviewable source.
+module. Decompile and adopt write one file per page (`--out-dir`), each headed by its `page` line;
+the periphery, which is not a page, goes to `_periphery.loxl` under a `# periphery` comment. A
+config with one page of content is also one file (`adopt --out-module`, `decompile` to standard
+output), the page line first. `decompile` without `--out-dir` prints a config with several pages as
+the files `--out-dir` would write, each under a `# ---- <file>.loxl` line.
 
 ### `template` — a reusable, parameterized body
 
 ```text
 template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)
-	hoch = GreaterEqual(I2: schwelle)
-	hoch.I1 <- temp_aussen.AQ
+	hoch = GreaterEqual(In1: temp_aussen.AQ, In2: schwelle)
 	beschatten = And(In1: hoch, In2: jalousie.Sd)
 	jalousie.TargetPos = pos
 end
@@ -1251,11 +1281,23 @@ compile, like template expansion, it desugars into verified blocks:
   change nothing.
 
 Precedence, loosest to tightest: `or` < `and` < `not` < comparison <
-`+ -` < `* /`; parentheses group. Comparisons take plain operands (a
-port, a number, or a constant — at least one side a port) and do not
-chain — write `a.AQ >= 5 and a.AQ < 10`, not `5 <= a.AQ < 10`. A
-constant cannot drive a gate input directly; compare it. Gates take
-boolean ports or sub-expressions.
+`+ -` < `* /`; parentheses group. A comparison takes a port, a number, a constant or arithmetic
+on each side (at least one side reads a port) and does not chain — write `a.AQ >= 5 and a.AQ < 10`,
+not `5 <= a.AQ < 10`. A constant cannot drive a gate input directly; compare it. Gates take boolean
+ports, sub-expressions or arithmetic. A long chain wraps (see the grammar notes):
+
+```text
+let wunschtemp = 26
+let pv_schwelle = 1500
+
+extern wassertemp = VirtualIn(iname: "VI1")
+extern pv_ueberschuss = VirtualIn(iname: "VI2")
+extern abdeckung_offen = VirtualIn(iname: "VI3")
+
+wp_bedarf = wassertemp < wunschtemp
+	and pv_ueberschuss >= pv_schwelle
+	and not abdeckung_offen
+```
 
 **Arithmetic — one `Formula` block**. `+ - * /` may form the
 whole RHS of `<-` or a whole argument binding:
@@ -1274,8 +1316,12 @@ A whole arithmetic tree desugars into one `Formula` block. Here that is `verbrau
 - Unit values (`40s`) and strings are rejected: formulas compute on plain numbers.
 - The label is the expression text. Identity works as for the gate blocks (slug operator `f`,
   expression-owned lock entry).
-- Arithmetic inside gates or comparisons (`a.Q and x.AQ + 1`, `x.AQ + 1 >= 5`) is not supported.
-  Name the arithmetic as a signal (below) and compare its `AQ`.
+- **Under a comparison** the comparison is part of the formula: `x.AQ + 1 >= 5` is one `Formula`
+  block with `Formula: "I1+1>=5"`, whose `AQ` (1 or 0) feeds the sink. Both sides may hold
+  arithmetic (`a.AQ >= b.AQ * 2` is `"I1>=I2*2"`).
+- **Under a gate** (`a.Q and x.AQ + 1`, `not x.AQ + 1`) the arithmetic is its own `Formula` block
+  whose `AQ` feeds the gate's input, like any wire. A boolean group cannot take part in arithmetic
+  or stand on a side of a comparison (`(a.Q and b.Q) + 1`).
 
 **Identity.** The generated blocks get synthetic slugs `<sink>_<port>__<op><n>`: a post-order walk with
 one counter per operator. The sink is the extern port on `<-`, or the managed block's port for an
@@ -1308,8 +1354,8 @@ differ:
 - The signal's output is the top block's: `<slug>.Q` for a gate or comparator, `<slug>.AQ` for the
   `Formula` of an arithmetic signal. `<slug>.Q` on a Formula is an unknown-port error.
 - It is referenced like any block: from arguments, `<-`, tests, tile `to:` and rules.
-- Arithmetic under a comparison, which an inline expression cannot hold, is two signals
-  (`pv_kw = pv.Q / 1000`, then `pv_hoch = pv_kw.AQ >= 1.5`).
+- Arithmetic under a comparison is one `Formula` (`pv_hoch = pv.Q / 1000 >= 1.5`); two signals
+  (`pv_kw = pv.Q / 1000`, then `pv_hoch = pv_kw.AQ >= 1.5`) read the intermediate value too.
 
 The right side must be an expression:
 
@@ -1949,11 +1995,10 @@ A module may be a directory of `*.loxl` fragments instead of one file.
   `import` statement** (it would name a dependency with no effect). The convention is one file per page, with
   `_periphery.loxl` for the externs.
 - Dot-entries (`.git`, editor caches) are skipped.
-- `page` governs only its own fragment: from the statement to the next `page` or the end of the file.
-  Blocks above a fragment's first `page` take the default page, whatever page the previous file
-  named. Start every fragment that declares blocks with its `page` statement, as decompile and adopt
-  do; `loxl lint` reports a fragment that does not while others do (`default-page`). Merge order only
-  affects determinism.
+- `page` is a file's header and governs only that file. A file without one builds its blocks on the
+  default page, whatever page the file before it named. Start every file that declares blocks with
+  its `page` line, as decompile and adopt do; `loxl lint` reports a file that does not while others do
+  (`default-page`). Merge order only affects determinism.
 
 A directory with a `lox.toml` is a **project** — one deployment target:
 
@@ -2019,6 +2064,11 @@ block with another value (a `Monoflop` adopted without `Time` pulses for 0 s, no
 writes `Port: 0` into the block, at the port's place, and the compiled config stays byte-identical.
 Write the value you want instead where 0 is not meant. A block a template creates is reported, not
 fixed.
+
+`remote-binding` reports a `<-` or port `=` whose sink is a block the module declares. It compiles
+like the argument it stands for; write it in the block's argument list, where a reader looks for
+what feeds the block. The statement form is for a binding written in another file than the
+declaration.
 
 `stale-lifecycle` reports a `removed` or `moved` statement the lockfile has nothing left for: a
 `removed` of a slug that is no managed block, no pinned rule and no pending removal, or a `moved`
@@ -2204,6 +2254,23 @@ that names its replacement. The compile output of a migrated file is byte-identi
 - **`step` counts program cycles, `tick` takes a duration**: `step 3` (was `tick 3`), `tick 5min`.
   A bare number after `tick` is an error naming `step`; `loxl fmt --write` rewrites it. `step` is a
   reserved word.
+
+Part two:
+
+- **Externs take port bindings** (`extern jal = AutoJalousie(title: "Süd", AutoShade: beschatten,
+  TargetPos: 70)`), with the meaning the same bindings have on a block. Decompile and adopt write
+  them.
+- **`<-` and `=` work on every sink.** On a block the module declares they fold into its argument
+  list and `loxl lint` reports `remote-binding`; the v2 error for a managed sink is gone.
+- **Fan-in is a list**: `In1: [a, b]`. A repeated key still parses; `fmt` writes the list.
+- **Expressions wrap** after an operator, before `and`/`or`, and inside an open expression group.
+  `fmt` breaks a long `and`/`or` chain.
+- **Arithmetic under a comparison and under a gate compiles**: `x.AQ + 1 >= 5` is one `Formula`
+  block; `a and x.AQ + 1` feeds the gate from a `Formula`.
+- **`page` is the file's header**: at most one per file, before every other statement. A `page`
+  below a statement or a second one is an error; a file with two pages becomes two files.
+  `decompile` without `--out-dir` prints several pages as several files; `adopt --out-module` refuses
+  a config with blocks on several pages.
 
 ## Versioning
 

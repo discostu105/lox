@@ -1,0 +1,51 @@
+# Sprachtour, zweite Datei: Seite "Technik" — Spiegel (Refs) und die
+# Attribute von Externs. Die Externs und Konstanten der ersten Datei
+# (wassertemp, netzbezug, frost_grenze) gelten auch hier.
+
+page "Technik"
+
+# D32: ein GUI-gezeichneter Spiegel wird per `mirrors:` gematcht — die
+# Behauptung "spiegelt netzbezug" wird bei jedem Compile geprüft.
+
+extern netz_spiegel = InputRef(mirrors: netzbezug)
+
+# D34: ein Draht, der hier `netzbezug.Q` nennt, wird automatisch über
+# den Spiegel der eigenen Seite gezogen (netz_spiegel.AQ) — genau wie
+# die GUI ihn zeichnen würde.
+
+netz_hoch = GreaterEqual(
+	"Netzbezug hoch",
+	In1: netzbezug.Q, # tatsächlich verdrahtet: netz_spiegel.AQ
+	In2: 2000,
+)
+
+# D33: einen Spiegel selbst prägen — der Titel kommt vom Ziel, der
+# Speise-Draht (AI <- Ziel-Ausgang) steht explizit in der Quelle. Ein
+# Draht, der den Ref selbst nennt, bleibt wörtlich (kein D34-Umweg).
+
+wasser_spiegel = InputRef(mirrors: wassertemp, AI: wassertemp.Q)
+kalt_technik = Less("Wasser kalt (Technik)", In1: wasser_spiegel.AQ, In2: frost_grenze)
+
+# Millisekunden-Einheiten: 250ms → Def="0.25".
+
+blitz = PulseGen("Störblitz", OnTime: 250ms, OffTime: 750ms)
+stoerung = And(In1: kalt_technik.Q, In2: blitz.Q)
+
+stoerlampe.On <- stoerung.Q
+
+# --- Attribute (D39): Titel, Raum und Kategorie eines Externs ----------
+# Geräte und ihre Ein-/Ausgänge legt Loxone Config an; die Quelle weist
+# ihnen Titel, Raum und Kategorie zu. Raum und Kategorie werden per
+# Titel genannt und müssen in der Basis existieren. Gepinnt wird per
+# uuid: — ein title:-Matcher neben `.title = …` würde sich selbst den
+# Boden wegziehen und wird abgewiesen (ebenso room:/category:).
+# Ein Raumwechsel nimmt die Kinder mit, die bisher im Raum des Geräts
+# lagen (Onlinestatus, Temperatur); "Batterie schwach" liegt im Raum
+# Pool und bleibt dort. Die Kategorie hier gilt nur dem einen Eingang.
+
+extern klimasensor = LoxAIRDevice(uuid: "3000000e-0000-00e0-ffff504f94112233")
+extern klima_temp = LoxAIRAsensor(uuid: "30000010-0000-0100-ffff504f94112233")
+
+klimasensor.title = "Raumklima Garten"
+klimasensor.room = "Garten"
+klima_temp.category = "Klima"

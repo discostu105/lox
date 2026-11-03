@@ -1,8 +1,8 @@
+page "Logik"
+
 extern bewegung = VirtualIn(title: "Bewegung Flur")
 extern helligkeit = VirtualIn(title: "Helligkeit außen")
 extern licht = VirtualOutCmd(title: "Licht Flur")
-
-page "Logik"
 
 dunkel = Less(In1: helligkeit.Q, In2: 50)
 an = And(In1: bewegung.Q, In2: dunkel.Q)

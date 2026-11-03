@@ -1,10 +1,10 @@
+page "Logik"
+
 extern taster_auf = VirtualIn(title: "Taster Rollladen auf")
 extern taster_ab = VirtualIn(title: "Taster Rollladen ab")
 extern wind = VirtualIn(title: "Windgeschwindigkeit")
 extern motor_auf = VirtualOutCmd(title: "Rollladen Wohnzimmer auf")
 extern motor_ab = VirtualOutCmd(title: "Rollladen Wohnzimmer ab")
-
-page "Logik"
 
 sturm = Greater(In1: wind.Q, In2: 50)
 

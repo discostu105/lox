@@ -1,8 +1,8 @@
+page "Logik"
+
 extern aussentemp = VirtualIn(title: "Außentemperatur")
 extern raumtemp = VirtualIn(title: "Raumtemperatur Bad")
 extern heizung = VirtualOutCmd(title: "Heizung Bad")
-
-page "Logik"
 
 frost_aussen = Less(In1: aussentemp.Q, In2: 3)
 frost_bad = Less(In1: raumtemp.Q, In2: 10)

@@ -153,7 +153,14 @@ flex.tiles = kueche
 ";
 
 fn module(rest: &str) -> Module {
-    Module::parse(&format!("{EXTERNS}\n{rest}")).unwrap()
+    // A `page` line in `rest` is the file's header: it goes first.
+    let (page, rest): (Vec<&str>, Vec<&str>) = rest.lines().partition(|l| l.starts_with("page \""));
+    Module::parse(&format!(
+        "{}{EXTERNS}\n{}\n",
+        page.first().map(|p| format!("{p}\n")).unwrap_or_default(),
+        rest.join("\n")
+    ))
+    .unwrap()
 }
 
 fn compile_err(rest: &str) -> String {

@@ -617,9 +617,18 @@ impl Lift {
     }
 
     pub(super) fn single_module(&self) -> Module {
+        let buckets = self.buckets();
         let mut items = Vec::new();
-        for (page, b) in self.buckets() {
-            items.extend(self.bucket_items(page, &b));
+        // A `page` statement is a file's header. With one page the view
+        // is a file: its page line first, the periphery after it.
+        let pages = buckets.iter().filter(|(p, _)| p.is_some()).count();
+        for (page, b) in &buckets {
+            let mut more = self.bucket_items(*page, b);
+            if pages == 1 && page.is_some() && !items.is_empty() {
+                let header = more.remove(0);
+                items.insert(0, header);
+            }
+            items.extend(more);
         }
         Module { items }
     }
@@ -2250,10 +2259,7 @@ fn fold_extern_wires(items: &mut Vec<Item>) {
             ),
             _ => return true,
         };
-        folded
-            .entry(to.slug.clone())
-            .or_default()
-            .push(binding);
+        folded.entry(to.slug.clone()).or_default().push(binding);
         false
     });
     for item in items.iter_mut() {

@@ -1,8 +1,8 @@
+page "Logik"
+
 extern wind = VirtualIn(title: "Windgeschwindigkeit")
 extern regen = VirtualIn(title: "Regensensor")
 extern markise = VirtualOutCmd(title: "Markise einfahren")
-
-page "Logik"
 
 windig = Greater(In1: wind.Q, In2: 40)
 einfahren = Or(In1: windig.Q, In2: regen.Q)

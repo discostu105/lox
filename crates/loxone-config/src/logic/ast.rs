@@ -985,6 +985,29 @@ impl Expr {
     }
 
     /// Binding strength for canonical (minimal-paren) emission.
+    /// The pieces of the top-level `and`/`or` chain, as printed: the
+    /// left-nested operands of the same operator, each with the
+    /// parentheses the whole expression's text gives it.
+    fn chain(&self) -> Vec<String> {
+        let same = |x: &Expr| std::mem::discriminant(x) == std::mem::discriminant(self);
+        let (Expr::Or(a, b) | Expr::And(a, b)) = self else {
+            return vec![self.to_string()];
+        };
+        let mut pieces = if same(a) {
+            a.chain()
+        } else if a.prec() < self.prec() {
+            vec![format!("({a})")]
+        } else {
+            vec![a.to_string()]
+        };
+        pieces.push(if b.prec() <= self.prec() {
+            format!("({b})")
+        } else {
+            b.to_string()
+        });
+        pieces
+    }
+
     pub(crate) fn prec(&self) -> u8 {
         match self {
             Expr::Or(..) => 1,
@@ -2965,10 +2988,22 @@ impl Module {
                 out.push_str(&format!("{} <- {}{}\n", w.to, w.from, tail(&w.comment)));
             }
             Item::ExprWire(w) => {
-                out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
+                out.push_str(&expr_lines(
+                    &format!("{} <- ", w.to),
+                    &w.expr,
+                    depth,
+                    "",
+                    &w.comment,
+                ));
             }
             Item::Signal(x) => {
-                out.push_str(&format!("{} = {}{}\n", x.slug, x.expr, tail(&x.comment)));
+                out.push_str(&expr_lines(
+                    &format!("{} = ", x.slug),
+                    &x.expr,
+                    depth,
+                    "",
+                    &x.comment,
+                ));
             }
             // The statements of one bulk line go back to that line.
             Item::Set(SetDecl {
@@ -3178,15 +3213,143 @@ fn write_call(
     if let Some(t) = title {
         out.push_str(&format!("\t{},\n", quote(t)));
     }
-    for arg in args {
+    for arg in printed_args(args) {
         match arg {
-            ArgItem::Binding(x) => {
-                out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
-            }
-            ArgItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+            PrintedArg::Binding {
+                port,
+                expr: Some(e),
+                comment,
+                ..
+            } => out.push_str(&expr_lines(&format!("\t{port}: "), e, depth, ",", comment)),
+            PrintedArg::Binding {
+                port,
+                value,
+                comment,
+                ..
+            } => out.push_str(&format!("\t{port}: {value},{}\n", tail(comment))),
+            PrintedArg::Comment(text) => out.push_str(&format!("\t#{text}\n")),
         }
     }
     out.push_str(&format!("){}\n", tail(close_comment)));
+}
+
+/// One argument as printed: a port with several sources is one list.
+enum PrintedArg<'a> {
+    Binding {
+        port: &'a str,
+        value: String,
+        /// The expression, when the binding is one: it may wrap.
+        expr: Option<&'a Expr>,
+        comment: &'a Option<String>,
+        short: bool,
+    },
+    Comment(&'a str),
+}
+
+/// The arguments as printed. A port bound to several sources (a
+/// repeated key, as `decompile` reads a fan-in) prints once, as a list
+/// `In1: [a, b]`, where no source carries a comment.
+fn printed_args(args: &[ArgItem]) -> Vec<PrintedArg<'_>> {
+    let listable = |b: &Binding| {
+        b.comment.is_none()
+            && b.port.starts_with(|c: char| c.is_ascii_uppercase())
+            && matches!(
+                b.kind,
+                BindingKind::Wire(_) | BindingKind::Expr(_) | BindingKind::Param(Value::Ref(_))
+            )
+    };
+    let mut taken = vec![false; args.len()];
+    let mut out = Vec::with_capacity(args.len());
+    for (i, arg) in args.iter().enumerate() {
+        if taken[i] {
+            continue;
+        }
+        let ArgItem::Binding(b) = arg else {
+            let ArgItem::Comment(text) = arg else {
+                unreachable!()
+            };
+            out.push(PrintedArg::Comment(text));
+            continue;
+        };
+        let group: Vec<&Binding> = if listable(b) {
+            args.iter()
+                .enumerate()
+                .skip(i + 1)
+                .filter_map(|(j, a)| match a {
+                    ArgItem::Binding(x) if x.port == b.port && listable(x) && !taken[j] => {
+                        taken[j] = true;
+                        Some(x)
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if group.is_empty() {
+            out.push(PrintedArg::Binding {
+                port: &b.port,
+                value: b.kind.to_string(),
+                expr: match &b.kind {
+                    BindingKind::Expr(e) => Some(e),
+                    _ => None,
+                },
+                comment: &b.comment,
+                short: is_short(&b.kind),
+            });
+        } else {
+            let sources: Vec<String> = std::iter::once(b)
+                .chain(group)
+                .map(|x| x.kind.to_string())
+                .collect();
+            out.push(PrintedArg::Binding {
+                port: &b.port,
+                value: format!("[{}]", sources.join(", ")),
+                expr: None,
+                comment: &b.comment,
+                short: false,
+            });
+        }
+    }
+    out
+}
+
+/// A statement whose value is an expression, wrapped when it runs past
+/// the line limit: the top-level `and`/`or` chain breaks before each
+/// operator, one level deeper than `prefix`'s line. `prefix` starts
+/// with the line's own tabs (the caller adds `depth` more); `suffix`
+/// follows the expression (`,` in an argument list), the comment the
+/// last line.
+fn expr_lines(
+    prefix: &str,
+    e: &Expr,
+    depth: usize,
+    suffix: &str,
+    comment: &Option<String>,
+) -> String {
+    let one = format!("{prefix}{e}{suffix}{}\n", tail(comment));
+    let tabs = prefix.chars().take_while(|c| *c == '\t').count();
+    let width = (depth + tabs) * TAB_WIDTH + one.trim_end().chars().count() - tabs;
+    if width <= MAX_LINE {
+        return one;
+    }
+    let (kw, pieces) = match e {
+        Expr::Or(..) => ("or", e.chain()),
+        Expr::And(..) => ("and", e.chain()),
+        _ => return one,
+    };
+    let indent = "\t".repeat(tabs + 1);
+    let mut out = format!("{prefix}{}\n", pieces[0]);
+    let last = pieces.len() - 1;
+    for (i, piece) in pieces.iter().enumerate().skip(1) {
+        out.push_str(&format!("{indent}{kw} {piece}"));
+        if i == last {
+            out.push_str(suffix);
+            out.push_str(&tail(comment));
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// The one-line form of a call (see [`write_call`]), when it qualifies.
@@ -3200,11 +3363,17 @@ fn inline_call(
 ) -> Option<String> {
     let mut parts: Vec<String> = title.map(quote).into_iter().collect();
     let mut short = true;
-    for arg in args {
+    for arg in printed_args(args) {
         match arg {
-            ArgItem::Binding(x) if x.comment.is_none() => {
-                parts.push(format!("{}: {}", x.port, x.kind));
-                short &= is_short(&x.kind);
+            PrintedArg::Binding {
+                port,
+                value,
+                comment: None,
+                short: s,
+                ..
+            } => {
+                parts.push(format!("{port}: {value}"));
+                short &= s;
             }
             _ => return None,
         }

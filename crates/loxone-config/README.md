@@ -16,23 +16,23 @@ let temp_schwelle = 28
 extern aussentemp = VirtualIn(iname: "VI1")
 extern wind_alarm = VirtualIn(iname: "VI2")
 extern sonne = VirtualIn(iname: "VI3")
-extern jal_sued = AutoJalousie(title: "Beschattung Süd")
+extern jal_sued = AutoJalousie(
+    title: "Beschattung Süd",
+    AutoShade: beschatten,
+    Safety: wind_alarm,
+    TargetPos: 70,
+)
 
 temp_hoch = GreaterEqual(
     "Temp über 28",
-    In1: aussentemp.Q,
+    In1: aussentemp,
     In2: temp_schwelle,
 )
 
 beschatten = And(
-    In1: temp_hoch.Q,
-    In2: sonne.Q,
+    In1: temp_hoch,
+    In2: sonne,
 )
-
-jal_sued.AutoShade <- beschatten.Q
-jal_sued.Safety <- wind_alarm.Q
-
-jal_sued.TargetPos = 70
 ```
 
 `loxl compile` turns this into the XML Loxone Config would have written: UUIDs, counters, connectors
@@ -44,9 +44,9 @@ what you changed.
 - **Templates.** `template fassade(jalousie: AutoJalousie, pos = 70) … end` declares a body once;
   `sued = fassade(jalousie: jal_sued)` creates it per facade. Each instance keeps stable identities,
   and source names its blocks through it (`sued.hoch.Q`, `sued.Q` for its primary block).
-- **Expressions.** `jal_sued.AutoShade <- sonne.Q and aussentemp.Q >= temp_schwelle` compiles into gate
-  and comparator blocks, each labeled with its sub-expression. Arithmetic such as
-  `verbrauch.AQ / 1000` becomes one `Formula` block.
+- **Expressions.** `AutoShade: sonne and aussentemp >= temp_schwelle` compiles into gate and
+  comparator blocks, each labeled with its sub-expression. Arithmetic such as `verbrauch.AQ / 1000`
+  or `verbrauch.AQ / 1000 >= 1.5` becomes one `Formula` block.
 - **Units.** `Time: 30min`, `2700K` and `70%` compile to the port's base unit.
 - **Device assignment.** `sensor.title`, `sensor.room` and `sensor.category` set an object's title, room
   and category. A room change also moves the device's inputs and outputs that shared its room.

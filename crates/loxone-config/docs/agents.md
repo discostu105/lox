@@ -45,7 +45,7 @@ example module valid.
 
 ```sh
 # 0. Orientation: what does the config contain, what is already managed?
-loxl decompile current.Loxone            # full Lox Logic view, `page` sections
+loxl decompile current.Loxone            # full Lox Logic view; several pages print as several files
 loxl decompile --out-dir view/ current.Loxone   # one module per page
 loxl observe current.Loxone              # port evidence per block type
 loxl types --search delay                 # which type does what (name or purpose)
@@ -133,8 +133,12 @@ passes `loxl check`.
 let schwelle = 28 # a named constant
 
 extern sonne = VirtualIn(iname: "VI3") # an existing object: yours to use, not to own
-extern jal = AutoJalousie(title: "Beschattung Süd")
 extern pumpe = PushButton(title: "Pumpe")
+
+# An extern takes port bindings like a block: a source wires, a value
+# sets the parameter (restored when the line goes).
+
+extern jal = AutoJalousie(title: "Beschattung Süd", AutoShade: beschatten, TargetPos: 70)
 
 party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folder
 
@@ -142,13 +146,9 @@ party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folde
 # reference wires, a value or constant sets the parameter.
 
 temp_hoch = GreaterEqual("Temp über 28", In1: sonne.Q, In2: schwelle)
-beschatten = And(In1: temp_hoch, In2: sonne)
-
-jal.AutoShade <- beschatten # a wire onto an extern port; a bare name is the default output
-
+beschatten = And(In1: temp_hoch, In2: sonne) # a bare name is the default output
+anforderung = Or(In1: [temp_hoch, party], In2: sonne) # fan-in: several sources on one input
 heiss = sonne >= 30 and not party # a named signal: its top block is `heiss`
-
-jal.TargetPos = 70 # an extern parameter, restored when the line goes
 
 defaults Monoflop(Time: 5min) # for every Monoflop that does not bind `Time`
 
@@ -205,9 +205,11 @@ removed alt_gate # a confirmed delete of a managed block
 moved alt_schatten -> beschatten # a rename that keeps the UUIDs
 ```
 
-The value decides what an argument means: `Port: slug.Port` wires that source in, anything else sets
-the port's parameter. `<-` and port-`=` work only on externs; everything about a managed block is in
-its own argument list.
+The value decides what an argument means: `Port: slug.Port` (or a bare block name) wires that source
+in, an expression desugars into blocks, anything else sets the port's parameter. The same bindings
+work on an extern. `x.Port <- y` and `x.Port = 5` are the statement forms, for a binding written in
+another file than the declaration; on a block the module declares, `loxl lint` reports them
+(`remote-binding`).
 
 A named signal `x = <expr>` names an expression's result. Its top block is `x` (`x.Q`; an arithmetic
 one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it instead of spelling an
@@ -351,7 +353,8 @@ it only when it matches what you intended.
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
-| `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
+| `remote-binding` (from `lint`) | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
+| `` `page` is the file's header `` / `` a second `page` `` | a `page` line below a statement, or two in one file | move the line to the top; put the blocks of a second page in a file of their own |
 | `targets named signal` | `<-`, port-`=`, `.room` or `.category` on an `x = <expr>` signal | change the expression; its inputs are its operands. Only `.title` is allowed |
 | `an alias is not a block` | `x = a.Q`: a named signal needs an expression | use `a.Q` directly where `x.Q` would go |
 | `changed its top operator` | a named signal's top `and`/`or`/comparison changed, and with it its block type | give the signal a new name and add `removed <old>` |
