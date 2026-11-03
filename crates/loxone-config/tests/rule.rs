@@ -9,6 +9,7 @@
 
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, Item, Module, adopt, adopt_one, compile, decompile,
+    lint_stale_lifecycle,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc};
@@ -535,7 +536,8 @@ fn a_removed_rule_is_deleted_until_the_miniserver_runs_without_it() {
     assert_eq!(lock.removed[&uuid].slug, "mittag");
 
     // A base from before the deployment loses it again; the deployed one
-    // retires the tombstone, and the statement is then an error.
+    // retires the tombstone, and the statement is then stale: it compiles
+    // to nothing, and the lint says to delete it.
     let mut again = lock.clone();
     assert_eq!(
         compile_with(&created, "removed mittag\n", &mut again).unwrap(),
@@ -546,8 +548,14 @@ fn a_removed_rule_is_deleted_until_the_miniserver_runs_without_it() {
         out
     );
     assert!(again.removed.is_empty());
-    let e = compile_with(&out, "removed mittag\n", &mut again).unwrap_err();
-    assert!(e.to_string().contains("delete the `removed` line"), "{e}");
+    assert_eq!(
+        compile_with(&out, "removed mittag\n", &mut again).unwrap(),
+        out
+    );
+    let stale = Module::parse(&format!("{EXTERNS}\nremoved mittag\n")).unwrap();
+    let findings = lint_stale_lifecycle(&stale, &again);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].slug, "mittag");
 
     // A rule that drives a block stays until that wire is gone.
     let seq = u32::from_str_radix(&uuid[14..18], 16).unwrap();

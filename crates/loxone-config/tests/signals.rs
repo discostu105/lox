@@ -244,10 +244,10 @@ fn named_signals_are_referenced_like_blocks_in_tests() {
          test \"Sonne und Hitze\"\n\
          \tsonne.Q = on\n\
          \taussentemp.Q = 30\n\
-         \ttick 2\n\
+         \tstep 2\n\
          \texpect beschatten.Q == on\n\
          \taussentemp.Q = 20\n\
-         \ttick 2\n\
+         \tstep 2\n\
          \texpect beschatten.Q == off\n\
          end\n"
     ));

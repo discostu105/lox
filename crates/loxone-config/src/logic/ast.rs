@@ -181,7 +181,8 @@ pub fn clock_text(seconds: u32) -> Option<String> {
 }
 
 /// A value's unit suffix. Time units scale to Loxone's base unit,
-/// seconds; `K` (color temperature) and `%` are annotations with factor 1.
+/// seconds; `K` (color temperature), `%` and `°` are annotations with
+/// factor 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     Ms,
@@ -190,6 +191,7 @@ pub enum Unit {
     H,
     K,
     Pct,
+    Deg,
 }
 
 impl Unit {
@@ -206,6 +208,7 @@ impl Unit {
             Unit::H => "h",
             Unit::K => "K",
             Unit::Pct => "%",
+            Unit::Deg => "°",
         }
     }
 
@@ -217,6 +220,7 @@ impl Unit {
             "h" => Unit::H,
             "K" => Unit::K,
             "%" => Unit::Pct,
+            "°" => Unit::Deg,
             _ => return None,
         })
     }
@@ -226,7 +230,7 @@ impl Unit {
     fn factor(self) -> (u128, u32) {
         match self {
             Unit::Ms => (1, 3),
-            Unit::S | Unit::K | Unit::Pct => (1, 0),
+            Unit::S | Unit::K | Unit::Pct | Unit::Deg => (1, 0),
             Unit::Min => (60, 0),
             Unit::H => (3600, 0),
         }
@@ -287,10 +291,10 @@ pub(crate) fn duration_value(block_type: &str, port: &str, raw: &str) -> Option<
 
 /// Resolve a suffixed value for a port whose documented unit is
 /// `port_unit`: time suffixes scale into the port's own time unit
-/// (seconds or minutes), `%` and `K` bind only where they mean what the
-/// port is in. `None` (undocumented port) keeps the default reading: time in seconds,
-/// `%` and `K` as annotations. The
-/// error is the reason, without the port's name (callers add it).
+/// (seconds or minutes), `%`, `K` and `°` bind only where they mean what
+/// the port is in. `None` (undocumented port) keeps the default reading:
+/// time in seconds, `%`, `K` and `°` as annotations. The error is the
+/// reason, without the port's name (callers add it).
 pub(crate) fn scale_for_port(
     number: &str,
     unit: Unit,
@@ -321,6 +325,7 @@ pub(crate) fn scale_for_port(
         }
         Some(PortUnit::Percent) if unit == Unit::Pct => Ok(number.to_string()),
         Some(PortUnit::Kelvin) if unit == Unit::K => Ok(number.to_string()),
+        Some(PortUnit::Degrees) if unit == Unit::Deg => Ok(number.to_string()),
         Some(pu) => mismatch(pu),
     }
 }
@@ -1108,9 +1113,9 @@ pub struct LetDecl {
 /// object from bases predating the deployment. Scoped to one slug and
 /// reviewable in the diff (the in-language counterpart of Terraform's
 /// `removed` block). The statement may be deleted right after the compile
-/// that applies it (the tombstone carries the intent from there) and is
-/// tolerated while the tombstone is pending; once the removal has reached
-/// the deployed config, a lingering statement is a compile error.
+/// that applies it (the tombstone carries the intent from there). Once
+/// the removal has reached the deployed config, the compile ignores it
+/// and `loxl lint` reports it (`stale-lifecycle`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemovedDecl {
     pub slug: String,
@@ -1321,29 +1326,49 @@ pub enum TestItem {
     /// of the scenario. On an output connector the injection overrides
     /// the block (how calendar-driven Mode blocks are driven in the sim).
     Inject(SetDecl),
-    /// `tick <n> [dt <seconds>]` — advance the simulation `n` ticks of
-    /// `dt` simulated seconds each (default 1s; a unit value like
-    /// `dt 100ms` scales). `tick <duration>` (`tick 5min`) advances
-    /// that much simulated time, a whole number of ticks.
+    /// `tick <duration> [dt <seconds>]` — advance the simulation by that
+    /// much simulated time, a whole number of program cycles of `dt`
+    /// seconds each (default 1s; a unit value like `dt 100ms` scales).
+    /// `step <n> [dt <seconds>]` advances `n` cycles.
     Tick(TickDecl),
     /// `expect slug.Port <cmp> <value>` — assert a port's value after the
-    /// preceding `tick`.
+    /// preceding `tick` or `step`.
     Expect(ExpectDecl),
     /// `clock HH:MM[:SS]` or `clock YYYY-MM-DD HH:MM[:SS]` — set the
     /// simulated wall-clock (drives DayTimer/astro blocks); it advances
-    /// by `dt` each tick.
+    /// by `dt` each cycle.
     Clock(ClockDecl),
     /// Whole-line `#` comment, verbatim.
     Comment(String),
 }
 
+/// The keyword of a [`TickDecl`]: `tick` advances by a duration, `step`
+/// by a number of program cycles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickKind {
+    Tick,
+    Step,
+}
+
+impl TickKind {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            TickKind::Tick => "tick",
+            TickKind::Step => "step",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TickDecl {
-    /// What `tick` advances, as written: a plain tick count (`Number`), a
-    /// duration (a time `Unit` value, `tick 5min`), or a `let` constant
-    /// naming either. [`TickDecl::count`] turns it into ticks.
+    /// `tick` or `step`.
+    pub kind: TickKind,
+    /// What the statement advances, as written: a duration (a time
+    /// `Unit` value, `tick 5min`), a count of program cycles (`step 3`),
+    /// or a `let` constant holding the one the keyword takes.
+    /// [`TickDecl::count`] turns it into cycles.
     pub amount: Value,
-    /// Simulated seconds per tick; `None` = the default (1s). `Number`,
+    /// Simulated seconds per cycle; `None` = the default (1s). `Number`,
     /// `Unit`, or a `let` constant naming one.
     pub dt: Option<Value>,
     /// Trailing `#` comment on the statement line, verbatim.
@@ -1351,10 +1376,12 @@ pub struct TickDecl {
 }
 
 impl TickDecl {
-    /// The number of ticks, with `let` constants looked up in `lets`: the
-    /// count as written, or the duration divided by dt (which must divide
-    /// it). `None` from `lets` for a constant means it is not known yet
-    /// (the parser checks literals only); that gives `Ok(None)`.
+    /// The number of cycles, with `let` constants looked up in `lets`: a
+    /// `step`'s count as written, or a `tick`'s duration divided by dt
+    /// (which must divide it). `None` from `lets` for a constant means it
+    /// is not known yet (the parser checks literals only); that gives
+    /// `Ok(None)`. A bare number under `tick` and a duration under `step`
+    /// are errors that name the other keyword.
     pub fn count<'v>(
         &'v self,
         lets: impl Fn(&str) -> Option<&'v Value>,
@@ -1366,11 +1393,27 @@ impl TickDecl {
         let Some(amount) = deref(&self.amount) else {
             return Ok(None);
         };
-        let n = match amount {
-            Value::Number(n) => n.parse::<u64>().map_err(|_| {
-                format!("`tick {}`: the tick count is a positive whole number or a duration (`tick 5min`)", self.amount)
+        let kw = self.kind.keyword();
+        let n = match (self.kind, amount) {
+            (TickKind::Tick, Value::Number(_)) => {
+                return Err(format!(
+                    "`tick` takes a duration (`tick 5s`); `step` counts program cycles. \
+                     Write `step {amount}` instead of `tick {amount}`."
+                ));
+            }
+            (TickKind::Step, Value::Unit { unit, .. }) if unit.is_time() => {
+                return Err(format!(
+                    "`step` counts program cycles; `tick` takes a duration. \
+                     Write `tick {amount}` instead of `step {amount}`."
+                ));
+            }
+            (TickKind::Step, Value::Number(n)) => n.parse::<u64>().map_err(|_| {
+                format!(
+                    "`step {}`: the count is a positive whole number",
+                    self.amount
+                )
             })?,
-            Value::Unit { unit, .. } if unit.is_time() => {
+            (TickKind::Tick, Value::Unit { unit, .. }) if unit.is_time() => {
                 let dt_secs = match &self.dt {
                     None => Cow::Borrowed("1"),
                     Some(dt) => match deref(dt) {
@@ -1388,21 +1431,27 @@ impl TickDecl {
                 whole_ratio(&total, &dt_secs).ok_or_else(|| {
                     let dt = self.dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
                     format!(
-                        "`tick {}` is not a whole number of `dt {dt}` ticks. Make the duration a multiple of dt.",
+                        "`tick {}` is not a whole number of `dt {dt}` cycles. Make the duration a multiple of dt.",
                         self.amount
                     )
                 })?
             }
-            _ => {
+            (TickKind::Tick, _) => {
                 return Err(format!(
-                    "`tick {}`: a tick takes a plain tick count or a duration (`tick 90s`, `tick 5min`)",
+                    "`tick {}`: a tick takes a duration (`tick 90s`, `tick 5min`)",
+                    self.amount
+                ));
+            }
+            (TickKind::Step, _) => {
+                return Err(format!(
+                    "`step {}`: a step takes a number of program cycles (`step 3`)",
                     self.amount
                 ));
             }
         };
         if n == 0 {
             return Err(format!(
-                "`tick {}` advances nothing. Use at least 1.",
+                "`{kw} {}` advances nothing. Use at least 1.",
                 self.amount
             ));
         }
@@ -1413,7 +1462,7 @@ impl TickDecl {
 /// The error for a `dt` that is no number of seconds or duration.
 pub(crate) fn dt_error(dt: &Value) -> String {
     format!(
-        "`dt {dt}`: the tick length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
+        "`dt {dt}`: the cycle length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
     )
 }
 
@@ -1492,7 +1541,7 @@ impl fmt::Display for TestItem {
         match self {
             TestItem::Inject(s) => write!(f, "{} = {}{}", s.target, s.value, tail(&s.comment)),
             TestItem::Tick(t) => {
-                write!(f, "tick {}", t.amount)?;
+                write!(f, "{} {}", t.kind.keyword(), t.amount)?;
                 if let Some(dt) = &t.dt {
                     write!(f, " dt {dt}")?;
                 }
@@ -3323,7 +3372,14 @@ mod tests {
         assert!(err.contains("documented in seconds"), "{err}");
         let err = scale_for_port("5", Unit::S, Some(PortUnit::Percent)).unwrap_err();
         assert!(err.contains("`5s` does not fit"), "{err}");
-        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Other("°"))).is_err());
+        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Degrees)).is_err());
+        assert_eq!(
+            scale_for_port("180", Unit::Deg, Some(PortUnit::Degrees)).unwrap(),
+            "180"
+        );
+        let err = scale_for_port("180", Unit::Deg, seconds).unwrap_err();
+        assert!(err.contains("`180°` does not fit"), "{err}");
+        assert!(scale_for_port("5", Unit::Pct, Some(PortUnit::Other("mm"))).is_err());
 
         // Undocumented ports keep the default reading.
         assert_eq!(scale_for_port("45", Unit::Min, None).unwrap(), "2700");

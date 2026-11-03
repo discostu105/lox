@@ -10,7 +10,8 @@
 //! so only there is "nothing reads this block" a real statement. Both are
 //! advisory: a finding can be deliberate (reference externs kept as
 //! documentation, registers kept for later), which is why lint reports
-//! and never blocks a compile. [`finish_lint`] applies the
+//! and never blocks a compile. [`lint_stale_lifecycle`] needs the lock:
+//! a `removed` or `moved` that is done. [`finish_lint`] applies the
 //! `# lint: allow <kind>` comments, groups a device's unused inputs into
 //! one finding and reports allows that cover nothing.
 
@@ -58,6 +59,9 @@ pub enum LintKind {
     /// A port of an existing block that is 0 only because nothing sets
     /// it, while Loxone Config places the block with another value.
     ImplicitZero,
+    /// A `removed` or `moved` statement the lock has nothing left for:
+    /// the removal or rename is done, or the slug never existed.
+    StaleLifecycle,
 }
 
 impl LintKind {
@@ -77,11 +81,12 @@ impl LintKind {
             LintKind::NoActuator => "no-actuator",
             LintKind::UnusedAllow => "unused-allow",
             LintKind::ImplicitZero => "implicit-zero",
+            LintKind::StaleLifecycle => "stale-lifecycle",
         }
     }
 
     /// Every kind.
-    pub const ALL: [LintKind; 14] = [
+    pub const ALL: [LintKind; 15] = [
         LintKind::UnusedExtern,
         LintKind::UnusedLet,
         LintKind::UnusedTemplate,
@@ -96,6 +101,7 @@ impl LintKind {
         LintKind::NoActuator,
         LintKind::UnusedAllow,
         LintKind::ImplicitZero,
+        LintKind::StaleLifecycle,
     ];
 
     /// The kind with this label (`dead-outputs`).
@@ -1370,7 +1376,59 @@ fn needs_project(kind: LintKind) -> bool {
             | LintKind::NoAccessRight
             | LintKind::NoActuator
             | LintKind::ImplicitZero
+            | LintKind::StaleLifecycle
     )
+}
+
+/// The `removed` and `moved` statements of `module` that the lock before
+/// the compile has nothing left for: a `removed` of a slug that is
+/// neither a managed block, a pinned rule nor a pending tombstone, and a
+/// `moved` whose old slug is not a managed block. Each is done (the
+/// removal has reached the deployed config, the rename is applied) or
+/// named nothing to begin with; either way the line can go. One finding
+/// per statement, `stale-lifecycle`.
+pub fn lint_stale_lifecycle(module: &Module, lock: &Lockfile) -> Vec<LintFinding> {
+    let mut out = Vec::new();
+    for r in module.removed() {
+        let known = lock.objects.contains_key(&r.slug)
+            || lock.rules.contains_key(&r.slug)
+            || lock.hardware.contains_key(&r.slug)
+            || lock.removed.values().any(|t| t.slug == r.slug);
+        if !known {
+            out.push(LintFinding {
+                kind: LintKind::StaleLifecycle,
+                slug: r.slug.clone(),
+                detail: format!(
+                    "`removed {}`: the lockfile has no block, rule, device or pending removal \
+                     of this name. The removal is done, or the name is a typo. Delete the line",
+                    r.slug
+                ),
+            });
+        }
+    }
+    for mv in module.moved() {
+        if !lock.objects.contains_key(&mv.from) {
+            let detail = if lock.objects.contains_key(&mv.to) {
+                format!(
+                    "`moved {} -> {}`: `{}` has the lockfile entry, so the rename is done. \
+                     Delete the line",
+                    mv.from, mv.to, mv.to
+                )
+            } else {
+                format!(
+                    "`moved {} -> {}`: neither name is in the lockfile. Check the spelling \
+                     against the lockfile, or delete the line",
+                    mv.from, mv.to
+                )
+            };
+            out.push(LintFinding {
+                kind: LintKind::StaleLifecycle,
+                slug: mv.to.clone(),
+                detail,
+            });
+        }
+    }
+    out
 }
 
 /// Moods the source gives a lighting controller that set a percentage

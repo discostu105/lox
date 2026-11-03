@@ -68,8 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // A recompile against the new output sees the deletion deployed and
-    // retires the tombstone; the lingering `removed` line is tolerated
-    // until then.
+    // retires the tombstone. The lingering `removed` line still compiles
+    // (it does nothing); `loxl lint` reports it as `stale-lifecycle`.
     compile(&out3, &m3, &mut lock, &opts)?;
     assert!(lock.removed.is_empty());
     println!("recompile: deletion deployed, tombstone retired");

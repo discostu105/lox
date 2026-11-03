@@ -3,8 +3,9 @@
 //! decompile view of compiled output.
 
 use loxone_config::logic::{
-    ArgItem, Binding, BindingKind, CompileOptions, DecompileOptions, DecompileScope, Item, Module,
-    PortRef, Value, adopt, adopt_one, adopt_pages, compile, decompile, decompile_pages,
+    ArgItem, Binding, BindingKind, CompileOptions, DecompileOptions, DecompileScope, Item,
+    LintKind, Module, PortRef, Value, adopt, adopt_one, adopt_pages, compile, decompile,
+    decompile_pages, lint_stale_lifecycle,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::xml::{Attr, Element, Node};
@@ -1747,7 +1748,7 @@ a = paar(x: vi)\n";
         "{head}template weiter(y: Not)\n\tz = Not(In: y.Q)\nend\n\
          c = weiter(y: a.aus)\nd = weiter(y: a)\n\
          moved alt -> a.aus\nremoved a.weg\n\
-         test \"t\"\n\tvi.Q = 1\n\ttick 1\n\texpect a.Q == 0\n\texpect a.aus.Q == 1\nend\n"
+         test \"t\"\n\tvi.Q = 1\n\tstep 1\n\texpect a.Q == 0\n\texpect a.aus.Q == 1\nend\n"
     );
     let m = Module::parse(&more).unwrap();
     let flat = m.expand().unwrap();
@@ -2857,15 +2858,65 @@ fn removal_tombstone_bridges_the_compile_to_push_window() {
     assert!(lock.removed_wires.is_empty(), "wire tombstones retired");
     assert!(lock.removed_sets.is_empty(), "set tombstone retired");
 
-    // A lingering `removed` after that is a hard error — the ratchet that
-    // gets the transient statement cleaned up.
-    let err = compile(&out1, &without, &mut lock, &opts()).unwrap_err();
-    assert!(err.to_string().contains("If the removal is done"), "{err}");
+    // A lingering `removed` after that compiles (it does nothing) and is
+    // a `stale-lifecycle` lint finding.
+    let out4 = compile(&out1, &without, &mut lock.clone(), &opts()).unwrap();
+    assert_eq!(out1.to_bytes(), out4.to_bytes());
+    let findings = lint_stale_lifecycle(&without, &lock);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, LintKind::StaleLifecycle);
+    assert_eq!(findings[0].slug, "beschatten");
+    assert!(
+        findings[0].detail.contains("Delete the line"),
+        "{findings:?}"
+    );
 
-    // And a `removed` that never named anything errors immediately.
+    // A `removed` that never named anything compiles too; the lint says.
     let typo = Module::parse("removed nie_da\n").unwrap();
-    let err = compile(&base, &typo, &mut Lockfile::new(), &opts()).unwrap_err();
-    assert!(err.to_string().contains("nie_da"), "{err}");
+    compile(&base, &typo, &mut Lockfile::new(), &opts()).unwrap();
+    let findings = lint_stale_lifecycle(&typo, &Lockfile::new());
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(
+        findings[0].detail.contains("`removed nie_da`"),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn stale_lifecycle_is_a_lint_not_an_error() {
+    let base = base();
+    let mut lock = Lockfile::new();
+    compile(&base, &module(), &mut lock, &opts()).unwrap();
+    // Active statements: nothing to report.
+    let active = Module::parse(
+        "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
+         temp_hoch = GreaterEqual(In1: aussentemp.Q, In2: 28)\n\
+         schatten = And(In1: temp_hoch.Q, In2: aussentemp.Q)\n\
+         moved beschatten -> schatten\n",
+    )
+    .unwrap();
+    assert!(lint_stale_lifecycle(&active, &lock).is_empty());
+    let removing = Module::parse(
+        "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
+         temp_hoch = GreaterEqual(In1: aussentemp.Q, In2: 28)\n\
+         removed beschatten\n",
+    )
+    .unwrap();
+    assert!(lint_stale_lifecycle(&removing, &lock).is_empty());
+    // After the rename, the `moved` is done: reported, and the compile
+    // ignores it.
+    compile(&base, &active, &mut lock, &opts()).unwrap();
+    let findings = lint_stale_lifecycle(&active, &lock);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind.label(), "stale-lifecycle");
+    assert!(
+        findings[0].detail.contains("the rename is done"),
+        "{findings:?}"
+    );
+    assert_eq!(
+        LintKind::from_label("stale-lifecycle"),
+        Some(LintKind::StaleLifecycle)
+    );
 }
 
 #[test]
@@ -2917,9 +2968,13 @@ moved beschatten -> schatten_gate
     let third = compile(&second, &renamed, &mut lock, &opts()).unwrap();
     assert_eq!(second.to_bytes(), third.to_bytes());
 
-    // With no matching lock entry at all, `moved` is an error (typo guard).
-    let err = compile(&base, &renamed, &mut Lockfile::new(), &opts()).unwrap_err();
-    assert!(err.to_string().contains("neither slug"), "{err}");
+    // With no matching lock entry at all, `moved` does nothing; the lint
+    // names it.
+    let mut fresh = Lockfile::new();
+    compile(&base, &renamed, &mut fresh, &opts()).unwrap();
+    let findings = lint_stale_lifecycle(&renamed, &Lockfile::new());
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].detail.contains("neither name"), "{findings:?}");
 }
 
 #[test]

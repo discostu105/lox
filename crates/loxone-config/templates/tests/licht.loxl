@@ -13,47 +13,47 @@ treppe = treppenlicht(taster: taster, dauer: 60s)
 
 test "bewegungslicht: Nachlauf nach der letzten Bewegung"
 	bewegung.Q = 1
-	tick 2
+	step 2
 	expect nachlauf.Q == 1
 	bewegung.Q = 0
-	tick 110
+	step 110
 	expect nachlauf.Q == 1
-	tick 20
+	step 20
 	expect nachlauf.Q == 0
 end
 
 test "bewegungslicht_dunkel: nur bei Dunkelheit"
 	helligkeit.Q = 500
 	bewegung.Q = 1
-	tick 2
+	step 2
 	expect dunkel.Q == 0
 	helligkeit.Q = 10
 	bewegung.Q = 0
-	tick 1
+	step 1
 	bewegung.Q = 1
-	tick 2
+	step 2
 	expect dunkel.Q == 1
 	bewegung.Q = 0
-	tick 170
+	step 170
 	expect dunkel.Q == 1
-	tick 20
+	step 20
 	expect dunkel.Q == 0
 end
 
 test "taster_licht und treppenlicht"
 	taster.Q = 1
-	tick 1
+	step 1
 	taster.Q = 0
-	tick 2
+	step 2
 	expect schalter.Q == 1
 	expect treppe.Q == 1
-	tick 70
+	step 70
 	expect schalter.Q == 1
 	expect treppe.Q == 0
 	taster.Q = 1
-	tick 1
+	step 1
 	taster.Q = 0
-	tick 2
+	step 2
 	expect schalter.Q == 0
 	expect treppe.Q == 1
 end

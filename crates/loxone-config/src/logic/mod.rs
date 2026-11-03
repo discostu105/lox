@@ -66,7 +66,8 @@ pub use ast::{
     Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl, RuleItem,
     RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl,
     SetKind, SignalDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds, clock_text,
+    TickKind, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds,
+    clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids, unpaired_created};
 pub use decompile::{
@@ -79,9 +80,9 @@ pub(crate) use lint::is_allow_comment;
 pub use lint::{
     ImplicitZero, LintFinding, LintKind, finish_lint, fix_implicit_zeros, fix_unit_suffixes,
     fix_unit_suffixes_in, fix_unit_suffixes_text, implicit_zeros, lint_circuits, lint_dead_outputs,
-    lint_implicit_zero, lint_source,
+    lint_implicit_zero, lint_source, lint_stale_lifecycle,
 };
-pub use migrate::migrate_port_names;
+pub use migrate::{migrate_port_names, migrate_test_steps};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,

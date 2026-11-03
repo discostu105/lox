@@ -2307,7 +2307,7 @@ fn is_ident(s: &str) -> bool {
 /// parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tile", "on", "off",
+    "and", "or", "not", "test", "tick", "step", "expect", "clock", "tile", "on", "off",
 ];
 
 /// Contextual keywords: a section kind is a keyword only where its section

@@ -7,16 +7,16 @@ extern t_markise = VirtualOutCmd(title: "Markise einfahren")
 
 test "Markise fährt bei Wind oder Regen ein"
 	t_wind.Q = 30
-	tick 2
+	step 2
 	expect t_markise.In == 0
 	t_wind.Q = 55
-	tick 2
+	step 2
 	expect t_markise.In == 1
 	t_wind.Q = 10
 	t_regen.Q = 1
-	tick 2
+	step 2
 	expect t_markise.In == 1
 	t_regen.Q = 0
-	tick 2
+	step 2
 	expect t_markise.In == 0
 end

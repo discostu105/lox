@@ -8,12 +8,12 @@ extern t_licht = VirtualOutCmd(title: "Licht Flur")
 test "Flurlicht bei Bewegung nur im Dunkeln"
 	t_helligkeit.Q = 1000
 	t_bewegung.Q = 1
-	tick 2
+	step 2
 	expect t_licht.In == 0
 	t_helligkeit.Q = 20
-	tick 2
+	step 2
 	expect t_licht.In == 1
 	t_bewegung.Q = 0
-	tick 2
+	step 2
 	expect t_licht.In == 0
 end

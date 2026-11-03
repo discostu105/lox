@@ -272,8 +272,8 @@ fn check_ref(s: &str, lineno: usize) -> Result<String> {
 }
 
 /// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
-/// immediately following letter run or `%` is a unit suffix:
-/// `40s`, `1.5h`, `2700K`, `70%`.
+/// immediately following letter run, `%` or `°` is a unit suffix:
+/// `40s`, `1.5h`, `2700K`, `70%`, `180°`.
 fn number(
     s: String,
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
@@ -286,9 +286,9 @@ fn number(
         )));
     }
     let mut suffix = String::new();
-    if chars.peek() == Some(&'%') {
+    if let Some(&c @ ('%' | '°')) = chars.peek() {
         chars.next();
-        suffix.push('%');
+        suffix.push(c);
     } else {
         while let Some(&c) = chars.peek() {
             if c.is_ascii_alphabetic() {
@@ -304,7 +304,7 @@ fn number(
     }
     let Some(unit) = Unit::parse(&suffix) else {
         return Err(err(format!(
-            "unknown unit `{suffix}` on `{s}{suffix}` (known units: ms, s, min, h, K, %)"
+            "unknown unit `{suffix}` on `{s}{suffix}` (known units: ms, s, min, h, K, %, °)"
         )));
     };
     if scale_by_unit(&s, unit).is_none() {
@@ -929,6 +929,7 @@ impl Parser {
                     | "page"
                     | "test"
                     | "tick"
+                    | "step"
                     | "expect"
                     | "clock"
                     | "tile"
@@ -1028,7 +1029,7 @@ impl Parser {
                     "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
                 ));
             }
-            Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
+            Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "step" | "expect" | "clock") => {
                 return Err(err(format!(
                     "`{kw}` is only allowed inside a `test \"…\"` … `end` body"
                 )));
@@ -1897,7 +1898,7 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
     Ok(kind)
 }
 
-/// One statement of a `test` body: a port injection, `tick`,
+/// One statement of a `test` body: a port injection, `tick`, `step`,
 /// `expect`, or `clock`.
 /// One line of a `moods` body: `"<name>": <setting>, …`, a
 /// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
@@ -2115,7 +2116,16 @@ fn parse_schedule_line(
 fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<TestItem> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     match toks {
-        [Tok::Ident(kw), rest @ ..] if kw == "tick" => {
+        [Tok::Ident(kw), rest @ ..] if kw == "tick" || kw == "step" => {
+            let kind = if kw == "tick" {
+                TickKind::Tick
+            } else {
+                TickKind::Step
+            };
+            let usage = match kind {
+                TickKind::Tick => "expected `tick <duration>` (`tick 5min`, `tick 2s dt 500ms`)",
+                TickKind::Step => "expected `step <n>` (`step 3`, `step 2 dt 0.5`)",
+            };
             let (n_tok, dt) = match rest {
                 [n] => (n, None),
                 [n, Tok::Ident(kw), v] if kw == "dt" => {
@@ -2125,25 +2135,14 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     };
                     (n, Some(dt))
                 }
-                _ => {
-                    return Err(err(
-                        "expected `tick <n>`, `tick <duration>` (`tick 5min`) or either \
-                         with `dt <seconds>`"
-                            .into(),
-                    ));
-                }
+                _ => return Err(err(usage.into())),
             };
             let amount = match n_tok {
                 Tok::Num(_) | Tok::UnitNum(..) | Tok::Ident(_) => value_of(n_tok, lineno)?,
-                _ => {
-                    return Err(err(
-                        "expected `tick <n>` with a plain tick count, or `tick <duration>` \
-                         (`tick 90s`, `tick 5min`)"
-                            .into(),
-                    ));
-                }
+                _ => return Err(err(usage.into())),
             };
             let tick = TickDecl {
+                kind,
                 amount,
                 dt,
                 comment,
@@ -2229,8 +2228,8 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             "`{slug}.{port} <- …`: a test sets values and draws no wires. Write `{slug}.{port} = 1`."
         ))),
         _ => Err(err(
-            "expected a test statement: `<slug>.<Port> = <value>`, `tick <n> [dt <s>]`, \
-             `tick <duration>`, `expect <slug>.<Port> <cmp> <value>`, `clock HH:MM`, \
+            "expected a test statement: `<slug>.<Port> = <value>`, `tick <duration> [dt <s>]`, \
+             `step <n> [dt <s>]`, `expect <slug>.<Port> <cmp> <value>`, `clock HH:MM`, \
              `clock YYYY-MM-DD HH:MM`, or `end`"
                 .into(),
         )),
@@ -2753,7 +2752,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
     })
 }
 
-/// A calendar entry's `on:`, `from:` or `to:` date, `YYYY-MM-DD` or
+/// A calendar entry's `every:`, `from:` or `to:` date, `YYYY-MM-DD` or
 /// `MM-DD`, written bare like `when date 2026-12-24`; `None` for any other
 /// argument or shape (the check names the right one). A quoted date is
 /// refused with the bare one.
@@ -3674,7 +3673,7 @@ sonne.Qm = 30 # override
                    \tx.Q = on\n\
                    \ttick 5min\n\
                    \ttick 2s dt 500ms\n\
-                   \ttick 3 dt 0.5\n\
+                   \tstep 3 dt 0.5\n\
                    \texpect x.Q != off\n\
                    \texpect x.AQ == 1\n\
                    end\n";
@@ -3693,7 +3692,7 @@ sonne.Qm = 30 # override
             .collect();
         assert_eq!(ticks, [300, 4, 3]);
         // A time of day canonicalizes like `At:`.
-        let m = Module::parse_fragment("test \"t\"\n\tclock 7:30:00\n\ttick 1\nend\n").unwrap();
+        let m = Module::parse_fragment("test \"t\"\n\tclock 7:30:00\n\tstep 1\nend\n").unwrap();
         assert!(m.to_text().contains("\tclock 07:30\n"), "{}", m.to_text());
 
         let err = |body: &str| {
@@ -3710,11 +3709,36 @@ sonne.Qm = 30 # override
         assert!(err("\tclock \"spät\"").contains("takes no quotes"));
         assert!(err("\tclock 2026-02-30 07:00").contains("not a date"));
         assert!(err("\tclock 25:00").contains("not a time of day"));
-        // A duration is a whole number of ticks.
+        // A duration is a whole number of cycles.
         let e = err("\ttick 1s dt 300ms");
-        assert!(e.contains("not a whole number of `dt 300ms` ticks"), "{e}");
+        assert!(e.contains("not a whole number of `dt 300ms` cycles"), "{e}");
         assert!(err("\ttick 0s").contains("advances nothing"));
+        assert!(err("\tstep 0").contains("advances nothing"));
         assert!(err("\ttick 5%").contains("duration"));
+        assert!(err("\tstep 1.5").contains("positive whole number"));
+        // Each keyword names the other for the value it does not take.
+        let e = err("\ttick 3");
+        assert!(e.contains("Write `step 3` instead of `tick 3`"), "{e}");
+        let e = err("\tstep 5min");
+        assert!(
+            e.contains("Write `tick 5min` instead of `step 5min`"),
+            "{e}"
+        );
+        let e = Module::parse_fragment("step = Not()\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("reserved word"), "{e}");
+    }
+
+    #[test]
+    fn degrees_are_a_unit_suffix() {
+        let src = "extern jal = AutoJalousie(title: \"J\")\n\njal.Dir = 180°\n";
+        let m = Module::parse_fragment(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        let e = Module::parse_fragment("x = And(In1: 5deg)\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("unknown unit `deg`"), "{e}");
     }
 
     #[test]

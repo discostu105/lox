@@ -208,10 +208,10 @@ Tests live in the module and simulate the compiled config:
 ```text
 test "Frostwächter schlägt an und beruhigt sich"
     wassertemp.Q = 2         # drive the sensor
-    tick 2
+    step 2
     expect frost.Q == 1
     wassertemp.Q = 10
-    tick 2
+    step 2
     expect frost.Q == 0
 end
 ```

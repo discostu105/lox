@@ -160,22 +160,22 @@ klima_temp.category = "Klima"
 test "Hitzewarnung mit Hysterese"
 	clock 2026-07-15 14:00 # simulierte Uhrzeit, für Zeitlogik
 	aussentemp.Q = 35
-	tick 4
+	step 4
 	expect hitze.Q == 1
 	aussentemp.Q = 29 # unter Ein (30), über Aus (28)
 	tick 2s dt 500ms # zwei Sekunden in feineren Schritten (4 Ticks)
 	expect hitze.Q == 1 # Hysterese hält
 	aussentemp.Q = 20
-	tick 4
+	step 4
 	expect hitze.Q ~= 0 # ~= toleriert 5 %
 end
 
 test "Abdeckungswächter schaltet"
 	abdeckung.Q = 90
-	tick 4
+	step 4
 	expect weit_offen.Q == on # digitale Werte: on/off
 	expect anforderung.Q == 1 # Fan-in: ein I1-Draht genügt
 	abdeckung.Q = 30
-	tick 4
+	step 4
 	expect weit_offen.Q != on
 end

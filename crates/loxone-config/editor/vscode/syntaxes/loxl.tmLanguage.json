@@ -58,7 +58,7 @@
       "match": "(?<![\\w.:-])(?:[0-9]{4}-)?[0-9]{2}-[0-9]{2}(?![\\w.:-])"
     },
     "number": {
-      "match": "(?<![\\w.])(-?[0-9]+(?:\\.[0-9]+)?)(ms|min|h|s|K|%)?(?![\\w.])",
+      "match": "(?<![\\w.])(-?[0-9]+(?:\\.[0-9]+)?)(ms|min|h|s|K|%|°)?(?![\\w.])",
       "captures": {
         "1": { "name": "constant.numeric.loxl" },
         "2": { "name": "keyword.other.unit.loxl" }
@@ -148,7 +148,7 @@
           }
         },
         {
-          "match": "^\\s*(tick)\\s+([0-9]+(?:\\.[0-9]+)?)(ms|min|h|s)?(?:\\s+(dt)\\b)?",
+          "match": "^\\s*(tick|step)\\s+([0-9]+(?:\\.[0-9]+)?)(ms|min|h|s)?(?:\\s+(dt)\\b)?",
           "captures": {
             "1": { "name": "keyword.control.tick.loxl" },
             "2": { "name": "constant.numeric.loxl" },

@@ -9,9 +9,9 @@ use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
     decompile_pages, finish_lint, fix_implicit_zeros, fix_unit_suffixes_text, implicit_zeros,
-    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source, lint_tiles,
-    lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify, trace_tests,
-    valid_slug, validate_ports,
+    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source,
+    lint_stale_lifecycle, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
+    rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -899,12 +899,16 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     for f in &targets {
         let name = f.display();
         let src = std::fs::read_to_string(f).map_err(|e| format!("{name}: {e}"))?;
-        let module = Module::parse_fragment(&src).map_err(|e| format!("{name}: {e}"))?;
+        // A v2 test's `tick <n>` is `step <n>`, rewritten before the
+        // parse, which refuses it.
+        let module = Module::parse_fragment(&loxone_config::logic::migrate_test_steps(&src))
+            .map_err(|e| format!("{name}: {e}"))?;
         parsed.push((src, module));
     }
     let spellings = loxone_config::logic::ModeSpellings::of(parsed.iter().map(|(_, m)| m));
     // A v2 module's port keys become the v3 names (`InputTrigger` →
-    // `Trigger`), looked up across every fragment.
+    // `Trigger`), looked up across every fragment. A calendar entry's
+    // `on:` becomes `every:` with the mode spellings.
     let whole: Vec<Module> = parsed.iter().map(|(_, m)| m.clone()).collect();
     let whole: Vec<&Module> = whole.iter().collect();
     let mut dirty = false;
@@ -1670,6 +1674,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
             findings.extend(lint_circuits(&module, lock, &compiled)?);
             findings.extend(lint_implicit_zero(&module, lock, &compiled)?);
+            findings.extend(lint_stale_lifecycle(&module, lock));
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
             true

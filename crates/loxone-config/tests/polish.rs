@@ -139,7 +139,7 @@ fn tick_and_dt_take_let_constants() {
                nach = OffDelay(Trigger: vi.Q, Time: 2s)\n\n\
                test \"konstanten\"\n\
                \tvi.Q = 1\n\
-               \ttick schritte\n\
+               \tstep schritte\n\
                \texpect nach.Q == 1\n\
                \tvi.Q = 0\n\
                \ttick warten dt takt\n\
@@ -174,12 +174,18 @@ fn tick_and_dt_take_let_constants() {
 
     // A constant that is no count or duration, or does not divide: errors.
     for (lets, tick, want) in [
-        ("let x = on", "tick x", "a plain tick count or a duration"),
-        ("let x = 1.5", "tick x", "positive whole number"),
+        ("let x = on", "tick x", "a tick takes a duration"),
+        ("let x = 1.5", "step x", "positive whole number"),
+        ("let x = 3", "tick x", "Write `step 3` instead of `tick 3`"),
+        (
+            "let x = 5min",
+            "step x",
+            "Write `tick 5min` instead of `step 5min`",
+        ),
         (
             "let x = 3s",
             "tick x dt 2s",
-            "not a whole number of `dt 2s` ticks",
+            "not a whole number of `dt 2s` cycles",
         ),
         ("let x = 3s", "tick nix", "undeclared constant `nix`"),
     ] {

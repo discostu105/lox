@@ -1777,7 +1777,8 @@ pub enum PortUnit {
     Minutes,
     Percent,
     Kelvin,
-    /// A documented unit Lox Logic has no suffix for (`°`, `mm`, `lux`, …).
+    Degrees,
+    /// A documented unit Lox Logic has no suffix for (`mm`, `lux`, …).
     Other(&'static str),
 }
 
@@ -1789,6 +1790,7 @@ impl PortUnit {
             PortUnit::Minutes => "minutes".into(),
             PortUnit::Percent => "percent".into(),
             PortUnit::Kelvin => "kelvin".into(),
+            PortUnit::Degrees => "degrees".into(),
             PortUnit::Other(u) => format!("`{u}`"),
         }
     }
@@ -1804,6 +1806,7 @@ pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
         "min" => PortUnit::Minutes,
         "%" => PortUnit::Percent,
         "K" => PortUnit::Kelvin,
+        "°" => PortUnit::Degrees,
         other => PortUnit::Other(other),
     })
 }

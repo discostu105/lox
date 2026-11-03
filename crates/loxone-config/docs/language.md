@@ -97,14 +97,16 @@ ref        = slug                                  (* a name; an instance stands
            | slug "." slug ;                       (* instance.block *)
 
 test       = "test" string [ comment ]
-             { comment | inject | tick | expect | test-clock }
+             { comment | inject | tick | step | expect | test-clock }
              "end" [ comment ] ;
 test-cmp   = "==" | "!=" | ">=" | ">" | "<=" | "<" | "~=" ;
 inject     = source "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
-tick       = "tick" ( integer | number time-unit | const-ref )
-                                    (* a count, or a duration: a whole
-                                       number of dt steps; a constant
-                                       holds either *)
+tick       = "tick" ( number time-unit | const-ref )
+                                    (* a duration: a whole number of dt
+                                       cycles; a constant holds one *)
+             [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
+step       = "step" ( integer | const-ref )
+                                    (* a count of program cycles *)
              [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
 time-unit  = "ms" | "s" | "min" | "h" ;
 expect     = "expect" source test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
@@ -197,14 +199,14 @@ port       = letter-or-digit-or-underscore-sequence ;       (* the port's source
 value      = number [ unit ] | string | bool | const-ref | clock | date | day-of-year ;
 day-of-year = digit digit "-" digit digit ;        (* MM-DD; a date and a day of the year
                                                       bind only a calendar entry's
-                                                      `on:`, `from:`, `to:` *)
+                                                      `every:`, `from:`, `to:` *)
 bool       = "on" | "off" ;                        (* digital 1/0; "true"/"false" on a
                                                       text-boolean attribute *)
 clock      = digit [ digit ] ":" digit digit [ ":" digit digit ] ;
                                                    (* a time of day, 00:00 … 23:59:59 *)
 const-ref  = slug ;                                (* names a `let` constant *)
 number     = [ "-" ] digits [ "." digits ] ;       (* exactly — `1.2.3`, `5.` are errors *)
-unit       = "ms" | "s" | "min" | "h" | "K" | "%" ;   (* immediately adjacent *)
+unit       = "ms" | "s" | "min" | "h" | "K" | "%" | "°" ;   (* immediately adjacent *)
 string     = '"' { character | escape } '"' ;
 escape     = '\"' | "\\" | "\n" ;
 ```
@@ -246,20 +248,22 @@ Notes:
   milliseconds from 10, its `Allowedtimeouts` a whole number; a digital `VirtualIn`'s `MaxVal` is 1 and
   its `MinVal` 0.
 - A number may carry a **unit suffix**, written immediately adjacent: `40s`, `250ms`, `90min`,
-  `1.5h`, `2700K`, `70%`. `loxl types <Type>` shows each port's documented unit.
+  `1.5h`, `2700K`, `70%`, `180°`. `loxl types <Type>` shows each port's documented unit.
   - Time units scale exactly into the port's unit. That is seconds by default (`1.5h` compiles to
     `Def="5400"`, byte-identical to `5400`), minutes on a minutes port (`AutoShadeTime: 2h` compiles
     to `120`), milliseconds on a milliseconds port (`VirtualHttpIn`'s `Timeout: 4s` compiles to
     `4000`). A value that is not an exact decimal number of minutes (`10s`) is an error there.
-  - `%` and `K` (color temperature) have factor 1. They are accepted only on a port documented in
-    that unit, or on an undocumented one. A time suffix on a `%`, `K` or `°` port is an error.
+  - `%`, `K` (color temperature) and `°` (an angle or a temperature) have factor 1. They are
+    accepted only on a port documented in that unit, or on an undocumented one. A time suffix on a
+    `%`, `K` or `°` port is an error.
   - A suffixed `let` scales per use, into each port's unit.
   - The suffix is part of the canonical spelling: `1.5h` stays `1.5h` through `fmt`.
   - An unknown suffix is a parse error. A quoted `"40s"` stays a string.
   - Decompile and adopt write the suffix on a port documented in milliseconds, seconds or minutes:
     the largest of
     `h`, `min`, `s`, `ms` that gives a whole number (`10800` → `3h`, `0.5` → `500ms`, `58` → `58s`),
-    and only when it compiles back to the same digits. Zero and the other ports stay bare.
+    and only when it compiles back to the same digits. Zero and the other ports stay bare, `%`, `K`
+    and `°` ports among them.
   - `loxl lint` reports a bare number that this rule would write with a suffix (`unit-suffix`:
     `Delay: 10800` → `Delay: 3h`), on blocks, in `defaults`, on extern port assignments
     (`x.Time = 300` → `x.Time = 5min`) and in template bodies. A template value parameter
@@ -271,7 +275,7 @@ Notes:
     `loxl lint --fix` writes the suffixes; the compile output stays byte-identical, and in a project
     the fix is refused if it would not.
 - **Reserved words** can never be a name: the statement keywords `let`, `extern`, `removed`,
-  `moved`, `template`, `end`, `page`, `test`, `tick`, `expect`, `clock`, `tile`, the boolean
+  `moved`, `template`, `end`, `page`, `test`, `tick`, `step`, `expect`, `clock`, `tile`, the boolean
   literals `on` and `off`, the expression operators `and`, `or`, `not`, and v0's `block`, `wire`,
   `set` and `use` (migration errors). `tick = Not()` is an error saying so.
 - **Contextual words** are keywords only in their place and ordinary names everywhere else. One
@@ -787,7 +791,7 @@ module directory rewrites the spellings the source shows; `decompile` and `adopt
 party = Mode("Party")
 ferien = CalendarEntry("Sommerferien", switches: vacation, from: 2026-07-04, to: 2026-09-05)
 ostern = CalendarEntry("Ostermontag", switches: holiday, easter: 1)
-silvester = CalendarEntry("Silvester", switches: party, on: 12-31)
+silvester = CalendarEntry("Silvester", switches: party, every: 12-31)
 heizperiode = CalendarEntry("Heizperiode", switches: heating, from: 10-01, to: 04-30)
 ```
 
@@ -807,14 +811,15 @@ The date is one of four kinds, written bare like `when date`:
 
 | Source | Kind | Compiles to |
 |---|---|---|
-| `on: 12-31` | a day every year (`MM-DD`) | no `Mode=`; `Month`, `Day` |
+| `every: 12-31` | a day every year (`MM-DD`) | no `Mode=`; `Month`, `Day` |
 | `easter: 1` | days after Easter Sunday (`easter: -2`: before it) | `Mode="1"`, `EasterOffset` |
 | `from: 2026-07-04, to: 2026-09-05` | one period (`YYYY-MM-DD`) | `Mode="3"`, `From`, `To` (days since 2009-01-01) |
 | `from: 10-01, to: 04-30` | a range every year (`MM-DD`), across New Year when `to` is earlier | `Mode="4"`, `Month`, `Day`, `Month2`, `Day2` |
 
 Month and day have two digits, and `02-29` is a day of the year. A
-period starts on 2009-01-01 or later. `on:` takes no year: for one day,
-write `from: 2026-12-24, to: 2026-12-24`. The attributes the kind does
+period starts on 2009-01-01 or later. `every:` takes no year: for one day,
+write `from: 2026-12-24, to: 2026-12-24`. v2's `on: 12-31` is an error
+naming `every: 12-31`; `loxl fmt` rewrites it. The attributes the kind does
 not read stay as they are, as in a Loxone Config save. Without a date,
 a fresh entry is 1 January (what Loxone Config writes for an unset
 date), and an adopted one keeps its date.
@@ -994,8 +999,9 @@ object from bases older than the deployment of that output.
 
 - It covers one slug and shows in the diff. Prefer it over the global `--allow-removals` flag.
 - You may delete the statement right after the compile that applies it; the tombstone carries the
-  intent from there. It is tolerated while the tombstone is pending. Once the removal has reached the
-  deployed config, a lingering statement is a compile error.
+  intent from there. A statement that names neither a managed block nor a pending removal (the
+  removal is done, or the slug is a typo) compiles and does nothing; `loxl lint` reports it as
+  `stale-lifecycle`.
 - Declaring a slug and `removed`-ing it in the same module is an error.
 
 The same statement deletes a named rule (`rule <slug> "Name"`) in
@@ -1011,10 +1017,12 @@ moved beschatten -> schatten_gate
 
 Renames the lockfile entry, so the block's identity (object and port UUIDs, layout) survives a slug
 rename in source. Rename the declaration and its references, add the `moved` line, and compile.
-Once the new slug has the lock entry, the statement is done and can be deleted.
+Once the old slug has left the lockfile, the statement is done: it compiles and does nothing, and
+`loxl lint` reports it as `stale-lifecycle` until it is deleted. A `moved` that names no slug of the
+lockfile is reported the same way.
 
-It is an error when neither slug is in the lockfile (typo guard), when the old slug is still
-declared, or when moves are chained (`a -> b`, `b -> c`). `loxl rename` does all of this in one step.
+It is an error when the old slug is still declared or when moves are chained (`a -> b`, `b -> c`).
+`loxl rename` does all of this in one step.
 
 ### `page` — place the following blocks on a named page
 
@@ -1352,13 +1360,13 @@ Anything else, such as a gate drawn in Loxone Config, stays a declared block.
 ```text
 test "Frostwächter schlägt an"
 	wassertemp.Q = 2        # inject: override that output for the whole test
-	tick 2                  # advance the simulation two steps (default dt 1s)
+	tick 2s                 # advance the simulation two seconds (default dt 1s)
 	expect frost.Q == 1
 	wassertemp.Q = 10
-	tick 2 dt 0.5           # per-step dt override, unit values allowed
+	step 2 dt 0.5           # two program cycles of half a second
 	expect frost.Q == off
 	clock 06:30             # the wall clock, bare
-	tick 5min               # a duration: 300 steps of 1s
+	tick 5min               # a duration: 300 cycles of 1s
 	expect frost.Q != on
 end
 ```
@@ -1379,24 +1387,24 @@ Statements, in file order:
   (that is the normal case: drive a sensor's `Q`/`AQ`). Values are
   numbers (with units), `on`/`off` or `let` references; strings are
   rejected.
-- **`tick <n> [dt <v>]`** — advance the simulation `n` program cycles
-  of `dt` seconds (default 1). Injections since the previous `tick`
-  take effect for these cycles.
-- **`tick <duration> [dt <v>]`** — advance by a time: `tick 5min`
-  is `tick 300`, `tick 2s dt 500ms` is `tick 4 dt 500ms`. The duration
-  must be a whole number of `dt` steps (`tick 1s dt 300ms` is an
-  error); `fmt` keeps the spelling written.
-- **`tick <constant> [dt <constant>]`** — a `let` constant holds the count or the duration
-  (`let warten = 5min` … `tick warten`), and `dt` takes one too. A constant that is neither a whole
-  count nor a time, or a duration that is no whole number of `dt` steps, is an error.
+- **`tick <duration> [dt <v>]`** — advance the simulation by a time, in program cycles of `dt`
+  seconds (default 1): `tick 5min` is 300 cycles, `tick 2s dt 500ms` is 4 cycles of 500 ms. The
+  duration must be a whole number of cycles (`tick 1s dt 300ms` is an error). Injections since the
+  previous `tick` or `step` take effect for these cycles.
+- **`step <n> [dt <v>]`** — advance `n` program cycles of `dt` seconds. A bare number after `tick`
+  is an error naming `step`, a duration after `step` one naming `tick`; `loxl fmt --write` rewrites
+  a v2 `tick <n>`.
+- **`tick <constant>` / `step <constant>` `[dt <constant>]`** — a `let` constant holds the
+  duration or the count (`let warten = 5min` … `tick warten`), and `dt` takes one too. A constant
+  that holds the other kind of value, or a duration that is no whole number of `dt` cycles, is an
+  error.
 - **`expect slug.Port <cmp> <value>`** (or `expect slug <cmp> <value>` for the default output) —
-  assert after the preceding `tick`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and `~=`
-  (approximately, 5 % tolerance); `==` and `!=` allow the rounding of
-  decimal arithmetic. An `expect` before any `tick` is an
-  error, as is a trailing injection no `tick` ever applies. `--lox`
-  (below) has no `!=`.
+  assert after the preceding `tick` or `step`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and
+  `~=` (approximately, 5 % tolerance); `==` and `!=` allow the rounding of decimal arithmetic. An
+  `expect` before any `tick` or `step` is an error, as is a trailing injection none ever applies.
+  `--lox` (below) has no `!=`.
 - **`clock HH:MM[:SS]` / `clock YYYY-MM-DD HH:MM[:SS]`** — set the
-  simulated wall clock before the following `tick`, for time-dependent
+  simulated wall clock before the following `tick` or `step`, for time-dependent
   logic: the weekday operating modes and the `DayTimer`s follow it.
   Written bare; the time canonicalizes like a `clock` value
   (`7:30:00` → `07:30`). v1's quoted `clock "07:30"` is an error naming
@@ -2001,9 +2009,9 @@ It names one or more kinds (comma or space separated); the rest of the line is t
 the declaration below it: a block, extern, instance (all its blocks), device (all its inputs),
 constant, template, signal or `defaults`. Inside a template body it covers that block in every
 instance. An allow that covers no finding, names no kind or stands above no declaration is reported
-as `unused-allow`. Outside a project the kinds that need the compiled config (`dead-outputs`,
-`tile-broadcast`, `tile-dead-command`, `no-access-right`, `no-actuator`, `implicit-zero`) are not
-judged.
+as `unused-allow`. Outside a project the kinds that need the compiled config or the lockfile
+(`dead-outputs`, `tile-broadcast`, `tile-dead-command`, `no-access-right`, `no-actuator`,
+`implicit-zero`, `stale-lifecycle`) are not judged.
 
 `implicit-zero` reports a block that already existed and has a port at 0 only because nothing sets it:
 the compiled config has no `Def=` and no wire there, the source no value, and Loxone Config places the
@@ -2011,6 +2019,11 @@ block with another value (a `Monoflop` adopted without `Time` pulses for 0 s, no
 writes `Port: 0` into the block, at the port's place, and the compiled config stays byte-identical.
 Write the value you want instead where 0 is not meant. A block a template creates is reported, not
 fixed.
+
+`stale-lifecycle` reports a `removed` or `moved` statement the lockfile has nothing left for: a
+`removed` of a slug that is no managed block, no pinned rule and no pending removal, or a `moved`
+whose old slug is no managed block. The removal has reached the deployed config, the rename is
+applied, or the name is a typo. The compile ignores the statement; delete the line.
 
 The language server offers both as quick fixes: on a finding it inserts the allow comment above the
 declaration (or adds the kind to the allow already there), and on an `unused-allow` it removes the
@@ -2125,7 +2138,7 @@ replacement. The compile output of a migrated file is byte-identical.
   goes on one line too when they are all numbers, unit values, times or `on`/`off`. A whole-line
   comment stays attached to the statement below it unless a blank line separates them. The compile
   output does not change.
-- **`tick` and `dt` take `let` constants** (`tick warten`, `tick 3 dt takt`).
+- **`tick` and `dt` take `let` constants** (`tick warten`, `step 3 dt takt`).
 - **`when time`** reads the time like `clock` (`7:30` = `07:30`).
 - **Scoped names everywhere**: `(inst.block, x).room = …` and `mirrors: inst.block` (extern
   matcher and minted ref) take the instance spelling. Compile, check and test errors spell a block
@@ -2182,6 +2195,15 @@ that names its replacement. The compile output of a migrated file is byte-identi
   `pumpe.On <- wp_bedarf`, `expect frost == 1`. New syntax only.
 - **`let` aliases a port**: `let aussen = sensor.AQ`. New syntax only; `x = a.Q` stays an error that
   points at `let`.
+- **A leftover `removed` or `moved` is a lint, not an error**: once the lockfile has nothing left
+  for it, the compile ignores it and `loxl lint` reports `stale-lifecycle`.
+- **A calendar entry's day every year is `every:`** (`every: 12-31`, was `on: 12-31`). `on:` is an
+  error naming `every:`; `loxl fmt --write` rewrites it.
+- **`°` is a unit suffix** (`Dir: 180°`), with factor 1 like `%` and `K`: accepted on a port
+  documented in `°` or on an undocumented one.
+- **`step` counts program cycles, `tick` takes a duration**: `step 3` (was `tick 3`), `tick 5min`.
+  A bare number after `tick` is an error naming `step`; `loxl fmt --write` rewrites it. `step` is a
+  reserved word.
 
 ## Versioning
 

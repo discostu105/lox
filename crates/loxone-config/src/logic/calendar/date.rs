@@ -1,10 +1,10 @@
-//! A calendar entry's date, stated as a date: `on: 12-31` (a day every
+//! A calendar entry's date, stated as a date: `every: 12-31` (a day every
 //! year), `easter: 1` (days after Easter Sunday), `from: 2026-07-05, to:
 //! 2026-09-06` (one period) or `from: 10-01, to: 04-30` (every year). It
 //! compiles to the stored `Mode=` and the attributes of that kind (see
 //! [`EntryDate`] and loxone-format.md, "Calendar entries"). The stored
-//! attributes are refused in source with the replacement; `loxl fmt`
-//! writes it and adopt lifts it.
+//! attributes and v2's `on:` are refused in source with the replacement;
+//! `loxl fmt` writes it and adopt lifts it.
 
 use super::BLOCK_TYPE;
 use crate::error::{Error, Result};
@@ -12,11 +12,14 @@ use crate::logic::ast::{ArgItem, Binding, BindingKind, BlockDecl, Module, Value}
 use crate::logic::rule::{civil_from_days, days_from_civil, parse_date};
 
 /// The arguments that state an entry's date.
-pub(crate) const ON: &str = "on";
+pub(crate) const EVERY: &str = "every";
 pub(crate) const EASTER: &str = "easter";
 pub(crate) const FROM: &str = "from";
 pub(crate) const TO: &str = "to";
-const DATE_KEYS: &[&str] = &[ON, EASTER, FROM, TO];
+const DATE_KEYS: &[&str] = &[EVERY, EASTER, FROM, TO];
+/// v2's name of `every:`: parsed as a date, refused by the check, renamed
+/// by `loxl fmt`.
+pub(crate) const OLD_EVERY: &str = "on";
 
 /// The stored attributes of the date, in the save's order: no source.
 const RAW_DATE: &[&str] = &[
@@ -31,15 +34,17 @@ const RAW_DATE: &[&str] = &[
     "WeekDayInMonth",
 ];
 
-/// Whether `key` on a block of this type states the entry's date.
+/// Whether `key` on a block of this type states the entry's date (v2's
+/// `on:` counts, so that the check names `every:` and not a port).
 pub(crate) fn is_date_key(block_type: &str, key: &str) -> bool {
-    block_type == BLOCK_TYPE && DATE_KEYS.contains(&key)
+    block_type == BLOCK_TYPE && (DATE_KEYS.contains(&key) || key == OLD_EVERY)
 }
 
-/// Whether `key` takes a date (`on:`, `from:`, `to:`) on a block of this
-/// type: the parser reads `12-31` there as a date, not a subtraction.
+/// Whether `key` takes a date (`every:`, `from:`, `to:`) on a block of
+/// this type: the parser reads `12-31` there as a date, not a
+/// subtraction. v2's `on:` reads one too, so the check can name `every:`.
 pub(crate) fn takes_date(block_type: &str, key: &str) -> bool {
-    block_type == BLOCK_TYPE && matches!(key, ON | FROM | TO)
+    block_type == BLOCK_TYPE && matches!(key, EVERY | FROM | TO | OLD_EVERY)
 }
 
 /// Whether adopt leaves out a stored attribute of an entry: one of the
@@ -108,7 +113,7 @@ fn ymd(days: i64) -> String {
 }
 
 /// How a calendar entry states its date, for errors.
-const USAGE: &str = "`on: 12-31` (a day every year), `easter: 1` (days after Easter Sunday), \
+const USAGE: &str = "`every: 12-31` (a day every year), `easter: 1` (days after Easter Sunday), \
                      `from: 2026-07-05, to: 2026-09-06` (one period) or `from: 10-01, to: \
                      04-30` (every year)";
 
@@ -116,7 +121,7 @@ impl EntryDate {
     /// The source arguments that state it.
     fn args(self) -> Vec<(&'static str, Value)> {
         match self {
-            EntryDate::Fixed { month, day } => vec![(ON, Value::Date(md(month, day)))],
+            EntryDate::Fixed { month, day } => vec![(EVERY, Value::Date(md(month, day)))],
             EntryDate::Easter(n) => vec![(EASTER, Value::Number(n.to_string()))],
             EntryDate::Period { from, to } => {
                 vec![(FROM, Value::Date(ymd(from))), (TO, Value::Date(ymd(to)))]
@@ -235,7 +240,7 @@ impl EntryDate {
     }
 }
 
-/// The date an entry's `on:`, `easter:` or `from:`/`to:` state, `None`
+/// The date an entry's `every:`, `easter:` or `from:`/`to:` state, `None`
 /// without one. `Err` is the message, without the block.
 fn source_date(module: &Module, b: &BlockDecl) -> std::result::Result<Option<EntryDate>, String> {
     let get = |k: &str| b.params().find(|(p, _)| *p == k).map(|(_, v)| v);
@@ -247,14 +252,14 @@ fn source_date(module: &Module, b: &BlockDecl) -> std::result::Result<Option<Ent
         let (y, m, dd) = parse_date(d)?;
         Some(days_from_civil(y, m, dd) - epoch())
     };
-    Ok(Some(match (get(ON), get(EASTER), get(FROM), get(TO)) {
+    Ok(Some(match (get(EVERY), get(EASTER), get(FROM), get(TO)) {
         (None, None, None, None) => return Ok(None),
         (Some(v), None, None, None) => {
-            let d = date(ON, v)?;
+            let d = date(EVERY, v)?;
             let Some((month, day)) = month_day(&d) else {
                 return Err(format!(
-                    "`{ON}:` is a day every year, without the year. For that one day, write \
-                     `{FROM}: {d}, {TO}: {d}` instead of `{ON}: {d}`."
+                    "`{EVERY}:` is a day every year, without the year. For that one day, write \
+                     `{FROM}: {d}, {TO}: {d}` instead of `{EVERY}: {d}`."
                 ));
             };
             EntryDate::Fixed { month, day }
@@ -308,17 +313,23 @@ fn source_date(module: &Module, b: &BlockDecl) -> std::result::Result<Option<Ent
         }
         _ => {
             return Err(format!(
-                "an entry has one date: `{ON}:`, `{EASTER}:`, or `{FROM}:` with `{TO}:`"
+                "an entry has one date: `{EVERY}:`, `{EASTER}:`, or `{FROM}:` with `{TO}:`"
             ));
         }
     }))
 }
 
-/// A calendar entry's date, checked: the source states it with `on:`,
+/// A calendar entry's date, checked: the source states it with `every:`,
 /// `easter:` or `from:`/`to:`. The stored attributes (`Mode: 4, Month:
-/// 10, …`) are refused with the replacement.
+/// 10, …`) and v2's `on:` are refused with the replacement.
 pub(crate) fn check_date(module: &Module, b: &BlockDecl) -> Result<()> {
     let fail = |m: String| Err(Error::Compile(format!("block `{}`: {m}", b.slug)));
+    if let Some((_, v)) = b.params().find(|(k, _)| *k == OLD_EVERY) {
+        return fail(format!(
+            "a calendar entry's day every year is `{EVERY}:`. Write `{EVERY}: {v}` instead of \
+             `{OLD_EVERY}: {v}`."
+        ));
+    }
     if let Some(x) = b
         .bindings()
         .find(|x| DATE_KEYS.contains(&x.port.as_str()) && !matches!(x.kind, BindingKind::Param(_)))
@@ -336,7 +347,7 @@ pub(crate) fn check_date(module: &Module, b: &BlockDecl) -> Result<()> {
     let old = old.join(", ");
     if b.params().any(|(k, _)| DATE_KEYS.contains(&k)) {
         return fail(format!(
-            "a calendar entry states its date once, with `{ON}:`, `{EASTER}:` or \
+            "a calendar entry states its date once, with `{EVERY}:`, `{EASTER}:` or \
              `{FROM}:`/`{TO}:`. Leave out `{old}`."
         ));
     }
@@ -388,9 +399,19 @@ pub(crate) fn lift_date(
 
 /// `loxl fmt`: an entry's stored attributes (`Mode: 4, Month: 10, …`)
 /// become its date (`from: 10-01, to: 04-30`) where their numbers give
-/// one, and `WeekDayInMonth: 1` leaves.
+/// one, `WeekDayInMonth: 1` leaves, and v2's `on:` becomes `every:`.
 pub(crate) fn rewrite_raw_date(b: &mut BlockDecl) {
-    if b.block_type != BLOCK_TYPE || b.params().any(|(k, _)| DATE_KEYS.contains(&k)) {
+    if b.block_type != BLOCK_TYPE {
+        return;
+    }
+    for arg in &mut b.args {
+        if let ArgItem::Binding(x) = arg
+            && x.port == OLD_EVERY
+        {
+            x.port = EVERY.to_string();
+        }
+    }
+    if b.params().any(|(k, _)| DATE_KEYS.contains(&k)) {
         return;
     }
     let numbers: Option<Vec<(String, String)>> = b

@@ -9,32 +9,32 @@ extern t_licht = VirtualOutCmd(title: "Licht Flur")
 test "Bewegung im Dunkeln: 3 Minuten"
 	t_helligkeit.Q = 10
 	t_bewegung.Q = 1
-	tick 2
+	step 2
 	expect t_licht.In == 1
 	t_bewegung.Q = 0
-	tick 170
+	step 170
 	expect t_licht.In == 1
-	tick 20
+	step 20
 	expect t_licht.In == 0
 end
 
 test "Bewegung bei Tag: aus"
 	t_helligkeit.Q = 5000
 	t_bewegung.Q = 1
-	tick 2
+	step 2
 	expect t_licht.In == 0
 end
 
 test "Taster hält das Licht"
 	t_helligkeit.Q = 5000
 	t_taster.Q = 1
-	tick 1
+	step 1
 	t_taster.Q = 0
-	tick 600
+	step 600
 	expect t_licht.In == 1
 	t_taster.Q = 1
-	tick 1
+	step 1
 	t_taster.Q = 0
-	tick 2
+	step 2
 	expect t_licht.In == 0
 end

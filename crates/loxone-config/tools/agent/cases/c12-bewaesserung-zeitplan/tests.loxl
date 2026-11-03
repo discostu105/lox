@@ -6,23 +6,23 @@ extern t_bewaesserung = VirtualOutCmd(title: "Bewässerung Garten")
 
 test "Bewässerung an einem Mittwoch"
 	clock 2026-07-15 05:58
-	tick 60
+	step 60
 	expect t_bewaesserung.In == 0
-	tick 180
+	step 180
 	expect t_bewaesserung.In == 1
 	t_regen.Q = 1
-	tick 2
+	step 2
 	expect t_bewaesserung.In == 0
 	t_regen.Q = 0
-	tick 2
+	step 2
 	expect t_bewaesserung.In == 1
 	clock 2026-07-15 06:25
-	tick 2
+	step 2
 	expect t_bewaesserung.In == 0
 end
 
 test "Bewässerung auch am Samstag"
 	clock 2026-07-18 06:05
-	tick 2
+	step 2
 	expect t_bewaesserung.In == 1
 end

@@ -7,23 +7,23 @@ extern t_lueftung = VirtualOutCmd(title: "Lüftung Büro")
 
 test "Lüftung nach 5 Minuten CO2 über 1000 ppm"
 	t_co2.Q = 1200
-	tick 200
+	step 200
 	expect t_lueftung.In == 0
-	tick 120
+	step 120
 	expect t_lueftung.In == 1
 	t_co2.Q = 800
-	tick 2
+	step 2
 	expect t_lueftung.In == 0
 end
 
 test "Offenes Fenster sperrt die Lüftung"
 	t_co2.Q = 1500
-	tick 400
+	step 400
 	expect t_lueftung.In == 1
 	t_fenster.Q = 1
-	tick 2
+	step 2
 	expect t_lueftung.In == 0
 	t_fenster.Q = 0
-	tick 2
+	step 2
 	expect t_lueftung.In == 1
 end
