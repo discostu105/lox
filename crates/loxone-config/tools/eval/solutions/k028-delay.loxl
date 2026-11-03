@@ -5,9 +5,9 @@ extern luefter = VirtualOut(title: "Lüfter Bad")
 
 nachlauf = OnPulseDelay(
 	"Lüfter-Nachlauf",
-	InputTrigger: licht.AQ1,
+	Trigger: licht.AQ1,
 	Delay: 0,
-	Time: 10min,
+	PulseTime: 10min,
 )
 
 luefter.I1 <- nachlauf.Q

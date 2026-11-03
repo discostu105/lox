@@ -28,14 +28,14 @@ fn every_syntax_error_is_reported_with_its_line() {
 extern sw = Switch(title: \"Licht\")
 a = Or(I1 sw.Q)
 b = Or(
-  I1: sw.Q,
+  In1: sw.Q,
   I2 = 3,
 )
 rule r1 bad words
   when sw.Q on
   then b on
 end
-c = Not(I: sw.Q)
+c = Not(In: sw.Q)
 d.Q <- <- sw.Q
 ";
     let e = Module::parse(src).unwrap_err();
@@ -49,7 +49,7 @@ d.Q <- <- sw.Q
 fn a_failed_call_head_skips_its_argument_lines() {
     let src = "\
 a = Or(I1 sw.Q,
-  I2: sw.Q,
+  In2: sw.Q,
   oops oops,
 )
 b = Or(I1 3)
@@ -67,10 +67,10 @@ fn one_syntax_error_is_still_a_plain_parse_error() {
 fn independent_name_errors_are_all_reported() {
     let src = "\
 extern sw = Switch(title: \"Licht\")
-a = And(I1: sw.Q, I2: nope.Q)
-b = Or(I1: sw.Q)
-b.I2 <- sw.Q
-c = Not(I: sw.Q)
+a = And(In1: sw.Q, In2: nope.Q)
+b = Or(In1: sw.Q)
+b.In2 <- sw.Q
+c = Not(In: sw.Q)
 c.Q = 3
 a = Not()
 ";
@@ -78,7 +78,7 @@ a = Not()
     assert_eq!(m.len(), 4, "{m:#?}");
     assert!(m[0].contains("duplicate name `a`"), "{m:#?}");
     assert!(m[1].contains("undeclared slug `nope`"), "{m:#?}");
-    assert!(m[2].contains("`b.I2 <- sw.Q`"), "{m:#?}");
+    assert!(m[2].contains("`b.In2 <- sw.Q`"), "{m:#?}");
     assert!(m[3].contains("`c.Q = …`"), "{m:#?}");
 }
 
@@ -86,10 +86,10 @@ a = Not()
 fn a_missing_declaration_is_reported_once() {
     let src = "\
 extern sw = Switch(title: \"Licht\")
-a = And(I1: sw.Q, I2: nope.Q)
-b = Or(I1: nope.Q)
-c = Or(I1: nope.Q, I2: sw.Q)
-d = Or(I1: other.Q)
+a = And(In1: sw.Q, In2: nope.Q)
+b = Or(In1: nope.Q)
+c = Or(In1: nope.Q, In2: sw.Q)
+d = Or(In1: other.Q)
 ";
     let m = messages(Module::parse(src).unwrap_err());
     assert_eq!(m.len(), 2, "{m:#?}");
@@ -101,11 +101,11 @@ d = Or(I1: other.Q)
 fn a_block_of_an_unknown_type_is_reported_once() {
     let src = "\
 extern sw = Switch(title: \"Licht\")
-a = And(I1: sw.Q, I2: sw.Q)
+a = And(In1: sw.Q, In2: sw.Q)
 b = Foo(I1: sw.Q)
-c = Or(I1: b.Q, I2: b.Q)
-d = Or(I1: a.Qx)
-g = Not(I: sw.Q, Gg: 3)
+c = Or(In1: b.Q, In2: b.Q)
+d = Or(In1: a.Qx)
+g = Not(In: sw.Q, Gg: 3)
 ";
     let m = Module::parse(src).unwrap();
     let m = messages(loxone_config::logic::validate_ports(&m).unwrap_err());
@@ -121,12 +121,12 @@ fn errors_in_template_instances_are_all_reported_in_source_spelling() {
     let src = "\
 extern sw = Switch(title: \"Licht\")
 template licht(taster: Switch) -> lc
-  lc = Or(I1: taster.Q)
-  aus = Not(I: taster.Q)
+  lc = Or(In1: taster.Q)
+  aus = Not(In: taster.Q)
 end
 k = licht(taster: sw)
 w = licht(taster: sw)
-x = Or(I1: k.aus.Qx, I2: w.Qy)
+x = Or(In1: k.aus.Qx, In2: w.Qy)
 y = nix(taster: sw)
 ";
     let m = Module::parse_fragment(src).unwrap();
@@ -177,12 +177,12 @@ fn check_lists_every_error_by_file_and_line() {
     let dir = scratch("errors-check");
     std::fs::write(
         dir.join("src/a.loxl"),
-        "extern sw = Switch(title: \"Licht\")\nx = Or(I1: nope.Q)\ny = Or(I1: sw.Q)\ny.I2 <- sw.Q\n",
+        "extern sw = Switch(title: \"Licht\")\nx = Or(In1: nope.Q)\ny = Or(In1: sw.Q)\ny.In2 <- sw.Q\n",
     )
     .unwrap();
     std::fs::write(
         dir.join("src/b.loxl"),
-        "z = Not(I: sw.Q)\nz2 = Not(I: other.Q)\n",
+        "z = Not(In: sw.Q)\nz2 = Not(In: other.Q)\n",
     )
     .unwrap();
 
@@ -224,7 +224,7 @@ fn check_lists_every_error_by_file_and_line() {
 
     // Syntax errors in two fragments: both, and no name errors.
     std::fs::write(dir.join("src/a.loxl"), "x = Or(I1 3)\n").unwrap();
-    std::fs::write(dir.join("src/b.loxl"), "z = Not(I: sw.Q)\nz2 = = 3\n").unwrap();
+    std::fs::write(dir.join("src/b.loxl"), "z = Not(In: sw.Q)\nz2 = = 3\n").unwrap();
     let out = loxl(&dir, &["check", "--json", "src"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let lines: Vec<u64> = v["errors"]

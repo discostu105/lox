@@ -5,8 +5,10 @@ Lox Logic is the text language for managed Loxone logic.
 - File extension `.loxl`, UTF-8 without BOM.
 - One statement per line. Only a block declaration's `( … )` argument list spans lines.
 - This spec defines what `Module::parse` accepts and what `Module::to_text` (`loxl fmt`) writes.
-- This is v2, where every value has one spelling ([Changes from v1](#changes-from-v1)). The v0
-  keywords `block`, `wire` and `set` are reserved and give migration errors.
+- This is v3, part one ([Changes from v2](#changes-from-v2)): ports have source names, a bare
+  block name is its default output, and `let` may alias a port. v2 made every value have one
+  spelling ([Changes from v1](#changes-from-v1)). The v0 keywords `block`, `wire` and `set` are
+  reserved and give migration errors.
 
 ## Grammar
 
@@ -21,7 +23,8 @@ line       = comment | let | extern | block-head | arg-line | signal
 comment    = "#" any-text ;                        (* whole line *)
 allow      = "#" "lint:" "allow" kind { [ "," ] kind } [ any-text ] ;
              (* a comment; the line right above a declaration *)
-let        = "let" slug "=" ( number [ unit ] | string | bool ) [ comment ] ;
+let        = "let" slug "=" ( number [ unit ] | string | bool | clock
+             | ref "." port ) [ comment ] ;       (* a port: an alias *)
 extern     = "extern" slug "=" type "(" matcher
              { "," constraint ":" string } ")" [ comment ] ;
 matcher    = ( "uuid" | "iname" | "title" ) ":" string
@@ -38,14 +41,17 @@ args       = arg { "," arg } [ "," ] ;
 arg        = string                                (* label; first argument only *)
            | port ":" binding ;
 binding    = value                                 (* Def= parameter *)
-           | ref "." port                          (* wire from that source *)
+           | source                                (* wire from that source *)
            | expr ;                                (* expression sugar:
                                                       desugars into gate blocks *)
+source     = ref "." port                          (* a port *)
+           | ref ;                                 (* a block, extern or
+                                                      alias: its default output *)
 
 signal     = slug "=" expr [ comment ] ;            (* named signal: not a
                                                       bare operand; the top
                                                       block is `slug` *)
-wire       = slug "." port "<-" ( ref "." port | expr ) [ comment ] ;
+wire       = slug "." port "<-" ( source | expr ) [ comment ] ;
                                     (* extern target; an expression RHS
                                        desugars into gate blocks *)
 set        = slug "." port "=" value [ comment ] ;            (* extern target *)
@@ -66,7 +72,7 @@ arith      = term { ("+" | "-") term } ;           (* standalone only:
                                                       a whole RHS or binding *)
 term       = factor { ("*" | "/") factor } ;
 factor     = operand | "(" arith ")" ;
-operand    = ref "." port | number [ unit ] | bool | const-ref ;
+operand    = source | number [ unit ] | bool | const-ref ;
 removed    = "removed" ref [ comment ] ;
 moved      = "moved" ref "->" ref [ comment ] ;
 page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
@@ -94,14 +100,14 @@ test       = "test" string [ comment ]
              { comment | inject | tick | expect | test-clock }
              "end" [ comment ] ;
 test-cmp   = "==" | "!=" | ">=" | ">" | "<=" | "<" | "~=" ;
-inject     = ref "." port "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
+inject     = source "=" ( number [ unit ] | bool | const-ref ) [ comment ] ;
 tick       = "tick" ( integer | number time-unit | const-ref )
                                     (* a count, or a duration: a whole
                                        number of dt steps; a constant
                                        holds either *)
              [ "dt" ( number [ unit ] | const-ref ) ] [ comment ] ;
 time-unit  = "ms" | "s" | "min" | "h" ;
-expect     = "expect" ref "." port test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
+expect     = "expect" source test-cmp ( number [ unit ] | bool | const-ref ) [ comment ] ;
 test-clock = "clock" [ date ] clock [ comment ] ;  (* bare: 07:30, 2026-01-03 07:30:15 *)
 date       = digit digit digit digit "-" digit digit "-" digit digit ;
 
@@ -186,7 +192,8 @@ rule-day   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 
 slug       = lowercase-letter { lowercase-letter | digit | "_" } ;
 type       = uppercase-letter { letter | digit } ;          (* PascalCase *)
-port       = letter-or-digit-or-underscore-sequence ;       (* as in the XML `K=` key *)
+port       = letter-or-digit-or-underscore-sequence ;       (* the port's source name:
+                                                               see Port names *)
 value      = number [ unit ] | string | bool | const-ref | clock | date | day-of-year ;
 day-of-year = digit digit "-" digit digit ;        (* MM-DD; a date and a day of the year
                                                       bind only a calendar entry's
@@ -213,11 +220,11 @@ Notes:
   or span lines; nothing may follow the closing `)` except a comment.
 - Whitespace is insignificant except as a token separator. Indentation is
   conventional (the formatter uses one tab inside argument lists).
-- A bare identifier in value position is always a **constant reference**;
-  it must name a `let` in the same module. A dotted identifier
-  (`slug.Port`) is always a **port reference**. With three parts
-  (`instance.block.Port`) it names a block of a template instance. String values are always
-  quoted.
+- A dotted identifier (`slug.Port`) is a **port reference**. With three parts
+  (`instance.block.Port`) it names a block of a template instance. A bare identifier where a port
+  may stand (an argument, an operand, the source of `<-`, a test statement) is a `let` constant,
+  a `let` alias of a port, or a block, extern or signal, which stands for its **default output**
+  (`sonne` is `sonne.Q`; see [Port names](#port-names)). String values are always quoted.
 - **`on` and `off`** are the boolean literals in every value position: block and extern parameters,
   `let`, template defaults, expression operands, test injections and expectations.
   - On a port they compile to `1`/`0`: `I2: on` is byte-identical to `I2: 1`.
@@ -289,12 +296,22 @@ Notes:
 let temp_schwelle = 28
 ```
 
-Declares a name for a number or string. Any value position (argument
+Declares a name for a number, string, time of day or `on`/`off`. Any value position (argument
 lists, extern port assignments) may reference it by bare identifier; the
 compiler substitutes the literal before emitting `Def=`, so a `let`
 reference compiles byte-identically to writing the literal in place.
 Constants cannot reference other constants, and constant names share the
 module's one slug namespace (they have no ports and cannot be wired).
+
+```text
+let aussen = sensor_7.AQ
+warm = aussen >= 28
+```
+
+`let <name> = <slug>.<Port>` is an **alias** of a port: the name stands for the port wherever a port
+may stand (an argument, an operand, the source of `<-`, a test statement) and is never a value. An
+alias has no ports of its own (`aussen.Q` is an error), and no alias may be built on another. The rule
+behind both forms: `let` never creates an object, `=` always does.
 
 ### `extern` — reference an object owned by Loxone Config
 
@@ -381,8 +398,8 @@ the same kind of singleton).
 beschatten = And()
 temp_hoch = GreaterEqual(
 	"Temp über 28",
-	Input1: aussentemp.Q,
-	Input2: temp_schwelle,
+	In1: aussentemp.Q,
+	In2: temp_schwelle,
 )
 ```
 
@@ -405,7 +422,7 @@ value decides the meaning:
 - `Port: slug.Port` — a **wire**: the referenced source port is wired into
   this port. Sources may be extern or managed ports (including the block
   itself — feedback is representable) and are referenced before or after
-  their declaration.
+  their declaration. `Port: slug` wires the source's default output (below).
 - `Port: a.Q and b.AQ >= 28` — an **expression**: desugars into
   gate/comparator blocks whose result is wired into the port — the same
   sugar as on `<-` (see [Expressions](#expressions--sugar-over-the-discrete-blocks)).
@@ -421,7 +438,7 @@ element attribute rather than a connector. They bind exactly like
 parameters but can never take a wire:
 
 ```text
-summe = Formula("Summe", Formula: "I1+I2", Input1: a.Q, Input2: b.Q)
+summe = Formula("Summe", Formula: "I1+I2", In1: a.Q, In2: b.Q)
 ```
 
 They are declared per type in `connectors::attr_params`. `Formula:` on
@@ -460,6 +477,35 @@ pulse on a date stays with Loxone Config.
 licht_an = PulseAt("Licht an", Pulse: "sunset", Time: 1s)
 ```
 
+#### Port names
+
+A port is named by its **source name**, not by the key Loxone Config stores it under. The name is
+the key where it reads well (`Reset`, `AutoShade`, `TargetPos`), a curated name where it does not
+(`Trigger` for `InputTrigger`, `Power` for a meter's `Pf`, `LedRed` for a Code Touch's `Lr`), and
+one name per family: `In` on a one-input block, `In1`, `In2`, … on every block with numbered
+inputs, `Enable`, `Disable`, `Invert`, `Set`, `Direction`. `loxl types <Type>` lists the names and,
+under a port whose key differs, `Stored as `<key>``.
+
+- A renamed port's key is an error that names the port (`write `Trigger` instead of
+  `InputTrigger``). `loxl fmt --write` rewrites a v2 module.
+- A port the table does not know, on an extern of a type outside it, is named by its key. The
+  family names read back to their keys there too: `In` on a Tree actuator is its `I`.
+- The lockfile and the compiled config keep the keys. The blocks an expression generates are named
+  after the sink's key (`nachlauf_inputtrigger__ge1`), so a renamed port keeps their identities.
+
+**Default outputs.** A bare block, extern or signal name where a port may stand is the type's
+default output: its only output, or the one the table names (`Q` on gates, switches, triggers and
+virtual inputs, `AQ` on `Formula`, the arithmetic blocks, meters and analog sensors; `loxl types`
+shows it). A type whose outputs are all equally meaningful (`Memory`, `AutoJalousie`,
+`LightController2`) has none; the bare name is an error that lists the outputs. The explicit port
+stays legal, and `fmt` keeps whichever the author wrote; decompile and adopt write the bare form.
+
+```text
+beschatten = sonne and aussentemp >= schwelle
+nachlauf = Monoflop("Filter-Nachlauf", Trigger: beschatten, Time: 30min)
+jal_sued.AutoShade <- nachlauf
+```
+
 #### Block settings
 
 These settings live on the block element. Each is a claim like `At:`:
@@ -480,7 +526,7 @@ except a value a save writes when nothing is set.
 | `Un1:`, `Un2:`, `UnSt:` | `EFM` | text | power, energy and storage units, such as `<v.3>kW` |
 
 ```text
-merker = Memory("Anrufer", Desc: "Letzter Anrufer", Type: "text", Input: tel.TQ1)
+merker = Memory("Anrufer", Desc: "Letzter Anrufer", Type: "text", In: tel.TQ1)
 zaehler = MeterDig("Strom", PwrN: "Leistung", Un1: "kW", Un2: "kWh", Input: s0.Q)
 ```
 
@@ -503,7 +549,7 @@ zaehler = MeterDig("Strom", PwrN: "Leistung", Un1: "kW", Un2: "kWh", Input: s0.Q
 of lines, so its value is a **file**:
 
 ```text
-hue = Code16("Philipps Hue Steuerung", Code: file("hue.c"), AI1: rgb.AQ)
+hue = Code16("Philipps Hue Steuerung", Code: file("hue.c"), In1: rgb.AQ)
 ```
 
 - The path is relative to the `.loxl` file that names it. The file is
@@ -527,10 +573,10 @@ Rules:
 - At most one parameter binding per port. Several wire bindings on one port are allowed when the
   sources differ (fan-in).
 - A port takes a value or wires, never both: a wired input ignores its value, so
-  `Input1: 2, Input1: x.AQ` is an error.
+  `In1: 2, In1: x.AQ` is an error.
 - Loxone Config keeps a constant under a wire, and it comes back when the wire is removed. Source does
   not write it. Decompile and adopt show it as a comment on the wire
-  (`Input1: x.AQ, # stale constant 2 kept under the wire`), and the compile carries it from the base
+  (`In1: x.AQ, # stale constant 2 kept under the wire`), and the compile carries it from the base
   while the port stays wired.
 - The type must be in the verified builtin table
   (gates `And`/`Or`/`Not`, the comparator family `Equal`/`NotEqual`/
@@ -538,9 +584,9 @@ Rules:
   `PulseGen`, `AnalogThresholdTrigger`, … `loxl types` lists them — see
   [connector-db.md](connector-db.md)) — anything else is an error. See
   [design.md](design.md) "Refuse, never guess".
-- `And`/`Or` are fixed two-input blocks (`I1`, `I2`, `Q`): binding `I3`+
+- `And`/`Or` are fixed two-input blocks (`In1`, `In2`, `Q`): binding `In3`+
   is an error — Loxone Config silently deletes grown inputs on save. Need more inputs? Cascade gates:
-  `c = And(I1: a.Q, I2: b.Q)`.
+  `c = And(In1: a, In2: b)`.
 - Types, port names, and wire directions on managed blocks are validated
   **statically** (`loxl check`, no base config needed); unknown names get
   a "did you mean" suggestion when a close candidate exists.
@@ -565,7 +611,7 @@ Rules:
 ```text
 party = VirtualIn("Partymodus")
 soll = VirtualIn("Sollwert", Analog: on, MinVal: 5, MaxVal: 30, DefVal: 21)
-licht = And(I1: party.Q)
+licht = And(In1: party.Q)
 ```
 
 `VirtualIn` is a block type like any other, except where it lives: the
@@ -598,7 +644,7 @@ leistung = VirtualHttpInCmd("Leistung", device: zaehler, Check: "\"power\":\\v")
 wp = ModbusServer("Wärmepumpe", Address: "192.0.2.12:502")
 wp_regler = ModbusDev("Regler", device: wp)
 vorlauf = ModbusASensor("Vorlauf", device: wp_regler, ModbusAddress: 1)
-sollwert = ModbusAActor("Sollwert", device: wp_regler, ModbusAddress: 3, I: plus.AQ)
+sollwert = ModbusAActor("Sollwert", device: wp_regler, ModbusAddress: 3, In: plus.AQ)
 ```
 
 A device goes into its folder: VirtualHttpIn, VirtualUdpIn and
@@ -635,7 +681,7 @@ follows `page`.
 taster = TreeDevice("Taster Bad", serial: "B0A1B2C3", Installation: "Neben der Tür")
 klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", Statistics: on)
 temp = TreeAsensor("Raum", device: taster, iname: "AI0", Unit: "<v.1> °C", MinTime: 600)
-led = TreeActor("Status", device: taster, iname: "Q0", I: klingel.Q)
+led = TreeActor("Status", device: taster, iname: "Q0", In: klingel.Q)
 tree = LoxTree("Tree", serial: "13000003", SwitchBoard: "Verteiler 2")
 klingel.room = "Flur"
 ```
@@ -710,7 +756,7 @@ the lockfile keeps it. Pair it with a Tree search in Loxone Config.
 ```text
 party = Mode("Party")
 party.I <- partytaster.Q          # switch the mode from logic
-licht = And(I1: party.Q)          # or read it
+licht = And(In1: party.Q)          # or read it
 ```
 
 A user-defined operating mode is an object of the object tree, like a virtual input: no position, no
@@ -796,7 +842,8 @@ jal_sued.AutoShade <- beschatten.Q
 jal_sued.Safety <- wind_alarm.Q
 ```
 
-Wires a source port onto an extern port. The source must be an output; the
+Wires a source port onto an extern port. The source must be an output, or a bare name standing for
+its default output (`jal_sued.AutoShade <- beschatten`); the
 extern port is open-world — it must merely exist in the base config. These
 wires are recorded in the lockfile so removing the statement removes the
 wire again without touching GUI-drawn wires.
@@ -975,7 +1022,7 @@ declared, or when moves are chained (`a -> b`, `b -> c`). `loxl rename` does all
 page "Beschattung"
 
 wp_ein = And(
-	I1: soll.AQ >= 1.5h,
+	In1: soll.AQ >= 1.5h,
 )
 ```
 
@@ -1031,7 +1078,7 @@ decompiled or adopted module records its placement in reviewable source.
 template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)
 	hoch = GreaterEqual(I2: schwelle)
 	hoch.I1 <- temp_aussen.AQ
-	beschatten = And(I1: hoch, I2: jalousie.Sd)
+	beschatten = And(In1: hoch, In2: jalousie.Sd)
 	jalousie.TargetPos = pos
 end
 
@@ -1174,8 +1221,8 @@ let schwelle = 28
 jal_sued.AutoShade <- sonne.Q and aussentemp.Q >= schwelle
 
 wp_ein = And(
-	I1: wassertemp.AQ < wunschtemp and abdeckung_offen.Q,
-	I2: pv_ueberschuss.AQ >= pv_schwelle,
+	In1: wassertemp.AQ < wunschtemp and abdeckung_offen.Q,
+	In2: pv_ueberschuss.AQ >= pv_schwelle,
 )
 ```
 
@@ -1186,8 +1233,9 @@ compile, like template expansion, it desugars into verified blocks:
 - `not` becomes `Not`.
 - Each comparison becomes one comparator block: `>=` → `GreaterEqual`, `>` → `Greater`, `<=` →
   `LessEqual`, `<` → `Less`, `==` → `Equal`, `!=` → `NotEqual`.
-- Operand order is kept: the left side binds `Input1`, the right side `Input2`. A port operand becomes
-  a wire; a number or `let` reference becomes the port's `Def=`.
+- Operand order is kept: the left side binds `In1`, the right side `In2`. A port operand (`a.Q`, or a
+  bare block name for its default output) becomes a wire; a number or `let` reference becomes the
+  port's `Def=`.
 - Each generated block is labeled with its sub-expression, so the rule stays readable on the Loxone
   Config canvas. A save would turn `<` and `%` in a title into `_`, so the label writes `<=` as `≤`,
   `<` as `＜` and `%` as `％` (`p1.Q ≤ 5 and p2.Q ＜ 70％`).
@@ -1211,7 +1259,7 @@ verbrauch_kw.AI <- verbrauch.AQ / 1000
 A whole arithmetic tree desugars into one `Formula` block. Here that is `verbrauch_kw_ai__f1` with
 `Formula: "I1/1000"`, `Input1` wired from `verbrauch.AQ`, and the sink fed from the block's `AQ`.
 
-- Distinct port operands become `Input1`…`Input4` in order of first appearance. A repeated port reuses
+- Distinct port operands become `In1`…`In4` in order of first appearance. A repeated port reuses
   its input. More than four distinct ports is an error; split the expression.
 - Numbers and numeric `let` references are inlined into the formula text. Negative constants are
   parenthesized: `I1*(-2)`.
@@ -1325,8 +1373,8 @@ the expectation to cut it out.
 
 Statements, in file order:
 
-- **Injection** `slug.Port = value` — sets that signal for the rest of
-  the test (a persistent override).
+- **Injection** `slug.Port = value` (or `slug = value` for the default output) — sets that signal
+  for the rest of the test (a persistent override).
   Any declared extern or block port can be driven, including outputs
   (that is the normal case: drive a sensor's `Q`/`AQ`). Values are
   numbers (with units), `on`/`off` or `let` references; strings are
@@ -1341,8 +1389,8 @@ Statements, in file order:
 - **`tick <constant> [dt <constant>]`** — a `let` constant holds the count or the duration
   (`let warten = 5min` … `tick warten`), and `dt` takes one too. A constant that is neither a whole
   count nor a time, or a duration that is no whole number of `dt` steps, is an error.
-- **`expect slug.Port <cmp> <value>`** — assert after the preceding
-  `tick`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and `~=`
+- **`expect slug.Port <cmp> <value>`** (or `expect slug <cmp> <value>` for the default output) —
+  assert after the preceding `tick`. Comparators: `==`, `!=`, `>`, `>=`, `<`, `<=`, and `~=`
   (approximately, 5 % tolerance); `==` and `!=` allow the rounding of
   decimal arithmetic. An `expect` before any `tick` is an
   error, as is a trailing injection no `tick` ever applies. `--lox`
@@ -1978,7 +2026,7 @@ comment.
 - an argument-free call on one line (`b = And()`, `c = Or("Oder")`);
 - a call on one line when it has at most three arguments (the label counts as one), no comments,
   and the line fits in 100 columns with its indentation (a tab counts four):
-  `b = And(I1: x.Q, I2: on)`. Past three arguments the same holds when every argument but the label
+  `b = And(In1: x.Q, In2: on)`. Past three arguments the same holds when every argument but the label
   is a number, a unit value, a time or `on`/`off`:
   `s = ModbusASensor("Kompressor", ModbusAddress: 1100, ModbusDataType: 0, DestValHigh: 100)`;
 - any other call with the label and each argument on its own tab-indented line with a trailing
@@ -2122,9 +2170,22 @@ stored date as a date; `loxl
 compile` names the modes it cannot see) and, if you like,
 `loxl lint --fix` for the unit suffixes.
 
+## Changes from v2
+
+v3 keeps every v2 file's meaning; what changed is spelling, and each dropped spelling is an error
+that names its replacement. The compile output of a migrated file is byte-identical. Part one:
+
+- **Ports have source names** ([Port names](#port-names)): `In1`/`In2` on every two-input block,
+  `Trigger`, `Enable`, `Disable`, `Power`, `LedRed`, … A v2 key is an error naming the port;
+  `loxl fmt --write` rewrites a module, looking the types up across its fragments.
+- **A bare block name is its default output**: `sonne and aussentemp >= 28`,
+  `pumpe.On <- wp_bedarf`, `expect frost == 1`. New syntax only.
+- **`let` aliases a port**: `let aussen = sensor.AQ`. New syntax only; `x = a.Q` stays an error that
+  points at `let`.
+
 ## Versioning
 
-This is v2 (see [Changes from v1](#changes-from-v1)). v0 was a pre-release revision; no v0 files are in
-use. Anything not specified here, such as template nesting and template-local declarations, is not
-part of the language. A future version keeps v2 files parsing unchanged, or every spelling it drops
-is an error that names the replacement.
+This is v3, part one (see [Changes from v2](#changes-from-v2) and [Changes from v1](#changes-from-v1)).
+v0 was a pre-release revision; no v0 files are in use. Anything not specified here, such as template
+nesting and template-local declarations, is not part of the language. A future version keeps v3 files
+parsing unchanged, or every spelling it drops is an error that names the replacement.

@@ -10,30 +10,30 @@ extern led_streifen = TreeAactor(title: "LED-Streifen") # periphery
 
 licht_wohnzimmer = LightController2(
 	Circuit1: "switch",
-	InputTriggerUp: taste_rechts_unten.Q,
-	InputTriggerDown: taste_links_unten.Q,
-	Move: bewegung.Q,
-	Brightness: helligkeit.AQ,
-	Presence: praesenz.Q,
+	NextMood: taste_rechts_unten,
+	PrevMood: taste_links_unten,
+	Motion: bewegung,
+	Brightness: helligkeit,
+	Presence: praesenz,
 	BrightnessLimit: 80,
-	MoveOn: 0,
-	MoveIgnore: 0,
+	MotionExtend: 0,
+	PresenceTimeout: 0,
 	Step: 0,
-	Steptime: 0,
+	StepTime: 0,
 	Max: 0,
-	MaxP: 0,
-	MoveTimeout: 0,
-	SceneMixTime: 0,
+	DoubleClickTime: 0,
+	ManualTimeout: 0,
+	MoodMixTime: 0,
 	FadingTime: 0,
-	AlarmClockPeriod: 0,
-	DayMinTemp: 0,
-	DayMaxTemp: 0,
-	AlarmPeriod: 0,
+	BuzzerFade: 0,
+	MinColorTemp: 0,
+	MaxColorTemp: 0,
+	AlarmInterval: 0,
 	AlarmBrightness: 0,
 )
 
-deckenlicht.I <- licht_wohnzimmer.AQ1
-led_streifen.I <- licht_wohnzimmer.AQ2
+deckenlicht.In <- licht_wohnzimmer.AQ1
+led_streifen.In <- licht_wohnzimmer.AQ2
 
 moods licht_wohnzimmer_moods
 	"Viel Licht": all on, AQ2 rgb(100, 100, 100)

@@ -34,7 +34,7 @@ const BASE: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n\
 const SRC: &str = "page \"K\u{fc}che\"\n\n\
                    a = Not()\n\n\
                    page \"K\u{fc}che Logik\" (room: \"K\u{fc}che\")\n\n\
-                   b = Not(I: a.Q)\n";
+                   b = Not(In: a.Q)\n";
 
 fn base() -> LoxoneDoc {
     LoxoneDoc::parse(BASE.as_bytes()).unwrap()
@@ -256,8 +256,8 @@ fn a_page_governs_only_its_own_fragment() {
     // another file: it takes the default page (the document's first),
     // as it would on its own. Within one file the page still carries.
     let module = fragments(&[
-        "page \"Zentral\"\n\na = Not()\n\nc = Not(I: a.Q)\n",
-        "b = Not(I: a.Q)\n",
+        "page \"Zentral\"\n\na = Not()\n\nc = Not(In: a.Q)\n",
+        "b = Not(In: a.Q)\n",
     ]);
     module.validate().unwrap();
     let mut lock = Lockfile::new();
@@ -281,7 +281,7 @@ fn a_page_governs_only_its_own_fragment() {
     // The fragment boundary is not printed.
     assert_eq!(
         module.to_text(),
-        "page \"Zentral\"\n\na = Not()\nc = Not(I: a.Q)\nb = Not(I: a.Q)\n"
+        "page \"Zentral\"\n\na = Not()\nc = Not(In: a.Q)\nb = Not(In: a.Q)\n"
     );
 }
 
@@ -298,19 +298,22 @@ fn a_fragment_without_a_page_in_a_paged_module_is_linted() {
     };
     let module = fragments(&[
         "page \"Zentral\"\n\na = Not()\n",
-        "# no page\nv = VirtualIn()\n\nb = Not(I: v.Q)\n\nc = Not(I: b.Q)\n",
-        "page \"K\u{fc}che\"\n\nd = Not(I: c.Q)\n",
+        "# no page\nv = VirtualIn()\n\nb = Not(In: v.Q)\n\nc = Not(In: b.Q)\n",
+        "page \"K\u{fc}che\"\n\nd = Not(In: c.Q)\n",
     ]);
     let found = lint(&module);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].starts_with("b: 2 blocks before any"), "{found:?}");
     // Object-tree items (a VirtualIn, a Mode) take no page: not flagged.
-    let module = fragments(&["page \"Zentral\"\n\na = Not(I: v.Q)\n", "v = VirtualIn()\n"]);
+    let module = fragments(&[
+        "page \"Zentral\"\n\na = Not(In: v.Q)\n",
+        "v = VirtualIn()\n",
+    ]);
     assert!(lint(&module).is_empty());
     // A module without any `page` uses the default page throughout.
-    let module = fragments(&["a = Not()\n", "b = Not(I: a.Q)\n"]);
+    let module = fragments(&["a = Not()\n", "b = Not(In: a.Q)\n"]);
     assert!(lint(&module).is_empty());
     // A single file may open with default-page blocks.
-    let module = Module::parse("a = Not()\n\npage \"Zentral\"\n\nb = Not(I: a.Q)\n").unwrap();
+    let module = Module::parse("a = Not()\n\npage \"Zentral\"\n\nb = Not(In: a.Q)\n").unwrap();
     assert!(lint(&module).is_empty());
 }

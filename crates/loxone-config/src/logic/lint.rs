@@ -1092,7 +1092,10 @@ pub fn implicit_zeros(
         };
         let ports: Vec<(String, &'static str)> = defaults
             .iter()
-            .filter(|(key, _)| !b.bindings().any(|x| x.port == *key))
+            .filter(|(key, _)| {
+                !b.bindings()
+                    .any(|x| crate::port_names::key_or_raw(&b.block_type, &x.port) == *key)
+            })
             .filter(|(key, _)| {
                 el.child_elements()
                     .find(|c| c.name == "Co" && c.attr("K") == Some(key))
@@ -1102,7 +1105,12 @@ pub fn implicit_zeros(
                             && !co.child_elements().any(|i| i.name == "In")
                     })
             })
-            .map(|(key, v)| (key.to_string(), *v))
+            .map(|(key, v)| {
+                (
+                    crate::port_names::name_of(&b.block_type, key).to_string(),
+                    *v,
+                )
+            })
             .collect();
         if !ports.is_empty() {
             let fixable = module
@@ -1170,7 +1178,7 @@ pub fn fix_implicit_zeros(module: &mut Module, zeros: &[ImplicitZero]) -> usize 
             continue;
         };
         let specs = crate::connectors::builtin(&b.block_type).unwrap_or_default();
-        let at = |port: &str| specs.iter().position(|s| s.key == port);
+        let at = |port: &str| specs.iter().position(|s| s.name == port);
         for (port, _) in &z.ports {
             if b.bindings().any(|x| x.port == *port) {
                 continue;
@@ -1556,14 +1564,14 @@ extern jal = AutoJalousie(title: \"Süd\")
 extern jal2 = AutoJalousie(title: \"Nord\")
 extern vi = VirtualIn(iname: \"VI1\")
 
-jal.TimeEnd = 120
+jal.OpenTime = 120
 (jal, jal2).AutoShadeTime = 120
 (jal, vi).TimeEnd = 90
 
 template t(j: AutoJalousie, lauf = 60) -> m
 \tm = Monoflop(Time: 300)
-\tj.TimeEndDown = 75
-\tj.TimeEnd = lauf
+\tj.CloseTime = 75
+\tj.OpenTime = lauf
 end
 
 x = t(j: jal2, lauf: 30, Time: 600)
@@ -1571,21 +1579,21 @@ x = t(j: jal2, lauf: 30, Time: 600)
         let mut m = Module::parse(src).unwrap();
         let found = fix_unit_suffixes(&mut m);
         let text = m.to_text();
-        assert!(text.contains("jal.TimeEnd = 2min\n"), "{text}");
+        assert!(text.contains("jal.OpenTime = 2min\n"), "{text}");
         // Minutes: 120 min is 2h.
         assert!(text.contains("(jal, jal2).AutoShadeTime = 2h\n"), "{text}");
         // One member has no documented unit: the line keeps its number.
         assert!(text.contains("(jal, vi).TimeEnd = 90\n"), "{text}");
         assert!(text.contains("Time: 5min"), "{text}");
-        assert!(text.contains("j.TimeEndDown = 75s"), "{text}");
+        assert!(text.contains("j.CloseTime = 75s"), "{text}");
         assert!(text.contains("lauf = 1min)"), "{text}");
         assert!(text.contains("lauf: 30s"), "{text}");
         // Forwarded onto the primary block.
         assert!(text.contains("Time: 10min"), "{text}");
         assert_eq!(found.len(), 8, "{found:?}");
         assert!(found.iter().any(|f| f.detail
-            == "`jal.TimeEnd = 120` reads better with its unit. Write `jal.TimeEnd = 2min` \
-                instead of `jal.TimeEnd = 120`."));
+            == "`jal.OpenTime = 120` reads better with its unit. Write `jal.OpenTime = 2min` \
+                instead of `jal.OpenTime = 120`."));
         // A second pass finds nothing.
         assert!(fix_unit_suffixes(&mut m).is_empty());
     }
@@ -1602,13 +1610,13 @@ let verwaist = 5
 
 template nie_benutzt(x: VirtualIn)
 \tg = And(
-\t\tI1: x.Q,
+\t\tIn1: x.Q,
 \t)
 end
 
 gate = GreaterEqual(
-\tInput1: used.Q,
-\tInput2: schwelle,
+\tIn1: used.Q,
+\tIn2: schwelle,
 )
 
 sink.I <- gate.Q

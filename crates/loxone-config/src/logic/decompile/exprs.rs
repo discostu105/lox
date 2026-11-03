@@ -227,8 +227,9 @@ impl Lift {
 
     /// Whether the view as it stands checks, and if not, why.
     fn verdict(&self) -> std::result::Result<(), String> {
-        let module = self.single_module();
+        let mut module = self.single_module();
         module.validate().map_err(|e| e.to_string())?;
+        module.resolve_names().map_err(|e| e.to_string())?;
         let (m, _) = module.desugar().map_err(|e| e.to_string())?;
         crate::logic::validate_ports(&m).map_err(|e| e.to_string())
     }
@@ -314,27 +315,25 @@ impl Lift {
         };
         let mut sub = false;
         let mut gate_input = |port: &str| -> Option<Expr> {
-            let BindingKind::Wire(src) = one(port)? else {
-                return None;
-            };
+            let src = self.wire_of(one(port)?)?;
             match self.sub_block(r, port, None, refs) {
                 Some(g) => {
                     sub = true;
                     self.label(g)
                 }
-                None => Some(Expr::Atom(Operand::Port(src.clone()))),
+                None => Some(Expr::Atom(Operand::Port(src))),
             }
         };
         let e = match ty {
             "And" | "Or" => {
-                let (a, b) = (gate_input("I1")?, gate_input("I2")?);
+                let (a, b) = (gate_input("In1")?, gate_input("In2")?);
                 if ty == "And" {
                     Expr::And(Box::new(a), Box::new(b))
                 } else {
                     Expr::Or(Box::new(a), Box::new(b))
                 }
             }
-            "Not" => Expr::Not(Box::new(gate_input("I")?)),
+            "Not" => Expr::Not(Box::new(gate_input("In")?)),
             // A comparison takes no sub-blocks: on its own it is a block
             // drawn in Loxone Config as much as an expression.
             _ => return None,
@@ -365,9 +364,7 @@ impl Lift {
         let (Some(b), None) = (wires.next(), wires.next()) else {
             return None;
         };
-        let BindingKind::Wire(src) = &b.kind else {
-            return None;
-        };
+        let src = self.wire_of(&b.kind)?;
         let &g = self.obj_of_slug.get(&src.slug)?;
         let ty = self.objects[g].block_type.as_str();
         let ok = src.port == "Q"
@@ -384,8 +381,8 @@ impl Lift {
     /// each compound operand is the sub-block at its input.
     fn chain(&self, e: &Expr, o: usize, refs: &Refs, out: &mut Vec<usize>) -> Option<()> {
         let inputs: Vec<(&str, &Expr)> = match e {
-            Expr::And(a, b) | Expr::Or(a, b) => vec![("I1", a), ("I2", b)],
-            Expr::Not(x) => vec![("I", x)],
+            Expr::And(a, b) | Expr::Or(a, b) => vec![("In1", a), ("In2", b)],
+            Expr::Not(x) => vec![("In", x)],
             Expr::Cmp { .. } | Expr::Arith { .. } => Vec::new(),
             Expr::Atom(_) => return None,
         };
@@ -512,6 +509,15 @@ impl Lift {
                 bulk: None,
             }));
         }
+        // A bare operand is an object's default output: resolve it the way
+        // the compile does, against the view's declarations.
+        let items = {
+            let n = items.len();
+            let mut m = self.single_module();
+            m.items.extend(items);
+            m.resolve_names().ok()?;
+            m.items.split_off(m.items.len() - n)
+        };
         let (plain, _) = Module { items }.desugar().ok()?;
         let made: Vec<&BlockDecl> = plain
             .blocks()
@@ -570,6 +576,20 @@ impl Lift {
                 .map(|s| s.into_owned())
         };
         let synthetic: BTreeSet<&String> = rename.values().collect();
+        // A bare name on a port is the object's default output: compare
+        // it as the wire it becomes.
+        let normal = |b: &Binding| -> BindingKind {
+            if let BindingKind::Param(Value::Ref(n)) = &b.kind
+                && let Some(&o) = self.obj_of_slug.get(n)
+                && let Some(out) = crate::port_names::default_output(&self.objects[o].block_type)
+            {
+                return BindingKind::Wire(PortRef {
+                    slug: n.clone(),
+                    port: out.to_string(),
+                });
+            }
+            b.kind.clone()
+        };
         let mut theirs: BTreeMap<&str, Vec<&Binding>> = BTreeMap::new();
         for b in orig.bindings() {
             if b.comment.is_some() {
@@ -590,7 +610,19 @@ impl Lift {
                 None => None,
                 Some(_) => return None,
             };
-            match (&mine.kind, theirs.map(|t| &t.kind)) {
+            let mine_kind = normal(mine);
+            let their_kind = theirs.map(normal);
+            match (&mine_kind, their_kind.as_ref()) {
+                // The label names an object bare that the view spells
+                // otherwise: the second scan may give it that name.
+                (BindingKind::Param(Value::Ref(name)), Some(BindingKind::Wire(b))) => {
+                    let o = *self.obj_of_slug.get(&b.slug)?;
+                    let default = crate::port_names::default_output(&self.objects[o].block_type);
+                    if strict || synthetic.contains(&b.slug) || default != Some(b.port.as_str()) {
+                        return None;
+                    }
+                    found.hints.push((o, name.clone()));
+                }
                 (BindingKind::Wire(a), Some(BindingKind::Wire(b))) => {
                     let b_slug = rename.get(&b.slug).unwrap_or(&b.slug);
                     if a.port != b.port {
@@ -642,8 +674,23 @@ impl Lift {
         for mut item in self.single_module().items {
             let _ = visit_refs(&mut item, &mut |slug, used| {
                 *refs.total.entry(slug.clone()).or_default() += 1;
-                if let RefUse::Port(p) = used {
-                    *refs.port.entry((slug.clone(), p.to_string())).or_default() += 1;
+                match used {
+                    RefUse::Port(p) => {
+                        *refs.port.entry((slug.clone(), p.to_string())).or_default() += 1;
+                    }
+                    // A bare name reads the object's default output.
+                    RefUse::Bare => {
+                        if let Some(&o) = self.obj_of_slug.get(slug.as_str())
+                            && let Some(out) =
+                                crate::port_names::default_output(&self.objects[o].block_type)
+                        {
+                            *refs
+                                .port
+                                .entry((slug.clone(), out.to_string()))
+                                .or_default() += 1;
+                        }
+                    }
+                    _ => {}
                 }
                 Ok(())
             });
@@ -656,7 +703,7 @@ impl Lift {
         let mut out: BTreeMap<usize, Vec<(Sink, String)>> = BTreeMap::new();
         for &c in &self.managed {
             for b in self.block_decls[&c].bindings() {
-                if let BindingKind::Wire(src) = &b.kind
+                if let Some(src) = self.wire_of(&b.kind)
                     && let Some(&g) = self.obj_of_slug.get(&src.slug)
                 {
                     out.entry(g)
@@ -666,10 +713,33 @@ impl Lift {
             }
         }
         for (wi, (w, _, fi)) in self.wires.iter().enumerate() {
-            out.entry(*fi)
-                .or_default()
-                .push((Sink::Wire(wi), w.from.port.clone()));
+            // A bare source is the object's default output.
+            let port = if w.from.port.is_empty() {
+                crate::port_names::default_output(&self.objects[*fi].block_type)
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                w.from.port.clone()
+            };
+            out.entry(*fi).or_default().push((Sink::Wire(wi), port));
         }
         out
+    }
+
+    /// The source port a binding wires: a `slug.Port` reference, or a bare
+    /// name standing for the object's default output.
+    fn wire_of(&self, kind: &BindingKind) -> Option<PortRef> {
+        match kind {
+            BindingKind::Wire(src) => Some(src.clone()),
+            BindingKind::Param(Value::Ref(n)) => {
+                let &o = self.obj_of_slug.get(n)?;
+                let out = crate::port_names::default_output(&self.objects[o].block_type)?;
+                Some(PortRef {
+                    slug: n.clone(),
+                    port: out.to_string(),
+                })
+            }
+            _ => None,
+        }
     }
 }

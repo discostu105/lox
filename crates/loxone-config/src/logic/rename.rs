@@ -510,7 +510,7 @@ extern sonne = VirtualIn(iname: \"VI3\") # sonne feeds the gate
 extern sonne_ref = InputRef(mirrors: sonne)
 
 gate = And(
-\tI1: sonne.Q, # from sonne
+\tIn1: sonne.Q, # from sonne
 \tI2: sonne_ref.Q,
 )
 
@@ -535,7 +535,7 @@ extern takt = VirtualIn(iname: \"VI1\")
 
 template blinker(takt: VirtualIn)
 \tgate = And(
-\t\tI1: takt.Q,
+\t\tIn1: takt.Q,
 \t)
 end
 
@@ -548,7 +548,7 @@ b1 = blinker(takt: takt)
         // extern and the instance ARGUMENT are renamed.
         assert!(text.contains("extern sekundentakt = VirtualIn"));
         assert!(text.contains("template blinker(takt: VirtualIn)"));
-        assert!(text.contains("I1: takt.Q"));
+        assert!(text.contains("In1: takt.Q"));
         assert!(
             text.contains("b1 = blinker(takt: sekundentakt)"),
             "instance arg:\n{text}"

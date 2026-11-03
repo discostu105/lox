@@ -10,4 +10,4 @@ uhr = DayTimer("Gartenlicht abends")
 
 uhr.schedule = abends
 
-licht.I1 <- uhr.AQ
+licht.In1 <- uhr.AQ

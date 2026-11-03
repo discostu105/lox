@@ -7,17 +7,17 @@ extern t_entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
 test "Entfeuchter mit Hysterese 65/55 %"
 	t_feuchte.Q = 60
 	tick 2
-	expect t_entfeuchter.I == 0
+	expect t_entfeuchter.In == 0
 	t_feuchte.Q = 70
 	tick 2
-	expect t_entfeuchter.I == 1
+	expect t_entfeuchter.In == 1
 	t_feuchte.Q = 60
 	tick 2
-	expect t_entfeuchter.I == 1
+	expect t_entfeuchter.In == 1
 	t_feuchte.Q = 50
 	tick 2
-	expect t_entfeuchter.I == 0
+	expect t_entfeuchter.In == 0
 	t_feuchte.Q = 60
 	tick 2
-	expect t_entfeuchter.I == 0
+	expect t_entfeuchter.In == 0
 end

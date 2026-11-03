@@ -111,11 +111,11 @@ fn base_with_mirrors(name: &str) -> PathBuf {
          spiegel = InputRef(\n\
          \tmirrors: quelle,\n\
          \tAI: quelle.Q,\n\
-         \tI: quelle.Qm,\n\
+         \tIn: quelle.Qm,\n\
          )\n\
          \n\
          halter = Memory(\n\
-         \tInput: spiegel.Q,\n\
+         \tIn: spiegel.Q,\n\
          )\n\
          \n\
          aus_spiegel = OutputRef(\n\
@@ -145,8 +145,8 @@ fn wires_route_through_same_page_mirrors() {
          extern aktor = VirtualIn(iname: \"VI3\")\n\
          \n\
          anzeige = And(\n\
-         \tI1: quelle.Q,\n\
-         \tI2: quelle.Qm,\n\
+         \tIn1: quelle.Q,\n\
+         \tIn2: quelle.Qm,\n\
          )\n\
          \n\
          aktor.Qm <- anzeige.Q\n",
@@ -198,8 +198,8 @@ fn twin_mirrors_route_by_the_drawn_wire_or_refuse() {
          extern aktor = VirtualIn(iname: \"VI3\")\n\
          \n\
          anzeige = And(\n\
-         \tI1: quelle.Q,\n\
-         \tI2: quelle.Qm,\n\
+         \tIn1: quelle.Q,\n\
+         \tIn2: quelle.Qm,\n\
          )\n\
          \n\
          aktor.Qm <- anzeige.Q\n";
@@ -277,8 +277,8 @@ fn cross_page_consumers_stay_direct() {
          extern senke = VirtualIn(iname: \"VI2\")\n\
          \n\
          anzeige = And(\n\
-         \tI1: quelle.Q,\n\
-         \tI2: quelle.Q,\n\
+         \tIn1: quelle.Q,\n\
+         \tIn2: quelle.Q,\n\
          )\n\
          \n\
          senke.Qm <- anzeige.Q\n",
@@ -325,7 +325,7 @@ fn decompile_folds_consumer_wires_to_the_target() {
     // names the VirtualIn's own port (decompile derives slugs from
     // titles, so match on the port). The actor write through the
     // OutputRef's AI names the actor port its AQ feeds.
-    assert!(view.contains("Input: "), "{view}");
+    assert!(view.contains("In: "), "{view}");
     assert!(
         view.contains(".Qm)"),
         "read must name the target port: {view}"
@@ -347,8 +347,8 @@ fn explicit_ref_externs_still_wire_literally() {
          extern spiegel = InputRef(mirrors: quelle)\n\
          \n\
          anzeige = And(\n\
-         \tI1: spiegel.AQ,\n\
-         \tI2: spiegel.Q,\n\
+         \tIn1: spiegel.AQ,\n\
+         \tIn2: spiegel.Q,\n\
          )\n",
         Some(&base),
     );

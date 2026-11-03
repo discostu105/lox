@@ -57,7 +57,11 @@ pub struct PeripheryType {
 }
 
 const fn port(key: &'static str, dir: crate::connectors::PortDir) -> PortSpec {
-    PortSpec { key, dir }
+    PortSpec {
+        key,
+        name: key,
+        dir,
+    }
 }
 
 // An HTTP or UDP command: its value (`AQ`) and the digital form (`Q`),

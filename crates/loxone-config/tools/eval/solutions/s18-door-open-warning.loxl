@@ -8,16 +8,16 @@ extern licht = LightController2(uuid: "60000005-0005-0001-ffff000000000001")
 
 offen = OnPulseDelay(
 	"Tür 5 min offen",
-	InputTrigger: tuer.Q,
+	Trigger: tuer.Q,
 	Delay: 5min,
-	Time: 6s,
+	PulseTime: 6s,
 )
 
 blinker = PulseGen(
 	"Flurlicht blinken",
-	InputEnable: offen.Q,
-	TimeHigh: 1s,
-	TimeLow: 1s,
+	Enable: offen.Q,
+	OnTime: 1s,
+	OffTime: 1s,
 )
 
-licht.I1 <- blinker.Q
+licht.In1 <- blinker.Q

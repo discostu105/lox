@@ -12,7 +12,7 @@ heizzeit = DayTimer("Heizzeiten Bad")
 
 heizzeit.schedule = bad_heizzeiten
 
-frost = Less(Input1: raumtemp.Q, Input2: 10)
-heizen = Or(I1: heizzeit.AQ, I2: frost.Q)
+frost = Less(In1: raumtemp.Q, In2: 10)
+heizen = Or(In1: heizzeit.AQ, In2: frost.Q)
 
-heizung.I <- heizen.Q
+heizung.In <- heizen.Q

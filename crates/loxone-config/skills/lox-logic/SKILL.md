@@ -47,7 +47,7 @@ first line is a commit subject. Show it before anyone pushes.
 ```text
 extern sonne = VirtualIn(iname: "VI3")            # existing object: reference it
 party = VirtualIn("Partymodus")                    # new app switch (Virtual Inputs folder)
-warm = GreaterEqual("Warm", Input1: sonne.Q, Input2: 28)
+warm = GreaterEqual("Warm", In1: sonne.Q, In2: 28)
 licht = warm.Q and party.Q                         # named signal: an And named licht
 extern jal = AutoJalousie(title: "Beschattung Süd")
 jal.AutoShade <- licht.Q                           # wire onto an extern

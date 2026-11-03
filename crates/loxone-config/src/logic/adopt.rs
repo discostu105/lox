@@ -32,7 +32,7 @@ use crate::doc::{GUI_OWNED_ATTRS, GUI_OWNED_CHILDREN, LoxoneDoc, ObjectSummary, 
 use crate::error::{Error, Result};
 use crate::lock::{Layout, LockedExternal, LockedObject, Lockfile, sha256_hex};
 use crate::logic::ast::{
-    ArgItem, Binding, BindingKind, Item, Module, PortRef, RULE_BLOCK_TYPE, WireDecl,
+    ArgItem, Binding, BindingKind, Item, Module, PortRef, RULE_BLOCK_TYPE, Value, WireDecl,
 };
 use crate::logic::decompile::{DecompileOptions, DecompileScope, Lift, RESERVED, owned_by_block};
 use crate::logic::validate::validate_ports;
@@ -297,8 +297,13 @@ fn adopt_one_expanded(
     // A controller the lift declared only for its moods is not this
     // block's business: adopting one block appends no mood claims.
     let mut used: BTreeSet<&str> = lift.block_decls[&ti]
-        .input_wires()
-        .map(|(_, src)| src.slug.as_str())
+        .bindings()
+        .filter_map(|b| match &b.kind {
+            BindingKind::Wire(src) => Some(src.slug.as_str()),
+            // A bare name: the object's default output.
+            BindingKind::Param(Value::Ref(s)) => Some(s.as_str()),
+            _ => None,
+        })
         .collect();
     used.extend(lift.wires.iter().map(|(w, _, _)| w.to.slug.as_str()));
     let mut new_externs: Vec<(usize, String)> = Vec::new();
@@ -349,22 +354,41 @@ fn adopt_one_expanded(
     for (w, _ti, _fi) in &lift.wires {
         let to_slug = rename[&w.to.slug].clone();
         if lock.objects.contains_key(&to_slug) {
+            // `w` carries source names already; a bare source is the
+            // default output.
             let declared = module
                 .blocks()
                 .find(|b| b.slug == to_slug)
                 .is_some_and(|b| {
-                    b.input_wires().any(|(port, src)| {
-                        port == w.to.port && src.slug == slug && src.port == w.from.port
+                    b.bindings().any(|x| {
+                        x.port == w.to.port
+                            && match &x.kind {
+                                BindingKind::Wire(src) => {
+                                    src.slug == slug
+                                        && (src.port == w.from.port
+                                            || (w.from.port.is_empty()
+                                                && crate::port_names::default_output(
+                                                    &o.block_type,
+                                                ) == Some(src.port.as_str())))
+                                }
+                                BindingKind::Param(Value::Ref(s)) => {
+                                    *s == slug && w.from.port.is_empty()
+                                }
+                                _ => false,
+                            }
                     })
                 });
             if !declared {
                 let shown = raw.spelling(&to_slug);
+                let from = PortRef {
+                    slug: slug.to_string(),
+                    port: w.from.port.clone(),
+                };
                 return Err(fail(format!(
-                    "the config wires {slug}.{fk} into managed block `{shown}` port \
+                    "the config wires {from} into managed block `{shown}` port \
                      {tk}, which the declaration of `{shown}` does not state, so the next \
-                     compile would remove it. Add `{tk}: {slug}.{fk},` to the \
+                     compile would remove it. Add `{tk}: {from},` to the \
                      argument list of `{shown}` and run the adoption again.",
-                    fk = w.from.port,
                     tk = w.to.port,
                 )));
             }
@@ -445,11 +469,37 @@ fn adopt_one_expanded(
             .iter()
             .map(|(u, s)| (s.as_str(), u.as_str()))
             .collect();
+        // A source port as the config stores it: `(object uuid, key)`.
+        let source_key = |slug: &str, port: &str| -> (String, String) {
+            let from = uuid_of_lift.get(slug).copied().unwrap_or("");
+            let ty = lift
+                .objects
+                .iter()
+                .find(|o| o.uuid == from)
+                .map_or("", |o| o.block_type.as_str());
+            let name = if port.is_empty() {
+                crate::port_names::default_output(ty).unwrap_or("")
+            } else {
+                port
+            };
+            (
+                from.to_string(),
+                crate::port_names::key_or_raw(ty, name).to_string(),
+            )
+        };
+        let block_type = block.block_type.clone();
         block.args.retain(|a| match a {
             ArgItem::Binding(b) => match &b.kind {
                 BindingKind::Wire(r) => {
-                    let from = uuid_of_lift.get(r.slug.as_str()).copied().unwrap_or("");
-                    !owned_wires.contains(&(b.port.clone(), from.to_string(), r.port.clone()))
+                    let (from, key) = source_key(&r.slug, &r.port);
+                    let to = crate::port_names::key_or_raw(&block_type, &b.port).to_string();
+                    !owned_wires.contains(&(to, from, key))
+                }
+                // A bare name is the object's default output.
+                BindingKind::Param(Value::Ref(s)) if uuid_of_lift.contains_key(s.as_str()) => {
+                    let (from, key) = source_key(s, "");
+                    let to = crate::port_names::key_or_raw(&block_type, &b.port).to_string();
+                    !owned_wires.contains(&(to, from, key))
                 }
                 BindingKind::Param(_) => !owned_sets.contains(&b.port),
                 BindingKind::Expr(_) => true,
@@ -479,11 +529,20 @@ fn adopt_one_expanded(
         }
     }
     for arg in &mut block.args {
-        if let ArgItem::Binding(x) = arg
-            && let BindingKind::Wire(r) = &mut x.kind
-            && let Some(fin) = rename.get(&r.slug)
-        {
-            r.slug = fin.clone();
+        let ArgItem::Binding(x) = arg else { continue };
+        match &mut x.kind {
+            BindingKind::Wire(r) => {
+                if let Some(fin) = rename.get(&r.slug) {
+                    r.slug = fin.clone();
+                }
+            }
+            // A bare name: the object's default output.
+            BindingKind::Param(Value::Ref(s)) => {
+                if let Some(fin) = rename.get(s.as_str()) {
+                    *s = fin.clone();
+                }
+            }
+            _ => {}
         }
     }
     items.push(Item::Block(block));

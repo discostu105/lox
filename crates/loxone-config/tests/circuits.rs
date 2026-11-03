@@ -59,8 +59,8 @@ fn column(doc: &LoxoneDoc, title: &str, n: usize) -> Vec<u32> {
 }
 
 const DIM: &str = "l1 = LightController2(\"L1\", Circuit1: \"dimmer\", Circuit2: \"switch\")\n\
-                   relais2.I <- l1.AQ1\n\
-                   relais3.I <- l1.AQ2\n";
+                   relais2.In <- l1.AQ1\n\
+                   relais3.In <- l1.AQ2\n";
 
 #[test]
 fn a_circuit_is_named_after_its_actuator() {
@@ -143,7 +143,7 @@ fn what_the_mood_editor_was_never_seen_to_do_is_refused() {
         ),
         (
             "l1 = LightController2(\"L1\", Circuit1: \"dimmer\")\n\
-             relais2.I <- l1.AQ1\nrelais3.I <- l1.AQ1\n",
+             relais2.In <- l1.AQ1\nrelais3.I <- l1.AQ1\n",
             "drives 2 objects",
         ),
         (

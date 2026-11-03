@@ -15,6 +15,8 @@
 /// The GUI default of a builtin block's connector, as the exact `Def=`
 /// string, or `None` when it is 0.
 pub fn gui_default(block_type: &str, port: &str) -> Option<&'static str> {
+    // The source name or the connector key, either way.
+    let port = crate::port_names::key_of(block_type, port).unwrap_or(port);
     TABLE
         .iter()
         .find(|(t, _)| *t == block_type)

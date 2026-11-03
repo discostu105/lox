@@ -20,13 +20,13 @@ extern jal_sued = AutoJalousie(title: "Beschattung Süd")
 
 temp_hoch = GreaterEqual(
     "Temp über 28",
-    Input1: aussentemp.Q,
-    Input2: temp_schwelle,
+    In1: aussentemp.Q,
+    In2: temp_schwelle,
 )
 
 beschatten = And(
-    I1: temp_hoch.Q,
-    I2: sonne.Q,
+    In1: temp_hoch.Q,
+    In2: sonne.Q,
 )
 
 jal_sued.AutoShade <- beschatten.Q

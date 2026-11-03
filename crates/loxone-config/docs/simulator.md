@@ -65,9 +65,9 @@ The KB pages are at `https://www.loxone.com/enen/kb/<page>/`.
 |---|---|---|---|---|
 | `And` | AND | kb `and` | Q on when all *connected* inputs are on; several wires into one input are AND-linked | — |
 | `Or` | OR | kb `or` | Q on when any input is on; fan-in OR-linked | — |
-| `Xor` | Exclusive OR | kb `exclusive-or` | Q on when I1 and I2 differ; fan-in OR-linked | — |
+| `Xor` | Exclusive OR | kb `exclusive-or` | Q on when In1 and In2 differ; fan-in OR-linked | — |
 | `Not` | NOT | kb `not` | Q = not I | — |
-| `Equal`, `NotEqual`, `Greater`, `GreaterEqual`, `Less`, `LessEqual` | comparators | kb `comparator` family | Q = Input1 op Input2 | — |
+| `Equal`, `NotEqual`, `Greater`, `GreaterEqual`, `Less`, `LessEqual` | comparators | kb `comparator` family | Q = In1 op In2 | — |
 | `Add`, `Sub`, `Mult`, `Div`, `Add4` | arithmetic | kb `add-2-way`, `subtract`, `multiply`, `divide` | AQ | division by 0 fails the block |
 | `Int` | Integer | kb `integer` | AQ: Ro 0 rounds down, Ro 1 rounds down below .5 and up from it | a negative value, Ro other than 0 or 1 (refused) |
 | `Formula` | Formula | kb `formula`; both decimal separators (loxone-format.md) | AQ from `Formula=`: `+ - * / ^`, comparisons, I1–I4, PI and the documented functions | the error output; a formula without a value fails the block |

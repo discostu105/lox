@@ -21,13 +21,13 @@ let temp_schwelle = 28
 
 temp_hoch = GreaterEqual(
 \t\"Temp über 28\",
-\tInput1: aussentemp.Q,
-\tInput2: temp_schwelle,
+\tIn1: aussentemp.Q,
+\tIn2: temp_schwelle,
 )
 
 beschatten = And(
-\tI1: temp_hoch.Q,
-\tI2: sonne.Q,
+\tIn1: temp_hoch.Q,
+\tIn2: sonne.Q,
 )
 
 jal_sued.AutoShade <- beschatten.Q
@@ -103,7 +103,7 @@ fn rename_moves_source_lock_and_output_together() {
     let periphery = std::fs::read_to_string(dir.join("src/_periphery.loxl")).unwrap();
     assert!(periphery.contains("extern sonnenschein = VirtualIn"));
     let sued = std::fs::read_to_string(dir.join("src/sued.loxl")).unwrap();
-    assert!(sued.contains("I2: sonnenschein.Q"));
+    assert!(sued.contains("In2: sonnenschein.Q"));
     assert!(
         sued.contains("# sonnenschein und aussentemp speisen das Gatter."),
         "comment not renamed: {sued}"

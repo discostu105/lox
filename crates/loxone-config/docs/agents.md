@@ -141,18 +141,18 @@ party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folde
 # Managed blocks. The argument list is the whole input side: a port
 # reference wires, a value or constant sets the parameter.
 
-temp_hoch = GreaterEqual("Temp über 28", Input1: sonne.Q, Input2: schwelle)
-beschatten = And(I1: temp_hoch.Q, I2: sonne.Q)
+temp_hoch = GreaterEqual("Temp über 28", In1: sonne.Q, In2: schwelle)
+beschatten = And(In1: temp_hoch, In2: sonne)
 
-jal.AutoShade <- beschatten.Q # a wire onto an extern port
+jal.AutoShade <- beschatten # a wire onto an extern port; a bare name is the default output
 
-heiss = sonne.Q >= 30 and not party.Q # a named signal: its top block is `heiss`
+heiss = sonne >= 30 and not party # a named signal: its top block is `heiss`
 
 jal.TargetPos = 70 # an extern parameter, restored when the line goes
 
 defaults Monoflop(Time: 5min) # for every Monoflop that does not bind `Time`
 
-nachlauf = Monoflop(InputTrigger: heiss.Q)
+nachlauf = Monoflop(Trigger: heiss)
 
 extern sensor = LoxAIRDevice(uuid: "…") # a device created in Loxone Config
 
@@ -322,7 +322,8 @@ it only when it matches what you intended.
 | `matches N objects` + candidate UUIDs | several objects match | pin one with `uuid: "<one of the candidates>"`; ask if unclear |
 | `not in the verified builtin table` | the compiler cannot create this type | use a verified type, or declare the object `extern` (create it once in Loxone Config) |
 | `unknown port … known ports: …` | wrong port name on a managed block | use a listed port (caught by `check`, no base needed) |
-| `is the canvas label of port` | a canvas label (`Tr`, `D`) used as a port name | use the port the error names (`InputTrigger`, `Time`) |
+| `is the canvas label of port` | a canvas label (`Tr`, `D`) used as a port name | use the port the error names (`Trigger`, `Time`) |
+| `is the connector key of port` | a v2 port key (`InputTrigger`, `I1`) used as a port name | write the name the error gives, or run `loxl fmt --write` to rewrite the module |
 | `a Loxone Config save turns it into` | Config would store the value differently (`Poll: 5` as 10, a digital input's `MaxVal: 5` as 1) | write the value the error names |
 | `a Loxone Config save writes it as` | Config would store the title differently (`Max<Min` as `Max_Min`, a space at the end as `_`) | write the title the error names |
 | `does not fit. The port is documented in …` | a unit suffix that cannot mean the port's unit (`Time: 70%`) | write the value in the named unit (`loxl types <Type>`) |

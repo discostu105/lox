@@ -25,7 +25,7 @@ extern wp_freigabe = Switch(title: "Freigabe", room: "Technikraum")
 # `alarm` der Instanz `frost` (im Lock `frost_alarm`).
 
 template waechter(sensor: VirtualIn, grenze = 3)
-	alarm = Less("Unter Grenzwert", Input1: sensor.Q, Input2: grenze)
+	alarm = Less("Unter Grenzwert", In1: sensor.Q, In2: grenze)
 end
 
 frost = waechter(sensor: wassertemp)
@@ -34,7 +34,7 @@ frost = waechter(sensor: wassertemp)
 # Monoflop hält nach Erreichen der Wunschtemperatur noch 30min —
 # kompiliert exakt zu Def="1800".
 
-nachlauf = Monoflop("Filter-Nachlauf", InputTrigger: wassertemp.Q >= wunschtemp, Time: 30min)
+nachlauf = Monoflop("Filter-Nachlauf", Trigger: wassertemp.Q >= wunschtemp, Time: 30min)
 
 # Ein benanntes Signal (D81): heizen, wenn Wasser unter Soll ist, die PV
 # genug liefert und die Abdeckung zu ist (Verdunstungsverlust). Jeder
@@ -44,7 +44,7 @@ nachlauf = Monoflop("Filter-Nachlauf", InputTrigger: wassertemp.Q >= wunschtemp,
 
 wp_bedarf = wassertemp.Q < wunschtemp and pv_ueberschuss.Q >= pv_schwelle and not abdeckung_offen.Q
 
-wp_freigabe.On <- wp_bedarf.Q
+wp_freigabe.On <- wp_bedarf
 
 # Arithmetik (D35): der ganze Rechenbaum wird EIN Formula-Block
 # (`pv_kw_input__f1`, Formel "I1/1000"), gespeist wird der Schwellwert-
@@ -52,7 +52,7 @@ wp_freigabe.On <- wp_bedarf.Q
 
 pv_kw = AnalogThresholdTrigger(
 	"PV-Überschuss über 1.5 kW",
-	Input: pv_ueberschuss.Q / 1000,
+	In: pv_ueberschuss.Q / 1000,
 	On: 1.5,
 	Off: 1.2,
 )
@@ -77,8 +77,8 @@ test "WP-Freigabe folgt PV und Abdeckung"
 	pv_ueberschuss.Q = 2000
 	abdeckung_offen.Q = 0
 	tick 3
-	expect wp_bedarf.Q == 1
+	expect wp_bedarf == 1
 	abdeckung_offen.Q = 1
 	tick 3
-	expect wp_bedarf.Q == 0
+	expect wp_bedarf == 0
 end

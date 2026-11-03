@@ -385,8 +385,13 @@ pub(super) fn collect_params(module: &Module) -> Result<Params> {
             };
             let value = module.resolve_value_for(v, &block.block_type, &block.slug, k)?;
             // An attribute parameter is keyed by the attribute it writes
-            // (`At:` → `Sec=`).
-            let name = attr_name(&block.block_type, k);
+            // (`At:` → `Sec=`), a connector by its key (`Trigger` →
+            // `InputTrigger`).
+            let name = if attrs.contains(&k) {
+                attr_name(&block.block_type, k)
+            } else {
+                crate::port_names::key_or_raw(&block.block_type, k)
+            };
             target.insert((block.slug.clone(), name.to_string()), value.into_owned());
         }
         // A calendar entry's date: its stored `Mode=` and the attributes

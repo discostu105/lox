@@ -73,7 +73,7 @@ const DECLS: &str = r#"
 taster = TreeDevice("Taster Bad", serial: "B0A1B2C3", Installation: "Neben der Tür", Desc: "Touch")
 taste = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Haustür", MinTime: 20, Statistics: on)
 temp = TreeAsensor("Raum", device: taster, iname: "AI0", Unit: "<v.1> °C", Statistics: off)
-led = TreeActor("Status", device: taster, iname: "Q0", I: taste.Q)
+led = TreeActor("Status", device: taster, iname: "Q0", In: taste.Q)
 tree = LoxTree("Tree", serial: "13000003", Installation: "Keller")
 taste.room = "Bad"
 "#;

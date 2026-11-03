@@ -68,8 +68,8 @@ fn minted_ref_carries_the_mirror_identity() {
          )\n\
          \n\
          anzeige = And(\n\
-         \tI1: spiegel.Q,\n\
-         \tI2: spiegel.AQ,\n\
+         \tIn1: spiegel.Q,\n\
+         \tIn2: spiegel.AQ,\n\
          )\n\
          \n\
          senke.Qm <- anzeige.Q\n",
@@ -152,7 +152,7 @@ fn minted_ref_may_mirror_a_managed_block() {
          extern senke = VirtualIn(iname: \"VI3\")\n\
          \n\
          zustand = Memory(\n\
-         \tInput: quelle.Q,\n\
+         \tIn: quelle.Q,\n\
          )\n\
          \n\
          spiegel = InputRef(\n\
@@ -200,7 +200,7 @@ fn mirror_refusals() {
          extern senke = VirtualIn(iname: \"VI3\")\n\
          g = And(\n\
          \tmirrors: quelle,\n\
-         \tI1: quelle.Q,\n\
+         \tIn1: quelle.Q,\n\
          )\n\
          senke.Qm <- g.Q\n",
     );
@@ -246,8 +246,8 @@ fn mirror_refusals() {
         "extern quelle = VirtualIn(iname: \"VI1\")\n\
          extern senke = VirtualIn(iname: \"VI3\")\n\
          g = And(\n\
-         \tI1: quelle.Q,\n\
-         \tI2: quelle.Q,\n\
+         \tIn1: quelle.Q,\n\
+         \tIn2: quelle.Q,\n\
          )\n\
          spiegel = InputRef(mirrors: g)\n\
          senke.Qm <- spiegel.Q\n",

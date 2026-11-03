@@ -365,7 +365,7 @@ mod tests {
             r#"
 taster = TreeDevice("Taster Flur", serial: "B0A1B2C3", Installation: "Wand")
 klingel = TreeSensor("Klingel", device: taster, iname: "I0", Desc: "Klingel", Statistics: on)
-led = TreeAactor("LED", device: taster, iname: "AQ0", I: 30)
+led = TreeAactor("LED", device: taster, iname: "AQ0", In: 30)
 taster.room = "Flur"
 "#,
         )
@@ -397,7 +397,7 @@ taster.room = "Flur"
                 r#"extern klingel iname: "I0", device: "B0A1B2C3""#,
                 r#"owned klingel Some("Klingel") None ["Desc", "Statistics"]"#,
                 r#"extern led iname: "AQ0", device: "B0A1B2C3""#,
-                "set led.I",
+                "set led.In",
                 r#"owned led Some("LED") None []"#,
             ]
         );

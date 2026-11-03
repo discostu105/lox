@@ -87,7 +87,7 @@ end
 
 timer = DayTimer("Abendlicht")
 timer.schedule = abend
-licht = And(I1: party.Q)
+licht = And(In1: party.Q)
 "#;
 
 #[test]

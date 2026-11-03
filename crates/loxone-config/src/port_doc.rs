@@ -30,6 +30,8 @@ const RTD: &str = "Reset to default: resets the block's parameters and settings 
 
 /// The documented meaning of `port` on a builtin `block_type`, one line.
 pub fn describe(block_type: &str, port: &str) -> Option<String> {
+    // The source name or the connector key, either way.
+    let port = crate::port_names::key_of(block_type, port).unwrap_or(port);
     entries(block_type)?.iter().find_map(|(key, _, text)| {
         let n = matches(key, port)?;
         Some(match n {

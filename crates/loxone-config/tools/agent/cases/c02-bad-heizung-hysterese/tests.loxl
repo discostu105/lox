@@ -7,17 +7,17 @@ extern t_heizung = VirtualOutCmd(title: "Heizung Bad")
 test "Heizung Bad mit Hysterese 20/22 °C"
 	t_raumtemp.Q = 21
 	tick 2
-	expect t_heizung.I == 0
+	expect t_heizung.In == 0
 	t_raumtemp.Q = 19
 	tick 2
-	expect t_heizung.I == 1
+	expect t_heizung.In == 1
 	t_raumtemp.Q = 21
 	tick 2
-	expect t_heizung.I == 1 # hält bis 22 °C
+	expect t_heizung.In == 1 # hält bis 22 °C
 	t_raumtemp.Q = 22.5
 	tick 2
-	expect t_heizung.I == 0
+	expect t_heizung.In == 0
 	t_raumtemp.Q = 21
 	tick 2
-	expect t_heizung.I == 0 # bleibt aus bis unter 20 °C
+	expect t_heizung.In == 0 # bleibt aus bis unter 20 °C
 end

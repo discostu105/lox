@@ -289,11 +289,11 @@ fn named_signal_misuse_is_reported() {
     fails("warm = schwelle", "`let warm = schwelle`");
     // Its inputs are its expression.
     fails(
-        "warm = sonne.Q and wind_alarm.Q\nwarm.I1 <- sonne.Q",
+        "warm = sonne.Q and wind_alarm.Q\nwarm.In1 <- sonne.Q",
         "targets named signal `warm`",
     );
     fails(
-        "warm = sonne.Q and wind_alarm.Q\nwarm.I1 = 1",
+        "warm = sonne.Q and wind_alarm.Q\nwarm.In1 = 1",
         "targets named signal `warm`",
     );
     fails(
@@ -306,7 +306,7 @@ fn named_signal_misuse_is_reported() {
     );
     // One namespace with every other name.
     fails(
-        "warm = sonne.Q and wind_alarm.Q\nwarm = Or(I1: sonne.Q)",
+        "warm = sonne.Q and wind_alarm.Q\nwarm = Or(In1: sonne.Q)",
         "duplicate name `warm`",
     );
     fails(
@@ -315,7 +315,7 @@ fn named_signal_misuse_is_reported() {
     );
     // Its sub-block namespace is its own.
     fails(
-        "warm__ge1 = Or(I1: sonne.Q)\nwarm = sonne.Q and aussentemp.Q >= 5",
+        "warm__ge1 = Or(In1: sonne.Q)\nwarm = sonne.Q and aussentemp.Q >= 5",
         "claimed by the expression",
     );
     fails("warm = nix.Q and sonne.Q", "undeclared slug `nix`");
@@ -442,7 +442,7 @@ fn adopt_lifts_expressions_and_signals_back() {
     // unlabelled signal's from its expression text.
     for line in [
         "let schwelle = 28\n",
-        "AutoShade: beschatten.Q, Safety: not wind_alarm.Q,",
+        "AutoShade: beschatten, Safety: not wind_alarm.Q,",
         "beschatten = sonnenschein.Q and aussentemp.Q >= schwelle\n\
          beschatten.title = \"Beschatten\"\n",
         "aussentemp_q_30 = aussentemp.Q >= 30\n",

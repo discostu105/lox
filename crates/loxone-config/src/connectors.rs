@@ -34,12 +34,19 @@ pub enum PortDir {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortSpec {
+    /// The connector key, as the config stores it (`K="InputTrigger"`).
     pub key: &'static str,
+    /// The name source writes (`Trigger`): [`crate::port_names`].
+    pub name: &'static str,
     pub dir: PortDir,
 }
 
 const fn p(key: &'static str, dir: PortDir) -> PortSpec {
-    PortSpec { key, dir }
+    PortSpec {
+        key,
+        name: key,
+        dir,
+    }
 }
 
 use PortDir::{Api, Input, Output, Param};
@@ -1790,6 +1797,7 @@ impl PortUnit {
 /// The documented unit of a block type's port, if any.
 pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
     let unit = crate::port_meta::port_meta(block_type, port)?.unit?;
+    // `port_meta` takes the source name or the key.
     Some(match unit {
         "ms" => PortUnit::Milliseconds,
         "s" => PortUnit::Seconds,
@@ -1801,8 +1809,34 @@ pub fn port_unit(block_type: &str, port: &str) -> Option<PortUnit> {
 }
 
 /// Verified port tables for the block types the compiler may create.
-/// Order = connector-index order.
+/// Order = connector-index order. Each spec carries the connector key
+/// and the source name of the port ([`crate::port_names`]).
 pub fn builtin(block_type: &str) -> Option<&'static [PortSpec]> {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+    static NAMED: OnceLock<Mutex<BTreeMap<String, &'static [PortSpec]>>> = OnceLock::new();
+    let cache = NAMED.get_or_init(Default::default);
+    if let Some(specs) = cache.lock().expect("port table").get(block_type) {
+        return Some(specs);
+    }
+    let raw = builtin_raw(block_type)?;
+    let named: Vec<PortSpec> = raw
+        .iter()
+        .map(|s| PortSpec {
+            name: crate::port_names::name_of(block_type, s.key),
+            ..*s
+        })
+        .collect();
+    let leaked: &'static [PortSpec] = Box::leak(named.into_boxed_slice());
+    cache
+        .lock()
+        .expect("port table")
+        .insert(block_type.to_string(), leaked);
+    Some(leaked)
+}
+
+/// The port tables as written: connector keys only.
+fn builtin_raw(block_type: &str) -> Option<&'static [PortSpec]> {
     match block_type {
         "And" | "Or" => Some(GATE),
         "Not" => Some(NOT),

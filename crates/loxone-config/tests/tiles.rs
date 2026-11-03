@@ -428,7 +428,7 @@ fn new_api_links_go_through_an_explicit_output_ref() {
     let netz = "extern netz = InputRef(uuid: \"3000000a-0000-00a0-ffff504f94112233\")\n";
     for (rest, want) in [
         (
-            format!("{api}{link}m = Monoflop(InputTrigger: ost_api.AI)\n"),
+            format!("{api}{link}m = Monoflop(Trigger: ost_api.AI)\n"),
             "`ost_api.AI` is an input port and cannot be used as a wire source",
         ),
         (

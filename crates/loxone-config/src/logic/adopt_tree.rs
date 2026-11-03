@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::lock::{LockedExternal, LockedObject, Lockfile, sha256_hex};
 use crate::logic::adopt::{AdoptedBlock, check_promotable};
 use crate::logic::ast::{
-    ArgItem, Binding, BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, PortRef, Value,
+    ArgItem, Binding, BindingKind, BlockDecl, ExternDecl, Item, MatchSpec, Module, Value,
 };
 use crate::logic::decompile::slugify;
 use crate::periphery::{device_types, periphery};
@@ -392,11 +392,12 @@ pub(super) fn adopt_device(
                 })?;
                 let src = pin(owner, &mut items, lock, &mut taken);
                 args.push(ArgItem::Binding(Binding {
-                    port: key.clone(),
-                    kind: BindingKind::Wire(PortRef {
-                        slug: src,
-                        port: from_key,
-                    }),
+                    port: crate::port_names::name_of(&o.block_type, &key).to_string(),
+                    kind: crate::logic::decompile::source_binding(
+                        &owner.block_type,
+                        &src,
+                        &from_key,
+                    ),
                     comment: None,
                 }));
             }

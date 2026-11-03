@@ -260,8 +260,8 @@ Guide: [Config versioning](docs/guides/config-versioning.md).
 Write Miniserver logic as text, review it in a pull request, and compile it into the real config:
 
 ```text
-temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: 28)
-jal_sued.AutoShade <- temp_hoch.Q and sonne.Q
+temp_hoch = GreaterEqual("Temp über 28", In1: aussentemp, In2: 28)
+jal_sued.AutoShade <- temp_hoch and sonne
 ```
 
 - `lox logic compile` writes the same XML Loxone Config would have written, and pins every UUID it creates in a

@@ -297,10 +297,10 @@ fn zero_on_a_connector_is_no_def() {
     let src = "page \"Beschattung\"\n\
                extern aussentemp = VirtualIn(iname: \"VI1\")\n\
                extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n\
-               frost = Less(\"Frost\", Input1: aussentemp.Q, Input2: 0)\n\
-               warm = GreaterEqual(\"Warm\", Input1: aussentemp.Q, Input2: 0.0)\n\
-               kurz = Monoflop(\"Kurz\", InputTrigger: frost.Q, Time: 0)\n\
-               lang = Monoflop(\"Lang\", InputTrigger: frost.Q, Time: 2)\n\
+               frost = Less(\"Frost\", In1: aussentemp.Q, In2: 0)\n\
+               warm = GreaterEqual(\"Warm\", In1: aussentemp.Q, In2: 0.0)\n\
+               kurz = Monoflop(\"Kurz\", Trigger: frost.Q, Time: 0)\n\
+               lang = Monoflop(\"Lang\", Trigger: frost.Q, Time: 2)\n\
                unter_null = aussentemp.Q < 0\n\
                jal_sued.TargetPos = 0\n";
     let module = Module::parse(src).unwrap();
@@ -364,11 +364,11 @@ fn a_new_block_gets_the_gui_defaults() {
     let base = base();
     let src = "page \"Beschattung\"\n\
                extern aussentemp = VirtualIn(iname: \"VI1\")\n\
-               frost = Less(\"Frost\", Input1: aussentemp.Q, Input2: 3)\n\
-               puls = Monoflop(\"Puls\", InputTrigger: frost.Q)\n\
-               null = Monoflop(\"Null\", InputTrigger: frost.Q, Time: 0)\n\
+               frost = Less(\"Frost\", In1: aussentemp.Q, In2: 3)\n\
+               puls = Monoflop(\"Puls\", Trigger: frost.Q)\n\
+               null = Monoflop(\"Null\", Trigger: frost.Q, Time: 0)\n\
                licht = LightController2(\"Licht\", Max: 80)\n\
-               treppe = StairwayLS(\"Treppe\", InputTrigger: frost.Q, TimeHigh: aussentemp.Q)\n";
+               treppe = StairwayLS(\"Treppe\", Trigger: frost.Q, Time: aussentemp.Q)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base, &module, &mut lock, &opts()).unwrap();
@@ -411,8 +411,8 @@ fn implicit_zeros_are_found_and_fixed() {
     let base = base();
     let src = "page \"Beschattung\"\n\
                extern aussentemp = VirtualIn(iname: \"VI1\")\n\
-               puls = Monoflop(\"Puls\", InputTrigger: aussentemp.Q)\n\
-               lang = Monoflop(\"Lang\", InputTrigger: aussentemp.Q, Time: 5)\n";
+               puls = Monoflop(\"Puls\", Trigger: aussentemp.Q)\n\
+               lang = Monoflop(\"Lang\", Trigger: aussentemp.Q, Time: 5)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     compile(&base, &module, &mut lock, &opts()).unwrap();
@@ -435,10 +435,7 @@ fn implicit_zeros_are_found_and_fixed() {
     let mut fixed = module.clone();
     assert_eq!(fix_implicit_zeros(&mut fixed, &zeros), 1);
     let text = fixed.to_text();
-    assert!(
-        text.contains("InputTrigger: aussentemp.Q, Time: 0"),
-        "{text}"
-    );
+    assert!(text.contains("Trigger: aussentemp.Q, Time: 0"), "{text}");
     let refixed = compile(&base, &fixed, &mut lock.clone(), &opts()).unwrap();
     assert_eq!(refixed.to_bytes(), out.to_bytes());
     assert!(implicit_zeros(&fixed, &lock, &refixed).unwrap().is_empty());
@@ -471,7 +468,7 @@ fn ambiguity_and_no_match_are_reported() {
     let err = compile(&base, &unknown_port, &mut Lockfile::new(), &opts()).unwrap_err();
     assert!(err.to_string().contains("DoesNotExist"), "{err}");
     assert!(
-        err.to_string().contains("InputTrigger"),
+        err.to_string().contains("Toggle"),
         "lists available ports: {err}"
     );
 }
@@ -1186,7 +1183,7 @@ fn incremental_adopt_claims_a_gui_drawn_block() {
     // The wire into the managed sink is not in source yet: refused, and
     // the error names the exact line to add.
     let err = adopt_one(&base2, OR_UUID, "nachtlicht", &module, &mut lock0.clone()).unwrap_err();
-    assert!(err.to_string().contains("I2: nachtlicht.Q"), "{err}");
+    assert!(err.to_string().contains("In2: nachtlicht"), "{err}");
     assert!(err.to_string().contains("`beide`"), "{err}");
 
     // The manual fix: declare the wire in the And's argument list.
@@ -1195,7 +1192,7 @@ fn incremental_adopt_claims_a_gui_drawn_block() {
             && b.slug == "beide"
         {
             b.args.push(ArgItem::Binding(Binding {
-                port: "I2".into(),
+                port: "In2".into(),
                 kind: BindingKind::Wire(PortRef {
                     slug: "nachtlicht".into(),
                     port: "Q".into(),
@@ -1222,8 +1219,8 @@ fn incremental_adopt_claims_a_gui_drawn_block() {
         text.contains("extern sensor_b = VirtualIn(title: \"Sensor B\")"),
         "{text}"
     );
-    assert!(text.contains("I1: sensor_a.Q"), "{text}");
-    assert!(text.contains("I2: sensor_b.Q"), "{text}");
+    assert!(text.contains("In1: sensor_a,"), "{text}");
+    assert!(text.contains("In2: sensor_b)"), "{text}");
 
     // The lock pins the block's existing identity and the new extern, and
     // the adopted-from config is the new drift baseline.
@@ -1282,7 +1279,7 @@ fn incremental_adopt_promotes_an_extern() {
         Module::parse(
             "extern sensor_b = VirtualIn(title: \"Sensor B\")\n\
              extern nachtlicht = Or(title: \"Nachtlicht\")\n\
-             nachtlicht.I2 <- sensor_b.Q # vom Bewegungsmelder\n",
+             nachtlicht.In2 <- sensor_b.Q # vom Bewegungsmelder\n",
         )
         .unwrap()
         .items,
@@ -1309,8 +1306,9 @@ fn incremental_adopt_promotes_an_extern() {
     .to_text();
     // The GUI's wire and the source's wire are both arguments now — the
     // source's once, with its comment.
-    assert!(text.contains("I1: sensor_a.Q"), "{text}");
-    assert_eq!(text.matches("I2: sensor_b.Q").count(), 1, "{text}");
+    assert!(text.contains("In1: sensor_a,"), "{text}");
+    assert_eq!(text.matches("In2: sensor_b.Q").count(), 1, "{text}");
+    assert!(!text.contains("In2: sensor_b,"), "{text}");
     assert!(text.contains("# vom Bewegungsmelder"), "{text}");
     assert!(!promoted_lock.externals.contains_key("nachtlicht"));
     assert!(promoted_lock.extern_wires.is_empty());
@@ -1337,7 +1335,7 @@ fn extern_wire_keeps_the_guis_flag() {
         Module::parse(
             "extern sensor_b = VirtualIn(title: \"Sensor B\")\n\
              extern nachtlicht = Or(title: \"Nachtlicht\")\n\
-             nachtlicht.I2 <- sensor_b.Q\n",
+             nachtlicht.In2 <- sensor_b.Q\n",
         )
         .unwrap()
         .items,
@@ -1421,9 +1419,9 @@ extern sonne = VirtualIn(iname: \"VI3\")\n\
 extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
 \n\
 template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)\n\
-\thoch = GreaterEqual(Input1: aussentemp.Q, Input2: schwelle)\n\
+\thoch = GreaterEqual(In1: aussentemp.Q, In2: schwelle)\n\
 \n\
-\tbeschatten = And(I1: hoch.Q, I2: sonne.Q)\n\
+\tbeschatten = And(In1: hoch.Q, In2: sonne.Q)\n\
 \n\
 \tjalousie.AutoShade <- beschatten.Q\n\
 \tjalousie.Safety <- wind_alarm.Q\n\
@@ -1505,7 +1503,7 @@ fn templates_expand_with_locked_identities() {
     // the usual vanished-slug error, per instance.
     let grown = Module::parse(&FASSADE_MODULE.replace(
         "\tjalousie.TargetPos = pos\n",
-        "\tjalousie.TargetPos = pos\n\twarnung = Not(I: hoch.Q)\n",
+        "\tjalousie.TargetPos = pos\n\twarnung = Not(In: hoch.Q)\n",
     ))
     .unwrap();
     let grown_out = compile(&base, &grown, &mut lock, &opts()).unwrap();
@@ -1522,7 +1520,7 @@ extern vi_a = VirtualIn(iname: \"VI1\")\n\
 extern vi_b = VirtualIn(iname: \"VI2\")\n\
 \n\
 template melder(quelle: VirtualIn, schwelle = 1)\n\
-\talarm = GreaterEqual(Input1: quelle.Q, Input2: schwelle)\n\
+\talarm = GreaterEqual(In1: quelle.Q, In2: schwelle)\n\
 end\n\
 \n\
 a = melder(quelle: vi_a)\n\
@@ -1548,7 +1546,7 @@ extern vi_b = VirtualIn(iname: \"VI2\")\n\
 let name_b = \"Melder Garage\"\n\
 \n\
 template melder(quelle: VirtualIn, titel = \"Melder\", schwelle = 1)\n\
-\talarm = GreaterEqual(\"{titel} (scharf)\", Input1: quelle.Q, Input2: schwelle)\n\
+\talarm = GreaterEqual(\"{titel} (scharf)\", In1: quelle.Q, In2: schwelle)\n\
 end\n\
 \n\
 a = melder(quelle: vi_a, titel: \"Melder Keller\")\n\
@@ -1599,10 +1597,10 @@ extern vi_a = VirtualIn(iname: \"VI1\")\n\
 extern vi_b = VirtualIn(iname: \"VI2\")\n\
 \n\
 template melder(schwelle = 1)\n\
-\talarm = GreaterEqual(Input2: schwelle)\n\
+\talarm = GreaterEqual(In2: schwelle)\n\
 end\n\
 \n\
-a = melder(schwelle: 3, Input1: vi_a.Q, Input1: vi_b.Q)\n";
+a = melder(schwelle: 3, In1: vi_a.Q, In1: vi_b.Q)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
@@ -1636,8 +1634,8 @@ a = melder(schwelle: 3, Input1: vi_a.Q, Input1: vi_b.Q)\n";
     // A body with several blocks forwards to its primary block (D82); without
     // one the unknown binding reports the constraint.
     let multi = src.replace(
-        "\talarm = GreaterEqual(Input2: schwelle)\n",
-        "\talarm = GreaterEqual(Input2: schwelle)\n\tinvers = Not(I: alarm.Q)\n",
+        "\talarm = GreaterEqual(In2: schwelle)\n",
+        "\talarm = GreaterEqual(In2: schwelle)\n\tinvers = Not(In: alarm.Q)\n",
     );
     let err = Module::parse(&multi).unwrap_err();
     assert!(err.to_string().contains("primary block"), "{err}");
@@ -1683,11 +1681,11 @@ fn instance_blocks_are_named_by_their_instance() {
     let head = "\
 extern vi = VirtualIn(iname: \"VI1\")\n\
 template paar(x: VirtualIn) -> ein\n\
-\tein = Not(I: x.Q)\n\
-\taus = Not(I: ein.Q)\n\
+\tein = Not(In: x.Q)\n\
+\taus = Not(In: ein.Q)\n\
 end\n\
 a = paar(x: vi)\n";
-    let ok = format!("{head}e = Or(I1: a.Q and a.aus.Q)\nb = And(I1: a.Q, I2: a.aus.Q)\n");
+    let ok = format!("{head}e = Or(In1: a.Q and a.aus.Q)\nb = And(In1: a.Q, In2: a.aus.Q)\n");
     let module = Module::parse(&ok).unwrap();
     assert_eq!(Module::parse(&module.to_text()).unwrap(), module);
     let mut lock = Lockfile::new();
@@ -1712,25 +1710,28 @@ a = paar(x: vi)\n";
     };
     // The expanded spelling names its replacement.
     fails(
-        format!("{head}b = Not(I: a_aus.Q)\n"),
+        format!("{head}b = Not(In: a_aus.Q)\n"),
         "Write `a.aus.Q` instead of `a_aus.Q`",
     );
     fails(
-        format!("{head}b = Not(I: a_ein.Q)\n"),
+        format!("{head}b = Not(In: a_ein.Q)\n"),
         "Write `a.Q` instead of `a_ein.Q`",
     );
     // One spelling: the primary block is the instance.
     fails(
-        format!("{head}b = Not(I: a.ein.Q)\n"),
+        format!("{head}b = Not(In: a.ein.Q)\n"),
         "Write `a.Q` instead of `a.ein.Q`",
     );
-    fails(format!("{head}b = Not(I: a.nix.Q)\n"), "has no block `nix`");
     fails(
-        format!("{head}b = Not(I: vi.nix.Q)\n"),
+        format!("{head}b = Not(In: a.nix.Q)\n"),
+        "has no block `nix`",
+    );
+    fails(
+        format!("{head}b = Not(In: vi.nix.Q)\n"),
         "`vi` is not a template instance",
     );
     fails(
-        format!("{}b = Not(I: a.Q)\n", head.replace(" -> ein", "")),
+        format!("{}b = Not(In: a.Q)\n", head.replace(" -> ein", "")),
         "has no primary block",
     );
     fails(
@@ -1743,7 +1744,7 @@ a = paar(x: vi)\n";
     );
     // Object arguments, tests, removed/moved take the scoped name too.
     let more = format!(
-        "{head}template weiter(y: Not)\n\tz = Not(I: y.Q)\nend\n\
+        "{head}template weiter(y: Not)\n\tz = Not(In: y.Q)\nend\n\
          c = weiter(y: a.aus)\nd = weiter(y: a)\n\
          moved alt -> a.aus\nremoved a.weg\n\
          test \"t\"\n\tvi.Q = 1\n\ttick 1\n\texpect a.Q == 0\n\texpect a.aus.Q == 1\nend\n"
@@ -1787,7 +1788,7 @@ fn template_misuse_is_reported() {
         };
         assert!(err.contains(needle), "`{needle}` not in: {err}");
     };
-    let tmpl = "template t(x: VirtualIn, n = 1)\n\ty = Not(I: x.Q)\nend\n";
+    let tmpl = "template t(x: VirtualIn, n = 1)\n\ty = Not(In: x.Q)\nend\n";
     let vi = "extern vi = VirtualIn(iname: \"VI1\")\n";
 
     fails("a = nirgends(x: 1)\n", "unknown template `nirgends`");
@@ -1816,13 +1817,13 @@ fn template_misuse_is_reported() {
         "not allowed inside a template body",
     );
     fails(
-        "template a(x: VirtualIn)\n\ty = Not(I: x.Q)\nend\n\
+        "template a(x: VirtualIn)\n\ty = Not(In: x.Q)\nend\n\
            template b(x: VirtualIn)\n\tz = a(x: x)\nend\n",
         "cannot instantiate another template",
     );
     fails("use fassade(jal)\n", "old syntax");
     fails(
-        "template t(x: VirtualIn)\n\ty = Not(I: x.Q)\n",
+        "template t(x: VirtualIn)\n\ty = Not(In: x.Q)\n",
         "Close it with `end`",
     );
     fails("end\n", "`end` without an open `template`");
@@ -1830,8 +1831,8 @@ fn template_misuse_is_reported() {
     // the message points at the scoped names.
     fails(
         &format!(
-            "{vi}template t2(x: VirtualIn)\n\ty = Not(I: x.Q)\n\tz = Not(I: y.Q)\nend\n\
-             a = t2(x: vi)\nb = Not(I: a.Q)\n"
+            "{vi}template t2(x: VirtualIn)\n\ty = Not(In: x.Q)\n\tz = Not(In: y.Q)\nend\n\
+             a = t2(x: vi)\nb = Not(In: a.Q)\n"
         ),
         "Name the block (`a.<block>.Q`)",
     );
@@ -1843,7 +1844,7 @@ fn template_misuse_is_reported() {
         "expects a VirtualIn",
     );
     // `any` takes every type; the port is checked after expansion.
-    let any = "template u(x: any)\n\ty = Not(I: x.Q)\nend\n";
+    let any = "template u(x: any)\n\ty = Not(In: x.Q)\nend\n";
     Module::parse(&format!(
         "extern j = AutoJalousie(title: \"X\")\n{any}a = u(x: j)\n"
     ))
@@ -1860,7 +1861,7 @@ fn grown_gate_inputs_are_refused() {
         "extern t1 = VirtualIn(iname: \"VI1\")\n\
          extern t2 = VirtualIn(iname: \"VI2\")\n\
          extern t3 = VirtualIn(iname: \"VI3\")\n\
-         any = Or(I1: t1.Q, I2: t2.Q, I3: t3.Q)\n",
+         any = Or(In1: t1.Q, In2: t2.Q, I3: t3.Q)\n",
     )
     .unwrap();
     let err = compile(&base(), &m, &mut Lockfile::new(), &opts()).unwrap_err();
@@ -1885,8 +1886,9 @@ fn decompile_of_compiled_output_reflects_the_module() {
     assert_eq!(report.externs, 3);
     assert_eq!(m.blocks().count(), 3);
     // Every wire lands in a block argument list — the AutoShade and Safety
-    // sinks are on the lifted AutoJalousie now.
-    assert_eq!(m.wire_pairs().len(), 5);
+    // sinks are on the lifted AutoJalousie now (a bare source is a wire
+    // once the module is expanded).
+    assert_eq!(m.expand().unwrap().wire_pairs().len(), 5);
     assert_eq!(m.extern_wires().count(), 0);
     // Everything the compiler owns sits on the one page it compiled onto.
     assert_eq!(report.pages, 1);
@@ -1909,7 +1911,7 @@ fn full_view_decompile_shows_every_page_block_and_wire() {
     assert_eq!(report.pages, 1);
     // Every wire sinks on a lifted block now — nothing needs `<-`.
     assert_eq!(m.extern_wires().count(), 0);
-    assert_eq!(m.wire_pairs().len(), 5);
+    assert_eq!(m.expand().unwrap().wire_pairs().len(), 5);
     // Output is grouped into page sections headed by real `page`
     // statements (D28); the periphery keeps its comment.
     assert!(
@@ -2049,7 +2051,7 @@ fn full_view_folds_ref_plumbing_and_sorts_extern_wires() {
     assert!(m.externs().all(|e| e.slug != "regensensor"));
     // Only the refs' real source wires survive the fold.
     let pile: Vec<String> = m.extern_wires().map(|w| w.to.to_string()).collect();
-    assert_eq!(pile, ["alpha_ref.AI", "zeta_ref.I"]);
+    assert_eq!(pile, ["alpha_ref.AI", "zeta_ref.In"]);
     // Still canonical, parseable text.
     let text = m.to_text();
     assert_eq!(Module::parse(&text).unwrap(), m);
@@ -2240,7 +2242,7 @@ fn full_view_elides_observed_default_params() {
         params(&m),
         [
             ("TargetPos".into(), "100".into()),
-            ("Width".into(), "50".into())
+            ("SlatWidth".into(), "50".into())
         ]
     );
 
@@ -2332,9 +2334,9 @@ fn page_statements_place_and_move_blocks() {
     };
 
     let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
-               vor = Or(I1: wind.Q)\n\n\
+               vor = Or(In1: wind.Q)\n\n\
                page \"Regeln\"\n\n\
-               danach = Not(I: wind.Q)\n";
+               danach = Not(In: wind.Q)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base_with_page("Regeln"), &module, &mut lock, &opts()).unwrap();
@@ -2368,12 +2370,12 @@ extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")
 summe = Formula(
 \t\"Summe\",
 \tFormula: \"I1+I2\",
-\tInput1: aussentemp.Q,
-\tInput2: sonne.Q,
+\tIn1: aussentemp.Q,
+\tIn2: sonne.Q,
 )
 heiss = GreaterEqual(
-\tInput1: summe.AQ,
-\tInput2: 50,
+\tIn1: summe.AQ,
+\tIn2: 50,
 )
 
 jal_sued.AutoShade <- heiss.Q
@@ -2471,7 +2473,7 @@ fn fingerprint_is_recorded_and_survives_the_rebuild() {
     assert_eq!(loxone_config::diff::semantic_fingerprint(&out), recorded);
 
     // Any real edit moves it (here: a changed Def value).
-    let changed_src = ADOPT_SRC.replace("Input2: 50", "Input2: 51");
+    let changed_src = ADOPT_SRC.replace("In2: 50", "In2: 51");
     let changed = compile(
         &base(),
         &Module::parse(&changed_src).unwrap(),
@@ -2573,8 +2575,8 @@ fn adopt_carries_gui_owned_inv_connectors_verbatim() {
     // the source (restating the wire would silently invert its meaning);
     // the untouched Input2 parameter is still lifted.
     let text = module.to_text();
-    assert!(!text.contains("Input1: summe.AQ"), "{text}");
-    assert!(text.contains("Input2: 50"), "{text}");
+    assert!(!text.contains("In1: summe.AQ"), "{text}");
+    assert!(text.contains("In2: 50"), "{text}");
     // The rebuild is still a semantic no-op: the carried <Co> brings the
     // flag and the wire back verbatim.
     let out = compile(&existing, &module, &mut lock, &opts()).unwrap();
@@ -2598,7 +2600,7 @@ fn adopt_carries_gui_owned_inv_connectors_verbatim() {
     let wire_src = "\
 extern sonne = VirtualIn(iname: \"VI3\")
 extern heiss = GreaterEqual(title: \"heiss\")
-heiss.Input1 <- sonne.Q
+heiss.In1 <- sonne.Q
 ";
     let m = Module::parse(wire_src).unwrap();
     let err = compile(&existing, &m, &mut Lockfile::new(), &opts())
@@ -2608,7 +2610,7 @@ heiss.Input1 <- sonne.Q
     assert!(err.contains("inverted in Loxone Config"), "{err}");
     let (module, mut lock, _) = adopt(&existing).unwrap();
     let mut text = module.to_text();
-    text = text.replace("Input2: 50", "Input1: 5, Input2: 50");
+    text = text.replace("In2: 50", "In1: 5, In2: 50");
     let m = Module::parse(&text).unwrap();
     let err = compile(&existing, &m, &mut lock, &opts())
         .unwrap_err()
@@ -2728,7 +2730,7 @@ fn adopt_carries_wire_flags_verbatim() {
 
 #[test]
 fn wire_direction_is_checked_on_managed_blocks() {
-    let m = Module::parse("a = And()\nb = And(I2: a.I1)\n").unwrap();
+    let m = Module::parse("a = And()\nb = And(In2: a.In1)\n").unwrap();
     let err = compile(&base(), &m, &mut Lockfile::new(), &opts()).unwrap_err();
     assert!(err.to_string().contains("wire source"), "{err}");
 }
@@ -2745,8 +2747,8 @@ fn removed_statement_authorizes_scoped_removal() {
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
          temp_hoch = GreaterEqual(\n\
          \t\"Temp \u{fc}ber 28\",\n\
-         \tInput1: aussentemp.Q,\n\
-         \tInput2: 28,\n\
+         \tIn1: aussentemp.Q,\n\
+         \tIn2: 28,\n\
          )\n\
          removed beschatten\n",
     )
@@ -2791,8 +2793,8 @@ fn removal_tombstone_bridges_the_compile_to_push_window() {
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
          temp_hoch = GreaterEqual(\n\
          \t\"Temp \u{fc}ber 28\",\n\
-         \tInput1: aussentemp.Q,\n\
-         \tInput2: 28,\n\
+         \tIn1: aussentemp.Q,\n\
+         \tIn2: 28,\n\
          )\n\
          removed beschatten\n",
     )
@@ -2835,8 +2837,8 @@ fn removal_tombstone_bridges_the_compile_to_push_window() {
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
          temp_hoch = GreaterEqual(\n\
          \t\"Temp \u{fc}ber 28\",\n\
-         \tInput1: aussentemp.Q,\n\
-         \tInput2: 28,\n\
+         \tIn1: aussentemp.Q,\n\
+         \tIn2: 28,\n\
          )\n",
     )
     .unwrap();
@@ -2875,12 +2877,12 @@ extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")
 
 temp_hoch = GreaterEqual(
 \t\"Temp \u{fc}ber 28\",
-\tInput1: aussentemp.Q,
-\tInput2: 28,
+\tIn1: aussentemp.Q,
+\tIn2: 28,
 )
 schatten_gate = And(
-\tI1: temp_hoch.Q,
-\tI2: sonne.Q,
+\tIn1: temp_hoch.Q,
+\tIn2: sonne.Q,
 )
 
 jal_sued.AutoShade <- schatten_gate.Q
@@ -2919,13 +2921,13 @@ fn let_constants_resolve_to_defs() {
     let with_let = Module::parse(
         "let schwelle = 28\n\
          extern aussentemp = VirtualIn(iname: \"VI1\")\n\
-         temp_hoch = GreaterEqual(Input1: aussentemp.Q, Input2: schwelle)\n\
+         temp_hoch = GreaterEqual(In1: aussentemp.Q, In2: schwelle)\n\
          aussentemp.Qm = schwelle\n",
     )
     .unwrap();
     let literal = Module::parse(
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
-         temp_hoch = GreaterEqual(Input1: aussentemp.Q, Input2: 28)\n\
+         temp_hoch = GreaterEqual(In1: aussentemp.Q, In2: 28)\n\
          aussentemp.Qm = 28\n",
     )
     .unwrap();
@@ -2959,7 +2961,7 @@ fn module_fragments_merge_and_cross_reference() {
     // declared in fragment A. Each fragment parses alone (no name
     // resolution), the merged module validates.
     let frag_a = "# page: A\nextern sonne = InputRef(title: \"Sonne\")\n";
-    let frag_b = "# page: B\ngate = Not(\"Gate\", I: sonne.AQ)\n";
+    let frag_b = "# page: B\ngate = Not(\"Gate\", In: sonne.AQ)\n";
     assert!(
         Module::parse(frag_b).is_err(),
         "a lone fragment with a cross-file reference must not pass full parse"
@@ -2975,7 +2977,7 @@ fn module_fragments_merge_and_cross_reference() {
 
 #[test]
 fn module_fragments_duplicate_slug_is_rejected() {
-    let frag = "x = Not(\"X\", I: x.Q)\n";
+    let frag = "x = Not(\"X\", In: x.Q)\n";
     let err = Module::from_fragments([
         Module::parse_fragment(frag).unwrap(),
         Module::parse_fragment(frag).unwrap(),
@@ -3032,7 +3034,7 @@ fn expressions_desugar_with_locked_identities() {
     assert_eq!(ge.title.as_deref(), Some("aussentemp.Q >= schwelle"));
     assert!(
         ge.params()
-            .any(|(p, v)| p == "Input2" && v.to_string() == "schwelle"),
+            .any(|(p, v)| p == "In2" && v.to_string() == "schwelle"),
         "constant operand becomes a Def parameter"
     );
 
@@ -3196,7 +3198,7 @@ fn expression_misuse_is_reported() {
     );
     fails("jal.AutoShade <- 5", "write `jal.AutoShade = 5`");
     fails("let and = 5", "reserved word");
-    fails("or = And(I1: a.Q, I2: b.Q)", "reserved word");
+    fails("or = And(In1: a.Q, In2: b.Q)", "reserved word");
 
     // Validation: references resolve before desugaring, on what the user
     // wrote.
@@ -3206,21 +3208,21 @@ fn expression_misuse_is_reported() {
     );
     fails(
         "jal.AutoShade <- a.Q and nixkonst >= 5",
-        "undeclared constant `nixkonst`",
+        "undeclared name `nixkonst`",
     );
 
     // Desugar-level semantic errors.
     fails("jal.AutoShade <- 5 and a.Q", "cannot drive a gate input");
     fails("jal.AutoShade <- schwelle >= 28", "compares two constants");
     fails(
-        "jal_autoshade__and1 = And(I1: a.Q, I2: b.Q)\n\
+        "jal_autoshade__and1 = And(In1: a.Q, In2: b.Q)\n\
          jal.AutoShade <- a.Q and b.Q",
         "claimed by the expression",
     );
 
     // A managed sink refuses `<-` exactly like plain wires do.
     let err = Module::parse(&format!(
-        "{head}gate = And(I1: a.Q, I2: b.Q)\ngate.I1 <- a.Q and b.Q\n"
+        "{head}gate = And(In1: a.Q, In2: b.Q)\ngate.I1 <- a.Q and b.Q\n"
     ))
     .unwrap_err();
     assert!(err.to_string().contains("targets managed block"), "{err}");
@@ -3234,12 +3236,12 @@ fn unit_values_compile_byte_identically_to_their_base_literal() {
     let base = base();
     let with_units = Module::parse(
         "extern sonne = VirtualIn(iname: \"VI3\")\n\
-         nachlauf = Monoflop(InputTrigger: sonne.Q, Time: 1.5h)\n",
+         nachlauf = Monoflop(Trigger: sonne.Q, Time: 1.5h)\n",
     )
     .unwrap();
     let plain = Module::parse(
         "extern sonne = VirtualIn(iname: \"VI3\")\n\
-         nachlauf = Monoflop(InputTrigger: sonne.Q, Time: 5400)\n",
+         nachlauf = Monoflop(Trigger: sonne.Q, Time: 5400)\n",
     )
     .unwrap();
     let mut lock_a = Lockfile::new();
@@ -3268,8 +3270,8 @@ extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
 let schwelle = 28\n\
 \n\
 gate = And(\n\
-\tI1: sonne.Q and aussentemp.Q >= schwelle,\n\
-\tI2: wind_alarm.Q,\n\
+\tIn1: sonne.Q and aussentemp.Q >= schwelle,\n\
+\tIn2: wind_alarm.Q,\n\
 )\n\
 \n\
 jal_sued.AutoShade <- gate.Q\n";
@@ -3278,7 +3280,7 @@ jal_sued.AutoShade <- gate.Q\n";
     // Canonical form keeps the expression as written and is a fixpoint.
     let text = module.to_text();
     assert!(
-        text.contains("I1: sonne.Q and aussentemp.Q >= schwelle,"),
+        text.contains("In1: sonne.Q and aussentemp.Q >= schwelle,"),
         "{text}"
     );
     assert_eq!(
@@ -3300,7 +3302,7 @@ jal_sued.AutoShade <- gate.Q\n";
         .input_wires()
         .map(|(p, src)| format!("{p}: {src}"))
         .collect();
-    assert_eq!(wires, ["I1: gate_i1__and1.Q", "I2: wind_alarm.Q"]);
+    assert_eq!(wires, ["In1: gate_i1__and1.Q", "In2: wind_alarm.Q"]);
     assert!(gate.expr_bindings().next().is_none());
 
     // Compile: synthetic blocks are locked and expression-owned; the
@@ -3314,9 +3316,11 @@ jal_sued.AutoShade <- gate.Q\n";
     assert_eq!(out.to_bytes(), out2.to_bytes());
 
     // Dropping the expression from the binding auto-removes its blocks.
-    let shrunk =
-        Module::parse(&src.replace("I1: sonne.Q and aussentemp.Q >= schwelle,", "I1: sonne.Q,"))
-            .unwrap();
+    let shrunk = Module::parse(&src.replace(
+        "In1: sonne.Q and aussentemp.Q >= schwelle,",
+        "In1: sonne.Q,",
+    ))
+    .unwrap();
     compile(&base, &shrunk, &mut lock, &opts()).unwrap();
     assert_eq!(lock.objects.keys().collect::<Vec<_>>(), ["gate"]);
 }
@@ -3329,7 +3333,7 @@ fn expression_bindings_expand_inside_template_bodies() {
          extern sonne = VirtualIn(iname: \"VI3\")\n\
          extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
          template fassade(jalousie: AutoJalousie, schwelle = 28)\n\
-         \tgate = Not(I: sonne.Q and aussentemp.Q >= schwelle)\n\
+         \tgate = Not(In: sonne.Q and aussentemp.Q >= schwelle)\n\
          \tjalousie.AutoShade <- gate.Q\n\
          end\n\
          sued = fassade(jalousie: jal_sued, schwelle: 30)\n",
@@ -3349,7 +3353,7 @@ fn expression_bindings_expand_inside_template_bodies() {
         .unwrap();
     assert!(
         ge.params()
-            .any(|(p, v)| p == "Input2" && v.to_string() == "30"),
+            .any(|(p, v)| p == "In2" && v.to_string() == "30"),
         "template value parameter substitutes into the expression"
     );
     let mut lock = Lockfile::new();
@@ -3373,17 +3377,17 @@ fn expression_binding_misuse_is_reported() {
         );
     };
 
-    fails("I1: a.Q and \"x\"", "cannot contain strings");
-    fails("I1: nix.Q and a.Q", "reference to undeclared slug `nix`");
-    fails("I1: 5 and a.Q", "cannot drive a gate input");
-    fails("I1: schwelle >= 28", "compares two constants");
+    fails("In1: a.Q and \"x\"", "cannot contain strings");
+    fails("In1: nix.Q and a.Q", "reference to undeclared slug `nix`");
+    fails("In1: 5 and a.Q", "cannot drive a gate input");
+    fails("In1: schwelle >= 28", "compares two constants");
     fails(
-        "I1: a.Q and b.Q, I1: a.Q and b.Q",
-        "duplicate expression `I1: a.Q and b.Q`",
+        "In1: a.Q and b.Q, In1: a.Q and b.Q",
+        "duplicate expression `In1: a.Q and b.Q`",
     );
 
     // A parenthesized bare port or value canonicalizes to the plain form.
-    let m = Module::parse(&format!("{head}gate = And(I1: (a.Q), I2: (28))\n")).unwrap();
+    let m = Module::parse(&format!("{head}gate = And(In1: (a.Q), In2: (28))\n")).unwrap();
     let gate = m.blocks().next().unwrap();
     assert!(
         matches!(
@@ -3410,7 +3414,7 @@ fn expression_binding_misuse_is_reported() {
     let err = Module::parse(
         "extern a = VirtualIn(iname: \"VI1\")\n\
          template t(x: VirtualIn, n = 1)\n\
-         \ty = Not(I: x.Q)\n\
+         \ty = Not(In: x.Q)\n\
          end\n\
          z = t(x: a, n: a.Q and a.Qm)\n",
     )
@@ -3477,8 +3481,8 @@ fn arithmetic_desugars_to_one_formula_block() {
     assert_eq!(
         inputs,
         [
-            ("Input1".to_string(), "aussentemp.Q".to_string()),
-            ("Input2".to_string(), "sonne.Q".to_string()),
+            ("In1".to_string(), "aussentemp.Q".to_string()),
+            ("In2".to_string(), "sonne.Q".to_string()),
         ]
     );
     assert!(
@@ -3546,13 +3550,13 @@ fn arithmetic_inlines_let_constants_and_works_in_bindings() {
 
     // A whole argument binding may be arithmetic (D26): the Formula's AQ
     // is wired onto the bound input.
-    let m = Module::parse(&format!("{head}gate = And(I1: a.Q - b.Q, I2: b.Q)\n")).unwrap();
+    let m = Module::parse(&format!("{head}gate = And(In1: a.Q - b.Q, In2: b.Q)\n")).unwrap();
     let (plain, info) = m.expand().unwrap().desugar().unwrap();
     assert_eq!(info.synthetic.iter().collect::<Vec<_>>(), ["gate_i1__f1"]);
     let gate = plain.blocks().find(|x| x.slug == "gate").unwrap();
     assert!(
         gate.input_wires()
-            .any(|(port, src)| port == "I1" && src.to_string() == "gate_i1__f1.AQ"),
+            .any(|(port, src)| port == "In1" && src.to_string() == "gate_i1__f1.AQ"),
         "binding becomes a wire from the Formula's AQ"
     );
 }
@@ -3663,8 +3667,8 @@ fn unit_suffixes_follow_the_documented_port_unit() {
                let nachlauf = 90s\n\
                extern sonne = VirtualIn(iname: \"VI3\")\n\
                extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")\n\
-               puls = Monoflop(InputTrigger: sonne.Q, Time: 1.5h)\n\
-               jal = AutoJalousie(AutoShadeTime: 2h, SRoff: nachlauf)\n\
+               puls = Monoflop(Trigger: sonne.Q, Time: 1.5h)\n\
+               jal = AutoJalousie(AutoShadeTime: 2h, SunriseOffset: nachlauf)\n\
                jal_sued.TargetPos = 70%\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
@@ -3694,7 +3698,7 @@ fn unit_suffixes_follow_the_documented_port_unit() {
     // A suffix that cannot mean the port's unit is refused, by name.
     for (bad, needle) in [
         (
-            "puls = Monoflop(InputTrigger: sonne.Q, Time: 70%)",
+            "puls = Monoflop(Trigger: sonne.Q, Time: 70%)",
             "`puls.Time`: `70%` does not fit",
         ),
         (
@@ -3728,7 +3732,7 @@ fn canvas_labels_point_at_the_port_key() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("`Tr` is the canvas label of port `InputTrigger`"),
+        err.contains("`Tr` is the canvas label of port `Trigger`"),
         "{err}"
     );
 }
@@ -3897,7 +3901,7 @@ fn virtual_inputs_are_minted_into_their_folder() {
     let src = "page \"Beschattung\"\n\
                party = VirtualIn(\"Partymodus\")\n\
                soll = VirtualIn(\"Sollwert\", Analog: on, MinVal: 5, MaxVal: 30, DefVal: 21)\n\
-               licht = And(I1: party.Q)\n";
+               licht = And(In1: party.Q)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
@@ -4727,10 +4731,10 @@ fn a_stale_constant_under_a_wire_survives_adopt_and_compile() {
     assert_eq!(report.blocks, 2);
     let text = module.to_text();
     assert!(
-        text.contains("\tInput1: summe.AQ, # stale constant 20 kept under the wire\n"),
+        text.contains("\tIn1: summe, # stale constant 20 kept under the wire\n"),
         "{text}"
     );
-    assert_eq!(text.matches("Input1:").count(), 2, "one per block:\n{text}");
+    assert_eq!(text.matches("In1:").count(), 2, "one per block:\n{text}");
     let out = compile(&existing, &module, &mut lock, &opts()).unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.to_bytes()),
@@ -4741,25 +4745,23 @@ fn a_stale_constant_under_a_wire_survives_adopt_and_compile() {
     let (view, _) = decompile(&existing, &DecompileOptions::default()).unwrap();
     assert!(
         view.to_text()
-            .contains("Input1: summe.AQ, # stale constant 20 kept under the wire"),
+            .contains("In1: summe, # stale constant 20 kept under the wire"),
         "{}",
         view.to_text()
     );
 
     // Restating the constant as a second argument is refused.
-    let e =
-        Module::parse(&text.replace("\tInput1: summe.AQ,", "\tInput1: 20,\n\tInput1: summe.AQ,"))
-            .unwrap_err();
+    let e = Module::parse(&text.replace("\tIn1: summe,", "\tIn1: 20,\n\tIn1: summe,")).unwrap_err();
     assert!(
         e.to_string()
-            .contains("block `heiss`: port `Input1` has both a value (`Input1: 20`) and a wire"),
+            .contains("block `heiss`: port `In1` has both a value (`In1: 20`) and a wire"),
         "{e}"
     );
 
     // Unwiring the port in source drops the constant with the wire: the
     // source states what the port carries.
     let unwired = Module::parse(&text.replace(
-        "\tInput1: summe.AQ, # stale constant 20 kept under the wire\n",
+        "\tIn1: summe, # stale constant 20 kept under the wire\n",
         "",
     ))
     .unwrap();
@@ -4817,17 +4819,17 @@ fn renaming_an_instance_renames_its_scoped_references() {
     use loxone_config::logic::rename_slug;
     let src = "extern vi = VirtualIn(iname: \"VI1\")\n\
                template paar(x: VirtualIn) -> ein\n\
-               \tein = Not(I: x.Q)\n\
-               \taus = Not(I: ein.Q)\n\
+               \tein = Not(In: x.Q)\n\
+               \taus = Not(In: ein.Q)\n\
                end\n\
                a = paar(x: vi)\n\
-               b = And(I1: a.Q, I2: a.aus.Q)\n";
+               b = And(In1: a.Q, In2: a.aus.Q)\n";
     let mut m = Module::parse(src).unwrap();
     rename_slug(&mut m, "a", "c");
     let text = m.to_text();
     assert!(text.contains("c = paar("), "{text}");
-    assert!(text.contains("I1: c.Q"), "{text}");
-    assert!(text.contains("I2: c.aus.Q"), "{text}");
+    assert!(text.contains("In1: c.Q"), "{text}");
+    assert!(text.contains("In2: c.aus.Q"), "{text}");
     Module::parse(&text).unwrap();
 }
 

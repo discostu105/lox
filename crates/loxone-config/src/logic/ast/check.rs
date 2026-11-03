@@ -239,6 +239,40 @@ impl Module {
         }
     }
 
+    /// A bare name where a port may stand (an argument, an operand): a
+    /// `let` constant or alias, or a block, extern, signal or instance,
+    /// which stands for its default output.
+    fn operand_refs(&self, names: &Names, value: &Value) -> Result<()> {
+        let Value::Ref(name) = value else {
+            return Ok(());
+        };
+        if let Some((a, _)) = name.split_once('.')
+            && names.get(a) == Some(&NameKind::Instance)
+        {
+            return Ok(());
+        }
+        match names.get(name.as_str()) {
+            Some(
+                NameKind::Let
+                | NameKind::Extern
+                | NameKind::Block
+                | NameKind::Signal
+                | NameKind::Instance,
+            ) => Ok(()),
+            Some(kind) => compile_err(format!(
+                "`{name}` is {}, not a constant, block or extern",
+                kind.describe()
+            )),
+            None => {
+                let hint = crate::logic::validate::suggest(name, names.keys().copied());
+                compile_err(format!(
+                    "undeclared name `{name}`{hint}: no constant, block or extern of this \
+                     module has that name"
+                ))
+            }
+        }
+    }
+
     /// Expression operands, shared by `<-` expressions and expression
     /// bindings in argument lists: ports must resolve, constants must be
     /// numbers or `let` references.
@@ -253,7 +287,7 @@ impl Module {
                         quote(s),
                     ));
                 }
-                Operand::Value(v) => self.value_refs(names, v)?,
+                Operand::Value(v) => self.operand_refs(names, v)?,
             }
         }
         Ok(())
@@ -299,6 +333,19 @@ impl Module {
             Item::Page(p) if p.title.is_empty() => {
                 return compile_err("`page \"\"`: the page title must not be empty".into());
             }
+            // An alias names a port of a block or extern.
+            Item::Let(l) => {
+                if let Value::Port(p) = &l.value {
+                    object_ref(names, p)?;
+                    if names.get(p.slug.as_str()) == Some(&NameKind::Let) {
+                        return compile_err(format!(
+                            "`let {} = {p}`: `{}` is a constant or alias, not a block or \
+                             extern",
+                            l.name, p.slug
+                        ));
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -306,11 +353,37 @@ impl Module {
 
     /// A block declaration: its parameters, wires and expressions, each
     /// once, and no value next to a wire on one port.
-    fn check_block(&self, names: &Names, b: &BlockDecl) -> Result<()> {
+    fn check_block<'a>(&self, names: &Names, b: &'a BlockDecl) -> Result<()> {
         let mut params_seen: BTreeSet<&str> = BTreeSet::new();
         let mut wires_seen: BTreeSet<(&str, &PortRef)> = BTreeSet::new();
+        let mut bare_seen: BTreeSet<(&str, &str)> = BTreeSet::new();
         let mut exprs_seen: BTreeSet<(&str, String)> = BTreeSet::new();
+        // A bare object name on a port is a wire to its default output.
+        let bare_wire = |x: &'a Binding| -> Option<&'a str> {
+            let BindingKind::Param(Value::Ref(n)) = &x.kind else {
+                return None;
+            };
+            if !x.port.starts_with(|c: char| c.is_ascii_uppercase()) {
+                return None;
+            }
+            let base = n.split_once('.').map_or(n.as_str(), |(a, _)| a);
+            matches!(
+                names.get(base),
+                Some(NameKind::Extern | NameKind::Block | NameKind::Signal | NameKind::Instance)
+            )
+            .then_some(n.as_str())
+        };
         for binding in b.bindings() {
+            if let Some(n) = bare_wire(binding) {
+                self.operand_refs(names, &Value::Ref(n.to_string()))?;
+                if !bare_seen.insert((&binding.port, n)) {
+                    return compile_err(format!(
+                        "block `{}`: duplicate wire `{}: {n}` in `{} = {}(…)`",
+                        b.slug, binding.port, b.slug, b.block_type
+                    ));
+                }
+                continue;
+            }
             match &binding.kind {
                 BindingKind::Param(v) => {
                     // `mirrors:` on a minted ref names an object,
@@ -353,8 +426,10 @@ impl Module {
                                 b.block_type, b.slug, b.block_type
                             ));
                         }
-                    } else {
+                    } else if binding.port.starts_with(|c: char| c.is_ascii_lowercase()) {
                         self.value_refs(names, v)?;
+                    } else {
+                        self.operand_refs(names, v)?;
                     }
                     if !params_seen.insert(&binding.port) {
                         return compile_err(format!(
@@ -390,9 +465,13 @@ impl Module {
             let BindingKind::Param(v) = &binding.kind else {
                 continue;
             };
+            if bare_wire(binding).is_some() {
+                continue;
+            }
             if let Some(w) = b.bindings().find(|w| {
                 w.port == binding.port
-                    && matches!(w.kind, BindingKind::Wire(_) | BindingKind::Expr(_))
+                    && (matches!(w.kind, BindingKind::Wire(_) | BindingKind::Expr(_))
+                        || bare_wire(w).is_some())
             }) {
                 return compile_err(format!(
                     "block `{slug}`: port `{port}` has both a value (`{port}: {v}`) and a wire (`{port}: {wire}`) in `{slug} = {ty}(…)`. Keep one, since a wired input ignores its value.",

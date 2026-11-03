@@ -40,13 +40,13 @@ fn compile_err(src: &str) -> String {
 #[test]
 fn section_kinds_are_names_outside_their_section_head() {
     let src = "extern vi = VirtualIn(iname: \"VI1\")\n\n\
-               tiles = Not(I: vi.Q)\n\
-               schedule = Not(I: tiles.Q)\n\
-               moods = Not(I: schedule.Q)\n\
-               access = Not(I: moods.Q)\n\
-               recipients = Not(I: access.Q)\n\
-               defaults = Not(I: recipients.Q)\n\
-               rule = Not(I: defaults.Q)\n\n\
+               tiles = Not(In: vi.Q)\n\
+               schedule = Not(In: tiles.Q)\n\
+               moods = Not(In: schedule.Q)\n\
+               access = Not(In: moods.Q)\n\
+               recipients = Not(In: access.Q)\n\
+               defaults = Not(In: recipients.Q)\n\
+               rule = Not(In: defaults.Q)\n\n\
                moods.room = \"Pool\"\n";
     let m = Module::parse(src).unwrap();
     assert_eq!(m.to_text(), src);
@@ -136,7 +136,7 @@ fn tick_and_dt_take_let_constants() {
                let schritte = 3\n\
                let takt = 500ms\n\n\
                extern vi = VirtualIn(iname: \"VI1\")\n\n\
-               nach = OffDelay(InputTrigger: vi.Q, Time: 2s)\n\n\
+               nach = OffDelay(Trigger: vi.Q, Time: 2s)\n\n\
                test \"konstanten\"\n\
                \tvi.Q = 1\n\
                \ttick schritte\n\
@@ -197,8 +197,8 @@ fn tick_and_dt_take_let_constants() {
 
 const PAAR: &str = "extern vi = VirtualIn(iname: \"VI1\")\n\n\
                     template paar(x: VirtualIn) -> ein\n\
-                    \tein = Not(I: x.Q)\n\
-                    \taus = Not(I: ein.Q)\n\
+                    \tein = Not(In: x.Q)\n\
+                    \taus = Not(In: ein.Q)\n\
                     end\n\n\
                     a = paar(x: vi)\n";
 
@@ -240,10 +240,10 @@ fn scoped_names_work_in_bulk_statements_and_mirrors() {
 #[test]
 fn errors_spell_instance_blocks_like_the_source() {
     // An unknown port on a body block, found after expansion.
-    let e = compile_err(&format!("{PAAR}\nb = Not(I: a.aus.Nope)\n"));
+    let e = compile_err(&format!("{PAAR}\nb = Not(In: a.aus.Nope)\n"));
     assert!(e.contains("`a.aus`"), "{e}");
     assert!(!e.contains("a_aus"), "{e}");
-    let e = compile_err(&format!("{PAAR}\nb = Not(I: a.Nope)\n"));
+    let e = compile_err(&format!("{PAAR}\nb = Not(In: a.Nope)\n"));
     assert!(e.contains("block `a`"), "{e}");
     assert!(!e.contains("a_ein"), "{e}");
 }
@@ -252,12 +252,12 @@ fn errors_spell_instance_blocks_like_the_source() {
 fn a_signal_named_like_an_expression_sink_is_refused() {
     let e = compile_err(
         "extern vi = VirtualIn(iname: \"VI1\")\n\
-         a = And(I1: vi.Q < 3 and vi.Q > 1, I2: vi.Q)\n\
+         a = And(In1: vi.Q < 3 and vi.Q > 1, In2: vi.Q)\n\
          a_i1 = vi.Q < 5 and vi.Q > 2\n",
     );
     assert!(
         e.contains(
-            "the expression on `a.I1` and the named signal `a_i1` would both name their \
+            "the expression on `a.In1` and the named signal `a_i1` would both name their \
              blocks `a_i1__<op><n>`"
         ),
         "{e}"
@@ -269,7 +269,7 @@ fn a_signal_named_like_an_expression_sink_is_refused() {
 fn a_call_of_short_values_goes_on_one_line() {
     let m = Module::parse(
         "s = Monoflop(\n\tTime: 5min,\n\tOn: 1,\n\tOff: 0,\n\tReset: off,\n)\n\
-         w = Monoflop(\n\tInputTrigger: s.Q,\n\tOn: 1,\n\tOff: 0,\n\tReset: off,\n)\n",
+         w = Monoflop(\n\tTrigger: s.Q,\n\tOn: 1,\n\tOff: 0,\n\tReset: off,\n)\n",
     )
     .unwrap();
     let text = m.to_text();

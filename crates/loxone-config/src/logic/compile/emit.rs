@@ -387,7 +387,7 @@ fn push_connectors(
             }
         } else if let Some(stale) = res.and_then(|r| r.stale_defs.get(key))
             && block.bindings().any(|b| {
-                b.port == *key
+                crate::port_names::key_or_raw(&block.block_type, &b.port) == key
                     && matches!(
                         b.kind,
                         crate::logic::ast::BindingKind::Wire(_)

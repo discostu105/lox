@@ -126,7 +126,7 @@ fn a_switch_nothing_reads_is_dead_even_in_the_app() {
 fn a_controller_that_drives_nothing_names_what_to_wire() {
     // The type is changed after compiling, as a GUI save of the
     // controller would leave it: in the app, its outputs unwired.
-    let src = format!("{QUELLE}regler = And(I1: quelle.Q)\n");
+    let src = format!("{QUELLE}regler = And(In1: quelle.Q)\n");
     for (ty, fix) in [
         (
             "HeatIRoomController2",
@@ -159,7 +159,7 @@ fn a_controller_that_drives_nothing_names_what_to_wire() {
 
 #[test]
 fn a_statistic_is_a_use() {
-    let src = format!("{QUELLE}verwaist = And(I1: quelle.Q)\n");
+    let src = format!("{QUELLE}verwaist = And(In1: quelle.Q)\n");
     let src = src.as_str();
     assert_eq!(of(&lint(src), LintKind::DeadOutputs), ["verwaist"]);
     let findings = lint_with(src, |lock, xml| {
@@ -173,7 +173,7 @@ fn a_statistic_is_a_use() {
 
 #[test]
 fn a_block_an_energy_flow_monitor_reads_is_used() {
-    let src = format!("{QUELLE}zaehler = And(I1: quelle.Q)\nefm = Or(I1: quelle.Q)\n");
+    let src = format!("{QUELLE}zaehler = And(In1: quelle.Q)\nefm = Or(In1: quelle.Q)\n");
     let src = src.as_str();
     assert_eq!(of(&lint(src), LintKind::DeadOutputs), ["zaehler", "efm"]);
     // `efm` becomes a monitor whose node reads `zaehler`.
@@ -200,7 +200,7 @@ fn modes_and_messages_count_as_used() {
 extern frost = Notification(title: \"Frost\")
 quelle = VirtualIn(\"Quelle\")
 party = Mode(\"Party\")
-kalt = And(I1: quelle.Q)
+kalt = And(In1: quelle.Q)
 warnung = OutputRefLM(mirrors: frost, AI: kalt.Q, On: \"kalt\")
 ";
     let findings = lint(src);
@@ -218,7 +218,7 @@ http_c = VirtualHttpInCmd("C", device: http, Check: "c:\\v")
 udp = VirtualUdpIn("Kamera", Port: 45999)
 udp_person = VirtualUdpInCmd("Person", device: udp, Check: "person:\\v")
 out = VirtualOut("Aktor", Address: "http://192.0.2.11")
-ein = VirtualOutCmd("Ein", device: out, CmdOn: "/on", I: http_c.Q)
+ein = VirtualOutCmd("Ein", device: out, CmdOn: "/on", In: http_c.Q)
 aus = VirtualOutCmd("Aus", device: out, CmdOn: "/off")
 "#;
 
@@ -246,7 +246,7 @@ fn a_device_reports_its_unused_inputs_once_and_outputs_by_their_drive() {
 fn an_allow_above_a_declaration_keeps_its_finding_out() {
     // On the device: covers its inputs. On a single block: that block.
     let src = format!(
-        "{QUELLE}# lint: allow dead-outputs read by Home Assistant\nverwaist = And(I1: quelle.Q)\n{}",
+        "{QUELLE}# lint: allow dead-outputs read by Home Assistant\nverwaist = And(In1: quelle.Q)\n{}",
         DEVICES.replace(
             "http = VirtualHttpIn",
             "# Shelly: every value it reports\n# lint: allow dead-outputs\nhttp = VirtualHttpIn"
@@ -269,12 +269,12 @@ fn an_allow_that_covers_nothing_is_reported() {
     let src = "\
 vi = VirtualIn(\"Eins\")
 # lint: allow dead-outputs
-gate = And(I1: vi.Q)
+gate = And(In1: vi.Q)
 # lint: allow unused-extern
 ok = VirtualIn(\"Zwei\")
 # lint: allow dead-output
-x = Or(I1: gate.Q, I2: ok.Q)
-ein = VirtualOutCmd(\"Ein\", device: out, CmdOn: \"/on\", I: x.Q)
+x = Or(In1: gate.Q, In2: ok.Q)
+ein = VirtualOutCmd(\"Ein\", device: out, CmdOn: \"/on\", In: x.Q)
 out = VirtualOut(\"Aktor\", Address: \"http://192.0.2.11\")
 # lint: allow dead-outputs
 ";
@@ -305,8 +305,8 @@ out = VirtualOut(\"Aktor\", Address: \"http://192.0.2.11\")
 #[test]
 fn an_allow_outside_a_project_judges_source_lints_only() {
     let m = Module::parse(
-        "# lint: allow dead-outputs\ngate = And(I1: 1)\n\
-         # lint: allow unused-let\nlet schwelle = 3\n# lint: allow unused-let\nlet b = 2\nx = And(I1: 1, I2: b)\n",
+        "# lint: allow dead-outputs\ngate = And(In1: 1)\n\
+         # lint: allow unused-let\nlet schwelle = 3\n# lint: allow unused-let\nlet b = 2\nx = And(In1: 1, In2: b)\n",
     )
     .unwrap();
     let findings = finish_lint(&m, lint_source(&m).unwrap(), false).unwrap();
@@ -326,8 +326,8 @@ quelle = VirtualIn(\"Quelle\")
 
 template paar()
 \t# lint: allow dead-outputs
-\ta = And(I1: quelle.Q)
-\tb = Or(I1: quelle.Q)
+\ta = And(In1: quelle.Q)
+\tb = Or(In1: quelle.Q)
 end
 
 # lint: allow dead-outputs

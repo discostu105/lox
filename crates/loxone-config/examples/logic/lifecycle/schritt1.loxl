@@ -5,5 +5,5 @@
 
 extern sonne = VirtualIn(iname: "VI1")
 
-wetter_ok = Not(I: sonne.Q)
-altlast = And(I1: sonne.Q, I2: wetter_ok.Q)
+wetter_ok = Not(In: sonne.Q)
+altlast = And(In1: sonne.Q, In2: wetter_ok.Q)

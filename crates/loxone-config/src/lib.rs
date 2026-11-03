@@ -77,6 +77,7 @@ pub(crate) mod periphery;
 pub mod permissions;
 pub(crate) mod port_doc;
 pub(crate) mod port_meta;
+pub mod port_names;
 pub mod project;
 pub mod render;
 pub(crate) mod scan;

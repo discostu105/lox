@@ -28,8 +28,8 @@
     "body": [
       "${1:slug} = ${2|And,Or,Not,Equal,GreaterEqual|}(",
       "\t\"${3:Label}\",",
-      "\t${4:Input1}: ${5:source.Q},",
-      "\t${6:Input2}: ${7:28},",
+      "\t${4:In1}: ${5:source},",
+      "\t${6:In2}: ${7:28},",
       ")"
     ],
     "description": "Managed logic block with label, input wire, and parameter"
@@ -50,8 +50,8 @@
     "body": [
       "template ${1:name}(${2:sensor}: ${3:VirtualIn}, ${4:grenze} = ${5:3}) -> ${6:alarm}",
       "\t${6:alarm} = ${7:Less}(",
-      "\t\t${8:Input1}: ${2:sensor}.Q,",
-      "\t\t${9:Input2}: ${4:grenze},",
+      "\t\t${8:In1}: ${2:sensor},",
+      "\t\t${9:In2}: ${4:grenze},",
       "\t)",
       "end"
     ],
