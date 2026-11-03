@@ -186,6 +186,9 @@ fn check_wire(
                 && api_mirror_entry(&b.block_type, &from.port, mirrored_type(module, b))
         });
     for (endpoint, want) in [(from, PortDir::Output), (to, PortDir::Input)] {
+        if endpoint.port.is_empty() {
+            continue; // a bare name: its default output, resolved on expansion
+        }
         let Some(block) = module.blocks().find(|b| b.slug == endpoint.slug) else {
             continue; // extern — checked against the base config later
         };
@@ -206,7 +209,7 @@ fn check_wire(
         let specs = builtin(&block.block_type).expect("type validated above");
         let dir = specs
             .iter()
-            .find(|s| s.key == endpoint.port)
+            .find(|s| s.name == endpoint.port)
             .map(|s| s.dir)
             .expect("port validated above");
         let ok = match want {
@@ -258,6 +261,14 @@ fn check_block(module: &Module, block: &super::ast::BlockDecl) -> Result<()> {
         )));
     }
     for (key, v) in block.params() {
+        // A bare object name is a wire to its default output once the
+        // module is expanded; nothing to check about it as a value.
+        if let Value::Ref(name) = v
+            && key.starts_with(|c: char| c.is_ascii_uppercase())
+            && module.names_object(name)
+        {
+            continue;
+        }
         // A file holds program text — nothing else takes one.
         if let Value::File { .. } = v
             && !file_params(&block.block_type).contains(&key)
@@ -543,8 +554,15 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
         .find(|b| b.slug == slug)
         .expect("caller resolved the slug to a block");
     let specs = builtin(&block.block_type).expect("caller validated the type");
-    if specs.iter().any(|s| s.key == key) {
+    if specs.iter().any(|s| s.name == key) {
         return Ok(());
+    }
+    // The connector key of a port that has a name of its own.
+    if let Some(name) = crate::port_names::renamed(&block.block_type, key) {
+        return Err(Error::Compile(format!(
+            "block `{slug}`: `{key}` is the connector key of port `{name}`. Write `{name}` \
+             instead of `{key}`."
+        )));
     }
     // Loxone Config 17 silently DELETES off-descriptor connectors (and
     // their wires) on save — verified via the Wine oracle with a grown `I3`
@@ -570,14 +588,14 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
     let labeled: Vec<&str> = specs
         .iter()
         .filter(|s| port_meta(&block.block_type, s.key).and_then(|m| m.label) == Some(key))
-        .map(|s| s.key)
+        .map(|s| s.name)
         .collect();
     let hint = if labeled.is_empty() {
         suggest(
             key,
             specs
                 .iter()
-                .map(|s| s.key)
+                .map(|s| s.name)
                 .chain(attr_params(&block.block_type)),
         )
     } else {
@@ -589,7 +607,7 @@ fn known_port(module: &Module, slug: &str, key: &str) -> Result<()> {
     Err(Error::Compile(format!(
         "unknown port `{key}` on block `{slug}` (type `{}`); known ports: {}{hint}{gate_hint}",
         block.block_type,
-        specs.iter().map(|s| s.key).collect::<Vec<_>>().join(", ")
+        specs.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")
     )))
 }
 
@@ -676,7 +694,7 @@ mod tests {
     #[test]
     fn wire_ports_and_directions_are_checked_statically() {
         // A binding's source must be an output port.
-        let m = Module::parse("a = And()\nb = And(I2: a.I1)\n").unwrap();
+        let m = Module::parse("a = And()\nb = And(In2: a.In1)\n").unwrap();
         let err = validate_ports(&m).unwrap_err().to_string();
         assert!(err.contains("wire source"), "{err}");
 
@@ -693,13 +711,13 @@ mod tests {
 
     #[test]
     fn valid_module_passes() {
-        let m = Module::parse("b = GreaterEqual(Input2: 28)\na = And(I1: b.Q)\n").unwrap();
+        let m = Module::parse("b = GreaterEqual(In2: 28)\na = And(In1: b.Q)\n").unwrap();
         validate_ports(&m).unwrap();
     }
 
     #[test]
     fn attr_params_bind_as_values_but_never_as_wires() {
-        let m = Module::parse("f = Formula(Formula: \"I1+I2\", Input1: 3)\n").unwrap();
+        let m = Module::parse("f = Formula(Formula: \"I1+I2\", In1: 3)\n").unwrap();
         validate_ports(&m).unwrap();
 
         let m = Module::parse("a = And()\nf = Formula(Formula: a.Q)\n").unwrap();

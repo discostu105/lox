@@ -1313,6 +1313,22 @@ fn parse_set_head(
 fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<LetDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     match toks {
+        // `let aussen = sensor.AQ` — an alias of a port.
+        [
+            _,
+            Tok::Ident(name),
+            Tok::Eq,
+            Tok::Ident(a),
+            Tok::Dot,
+            Tok::Ident(b),
+        ] => Ok(LetDecl {
+            name: check_slug(name, lineno)?,
+            value: Value::Port(PortRef {
+                slug: check_ref(a, lineno)?,
+                port: b.clone(),
+            }),
+            comment,
+        }),
         [_, Tok::Ident(name), Tok::Eq, val] => {
             let value = match value_of(val, lineno)? {
                 Value::Ref(other) => {
@@ -1335,7 +1351,7 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
             comment,
         }),
         _ => Err(err(
-            "expected `let <name> = <number | on | off | \"string\" | HH:MM>`".into(),
+            "expected `let <name> = <number | on | off | \"string\" | HH:MM | slug.Port>`".into(),
         )),
     }
 }
@@ -2116,12 +2132,20 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             Ok(TestItem::Tick(tick))
         }
         [Tok::Ident(kw), rest @ ..] if kw == "expect" => {
-            let [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), cmp_tok, val] = rest else {
-                return Err(err(
-                    "expected `expect <slug>.<Port> <cmp> <value>` with cmp one of \
-                     `==`, `!=`, `>=`, `>`, `<=`, `<`, `~=`"
-                        .into(),
-                ));
+            // `expect frost.Q == 1`, or `expect frost == 1` for the
+            // default output.
+            let (slug, port, cmp_tok, val) = match rest {
+                [Tok::Ident(slug), Tok::Dot, Tok::Ident(port), cmp_tok, val] => {
+                    (slug, port.clone(), cmp_tok, val)
+                }
+                [Tok::Ident(slug), cmp_tok, val] => (slug, String::new(), cmp_tok, val),
+                _ => {
+                    return Err(err(
+                        "expected `expect <slug>[.<Port>] <cmp> <value>` with cmp one of \
+                         `==`, `!=`, `>=`, `>`, `<=`, `<`, `~=`"
+                            .into(),
+                    ));
+                }
             };
             let cmp = match cmp_tok {
                 Tok::Cmp(CmpOp::Eq) => TestCmp::Eq,
@@ -2142,7 +2166,7 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             Ok(TestItem::Expect(ExpectDecl {
                 port: PortRef {
                     slug: slug.clone(),
-                    port: port.clone(),
+                    port,
                 },
                 cmp,
                 value: value_of(val, lineno)?,
@@ -2164,6 +2188,16 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                 bulk: None,
             }))
         }
+        // `frost = 1`: the default output.
+        [Tok::Ident(slug), Tok::Eq, val] => Ok(TestItem::Inject(SetDecl {
+            target: PortRef {
+                slug: check_ref(slug, lineno)?,
+                port: String::new(),
+            },
+            value: value_of(val, lineno)?,
+            comment,
+            bulk: None,
+        })),
         [
             Tok::Ident(slug),
             Tok::Dot,
@@ -2410,6 +2444,15 @@ fn parse_wire(
     }
     match parse_expr(rest, lineno)? {
         Expr::Atom(Operand::Port(from)) => Ok(Item::Wire(WireDecl { to, from, comment })),
+        // A bare name: the object's default output, or an alias.
+        Expr::Atom(Operand::Value(Value::Ref(name))) => Ok(Item::Wire(WireDecl {
+            to,
+            from: PortRef {
+                slug: name,
+                port: String::new(),
+            },
+            comment,
+        })),
         Expr::Atom(Operand::Value(v)) => Err(err(format!(
             "`{to} <- {v}` wires a constant. To assign a value, write `{to} = {v}`."
         ))),
@@ -3178,10 +3221,10 @@ let schwelle = 28
 
 temp_hoch = GreaterEqual(
 	"Temp über 28",
-	Input1: sonne.Q,
-	Input2: schwelle,
+	In1: sonne.Q,
+	In2: schwelle,
 )
-beschatten = And(I1: temp_hoch.Q, I2: sonne.Q)
+beschatten = And(In1: temp_hoch.Q, In2: sonne.Q)
 
 jal.AutoShade <- beschatten.Q
 jal.TargetPos = 70
@@ -3199,11 +3242,11 @@ jal.TargetPos = 70
         let block = m.blocks().next().unwrap();
         assert_eq!(block.title.as_deref(), Some("Temp über 28"));
         let params: Vec<_> = block.params().collect();
-        assert_eq!(params, vec![("Input2", &Value::Ref("schwelle".into()))]);
+        assert_eq!(params, vec![("In2", &Value::Ref("schwelle".into()))]);
         assert_eq!(m.resolve_value(params[0].1).unwrap(), "28");
         let wires: Vec<_> = block.input_wires().collect();
         assert_eq!(wires.len(), 1);
-        assert_eq!(wires[0].0, "Input1");
+        assert_eq!(wires[0].0, "In1");
         assert_eq!(wires[0].1.to_string(), "sonne.Q");
     }
 
@@ -3219,31 +3262,31 @@ jal.TargetPos = 70
     #[test]
     fn short_calls_go_on_one_line_long_ones_one_argument_per_line() {
         let m = Module::parse(
-            "extern x = VirtualIn(iname: \"VI1\")\nb = And(\n\tI1: x.Q,\n\tI2: x.Qm,\n)\n",
+            "extern x = VirtualIn(iname: \"VI1\")\nb = And(\n\tIn1: x.Q,\n\tIn2: x.Qm,\n)\n",
         )
         .unwrap();
         let text = m.to_text();
-        assert!(text.contains("b = And(I1: x.Q, I2: x.Qm)\n"), "{text}");
+        assert!(text.contains("b = And(In1: x.Q, In2: x.Qm)\n"), "{text}");
         let again = Module::parse(&text).unwrap();
         assert_eq!(m, again);
         assert_eq!(again.to_text(), text);
         // Four arguments (the label counts), a comment in the list, or a
         // line over 100 columns: one argument per line.
         for src in [
-            "b = And(\"L\", I1: x.Q, I2: x.Qm, Off: 1)\n",
-            "b = And(\n\tI1: x.Q, # why\n\tI2: x.Qm,\n)\n",
+            "b = And(\"L\", In1: x.Q, In2: x.Qm, Off: 1)\n",
+            "b = And(\n\tIn1: x.Q, # why\n\tI2: x.Qm,\n)\n",
             "b = And(\n\t# why\n\tI1: x.Q,\n)\n",
-            "b = And(\n\tI1: x.Q,\n) # why\n",
-            "b = And(\"A label long enough to push this call past the limit of one hundred columns\", I1: x.Q, I2: x.Qm)\n",
+            "b = And(\n\tIn1: x.Q,\n) # why\n",
+            "b = And(\"A label long enough to push this call past the limit of one hundred columns\", In1: x.Q, In2: x.Qm)\n",
         ] {
             let text = Module::parse_fragment(src).unwrap().to_text();
             assert!(text.contains("b = And(\n"), "{src}: {text}");
         }
         // A trailing comment after a one-line call stays on its line.
-        let src = "b = And(I1: x.Q) # why\n";
+        let src = "b = And(In1: x.Q) # why\n";
         assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
         // Indentation counts: in a template body a tab is four columns.
-        let call = format!("g = And(\"{}\", I1: x.Q, I2: x.Qm)", "l".repeat(68));
+        let call = format!("g = And(\"{}\", In1: x.Q, In2: x.Qm)", "l".repeat(66));
         assert_eq!(call.len(), 98);
         let top = Module::parse_fragment(&format!("{call}\n"))
             .unwrap()
@@ -3311,8 +3354,8 @@ sonne.Qm = 30 # override
         // form per value, in port assignments and argument lists alike.
         let m = Module::parse("extern s = VirtualIn(iname: \"VI1\")\ns.Q = \"28\"\n").unwrap();
         assert!(m.to_text().contains("s.Q = 28"), "{}", m.to_text());
-        let m = Module::parse("b = GreaterEqual(Input2: \"28\")\n").unwrap();
-        assert!(m.to_text().contains("Input2: 28)"), "{}", m.to_text());
+        let m = Module::parse("b = GreaterEqual(In2: \"28\")\n").unwrap();
+        assert!(m.to_text().contains("In2: 28)"), "{}", m.to_text());
     }
 
     #[test]
@@ -3322,11 +3365,11 @@ sonne.Qm = 30 # override
         let m = Module::parse(
             "let nachlauf = 90min\n\
              t = Monoflop(Time: 1.5h)\n\
-             p = PulseGen(TimeHigh: 250ms, TimeLow: 2s)\n",
+             p = PulseGen(OnTime: 250ms, OffTime: 2s)\n",
         )
         .unwrap();
         let text = m.to_text();
-        for needle in ["nachlauf = 90min", "Time: 1.5h)", "TimeHigh: 250ms,"] {
+        for needle in ["nachlauf = 90min", "Time: 1.5h)", "OnTime: 250ms,"] {
             assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
         }
         assert_eq!(Module::parse(&text).unwrap(), m);
@@ -3390,7 +3433,7 @@ sonne.Qm = 30 # override
     #[test]
     fn malformed_numbers_are_rejected() {
         for bad in ["1.2.3", "5.", "-5."] {
-            let src = format!("b = GreaterEqual(Input2: {bad})\n");
+            let src = format!("b = GreaterEqual(In2: {bad})\n");
             let e = Module::parse(&src).unwrap_err();
             assert!(
                 e.to_string().contains("invalid number literal"),
@@ -3402,7 +3445,7 @@ sonne.Qm = 30 # override
     #[test]
     fn let_statements_parse_and_resolve() {
         let m = Module::parse(
-            "let schwelle = 28\nlet gruss = \"hallo\"\nb = GreaterEqual(Input2: schwelle)\n",
+            "let schwelle = 28\nlet gruss = \"hallo\"\nb = GreaterEqual(In2: schwelle)\n",
         )
         .unwrap();
         assert_eq!(m.lets().count(), 2);
@@ -3414,18 +3457,14 @@ sonne.Qm = 30 # override
         assert!(e.to_string().contains("not another name"), "{e}");
 
         // Undeclared references are errors, with a suggestion.
-        let e =
-            Module::parse("let schwelle = 28\nb = GreaterEqual(Input2: schwele)\n").unwrap_err();
-        assert!(
-            e.to_string().contains("undeclared constant `schwele`"),
-            "{e}"
-        );
+        let e = Module::parse("let schwelle = 28\nb = GreaterEqual(In2: schwele)\n").unwrap_err();
+        assert!(e.to_string().contains("undeclared name `schwele`"), "{e}");
         assert!(e.to_string().contains("did you mean `schwelle`?"), "{e}");
 
         // Constants share the slug namespace and cannot be wired.
         let e = Module::parse("let x = 1\nx = And()\n").unwrap_err();
         assert!(e.to_string().contains("duplicate name `x`"), "{e}");
-        let e = Module::parse("let x = 1\nb = And(I1: x.Q)\n").unwrap_err();
+        let e = Module::parse("let x = 1\nb = And(In1: x.Q)\n").unwrap_err();
         assert!(e.to_string().contains("not a block or extern"), "{e}");
     }
 
@@ -3467,35 +3506,33 @@ sonne.Qm = 30 # override
     #[test]
     fn port_statements_on_managed_blocks_are_rejected() {
         // `=` on a managed port: parameters belong in the argument list.
-        let e = Module::parse("b = And()\nb.I1 = 3\n").unwrap_err();
+        let e = Module::parse("b = And()\nb.In1 = 3\n").unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("targets managed block `b`"), "{msg}");
         assert!(msg.contains("argument list"), "{msg}");
         // `<-` on a managed port: wires belong in the argument list.
-        let e = Module::parse("a = And()\nb = And()\nb.I1 <- a.Q\n").unwrap_err();
+        let e = Module::parse("a = And()\nb = And()\nb.In1 <- a.Q\n").unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("targets managed block `b`"), "{msg}");
-        assert!(msg.contains("I1: a.Q"), "{msg}");
+        assert!(msg.contains("In1: a.Q"), "{msg}");
     }
 
     #[test]
     fn duplicate_arguments_are_rejected() {
-        let e = Module::parse("b = GreaterEqual(Input2: 1, Input2: 2)\n").unwrap_err();
-        assert!(
-            e.to_string().contains("duplicate parameter `Input2`"),
-            "{e}"
-        );
-        let e = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I1: x.Q)\n")
-            .unwrap_err();
-        assert!(e.to_string().contains("duplicate wire `I1: x.Q`"), "{e}");
+        let e = Module::parse("b = GreaterEqual(In2: 1, In2: 2)\n").unwrap_err();
+        assert!(e.to_string().contains("duplicate parameter `In2`"), "{e}");
+        let e =
+            Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(In1: x.Q, In1: x.Q)\n")
+                .unwrap_err();
+        assert!(e.to_string().contains("duplicate wire `In1: x.Q`"), "{e}");
         // Two different sources into one port (fan-in) are representable.
-        Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, I1: x.Qm)\n")
+        Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(In1: x.Q, In1: x.Qm)\n")
             .unwrap();
     }
 
     #[test]
     fn label_must_come_first() {
-        let e = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(I1: x.Q, \"L\")\n")
+        let e = Module::parse("extern x = VirtualIn(iname: \"VI1\")\nb = And(In1: x.Q, \"L\")\n")
             .unwrap_err();
         assert!(e.to_string().contains("first argument"), "{e}");
         let e = Module::parse("b = And(\"L\", \"M\")\n").unwrap_err();
@@ -3507,7 +3544,7 @@ sonne.Qm = 30 # override
         let e = Module::parse("block b: And\n").unwrap_err();
         assert!(e.to_string().contains("old syntax"), "{e}");
         assert!(e.to_string().contains("= <Type>("), "{e}");
-        let e = Module::parse("wire a.Q -> b.I1\n").unwrap_err();
+        let e = Module::parse("wire a.Q -> b.In1\n").unwrap_err();
         assert!(e.to_string().contains("argument list"), "{e}");
         assert!(e.to_string().contains("<-"), "{e}");
         let e = Module::parse("set a.B = 3\n").unwrap_err();
@@ -3548,7 +3585,7 @@ sonne.Qm = 30 # override
                    page \"Beschattung\" # Süd\n\n\
                    gate = Not(I: wind.Q)\n\n\
                    page \"Regeln\"\n\n\
-                   halt = Or(I1: gate.Q)\n";
+                   halt = Or(In1: gate.Q)\n";
         let m = Module::parse(src).unwrap();
         assert_eq!(m.to_text(), src);
         let pages: Vec<_> = m
@@ -3578,8 +3615,8 @@ sonne.Qm = 30 # override
     #[test]
     fn on_off_are_digital_literals() {
         let src = "let an = on\n\n\
-                   b = And(I1: x.Q, I2: on)\n\
-                   c = GreaterEqual(Input1: x.AQ, Input2: off)\n\n\
+                   b = And(In1: x.Q, In2: on)\n\
+                   c = GreaterEqual(In1: x.AQ, In2: off)\n\n\
                    x.Value = an\n";
         let m = Module::parse_fragment(src).unwrap();
         assert_eq!(m.to_text(), src);
@@ -3602,8 +3639,8 @@ sonne.Qm = 30 # override
             "true"
         );
         // A number stays a number: no 1 -> on canonicalization.
-        let m = Module::parse_fragment("b = And(I2: 1)\n").unwrap();
-        assert!(m.to_text().contains("I2: 1)"));
+        let m = Module::parse_fragment("b = And(In2: 1)\n").unwrap();
+        assert!(m.to_text().contains("In2: 1)"));
         // Reserved: neither can name anything.
         for src in ["on = And()\n", "let off = 1\n"] {
             let e = Module::parse_fragment(src).unwrap_err();
@@ -3619,7 +3656,7 @@ sonne.Qm = 30 # override
         );
         assert!(Module::parse_fragment("f = Formula(Formula: \"true\")\n").is_ok());
         // Template value parameters take on/off as defaults.
-        let src = "template t(an = on)\n\tg = And(I1: x.Q, I2: an)\nend\n";
+        let src = "template t(an = on)\n\tg = And(In1: x.Q, In2: an)\nend\n";
         assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
     }
 

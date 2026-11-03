@@ -3,7 +3,7 @@ page "Küche"
 extern co2 = VirtualIn(iname: "VI4")
 extern lueftung = StateV(title: "Steckdose")
 
-hoch = Greater("CO2 über 800", Input1: co2.AQ, Input2: 800)
-verzoegert = OnDelay("Delay 5 min", InputTrigger: hoch.Q, Time: 5min)
+hoch = Greater("CO2 über 800", In1: co2.AQ, In2: 800)
+verzoegert = OnDelay("Delay 5 min", Trigger: hoch.Q, Time: 5min)
 
-lueftung.I <- verzoegert.Q
+lueftung.In <- verzoegert.Q

@@ -8,19 +8,24 @@ extern total_meter_reading_consumption_2 = ModbusASensor(iname: "AMQ-5") # perip
 extern heizstab = Actor(iname: "Q1") # periphery
 
 netz = MeterAbsBi(
-	Pf: total_active_power.Q,
-	Mr1: total_meter_reading_consumption.Q,
-	Mr2: total_meter_reading_delivery.Q,
+	Power: total_active_power,
+	ReadingIn: total_meter_reading_consumption,
+	ReadingOut: total_meter_reading_delivery,
 )
 
-photovoltaik = MeterAbsUni(Pf: total_active_power_2.Q, Mr: total_meter_reading_consumption_2.Q)
-energiefluss = EFM(Pre: 0, Pri: 0, CO2: 0)
+photovoltaik = MeterAbsUni(
+	Power: total_active_power_2,
+	ReadingIn: total_meter_reading_consumption_2,
+)
+
+energiefluss = EFM(ExportPrice: 0, ImportPrice: 0, CO2: 0)
+netz_opf_1 = Formula(Formula: "I1*(-1)", In1: netz.OutPower)
 
 pv_ueberschuss = AnalogThresholdTrigger(
-	Input: netz.OPf * -1,
+	In: netz_opf_1,
 	On: 3,
 	Off: 0.5,
 	PulseTime: 0,
 )
 
-heizstab.I <- pv_ueberschuss.Q
+heizstab.In <- pv_ueberschuss

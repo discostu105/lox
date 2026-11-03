@@ -162,7 +162,7 @@ fn definition_hover_and_completion_resolve_across_fragments() {
     // …a block type…
     let hover = response(&out, 4)["contents"]["value"].as_str().unwrap();
     assert!(hover.starts_with("**Less**"), "{hover}");
-    assert!(hover.contains("`Input1` input"), "{hover}");
+    assert!(hover.contains("`In1` input"), "{hover}");
     // …and an extern with a room.
     let hover = response(&out, 5)["contents"]["value"].as_str().unwrap();
     assert!(hover.contains(r#"room "Pool""#), "{hover}");
@@ -197,7 +197,7 @@ fn errors_land_on_the_name_they_are_about() {
     );
 
     // A misspelled argument key, while typing (no compile needed).
-    let bad_key = src.replace("Input1: wasser", "Inputx: wasser");
+    let bad_key = src.replace("In1: wasser", "Inputx: wasser");
     let out = session(&[open(&pool, &bad_key)]);
     let d = diagnostics(&out, &pool);
     let (l, c) = pos(&bad_key, "Inputx");
@@ -211,31 +211,31 @@ fn errors_land_on_the_name_they_are_about() {
     assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
 
     // A value next to a wire on one port (D77): the port key in the call.
-    let both = src.replace("Input1: wasser.Q,", "Input1: 3, Input1: wasser.Q,");
+    let both = src.replace("In1: wasser.Q,", "In1: 3, In1: wasser.Q,");
     let out = session(&[open(&pool, &both)]);
     let d = diagnostics(&out, &pool);
     assert_eq!(d.len(), 1, "{d:?}");
-    let (l, c) = pos(&both, "Input1: 3");
+    let (l, c) = pos(&both, "In1: 3");
     assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
     assert!(
         d[0]["message"]
             .as_str()
             .unwrap()
-            .contains("has both a value (`Input1: 3`) and a wire (`Input1: wasser.Q`)"),
+            .contains("has both a value (`In1: 3`) and a wire (`In1: wasser.Q`)"),
         "{d:?}"
     );
 
     // A duplicate argument: the same.
-    let dup = src.replace("Input2: solltemp)", "Input2: solltemp, Input2: 4)");
+    let dup = src.replace("In2: solltemp)", "In2: solltemp, In2: 4)");
     let out = session(&[open(&pool, &dup)]);
     let d = diagnostics(&out, &pool);
-    let (l, c) = pos(&dup, "Input2: solltemp");
+    let (l, c) = pos(&dup, "In2: solltemp");
     assert_eq!(d[0]["range"]["start"], json!({"line": l, "character": c}));
     assert!(
         d[0]["message"]
             .as_str()
             .unwrap()
-            .contains("duplicate parameter `Input2`"),
+            .contains("duplicate parameter `In2`"),
         "{d:?}"
     );
 
@@ -254,14 +254,14 @@ fn every_error_is_its_own_diagnostic() {
     // Two independent name errors, and a second use of the undeclared
     // name that is not reported again.
     let two = src.replace("pumpe.On", "pumpi.On").replace(
-        "Input2: solltemp)",
-        "Input2: solltemp, Input2: 4)\nnoch = Not(I: pumpi.Q)",
+        "In2: solltemp)",
+        "In2: solltemp, In2: 4)\nnoch = Not(In: pumpi.Q)",
     );
     let out = session(&[open(&pool, &two)]);
     let d = diagnostics(&out, &pool);
     assert_eq!(d.len(), 2, "{d:?}");
     let starts: Vec<&Value> = d.iter().map(|x| &x["range"]["start"]).collect();
-    let (l, c) = pos(&two, "Input2: solltemp");
+    let (l, c) = pos(&two, "In2: solltemp");
     assert!(
         starts.contains(&&json!({"line": l, "character": c})),
         "{d:?}"
@@ -343,7 +343,7 @@ fn references_find_a_name_across_fragments_but_not_ports_or_keys() {
     let periphery = project().join("pages/_periphery.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
     let (l, c) = pos(&src, "solltemp");
-    let (kl, kc) = pos(&src, "Input1");
+    let (kl, kc) = pos(&src, "In1");
     let out = session(&[
         open(&pool, &src),
         at(1, "textDocument/references", &pool, l, c + 1),
@@ -402,7 +402,7 @@ fn rename_in_a_project_rewrites_the_fragments_and_the_lockfile() {
     assert_eq!(
         edited,
         [
-            "heizung = Less(\"Wasser unter Soll\", Input1: wasser.Q, Input2: solltemp)",
+            "heizung = Less(\"Wasser unter Soll\", In1: wasser.Q, In2: solltemp)",
             "pumpe.On <- heizung.Q"
         ]
     );
@@ -630,8 +630,9 @@ fn an_access_section_on_the_block_offers_the_named_set_as_a_quick_fix() {
 fn an_expanded_instance_name_offers_the_scoped_one_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
-    let v1 =
-        format!("{src}\ntemplate paar()\n\tein = Not()\nend\npx = paar()\nqx = Not(I: px_ein.Q)\n");
+    let v1 = format!(
+        "{src}\ntemplate paar()\n\tein = Not()\nend\npx = paar()\nqx = Not(In: px_ein.Q)\n"
+    );
     let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
     let diags = diagnostics(&out, &pool).clone();
     let d = diags
@@ -704,7 +705,7 @@ fn scoped_instance_names_hover_and_go_to_the_template_body() {
     let (bl, bc) = pos(&text, "px.aus.Q");
     let (ql, qc) = pos(&text, "px.Q\n");
     let (dl, dc) = pos(&text, "aus = Or");
-    let typing = format!("{text}x = Not(I: px.aus.\n");
+    let typing = format!("{text}x = Not(In: px.aus.\n");
     let (cl, cc) = pos(&typing, "px.aus.\n");
     let out = session(&[
         open(&pool, &text),
@@ -741,7 +742,7 @@ fn scoped_instance_names_hover_and_go_to_the_template_body() {
     assert!(hover.starts_with("**Not.Q** — output"), "{hover}");
     let got = labels(&out, 6);
     assert!(got.contains(&"Q".to_string()), "{got:?}");
-    assert!(got.contains(&"I1".to_string()), "{got:?}");
+    assert!(got.contains(&"In1".to_string()), "{got:?}");
     let q = response(&out, 6)
         .as_array()
         .unwrap()
@@ -761,11 +762,11 @@ fn completion_offers_argument_keys_and_signal_names() {
     let src = std::fs::read_to_string(&pool).unwrap();
     let typing = format!(
         "{src}\nwp_ok = heizen.Q and wasser.Q\ndefaults Monoflop(\n\t\n)\n\
-         m = Monoflop(Time: 5s, )\nt = Not(I: )\nn = Not(I: wp_ok.)\n"
+         m = Monoflop(Time: 5s, )\nt = Not(In: )\nn = Not(In: wp_ok.)\n"
     );
     let (dl, _) = pos(&typing, "defaults Monoflop(");
     let (ml, mc) = pos(&typing, ", )");
-    let (tl, tc) = pos(&typing, "I: )");
+    let (tl, tc) = pos(&typing, "In: )");
     let (sl, sc) = pos(&typing, "wp_ok.)");
     let out = session(&[
         open(&pool, &src),
@@ -778,10 +779,10 @@ fn completion_offers_argument_keys_and_signal_names() {
     // `defaults` takes parameters only; a block also its inputs.
     let got = labels(&out, 1);
     assert!(got.contains(&"Time".to_string()), "{got:?}");
-    assert!(!got.contains(&"InputTrigger".to_string()), "{got:?}");
+    assert!(!got.contains(&"Trigger".to_string()), "{got:?}");
     assert!(!got.contains(&"Q".to_string()), "{got:?}");
     let got = labels(&out, 2);
-    assert!(got.contains(&"InputTrigger".to_string()), "{got:?}");
+    assert!(got.contains(&"Trigger".to_string()), "{got:?}");
     assert!(!got.contains(&"Q".to_string()), "{got:?}");
     // A named signal is a name like a block's, with its top block's ports.
     let got = labels(&out, 3);
@@ -814,7 +815,7 @@ fn completion_offers_a_calendar_entrys_mode_and_date() {
 fn a_bare_duration_offers_its_unit_suffix_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
-    let text = format!("{src}\nm = Monoflop(InputTrigger: heizen.Q, Time: 300)\n");
+    let text = format!("{src}\nm = Monoflop(Trigger: heizen.Q, Time: 300)\n");
     let out = session(&[open(&pool, &src), change(&pool, &text), save(&pool)]);
     let diags = diagnostics(&out, &pool).clone();
     let d = diags

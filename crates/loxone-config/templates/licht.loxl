@@ -11,25 +11,25 @@
 template bewegungslicht(bewegung: any, nachlauf = 3min, titel = "Bewegungslicht")
 	# Licht an bei Bewegung, aus `nachlauf` nach der letzten Bewegung.
 
-	ausgang = OffDelay("{titel}", InputTrigger: bewegung.Q, Time: nachlauf)
+	ausgang = OffDelay("{titel}", Trigger: bewegung.Q, Time: nachlauf)
 end
 
 template bewegungslicht_dunkel(bewegung: any, helligkeit: any, lux = 50, nachlauf = 3min, titel = "Bewegungslicht") -> ausgang
 	# Wie bewegungslicht, aber nur wenn die Helligkeit unter `lux` liegt.
 
-	dunkel = Less(Input1: helligkeit.Q, Input2: lux)
-	bewegt = And(I1: bewegung.Q, I2: dunkel.Q)
-	ausgang = OffDelay("{titel}", InputTrigger: bewegt.Q, Time: nachlauf)
+	dunkel = Less(In1: helligkeit.Q, In2: lux)
+	bewegt = And(In1: bewegung.Q, In2: dunkel.Q)
+	ausgang = OffDelay("{titel}", Trigger: bewegt.Q, Time: nachlauf)
 end
 
 template taster_licht(taster: any, titel = "Tasterlicht")
 	# Jeder Tastendruck schaltet um (Stromstoß).
 
-	ausgang = PushButton("{titel}", InputTrigger: taster.Q)
+	ausgang = PushButton("{titel}", Toggle: taster.Q)
 end
 
 template treppenlicht(taster: any, dauer = 3min, titel = "Treppenlicht")
 	# Treppenlicht: ein Druck schaltet für `dauer` ein, ein weiterer verlängert.
 
-	ausgang = Monoflop("{titel}", InputTrigger: taster.Q, Time: dauer)
+	ausgang = Monoflop("{titel}", Trigger: taster.Q, Time: dauer)
 end

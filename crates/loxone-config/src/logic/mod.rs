@@ -42,9 +42,11 @@ mod desugar;
 mod hardware;
 mod lint;
 mod members;
+mod migrate;
 mod moods;
 mod parser;
 mod rename;
+mod resolve;
 mod rule;
 pub(crate) mod schedule;
 mod simtest;
@@ -78,6 +80,7 @@ pub use lint::{
     fix_unit_suffixes_in, fix_unit_suffixes_text, implicit_zeros, lint_circuits, lint_dead_outputs,
     lint_implicit_zero, lint_source,
 };
+pub use migrate::migrate_port_names;
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,

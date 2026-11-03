@@ -992,6 +992,13 @@ struct Scan<'a> {
 }
 
 impl Scan<'_> {
+    /// The block type of the object `uuid`.
+    fn type_of_uuid(&self, uuid: &str) -> &str {
+        self.obj_index
+            .get(uuid)
+            .map_or("", |&i| self.objects[i].block_type.as_str())
+    }
+
     /// The ref inversion table ([`Fold`]): which ref ports stand for a target port.
     fn ref_folds(&self) -> BTreeMap<String, Fold> {
         let Scan {
@@ -1880,12 +1887,10 @@ impl Scan<'_> {
                     if !is_ident(src_key) {
                         continue;
                     }
+                    let src_type = self.type_of_uuid(src_obj);
                     wires.push(Binding {
-                        port: p.key.clone(),
-                        kind: BindingKind::Wire(PortRef {
-                            slug: src_slug.clone(),
-                            port: src_key.clone(),
-                        }),
+                        port: crate::port_names::name_of(&o.block_type, &p.key).to_string(),
+                        kind: source_binding(src_type, src_slug, src_key),
                         comment: None,
                     });
                 }
@@ -1915,7 +1920,7 @@ impl Scan<'_> {
                         let value = duration_value(&o.block_type, &p.key, def)
                             .unwrap_or_else(|| Value::from_literal(def));
                         args.push(ArgItem::Binding(Binding {
-                            port: p.key.clone(),
+                            port: crate::port_names::name_of(&o.block_type, &p.key).to_string(),
                             kind: BindingKind::Param(value),
                             comment: None,
                         }));
@@ -1931,7 +1936,7 @@ impl Scan<'_> {
                     // No `Def=` is 0, not the default a reader would
                     // assume: a save writes none at 0.
                     args.push(ArgItem::Binding(Binding {
-                        port: p.key.clone(),
+                        port: crate::port_names::name_of(&o.block_type, &p.key).to_string(),
                         kind: BindingKind::Param(Value::from_literal("0")),
                         comment: None,
                     }));
@@ -1987,12 +1992,9 @@ impl Scan<'_> {
                 WireDecl {
                     to: PortRef {
                         slug: slug_of[&objects[ti].uuid].clone(),
-                        port: tk,
+                        port: crate::port_names::name_of(&objects[ti].block_type, &tk).to_string(),
                     },
-                    from: PortRef {
-                        slug: slug_of[&objects[fi].uuid].clone(),
-                        port: fk,
-                    },
+                    from: source_ref(&objects[fi].block_type, &slug_of[&objects[fi].uuid], &fk),
                     comment: None,
                 },
                 ti,
@@ -2198,6 +2200,31 @@ pub(super) fn message_of<'a>(
             .iter()
             .any(|x| x.uuid == target && x.block_type == MESSAGE_REF_TARGET))
     .then_some(target)
+}
+
+/// How source reads output `key` of `slug`, a `block_type`: the bare
+/// name for the type's default output, `slug.<Name>` otherwise.
+pub(crate) fn source_ref(block_type: &str, slug: &str, key: &str) -> PortRef {
+    let name = crate::port_names::name_of(block_type, key);
+    PortRef {
+        slug: slug.to_string(),
+        port: if crate::port_names::default_output(block_type) == Some(name) {
+            String::new()
+        } else {
+            name.to_string()
+        },
+    }
+}
+
+/// [`source_ref`] as an argument binding: a bare name is a reference
+/// value until the expanded module resolves it.
+pub(crate) fn source_binding(block_type: &str, slug: &str, key: &str) -> BindingKind {
+    let r = source_ref(block_type, slug, key);
+    if r.port.is_empty() {
+        BindingKind::Param(Value::Ref(r.slug))
+    } else {
+        BindingKind::Wire(r)
+    }
 }
 
 /// Whether `s` can be written as a language identifier

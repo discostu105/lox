@@ -6,6 +6,6 @@ extern luefter = VirtualOut(title: "Lüfter Bad")
 
 # SR flip-flop: set wins over reset
 
-vent = SRFlipFlop("Vent Bad", InputS: ein.Q, InputR: aus.Q)
+vent = SRFlipFlop("Vent Bad", Set: ein.Q, Reset: aus.Q)
 
 luefter.I1 <- vent.Q

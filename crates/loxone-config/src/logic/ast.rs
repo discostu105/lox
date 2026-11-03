@@ -144,6 +144,9 @@ pub enum Value {
     /// as written (two-digit month and day). Binds only a calendar
     /// entry's `on:`, `from:` and `to:`.
     Date(String),
+    /// `let aussen = sensor.AQ` — an alias of a port. It names the port
+    /// wherever a port may stand and is never a value.
+    Port(PortRef),
 }
 
 /// Seconds since midnight of a `HH:MM[:SS]` time of day, `None` unless
@@ -444,6 +447,7 @@ impl Value {
             Value::Clock(t) => clock_seconds(t).map(|s| Cow::Owned(s.to_string())),
             Value::Bool(b) => Some(Cow::Borrowed(if *b { "1" } else { "0" })),
             Value::Date(d) => Some(Cow::Borrowed(d)),
+            Value::Port(_) => None,
         }
     }
 }
@@ -459,6 +463,7 @@ impl fmt::Display for Value {
             Value::Clock(t) => f.write_str(t),
             Value::Bool(b) => f.write_str(if *b { "on" } else { "off" }),
             Value::Date(d) => f.write_str(d),
+            Value::Port(p) => write!(f, "{p}"),
         }
     }
 }
@@ -2245,7 +2250,13 @@ pub struct PortRef {
 
 impl fmt::Display for PortRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.slug, self.port)
+        // An empty port is a bare name: the object's default output,
+        // resolved on the expanded module.
+        if self.port.is_empty() {
+            f.write_str(&self.slug)
+        } else {
+            write!(f, "{}.{}", self.slug, self.port)
+        }
     }
 }
 
@@ -2355,6 +2366,21 @@ impl Module {
             Ok(())
         }
         load(&mut self.items, dir)
+    }
+
+    /// Whether `name` declares a block, extern, signal or instance of
+    /// this module, or a `let` alias of a port: a bare `name` in a value
+    /// position then stands for a port, not a value.
+    pub fn names_object(&self, name: &str) -> bool {
+        let base = name.split_once('.').map_or(name, |(a, _)| a);
+        self.items.iter().any(|i| match i {
+            Item::Extern(e) => e.slug == base,
+            Item::Block(b) | Item::Instance(b) => b.slug == base,
+            Item::Signal(x) => x.slug == base,
+            Item::Owned(o) => o.slug == base,
+            Item::Let(l) => l.name == base && matches!(l.value, Value::Port(_)),
+            _ => false,
+        })
     }
 
     pub fn externs(&self) -> impl Iterator<Item = &ExternDecl> {
@@ -2563,11 +2589,17 @@ impl Module {
     /// constants.
     pub fn resolve_value<'m>(&'m self, value: &'m Value) -> Result<Cow<'m, str>> {
         match value {
-            Value::Ref(name) => self
-                .lets()
-                .find(|l| l.name == *name)
-                .and_then(|l| l.value.literal())
-                .ok_or_else(|| Error::Compile(format!("undeclared constant `{name}`"))),
+            Value::Ref(name) => match self.lets().find(|l| l.name == *name) {
+                Some(l) if matches!(l.value, Value::Port(_)) => Err(Error::Compile(format!(
+                    "`{name}` is an alias of `{}`, a port, not a value",
+                    l.value
+                ))),
+                Some(l) => l
+                    .value
+                    .literal()
+                    .ok_or_else(|| Error::Compile(format!("undeclared constant `{name}`"))),
+                None => Err(Error::Compile(format!("undeclared constant `{name}`"))),
+            },
             Value::File { path, text: None } => Err(Error::Compile(format!(
                 "`file({})` was not loaded. Load the module from its `.loxl` files, \
                  which resolve the path relative to the `.loxl` file",
@@ -3118,7 +3150,7 @@ fn write_tiles(t: &TilesDecl, depth: usize, out: &mut String) {
     out.push_str(&format!("end{}\n", tail(&t.end_comment)));
 }
 
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {

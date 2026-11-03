@@ -25,6 +25,9 @@ pub(crate) enum RefUse<'a> {
     /// A bare object (`to: name`, `then name on`, a claim's target,
     /// `moved … -> name`).
     Object,
+    /// A bare name where a port may stand (an argument, an operand, the
+    /// source of `<-`): the object's default output.
+    Bare,
     /// A lockfile key (`removed name`, `moved name -> …`): it may name
     /// something the source no longer declares.
     LockKey,
@@ -40,7 +43,11 @@ pub(crate) fn visit_refs(
     f: &mut impl FnMut(&mut String, RefUse) -> Result<()>,
 ) -> Result<()> {
     let port = |r: &mut PortRef, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>| {
-        f(&mut r.slug, RefUse::Port(&r.port))
+        if r.port.is_empty() {
+            f(&mut r.slug, RefUse::Bare)
+        } else {
+            f(&mut r.slug, RefUse::Port(&r.port))
+        }
     };
     match item {
         Item::Block(b) => visit_args(&mut b.args, f)?,
@@ -158,6 +165,13 @@ fn visit_args(
                 BindingKind::Param(Value::Ref(target)) if b.port == "mirrors" => {
                     f(target, RefUse::Object)?
                 }
+                // A bare name on a port: a constant, or an object whose
+                // default output the binding wires.
+                BindingKind::Param(Value::Ref(target))
+                    if b.port.starts_with(|c: char| c.is_ascii_uppercase()) =>
+                {
+                    f(target, RefUse::Bare)?
+                }
                 // A calendar entry's `switches:` names a `Mode` by slug
                 // (a day word is no name).
                 BindingKind::Param(Value::Ref(target))
@@ -182,8 +196,10 @@ fn visit_expr(e: &mut Expr, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>
         Expr::Not(x) => visit_expr(x, f),
         Expr::Cmp { lhs, rhs, .. } => {
             for o in [lhs, rhs] {
-                if let Operand::Port(p) = o {
-                    f(&mut p.slug, RefUse::Port(&p.port))?;
+                match o {
+                    Operand::Port(p) => f(&mut p.slug, RefUse::Port(&p.port))?,
+                    Operand::Value(Value::Ref(name)) => f(name, RefUse::Bare)?,
+                    Operand::Value(_) => {}
                 }
             }
             Ok(())
@@ -193,6 +209,7 @@ fn visit_expr(e: &mut Expr, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>
             visit_expr(rhs, f)
         }
         Expr::Atom(Operand::Port(p)) => f(&mut p.slug, RefUse::Port(&p.port)),
+        Expr::Atom(Operand::Value(Value::Ref(name))) => f(name, RefUse::Bare),
         Expr::Atom(Operand::Value(_)) => Ok(()),
     }
 }
@@ -449,8 +466,10 @@ impl Module {
         }
         errors.finish()?;
         super::defaults::apply(&mut items, &defaults);
-        super::hardware::lower(&mut items)?;
-        Ok(Module { items })
+        let mut module = Module { items };
+        module.resolve_names()?;
+        super::hardware::lower(&mut module.items)?;
+        Ok(module)
     }
 
     /// The scoped-name errors [`Module::expand`] would report (`a_b` for
@@ -737,10 +756,10 @@ impl Module {
                 if let Some(val) = values.get(n.as_str()) {
                     return Ok(val.clone());
                 }
-                if objects.contains_key(n.as_str()) {
-                    return Err(fail(format!(
-                        "object parameter `{n}` is used as a value. Reference one of its ports (`{n}.<Port>`) or use a value parameter."
-                    )));
+                // An object parameter in a value position: the passed
+                // name, which resolution reads as its default output.
+                if let Some(o) = objects.get(n.as_str()) {
+                    return Ok(Value::Ref(o.clone()));
                 }
             }
             Ok(v.clone())

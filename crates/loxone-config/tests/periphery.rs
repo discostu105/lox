@@ -50,10 +50,10 @@ mb = ModbusServer("Wärmepumpe", Address: "192.0.2.12:502")
 mb_dev = ModbusDev("Regler", device: mb)
 mb_temp = ModbusASensor("Vorlauf", device: mb_dev, ModbusAddress: 1, ModbusPollingCycle: 600)
 mb_alarm = ModbusSensor("Alarm", device: mb_dev, ModbusAddress: 2)
-mb_set = ModbusAActor("Sollwert", device: mb_dev, ModbusAddress: 3, I: plus.AQ)
+mb_set = ModbusAActor("Sollwert", device: mb_dev, ModbusAddress: 3, In: plus.AQ)
 
 page "Regeln"
-plus = Formula(Formula: "I1+I2", Input1: http_power.AQ, Input2: mb_temp.Q)
+plus = Formula(Formula: "I1+I2", In1: http_power.AQ, In2: mb_temp.Q)
 "#;
 
 fn devices() -> Module {
@@ -197,8 +197,8 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
          extern vorlauf = ModbusASensor(title: \"Vorlauf\")\n\
          extern sollwert = ModbusAActor(title: \"Sollwert\")\n\
          page \"Regeln\"\n\
-         plus = Formula(Formula: \"I1+I2\", Input1: leistung.AQ, Input2: vorlauf.Q)\n\
-         sollwert.I <- plus.AQ\n",
+         plus = Formula(Formula: \"I1+I2\", In1: leistung.AQ, In2: vorlauf.Q)\n\
+         sollwert.In <- plus.AQ\n",
     )
     .unwrap();
     let mut lock1 = Lockfile::default();
@@ -241,7 +241,7 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
         text.contains("wp_regler = ModbusDev(\"Regler\", device: wp"),
         "{text}"
     );
-    assert!(text.contains("I: plus.AQ"), "{text}");
+    assert!(text.contains("In: plus"), "{text}");
     assert!(!text.contains("<-"), "{text}");
     let out = compile(&base1, &module, &mut lock2, &opts()).unwrap();
     assert_eq!(out.to_bytes(), base1.to_bytes());
@@ -272,7 +272,7 @@ fn removing_a_device_and_an_io_converges_against_the_old_base() {
         .filter(|l| !l.starts_with("http") && !l.starts_with("mb_set"))
         .collect::<Vec<_>>()
         .join("\n")
-        .replace("Input1: http_power.AQ, ", "")
+        .replace("In1: http_power.AQ, ", "")
         + "\nremoved http\nremoved http_power\nremoved mb_set\n";
     let module = Module::parse(&src).unwrap();
     let out = compile(&deployed, &module, &mut lock, &opts()).unwrap();

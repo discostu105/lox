@@ -120,7 +120,7 @@ impl Module {
                 Item::ExprWire(w) => {
                     info.expressions += 1;
                     let mut ctx = Desugar {
-                        prefix: format!("{}_{}__", w.to.slug, w.to.port.to_lowercase()),
+                        prefix: format!("{}_{}__", w.to.slug, self.sink_key(&w.to)),
                         sink: w.to.to_string(),
                         top: None,
                         counters: &mut counters,
@@ -158,7 +158,7 @@ impl Module {
                             port: x.port.clone(),
                         };
                         let mut ctx = Desugar {
-                            prefix: format!("{}_{}__", sink.slug, sink.port.to_lowercase()),
+                            prefix: format!("{}_{}__", sink.slug, self.sink_key(&sink)),
                             sink: sink.to_string(),
                             top: None,
                             counters: &mut counters,
@@ -223,6 +223,25 @@ impl Module {
     }
 }
 
+impl Module {
+    /// The connector key of an expression's sink port, lowercased: the
+    /// synthetic blocks are named after the key, which outlives a port's
+    /// source name, so a renamed port keeps their identities.
+    fn sink_key(&self, sink: &PortRef) -> String {
+        let ty = self
+            .externs()
+            .find(|e| e.slug == sink.slug)
+            .map(|e| e.block_type.as_str())
+            .or_else(|| {
+                self.blocks()
+                    .find(|b| b.slug == sink.slug)
+                    .map(|b| b.block_type.as_str())
+            })
+            .unwrap_or("");
+        crate::port_names::key_or_raw(ty, &sink.port).to_lowercase()
+    }
+}
+
 /// Each expression names its blocks `<prefix><op><n>`: `<sink>_<port>__`
 /// for an expression into a port, `<signal>__` for a named signal. Two
 /// statements with one prefix (the signal `a_i1` and an expression on
@@ -246,7 +265,7 @@ fn check_prefixes(module: &Module) -> Result<()> {
     for item in &module.items {
         match item {
             Item::ExprWire(w) => claim(
-                format!("{}_{}__", w.to.slug, w.to.port.to_lowercase()),
+                format!("{}_{}__", w.to.slug, module.sink_key(&w.to)),
                 w.to.to_string(),
                 format!("the expression on `{}`", w.to),
             )?,
@@ -254,7 +273,14 @@ fn check_prefixes(module: &Module) -> Result<()> {
                 for (port, _) in b.expr_bindings() {
                     let sink = format!("{}.{port}", b.slug);
                     claim(
-                        format!("{}_{}__", b.slug, port.to_lowercase()),
+                        format!(
+                            "{}_{}__",
+                            b.slug,
+                            module.sink_key(&PortRef {
+                                slug: b.slug.clone(),
+                                port: port.to_string()
+                            })
+                        ),
                         sink.clone(),
                         format!("the expression on `{sink}`"),
                     )?;
@@ -331,11 +357,11 @@ impl Desugar<'_> {
                 };
                 let i1 = self.node(a)?;
                 let i2 = self.node(b)?;
-                self.emit(op, ty, e, vec![wire("I1", i1), wire("I2", i2)], "Q")
+                self.emit(op, ty, e, vec![wire("In1", i1), wire("In2", i2)], "Q")
             }
             Expr::Not(x) => {
                 let i = self.node(x)?;
-                self.emit("not", "Not", e, vec![wire("I", i)], "Q")
+                self.emit("not", "Not", e, vec![wire("In", i)], "Q")
             }
             Expr::Cmp { op, lhs, rhs } => {
                 if !matches!(lhs, Operand::Port(_)) && !matches!(rhs, Operand::Port(_)) {
@@ -351,7 +377,7 @@ impl Desugar<'_> {
                     opname,
                     ty,
                     e,
-                    vec![operand("Input1", lhs), operand("Input2", rhs)],
+                    vec![operand("In1", lhs), operand("In2", rhs)],
                     "Q",
                 )
             }
@@ -398,7 +424,7 @@ impl Desugar<'_> {
             comment: None,
         })];
         for (i, p) in inputs.iter().enumerate() {
-            args.push(wire(&format!("Input{}", i + 1), p.clone()));
+            args.push(wire(&format!("In{}", i + 1), p.clone()));
         }
         self.emit("f", "Formula", e, args, "AQ")
     }
@@ -499,6 +525,10 @@ impl Desugar<'_> {
             Value::Bool(_) => Err(Error::Compile(format!(
                 "`{v}` in the arithmetic on `{}` is a digital value, but formulas \
                  compute on plain numbers. Write `1` or `0`",
+                self.sink,
+            ))),
+            Value::Port(_) => Err(Error::Compile(format!(
+                "`{v}` in the arithmetic on `{}` is a port, not a constant",
                 self.sink,
             ))),
         }

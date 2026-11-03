@@ -82,6 +82,9 @@ pub struct Signal {
     pub port: PortRef,
     /// The compiled object's UUID.
     pub object: String,
+    /// The connector key the simulator addresses (`InputTrigger` for
+    /// `Trigger`).
+    pub key: String,
 }
 
 #[derive(Debug)]
@@ -124,8 +127,11 @@ pub fn plan_tests(
     for (slug, e) in &lock.externals {
         uuid_of.insert(slug.as_str(), e.uuid.as_str());
     }
-    let present: std::collections::BTreeSet<String> =
-        compiled.objects().into_iter().map(|o| o.uuid).collect();
+    let types: BTreeMap<String, String> = compiled
+        .objects()
+        .into_iter()
+        .map(|o| (o.uuid, o.block_type))
+        .collect();
     let resolve = |port: &PortRef, test: &str| -> Result<Signal> {
         let compile_err = |msg: String| Error::Compile(format!("test \"{test}\": {msg}"));
         let uuid = uuid_of.get(port.slug.as_str()).ok_or_else(|| {
@@ -134,14 +140,15 @@ pub fn plan_tests(
                 port.slug
             ))
         })?;
-        if !present.contains(*uuid) {
+        let Some(ty) = types.get(*uuid) else {
             return Err(compile_err(format!(
                 "`{port}`: object {uuid} is not in the compiled config"
             )));
-        }
+        };
         Ok(Signal {
             port: port.clone(),
             object: uuid.to_string(),
+            key: crate::port_names::key_or_raw(ty, &port.port).to_string(),
         })
     };
     let mut runs = Vec::new();
@@ -349,7 +356,7 @@ fn run_one(
     mut tracer: Option<&mut Tracer>,
 ) -> std::result::Result<(), String> {
     let port_of = |sim: &Simulator, s: &Signal| {
-        sim.port(&s.object, &s.port.port)
+        sim.port(&s.object, &s.key)
             .map_err(|e| format!("`{}`: {e}", s.port))
     };
     for (step_no, step) in run.steps.iter().enumerate() {
@@ -433,7 +440,7 @@ impl Tracer {
                 .map(|(s, _)| s)
                 .chain(step.expects.iter().map(|e| &e.signal));
             for s in signals {
-                if let Ok(p) = sim.port(&s.object, &s.port.port) {
+                if let Ok(p) = sim.port(&s.object, &s.key) {
                     roots.push(p);
                 }
             }
@@ -687,7 +694,7 @@ impl TitleTable {
             });
             match room {
                 Some(room) if room_separates => {
-                    return Ok(format!("{title} [{room}].{}", port.port));
+                    return Ok(format!("{title} [{room}].{}", signal.key));
                 }
                 _ => {
                     return compile_err(format!(
@@ -697,7 +704,7 @@ impl TitleTable {
                 }
             }
         }
-        Ok(format!("{title}.{}", port.port))
+        Ok(format!("{title}.{}", signal.key))
     }
 
     /// Duplicate titles are harmless when the holders all carry the same
@@ -879,11 +886,11 @@ mod tests {
             "a = And(\"Gate A\")\n\
              \n\
              test \"basic\"\n\
-             \ta.I1 = 1\n\
-             \ta.I2 = 1\n\
+             \ta.In1 = 1\n\
+             \ta.In2 = 1\n\
              \ttick 3\n\
              \texpect a.Q == 1\n\
-             \ta.I1 = 0\n\
+             \ta.In1 = 0\n\
              \ttick 2 dt 0.5\n\
              \texpect a.Q == 0\n\
              end\n",
@@ -910,7 +917,8 @@ mod tests {
     #[test]
     fn expect_before_tick_and_missing_expect_are_refused() {
         let module =
-            Module::parse("a = And()\n\ntest \"t\"\n\ta.I1 = 1\n\texpect a.Q == 1\nend\n").unwrap();
+            Module::parse("a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\texpect a.Q == 1\nend\n")
+                .unwrap();
         let doc = doc_with(
             "\t\t\t<C Type=\"And\" V=\"175\" U=\"00000003-0000-0000-ffff000000000001\" Title=\"a\" Nio=\"3\"/>\r\n",
         );
@@ -920,7 +928,8 @@ mod tests {
             .to_string();
         assert!(err.contains("no preceding `tick`"), "{err}");
 
-        let module = Module::parse("a = And()\n\ntest \"t\"\n\ta.I1 = 1\n\ttick 1\nend\n").unwrap();
+        let module =
+            Module::parse("a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\nend\n").unwrap();
         let err = plan_tests(&module, &lock, &doc, None)
             .unwrap_err()
             .to_string();
@@ -933,7 +942,7 @@ mod tests {
             "a = And(\"Gate A\")\n\
              \n\
              test \"v2\"\n\
-             \ta.I1 = on\n\
+             \ta.In1 = on\n\
              \ttick 2min dt 500ms\n\
              \texpect a.Q != off\n\
              end\n",
@@ -960,7 +969,7 @@ mod tests {
     #[test]
     fn ambiguous_titles_are_refused() {
         let module = Module::parse(
-            "a = And(\"Dup\")\n\ntest \"t\"\n\ta.I1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
+            "a = And(\"Dup\")\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
         )
         .unwrap();
         let doc = doc_with(
@@ -979,7 +988,7 @@ mod tests {
     #[test]
     fn same_signal_ref_duplicates_are_tolerated() {
         let module = Module::parse(
-            "a = And()\n\ntest \"t\"\n\ta.I1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
+            "a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
         )
         .unwrap();
         // Two InputRefs of the same title mirroring the SAME object: the
@@ -1035,7 +1044,7 @@ mod tests {
             "a = And(\"Gate A\")\n\
              \n\
              test \"basic\"\n\
-             \ta.I1 = 1\n\
+             \ta.In1 = 1\n\
              \ttick 3\n\
              \texpect a.Q == 1\n\
              \ttick 2\n\
@@ -1071,11 +1080,11 @@ mod tests {
             "a = And(\"Gate A\")\n\
              \n\
              test \"basic\"\n\
-             \ta.I1 = 1\n\
-             \ta.I2 = 1\n\
+             \ta.In1 = 1\n\
+             \ta.In2 = 1\n\
              \ttick 1\n\
              \texpect a.Q == 1\n\
-             \ta.I2 = 0\n\
+             \ta.In2 = 0\n\
              \ttick 1\n\
              \texpect a.Q == 1\n\
              end\n\

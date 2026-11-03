@@ -120,7 +120,11 @@ pub(crate) fn factor(blocks: &mut [&mut BlockDecl]) -> Vec<DefaultsDecl> {
             // The most common value; the first to reach the top count wins.
             let mut counts: Vec<(&Value, usize)> = Vec::new();
             for k in kinds.iter().flatten() {
-                if let BindingKind::Param(v) = k {
+                // A bare name is an object's default output (a wire), not
+                // a value a default could carry.
+                if let BindingKind::Param(v) = k
+                    && !matches!(v, Value::Ref(_))
+                {
                     match counts.iter_mut().find(|(x, _)| *x == v) {
                         Some((_, n)) => *n += 1,
                         None => counts.push((v, 1)),

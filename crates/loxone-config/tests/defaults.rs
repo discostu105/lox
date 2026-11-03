@@ -29,27 +29,27 @@ extern wind_alarm = VirtualIn(iname: \"VI2\")\n\
 extern sonne = VirtualIn(iname: \"VI3\")\n\
 \n\
 template nachlauf(quelle: any)\n\
-\tm = Monoflop(InputTrigger: quelle.Q)\n\
+\tm = Monoflop(Trigger: quelle.Q)\n\
 end\n\
 \n\
 nl = nachlauf(quelle: sonne)\n";
 
 /// Every value written on its block.
 const EXPLICIT: &str = "\
-a = Monoflop(InputTrigger: sonne.Q, Time: 2s)\n\
-b = Monoflop(InputTrigger: wind_alarm.Q, Time: 2s)\n\
+a = Monoflop(Trigger: sonne.Q, Time: 2s)\n\
+b = Monoflop(Trigger: wind_alarm.Q, Time: 2s)\n\
 c = Monoflop(Reset: sonne.Q, Time: 2s)\n\
-d = Monoflop(InputTrigger: sonne.Q, Time: 5s)\n";
+d = Monoflop(Trigger: sonne.Q, Time: 5s)\n";
 
 /// The shared value in a `defaults`; `d` keeps its own, and the template
 /// body block takes the default too.
 const FACTORED: &str = "\
 defaults Monoflop(Time: 2s)\n\
 \n\
-a = Monoflop(InputTrigger: sonne.Q)\n\
-b = Monoflop(InputTrigger: wind_alarm.Q)\n\
+a = Monoflop(Trigger: sonne.Q)\n\
+b = Monoflop(Trigger: wind_alarm.Q)\n\
 c = Monoflop(Reset: sonne.Q)\n\
-d = Monoflop(InputTrigger: sonne.Q, Time: 5s)\n";
+d = Monoflop(Trigger: sonne.Q, Time: 5s)\n";
 
 fn module(body: &str) -> Module {
     Module::parse(&format!("{HEAD}{body}")).unwrap()
@@ -169,7 +169,7 @@ fn defaults_misuse_is_refused_with_the_fix() {
 fn a_default_no_block_takes_is_linted() {
     let m = module(
         "defaults Monoflop(Time: 2s)\ndefaults PulseGen(TimeHigh: 1)\n\
-         a = Monoflop(InputTrigger: sonne.Q, Time: 3s)\n",
+         a = Monoflop(Trigger: sonne.Q, Time: 3s)\n",
     );
     let findings: Vec<String> = lint_source(&m)
         .unwrap()
@@ -184,7 +184,7 @@ fn a_default_no_block_takes_is_linted() {
     );
     let m = Module::parse(
         "extern sonne = VirtualIn(iname: \"VI3\")\ndefaults Monoflop(Time: 2s)\n\
-         a = Monoflop(InputTrigger: sonne.Q, Time: 3s)\n",
+         a = Monoflop(Trigger: sonne.Q, Time: 3s)\n",
     )
     .unwrap();
     let f = lint_source(&m).unwrap();
@@ -236,7 +236,7 @@ fn adopting_one_block_drops_what_the_defaults_say() {
         items: adopted.items,
     }
     .to_text();
-    assert!(text.contains("c = Monoflop(Reset: sonne.Q)\n"), "{text}");
+    assert!(text.contains("c = Monoflop(Reset: sonne)\n"), "{text}");
 }
 
 #[test]
@@ -245,10 +245,10 @@ fn decompile_spells_durations_in_units() {
         "extern wind_alarm = VirtualIn(iname: \"VI2\")\n\
          extern sonne = VirtualIn(iname: \"VI3\")\n\
          extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
-         a = OffDelay(InputTrigger: sonne.Q, Time: 600)\n\
-         b = OnPulseDelay(InputTrigger: sonne.Q, Delay: 10800, Time: 0.5)\n\
-         c = OffDelay(InputTrigger: wind_alarm.Q, Time: 58)\n\
-         d = OffDelay(InputTrigger: wind_alarm.Q, Time: 0.02)\n\
+         a = OffDelay(Trigger: sonne.Q, Time: 600)\n\
+         b = OnPulseDelay(Trigger: sonne.Q, Delay: 10800, PulseTime: 0.5)\n\
+         c = OffDelay(Trigger: wind_alarm.Q, Time: 58)\n\
+         d = OffDelay(Trigger: wind_alarm.Q, Time: 0.02)\n\
          jal_sued.AutoShade <- a.Q\n",
     )
     .unwrap();

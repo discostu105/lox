@@ -8,15 +8,15 @@ extern t_markise = VirtualOutCmd(title: "Markise einfahren")
 test "Einfahren sofort, Freigabe nach 10 ruhigen Minuten"
 	t_wind.Q = 55
 	tick 2
-	expect t_markise.I == 1
+	expect t_markise.In == 1
 	t_wind.Q = 10
 	tick 300
-	expect t_markise.I == 1
+	expect t_markise.In == 1
 	t_regen.Q = 1 # Regen startet die 10 Minuten neu
 	tick 2
 	t_regen.Q = 0
 	tick 500
-	expect t_markise.I == 1
+	expect t_markise.In == 1
 	tick 120
-	expect t_markise.I == 0
+	expect t_markise.In == 0
 end

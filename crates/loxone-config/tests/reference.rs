@@ -43,11 +43,16 @@ fn types_describe_each_documented_port() {
     let (ok, out) = loxl(&["types", "NfcCodeTouch"]);
     assert!(ok);
     assert!(
-        out.contains("  Lr                 input        Lr\n      Turns the status LEDs red.\n"),
+        out.contains(
+            "  LedRed             input        Lr\n      Turns the status LEDs red.\n      Stored as `Lr`.\n"
+        ),
         "{out}"
     );
     // An undocumented port has no description line.
-    assert!(out.contains("  Disable            input\n  Lr"), "{out}");
+    assert!(
+        out.contains("  Disable            input\n  LedRed"),
+        "{out}"
+    );
 }
 
 #[test]

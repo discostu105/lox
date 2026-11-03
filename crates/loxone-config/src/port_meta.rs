@@ -52,6 +52,8 @@ const fn m(
 /// in `canvas_labels`. The settings of virtual and Modbus devices come
 /// from the hand-written table in `settings_meta`.
 pub fn port_meta(block_type: &str, port: &str) -> Option<PortMeta> {
+    // The source name or the connector key, either way.
+    let port = crate::port_names::key_of(block_type, port).unwrap_or(port);
     let label = crate::canvas_labels::label(block_type, port);
     match documented(block_type, port)
         .or_else(|| crate::settings_meta::documented(block_type, port))

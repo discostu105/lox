@@ -1105,12 +1105,14 @@ fn resolve_port(
     want: PortDir,
 ) -> Result<ResolvedPort> {
     if let Some(plan) = managed.get(slug) {
+        // Source names the port; the plan and the lock hold connector keys.
+        let key = crate::port_names::key_or_raw(&plan.block_type, port);
         let port_uuid =
-            plan.ports.get(port).cloned().ok_or_else(|| {
+            plan.ports.get(key).cloned().ok_or_else(|| {
                 Error::Compile(format!("no port `{port}` on managed block `{slug}`"))
             })?;
         // Direction check against the builtin table (extras are inputs).
-        let index = plan.keys.iter().position(|k| k == port).expect("planned");
+        let index = plan.keys.iter().position(|k| k == key).expect("planned");
         let dir = builtin(&plan.block_type)
             .and_then(|specs| specs.get(index).map(|s| s.dir))
             .unwrap_or(PortDir::Input);
@@ -1156,21 +1158,30 @@ fn resolve_port(
         .ok_or_else(|| Error::Compile(format!("extern `{slug}` vanished from the document")))?;
     let el = doc.element_at(path).expect("indexed path");
     let known = ports(el);
-    match known.iter().find(|p| p.key == port) {
+    // Source names the port; the config stores the connector key. A port
+    // the table does not know is named by its key.
+    let ty = el.attr("Type").unwrap_or("");
+    let key = crate::port_names::key_or_raw(ty, port);
+    match known.iter().find(|p| p.key == key) {
         Some(p) => Ok(ResolvedPort {
             owner_uuid: owner_uuid.clone(),
             port_uuid: p.uuid.clone(),
             is_extern: true,
         }),
-        None => Err(Error::Compile(format!(
-            "extern `{slug}` has no port `{port}` in the base config (ports: {}){}. Wire or set the port once in Loxone Config, then compile again.",
-            known
+        None => {
+            let names: Vec<&str> = known
                 .iter()
-                .map(|p| p.key.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            suggest(port, known.iter().map(|p| p.key.as_str()))
-        ))),
+                .map(|p| crate::port_names::name_of(ty, &p.key))
+                .collect();
+            let renamed = crate::port_names::renamed(ty, port)
+                .map(|n| format!(" `{port}` is the connector key of port `{n}`; write `{n}`."))
+                .unwrap_or_default();
+            Err(Error::Compile(format!(
+                "extern `{slug}` has no port `{port}` in the base config (ports: {}){}.{renamed} Wire or set the port once in Loxone Config, then compile again.",
+                names.join(", "),
+                suggest(port, names.iter().copied())
+            )))
+        }
     }
 }
 

@@ -989,7 +989,7 @@ impl Workspace {
 
     fn port_hover(&self, unit: &Unit, decl: &Decl, port: &str) -> Option<String> {
         let ty = decl.ty.as_deref()?;
-        if let Some(spec) = builtin(ty).and_then(|s| s.iter().find(|p| p.key == port)) {
+        if let Some(spec) = builtin(ty).and_then(|s| s.iter().find(|p| p.name == port)) {
             let mut md = format!("**{ty}.{port}** — {}", dir_name(spec.dir));
             if let Some(d) = crate::port_doc::describe(ty, port) {
                 md.push_str(&format!("\n\n{d}\n"));
@@ -1032,10 +1032,11 @@ impl Workspace {
             .clone();
         let base = self.base_doc(&project.base)?;
         let path = base.index().by_uuid.get(&uuid)?.clone();
+        let ty = decl.ty.as_deref().unwrap_or("");
         Some(
             ports(base.element_at(&path)?)
                 .into_iter()
-                .map(|p| p.key)
+                .map(|p| crate::port_names::name_of(ty, &p.key).to_string())
                 .collect(),
         )
     }
@@ -1163,7 +1164,7 @@ impl Workspace {
             .unwrap_or_default()
             .iter()
             .filter(|p| dirs.contains(&p.dir))
-            .map(|p| p.key)
+            .map(|p| p.name)
             .collect();
         let mut out: Vec<Completion> = self
             .port_completions(unit, &block)
@@ -1265,12 +1266,12 @@ impl Workspace {
         let keys: Vec<String> = match (decl.kind, self.base_ports(unit, decl)) {
             ("extern", Some(keys)) => keys,
             _ => spec
-                .map(|s| s.iter().map(|p| p.key.to_string()).collect())
+                .map(|s| s.iter().map(|p| p.name.to_string()).collect())
                 .unwrap_or_default(),
         };
         keys.into_iter()
             .map(|key| {
-                let dir = spec.and_then(|s| s.iter().find(|p| p.key == key).map(|p| p.dir));
+                let dir = spec.and_then(|s| s.iter().find(|p| p.name == key).map(|p| p.dir));
                 Completion {
                     detail: detail(&key, dir),
                     label: key,
@@ -1397,7 +1398,7 @@ fn type_hover(ty: &str) -> String {
         md.push_str(&format!("\n[Loxone documentation]({url})\n"));
     }
     for p in builtin(ty).unwrap_or_default() {
-        md.push_str(&format!("\n- `{}` {}", p.key, dir_name(p.dir)));
+        md.push_str(&format!("\n- `{}` {}", p.name, dir_name(p.dir)));
         if let Some(l) = port_meta(ty, p.key).and_then(|m| m.label) {
             md.push_str(&format!(" ({l})"));
         }

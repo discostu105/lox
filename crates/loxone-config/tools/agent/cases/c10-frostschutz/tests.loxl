@@ -9,15 +9,15 @@ test "Frostschutz Bad"
 	t_aussentemp.Q = 10
 	t_raumtemp.Q = 15
 	tick 2
-	expect t_heizung.I == 0
+	expect t_heizung.In == 0
 	t_aussentemp.Q = -2
 	tick 2
-	expect t_heizung.I == 1
+	expect t_heizung.In == 1
 	t_aussentemp.Q = 10
 	t_raumtemp.Q = 8
 	tick 2
-	expect t_heizung.I == 1
+	expect t_heizung.In == 1
 	t_raumtemp.Q = 15
 	tick 2
-	expect t_heizung.I == 0
+	expect t_heizung.In == 0
 end

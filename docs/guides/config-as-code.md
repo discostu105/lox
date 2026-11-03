@@ -50,9 +50,9 @@ extern aussentemp = VirtualIn(iname: "VI1")          # owned by Loxone Config
 extern sonne      = VirtualIn(iname: "VI3")
 extern jal_sued   = AutoJalousie(title: "Beschattung Süd")
 
-temp_hoch = GreaterEqual("Temp über 28", Input1: aussentemp.Q, Input2: temp_schwelle)
+temp_hoch = GreaterEqual("Temp über 28", In1: aussentemp, In2: temp_schwelle)
 
-jal_sued.AutoShade <- temp_hoch.Q and sonne.Q        # a wire; the `and` becomes an And block
+jal_sued.AutoShade <- temp_hoch and sonne            # a wire; the `and` becomes an And block
 jal_sued.TargetPos = 70                              # a parameter
 ```
 

@@ -19,6 +19,8 @@
 /// The default `Def=` seen in real configs for a builtin block's port,
 /// as the exact attribute string.
 pub fn observed_default(block_type: &str, port: &str) -> Option<&'static str> {
+    // The source name or the connector key, either way.
+    let port = crate::port_names::key_of(block_type, port).unwrap_or(port);
     Some(match (block_type, port) {
         ("AutoJalousie", "AutoShadeEnd") => "1",
         ("AutoJalousie", "Back") => "0.8",

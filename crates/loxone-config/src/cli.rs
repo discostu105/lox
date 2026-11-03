@@ -903,9 +903,14 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
         parsed.push((src, module));
     }
     let spellings = loxone_config::logic::ModeSpellings::of(parsed.iter().map(|(_, m)| m));
+    // A v2 module's port keys become the v3 names (`InputTrigger` →
+    // `Trigger`), looked up across every fragment.
+    let whole: Vec<Module> = parsed.iter().map(|(_, m)| m.clone()).collect();
+    let whole: Vec<&Module> = whole.iter().collect();
     let mut dirty = false;
     for (f, (src, mut module)) in targets.iter().zip(parsed) {
         let name = f.display();
+        loxone_config::logic::migrate_port_names(&mut module, &whole);
         spellings.apply(&mut module);
         let canonical = module.to_text();
         match mode {
@@ -2564,6 +2569,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
             .map(|spec| {
                 let meta = loxone_config::port_meta::port_meta(t, spec.key);
                 serde_json::json!({
+                    "name": spec.name,
                     "key": spec.key,
                     "dir": dir(spec.dir),
                     "unit": meta.and_then(|m| m.unit),
@@ -2662,7 +2668,7 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 }
                 let line = format!(
                     "  {:<18} {:<6} {:<5} {:<7} {:<14} {}",
-                    s(&port["key"]),
+                    s(&port["name"]),
                     s(&port["dir"]),
                     s(&port["unit"]),
                     s(&port["label"]),
@@ -2672,6 +2678,9 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
                 println!("{}", line.trim_end());
                 if let Some(d) = port["description"].as_str() {
                     println!("      {d}");
+                }
+                if port["key"] != port["name"] {
+                    println!("      Stored as `{}`.", s(&port["key"]));
                 }
             }
             for a in desc["attr_params"].as_array().into_iter().flatten() {

@@ -14,8 +14,8 @@ extern jal_sued = AutoJalousie(title: \"Beschattung Süd\")
 
 const SUED: &str = "\
 beschatten = And(
-\tI1: sonne.Q,
-\tI2: aussentemp.Q,
+\tIn1: sonne.Q,
+\tIn2: aussentemp.Q,
 )
 
 jal_sued.AutoShade <- beschatten.Q
@@ -70,7 +70,7 @@ fn lint_reports_and_clears() {
     // A block nothing consumes: flagged against the compiled config.
     std::fs::write(
         dir.join("src/sued.loxl"),
-        format!("{SUED}\nverwaist = And(\n\tI1: sonne.Q,\n\tI2: wind_alarm.Q,\n)\n"),
+        format!("{SUED}\nverwaist = And(\n\tIn1: sonne.Q,\n\tIn2: wind_alarm.Q,\n)\n"),
     )
     .unwrap();
     assert!(loxl(&dir, &["compile"]).status.success());
@@ -108,8 +108,8 @@ fn values_outside_the_documented_range_are_flagged() {
     let src = loxone_config::logic::Module::parse(
         "extern vi = VirtualIn(iname: \"VI1\")\n\
          extern jal = AutoJalousie(title: \"J\")\n\
-         puls = Monoflop(InputTrigger: vi.Q, Time: 30s)\n\
-         lc = LightController2(I1: puls.Q, AlarmClockPeriod: 2h)\n\
+         puls = Monoflop(Trigger: vi.Q, Time: 30s)\n\
+         lc = LightController2(In1: puls.Q, BuzzerFade: 2h)\n\
          jal.Safety <- puls.Q\n\
          jal.TargetPos = 120%\n",
     )
@@ -123,7 +123,7 @@ fn values_outside_the_documented_range_are_flagged() {
     assert_eq!(
         range,
         [
-            "lc: AlarmClockPeriod = 120 min is outside the documented range 0 … 60 min",
+            "lc: BuzzerFade = 120 min is outside the documented range 0 … 60 min",
             "jal: TargetPos = 120 % is outside the documented range 0 … 100 %",
         ]
     );
@@ -136,7 +136,7 @@ fn a_file_without_its_page_in_a_paged_module_is_flagged() {
     let dir = make_project("lint-default-page");
     std::fs::write(
         dir.join("src/a_nord.loxl"),
-        "page \"Beschattung\"\n\nnord = Not(\n\tI: sonne.Q,\n)\n",
+        "page \"Beschattung\"\n\nnord = Not(\n\tIn: sonne.Q,\n)\n",
     )
     .unwrap();
     let out = loxl(&dir, &["lint", "src"]);
@@ -198,10 +198,10 @@ fn lint_fix_writes_unit_suffixes_and_keeps_the_compiled_config() {
         dir.join("src/sued.loxl"),
         format!(
             "page \"Beschattung\"\n\n{SUED}\n\
-             puls = Monoflop(InputTrigger: sonne.Q, Time: 300)\n\
-             kurz = Monoflop(InputTrigger: puls.Q, Time: 0.02)\n\
-             krumm = Monoflop(InputTrigger: kurz.Q, Time: 0.0005)\n\
-             jal_sued.InputTrigger <- krumm.Q\n"
+             puls = Monoflop(Trigger: sonne.Q, Time: 300)\n\
+             kurz = Monoflop(Trigger: puls.Q, Time: 0.02)\n\
+             krumm = Monoflop(Trigger: kurz.Q, Time: 0.0005)\n\
+             jal_sued.Toggle <- krumm.Q\n"
         ),
     )
     .unwrap();
@@ -263,7 +263,7 @@ fn lint_fix_covers_extern_sets_templates_and_device_settings() {
          # `zeit` also feeds a port without a unit, where a suffix reads differently.\n\
          template beschriftet(zeit = 300) -> m\n\
          \tm = Monoflop(Time: zeit)\n\
-         \tn = Equal(Input1: m.Q, Input2: zeit)\n\
+         \tn = Equal(In1: m.Q, In2: zeit)\n\
          end\n",
     )
     .unwrap();
@@ -271,9 +271,9 @@ fn lint_fix_covers_extern_sets_templates_and_device_settings() {
         dir.join("src/sued.loxl"),
         format!(
             "page \"Beschattung\"\n\n{SUED}\n\
-             a = verz(zeit: 120, InputTrigger: sonne.Q)\n\
-             b = beschriftet(zeit: 120, InputTrigger: a.Q)\n\
-             jal_sued.InputTrigger <- b.Q\n\
+             a = verz(zeit: 120, Trigger: sonne.Q)\n\
+             b = beschriftet(zeit: 120, Trigger: a.Q)\n\
+             jal_sued.Toggle <- b.Q\n\
              zaehler = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/\", Poll: 60, \
              Timeout: 4000)\n"
         ),
@@ -329,7 +329,7 @@ fn a_module_error_names_the_fragment_and_line() {
     let dir = make_project("check-located");
     std::fs::write(
         dir.join("src/sued.loxl"),
-        format!("{SUED}\nnord = Not(I: nirgends.Q)\n"),
+        format!("{SUED}\nnord = Not(In: nirgends.Q)\n"),
     )
     .unwrap();
     let out = loxl(&dir, &["check", "src"]);
@@ -353,7 +353,7 @@ fn lint_fix_patches_the_value_in_place() {
     let src = "\
 extern a = VirtualIn(iname: \"VI1\")
 # Time: 300 stays in the comment.
-m = Monoflop(  InputTrigger: a.Q,
+m = Monoflop(  Trigger: a.Q,
 \tTime:   300   )
 n = Monoflop(Time: 300) # five minutes
 ";

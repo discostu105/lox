@@ -4,8 +4,8 @@ extern markise = VirtualOutCmd(title: "Markise einfahren")
 
 page "Logik"
 
-windig = Greater(Input1: wind.Q, Input2: 40)
-gefahr = Or(I1: windig.Q, I2: regen.Q)
-sperre = OffDelay("Markise Sperre 10 Minuten", InputTrigger: gefahr.Q, Time: 10min)
+windig = Greater(In1: wind.Q, In2: 40)
+gefahr = Or(In1: windig.Q, In2: regen.Q)
+sperre = OffDelay("Markise Sperre 10 Minuten", Trigger: gefahr.Q, Time: 10min)
 
-markise.I <- sperre.Q
+markise.In <- sperre.Q

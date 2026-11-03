@@ -117,8 +117,8 @@ mod tests {
 
     #[test]
     fn utf16_columns_count_code_units() {
-        let l = "a = Or(\"Küche 🔥\", I1: b.Q)";
-        let byte = l.find("I1").unwrap();
+        let l = "a = Or(\"Küche 🔥\", In1: b.Q)";
+        let byte = l.find("In1").unwrap();
         let col = Encoding::Utf16.column(l, byte);
         // ü is one unit, 🔥 two; bytes: ü 2, 🔥 4.
         assert_eq!(col as usize, byte - 1 - 2);

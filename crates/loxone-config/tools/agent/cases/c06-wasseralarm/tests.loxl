@@ -8,14 +8,14 @@ extern t_entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
 test "Wasseralarm: Sirene 60 Sekunden, Entfeuchter solange nass"
 	t_melder.Q = 1
 	tick 2
-	expect t_sirene.I == 1
-	expect t_entfeuchter.I == 1
+	expect t_sirene.In == 1
+	expect t_entfeuchter.In == 1
 	tick 50
-	expect t_sirene.I == 1
+	expect t_sirene.In == 1
 	tick 15
-	expect t_sirene.I == 0 # nach 60 Sekunden aus, obwohl noch nass
-	expect t_entfeuchter.I == 1
+	expect t_sirene.In == 0 # nach 60 Sekunden aus, obwohl noch nass
+	expect t_entfeuchter.In == 1
 	t_melder.Q = 0
 	tick 2
-	expect t_entfeuchter.I == 0
+	expect t_entfeuchter.In == 0
 end

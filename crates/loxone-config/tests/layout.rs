@@ -149,11 +149,11 @@ fn base_with_gui_ref() -> LoxoneDoc {
          spiegel = InputRef(\n\
          \tmirrors: quelle,\n\
          \tAI: quelle.Q,\n\
-         \tI: quelle.Qm,\n\
+         \tIn: quelle.Qm,\n\
          )\n\
          \n\
          halter = Memory(\n\
-         \tInput: spiegel.Q,\n\
+         \tIn: spiegel.Q,\n\
          )\n",
     )
     .unwrap();
@@ -166,11 +166,11 @@ fn ref_module() -> Module {
          extern quelle = VirtualIn(iname: \"VI1\")\n\
          \n\
          anzeige = And(\n\
-         \tI1: quelle.Q,\n\
+         \tIn1: quelle.Q,\n\
          )\n\
          \n\
          folge = And(\n\
-         \tI1: anzeige.Q,\n\
+         \tIn1: anzeige.Q,\n\
          )\n",
     )
     .unwrap()
@@ -244,7 +244,7 @@ fn a_relayout_moves_blocks_far_from_the_ref_they_read() {
 fn placement_is_per_page() {
     let one = "page \"Beschattung\"\n\
                extern sonne = VirtualIn(iname: \"VI3\")\n\
-               fern = And(I1: sonne.Q)\n";
+               fern = And(In1: sonne.Q)\n";
     let mut lock = Lockfile::new();
     let out = compile(
         &two_pages(),
@@ -258,7 +258,7 @@ fn placement_is_per_page() {
 
     // A new block on another page starts at that page's top, not below
     // the lowest block of the whole lock.
-    let two = format!("{one}\npage \"Werkstatt\"\nnah = And(I1: sonne.Q)\n");
+    let two = format!("{one}\npage \"Werkstatt\"\nnah = And(In1: sonne.Q)\n");
     let out = compile(&moved, &Module::parse(&two).unwrap(), &mut lock, &opts()).unwrap();
     let nah = rect(&out, &uuid(&lock, "nah"));
     assert!(nah.py < 4800, "{nah:?}");
@@ -355,7 +355,7 @@ fn an_unknown_relayout_page_is_an_error() {
 fn a_block_moved_to_another_page_is_placed_afresh() {
     let one = "page \"Beschattung\"\n\
                extern sonne = VirtualIn(iname: \"VI3\")\n\
-               fern = And(I1: sonne.Q)\n";
+               fern = And(In1: sonne.Q)\n";
     let mut lock = Lockfile::new();
     let out = compile(
         &two_pages(),
@@ -381,7 +381,7 @@ fn a_block_moved_to_another_page_is_placed_afresh() {
 fn a_gui_paste_onto_another_page_is_not_a_move() {
     let one = "page \"Beschattung\"\n\
                extern sonne = VirtualIn(iname: \"VI3\")\n\
-               fern = And(I1: sonne.Q)\n";
+               fern = And(In1: sonne.Q)\n";
     let module = Module::parse(one).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&two_pages(), &module, &mut lock, &opts()).unwrap();
@@ -409,15 +409,15 @@ fn a_memory_flag_is_placed_in_its_chain() {
          extern sonne = VirtualIn(iname: \"VI3\")\n\
          \n\
          vorne = And(\n\
-         \tI1: sonne.Q,\n\
+         \tIn1: sonne.Q,\n\
          )\n\
          \n\
          merker = Memory(\n\
-         \tInput: vorne.Q,\n\
+         \tIn: vorne.Q,\n\
          )\n\
          \n\
          hinten = And(\n\
-         \tI1: merker.Q,\n\
+         \tIn1: merker.Q,\n\
          )\n",
     )
     .unwrap();

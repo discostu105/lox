@@ -7,15 +7,15 @@ page "Logik"
 
 lichtsteuerung = LightController2(
 	"Lichtsteuerung Diele",
-	Move: bewegung.Q,
+	Motion: bewegung.Q,
 	Brightness: helligkeit.Q,
 	Reset: taster_aus.Q,
 	BrightnessLimit: 50,
-	MoveOn: 120,
-	MoveTimeout: 3600,
+	MotionExtend: 120,
+	ManualTimeout: 3600,
 )
 
-licht.I <- lichtsteuerung.AQ1
+licht.In <- lichtsteuerung.AQ1
 
 moods diele
 	"Viel Licht": AQ1 on
