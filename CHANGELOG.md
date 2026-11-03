@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.79.1] — 2026-11-03
+
+### Fixed
+- **`lox logic decompile` and `adopt`** keep accented letters in slugs and file names: `Ložnice` becomes `loznice`, not `lo_nice`. Existing slugs in modules and lockfiles stay as they are
+
 ## [0.79.0] — 2026-11-01
 
 ### Added

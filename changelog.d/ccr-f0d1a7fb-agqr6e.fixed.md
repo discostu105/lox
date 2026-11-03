@@ -1,1 +1,0 @@
-- **`lox logic decompile` and `adopt`** keep accented letters in slugs and file names: `Ložnice` becomes `loznice`, not `lo_nice`. Existing slugs in modules and lockfiles stay as they are
