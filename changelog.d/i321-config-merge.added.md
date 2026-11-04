@@ -1,3 +1,3 @@
-- **`lox config merge`** takes over Automatic Designer rules edited or deleted in the app since the base: it
-  rewrites their `rule` declarations from the live config, moves `base` to the download and records the change
-  time, so the next `lox config push` loses nothing. Conflicts with source edits and other live changes stop it.
+- **`lox config merge`** takes over what changed on the Miniserver since the base, so the next push loses nothing:
+  rules edited or deleted in the app become source, other changes the source doesn't own (a plugin added in
+  Loxone Config) stay as they are, and the download becomes the base.

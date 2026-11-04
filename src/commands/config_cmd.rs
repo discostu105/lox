@@ -580,8 +580,9 @@ pub(crate) enum ConfigCmd {
     /// edited in the app (and drops the ones deleted there), makes the
     /// download the base and records the rules' change time. Refuses while
     /// the Miniserver holds custom changes no download carries, and when the
-    /// logic changed in more than rules, or a rule changed both in the app and
-    /// in the source. Source changes not pushed yet stay for the next push;
+    /// live config changed what the source owns outside its rules, or a rule
+    /// changed both in the app and in the source. Other live changes (a plugin
+    /// added in Loxone Config, say) are kept as they are. Source changes not pushed yet stay for the next push;
     /// `--dry-run` writes nothing.
     ///
     /// JSON fields: `outcome` (`in-sync`, `merged`, `planned`), `live`,

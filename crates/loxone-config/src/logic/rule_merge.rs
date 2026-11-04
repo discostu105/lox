@@ -5,8 +5,9 @@
 //! from before the edit would write the old rule back. [`merge_rules`] lifts
 //! the rules the module declares from the live config, rewrites their
 //! declarations, and checks that the module then compiles to the live config
-//! byte for byte. Nothing else may have changed between base and live: other
-//! logic changes are a re-base by hand.
+//! byte for byte. Other live changes pass through when the source doesn't own
+//! them (a plugin added in Loxone Config, say); a change to what the source
+//! owns stops the merge.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -36,6 +37,9 @@ pub struct RuleMerge {
     /// Rules of the live config that no declaration owns, by name (new in the
     /// app, say). The push keeps them as they are live.
     pub unmanaged: Vec<String>,
+    /// Other live changes the source doesn't own, one line each: they pass
+    /// through as live
+    pub kept: Vec<String>,
 }
 
 impl RuleMerge {
@@ -47,8 +51,8 @@ impl RuleMerge {
 
 /// Lift the rules the module declares from `live`. `sources` are the module
 /// files with their text, in module order; `base` is the config the lock was
-/// compiled against. Fails, with nothing to write, when base and live differ
-/// in more than rules, users and access, when a rule cannot be written as
+/// compiled against. Fails, with nothing to write, when live changed what the
+/// source owns outside its rules, when a rule cannot be written as
 /// source, or when the result does not compile to `live` byte for byte.
 pub fn merge_rules(
     sources: &[(PathBuf, String)],
@@ -57,7 +61,7 @@ pub fn merge_rules(
     lock: &Lockfile,
     opts: &CompileOptions,
 ) -> Result<RuleMerge> {
-    check_only_rules_changed(&crate::diff::diff(base, live))?;
+    let kept = live_changes(&crate::diff::diff(base, live), base, lock)?;
 
     let mut fragments = Vec::new();
     for (path, src) in sources {
@@ -267,67 +271,130 @@ pub fn merge_rules(
         removed,
         source_ahead,
         unmanaged,
+        kept,
     })
 }
 
-/// Base and live may differ in rules (their payload, name and the flags the
-/// app writes with them), users and access. Anything else is an error.
-fn check_only_rules_changed(d: &DocDiff) -> Result<()> {
+/// What changed between base and live outside the rules. Changes to objects
+/// the source doesn't own pass through: the compile carries them over from
+/// live, and they are returned as lines for the report. A change the source
+/// owns (a managed block, its ports and wires, an extern's claimed title,
+/// room, category or assigned port, an owned hardware declaration, an extern
+/// removed, a page the compiler made) is an error.
+fn live_changes(d: &DocDiff, base: &LoxoneDoc, lock: &Lockfile) -> Result<Vec<String>> {
+    use std::collections::BTreeSet;
     let is_rule = |t: &str| t == RULE_BLOCK_TYPE;
-    let mut other: Vec<String> = Vec::new();
+    // Managed blocks and every port they own.
+    let mut managed: BTreeSet<&str> = BTreeSet::new();
+    for o in lock.objects.values() {
+        managed.insert(&o.uuid);
+        managed.extend(o.ports.values().map(String::as_str));
+    }
+    let pages: BTreeSet<&str> = lock.pages.values().map(String::as_str).collect();
+    let externs: BTreeMap<&str, &crate::lock::LockedExternal> = lock
+        .externals
+        .values()
+        .map(|e| (e.uuid.as_str(), e))
+        .collect();
+    let owned = |u: &str| externs.get(u).is_some_and(|e| e.owned);
+    let claimed = |u: &str| lock.attr_claims.contains_key(u);
+    // Port UUIDs of the source's extern assignments (`x.Port = value`).
+    let assigned = |object: &str, key: &str| -> bool {
+        base.objects()
+            .into_iter()
+            .find(|o| o.uuid == object)
+            .and_then(|o| base.element_at(&o.path))
+            .is_some_and(|el| {
+                crate::doc::ports(el)
+                    .iter()
+                    .any(|p| p.key == key && lock.set_originals.contains_key(&p.uuid))
+            })
+    };
+    let extern_wire = |w: &crate::doc::WireView| {
+        lock.extern_wires
+            .iter()
+            .any(|l| l.from == w.from_port && l.to == w.to_port)
+    };
+
+    let mut kept = Vec::new();
+    let mut owned_changes = Vec::new();
+    let mut sort = |source_owns: bool, line: String| {
+        if source_owns {
+            owned_changes.push(line);
+        } else {
+            kept.push(line);
+        }
+    };
     for o in d.added.iter().filter(|o| !is_rule(&o.block_type)) {
-        other.push(format!(
-            "added {} {}",
-            o.block_type,
-            name(&o.title, &o.uuid)
-        ));
+        sort(
+            managed.contains(o.uuid.as_str()),
+            format!("added {} {}", o.block_type, name(&o.title, &o.uuid)),
+        );
     }
     for o in d.removed.iter().filter(|o| !is_rule(&o.block_type)) {
-        other.push(format!(
-            "removed {} {}",
-            o.block_type,
-            name(&o.title, &o.uuid)
-        ));
+        let u = o.uuid.as_str();
+        sort(
+            managed.contains(u) || externs.contains_key(u) || pages.contains(u),
+            format!("removed {} {}", o.block_type, name(&o.title, &o.uuid)),
+        );
     }
     for r in d.renamed.iter().filter(|r| !is_rule(&r.block_type)) {
-        other.push(format!(
-            "renamed {} {:?} → {:?}",
-            r.block_type,
-            r.from.as_deref().unwrap_or(""),
-            r.to.as_deref().unwrap_or("")
-        ));
+        let u = r.uuid.as_str();
+        sort(
+            managed.contains(u) || owned(u) || claimed(u) || pages.contains(u),
+            format!(
+                "renamed {} {:?} → {:?}",
+                r.block_type,
+                r.from.as_deref().unwrap_or(""),
+                r.to.as_deref().unwrap_or("")
+            ),
+        );
     }
     for p in d.param_changes.iter().filter(|p| !is_rule(&p.block_type)) {
-        other.push(format!(
-            "{} {} {}: {:?} → {:?}",
-            p.block_type,
-            p.object_uuid,
-            p.port_key,
-            p.from.as_deref().unwrap_or(""),
-            p.to.as_deref().unwrap_or("")
-        ));
+        let u = p.object_uuid.as_str();
+        sort(
+            managed.contains(u) || owned(u) || assigned(u, &p.port_key),
+            format!(
+                "{} {} {}: {:?} → {:?}",
+                p.block_type,
+                p.object_uuid,
+                p.port_key,
+                p.from.as_deref().unwrap_or(""),
+                p.to.as_deref().unwrap_or("")
+            ),
+        );
     }
     for p in d.placements.iter().filter(|p| !is_rule(&p.block_type)) {
-        other.push(format!(
-            "{} {} {}",
-            p.block_type,
-            name(&p.title, &p.object_uuid),
-            p.attr
-        ));
+        let u = p.object_uuid.as_str();
+        sort(
+            managed.contains(u) || owned(u) || claimed(u),
+            format!(
+                "{} {} {}",
+                p.block_type,
+                name(&p.title, &p.object_uuid),
+                p.attr
+            ),
+        );
     }
-    let wires = d.wires_added.len() + d.wires_removed.len();
-    if wires > 0 {
-        other.push(format!("{wires} wire(s) added or removed"));
+    for (verb, wires) in [("added", &d.wires_added), ("removed", &d.wires_removed)] {
+        for w in wires {
+            sort(
+                managed.contains(w.from_port.as_str())
+                    || managed.contains(w.to_port.as_str())
+                    || extern_wire(w),
+                format!("wire {verb} {} → {}", w.from_port, w.to_port),
+            );
+        }
     }
-    if other.is_empty() {
-        return Ok(());
+    if owned_changes.is_empty() {
+        return Ok(kept);
     }
-    let n = other.len();
-    other.truncate(5);
+    let n = owned_changes.len();
+    owned_changes.truncate(5);
     Err(Error::Compile(format!(
-        "the live config changed in more than rules since the base ({n} change(s), first: {}). \
-         Review them with `lox logic diff`, update the module, and set the download as base",
-        other.join("; ")
+        "the live config changed what the source owns since the base ({n} change(s), first: \
+         {}). Review them with `lox logic diff`, update the module, and run the merge again",
+        owned_changes.join("; ")
     )))
 }
 

@@ -1103,14 +1103,34 @@ fn merge_drops_a_rule_deleted_in_the_app() {
 }
 
 #[test]
-fn merge_refuses_other_logic_changes() {
+fn merge_keeps_live_changes_the_source_does_not_own() {
     let base = placed_fixture();
     let (sources, lock) = merge_setup(&base);
+    // Renamed in Loxone Config: an extern the source only reads.
+    let live = base.replace("Title=\"Licht\"", "Title=\"Lampe\"");
+    assert_ne!(live, base);
+    let m = merge(&base, &live, &sources, &lock).unwrap();
+    assert_eq!(
+        m.kept,
+        vec!["renamed Switch \"Licht\" → \"Lampe\"".to_string()]
+    );
+    assert!(m.updated.is_empty() && m.files.is_empty());
+    assert_eq!(String::from_utf8(m.out).unwrap(), live);
+}
+
+#[test]
+fn merge_refuses_a_live_change_to_what_the_source_owns() {
+    let base = placed_fixture();
+    let (sources, mut lock) = merge_setup(&base);
+    // The source claims the switch's title (`licht.title = "Licht"`).
+    let uuid = lock.externals["licht"].uuid.clone();
+    lock.attr_claims.insert(uuid, Default::default());
     let live = base.replace("Title=\"Licht\"", "Title=\"Lampe\"");
     let e = merge(&base, &live, &sources, &lock)
         .unwrap_err()
         .to_string();
-    assert!(e.contains("changed in more than rules"), "{e}");
+    assert!(e.contains("changed what the source owns"), "{e}");
+    assert!(e.contains("\"Licht\" → \"Lampe\""), "{e}");
 }
 
 #[test]

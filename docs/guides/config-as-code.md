@@ -264,7 +264,8 @@ lox logic drift live.Loxone              # exit 0: in sync with the last compile
 lox config diff base.Loxone live.Loxone   # what they changed
 ```
 
-If they changed something you don't manage, point `base` in `lox.toml` at `live.Loxone` and compile again. If they
+If they changed something you don't manage, `lox config merge` takes it over: it points `base` at the download
+and compiles again (by hand: point `base` in `lox.toml` at `live.Loxone` and compile). If they
 touched a managed block, bring the module up to date first (or `lox logic adopt --uuid` a block they added).
 
 ## Tests, CI and editors

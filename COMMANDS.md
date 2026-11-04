@@ -607,6 +607,8 @@ the Automatic Designer rules changed in the app since the base:
 - A rule deleted in the app loses its declaration and its lock entry.
 - A rule you also changed in the source since the base is a conflict: the merge stops and names it.
 - Live rules that no declaration owns are listed. A push keeps them as they are.
+- Other changes since the base that the source doesn't own, a plugin or device added in Loxone Config for
+  example, are kept as they are and listed.
 
 It then compiles the module against the download, makes the download the new `base`, writes the lock and `out`,
 and records the rules' change time in `autopilot.changed`. Commit those files; the next push loses nothing. If the
@@ -614,12 +616,13 @@ source has changes the Miniserver doesn't run yet, they stay, and the next push 
 
 The merge refuses, and writes nothing, when:
 
-- The live config changed in more than rules since the base. Review it with `lox logic diff`.
+- The live config changed what the source owns outside its rules: a managed block, its wires, an extern the
+  source removed, titles, rooms or ports it claims. Review it with `lox logic diff`.
 - The Miniserver holds custom changes the download lacks (rules not saved to the program yet, light moods, users).
   Load the project from the Miniserver in Loxone Config, save it, and run the merge again.
 
-`-o json` prints `{outcome, live, rules_updated: [{rule, changes}], rules_removed, rules_unmanaged, files, rebased,
-source_ahead, recorded}`; `outcome` is `in-sync`, `merged` or `planned` (dry run).
+`-o json` prints `{outcome, live, rules_updated: [{rule, changes}], rules_removed, rules_unmanaged, live_kept, files,
+rebased, source_ahead, recorded}`; `outcome` is `in-sync`, `merged` or `planned` (dry run).
 
 #### Checking the project: `lox config sync`
 

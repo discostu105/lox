@@ -603,6 +603,9 @@ pub(crate) struct MergeReport {
     pub rules_removed: Vec<String>,
     /// Live rules that no declaration owns, by name; a push keeps them
     pub rules_unmanaged: Vec<String>,
+    /// Other live changes since the base that the source doesn't own (a
+    /// plugin added in Loxone Config, say): taken over as they are
+    pub live_kept: Vec<String>,
     /// Module files rewritten
     pub files: Vec<PathBuf>,
     /// The download became the project's base
@@ -738,6 +741,7 @@ pub(crate) fn merge(ms: &dyn Miniserver, opts: &MergeOptions, quiet: bool) -> Re
             .collect(),
         rules_removed: plan.removed.clone(),
         rules_unmanaged: plan.unmanaged.clone(),
+        live_kept: plan.kept.clone(),
         files: plan.files.iter().map(|(p, _)| p.clone()).collect(),
         rebased,
         source_ahead: plan.source_ahead,
@@ -763,6 +767,12 @@ pub(crate) fn merge(ms: &dyn Miniserver, opts: &MergeOptions, quiet: bool) -> Re
                 .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ));
+    }
+    if !report.live_kept.is_empty() {
+        say(&format!(
+            "Kept as live (the source doesn't own them): {}",
+            report.live_kept.join("; ")
         ));
     }
     let changes = !plan.is_empty() || rebased || lock_changes;
@@ -2191,27 +2201,76 @@ mod tests {
     }
 
     #[test]
-    fn merge_refuses_logic_changed_live() {
+    fn merge_refuses_a_live_change_to_what_the_source_owns() {
         let dir = project();
         let xml = String::from_utf8(base(dir.path())).unwrap();
+        // The source claims the title of the extern `lampe`.
+        let lock_path = dir.path().join("pool.lock.json");
+        let mut lock = Lockfile::load(&lock_path).unwrap();
+        let uuid = lock.externals["lampe"].uuid.clone();
+        lock.attr_claims.insert(uuid.clone(), Default::default());
+        lock.save(&lock_path).unwrap();
         let doc = LoxoneDoc::parse(xml.as_bytes()).unwrap();
+        let title = doc
+            .objects()
+            .into_iter()
+            .find(|o| o.uuid == uuid)
+            .and_then(|o| o.title)
+            .unwrap();
+        let live = xml.replacen(
+            &format!("U=\"{uuid}\" Title=\"{title}\""),
+            &format!("U=\"{uuid}\" Title=\"{title} neu\""),
+            1,
+        );
+        assert_ne!(live, xml);
+        let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
+        let e = format!(
+            "{:#}",
+            merge(&ms, &merge_options(dir.path(), false), true).unwrap_err()
+        );
+        assert!(e.contains("changed what the source owns"), "{e}");
+        assert!(recorded(dir.path()).is_none(), "nothing written");
+    }
+
+    #[test]
+    fn merge_keeps_a_live_change_the_source_does_not_own() {
+        let dir = project();
+        let xml = String::from_utf8(base(dir.path())).unwrap();
+        let lock = Lockfile::load(&dir.path().join("pool.lock.json")).unwrap();
+        let doc = LoxoneDoc::parse(xml.as_bytes()).unwrap();
+        let known = |u: &str| {
+            lock.objects.values().any(|l| l.uuid == u)
+                || lock.externals.values().any(|e| e.uuid == u)
+        };
         let obj = doc
             .objects()
             .into_iter()
-            .find(|o| o.block_type != "Page" && o.title.as_deref().is_some_and(|t| t.len() > 2))
-            .unwrap();
+            .find(|o| {
+                !known(&o.uuid)
+                    && !matches!(o.block_type.as_str(), "Page" | "Place" | "Category")
+                    && o.title.as_deref().is_some_and(|t| t.len() > 2)
+            })
+            .expect("a titled object the source doesn't know");
         let title = obj.title.unwrap();
         let live = xml.replacen(
             &format!("Title=\"{title}\""),
             &format!("Title=\"{title} neu\""),
             1,
         );
+        assert_ne!(live, xml);
         let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
-        let e = format!(
-            "{:#}",
-            merge(&ms, &merge_options(dir.path(), false), true).unwrap_err()
+
+        let report = merge(&ms, &merge_options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "merged");
+        assert!(report.rebased);
+        assert_eq!(report.live_kept.len(), 1, "{:?}", report.live_kept);
+        assert!(report.live_kept[0].contains(&format!("{title} neu")));
+        let out = fs::read_to_string(dir.path().join("out.Loxone")).unwrap();
+        assert!(
+            out.contains(&format!("Title=\"{title} neu\"")),
+            "the rename is kept"
         );
-        assert!(e.contains("more than rules"), "{e}");
     }
 
     fn with_custom_change(dir: &Path) -> (FakeMiniserver, String) {
