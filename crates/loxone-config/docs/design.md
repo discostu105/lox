@@ -250,3 +250,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D131 | [Source names for ports, default outputs and port aliases](decisions/0131-port-names-default-outputs-aliases.md) | accepted (language v3, part one) |
 | D132 | [A stale lifecycle statement is a lint, `every:`, `°`, and `step` next to `tick`](decisions/0132-lifecycle-lint-every-degrees-step.md) | accepted (language v3, part two) |
 | D133 | [Externs take bindings, expressions wrap and compute, `page` is a file header](decisions/0133-extern-bindings-expressions-page-header.md) | accepted (language v3, part two) |
+| D134 | [Templates are block types](decisions/0134-templates-as-block-types.md) | accepted (language v3, part three) |

@@ -118,12 +118,12 @@ g = Not(In: sw.Q, Gg: 3)
 fn errors_in_template_instances_are_all_reported_in_source_spelling() {
     let src = "\
 extern sw = Switch(title: \"Licht\")
-template licht(taster: Switch) -> lc
+template Licht(taster: Switch) -> (Q: lc.Q)
   lc = Or(In1: taster.Q)
   aus = Not(In: taster.Q)
 end
-k = licht(taster: sw)
-w = licht(taster: sw)
+k = Licht(taster: sw)
+w = Licht(taster: sw)
 x = Or(In1: k.aus.Qx, In2: w.Qy)
 y = nix(taster: sw)
 ";
@@ -136,9 +136,14 @@ y = nix(taster: sw)
         .unwrap_err();
     // The expansion fails first: its errors gate the later checks.
     let m = messages(e);
-    assert_eq!(m.len(), 1, "{m:#?}");
-    assert!(m[0].contains("unknown template `nix`"), "{m:#?}");
+    assert_eq!(m.len(), 2, "{m:#?}");
+    assert!(
+        m.iter().any(|x| x.contains("unknown template `nix`")),
+        "{m:#?}"
+    );
+    assert!(m.iter().any(|x| x.contains("has no output `Qy`")), "{m:#?}");
 
+    // An unknown output is an expansion error too.
     let src = src.replace("y = nix(taster: sw)\n", "");
     let m = Module::parse_fragment(&src).unwrap();
     let e = m
@@ -148,9 +153,21 @@ y = nix(taster: sw)
         })
         .unwrap_err();
     let m = messages(e);
-    assert_eq!(m.len(), 2, "{m:#?}");
+    assert_eq!(m.len(), 1, "{m:#?}");
+    assert!(m[0].contains("has no output `Qy`"), "{m:#?}");
+
+    // The port check names the block as the source spells it.
+    let src = src.replace("In2: w.Qy", "In2: w.Q");
+    let m = Module::parse_fragment(&src).unwrap();
+    let e = m
+        .with_expanded(|x| {
+            x.validate()?;
+            loxone_config::logic::validate_ports(&x)
+        })
+        .unwrap_err();
+    let m = messages(e);
+    assert_eq!(m.len(), 1, "{m:#?}");
     assert!(m[0].contains("on block `k.aus`"), "{m:#?}");
-    assert!(m[1].contains("on block `w`"), "{m:#?}");
 }
 
 fn loxl(dir: &Path, args: &[&str]) -> Output {

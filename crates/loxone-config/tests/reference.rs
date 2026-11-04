@@ -56,14 +56,41 @@ fn types_describe_each_documented_port() {
 }
 
 #[test]
+fn types_describe_a_library_template() {
+    let (ok, out) = loxl(&["types", "Treppenlicht"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.starts_with("Treppenlicht (template, from the library (licht.loxl))\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("    taster             object    an extern, block or instance of any type\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("    dauer              duration  a duration like `3min`, default 3min\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  Outputs:\n    Q                  ausgang.Q\n"),
+        "{out}"
+    );
+    let (ok, out) = loxl(&["types", "--json", "Treppenlicht"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("\"template\": \"Treppenlicht\""), "{out}");
+    let (ok, _) = loxl(&["types", "Nirgends"]);
+    assert!(!ok);
+}
+
+#[test]
 fn templates_list_and_print_the_library() {
     let (ok, out) = loxl(&["templates"]);
     assert!(ok);
     assert!(
-        out.contains("licht.loxl") && out.contains("  bewegungslicht(bewegung: any"),
+        out.contains("licht.loxl") && out.contains("  Bewegungslicht(bewegung: any"),
         "{out}"
     );
-    let (ok, out) = loxl(&["templates", "markise_schutz"]);
+    let (ok, out) = loxl(&["templates", "MarkiseSchutz"]);
     assert!(ok);
     assert!(out.starts_with("# Beschattung"), "{out}");
     let (ok, _) = loxl(&["templates", "nichts"]);

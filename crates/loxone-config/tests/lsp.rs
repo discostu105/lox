@@ -631,7 +631,7 @@ fn an_expanded_instance_name_offers_the_scoped_one_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
     let v1 = format!(
-        "{src}\ntemplate paar()\n\tein = Not()\nend\npx = paar()\nqx = Not(In: px_ein.Q)\n"
+        "{src}\ntemplate Paar()\n\tein = Not()\nend\npx = Paar()\nqx = Not(In: px_ein.Q)\n"
     );
     let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
     let diags = diagnostics(&out, &pool).clone();
@@ -654,7 +654,7 @@ fn an_expanded_instance_name_offers_the_scoped_one_as_a_quick_fix() {
     assert_eq!(actions.len(), 1, "{actions:?}");
     assert_eq!(
         actions[0]["edit"]["changes"][uri(&pool)][0]["newText"],
-        "px.Q"
+        "px.ein.Q"
     );
 }
 
@@ -663,7 +663,7 @@ fn completion_after_an_instance_offers_its_blocks_and_primary_ports() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
     let typing = format!(
-        "{src}\ntemplate paar() -> ein\n\tein = Not()\n\taus = Or()\nend\npx = paar()\npx.\n"
+        "{src}\ntemplate Paar() -> (Q: ein.Q)\n\tein = Not()\n\taus = Or()\nend\npx = Paar()\npx.\n"
     );
     let (cl, _) = pos(&typing, "px.\n");
     let out = session(&[
@@ -677,11 +677,10 @@ fn completion_after_an_instance_offers_its_blocks_and_primary_ports() {
         .iter()
         .map(|c| c["label"].as_str().unwrap())
         .collect();
-    // `aus` is a block of the instance; `Q` and `I` ports of its primary
-    // block `ein` (a Not).
+    // `Q` is the instance's output; `ein` and `aus` are its blocks.
     assert!(labels.contains(&"aus"), "{labels:?}");
     assert!(labels.contains(&"Q"), "{labels:?}");
-    assert!(!labels.contains(&"ein"), "{labels:?}");
+    assert!(labels.contains(&"ein"), "{labels:?}");
 }
 
 /// The labels of a completion response.
@@ -699,7 +698,7 @@ fn scoped_instance_names_hover_and_go_to_the_template_body() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
     let text = format!(
-        "{src}\ntemplate paar() -> ein\n\tein = Not()\n\taus = Or()\nend\npx = paar()\n\
+        "{src}\ntemplate Paar() -> (Q: ein.Q)\n\tein = Not()\n\taus = Or()\nend\npx = Paar()\n\
          lampe.On <- px.aus.Q\npumpe.Off <- px.Q\n"
     );
     let (bl, bc) = pos(&text, "px.aus.Q");

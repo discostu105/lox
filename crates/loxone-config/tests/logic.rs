@@ -618,13 +618,9 @@ fn sprachtour_compiles_end_to_end() {
     assert_eq!(def_of("blitz", "TimeHigh").as_deref(), Some("0.25"));
     assert_eq!(def_of("weit_offen", "Input2").as_deref(), Some("80"));
 
-    // Template machinery (D23): value-parameter override, port
-    // forwarding, and title interpolation from a string `let`.
+    // Template machinery (D23): value-parameter override, an input
+    // bound to a port, and title interpolation from a string `let`.
     assert_eq!(def_of("uebertemp_alarm", "On").as_deref(), Some("32"));
-    assert_eq!(
-        def_of("uebertemp_alarm", "PulseTime").as_deref(),
-        Some("10")
-    );
     assert_eq!(
         element("hitze_alarm").attr("Title"),
         Some("Außenbereich: über Grenze")
@@ -1424,7 +1420,7 @@ extern wind_alarm = VirtualIn(iname: \"VI2\")\n\
 extern sonne = VirtualIn(iname: \"VI3\")\n\
 extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
 \n\
-template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)\n\
+template Fassade(jalousie: AutoJalousie, schwelle: number = 28, pos: number = 70)\n\
 \thoch = GreaterEqual(In1: aussentemp.Q, In2: schwelle)\n\
 \n\
 \tbeschatten = And(In1: hoch.Q, In2: sonne.Q)\n\
@@ -1435,7 +1431,7 @@ template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)\n\
 \tjalousie.TargetPos = pos\n\
 end\n\
 \n\
-sued = fassade(jalousie: jal_sued)\n";
+sued = Fassade(jalousie: jal_sued)\n";
 
 #[test]
 fn templates_expand_with_locked_identities() {
@@ -1453,7 +1449,9 @@ fn templates_expand_with_locked_identities() {
     );
     assert_eq!(Module::parse(&text).unwrap().to_text(), text, "fixpoint");
     assert!(
-        text.contains("template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)"),
+        text.contains(
+            "template Fassade(jalousie: AutoJalousie, schwelle: number = 28, pos: number = 70)"
+        ),
         "{text}"
     );
     assert!(text.contains("\tjalousie.TargetPos = pos\nend"), "{text}");
@@ -1487,8 +1485,8 @@ fn templates_expand_with_locked_identities() {
     let again = compile(&out, &module, &mut lock, &opts()).unwrap();
     assert_eq!(out.to_bytes(), again.to_bytes());
     let tuned = Module::parse(&FASSADE_MODULE.replace(
-        "sued = fassade(jalousie: jal_sued)",
-        "sued = fassade(jalousie: jal_sued, schwelle: 30, pos: 55)",
+        "sued = Fassade(jalousie: jal_sued)",
+        "sued = Fassade(jalousie: jal_sued, schwelle: 30, pos: 55)",
     ))
     .unwrap();
     let next_obj = out.counters().next_obj;
@@ -1525,12 +1523,12 @@ fn two_instances_get_disjoint_identities() {
 extern vi_a = VirtualIn(iname: \"VI1\")\n\
 extern vi_b = VirtualIn(iname: \"VI2\")\n\
 \n\
-template melder(quelle: VirtualIn, schwelle = 1)\n\
+template Melder(quelle: VirtualIn, schwelle: number = 1) -> (Q: alarm.Q)\n\
 \talarm = GreaterEqual(In1: quelle.Q, In2: schwelle)\n\
 end\n\
 \n\
-a = melder(quelle: vi_a)\n\
-b = melder(quelle: vi_b, schwelle: 5)\n";
+a = Melder(quelle: vi_a)\n\
+b = Melder(quelle: vi_b, schwelle: 5)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
@@ -1551,12 +1549,12 @@ extern vi_b = VirtualIn(iname: \"VI2\")\n\
 \n\
 let name_b = \"Melder Garage\"\n\
 \n\
-template melder(quelle: VirtualIn, titel = \"Melder\", schwelle = 1)\n\
+template Melder(quelle: VirtualIn, titel: string = \"Melder\", schwelle: number = 1) -> (Q: alarm.Q)\n\
 \talarm = GreaterEqual(\"{titel} (scharf)\", In1: quelle.Q, In2: schwelle)\n\
 end\n\
 \n\
-a = melder(quelle: vi_a, titel: \"Melder Keller\")\n\
-b = melder(quelle: vi_b, titel: name_b)\n";
+a = Melder(quelle: vi_a, titel: \"Melder Keller\")\n\
+b = Melder(quelle: vi_b, titel: name_b)\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
@@ -1602,11 +1600,11 @@ fn instance_calls_forward_port_bindings_to_the_single_body_block() {
 extern vi_a = VirtualIn(iname: \"VI1\")\n\
 extern vi_b = VirtualIn(iname: \"VI2\")\n\
 \n\
-template melder(schwelle = 1)\n\
-\talarm = GreaterEqual(In2: schwelle)\n\
+template Melder(quelle: input, schwelle: number = 1) -> (Q: alarm.Q)\n\
+\talarm = GreaterEqual(In1: quelle, In2: schwelle)\n\
 end\n\
 \n\
-a = melder(schwelle: 3, In1: vi_a.Q, In1: vi_b.Q)\n";
+a = Melder(schwelle: 3, quelle: [vi_a.Q, vi_b.Q])\n";
     let module = Module::parse(src).unwrap();
     let mut lock = Lockfile::new();
     let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
@@ -1637,17 +1635,10 @@ a = melder(schwelle: 3, In1: vi_a.Q, In1: vi_b.Q)\n";
         Some("3")
     );
 
-    // A body with several blocks forwards to its primary block (D82); without
-    // one the unknown binding reports the constraint.
-    let multi = src.replace(
-        "\talarm = GreaterEqual(In2: schwelle)\n",
-        "\talarm = GreaterEqual(In2: schwelle)\n\tinvers = Not(In: alarm.Q)\n",
-    );
-    let err = Module::parse(&multi).unwrap_err();
-    assert!(err.to_string().contains("primary block"), "{err}");
-    let primary = multi.replace(
-        "template melder(schwelle = 1)",
-        "template melder(schwelle = 1) -> alarm",
+    // A body with several blocks binds the input the same way.
+    let primary = src.replace(
+        "\talarm = GreaterEqual(In1: quelle, In2: schwelle)\n",
+        "\talarm = GreaterEqual(In1: quelle, In2: schwelle)\n\tinvers = Not(In: alarm.Q)\n",
     );
     let module = Module::parse(&primary).unwrap();
     assert_eq!(
@@ -1658,7 +1649,7 @@ a = melder(schwelle: 3, In1: vi_a.Q, In1: vi_b.Q)\n";
     assert!(
         module
             .to_text()
-            .contains("template melder(schwelle = 1) -> alarm\n")
+            .contains("template Melder(quelle: input, schwelle: number = 1) -> (Q: alarm.Q)\n")
     );
     let mut lock2 = Lockfile::new();
     let out2 = compile(&base(), &module, &mut lock2, &opts()).unwrap();
@@ -1686,11 +1677,11 @@ fn instance_blocks_are_named_by_their_instance() {
     // lock keys stay the expanded slugs.
     let head = "\
 extern vi = VirtualIn(iname: \"VI1\")\n\
-template paar(x: VirtualIn) -> ein\n\
+template Paar(x: VirtualIn) -> (Q: ein.Q)\n\
 \tein = Not(In: x.Q)\n\
 \taus = Not(In: ein.Q)\n\
 end\n\
-a = paar(x: vi)\n";
+a = Paar(x: vi)\n";
     let ok = format!("{head}e = Or(In1: a.Q and a.aus.Q)\nb = And(In1: a.Q, In2: a.aus.Q)\n");
     let module = Module::parse(&ok).unwrap();
     assert_eq!(Module::parse(&module.to_text()).unwrap(), module);
@@ -1701,7 +1692,7 @@ a = paar(x: vi)\n";
     let b = flat.blocks().find(|b| b.slug == "b").unwrap();
     let wires: Vec<String> = b.input_wires().map(|(_, r)| r.to_string()).collect();
     assert_eq!(wires, ["a_ein.Q", "a_aus.Q"]);
-    assert_eq!(module.spelling("a_ein"), "a");
+    assert_eq!(module.spelling("a_ein"), "a.ein");
     assert_eq!(module.spelling("a_aus"), "a.aus");
     assert_eq!(module.spelling("vi"), "vi");
 
@@ -1721,12 +1712,7 @@ a = paar(x: vi)\n";
     );
     fails(
         format!("{head}b = Not(In: a_ein.Q)\n"),
-        "Write `a.Q` instead of `a_ein.Q`",
-    );
-    // One spelling: the primary block is the instance.
-    fails(
-        format!("{head}b = Not(In: a.ein.Q)\n"),
-        "Write `a.Q` instead of `a.ein.Q`",
+        "Write `a.ein.Q` instead of `a_ein.Q`",
     );
     fails(
         format!("{head}b = Not(In: a.nix.Q)\n"),
@@ -1736,13 +1722,15 @@ a = paar(x: vi)\n";
         format!("{head}b = Not(In: vi.nix.Q)\n"),
         "`vi` is not a template instance",
     );
+    // An output the template does not declare.
+    fails(format!("{head}b = Not(In: a.Nix)\n"), "has no output `Nix`");
     fails(
-        format!("{}b = Not(In: a.Q)\n", head.replace(" -> ein", "")),
-        "has no primary block",
+        format!("{}b = Not(In: a.Q)\n", head.replace(" -> (Q: ein.Q)", "")),
+        "declares no outputs",
     );
     fails(
-        head.replace(" -> ein", " -> zwei"),
-        "`-> zwei` names no block of the body",
+        head.replace(" -> (Q: ein.Q)", " -> (Q: zwei.Q)"),
+        "output `Q` names `zwei`, which is no block of the body",
     );
     fails(
         format!("{head}extern a = Switch(title: \"A\")\n"),
@@ -1750,8 +1738,8 @@ a = paar(x: vi)\n";
     );
     // Object arguments, tests, removed/moved take the scoped name too.
     let more = format!(
-        "{head}template weiter(y: Not)\n\tz = Not(In: y.Q)\nend\n\
-         c = weiter(y: a.aus)\nd = weiter(y: a)\n\
+        "{head}template Weiter(y: Not)\n\tz = Not(In: y.Q)\nend\n\
+         c = Weiter(y: a.aus)\nd = Weiter(y: a.ein)\n\
          moved alt -> a.aus\nremoved a.weg\n\
          test \"t\"\n\tvi.Q = 1\n\tstep 1\n\texpect a.Q == 0\n\texpect a.aus.Q == 1\nend\n"
     );
@@ -1772,7 +1760,7 @@ a = paar(x: vi)\n";
             .any(|i| matches!(i, Item::Removed(x) if x.slug == "a_weg"))
     );
     assert!(
-        m.to_text().contains("c = weiter(y: a.aus)\n"),
+        m.to_text().contains("c = Weiter(y: a.aus)\n"),
         "{}",
         m.to_text()
     );
@@ -1794,68 +1782,75 @@ fn template_misuse_is_reported() {
         };
         assert!(err.contains(needle), "`{needle}` not in: {err}");
     };
-    let tmpl = "template t(x: VirtualIn, n = 1)\n\ty = Not(In: x.Q)\nend\n";
+    let tmpl = "template T(x: VirtualIn, n: number = 1) -> (Q: y.Q)\n\ty = Not(In: x.Q)\nend\n";
     let vi = "extern vi = VirtualIn(iname: \"VI1\")\n";
 
     fails("a = nirgends(x: 1)\n", "unknown template `nirgends`");
-    fails(&format!("{tmpl}a = t()\n"), "`x` must be given");
-    // An unknown name on a single-block template forwards as a port
-    // binding (D23) and surfaces as an unknown port downstream.
+    fails(&format!("{tmpl}a = T()\n"), "`x` must be given");
+    // A call binds parameters only; a port of the body goes through an
+    // input parameter.
     fails(
-        &format!("{vi}{tmpl}a = t(x: vi, oops: 2)\n"),
-        "unknown port `oops`",
+        &format!("{vi}{tmpl}a = T(x: vi, oops: 2)\n"),
+        "names no parameter of `T`",
     );
     fails(
-        &format!("{vi}{tmpl}a = t(x: vi, x: vi)\n"),
+        &format!("{vi}{tmpl}a = T(x: vi, In: vi)\n"),
+        "declare `<name>: input`",
+    );
+    fails(
+        &format!("{vi}{tmpl}a = T(x: vi, x: vi)\n"),
         "duplicate argument",
     );
     fails(
-        &format!("{vi}{tmpl}a = t(x: 5)\n"),
+        &format!("{vi}{tmpl}a = T(x: 5)\n"),
         "takes an extern, block or instance",
     );
-    fails(&format!("{vi}{tmpl}a = t(x: vi, n: vi.Q)\n"), "not a port");
+    fails(&format!("{vi}{tmpl}a = T(x: vi, n: vi.Q)\n"), "not a port");
     fails(
-        &format!("{vi}{tmpl}a = t(\"Label\", x: vi)\n"),
+        &format!("{vi}{tmpl}a = T(\"Label\", x: vi)\n"),
         "no label string",
     );
     fails(
-        "template t(x: VirtualIn)\n\tlet n = 1\nend\n",
+        "template T(x: VirtualIn) -> (Q: y.Q)\n\textern e = VirtualIn(iname: \"VI9\")\nend\n",
         "not allowed inside a template body",
     );
+    // A body block of an unknown type surfaces once the template is
+    // instantiated.
     fails(
-        "template a(x: VirtualIn)\n\ty = Not(In: x.Q)\nend\n\
-           template b(x: VirtualIn)\n\tz = a(x: x)\nend\n",
-        "cannot instantiate another template",
+        &format!(
+            "{vi}template B(x: VirtualIn) -> (Q: z.Q)\n\tz = Nix(In: x.Q)\nend\nb = B(x: vi)\n"
+        ),
+        "Nix",
     );
     fails("use fassade(jal)\n", "old syntax");
     fails(
-        "template t(x: VirtualIn)\n\ty = Not(In: x.Q)\n",
+        "template T(x: VirtualIn) -> (Q: y.Q)\n\ty = Not(In: x.Q)\n",
         "Close it with `end`",
     );
     fails("end\n", "`end` without an open `template`");
-    // An instance of a template without a primary block names no object;
-    // the message points at the scoped names.
+    // An instance of a template without outputs has no `a.Q`; the
+    // message says how to declare one.
     fails(
         &format!(
-            "{vi}template t2(x: VirtualIn)\n\ty = Not(In: x.Q)\n\tz = Not(In: y.Q)\nend\n\
-             a = t2(x: vi)\nb = Not(In: a.Q)\n"
+            "{vi}template T2(x: VirtualIn)\n\ty = Not(In: x.Q)\n\tz = Not(In: y.Q)\nend\n\
+             a = T2(x: vi)\nb = Not(In: a.Q)\n"
         ),
-        "Name the block (`a.<block>.Q`)",
+        "declares no outputs",
     );
     // An object parameter takes no default; only a set parameter does.
-    fails("template t(x: VirtualIn = vi)\nend\n", "takes no default");
+    fails("template T(x: VirtualIn = vi)\nend\n", "takes no default");
     // A wrong object-arg type is caught where the declaration is known.
     fails(
-        &format!("extern j = AutoJalousie(title: \"X\")\n{tmpl}a = t(x: j)\n"),
+        &format!("extern j = AutoJalousie(title: \"X\")\n{tmpl}a = T(x: j)\n"),
         "expects a VirtualIn",
     );
     // `any` takes every type; the port is checked after expansion.
-    let any = "template u(x: any)\n\ty = Not(In: x.Q)\nend\n";
+    let any = "template U(x: any)\n\ty = Not(In: x.Q)\nend\n";
     Module::parse(&format!(
-        "extern j = AutoJalousie(title: \"X\")\n{any}a = u(x: j)\n"
+        "extern j = AutoJalousie(title: \"X\")\n{any}a = U(x: j)\n"
     ))
     .unwrap();
-    fails("template u(x: anything)\nend\n", "invalid block type");
+    fails("template U(x: anything)\nend\n", "invalid block type");
 }
 
 #[test]
@@ -3198,10 +3193,10 @@ fn expressions_expand_inside_template_bodies() {
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
          extern sonne = VirtualIn(iname: \"VI3\")\n\
          extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
-         template fassade(jalousie: AutoJalousie, schwelle = 28)\n\
+         template Fassade(jalousie: AutoJalousie, schwelle: number = 28)\n\
          \tjalousie.AutoShade <- sonne.Q and aussentemp.Q >= schwelle\n\
          end\n\
-         sued = fassade(jalousie: jal_sued, schwelle: 30)\n",
+         sued = Fassade(jalousie: jal_sued, schwelle: 30)\n",
     )
     .unwrap();
 
@@ -3429,11 +3424,11 @@ fn expression_bindings_expand_inside_template_bodies() {
         "extern aussentemp = VirtualIn(iname: \"VI1\")\n\
          extern sonne = VirtualIn(iname: \"VI3\")\n\
          extern jal_sued = AutoJalousie(title: \"Beschattung S\u{fc}d\")\n\
-         template fassade(jalousie: AutoJalousie, schwelle = 28)\n\
+         template Fassade(jalousie: AutoJalousie, schwelle: number = 28) -> (Q: gate.Q)\n\
          \tgate = Not(In: sonne.Q and aussentemp.Q >= schwelle)\n\
          \tjalousie.AutoShade <- gate.Q\n\
          end\n\
-         sued = fassade(jalousie: jal_sued, schwelle: 30)\n",
+         sued = Fassade(jalousie: jal_sued, schwelle: 30)\n",
     )
     .unwrap();
 
@@ -3510,10 +3505,10 @@ fn expression_binding_misuse_is_reported() {
     // A template's value parameter refuses an expression argument.
     let err = Module::parse(
         "extern a = VirtualIn(iname: \"VI1\")\n\
-         template t(x: VirtualIn, n = 1)\n\
+         template T(x: VirtualIn, n: number = 1) -> (Q: y.Q)\n\
          \ty = Not(In: x.Q)\n\
          end\n\
-         z = t(x: a, n: a.Q and a.Qm)\n",
+         z = T(x: a, n: a.Q and a.Qm)\n",
     )
     .unwrap_err();
     assert!(
@@ -4518,17 +4513,17 @@ fn a_template_gives_every_room_its_moods() {
     // a set parameter with a default (D82).
     let src = "moods abend\n\t\"Viel Licht\": all on\n\t\"Lesen\": AQ1 on\nend\n\
                moods kueche\n\t\"Viel Licht\": all on\n\t\"Kochen\": AQ1 50%\nend\n\
-               template raum(stimmungen: moods = abend)\n\
+               template Raum(stimmungen: moods = abend) -> (Q: lc.Q)\n\
                \tlc = LightController2(\"Licht\")\n\
                \tlc.moods = stimmungen\n\
                end\n\
-               wohnen = raum()\n\
-               kochen = raum(stimmungen: kueche)\n";
+               wohnen = Raum()\n\
+               kochen = Raum(stimmungen: kueche)\n";
     let module = Module::parse(src).unwrap();
     assert!(
         module
             .to_text()
-            .contains("template raum(stimmungen: moods = abend)\n")
+            .contains("template Raum(stimmungen: moods = abend) -> (Q: lc.Q)\n")
     );
     // v1's string-named set names its replacement.
     let fails = |src: String, needle: &str| {
@@ -4905,12 +4900,12 @@ fn a_template_takes_a_schedule_set_parameter() {
     let src = "page \"Beschattung\"\n\
                schedule abend\n\tmon 17:00-22:00\nend\n\
                schedule morgen\n\tmon 06:00-07:30\nend\n\
-               template uhr(plan: schedule = abend)\n\
+               template Uhr(plan: schedule = abend) -> (AQ: dt.AQ)\n\
                \tdt = DayTimer(\"Uhr\")\n\
                \tdt.schedule = plan\n\
                end\n\
-               a = uhr()\n\
-               b = uhr(plan: morgen)\n";
+               a = Uhr()\n\
+               b = Uhr(plan: morgen)\n";
     let module = Module::parse(src).unwrap();
     assert_eq!(Module::parse(&module.to_text()).unwrap(), module);
     let flat = module.expand().unwrap();
@@ -4941,16 +4936,16 @@ fn a_template_takes_a_schedule_set_parameter() {
 fn renaming_an_instance_renames_its_scoped_references() {
     use loxone_config::logic::rename_slug;
     let src = "extern vi = VirtualIn(iname: \"VI1\")\n\
-               template paar(x: VirtualIn) -> ein\n\
+               template Paar(x: VirtualIn) -> (Q: ein.Q)\n\
                \tein = Not(In: x.Q)\n\
                \taus = Not(In: ein.Q)\n\
                end\n\
-               a = paar(x: vi)\n\
+               a = Paar(x: vi)\n\
                b = And(In1: a.Q, In2: a.aus.Q)\n";
     let mut m = Module::parse(src).unwrap();
     rename_slug(&mut m, "a", "c");
     let text = m.to_text();
-    assert!(text.contains("c = paar("), "{text}");
+    assert!(text.contains("c = Paar("), "{text}");
     assert!(text.contains("In1: c.Q"), "{text}");
     assert!(text.contains("In2: c.aus.Q"), "{text}");
     Module::parse(&text).unwrap();
@@ -5021,4 +5016,131 @@ fn a_percentage_on_a_circuit_without_an_actuator_is_flagged() {
         .unwrap()
         .set_attr("NameAI0", "Dimmer");
     assert!(lint_circuits(&module, &lock, &assigned).unwrap().is_empty());
+}
+
+#[test]
+fn templates_are_block_types_with_outputs_inputs_labels_and_nesting() {
+    // D134: a template is named like a type and called like a block. Its
+    // header declares the outputs, an input parameter feeds a body port,
+    // the label binds `label`, a body may nest an instance and hold a
+    // `let`, and a body name shadows a module name.
+    let src = "\
+extern sonne = VirtualIn(iname: \"VI1\")
+extern wind = VirtualIn(iname: \"VI2\")
+extern jal = AutoJalousie(title: \"J\")
+
+template Waechter(quelle: input, grenze: number = 30, label: string = \"Wächter\") -> (Q: alarm.Q)
+\tlet hyst = 2
+\talarm = AnalogThresholdTrigger(\"{label}\", In: quelle, On: grenze, Off: hyst)
+end
+
+template Fassade(jalousie: AutoJalousie, sonne: input, wind: input, nachlauf: duration = 3min)
+\t-> (Q: halt.Q, Hitze: hitze.Q)
+\thitze = Waechter(\"Hitze\", quelle: sonne, grenze: 28)
+\thalt = OffDelay(Trigger: hitze and not wind, Time: nachlauf)
+\tjalousie.AutoShade <- hitze.Q
+end
+
+sued = Fassade(jalousie: jal, sonne: sonne, wind: wind.Q)
+melder = Waechter(quelle: [sonne.AQ, wind])
+
+x = And(In1: sued, In2: sued.Hitze)
+jal.Safety <- sued.halt.Q and melder
+";
+    let m = Module::parse(src).unwrap();
+    assert_eq!(Module::parse(&m.to_text()).unwrap(), m, "fmt round-trips");
+    let flat = m.expand().unwrap();
+    let block = |slug: &str| flat.blocks().find(|b| b.slug == slug).unwrap().clone();
+    // The nested instance: its blocks prefixed twice, the label and the
+    // local constant substituted, the input bound to the port.
+    let alarm = block("sued_hitze_alarm");
+    assert_eq!(alarm.title.as_deref(), Some("Hitze"));
+    assert_eq!(
+        alarm
+            .params()
+            .find(|(k, _)| *k == "Off")
+            .unwrap()
+            .1
+            .to_string(),
+        "2"
+    );
+    assert_eq!(
+        alarm
+            .params()
+            .find(|(k, _)| *k == "On")
+            .unwrap()
+            .1
+            .to_string(),
+        "28"
+    );
+    assert_eq!(
+        alarm
+            .input_wires()
+            .map(|(k, r)| format!("{k}: {r}"))
+            .collect::<Vec<_>>(),
+        ["In: sonne.Q"]
+    );
+    // A list on an input: one wire per source.
+    let melder = block("melder_alarm");
+    assert_eq!(
+        melder
+            .input_wires()
+            .map(|(_, r)| r.to_string())
+            .collect::<Vec<_>>(),
+        ["sonne.AQ", "wind.Q"]
+    );
+    assert_eq!(melder.title.as_deref(), Some("Wächter"));
+    // Outputs: a bare instance is its first output, `sued.Hitze` the
+    // nested instance's; `sued.halt.Q` names the block.
+    let x = block("x");
+    assert_eq!(
+        x.input_wires()
+            .map(|(_, r)| r.to_string())
+            .collect::<Vec<_>>(),
+        ["sued_halt.Q", "sued_hitze_alarm.Q"]
+    );
+    assert_eq!(m.spelling("sued_hitze_alarm"), "sued.hitze.alarm");
+    assert_eq!(
+        m.spell_port(&loxone_config::logic::PortRef {
+            slug: "sued_halt".into(),
+            port: "Q".into()
+        })
+        .to_string(),
+        "sued.Q"
+    );
+
+    let fails = |src: String, needle: &str| {
+        let err = match Module::parse(&src) {
+            Err(e) => e.to_string(),
+            Ok(m) => m.expand().unwrap_err().to_string(),
+        };
+        assert!(err.contains(needle), "`{needle}` not in: {err}");
+    };
+    // A value of the wrong kind, a label without the parameter, a call-
+    // site port binding, a template named like a block type.
+    fails(
+        src.replace("wind: wind.Q)", "wind: wind.Q, nachlauf: 5)"),
+        "takes a duration",
+    );
+    fails(
+        src.replace("sued = Fassade(", "sued = Fassade(\"Süd\", "),
+        "takes no label string",
+    );
+    fails(
+        src.replace("wind: wind.Q)", "wind: wind.Q, Trigger: wind)"),
+        "declare `<name>: input`",
+    );
+    fails(
+        src.replace("template Waechter(", "template Monoflop(")
+            .replace("Waechter(", "Monoflop("),
+        "is a block type",
+    );
+    // A v2 template: lowercase name, untyped value, `-> block`.
+    let e = Module::parse("template melder(x: VirtualIn, n = 1) -> y\n\ty = Not(In: x.Q)\nend\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("named like a type, in PascalCase (`Melder`)"),
+        "{e}"
+    );
 }

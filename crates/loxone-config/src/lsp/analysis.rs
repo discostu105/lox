@@ -248,13 +248,27 @@ impl Workspace {
 
     /// Every declaration of the unit, files in order.
     pub fn decls(&self, unit: &Unit) -> Vec<Decl> {
-        unit.files
+        let mut decls: Vec<Decl> = unit
+            .files
             .iter()
             .flat_map(|f| {
                 let text = self.text(f).unwrap_or_default();
                 scan(&text, f)
             })
-            .collect()
+            .collect();
+        // A call of a template declared anywhere in the unit is an
+        // instance; the scan alone cannot tell it from a block.
+        let templates: std::collections::BTreeSet<String> = decls
+            .iter()
+            .filter(|d| d.kind == "template")
+            .map(|d| d.slug.clone())
+            .collect();
+        for d in &mut decls {
+            if d.kind == "block" && d.ty.as_deref().is_some_and(|t| templates.contains(t)) {
+                d.kind = "instance";
+            }
+        }
+        decls
     }
 
     /// The diagnostics of every file of `unit` (an empty list clears a
@@ -845,15 +859,16 @@ impl Workspace {
         })
     }
 
-    /// The block whose ports `decl.Port` names: an instance's primary
-    /// block (`licht.Q` is `licht.<primary>.Q`), else `decl` itself.
+    /// The block whose ports `decl.Port` names: for an instance, the
+    /// block its first output reads (`licht.Q` is an output of the
+    /// template), else `decl` itself.
     fn port_owner(&self, decls: &[Decl], decl: &Decl, path: &Path) -> Option<Decl> {
         if decl.kind != "instance" {
             return Some(decl.clone());
         }
         let t = self.template(decls, decl.ty.as_deref()?)?;
-        let primary = t.primary_block()?;
-        self.resolve(decls, &format!("{}.{primary}", decl.slug), path)
+        let first = t.outputs.first()?;
+        self.resolve(decls, &format!("{}.{}", decl.slug, first.port.slug), path)
     }
 
     /// Hover text (Markdown) for the name at (`line`, `byte`).
@@ -1138,9 +1153,19 @@ impl Workspace {
                             TemplateParam::Object { name, block_type } => {
                                 (name, block_type.clone())
                             }
-                            TemplateParam::Value { name, default } => {
-                                (name, format!("= {default}"))
-                            }
+                            TemplateParam::Value {
+                                name,
+                                kind,
+                                default,
+                                ..
+                            } => (
+                                name,
+                                match default {
+                                    Some(d) => format!("{} = {d}", kind.keyword()),
+                                    None => kind.keyword().to_string(),
+                                },
+                            ),
+                            TemplateParam::Input { name } => (name, "input".to_string()),
                             TemplateParam::Set { name, kind, .. } => {
                                 (name, kind.keyword().to_string())
                             }
@@ -1200,35 +1225,32 @@ impl Workspace {
         out
     }
 
-    /// After `instance.`: the template's blocks (`licht.taster`) and the
-    /// ports of its primary block (`licht.Q`).
-    fn instance_completions(&self, unit: &Unit, decls: &[Decl], inst: &Decl) -> Vec<Completion> {
+    /// After `instance.`: the template's outputs (`licht.Q`) and its
+    /// blocks (`licht.taster`).
+    fn instance_completions(&self, _unit: &Unit, decls: &[Decl], inst: &Decl) -> Vec<Completion> {
         let Some(t) = inst.ty.as_deref().and_then(|ty| self.template(decls, ty)) else {
             return Vec::new();
         };
-        let primary = t.primary_block();
         let mut out = Vec::new();
+        for o in &t.outputs {
+            out.push(Completion {
+                label: o.name.clone(),
+                kind: "port",
+                detail: Some(o.port.to_string()),
+            });
+        }
         for item in &t.body {
             let (slug, ty) = match item {
                 crate::logic::Item::Block(b) => (&b.slug, Some(b.block_type.as_str())),
+                crate::logic::Item::Instance(b) => (&b.slug, Some(b.block_type.as_str())),
                 crate::logic::Item::Signal(s) => (&s.slug, s.expr.top_block_type()),
                 _ => continue,
             };
-            if Some(slug.as_str()) == primary {
-                let block = Decl {
-                    slug: slug.clone(),
-                    kind: "block",
-                    ty: ty.map(str::to_string),
-                    span: inst.span.clone(),
-                };
-                out.extend(self.port_completions(unit, &block));
-            } else {
-                out.push(Completion {
-                    label: slug.clone(),
-                    kind: "block",
-                    detail: ty.map(str::to_string),
-                });
-            }
+            out.push(Completion {
+                label: slug.clone(),
+                kind: "block",
+                detail: ty.map(str::to_string),
+            });
         }
         out
     }
@@ -1576,7 +1598,7 @@ fn template_bodies(text: &str) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
         };
         let start = n;
         let mut locals: Vec<String> = Vec::new();
-        // `template name(p: Type, q = 3)`: the word before a `:` or `=`.
+        // `template Name(p: Type, q: number = 3)`: the word before a `:` or `=`.
         if let Some((_, params)) = rest.split_once('(') {
             let params = params.split(')').next().unwrap_or("");
             for p in params.split(',') {
@@ -1841,6 +1863,17 @@ pub fn scan(text: &str, file: &Path) -> Vec<Decl> {
             out.push(decl(0, "signal", x.expr.top_block_type()));
         }
     }
+    // A call of a template this file declares is an instance.
+    let templates: std::collections::BTreeSet<String> = out
+        .iter()
+        .filter(|d| d.kind == "template")
+        .map(|d| d.slug.clone())
+        .collect();
+    for d in &mut out {
+        if d.kind == "block" && d.ty.as_deref().is_some_and(|t| templates.contains(t)) {
+            d.kind = "instance";
+        }
+    }
     out
 }
 
@@ -1858,18 +1891,18 @@ heizen = Less(
 	Input2: solltemp,
 )
 pumpe.On <- heizen.Q
-template licht(t: Switch)
+template Licht(t: Switch) -> (Q: g.Q)
 	g = Or(I1: t.Q)
 end
-a = licht(t: pumpe)
+a = Licht(t: pumpe)
 x = heizen.Q == 1
 "#;
 
     #[test]
     fn references_skip_ports_keys_and_template_locals() {
         let src = "let t = 3\nextern pumpe = Switch(title: \"P\")\n\
-                   template licht(t: Switch, n = 2)\n\tg = Or(I1: t.Q)\nend\n\
-                   a = licht(t: pumpe)\nb = Less(Input1: pumpe.t, Input2: t)\n";
+                   template Licht(t: Switch, n: number = 2)\n\tg = Or(I1: t.Q)\nend\n\
+                   a = Licht(t: pumpe)\nb = Less(Input1: pumpe.t, Input2: t)\n";
         let path = Path::new("/nowhere/a.loxl");
         let mut ws = Workspace::default();
         ws.open(path.to_path_buf(), src.to_string());
@@ -1912,7 +1945,7 @@ x = heizen.Q == 1
 
         // A template body's block takes them in every instance.
         let src = "defaults Monoflop(Time: 2s, Reset: 1)\n\
-                   template t()\n\
+                   template T() -> (Q: m.Q)\n\
                    \tm = Monoflop(Reset: 0)\n\
                    end\n";
         ws.open(path.to_path_buf(), src.to_string());
@@ -1959,9 +1992,9 @@ x = heizen.Q == 1
                 ("solltemp", "let", None, 1),
                 ("wasser", "extern", Some("VirtualIn"), 2),
                 ("heizen", "block", Some("Less"), 4),
-                ("licht", "template", None, 10),
+                ("Licht", "template", None, 10),
                 ("g", "block", Some("Or"), 11),
-                ("a", "instance", Some("licht"), 13),
+                ("a", "instance", Some("Licht"), 13),
                 ("x", "signal", Some("Equal"), 14),
             ]
         );

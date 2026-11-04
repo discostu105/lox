@@ -1189,11 +1189,16 @@ pub struct MovedDecl {
 /// externs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateDecl {
+    /// PascalCase, like a block type: an instance is declared like a
+    /// block. A v2 lowercase name parses and is refused by validation.
     pub name: String,
     pub params: Vec<TemplateParam>,
-    /// `-> <block>`: the body block `instance.Port` and call-site port
-    /// bindings mean. A body with exactly one block makes it primary
-    /// without the arrow; see [`TemplateDecl::primary_block`].
+    /// `-> (Q: beschatten.Q, Alarm: alarm.Q)`: the instance's outputs,
+    /// each a port of a body block or nested instance. `inst.Q` reads
+    /// the first, a bare `inst` the first one listed.
+    pub outputs: Vec<TemplateOutput>,
+    /// v2's `-> <block>`, kept only so `fmt --write` can rewrite it
+    /// into [`TemplateDecl::outputs`]; validation refuses it.
     pub primary: Option<String>,
     /// Block declarations, wires, port assignments, and comments.
     pub body: Vec<Item>,
@@ -1203,6 +1208,74 @@ pub struct TemplateDecl {
     pub end_comment: Option<String>,
 }
 
+/// One declared output of a template: `Name: block.Port`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateOutput {
+    /// PascalCase, like a port.
+    pub name: String,
+    /// The body port it stands for: a body block's, or `inner.Port` of
+    /// a nested instance.
+    pub port: PortRef,
+}
+
+/// The type of a template's value parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    /// A plain number, or one with a `%`, `K` or `°` suffix.
+    Number,
+    /// A number with a time unit (`3min`).
+    Duration,
+    /// A quoted string.
+    Str,
+    /// `on` or `off`.
+    Bool,
+}
+
+impl ValueKind {
+    pub const ALL: [ValueKind; 4] = [
+        ValueKind::Number,
+        ValueKind::Duration,
+        ValueKind::Str,
+        ValueKind::Bool,
+    ];
+
+    pub fn keyword(self) -> &'static str {
+        match self {
+            ValueKind::Number => "number",
+            ValueKind::Duration => "duration",
+            ValueKind::Str => "string",
+            ValueKind::Bool => "bool",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ValueKind> {
+        ValueKind::ALL.into_iter().find(|k| k.keyword() == s)
+    }
+
+    /// The kind a literal has, if it has one (a `let` reference has
+    /// none until it is resolved).
+    pub fn of(v: &Value) -> Option<ValueKind> {
+        Some(match v {
+            Value::Number(_) => ValueKind::Number,
+            Value::Unit { unit, .. } if unit.is_time() => ValueKind::Duration,
+            Value::Unit { .. } => ValueKind::Number,
+            Value::Str(_) => ValueKind::Str,
+            Value::Bool(_) => ValueKind::Bool,
+            _ => return None,
+        })
+    }
+
+    /// What a value of this kind looks like, for an error.
+    pub fn example(self) -> &'static str {
+        match self {
+            ValueKind::Number => "a number like `28`",
+            ValueKind::Duration => "a duration like `3min`",
+            ValueKind::Str => "a quoted string",
+            ValueKind::Bool => "`on` or `off`",
+        }
+    }
+}
+
 /// One parameter of a template header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemplateParam {
@@ -1210,9 +1283,19 @@ pub enum TemplateParam {
     /// annotation is checked against the slug's declared type when that
     /// is known.
     Object { name: String, block_type: String },
-    /// `name = <literal>` — a value parameter with a default; the
-    /// instance may override it with a literal or a `let` reference.
-    Value { name: String, default: Value },
+    /// `name: number = 28` — a typed value parameter; without a default
+    /// the instance must give it. `typed` is false for v2's `name = 28`,
+    /// which validation refuses and `fmt --write` rewrites.
+    Value {
+        name: String,
+        kind: ValueKind,
+        default: Option<Value>,
+        typed: bool,
+    },
+    /// `name: input` — a source the instance may feed in (`name: sensor`,
+    /// `name: sensor.Q`, a list or an expression); the body binds it to
+    /// a port (`Trigger: name`). An input not given leaves the port open.
+    Input { name: String },
     /// `name: moods [= <set>]` — a named set of one kind, passed by
     /// its bare name. The only object parameter that takes a default.
     Set {
@@ -1278,7 +1361,8 @@ impl TemplateParam {
         match self {
             TemplateParam::Object { name, .. }
             | TemplateParam::Value { name, .. }
-            | TemplateParam::Set { name, .. } => name,
+            | TemplateParam::Set { name, .. }
+            | TemplateParam::Input { name } => name,
         }
     }
 }
@@ -1287,7 +1371,21 @@ impl fmt::Display for TemplateParam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TemplateParam::Object { name, block_type } => write!(f, "{name}: {block_type}"),
-            TemplateParam::Value { name, default } => write!(f, "{name} = {default}"),
+            // The canonical form is typed: a v2 `name = 28` prints as
+            // `name: number = 28`, which is how `fmt --write` migrates it.
+            TemplateParam::Value {
+                name,
+                kind,
+                default: Some(d),
+                ..
+            } => write!(f, "{name}: {} = {d}", kind.keyword()),
+            TemplateParam::Value {
+                name,
+                kind,
+                default: None,
+                ..
+            } => write!(f, "{name}: {}", kind.keyword()),
+            TemplateParam::Input { name } => write!(f, "{name}: input"),
             TemplateParam::Set {
                 name,
                 kind,
@@ -1312,17 +1410,33 @@ impl TemplateDecl {
         })
     }
 
-    /// The primary block: the one `-> <block>` names, or the body's only
-    /// block.
-    pub fn primary_block(&self) -> Option<&str> {
-        if let Some(p) = &self.primary {
-            return Some(p);
-        }
-        let mut it = self.body_slugs();
-        match (it.next(), it.next()) {
-            (Some(only), None) => Some(only),
+    /// The body's nested instances, in order.
+    pub fn body_instances(&self) -> impl Iterator<Item = &BlockDecl> {
+        self.body.iter().filter_map(|i| match i {
+            Item::Instance(b) => Some(b),
             _ => None,
-        }
+        })
+    }
+
+    /// The declared output `name`.
+    pub fn output(&self, name: &str) -> Option<&TemplateOutput> {
+        self.outputs.iter().find(|o| o.name == name)
+    }
+
+    /// The parameter `name`.
+    pub fn param(&self, name: &str) -> Option<&TemplateParam> {
+        self.params.iter().find(|p| p.name() == name)
+    }
+
+    /// Whether the name is written like a type (PascalCase): v3's form.
+    pub fn is_type_named(&self) -> bool {
+        self.name.starts_with(|c: char| c.is_ascii_uppercase())
+    }
+}
+
+impl fmt::Display for TemplateOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.name, self.port)
     }
 }
 
@@ -2464,6 +2578,57 @@ impl Module {
         Ok(module)
     }
 
+    /// Turn every call of a template this module declares into an
+    /// instance: `x = Fassade(…)` is a block declaration until the
+    /// callee is known to be a template, in this file or a sibling.
+    /// Template bodies are classified too (a nested instance).
+    pub fn classify_instances(&mut self) {
+        let templates = self.template_names();
+        self.classify_instances_of(&templates);
+    }
+
+    /// The names of the templates this module declares.
+    pub fn template_names(&self) -> std::collections::BTreeSet<String> {
+        self.items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Template(t) => Some(t.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// [`Module::classify_instances`] with the templates of the whole
+    /// module, for a fragment parsed on its own.
+    pub fn classify_instances_of(&mut self, templates: &std::collections::BTreeSet<String>) {
+        if templates.is_empty() {
+            return;
+        }
+        fn classify(items: &mut [Item], templates: &std::collections::BTreeSet<String>) {
+            for item in items {
+                match item {
+                    Item::Block(b) if templates.contains(&b.block_type) => {
+                        let call = std::mem::replace(
+                            b,
+                            BlockDecl {
+                                slug: String::new(),
+                                block_type: String::new(),
+                                title: None,
+                                args: Vec::new(),
+                                comment: None,
+                                close_comment: None,
+                            },
+                        );
+                        *item = Item::Instance(call);
+                    }
+                    Item::Template(t) => classify(&mut t.body, templates),
+                    _ => {}
+                }
+            }
+        }
+        classify(&mut self.items, templates);
+    }
+
     /// Parse one file of a multi-file module. Syntax and statement-local
     /// checks run; name resolution does not — a fragment may reference
     /// slugs declared in a sibling file. Concatenate the fragments'
@@ -2482,7 +2647,9 @@ impl Module {
             items.extend(f.items);
             items.push(Item::FragmentEnd);
         }
-        Module { items }
+        let mut module = Module { items };
+        module.classify_instances();
+        module
     }
 
     /// Read every `file("…")` value relative to `dir` — the directory
@@ -3406,12 +3573,22 @@ fn write_template(t: &TemplateDecl, depth: usize, out: &mut String) {
         .map(|p| p.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let primary = t
-        .primary
-        .as_ref()
-        .map_or(String::new(), |p| format!(" -> {p}"));
+    let outputs = if t.outputs.is_empty() {
+        t.primary
+            .as_ref()
+            .map_or(String::new(), |p| format!(" -> {p}"))
+    } else {
+        format!(
+            " -> ({})",
+            t.outputs
+                .iter()
+                .map(|o| o.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
     out.push_str(&format!(
-        "template {}({params}){primary}{}\n",
+        "template {}({params}){outputs}{}\n",
         t.name,
         tail(&t.comment)
     ));

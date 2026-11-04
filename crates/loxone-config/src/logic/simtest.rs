@@ -35,10 +35,10 @@ impl TestPlan {
     pub fn respell(&mut self, source: &Module) {
         let spelled = &mut self.spelled;
         let mut spell = |port: &mut PortRef| {
-            let s = source.spelling(&port.slug);
-            if s != port.slug {
-                spelled.insert(port.slug.clone(), s.clone());
-                port.slug = s;
+            let s = source.spell_port(port);
+            if s.slug != port.slug {
+                spelled.insert(port.slug.clone(), s.slug.clone());
+                port.slug = s.slug;
             }
         };
         for run in &mut self.runs {

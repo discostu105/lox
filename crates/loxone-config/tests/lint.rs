@@ -257,12 +257,12 @@ fn lint_fix_covers_extern_sets_templates_and_device_settings() {
     let dir = make_project("lint-fix-wide");
     std::fs::write(
         dir.join("src/_vorlagen.loxl"),
-        "template verz(zeit = 300, titel = \"Verz\")\n\
-         \tm = Monoflop(\"{titel}\", Time: zeit)\n\
+        "template Verz(trigger: input, zeit: number = 300, titel: string = \"Verz\") -> (Q: m.Q)\n\
+         \tm = Monoflop(\"{titel}\", Trigger: trigger, Time: zeit)\n\
          end\n\n\
          # `zeit` also feeds a port without a unit, where a suffix reads differently.\n\
-         template beschriftet(zeit = 300) -> m\n\
-         \tm = Monoflop(Time: zeit)\n\
+         template Beschriftet(trigger: input, zeit: number = 300) -> (Q: m.Q)\n\
+         \tm = Monoflop(Trigger: trigger, Time: zeit)\n\
          \tn = Equal(In1: m.Q, In2: zeit)\n\
          end\n",
     )
@@ -271,8 +271,8 @@ fn lint_fix_covers_extern_sets_templates_and_device_settings() {
         dir.join("src/sued.loxl"),
         format!(
             "page \"Beschattung\"\n\n{SUED}\n\
-             a = verz(zeit: 120, Trigger: sonne.Q)\n\
-             b = beschriftet(zeit: 120, Trigger: a.Q)\n\
+             a = Verz(zeit: 120, trigger: sonne.Q)\n\
+             b = Beschriftet(zeit: 120, trigger: a.Q)\n\
              jal_sued.Toggle <- b.Q\n\
              zaehler = VirtualHttpIn(\"Zähler\", Address: \"http://192.0.2.10/\", Poll: 60, \
              Timeout: 4000)\n"
@@ -297,16 +297,16 @@ fn lint_fix_covers_extern_sets_templates_and_device_settings() {
     );
     let vorlagen = std::fs::read_to_string(dir.join("src/_vorlagen.loxl")).unwrap();
     assert!(
-        vorlagen.contains("template verz(zeit = 5min,"),
+        vorlagen.contains("template Verz(trigger: input, zeit: duration = 5min,"),
         "{vorlagen}"
     );
     assert!(
-        vorlagen.contains("template beschriftet(zeit = 300) -> m"),
+        vorlagen.contains("template Beschriftet(trigger: input, zeit: number = 300) -> (Q: m.Q)"),
         "{vorlagen}"
     );
     let sued = std::fs::read_to_string(dir.join("src/sued.loxl")).unwrap();
-    assert!(sued.contains("verz(zeit: 2min,"), "{sued}");
-    assert!(sued.contains("beschriftet(zeit: 120,"), "{sued}");
+    assert!(sued.contains("Verz(zeit: 2min,"), "{sued}");
+    assert!(sued.contains("Beschriftet(zeit: 120,"), "{sued}");
     // Documented in seconds and in milliseconds.
     assert!(sued.contains("Poll: 1min"), "{sued}");
     assert!(sued.contains("Timeout: 4s"), "{sued}");

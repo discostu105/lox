@@ -150,10 +150,18 @@ pub fn fix_unit_suffixes_in(module: &mut Module, whole: &Module) -> Vec<LintFind
 /// file the in-place edit cannot reproduce (a quoted number, say) comes
 /// back in canonical form, as `loxl fmt` writes it.
 pub fn fix_unit_suffixes_text(src: &str, whole: &Module) -> Result<(Vec<LintFinding>, String)> {
+    // A call of a template declared in another file is an instance.
+    let templates = whole.template_names();
     let mut module = Module::parse_fragment(src)?;
+    module.classify_instances_of(&templates);
     let fixes = unit_fixes(&mut module, whole);
     let text = patch_values(src, &fixes)
-        .filter(|t| Module::parse_fragment(t).is_ok_and(|m| m == module))
+        .filter(|t| {
+            Module::parse_fragment(t).is_ok_and(|mut m| {
+                m.classify_instances_of(&templates);
+                m == module
+            })
+        })
         .unwrap_or_else(|| module.to_text());
     Ok((fixes.into_iter().map(|f| f.finding).collect(), text))
 }
@@ -332,9 +340,12 @@ impl TemplateUnits {
             }
         }
         TemplateUnits {
+            // The block the first output reads, for a forwarded value's
+            // unit (none: outputs are read-only, inputs carry no unit).
             primary_type: t
-                .primary_block()
-                .and_then(|p| body_types.get(p))
+                .outputs
+                .first()
+                .and_then(|o| body_types.get(o.port.slug.as_str()))
                 .map(|ty| ty.to_string()),
             params,
         }
@@ -494,12 +505,21 @@ fn fix_items(
             Item::Template(t) => {
                 if let Some(units) = templates.get(&t.name) {
                     for p in &mut t.params {
-                        if let super::ast::TemplateParam::Value { name, default } = p
+                        if let super::ast::TemplateParam::Value {
+                            name,
+                            kind,
+                            default: Some(default),
+                            ..
+                        } = p
                             && let Value::Number(n) = &*default
                             && let Some(uses) = units.params.get(name.as_str())
                             && let Some(new) = suffix_for(uses, n)
                         {
                             out.push(unit_finding(&t.name, name, Some(name), "=", n, &new));
+                            // A suffixed default makes the parameter a duration.
+                            if matches!(new, Value::Unit { unit, .. } if unit.is_time()) {
+                                *kind = super::ast::ValueKind::Duration;
+                            }
                             *default = new;
                         }
                     }
@@ -1685,13 +1705,13 @@ jal.OpenTime = 120
 (jal, jal2).AutoShadeTime = 120
 (jal, vi).TimeEnd = 90
 
-template t(j: AutoJalousie, lauf = 60) -> m
-\tm = Monoflop(Time: 300)
+template T(j: AutoJalousie, lauf: number = 60, zeit: number = 300) -> (Q: m.Q)
+\tm = Monoflop(Time: zeit)
 \tj.CloseTime = 75
 \tj.OpenTime = lauf
 end
 
-x = t(j: jal2, lauf: 30, Time: 600)
+x = T(j: jal2, lauf: 30, zeit: 600)
 ";
         let mut m = Module::parse(src).unwrap();
         let found = fix_unit_suffixes(&mut m);
@@ -1701,12 +1721,12 @@ x = t(j: jal2, lauf: 30, Time: 600)
         assert!(text.contains("(jal, jal2).AutoShadeTime = 2h\n"), "{text}");
         // One member has no documented unit: the line keeps its number.
         assert!(text.contains("(jal, vi).TimeEnd = 90\n"), "{text}");
-        assert!(text.contains("Time: 5min"), "{text}");
+        assert!(text.contains("zeit: duration = 5min)"), "{text}");
         assert!(text.contains("j.CloseTime = 75s"), "{text}");
-        assert!(text.contains("lauf = 1min)"), "{text}");
+        assert!(text.contains("lauf: duration = 1min,"), "{text}");
         assert!(text.contains("lauf: 30s"), "{text}");
-        // Forwarded onto the primary block.
-        assert!(text.contains("Time: 10min"), "{text}");
+        // The argument for a duration parameter.
+        assert!(text.contains("zeit: 10min"), "{text}");
         assert_eq!(found.len(), 8, "{found:?}");
         assert!(found.iter().any(|f| f.detail
             == "`jal.OpenTime = 120` reads better with its unit. Write `jal.OpenTime = 2min` \
@@ -1725,7 +1745,7 @@ extern sink = VirtualIn(iname: \"VI3\")
 let schwelle = 28
 let verwaist = 5
 
-template nie_benutzt(x: VirtualIn)
+template NieBenutzt(x: VirtualIn) -> (Q: g.Q)
 \tg = And(
 \t\tIn1: x.Q,
 \t)
@@ -1746,7 +1766,7 @@ sink.I <- gate.Q
             .collect();
         assert!(got.contains(&("unused-extern", "lonely")), "{got:?}");
         assert!(got.contains(&("unused-let", "verwaist")), "{got:?}");
-        assert!(got.contains(&("unused-template", "nie_benutzt")), "{got:?}");
+        assert!(got.contains(&("unused-template", "NieBenutzt")), "{got:?}");
         assert!(!got.iter().any(|(_, s)| *s == "used"), "{got:?}");
         assert!(!got.iter().any(|(_, s)| *s == "schwelle"), "{got:?}");
         assert!(!got.iter().any(|(_, s)| *s == "sink"), "{got:?}");

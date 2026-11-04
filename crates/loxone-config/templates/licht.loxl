@@ -3,18 +3,18 @@
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
 # gelesen (virtuelle Eingänge, digitale Eingänge); das Ergebnis jeder
-# Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
+# Vorlage ist ihr Ausgang `Q`:
 #
-#   flur = bewegungslicht_dunkel(bewegung: bewegung_flur, helligkeit: lux)
+#   flur = BewegungslichtDunkel(bewegung: bewegung_flur, helligkeit: lux)
 #   licht_flur.I <- flur.Q
 
-template bewegungslicht(bewegung: any, nachlauf = 3min, titel = "Bewegungslicht")
+template Bewegungslicht(bewegung: any, nachlauf: duration = 3min, titel: string = "Bewegungslicht") -> (Q: ausgang.Q)
 	# Licht an bei Bewegung, aus `nachlauf` nach der letzten Bewegung.
 
 	ausgang = OffDelay("{titel}", Trigger: bewegung.Q, Time: nachlauf)
 end
 
-template bewegungslicht_dunkel(bewegung: any, helligkeit: any, lux = 50, nachlauf = 3min, titel = "Bewegungslicht") -> ausgang
+template BewegungslichtDunkel(bewegung: any, helligkeit: any, lux: number = 50, nachlauf: duration = 3min, titel: string = "Bewegungslicht") -> (Q: ausgang.Q)
 	# Wie bewegungslicht, aber nur wenn die Helligkeit unter `lux` liegt.
 
 	dunkel = Less(In1: helligkeit.Q, In2: lux)
@@ -22,13 +22,13 @@ template bewegungslicht_dunkel(bewegung: any, helligkeit: any, lux = 50, nachlau
 	ausgang = OffDelay("{titel}", Trigger: bewegt.Q, Time: nachlauf)
 end
 
-template taster_licht(taster: any, titel = "Tasterlicht")
+template TasterLicht(taster: any, titel: string = "Tasterlicht") -> (Q: ausgang.Q)
 	# Jeder Tastendruck schaltet um (Stromstoß).
 
 	ausgang = PushButton("{titel}", Toggle: taster.Q)
 end
 
-template treppenlicht(taster: any, dauer = 3min, titel = "Treppenlicht")
+template Treppenlicht(taster: any, dauer: duration = 3min, titel: string = "Treppenlicht") -> (Q: ausgang.Q)
 	# Treppenlicht: ein Druck schaltet für `dauer` ein, ein weiterer verlängert.
 
 	ausgang = Monoflop("{titel}", Trigger: taster.Q, Time: dauer)

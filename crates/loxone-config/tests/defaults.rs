@@ -28,11 +28,11 @@ const HEAD: &str = "\
 extern wind_alarm = VirtualIn(iname: \"VI2\")\n\
 extern sonne = VirtualIn(iname: \"VI3\")\n\
 \n\
-template nachlauf(quelle: any)\n\
+template Nachlauf(quelle: any) -> (Q: m.Q)\n\
 \tm = Monoflop(Trigger: quelle.Q)\n\
 end\n\
 \n\
-nl = nachlauf(quelle: sonne)\n";
+nl = Nachlauf(quelle: sonne)\n";
 
 /// Every value written on its block.
 const EXPLICIT: &str = "\
@@ -136,7 +136,7 @@ fn defaults_misuse_is_refused_with_the_fix() {
             "says which object a block is",
         ),
         (
-            "template t()\n\tdefaults Monoflop(Time: 2s)\nend\n",
+            "template T()\n\tdefaults Monoflop(Time: 2s)\nend\n",
             "`defaults` is a top-level statement",
         ),
         (
