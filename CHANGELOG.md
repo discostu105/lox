@@ -10,6 +10,19 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.82.0] — 2026-11-04 — lox logic v3, part three
+
+Templates are block types: named like one, called like a block, with declared outputs, typed value
+parameters and input parameters. This completes Lox Logic v3.
+
+### Changed
+- **Lox Logic v3, part 3: templates are block types.** A template is named like a type and called
+  like a block (`sued = Fassade("Süd", jalousie: jal_sued)`). Its header declares the outputs
+  (`-> (Q: beschatten.Q)`, read as `sued.Q`), its value parameters their type (`pos: number = 70`,
+  `nachlauf: duration`), and an input parameter (`sonne: input`) is how a call feeds a port of the
+  body. The primary block and call-site port bindings are gone; `loxl fmt --write` migrates a v2
+  template. New: the label string, nested instances, body-local `let`, `loxl types <Template>`.
+
 ## [0.81.0] — 2026-11-04 — lox logic v3, part two
 
 Externs take port bindings, fan-in is a list, expressions wrap and compute arithmetic under
