@@ -446,7 +446,8 @@ fn check_config_version(base: &LoxoneDoc, lock: &Lockfile, opts: &CompileOptions
 }
 
 /// Applies `moved` statements to the lock (identity surgery, in source).
-/// Idempotent: once the new slug carries the entry, the statement is done.
+/// Idempotent: once the old slug has left the lock, the statement is done
+/// and ignored (`loxl lint` reports it as `stale-lifecycle`).
 fn apply_moved(module: &Module, desugar_info: &DesugarInfo, lock: &mut Lockfile) -> Result<()> {
     for mv in module.moved() {
         match (
@@ -481,13 +482,7 @@ fn apply_moved(module: &Module, desugar_info: &DesugarInfo, lock: &mut Lockfile)
                     to = mv.to
                 )));
             }
-            (false, true) => {} // already applied — the statement is done
-            (false, false) => {
-                return Err(Error::Compile(format!(
-                    "moved `{} -> {}`: neither slug is in the lockfile, so there is nothing to rename",
-                    mv.from, mv.to
-                )));
-            }
+            (false, _) => {} // applied, or never named anything: the lint says
         }
     }
     Ok(())
@@ -528,21 +523,9 @@ fn check_removals(
             },
         );
     }
-    // A `removed` statement must name a block the lock still knows: a
-    // managed object (the removal happens now) or a tombstone (the removal
-    // is compiled but not yet seen deployed). Once the tombstone clears, a
-    // lingering statement is a hard error. Either the removal is done and
-    // the line can go, or it never named anything (a typo).
-    for r in module.removed() {
-        if !lock.objects.contains_key(&r.slug) && !lock.removed.values().any(|t| t.slug == r.slug) {
-            return Err(Error::Compile(format!(
-                "`removed {slug}`: no managed block or pending removal with \
-                 this slug is in the lockfile. If the removal is done, \
-                 delete the `removed` line.",
-                slug = r.slug
-            )));
-        }
-    }
+    // A `removed` that names neither a managed object nor a pending
+    // tombstone is done (or a typo): the compile does nothing for it and
+    // `loxl lint` reports it as `stale-lifecycle`.
     if !opts.allow_removals
         && let Some(slug) = lock.objects.iter().find_map(|(s, o)| {
             (!src_slugs.contains(s) && !removed_slugs.contains(s.as_str()) && !o.expr_owned)

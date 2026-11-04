@@ -65,10 +65,10 @@ pv_kw = AnalogThresholdTrigger(
 
 test "Frostwächter schlägt an und beruhigt sich"
 	wassertemp.Q = 2
-	tick 2
+	step 2
 	expect frost.Q == 1
 	wassertemp.Q = 10
-	tick 2
+	step 2
 	expect frost.Q == 0
 end
 
@@ -76,9 +76,9 @@ test "WP-Freigabe folgt PV und Abdeckung"
 	wassertemp.Q = 22
 	pv_ueberschuss.Q = 2000
 	abdeckung_offen.Q = 0
-	tick 3
+	step 3
 	expect wp_bedarf == 1
 	abdeckung_offen.Q = 1
-	tick 3
+	step 3
 	expect wp_bedarf == 0
 end

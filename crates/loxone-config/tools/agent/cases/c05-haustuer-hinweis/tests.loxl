@@ -6,14 +6,14 @@ extern t_hinweis = VirtualOutCmd(title: "Hinweis Haustür")
 
 test "Hinweis nach 3 Minuten offener Haustür"
 	t_tuer.Q = 1
-	tick 170
+	step 170
 	expect t_hinweis.In == 0
-	tick 20
+	step 20
 	expect t_hinweis.In == 1
 	t_tuer.Q = 0
-	tick 2
+	step 2
 	expect t_hinweis.In == 0
 	t_tuer.Q = 1
-	tick 60
+	step 60
 	expect t_hinweis.In == 0 # die Zeit läuft neu
 end

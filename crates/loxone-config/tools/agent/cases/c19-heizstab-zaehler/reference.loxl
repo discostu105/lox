@@ -1,7 +1,7 @@
+page "Logik"
+
 extern heizstab = VirtualIn(title: "Heizstab an")
 extern hinweis = VirtualOutCmd(title: "Hinweis Energie Heizstab")
-
-page "Logik"
 
 zaehler = MeterDig("Energie Heizstab", Active: heizstab.Q, Power: 3)
 genug = GreaterEqual(In1: zaehler.Reading, In2: 6)

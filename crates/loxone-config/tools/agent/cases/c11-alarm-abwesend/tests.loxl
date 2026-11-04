@@ -7,21 +7,21 @@ extern t_sirene = VirtualOutCmd(title: "Sirene")
 
 test "Tür offen bei Anwesenheit: kein Alarm"
 	t_tuer.Q = 1
-	tick 2
+	step 2
 	expect t_sirene.In == 0
 end
 
 test "Einbruchalarm hält bis Abwesend aus"
 	t_abwesend.Q = 1
-	tick 2
+	step 2
 	expect t_sirene.In == 0
 	t_tuer.Q = 1
-	tick 2
+	step 2
 	expect t_sirene.In == 1
 	t_tuer.Q = 0
-	tick 30
+	step 30
 	expect t_sirene.In == 1
 	t_abwesend.Q = 0
-	tick 2
+	step 2
 	expect t_sirene.In == 0
 end

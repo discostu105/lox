@@ -27,7 +27,10 @@ fn each_library_file_passes_its_tests() {
             "templates/{file}.loxl is not canonical (loxl fmt --write)"
         );
         let tests = std::fs::read_to_string(format!("{DIR}/tests/{file}.loxl")).unwrap();
-        let module = Module::parse(&format!("{library}\n{tests}")).unwrap();
+        let module = Module::from_fragments([
+            Module::parse_fragment(library).unwrap(),
+            Module::parse_fragment(&tests).unwrap(),
+        ]);
         let mut lock = Lockfile::new();
         let compiled = compile(&base, &module, &mut lock, &opts).unwrap();
         let (flat, _) = module.expand().unwrap().desugar().unwrap();

@@ -252,6 +252,8 @@ pub(super) fn adopt_device(
             category: None,
             device: None,
             comment: o.title.as_ref().map(|t| format!(" \"{t}\"")),
+            args: Vec::new(),
+            close_comment: None,
         }));
         lock.externals.insert(
             candidate.clone(),

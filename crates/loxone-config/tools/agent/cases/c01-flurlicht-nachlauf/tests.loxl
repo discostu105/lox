@@ -6,13 +6,13 @@ extern t_licht = VirtualOutCmd(title: "Licht Flur")
 
 test "Licht an bei Bewegung, aus 2 Minuten danach"
 	t_bewegung.Q = 1
-	tick 2
+	step 2
 	expect t_licht.In == 1
-	tick 300
+	step 300
 	expect t_licht.In == 1 # Dauerbewegung hält das Licht
 	t_bewegung.Q = 0
-	tick 100
+	step 100
 	expect t_licht.In == 1
-	tick 25
+	step 25
 	expect t_licht.In == 0
 end

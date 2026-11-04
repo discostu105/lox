@@ -45,7 +45,7 @@ example module valid.
 
 ```sh
 # 0. Orientation: what does the config contain, what is already managed?
-loxl decompile current.Loxone            # full Lox Logic view, `page` sections
+loxl decompile current.Loxone            # full Lox Logic view; several pages print as several files
 loxl decompile --out-dir view/ current.Loxone   # one module per page
 loxl observe current.Loxone              # port evidence per block type
 loxl types --search delay                 # which type does what (name or purpose)
@@ -133,8 +133,12 @@ passes `loxl check`.
 let schwelle = 28 # a named constant
 
 extern sonne = VirtualIn(iname: "VI3") # an existing object: yours to use, not to own
-extern jal = AutoJalousie(title: "Beschattung Süd")
 extern pumpe = PushButton(title: "Pumpe")
+
+# An extern takes port bindings like a block: a source wires, a value
+# sets the parameter (restored when the line goes).
+
+extern jal = AutoJalousie(title: "Beschattung Süd", AutoShade: beschatten, TargetPos: 70)
 
 party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folder
 
@@ -142,13 +146,9 @@ party = VirtualIn("Partymodus") # a new app switch in the "Virtual Inputs" folde
 # reference wires, a value or constant sets the parameter.
 
 temp_hoch = GreaterEqual("Temp über 28", In1: sonne.Q, In2: schwelle)
-beschatten = And(In1: temp_hoch, In2: sonne)
-
-jal.AutoShade <- beschatten # a wire onto an extern port; a bare name is the default output
-
+beschatten = And(In1: temp_hoch, In2: sonne) # a bare name is the default output
+anforderung = Or(In1: [temp_hoch, party], In2: sonne) # fan-in: several sources on one input
 heiss = sonne >= 30 and not party # a named signal: its top block is `heiss`
-
-jal.TargetPos = 70 # an extern parameter, restored when the line goes
 
 defaults Monoflop(Time: 5min) # for every Monoflop that does not bind `Time`
 
@@ -205,9 +205,11 @@ removed alt_gate # a confirmed delete of a managed block
 moved alt_schatten -> beschatten # a rename that keeps the UUIDs
 ```
 
-The value decides what an argument means: `Port: slug.Port` wires that source in, anything else sets
-the port's parameter. `<-` and port-`=` work only on externs; everything about a managed block is in
-its own argument list.
+The value decides what an argument means: `Port: slug.Port` (or a bare block name) wires that source
+in, an expression desugars into blocks, anything else sets the port's parameter. The same bindings
+work on an extern. `x.Port <- y` and `x.Port = 5` are the statement forms, for a binding written in
+another file than the declaration; on a block the module declares, `loxl lint` reports them
+(`remote-binding`).
 
 A named signal `x = <expr>` names an expression's result. Its top block is `x` (`x.Q`; an arithmetic
 one is a `Formula`, read at `x.AQ`), and its sub-blocks are `x__<op><n>`. Use it instead of spelling an
@@ -333,14 +335,15 @@ it only when it matches what you intended.
 | `the config has no operating mode titled "…"` | a quoted mode title in a schedule line that names no `Mode` object | use one of the titles the message lists, or create the mode (`party = Mode("Party")`) |
 | `no <C Type="VirtualInCaption"> to hold a new VirtualIn` | the base has no "Virtual Inputs" folder | create one virtual input in Loxone Config once, then compile again |
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
-| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"`, a mode by title that the module names by slug (`"Party"` for `party`), a built-in mode by title in a schedule (`"Montag"` for `mon`), a calendar entry's mode number (`CalType: 10` for `switches: heating`) or stored date (`Mode: 4, Month: 10, …` for `from: 10-01, to: 04-30`) | write what the message names (the language server offers it as a quick fix; `loxl fmt` on the module directory rewrites declared modes) |
+| `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"`, a calendar entry's `on: 12-31` (for `every: 12-31`), a mode by title that the module names by slug (`"Party"` for `party`), a built-in mode by title in a schedule (`"Montag"` for `mon`), a calendar entry's mode number (`CalType: 10` for `switches: heating`) or stored date (`Mode: 4, Month: 10, …` for `from: 10-01, to: 04-30`) | write what the message names (the language server offers it as a quick fix; `loxl fmt` on the module directory rewrites declared modes) |
 | `unknown day` | a schedule day that is no day word and no `Mode` of the module | fix the spelling, declare the mode (`extern x = Mode(title: "…")`), or quote its title |
 | `` Write `a.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name; `a.Q` when `b` is the primary block |
 | `has no primary block` | `a.Q` on an instance whose template has several blocks | name the block (`a.<block>.Q`), or mark one with `template t(…) -> <block>` |
 | `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |
 | `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
-| `is not a whole number of … ticks` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `tick <n>` |
-| `a plain tick count or a duration` / `positive whole number` (tick) | a `tick` constant that holds no count or time (`let x = on`, `let x = 1.5`) | give the `let` a whole count or a time, or write the value on the `tick` line |
+| `is not a whole number of … cycles` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `step <n>` |
+| `` Write `step 3` instead of `tick 3` `` (or the reverse) | a bare count after `tick`, or a duration after `step` | `tick` takes a duration (`tick 5s`), `step` a number of program cycles; `loxl fmt --write` rewrites a v2 `tick <n>` |
+| `a tick takes a duration` / `a step takes a number of program cycles` / `positive whole number` | a `tick` or `step` constant that holds no time or no whole count (`let x = on`, `let x = 1.5`) | give the `let` a time (`tick`) or a whole count (`step`), or write the value on the line |
 | `is a reserved word and cannot be used as a name` | a name that is a keyword everywhere (`tick`, `page`, `on`, `and`, …) | pick another name; section kinds (`moods`, `rule`, …) are fine as names |
 | `cannot be a rule target` | `then wait …` (or `mode`, `notify`, `mail`, `message`) where a block of that name was meant | rename the block: `loxl rename wait <new>` |
 | `would both name their blocks` | a named signal `a_i1 = …` and an expression on `a.I1` would generate the same block names | rename the signal (or the block `a`) with `loxl rename` |
@@ -350,7 +353,8 @@ it only when it matches what you intended.
 | `in the lockfile but not in the source` | managed block vanished from source | typo → restore the line; delete → add `removed <slug>`; rename → `moved <old> -> <new>`; unmanage → `remove_object` |
 | `changed type` | slug reused for a different block type | new slug, or `remove_object` first |
 | `is an output port and cannot be used as …` | wire direction wrong | swap source and sink |
-| `targets managed block` | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
+| `remote-binding` (from `lint`) | `<-` or port-`=` used on a block you declared | move the wire/parameter into that block's argument list |
+| `` `page` is the file's header `` / `` a second `page` `` | a `page` line below a statement, or two in one file | move the line to the top; put the blocks of a second page in a file of their own |
 | `targets named signal` | `<-`, port-`=`, `.room` or `.category` on an `x = <expr>` signal | change the expression; its inputs are its operands. Only `.title` is allowed |
 | `an alias is not a block` | `x = a.Q`: a named signal needs an expression | use `a.Q` directly where `x.Q` would go |
 | `changed its top operator` | a named signal's top `and`/`or`/comparison changed, and with it its block type | give the signal a new name and add `removed <old>` |
@@ -370,7 +374,7 @@ it only when it matches what you intended.
 | `unused-allow` (from `lint`) | a `# lint: allow` that covers no finding, names no kind or stands above no declaration | delete it, fix the kind, or move it right above its declaration; the language server offers "Remove this allow" |
 | `unused-default` (from `lint`) | no block takes the default: no block of the type, or every block binds the port | delete the statement or the port |
 | `undeclared constant` | bare identifier in value position | declare `let <name> = …`, or quote the value if a string was intended |
-| `neither slug is in the lockfile` (from `moved`) | rename references unknown identity | check both spellings against the lock; a first compile needs no `moved` |
+| `stale-lifecycle` (from `lint`) | a `removed` or `moved` the lockfile has nothing left for: the removal or rename is done, or the name is a typo. The compile ignores it | delete the line; for a typo, check the spelling against the lockfile |
 | `is an attribute parameter, not a connector` | wire aimed at e.g. `Formula:` | pass a value instead: `Formula: "I1+I2"` |
 | `warning: cannot adopt` (from `adopt`) | rebuilding that block would lose something (e.g. an input inversion `Inv=`); it stays unmanaged | leave it unmanaged, or remove that setting in Loxone Config and adopt again |
 | `base has N duplicate UUIDs` | two objects or connectors in the base share one UUID (another push tool re-keyed refs) | open and save the config once in Loxone Config, which gives the duplicates new UUIDs, then use that save as the base. Never edit UUIDs by hand |

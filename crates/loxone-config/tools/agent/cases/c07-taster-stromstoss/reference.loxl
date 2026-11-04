@@ -1,7 +1,7 @@
+page "Logik"
+
 extern taster = VirtualIn(title: "Taster Flur")
 extern licht = VirtualOutCmd(title: "Licht Flur")
-
-page "Logik"
 
 schalter = PushButton("Licht Flur", Toggle: taster.Q)
 

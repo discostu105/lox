@@ -1,8 +1,8 @@
+page "Logik"
+
 extern tuer = VirtualIn(title: "Haustür offen")
 extern abwesend = VirtualIn(title: "Abwesend")
 extern sirene = VirtualOutCmd(title: "Sirene")
-
-page "Logik"
 
 einbruch = And(In1: tuer.Q, In2: abwesend.Q)
 zuhause = Not(In: abwesend.Q)

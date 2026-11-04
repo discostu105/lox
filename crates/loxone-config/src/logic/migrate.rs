@@ -1,11 +1,17 @@
-//! Rewrite the port keys of a v2 module to the v3 source names
-//! (`InputTrigger` → `Trigger`, `I1` → `In1`): what `loxl fmt --write`
-//! does before it formats, so a v2 module migrates with one command.
+//! Rewrite a v2 module's spellings to v3: what `loxl fmt --write` does
+//! before it formats, so a v2 module migrates with one command.
 //!
-//! A key is renamed where its type is known: a block's own arguments
-//! and `defaults` by the block type, a `slug.Port` reference by the
-//! declared type of `slug` (an extern, a block, a template's object
-//! parameter or body block). Everything else stays as written.
+//! [`migrate_port_names`] renames the port keys to the source names
+//! (`InputTrigger` → `Trigger`, `I1` → `In1`). A key is renamed where
+//! its type is known: a block's own arguments and `defaults` by the block
+//! type, a `slug.Port` reference by the declared type of `slug` (an
+//! extern, a block, a template's object parameter or body block).
+//! Everything else stays as written.
+//!
+//! [`migrate_test_steps`] works on the text, before the parse: a test's
+//! `tick <n>` with a bare count is a parse error in v3, and becomes
+//! `step <n>`. A calendar entry's `on:` becomes `every:` in
+//! [`crate::logic::ModeSpellings::apply`], which `fmt` runs too.
 
 use super::ast::{ArgItem, BindingKind, Expr, Item, Module, Operand, PortRef, TestItem};
 use crate::port_names::renamed;
@@ -129,11 +135,13 @@ fn fix_ref(r: &mut PortRef, block_type: &str) -> usize {
 
 fn fix_expr(e: &mut Expr, types: &BTreeMap<String, String>) -> usize {
     let mut n = 0;
-    let mut fix_operand = |o: &mut Operand| {
-        if let Operand::Port(p) = o {
+    let mut fix_operand = |o: &mut Operand| match o {
+        Operand::Port(p) => {
             let t = types.get(&p.slug).cloned().unwrap_or_default();
             n += fix_ref(p, &t);
         }
+        Operand::Arith(x) => n += fix_expr(x, types),
+        Operand::Value(_) => {}
     };
     match e {
         Expr::Or(a, b) | Expr::And(a, b) | Expr::Arith { lhs: a, rhs: b, .. } => {
@@ -150,9 +158,67 @@ fn fix_expr(e: &mut Expr, types: &BTreeMap<String, String>) -> usize {
     n
 }
 
+/// `tick <n>` with a bare count becomes `step <n>` (`tick 3 dt 0.5` →
+/// `step 3 dt 0.5`), line by line. `tick` is a reserved word that only a
+/// test body takes, so a line that starts with it is that statement.
+/// Comments and the rest of the line stay as written.
+pub fn migrate_test_steps(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for line in src.split_inclusive('\n') {
+        let body = line.trim_start();
+        let indent = &line[..line.len() - body.len()];
+        let migrated = body.strip_prefix("tick").and_then(|rest| {
+            let after = rest.trim_start();
+            if after.len() == rest.len() {
+                return None; // `tickle`, `tick_x`
+            }
+            let digits = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            let is_count = digits.len() < after.len()
+                && digits
+                    .chars()
+                    .next()
+                    .is_none_or(|c| c.is_whitespace() || c == '#');
+            is_count.then(|| format!("{indent}step{rest}"))
+        });
+        match migrated {
+            Some(l) => out.push_str(&l),
+            None => out.push_str(line),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_tick_counts_become_steps() {
+        let src = "test \"t\"\n\
+                   \ttick 3 # three cycles\n\
+                   \ttick 2 dt 0.5\n\
+                   \ttick 5min\n\
+                   \ttick 1s dt 500ms\n\
+                   \ttick warten\n\
+                   \t# tick 7 in a comment stays\n\
+                   end\n";
+        let out = migrate_test_steps(src);
+        assert_eq!(
+            out,
+            "test \"t\"\n\
+             \tstep 3 # three cycles\n\
+             \tstep 2 dt 0.5\n\
+             \ttick 5min\n\
+             \ttick 1s dt 500ms\n\
+             \ttick warten\n\
+             \t# tick 7 in a comment stays\n\
+             end\n"
+        );
+        assert!(Module::parse_fragment(&out).is_ok());
+        assert_eq!(migrate_test_steps(&out), out);
+        assert_eq!(migrate_test_steps("tick 5"), "step 5");
+        assert_eq!(migrate_test_steps("ticks 5\n"), "ticks 5\n");
+    }
 
     #[test]
     fn keys_become_names_where_the_type_is_known() {
@@ -169,7 +235,7 @@ mod tests {
              end\n\
              test \"t\"\n\
              \ta.InputTrigger = 1\n\
-             \ttick 1\n\
+             \tstep 1\n\
              \texpect b.Q == 1\n\
              end\n",
         )

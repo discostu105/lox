@@ -617,9 +617,18 @@ impl Lift {
     }
 
     pub(super) fn single_module(&self) -> Module {
+        let buckets = self.buckets();
         let mut items = Vec::new();
-        for (page, b) in self.buckets() {
-            items.extend(self.bucket_items(page, &b));
+        // A `page` statement is a file's header. With one page the view
+        // is a file: its page line first, the periphery after it.
+        let pages = buckets.iter().filter(|(p, _)| p.is_some()).count();
+        for (page, b) in &buckets {
+            let mut more = self.bucket_items(*page, b);
+            if pages == 1 && page.is_some() && !items.is_empty() {
+                let header = more.remove(0);
+                items.insert(0, header);
+            }
+            items.extend(more);
         }
         Module { items }
     }
@@ -660,6 +669,7 @@ impl Lift {
         self.push_rules(&b.externs, &mut items);
         self.push_moods(page, b, false, &mut items);
         self.push_members(b, &mut items);
+        fold_extern_wires(&mut items);
         items
     }
 
@@ -805,6 +815,8 @@ impl Lift {
                         block_type: self.objects[i].block_type.clone(),
                         match_spec: self.match_specs[&i].clone(),
                         comment: None,
+                        args: Vec::new(),
+                        close_comment: None,
                     }
                 });
                 decl.comment = Some(origin);
@@ -817,6 +829,7 @@ impl Lift {
             self.push_rules(&b.externs, &mut items);
             self.push_moods(page, &b, true, &mut items);
             self.push_members(&b, &mut items);
+            fold_extern_wires(&mut items);
 
             let module = Module { items };
             module.validate()?;
@@ -1678,6 +1691,8 @@ impl Scan<'_> {
                             MatchSpec::Mirrors(_) => None,
                             _ => mirror_note(i),
                         },
+                        args: Vec::new(),
+                        close_comment: None,
                     },
                 )
             })
@@ -2204,6 +2219,58 @@ pub(super) fn message_of<'a>(
     .then_some(target)
 }
 
+/// Move every `<-` statement onto an extern the list declares into that
+/// extern's argument list, in the order the statements came. A wire onto
+/// an extern declared elsewhere (a per-page module's foreign extern is
+/// declared in the file, so it folds too) stays a statement.
+fn fold_extern_wires(items: &mut Vec<Item>) {
+    let externs: BTreeSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Extern(e) => Some(e.slug.clone()),
+            _ => None,
+        })
+        .collect();
+    if externs.is_empty() {
+        return;
+    }
+    let mut folded: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
+    items.retain(|item| {
+        let (to, binding) = match item {
+            Item::Wire(w) if externs.contains(&w.to.slug) => (
+                &w.to,
+                Binding {
+                    port: w.to.port.clone(),
+                    kind: if w.from.port.is_empty() {
+                        BindingKind::Param(Value::Ref(w.from.slug.clone()))
+                    } else {
+                        BindingKind::Wire(w.from.clone())
+                    },
+                    comment: w.comment.clone(),
+                },
+            ),
+            Item::ExprWire(w) if externs.contains(&w.to.slug) => (
+                &w.to,
+                Binding {
+                    port: w.to.port.clone(),
+                    kind: BindingKind::Expr(w.expr.clone()),
+                    comment: w.comment.clone(),
+                },
+            ),
+            _ => return true,
+        };
+        folded.entry(to.slug.clone()).or_default().push(binding);
+        false
+    });
+    for item in items.iter_mut() {
+        if let Item::Extern(e) = item
+            && let Some(more) = folded.remove(&e.slug)
+        {
+            e.args.extend(more.into_iter().map(ArgItem::Binding));
+        }
+    }
+}
+
 /// How source reads output `key` of `slug`, a `block_type`: the bare
 /// name for the type's default output, `slug.<Name>` otherwise.
 pub(crate) fn source_ref(block_type: &str, slug: &str, key: &str) -> PortRef {
@@ -2246,7 +2313,7 @@ fn is_ident(s: &str) -> bool {
 /// parser refuses them as names.
 pub(super) const RESERVED: &[&str] = &[
     "let", "extern", "removed", "moved", "template", "end", "use", "page", "block", "wire", "set",
-    "and", "or", "not", "test", "tick", "expect", "clock", "tile", "on", "off",
+    "and", "or", "not", "test", "tick", "step", "expect", "clock", "tile", "on", "off",
 ];
 
 /// Contextual keywords: a section kind is a keyword only where its section

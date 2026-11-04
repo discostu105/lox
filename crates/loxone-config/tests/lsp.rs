@@ -453,7 +453,7 @@ fn a_did_you_mean_diagnostic_offers_a_quick_fix() {
 fn a_v1_spelling_offers_its_replacement_as_a_quick_fix() {
     let pool = project().join("pages/pool.loxl");
     let src = std::fs::read_to_string(&pool).unwrap();
-    let v1 = format!("{src}\ntest \"uhr\"\n\tclock \"7:30\"\n\ttick 1\nend\n");
+    let v1 = format!("{src}\ntest \"uhr\"\n\tclock \"7:30\"\n\tstep 1\nend\n");
     let out = session(&[open(&pool, &src), change(&pool, &v1), save(&pool)]);
     let diags = diagnostics(&out, &pool).clone();
     let d = diags
@@ -803,7 +803,7 @@ fn completion_offers_a_calendar_entrys_mode_and_date() {
         at(1, "textDocument/completion", &pool, l, c + 2),
     ]);
     let got = labels(&out, 1);
-    for key in ["switches", "on", "easter", "from", "to"] {
+    for key in ["switches", "every", "easter", "from", "to"] {
         assert!(got.contains(&key.to_string()), "{key}: {got:?}");
     }
     for key in ["Mode", "Month", "From", "WeekDayInMonth"] {

@@ -3,7 +3,12 @@ page "Heizung"
 defaults Monoflop(Time: 2s)
 
 extern heizungsmodus = Radio(title: "Heizungsmodus")
-extern anwesenheitsmodus_heizung = Radio(title: "Anwesenheitsmodus Heizung")
+
+extern anwesenheitsmodus_heizung = Radio(
+	title: "Anwesenheitsmodus Heizung",
+	Reset: [o17795_2, o17795_4],
+)
+
 extern bad_temperatur_2 = InputRef(mirrors: bad_temperatur)
 extern bad_zieltemperatur_2 = InputRef(mirrors: bad_zieltemperatur)
 extern urlaub = InputRef(title: "Urlaub") # mirrors Mode "Urlaub"
@@ -31,6 +36,3 @@ o17795_4 = Monoflop("O17795")
 alle_sind_zu_hause = Memory()
 bad_temperatur = Memory()
 bad_zieltemperatur = Memory()
-
-anwesenheitsmodus_heizung.Reset <- o17795_2
-anwesenheitsmodus_heizung.Reset <- o17795_4

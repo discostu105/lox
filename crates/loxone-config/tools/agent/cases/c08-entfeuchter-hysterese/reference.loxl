@@ -1,7 +1,7 @@
+page "Logik"
+
 extern feuchte = VirtualIn(title: "Luftfeuchte Keller")
 extern entfeuchter = VirtualOutCmd(title: "Entfeuchter Keller")
-
-page "Logik"
 
 feucht = AnalogThresholdTrigger(
 	"Keller feucht",

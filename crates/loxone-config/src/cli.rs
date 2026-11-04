@@ -9,9 +9,9 @@ use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,
     decompile_pages, finish_lint, fix_implicit_zeros, fix_unit_suffixes_text, implicit_zeros,
-    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source, lint_tiles,
-    lock_rekeys, lox_specs, plan_tests, read_results, rename_slug, run_tests, slugify, trace_tests,
-    valid_slug, validate_ports,
+    lint_access, lint_circuits, lint_dead_outputs, lint_implicit_zero, lint_source,
+    lint_stale_lifecycle, lint_tiles, lock_rekeys, lox_specs, plan_tests, read_results,
+    rename_slug, run_tests, slugify, trace_tests, valid_slug, validate_ports,
 };
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc, Project};
@@ -899,12 +899,16 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     for f in &targets {
         let name = f.display();
         let src = std::fs::read_to_string(f).map_err(|e| format!("{name}: {e}"))?;
-        let module = Module::parse_fragment(&src).map_err(|e| format!("{name}: {e}"))?;
+        // A v2 test's `tick <n>` is `step <n>`, rewritten before the
+        // parse, which refuses it.
+        let module = Module::parse_fragment(&loxone_config::logic::migrate_test_steps(&src))
+            .map_err(|e| format!("{name}: {e}"))?;
         parsed.push((src, module));
     }
     let spellings = loxone_config::logic::ModeSpellings::of(parsed.iter().map(|(_, m)| m));
     // A v2 module's port keys become the v3 names (`InputTrigger` →
-    // `Trigger`), looked up across every fragment.
+    // `Trigger`), looked up across every fragment. A calendar entry's
+    // `on:` becomes `every:` with the mode spellings.
     let whole: Vec<Module> = parsed.iter().map(|(_, m)| m.clone()).collect();
     let whole: Vec<&Module> = whole.iter().collect();
     let mut dirty = false;
@@ -1670,6 +1674,7 @@ fn cmd_lint(args: &[&str]) -> Result<ExitCode, AnyError> {
             findings.extend(lint_dead_outputs(&module, lock, &compiled)?);
             findings.extend(lint_circuits(&module, lock, &compiled)?);
             findings.extend(lint_implicit_zero(&module, lock, &compiled)?);
+            findings.extend(lint_stale_lifecycle(&module, lock));
             findings.extend(lint_tiles(&module, &compiled));
             findings.extend(lint_access(&compiled));
             true
@@ -1811,7 +1816,24 @@ fn cmd_decompile(args: &[&str]) -> Result<ExitCode, AnyError> {
         report
     } else {
         let (module, report) = decompile(&doc, &opts)?;
-        print!("{}", module.to_text());
+        if report.pages > 1 {
+            // A file holds one page: print the per-page files, each
+            // under the name `--out-dir` would give it.
+            let (pages, _) = decompile_pages(&doc, &opts)?;
+            for (i, p) in pages.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                println!("# ---- {}.loxl", p.slug);
+                print!("{}", p.module.to_text());
+            }
+            eprintln!(
+                "# {} pages, one file each: `--out-dir <dir>` writes them",
+                pages.len()
+            );
+        } else {
+            print!("{}", module.to_text());
+        }
         report
     };
     eprintln!(
@@ -1914,6 +1936,14 @@ fn cmd_adopt(args: &[&str]) -> Result<ExitCode, AnyError> {
     } else {
         let out_module = out_module.as_ref().expect("checked above");
         let (module, lock, report) = adopt(&doc)?;
+        if report.pages > 1 {
+            return Err(format!(
+                "{path} has blocks on {} pages, and a file holds one page. Write one file per \
+                 page with `--out-dir <dir>`",
+                report.pages
+            )
+            .into());
+        }
         std::fs::write(out_module, module.to_text())?;
         (lock, report)
     };

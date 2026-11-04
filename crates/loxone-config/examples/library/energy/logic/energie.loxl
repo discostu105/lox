@@ -5,7 +5,7 @@ extern total_meter_reading_consumption = ModbusASensor(iname: "AMQ-2") # periphe
 extern total_meter_reading_delivery = ModbusASensor(iname: "AMQ-3") # periphery
 extern total_active_power_2 = ModbusASensor(iname: "AMQ-4") # periphery
 extern total_meter_reading_consumption_2 = ModbusASensor(iname: "AMQ-5") # periphery
-extern heizstab = Actor(iname: "Q1") # periphery
+extern heizstab = Actor(iname: "Q1", In: pv_ueberschuss) # periphery
 
 netz = MeterAbsBi(
 	Power: total_active_power,
@@ -27,5 +27,3 @@ pv_ueberschuss = AnalogThresholdTrigger(
 	Off: 0.5,
 	PulseTime: 0,
 )
-
-heizstab.In <- pv_ueberschuss

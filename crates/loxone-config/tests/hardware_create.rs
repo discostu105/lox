@@ -2,7 +2,9 @@
 //! once, unpaired, kept under the UUID the lockfile records, and deleted
 //! only by `removed`.
 
-use loxone_config::logic::{CompileOptions, Module, compile, unpaired_created};
+use loxone_config::logic::{
+    CompileOptions, Module, compile, lint_stale_lifecycle, unpaired_created,
+};
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc};
 
@@ -125,12 +127,16 @@ fn a_created_device_is_deleted_only_by_removed() {
     // An older base still carrying it loses it again.
     let again = compile(&out, &removing, &mut lock, &opts()).unwrap();
     assert!(element(&again, &uuid).is_none());
-    // Once a base without it was seen, the removal is done.
+    // While the removal is pending, the statement is current.
+    assert!(lint_stale_lifecycle(&removing, &lock).is_empty(), "pending");
+    // Once a base without it was seen, the removal is done: the statement
+    // compiles to nothing, and the lint says to delete it.
     compile(&gone, &removing, &mut lock, &opts()).unwrap();
-    let err = compile(&gone, &removing, &mut lock, &opts())
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("delete the `removed` line"), "{err}");
+    let same = compile(&gone, &removing, &mut lock, &opts()).unwrap();
+    assert_eq!(same.to_bytes(), gone.to_bytes());
+    let findings = lint_stale_lifecycle(&removing, &lock);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].slug, "melder");
 }
 
 #[test]

@@ -1,7 +1,7 @@
+page "Logik"
+
 extern regen = VirtualIn(title: "Regensensor")
 extern bewaesserung = VirtualOutCmd(title: "Bewässerung Garten")
-
-page "Logik"
 
 schedule morgens
 	daily 06:00-06:20

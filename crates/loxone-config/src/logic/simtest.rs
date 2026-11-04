@@ -64,8 +64,8 @@ pub struct TestRun {
     pub steps: Vec<PlannedStep>,
 }
 
-/// What one `tick` executes: the assignments and `clock` before it, the
-/// ticks, and the `expect`s that follow.
+/// What one `tick` or `step` executes: the assignments and `clock` before
+/// it, the cycles, and the `expect`s that follow.
 #[derive(Debug)]
 pub struct PlannedStep {
     pub sets: Vec<(Signal, f64)>,
@@ -183,8 +183,8 @@ fn plan_one(
         })
     };
 
-    // One step per `tick`: assignments and `clock` gather until a tick
-    // executes them; the expects that follow assert on its outcome.
+    // One step per `tick` or `step`: assignments and `clock` gather until
+    // one executes them; the expects that follow assert on its outcome.
     #[derive(Default)]
     struct StepBuild {
         sets: Vec<(Signal, f64)>,
@@ -228,7 +228,8 @@ fn plan_one(
                 };
                 if dt <= 0.0 {
                     return compile_err(format!(
-                        "`tick {} dt {dt}`: dt must be positive",
+                        "`{} {} dt {dt}`: dt must be positive",
+                        tick.kind.keyword(),
                         tick.amount
                     ));
                 }
@@ -255,7 +256,7 @@ fn plan_one(
             TestItem::Expect(e) => {
                 if cur.ticks.is_none() {
                     return compile_err(format!(
-                        "`expect {} {} {}` has no preceding `tick`. Add a `tick` before it, since assertions read the state after time advances.",
+                        "`expect {} {} {}` has no preceding `tick` or `step`. Add one before it, since assertions read the state after time advances.",
                         e.port, e.cmp, e.value
                     ));
                 }
@@ -280,7 +281,7 @@ fn plan_one(
         && dangling.ticks.is_none()
     {
         return compile_err(
-            "the final assignments are never executed. Add a `tick` (and an `expect`) after them."
+            "the final assignments are never executed. Add a `tick` or `step` (and an `expect`) after them."
                 .into(),
         );
     }
@@ -578,7 +579,7 @@ pub fn lox_specs(plan: &TestPlan, compiled: &LoxoneDoc) -> Result<LoxSpecs> {
                     .expect("built as object");
                 if per_key.contains_key(e.cmp.symbol()) {
                     return Err(Error::Compile(format!(
-                        "test \"{}\": two `expect {} {} …` in the same step, but lox-cli keeps one per port and step. Split them with a `tick`.",
+                        "test \"{}\": two `expect {} {} …` in the same step, but lox-cli keeps one per port and step. Split them with a `tick` or `step`.",
                         run.name,
                         e.signal.port,
                         e.cmp.symbol()
@@ -888,10 +889,10 @@ mod tests {
              test \"basic\"\n\
              \ta.In1 = 1\n\
              \ta.In2 = 1\n\
-             \ttick 3\n\
+             \tstep 3\n\
              \texpect a.Q == 1\n\
              \ta.In1 = 0\n\
-             \ttick 2 dt 0.5\n\
+             \tstep 2 dt 0.5\n\
              \texpect a.Q == 0\n\
              end\n",
         )
@@ -926,10 +927,10 @@ mod tests {
         let err = plan_tests(&module, &lock, &doc, None)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("no preceding `tick`"), "{err}");
+        assert!(err.contains("no preceding `tick` or `step`"), "{err}");
 
         let module =
-            Module::parse("a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\nend\n").unwrap();
+            Module::parse("a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\tstep 1\nend\n").unwrap();
         let err = plan_tests(&module, &lock, &doc, None)
             .unwrap_err()
             .to_string();
@@ -969,7 +970,7 @@ mod tests {
     #[test]
     fn ambiguous_titles_are_refused() {
         let module = Module::parse(
-            "a = And(\"Dup\")\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
+            "a = And(\"Dup\")\n\ntest \"t\"\n\ta.In1 = 1\n\tstep 1\n\texpect a.Q == 1\nend\n",
         )
         .unwrap();
         let doc = doc_with(
@@ -988,7 +989,7 @@ mod tests {
     #[test]
     fn same_signal_ref_duplicates_are_tolerated() {
         let module = Module::parse(
-            "a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\ttick 1\n\texpect a.Q == 1\nend\n",
+            "a = And()\n\ntest \"t\"\n\ta.In1 = 1\n\tstep 1\n\texpect a.Q == 1\nend\n",
         )
         .unwrap();
         // Two InputRefs of the same title mirroring the SAME object: the
@@ -1006,7 +1007,7 @@ mod tests {
     #[test]
     fn source_plus_own_mirrors_is_tolerated() {
         let module = Module::parse(
-            "a = Memory()\n\ntest \"t\"\n\ta.AQ = 1\n\ttick 1\n\texpect a.AQ == 1\nend\n",
+            "a = Memory()\n\ntest \"t\"\n\ta.AQ = 1\n\tstep 1\n\texpect a.AQ == 1\nend\n",
         )
         .unwrap();
         // A source block sharing its title with InputRefs whose Ref=
@@ -1045,9 +1046,9 @@ mod tests {
              \n\
              test \"basic\"\n\
              \ta.In1 = 1\n\
-             \ttick 3\n\
+             \tstep 3\n\
              \texpect a.Q == 1\n\
-             \ttick 2\n\
+             \tstep 2\n\
              \texpect a.Q == 0\n\
              end\n",
         )
@@ -1082,15 +1083,15 @@ mod tests {
              test \"basic\"\n\
              \ta.In1 = 1\n\
              \ta.In2 = 1\n\
-             \ttick 1\n\
+             \tstep 1\n\
              \texpect a.Q == 1\n\
              \ta.In2 = 0\n\
-             \ttick 1\n\
+             \tstep 1\n\
              \texpect a.Q == 1\n\
              end\n\
              \n\
              test \"bad port\"\n\
-             \ttick 1\n\
+             \tstep 1\n\
              \texpect a.Nope == 1\n\
              end\n",
         )

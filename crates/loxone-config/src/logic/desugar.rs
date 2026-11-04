@@ -306,6 +306,7 @@ impl Expr {
             Expr::And(..) => "And",
             Expr::Or(..) => "Or",
             Expr::Not(_) => "Not",
+            Expr::Cmp { .. } if self.is_formula() => "Formula",
             Expr::Cmp { op, .. } => cmp_block(*op).1,
             Expr::Arith { .. } => "Formula",
             Expr::Atom(_) => return None,
@@ -363,6 +364,9 @@ impl Desugar<'_> {
                 let i = self.node(x)?;
                 self.emit("not", "Not", e, vec![wire("In", i)], "Q")
             }
+            // A comparison of arithmetic: one Formula block, which
+            // evaluates the comparison itself.
+            Expr::Cmp { .. } if e.is_formula() => self.formula(e),
             Expr::Cmp { op, lhs, rhs } => {
                 if !matches!(lhs, Operand::Port(_)) && !matches!(rhs, Operand::Port(_)) {
                     return Err(Error::Compile(format!(
@@ -382,6 +386,7 @@ impl Desugar<'_> {
                 )
             }
             Expr::Arith { .. } => self.formula(e),
+            Expr::Atom(Operand::Arith(x)) => self.formula(x),
             Expr::Atom(Operand::Port(p)) => Ok(p.clone()),
             Expr::Atom(Operand::Value(v)) => Err(Error::Compile(format!(
                 "`{v}` in the expression on `{}` cannot drive a gate input, since gates \
@@ -437,6 +442,17 @@ impl Desugar<'_> {
                 let l = self.render_child(lhs, e, false, inputs)?;
                 let r = self.render_child(rhs, e, true, inputs)?;
                 format!("{l}{}{r}", op.symbol())
+            }
+            // Arithmetic binds tighter than the comparison, so neither
+            // side needs parentheses.
+            Expr::Cmp { op, lhs, rhs } => {
+                let side = |o: &Operand| -> Result<String> {
+                    match o {
+                        Operand::Arith(x) => self.render(x, inputs),
+                        leaf => self.render(&Expr::Atom(leaf.clone()), inputs),
+                    }
+                };
+                format!("{}{}{}", side(lhs)?, op.symbol(), side(rhs)?)
             }
             Expr::Atom(Operand::Port(p)) => {
                 let i = inputs.iter().position(|x| x == p).expect("collected above") + 1;
@@ -610,6 +626,7 @@ fn operand(port: &str, o: &Operand) -> ArgItem {
         kind: match o {
             Operand::Port(p) => BindingKind::Wire(p.clone()),
             Operand::Value(v) => BindingKind::Param(v.clone()),
+            Operand::Arith(e) => BindingKind::Expr((**e).clone()),
         },
         comment: None,
     })

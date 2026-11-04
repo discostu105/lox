@@ -248,3 +248,5 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D129 | [Port facts for the later-admitted types](decisions/0129-port-meta-regenerated.md) | accepted, follows [D52](decisions/0052-port-facts.md) and [D88](decisions/0088-port-descriptions.md) |
 | D130 | [A new block gets Loxone Config's defaults](decisions/0130-new-blocks-get-gui-defaults.md) | accepted, amends [D30](decisions/0030-observed-defaults.md) and [D128](decisions/0128-no-def-at-zero.md) |
 | D131 | [Source names for ports, default outputs and port aliases](decisions/0131-port-names-default-outputs-aliases.md) | accepted (language v3, part one) |
+| D132 | [A stale lifecycle statement is a lint, `every:`, `°`, and `step` next to `tick`](decisions/0132-lifecycle-lint-every-degrees-step.md) | accepted (language v3, part two) |
+| D133 | [Externs take bindings, expressions wrap and compute, `page` is a file header](decisions/0133-extern-bindings-expressions-page-header.md) | accepted (language v3, part two) |

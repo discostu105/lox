@@ -507,6 +507,13 @@ fn adopt_one_expanded(
             _ => true,
         });
         for item in &raw.items {
+            // The extern's own port bindings come along as they are.
+            if let Item::Extern(e) = item
+                && e.slug == slug
+            {
+                block.args.extend(e.args.iter().cloned());
+                continue;
+            }
             let binding = match item {
                 Item::Wire(w) if w.to.slug == slug => Binding {
                     port: w.to.port.clone(),

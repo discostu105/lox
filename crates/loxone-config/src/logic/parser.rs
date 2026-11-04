@@ -21,6 +21,9 @@ enum Tok {
     RParen,
     LBrace,
     RBrace,
+    /// `[` `]` — a list of sources on one input (`In1: [a, b]`).
+    LBracket,
+    RBracket,
     /// Comparison operators (expression sugar).
     Cmp(CmpOp),
     /// `~=` — approximately-equal, valid only in a test `expect`.
@@ -124,6 +127,14 @@ fn lex(line: &str, lineno: usize) -> Result<(Vec<Tok>, Option<String>)> {
             '}' => {
                 chars.next();
                 toks.push(Tok::RBrace);
+            }
+            '[' => {
+                chars.next();
+                toks.push(Tok::LBracket);
+            }
+            ']' => {
+                chars.next();
+                toks.push(Tok::RBracket);
             }
             '<' => {
                 chars.next();
@@ -272,8 +283,8 @@ fn check_ref(s: &str, lineno: usize) -> Result<String> {
 }
 
 /// A lexed digit-and-dot run must be exactly `-?digits(.digits)?`. An
-/// immediately following letter run or `%` is a unit suffix:
-/// `40s`, `1.5h`, `2700K`, `70%`.
+/// immediately following letter run, `%` or `°` is a unit suffix:
+/// `40s`, `1.5h`, `2700K`, `70%`, `180°`.
 fn number(
     s: String,
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
@@ -286,9 +297,9 @@ fn number(
         )));
     }
     let mut suffix = String::new();
-    if chars.peek() == Some(&'%') {
+    if let Some(&c @ ('%' | '°')) = chars.peek() {
         chars.next();
-        suffix.push('%');
+        suffix.push(c);
     } else {
         while let Some(&c) = chars.peek() {
             if c.is_ascii_alphabetic() {
@@ -304,7 +315,7 @@ fn number(
     }
     let Some(unit) = Unit::parse(&suffix) else {
         return Err(err(format!(
-            "unknown unit `{suffix}` on `{s}{suffix}` (known units: ms, s, min, h, K, %)"
+            "unknown unit `{suffix}` on `{s}{suffix}` (known units: ms, s, min, h, K, %, °)"
         )));
     };
     if scale_by_unit(&s, unit).is_none() {
@@ -470,11 +481,37 @@ pub fn parse(src: &str) -> Result<Module> {
     let mut parser = Parser::default();
     let mut errors = crate::error::Errors::default();
     let mut skip = Skip::None;
-    for (i, raw) in src.lines().enumerate() {
+    // Lexed lines, `None` where lexing failed (the error is recorded).
+    let lines: Vec<Option<(Vec<Tok>, Option<String>)>> = src
+        .lines()
+        .enumerate()
+        .map(|(i, raw)| errors.check(lex(raw, i + 1)))
+        .collect();
+    let mut i = 0;
+    while i < lines.len() {
         let lineno = i + 1;
-        let Some((toks, comment)) = errors.check(lex(raw, lineno)) else {
+        let Some((mut toks, mut comment)) = lines[i].clone() else {
+            i += 1;
             continue;
         };
+        // A wrapped expression: the lines a statement continues on.
+        if !parser.in_body() {
+            while let Some(Some((next, next_comment))) = lines.get(i + 1)
+                && continues(&toks, next)
+            {
+                if comment.is_some() {
+                    errors.push(Error::Parse {
+                        line: lineno,
+                        msg: "a comment on a wrapped expression goes on its last line".into(),
+                    });
+                    break;
+                }
+                toks.extend(next.iter().cloned());
+                comment = next_comment.clone();
+                i += 1;
+            }
+        }
+        i += 1;
         if skip.line(&toks) {
             continue;
         }
@@ -498,6 +535,50 @@ pub fn parse(src: &str) -> Result<Module> {
     let module = errors.check(parser.finish(src.lines().count()));
     errors.finish()?;
     Ok(module.expect("no errors"))
+}
+
+/// Whether `next` continues the statement on `line`: the line ends with
+/// an operator or `<-`, or opens a parenthesized expression (`= (`,
+/// `<- (`, `: (` — not a call, whose `(` follows a name) that is still
+/// open, or the next line starts with `and`/`or` and goes on.
+fn continues(line: &[Tok], next: &[Tok]) -> bool {
+    if line.is_empty() || next.is_empty() {
+        return false;
+    }
+    let is_kw = |t: &Tok, kw: &str| matches!(t, Tok::Ident(w) if w == kw);
+    if (is_kw(&next[0], "and") || is_kw(&next[0], "or"))
+        && next.len() >= 2
+        && !matches!(next[1], Tok::Eq | Tok::Dot | Tok::LArrow)
+    {
+        return true;
+    }
+    let last = line.last().expect("non-empty");
+    match last {
+        Tok::Plus | Tok::Minus | Tok::Star | Tok::Slash | Tok::Cmp(_) | Tok::LArrow => true,
+        Tok::Ident(w) if matches!(w.as_str(), "and" | "or" | "not") => true,
+        _ => expr_paren_open(line),
+    }
+}
+
+/// Whether `line` has an unclosed `(` that opens an expression group
+/// rather than an argument list: the `(` follows no name.
+fn expr_paren_open(line: &[Tok]) -> bool {
+    let mut depth = 0i64;
+    let mut expr_open = false;
+    for (i, t) in line.iter().enumerate() {
+        match t {
+            Tok::LParen => {
+                depth += 1;
+                if depth == 1 {
+                    expr_open =
+                        !matches!(line.get(i.wrapping_sub(1)), Some(Tok::Ident(_)) | None) && i > 0;
+                }
+            }
+            Tok::RParen => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0 && expr_open
 }
 
 /// Lines to skip after a statement failed, so its remaining lines are
@@ -568,6 +649,8 @@ struct Parser {
     open_tile: Option<u32>,
     /// `open_call` carries a `defaults <Type>(…)` argument list.
     open_defaults: bool,
+    /// `open_call` carries an `extern <slug> = <Type>(…)` argument list.
+    open_extern: bool,
     /// A `rule` whose body is still open (until `end`).
     open_rule: Option<RuleDecl>,
 }
@@ -693,6 +776,7 @@ impl Parser {
         self.open_call = None;
         self.open_tile = None;
         self.open_defaults = false;
+        self.open_extern = false;
     }
 
     /// Inside an open argument list: arguments, comments, or `)`.
@@ -718,6 +802,11 @@ impl Parser {
             if std::mem::take(&mut self.open_defaults) {
                 let d = finish_defaults(self.open_call.take().unwrap(), lineno)?;
                 self.items.push(Item::Defaults(d));
+                return Ok(());
+            }
+            if std::mem::take(&mut self.open_extern) {
+                let e = finish_extern(self.open_call.take().unwrap(), lineno)?;
+                self.items.push(Item::Extern(e));
                 return Ok(());
             }
             let in_template = self.open_template.is_some();
@@ -921,6 +1010,7 @@ impl Parser {
                     | "page"
                     | "test"
                     | "tick"
+                    | "step"
                     | "expect"
                     | "clock"
                     | "tile"
@@ -1020,7 +1110,7 @@ impl Parser {
                     "`tile` is only allowed inside a `tiles <name>` … `end` body".into(),
                 ));
             }
-            Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "expect" | "clock") => {
+            Tok::Ident(kw) if matches!(kw.as_str(), "tick" | "step" | "expect" | "clock") => {
                 return Err(err(format!(
                     "`{kw}` is only allowed inside a `test \"…\"` … `end` body"
                 )));
@@ -1046,8 +1136,38 @@ impl Parser {
                     .push(Item::Let(parse_let(toks, comment, lineno)?));
             }
             Tok::Ident(kw) if kw == "extern" => {
-                self.items
-                    .push(Item::Extern(parse_extern(toks, comment, lineno)?));
+                let [
+                    _,
+                    Tok::Ident(slug),
+                    Tok::Eq,
+                    Tok::Ident(ty),
+                    Tok::LParen,
+                    rest @ ..,
+                ] = toks
+                else {
+                    return Err(err(
+                        "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
+                         | mirrors: <slug>[, room: \"…\"][, category: \"…\"][, device: \"…\"]\
+                         [, <Port>: <source | value>, …])`"
+                            .into(),
+                    ));
+                };
+                let mut call = BlockDecl {
+                    slug: check_slug(slug, lineno)?,
+                    block_type: check_type(ty, lineno)?,
+                    title: None,
+                    args: Vec::new(),
+                    comment: None,
+                    close_comment: None,
+                };
+                let outcome = parse_call_args(&mut call, rest, lineno)?;
+                call.comment = comment;
+                if outcome.closed {
+                    self.items.push(Item::Extern(finish_extern(call, lineno)?));
+                } else {
+                    self.open_call = Some(call);
+                    self.open_extern = true;
+                }
             }
             Tok::Ident(kw) if kw == "removed" => {
                 let slug = match toks {
@@ -1074,6 +1194,24 @@ impl Parser {
                 }));
             }
             Tok::Ident(kw) if kw == "page" => {
+                // The file's header: once, before every other statement.
+                if let Some(Item::Page(p)) = self.items.iter().find(|i| matches!(i, Item::Page(_)))
+                {
+                    return Err(err(format!(
+                        "a second `page` in one file. A file belongs to one page: put the \
+                         blocks of page {} in a file of their own",
+                        Value::Str(p.title.clone())
+                    )));
+                }
+                if self
+                    .items
+                    .iter()
+                    .any(|i| !matches!(i, Item::Comment(_) | Item::Gap))
+                {
+                    return Err(err(
+                        "`page` is the file's header. Write it before the first statement".into(),
+                    ));
+                }
                 self.items
                     .push(Item::Page(parse_page(toks, comment, lineno)?));
             }
@@ -1126,6 +1264,9 @@ impl Parser {
             let what = match self.open_tile {
                 Some(i) => format!("tile {i}(…"),
                 None if self.open_defaults => format!("defaults {}(…", call.block_type),
+                None if self.open_extern => {
+                    format!("extern {} = {}(…", call.slug, call.block_type)
+                }
                 None => format!("{} = {}(…", call.slug, call.block_type),
             };
             return Err(Error::Parse {
@@ -1356,140 +1497,127 @@ fn parse_let(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<Let
     }
 }
 
-/// `extern <slug> = <Type>(<matcher>[, <constraint>…])`.
-fn parse_extern(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<ExternDecl> {
+/// A closed `extern <slug> = <Type>(…)` argument list: the lowercase keys
+/// are the matchers (one primary matcher — uuid, iname, title, serial or
+/// mirrors — then `room:`, `category:` and `device:`), the PascalCase keys
+/// are port bindings, wires and values onto the extern's ports.
+fn finish_extern(call: BlockDecl, lineno: usize) -> Result<ExternDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    match toks {
-        [
-            _,
-            Tok::Ident(slug),
-            Tok::Eq,
-            Tok::Ident(ty),
-            Tok::LParen,
-            rest @ ..,
-            Tok::RParen,
-        ] => {
-            // `kind: "value"` pairs, comma-separated: one primary
-            // matcher (uuid|iname|title|mirrors) first, then
-            // optional `room:` / `category:` constraints. Only
-            // `mirrors:` takes a bare slug; everything else is a
-            // quoted string.
-            let mut pairs = Vec::new();
-            // `mirrors: inst.block` names a block of a template instance.
-            let mut joined: Vec<Tok> = Vec::with_capacity(rest.len());
-            let mut i = 0;
-            while i < rest.len() {
-                match (&rest[i], rest.get(i + 1), rest.get(i + 2)) {
-                    (Tok::Ident(a), Some(Tok::Dot), Some(Tok::Ident(b)))
-                        if joined.last() == Some(&Tok::Colon) =>
-                    {
-                        joined.push(Tok::Ident(format!("{a}.{b}")));
-                        i += 3;
-                    }
-                    (t, _, _) => {
-                        joined.push(t.clone());
-                        i += 1;
-                    }
-                }
+    if call.title.is_some() {
+        return Err(err(format!(
+            "`extern {} = {}(…)` takes no label string. Match the object by its title: \
+             `title: \"…\"`.",
+            call.slug, call.block_type
+        )));
+    }
+    // (key, text, is_ident) per matcher, as the matcher list reads.
+    let mut pairs: Vec<(String, String, bool)> = Vec::new();
+    let mut args = Vec::new();
+    for arg in call.args {
+        let b = match arg {
+            ArgItem::Binding(b) => b,
+            comment => {
+                args.push(comment);
+                continue;
             }
-            let mut it = joined.iter();
-            loop {
-                match (it.next(), it.next(), it.next()) {
-                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Str(v))) => {
-                        pairs.push((k.as_str(), v.clone(), false));
-                    }
-                    (Some(Tok::Ident(k)), Some(Tok::Colon), Some(Tok::Ident(v))) => {
-                        pairs.push((k.as_str(), v.clone(), true));
-                    }
-                    _ => {
-                        return Err(err(
-                            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\" \
-                                     | mirrors: <slug>[, room: \"…\"] [, category: \"…\"] \
-                                     [, device: \"…\"])`"
-                                .into(),
-                        ));
-                    }
-                }
-                match it.next() {
-                    None => break,
-                    Some(Tok::Comma) => continue,
-                    Some(_) => {
-                        return Err(err("expected `,` between matchers".into()));
-                    }
-                }
+        };
+        if b.port.starts_with(|c: char| c.is_ascii_uppercase()) {
+            args.push(ArgItem::Binding(b));
+            continue;
+        }
+        let pair = match &b.kind {
+            BindingKind::Param(Value::Str(v)) => (b.port.clone(), v.clone(), false),
+            BindingKind::Param(Value::Number(v)) => (b.port.clone(), v.clone(), false),
+            BindingKind::Param(Value::Ref(v)) => (b.port.clone(), v.clone(), true),
+            // `mirrors: inst.block` reads as a port reference.
+            BindingKind::Wire(r) if r.port.starts_with(|c: char| c.is_ascii_lowercase()) => {
+                (b.port.clone(), format!("{}.{}", r.slug, r.port), true)
             }
-            let mut pairs = pairs.into_iter();
-            let match_spec = match pairs.next() {
-                Some(("mirrors", v, true)) => MatchSpec::Mirrors(check_ref(&v, lineno)?),
-                Some(("mirrors", _, false)) => {
-                    return Err(err("`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
-                        .into()));
-                }
-                Some((k, _, true)) => {
-                    return Err(err(format!("`{k}:` takes a quoted string")));
-                }
-                Some(("uuid", v, _)) => MatchSpec::Uuid(v),
-                Some(("iname", v, _)) => MatchSpec::IName(v),
-                Some(("title", v, _)) => MatchSpec::Title(v),
-                Some(("serial", v, _)) => MatchSpec::Serial(v),
-                Some((other, _, _)) => {
-                    return Err(err(format!(
-                        "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
-                    )));
-                }
-                None => return Err(err("empty matcher list".into())),
-            };
-            let (mut room, mut category, mut device) = (None, None, None);
-            for (k, v, is_ident) in pairs {
-                if is_ident {
-                    return Err(err(format!("`{k}:` takes a quoted string")));
-                }
-                let slot = match k {
-                    "room" => &mut room,
-                    "category" => &mut category,
-                    "device" => &mut device,
-                    other => {
-                        return Err(err(format!(
-                            "unknown constraint `{other}` (expected room, category \
-                                     or device)"
-                        )));
-                    }
-                };
-                if slot.replace(v).is_some() {
-                    return Err(err(format!("duplicate `{k}:` constraint")));
-                }
-            }
-            let constrained = room.is_some() || category.is_some() || device.is_some();
-            if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
-                let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
-                    "uuid"
-                } else {
-                    "serial"
-                };
+            other => {
                 return Err(err(format!(
-                    "`{k}:` matches exactly, so room, category and device are not allowed with it"
+                    "`{}: {other}`: a matcher takes a quoted string (`mirrors:` a name)",
+                    b.port
                 )));
             }
-            if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
-                return Err(err(
-                    "room, category and device are not allowed with `mirrors:`. The file's `page` statement narrows it."
-                        .into(),
-                ));
-            }
-            Ok(ExternDecl {
-                slug: check_slug(slug, lineno)?,
-                block_type: check_type(ty, lineno)?,
-                match_spec,
-                room,
-                category,
-                device,
-                comment,
-            })
-        }
-        _ => Err(err(
-            "expected `extern <slug> = <Type>(uuid|iname|title|serial: \"…\")`".into(),
-        )),
+        };
+        pairs.push(pair);
     }
+    let mut pairs = pairs.into_iter();
+    let match_spec = match pairs.next() {
+        Some((k, v, true)) if k == "mirrors" => MatchSpec::Mirrors(check_ref(&v, lineno)?),
+        Some((k, _, false)) if k == "mirrors" => {
+            return Err(err(
+                "`mirrors:` takes a slug, not a string. Write it without quotes: `mirrors: status_alarm`."
+                    .into(),
+            ));
+        }
+        Some((k, _, true)) => {
+            return Err(err(format!("`{k}:` takes a quoted string")));
+        }
+        Some((k, v, _)) if k == "uuid" => MatchSpec::Uuid(v),
+        Some((k, v, _)) if k == "iname" => MatchSpec::IName(v),
+        Some((k, v, _)) if k == "title" => MatchSpec::Title(v),
+        Some((k, v, _)) if k == "serial" => MatchSpec::Serial(v),
+        Some((other, _, _)) => {
+            return Err(err(format!(
+                "unknown matcher `{other}`. Start with uuid, iname, title, serial or mirrors, then narrow with room, category or device."
+            )));
+        }
+        None => {
+            return Err(err(format!(
+                "`extern {} = {}(…)` names no matcher. Start with uuid, iname, title, serial or \
+                 mirrors.",
+                call.slug, call.block_type
+            )));
+        }
+    };
+    let (mut room, mut category, mut device) = (None, None, None);
+    for (k, v, is_ident) in pairs {
+        if is_ident {
+            return Err(err(format!("`{k}:` takes a quoted string")));
+        }
+        let slot = match k.as_str() {
+            "room" => &mut room,
+            "category" => &mut category,
+            "device" => &mut device,
+            other => {
+                return Err(err(format!(
+                    "unknown constraint `{other}` (expected room, category or device)"
+                )));
+            }
+        };
+        if slot.replace(v).is_some() {
+            return Err(err(format!("duplicate `{k}:` constraint")));
+        }
+    }
+    let constrained = room.is_some() || category.is_some() || device.is_some();
+    if let (MatchSpec::Uuid(_) | MatchSpec::Serial(_), true) = (&match_spec, constrained) {
+        let k = if matches!(match_spec, MatchSpec::Uuid(_)) {
+            "uuid"
+        } else {
+            "serial"
+        };
+        return Err(err(format!(
+            "`{k}:` matches exactly, so room, category and device are not allowed with it"
+        )));
+    }
+    if matches!(match_spec, MatchSpec::Mirrors(_)) && constrained {
+        return Err(err(
+            "room, category and device are not allowed with `mirrors:`. The file's `page` statement narrows it."
+                .into(),
+        ));
+    }
+    Ok(ExternDecl {
+        slug: call.slug,
+        block_type: call.block_type,
+        match_spec,
+        room,
+        category,
+        device,
+        args,
+        comment: call.comment,
+        close_comment: call.close_comment,
+    })
 }
 
 /// `page "<Title>"`, optionally `(room: "…"[, category: "…"])` to
@@ -1876,7 +2004,7 @@ fn parse_rule_then(toks: &[Tok], lineno: usize, usage: &str) -> Result<RuleStmtK
     Ok(kind)
 }
 
-/// One statement of a `test` body: a port injection, `tick`,
+/// One statement of a `test` body: a port injection, `tick`, `step`,
 /// `expect`, or `clock`.
 /// One line of a `moods` body: `"<name>": <setting>, …`, a
 /// setting being `all <value>` or `AQ<n> <value>`, a value `on`, `off`,
@@ -2094,7 +2222,16 @@ fn parse_schedule_line(
 fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Result<TestItem> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
     match toks {
-        [Tok::Ident(kw), rest @ ..] if kw == "tick" => {
+        [Tok::Ident(kw), rest @ ..] if kw == "tick" || kw == "step" => {
+            let kind = if kw == "tick" {
+                TickKind::Tick
+            } else {
+                TickKind::Step
+            };
+            let usage = match kind {
+                TickKind::Tick => "expected `tick <duration>` (`tick 5min`, `tick 2s dt 500ms`)",
+                TickKind::Step => "expected `step <n>` (`step 3`, `step 2 dt 0.5`)",
+            };
             let (n_tok, dt) = match rest {
                 [n] => (n, None),
                 [n, Tok::Ident(kw), v] if kw == "dt" => {
@@ -2104,25 +2241,14 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
                     };
                     (n, Some(dt))
                 }
-                _ => {
-                    return Err(err(
-                        "expected `tick <n>`, `tick <duration>` (`tick 5min`) or either \
-                         with `dt <seconds>`"
-                            .into(),
-                    ));
-                }
+                _ => return Err(err(usage.into())),
             };
             let amount = match n_tok {
                 Tok::Num(_) | Tok::UnitNum(..) | Tok::Ident(_) => value_of(n_tok, lineno)?,
-                _ => {
-                    return Err(err(
-                        "expected `tick <n>` with a plain tick count, or `tick <duration>` \
-                         (`tick 90s`, `tick 5min`)"
-                            .into(),
-                    ));
-                }
+                _ => return Err(err(usage.into())),
             };
             let tick = TickDecl {
+                kind,
                 amount,
                 dt,
                 comment,
@@ -2208,8 +2334,8 @@ fn parse_test_stmt(toks: &[Tok], comment: Option<String>, lineno: usize) -> Resu
             "`{slug}.{port} <- …`: a test sets values and draws no wires. Write `{slug}.{port} = 1`."
         ))),
         _ => Err(err(
-            "expected a test statement: `<slug>.<Port> = <value>`, `tick <n> [dt <s>]`, \
-             `tick <duration>`, `expect <slug>.<Port> <cmp> <value>`, `clock HH:MM`, \
+            "expected a test statement: `<slug>.<Port> = <value>`, `tick <duration> [dt <s>]`, \
+             `step <n> [dt <s>]`, `expect <slug>.<Port> <cmp> <value>`, `clock HH:MM`, \
              `clock YYYY-MM-DD HH:MM`, or `end`"
                 .into(),
         )),
@@ -2629,34 +2755,80 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
                 let start = i + 2;
                 let mut end = start;
                 let mut depth = 0usize;
+                let mut bracket = false;
                 while let Some(t) = toks.get(end) {
                     match t {
                         Tok::LParen => depth += 1,
                         Tok::RParen if depth == 0 => break,
                         Tok::RParen => depth -= 1,
-                        Tok::Comma if depth == 0 => break,
+                        Tok::LBracket if end == start => bracket = true,
+                        Tok::LBracket => {
+                            return Err(err(format!(
+                                "`[` inside the value of `{port}:`. A list is the whole value: \
+                                 `{port}: [a, b]`"
+                            )));
+                        }
+                        Tok::RBracket if bracket => {
+                            end += 1;
+                            break;
+                        }
+                        Tok::RBracket => return Err(err("`]` without `[`".into())),
+                        Tok::Comma if depth == 0 && !bracket => break,
                         _ => {}
                     }
                     end += 1;
                 }
                 let value = &toks[start..end];
-                let kind = match calendar_date(&call.block_type, port, value, lineno)? {
-                    Some(date) => BindingKind::Param(date),
-                    None => binding_kind(port, value, lineno)?,
-                };
-                if let BindingKind::Param(Value::Str(text)) = &kind
-                    && (text == "true" || text == "false")
-                    && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
-                {
-                    return Err(err(bool_hint(port, text)));
+                if bracket {
+                    // `In1: [a, b]` — several sources on one input,
+                    // one binding each.
+                    let Some(Tok::RBracket) = value.last() else {
+                        return Err(err(format!("missing `]` in the list of `{port}:`")));
+                    };
+                    let inner = &value[1..value.len() - 1];
+                    if inner.is_empty() {
+                        return Err(err(format!(
+                            "`{port}: []` names no source. A list holds the sources of one \
+                             input: `{port}: [a, b]`"
+                        )));
+                    }
+                    for element in split_top_level(inner) {
+                        let kind = binding_kind(port, element, lineno)?;
+                        if let BindingKind::Param(v) = &kind
+                            && !matches!(v, Value::Ref(_))
+                        {
+                            return Err(err(format!(
+                                "`{v}` in the list of `{port}:` is a value. A list holds sources: \
+                                 block names, `<slug>.<Port>` or expressions"
+                            )));
+                        }
+                        call.args.push(ArgItem::Binding(Binding {
+                            port: port.clone(),
+                            kind,
+                            comment: None,
+                        }));
+                    }
+                    pushed_binding = true;
+                    i = end;
+                } else {
+                    let kind = match calendar_date(&call.block_type, port, value, lineno)? {
+                        Some(date) => BindingKind::Param(date),
+                        None => binding_kind(port, value, lineno)?,
+                    };
+                    if let BindingKind::Param(Value::Str(text)) = &kind
+                        && (text == "true" || text == "false")
+                        && crate::connectors::bool_params(&call.block_type).contains(&port.as_str())
+                    {
+                        return Err(err(bool_hint(port, text)));
+                    }
+                    call.args.push(ArgItem::Binding(Binding {
+                        port: port.clone(),
+                        kind,
+                        comment: None,
+                    }));
+                    pushed_binding = true;
+                    i = end;
                 }
-                call.args.push(ArgItem::Binding(Binding {
-                    port: port.clone(),
-                    kind,
-                    comment: None,
-                }));
-                pushed_binding = true;
-                i = end;
             }
             Some(_) => {
                 return Err(err(
@@ -2671,6 +2843,27 @@ fn parse_call_args(call: &mut BlockDecl, toks: &[Tok], lineno: usize) -> Result<
             Some(_) => return Err(err("expected `,` between arguments".into())),
         }
     }
+}
+
+/// The comma-separated elements of a token run, commas inside
+/// parentheses kept.
+fn split_top_level(toks: &[Tok]) -> Vec<&[Tok]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i64;
+    for (i, t) in toks.iter().enumerate() {
+        match t {
+            Tok::LParen => depth += 1,
+            Tok::RParen => depth -= 1,
+            Tok::Comma if depth == 0 => {
+                out.push(&toks[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&toks[start..]);
+    out
 }
 
 /// Classify one binding's value tokens: a literal or constant is a
@@ -2732,7 +2925,7 @@ fn binding_kind(port: &str, toks: &[Tok], lineno: usize) -> Result<BindingKind> 
     })
 }
 
-/// A calendar entry's `on:`, `from:` or `to:` date, `YYYY-MM-DD` or
+/// A calendar entry's `every:`, `from:` or `to:` date, `YYYY-MM-DD` or
 /// `MM-DD`, written bare like `when date 2026-12-24`; `None` for any other
 /// argument or shape (the check names the right one). A quoted date is
 /// refused with the bare one.
@@ -2964,24 +3157,12 @@ impl ExprParser<'_> {
         matches!(self.peek(), Some(Tok::Ident(s)) if s == kw)
     }
 
-    /// Arithmetic mixed under `or`/`and`/`not` is deferred: the analog
-    /// `AQ` of a `Formula` feeding a boolean gate input is behavior we have
-    /// not verified against the Miniserver.
-    fn no_arith(&self, e: &Expr, kw: &str) -> Result<()> {
-        if matches!(e, Expr::Arith { .. }) {
-            return Err(self.err(format!(
-                "arithmetic under `{kw}` is not supported. Declare a `Formula` block and use its `AQ`."
-            )));
-        }
-        Ok(())
-    }
-
     /// A parenthesized group taking part in arithmetic must itself be
     /// arithmetic — gates and comparisons produce on/off, not numbers.
     fn ensure_arith(&self, e: &Expr) -> Result<()> {
         if !matches!(e, Expr::Atom(_) | Expr::Arith { .. }) {
             return Err(self.err(
-                "a boolean group cannot take part in arithmetic, since gates and comparisons produce on/off, not numbers"
+                "a boolean group cannot take part in arithmetic or a comparison, since gates and comparisons produce on/off, not numbers"
                     .into(),
             ));
         }
@@ -3011,10 +3192,8 @@ impl ExprParser<'_> {
     fn or_level(&mut self) -> Result<Expr> {
         let mut e = self.and_level()?;
         while self.keyword("or") {
-            self.no_arith(&e, "or")?;
             self.pos += 1;
             let rhs = self.and_level()?;
-            self.no_arith(&rhs, "or")?;
             e = Expr::Or(Box::new(e), Box::new(rhs));
         }
         Ok(e)
@@ -3023,10 +3202,8 @@ impl ExprParser<'_> {
     fn and_level(&mut self) -> Result<Expr> {
         let mut e = self.unary()?;
         while self.keyword("and") {
-            self.no_arith(&e, "and")?;
             self.pos += 1;
             let rhs = self.unary()?;
-            self.no_arith(&rhs, "and")?;
             e = Expr::And(Box::new(e), Box::new(rhs));
         }
         Ok(e)
@@ -3036,10 +3213,23 @@ impl ExprParser<'_> {
         if self.keyword("not") {
             self.pos += 1;
             let x = self.unary()?;
-            self.no_arith(&x, "not")?;
             return Ok(Expr::Not(Box::new(x)));
         }
         self.primary()
+    }
+
+    /// One side of a comparison: a port, a number, a constant or
+    /// arithmetic. A boolean group is none of those.
+    fn cmp_side(&self, e: Expr, op: CmpOp) -> Result<Operand> {
+        match e {
+            Expr::Atom(o) => Ok(o),
+            Expr::Arith { .. } => Ok(Operand::Arith(Box::new(e))),
+            _ => Err(self.err(format!(
+                "`(…) {}`: a comparison takes ports, numbers, constants or arithmetic, not a \
+                 boolean group",
+                op.symbol()
+            ))),
+        }
     }
 
     fn primary(&mut self) -> Result<Expr> {
@@ -3050,17 +3240,11 @@ impl ExprParser<'_> {
                 return Err(self.err("missing `)` in the expression".into()));
             }
             self.pos += 1;
-            if let Some(Tok::Cmp(op)) = self.peek() {
-                return Err(self.err(format!(
-                    "`(…) {}`: a comparison takes ports, numbers or constants, not parenthesized expressions",
-                    op.symbol()
-                )));
-            }
-            if self.arith_op().is_none() {
+            if self.arith_op().is_none() && !matches!(self.peek(), Some(Tok::Cmp(_))) {
                 return Ok(e);
             }
-            // `(…) * x` — the group is the first factor of an arithmetic
-            // expression.
+            // `(…) * x` or `(…) >= 5` — the group is the first factor of
+            // an arithmetic expression.
             self.ensure_arith(&e)?;
             self.sum_from(e)?
         } else {
@@ -3068,20 +3252,10 @@ impl ExprParser<'_> {
         };
         if let Some(Tok::Cmp(op)) = self.peek() {
             let op = *op;
-            let Expr::Atom(lhs) = e else {
-                return Err(self.err(format!(
-                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
-                    op.symbol()
-                )));
-            };
+            let lhs = self.cmp_side(e, op)?;
             self.pos += 1;
-            let rhs = self.operand()?;
-            if self.arith_op().is_some() {
-                return Err(self.err(format!(
-                    "arithmetic under `{}` is not supported. Declare a `Formula` block and compare its `AQ`.",
-                    op.symbol()
-                )));
-            }
+            let rhs = self.sum()?;
+            let rhs = self.cmp_side(rhs, op)?;
             if matches!(self.peek(), Some(Tok::Cmp(_))) {
                 return Err(self.err(
                     "comparisons do not chain (`a < b < c`). Write two comparisons joined with `and`."
@@ -3504,17 +3678,21 @@ sonne.Qm = 30 # override
     }
 
     #[test]
-    fn port_statements_on_managed_blocks_are_rejected() {
-        // `=` on a managed port: parameters belong in the argument list.
-        let e = Module::parse("b = And()\nb.In1 = 3\n").unwrap_err();
-        let msg = e.to_string();
-        assert!(msg.contains("targets managed block `b`"), "{msg}");
-        assert!(msg.contains("argument list"), "{msg}");
-        // `<-` on a managed port: wires belong in the argument list.
-        let e = Module::parse("a = And()\nb = And()\nb.In1 <- a.Q\n").unwrap_err();
-        let msg = e.to_string();
-        assert!(msg.contains("targets managed block `b`"), "{msg}");
-        assert!(msg.contains("In1: a.Q"), "{msg}");
+    fn port_statements_on_managed_blocks_become_arguments() {
+        // `=` and `<-` on a managed port are the block's arguments once
+        // the module is expanded; the source keeps the statements.
+        let m = Module::parse("a = And()\nb = And()\nb.In1 <- a.Q\nb.In2 = 3\n").unwrap();
+        assert!(m.to_text().contains("b.In1 <- a.Q\n"));
+        let flat = m.expand().unwrap();
+        let b = flat.blocks().find(|x| x.slug == "b").unwrap();
+        assert_eq!(
+            b.bindings()
+                .map(|x| format!("{}: {}", x.port, x.kind))
+                .collect::<Vec<_>>(),
+            ["In1: a.Q", "In2: 3"]
+        );
+        assert_eq!(flat.extern_wires().count(), 0);
+        assert_eq!(flat.sets().count(), 0);
     }
 
     #[test]
@@ -3581,11 +3759,10 @@ sonne.Qm = 30 # override
 
     #[test]
     fn page_statements_parse_and_roundtrip() {
-        let src = "extern wind = VirtualIn(iname: \"VI2\")\n\n\
+        let src = "# Süd\n\n\
                    page \"Beschattung\" # Süd\n\n\
-                   gate = Not(I: wind.Q)\n\n\
-                   page \"Regeln\"\n\n\
-                   halt = Or(In1: gate.Q)\n";
+                   extern wind = VirtualIn(iname: \"VI2\")\n\n\
+                   gate = Not(In: wind.Q)\n";
         let m = Module::parse(src).unwrap();
         assert_eq!(m.to_text(), src);
         let pages: Vec<_> = m
@@ -3596,7 +3773,13 @@ sonne.Qm = 30 # override
                 _ => None,
             })
             .collect();
-        assert_eq!(pages, ["Beschattung", "Regeln"]);
+        assert_eq!(pages, ["Beschattung"]);
+
+        // The file's header: once, before the first statement.
+        let e = Module::parse("gate = Not()\npage \"Regeln\"\n").unwrap_err();
+        assert!(e.to_string().contains("file's header"), "{e}");
+        let e = Module::parse("page \"A\"\n\npage \"B\"\n").unwrap_err();
+        assert!(e.to_string().contains("second `page`"), "{e}");
 
         // The title is a quoted string — a bare identifier is guided.
         let e = Module::parse("page Regeln\n").unwrap_err();
@@ -3668,7 +3851,7 @@ sonne.Qm = 30 # override
                    \tx.Q = on\n\
                    \ttick 5min\n\
                    \ttick 2s dt 500ms\n\
-                   \ttick 3 dt 0.5\n\
+                   \tstep 3 dt 0.5\n\
                    \texpect x.Q != off\n\
                    \texpect x.AQ == 1\n\
                    end\n";
@@ -3687,7 +3870,7 @@ sonne.Qm = 30 # override
             .collect();
         assert_eq!(ticks, [300, 4, 3]);
         // A time of day canonicalizes like `At:`.
-        let m = Module::parse_fragment("test \"t\"\n\tclock 7:30:00\n\ttick 1\nend\n").unwrap();
+        let m = Module::parse_fragment("test \"t\"\n\tclock 7:30:00\n\tstep 1\nend\n").unwrap();
         assert!(m.to_text().contains("\tclock 07:30\n"), "{}", m.to_text());
 
         let err = |body: &str| {
@@ -3704,11 +3887,36 @@ sonne.Qm = 30 # override
         assert!(err("\tclock \"spät\"").contains("takes no quotes"));
         assert!(err("\tclock 2026-02-30 07:00").contains("not a date"));
         assert!(err("\tclock 25:00").contains("not a time of day"));
-        // A duration is a whole number of ticks.
+        // A duration is a whole number of cycles.
         let e = err("\ttick 1s dt 300ms");
-        assert!(e.contains("not a whole number of `dt 300ms` ticks"), "{e}");
+        assert!(e.contains("not a whole number of `dt 300ms` cycles"), "{e}");
         assert!(err("\ttick 0s").contains("advances nothing"));
+        assert!(err("\tstep 0").contains("advances nothing"));
         assert!(err("\ttick 5%").contains("duration"));
+        assert!(err("\tstep 1.5").contains("positive whole number"));
+        // Each keyword names the other for the value it does not take.
+        let e = err("\ttick 3");
+        assert!(e.contains("Write `step 3` instead of `tick 3`"), "{e}");
+        let e = err("\tstep 5min");
+        assert!(
+            e.contains("Write `tick 5min` instead of `step 5min`"),
+            "{e}"
+        );
+        let e = Module::parse_fragment("step = Not()\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("reserved word"), "{e}");
+    }
+
+    #[test]
+    fn degrees_are_a_unit_suffix() {
+        let src = "extern jal = AutoJalousie(title: \"J\")\n\njal.Dir = 180°\n";
+        let m = Module::parse_fragment(src).unwrap();
+        assert_eq!(m.to_text(), src);
+        let e = Module::parse_fragment("x = And(In1: 5deg)\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("unknown unit `deg`"), "{e}");
     }
 
     #[test]

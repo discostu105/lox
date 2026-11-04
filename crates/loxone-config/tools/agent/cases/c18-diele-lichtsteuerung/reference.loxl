@@ -1,9 +1,9 @@
+page "Logik"
+
 extern bewegung = VirtualIn(title: "Bewegung Diele")
 extern helligkeit = VirtualIn(title: "Helligkeit Diele")
 extern taster_aus = VirtualIn(title: "Taster Diele aus")
 extern licht = VirtualOutCmd(title: "Licht Diele")
-
-page "Logik"
 
 lichtsteuerung = LightController2(
 	"Lichtsteuerung Diele",

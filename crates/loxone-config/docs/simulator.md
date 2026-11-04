@@ -13,7 +13,8 @@ object.
 
 - Each test starts fresh: every value 0, the simulated clock at
   2026-01-01 00:00, a Thursday. `clock 06:30` sets it.
-- `tick n dt d` runs `n` program cycles. Each cycle advances time and
+- `step n dt d` runs `n` program cycles, `tick <duration> dt d` as many
+  as the duration holds. Each cycle advances time and
   clock by `d`, evaluates the operating modes, then every modelled block
   in wiring order. Blocks in a feedback loop follow in document order and
   read the previous cycle's values.

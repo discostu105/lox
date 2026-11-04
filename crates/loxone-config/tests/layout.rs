@@ -258,8 +258,11 @@ fn placement_is_per_page() {
 
     // A new block on another page starts at that page's top, not below
     // the lowest block of the whole lock.
-    let two = format!("{one}\npage \"Werkstatt\"\nnah = And(In1: sonne.Q)\n");
-    let out = compile(&moved, &Module::parse(&two).unwrap(), &mut lock, &opts()).unwrap();
+    let two = Module::from_fragments([
+        Module::parse_fragment(one).unwrap(),
+        Module::parse_fragment("page \"Werkstatt\"\nnah = And(In1: sonne.Q)\n").unwrap(),
+    ]);
+    let out = compile(&moved, &two, &mut lock, &opts()).unwrap();
     let nah = rect(&out, &uuid(&lock, "nah"));
     assert!(nah.py < 4800, "{nah:?}");
 }

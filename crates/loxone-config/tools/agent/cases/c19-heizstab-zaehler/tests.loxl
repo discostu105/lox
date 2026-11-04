@@ -6,17 +6,17 @@ extern t_hinweis = VirtualOutCmd(title: "Hinweis Energie Heizstab")
 
 test "Hinweis bei 6 kWh"
 	t_heizstab.Q = 1
-	tick 1
-	tick 3600 # 1 h: 3 kWh
+	step 1
+	step 3600 # 1 h: 3 kWh
 	expect t_hinweis.In == 0
 	t_heizstab.Q = 0
-	tick 1
-	tick 7200 # aus: kein Verbrauch
+	step 1
+	step 7200 # aus: kein Verbrauch
 	expect t_hinweis.In == 0
 	t_heizstab.Q = 1
-	tick 1
-	tick 3500
+	step 1
+	step 3500
 	expect t_hinweis.In == 0
-	tick 200
+	step 200
 	expect t_hinweis.In == 1
 end

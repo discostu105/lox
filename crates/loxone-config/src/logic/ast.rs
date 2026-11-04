@@ -181,7 +181,8 @@ pub fn clock_text(seconds: u32) -> Option<String> {
 }
 
 /// A value's unit suffix. Time units scale to Loxone's base unit,
-/// seconds; `K` (color temperature) and `%` are annotations with factor 1.
+/// seconds; `K` (color temperature), `%` and `°` are annotations with
+/// factor 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     Ms,
@@ -190,6 +191,7 @@ pub enum Unit {
     H,
     K,
     Pct,
+    Deg,
 }
 
 impl Unit {
@@ -206,6 +208,7 @@ impl Unit {
             Unit::H => "h",
             Unit::K => "K",
             Unit::Pct => "%",
+            Unit::Deg => "°",
         }
     }
 
@@ -217,6 +220,7 @@ impl Unit {
             "h" => Unit::H,
             "K" => Unit::K,
             "%" => Unit::Pct,
+            "°" => Unit::Deg,
             _ => return None,
         })
     }
@@ -226,7 +230,7 @@ impl Unit {
     fn factor(self) -> (u128, u32) {
         match self {
             Unit::Ms => (1, 3),
-            Unit::S | Unit::K | Unit::Pct => (1, 0),
+            Unit::S | Unit::K | Unit::Pct | Unit::Deg => (1, 0),
             Unit::Min => (60, 0),
             Unit::H => (3600, 0),
         }
@@ -287,10 +291,10 @@ pub(crate) fn duration_value(block_type: &str, port: &str, raw: &str) -> Option<
 
 /// Resolve a suffixed value for a port whose documented unit is
 /// `port_unit`: time suffixes scale into the port's own time unit
-/// (seconds or minutes), `%` and `K` bind only where they mean what the
-/// port is in. `None` (undocumented port) keeps the default reading: time in seconds,
-/// `%` and `K` as annotations. The
-/// error is the reason, without the port's name (callers add it).
+/// (seconds or minutes), `%`, `K` and `°` bind only where they mean what
+/// the port is in. `None` (undocumented port) keeps the default reading:
+/// time in seconds, `%`, `K` and `°` as annotations. The error is the
+/// reason, without the port's name (callers add it).
 pub(crate) fn scale_for_port(
     number: &str,
     unit: Unit,
@@ -321,6 +325,7 @@ pub(crate) fn scale_for_port(
         }
         Some(PortUnit::Percent) if unit == Unit::Pct => Ok(number.to_string()),
         Some(PortUnit::Kelvin) if unit == Unit::K => Ok(number.to_string()),
+        Some(PortUnit::Degrees) if unit == Unit::Deg => Ok(number.to_string()),
         Some(pu) => mismatch(pu),
     }
 }
@@ -500,11 +505,70 @@ pub struct ExternDecl {
     /// `iname`/`title` matching where identical devices repeat their I/O
     /// titles; unlike a room or a title, it does not change in the GUI.
     pub device: Option<String>,
+    /// Port bindings in the declaration (`AutoShade: beschatten`,
+    /// `TargetPos: 70`): the wires and assignments onto the extern's
+    /// ports, which [`Module::lowered`] turns into statements.
+    pub args: Vec<ArgItem>,
     /// Trailing `#` comment on the statement line, verbatim.
     pub comment: Option<String>,
+    /// The comment on the closing `)` line of a multi-line declaration.
+    pub close_comment: Option<String>,
 }
 
 impl ExternDecl {
+    /// The matchers as argument bindings, for the formatter.
+    fn matcher_args(&self) -> Vec<ArgItem> {
+        let str_arg = |k: &str, v: &str| {
+            ArgItem::Binding(Binding {
+                port: k.to_string(),
+                kind: BindingKind::Param(Value::Str(v.to_string())),
+                comment: None,
+            })
+        };
+        let ref_arg = |k: &str, v: &str| {
+            ArgItem::Binding(Binding {
+                port: k.to_string(),
+                kind: BindingKind::Param(Value::Ref(v.to_string())),
+                comment: None,
+            })
+        };
+        let mut out = match &self.match_spec {
+            MatchSpec::Uuid(v) => vec![str_arg("uuid", v)],
+            MatchSpec::IName(v) => vec![str_arg("iname", v)],
+            MatchSpec::Title(v) => vec![str_arg("title", v)],
+            MatchSpec::Mirrors(v) => vec![ref_arg("mirrors", v)],
+            MatchSpec::Serial(v) => vec![str_arg("serial", v)],
+            MatchSpec::Create { kind, tree, branch } => {
+                let mut v = vec![str_arg("kind", kind), ref_arg("tree", tree)];
+                if let Some(b) = branch {
+                    v.push(str_arg("branch", b));
+                }
+                v
+            }
+            MatchSpec::Within { device, iname } => {
+                vec![ref_arg("device", device), str_arg("iname", iname)]
+            }
+        };
+        if let Some(r) = &self.room {
+            out.push(str_arg("room", r));
+        }
+        if let Some(c) = &self.category {
+            out.push(str_arg("category", c));
+        }
+        if let Some(d) = &self.device {
+            out.push(str_arg("device", d));
+        }
+        out
+    }
+
+    /// The port bindings of the declaration.
+    pub fn bindings(&self) -> impl Iterator<Item = &Binding> {
+        self.args.iter().filter_map(|a| match a {
+            ArgItem::Binding(b) => Some(b),
+            _ => None,
+        })
+    }
+
     /// The full match spec as source text: `title: "…", room: "…"`.
     pub fn spec(&self) -> String {
         let mut s = self.match_spec.to_string();
@@ -856,6 +920,10 @@ impl ArithOp {
 pub enum Operand {
     Port(PortRef),
     Value(Value),
+    /// Arithmetic on one side of a comparison (`x.AQ + 1 >= 5`): the
+    /// whole comparison then desugars into one `Formula` block, which
+    /// evaluates the comparison itself. Always an [`Expr::Arith`].
+    Arith(Box<Expr>),
 }
 
 impl fmt::Display for Operand {
@@ -863,7 +931,15 @@ impl fmt::Display for Operand {
         match self {
             Operand::Port(p) => p.fmt(f),
             Operand::Value(v) => v.fmt(f),
+            Operand::Arith(e) => e.fmt(f),
         }
+    }
+}
+
+impl Operand {
+    /// Whether the operand is arithmetic.
+    pub fn is_arith(&self) -> bool {
+        matches!(self, Operand::Arith(_))
     }
 }
 
@@ -883,8 +959,12 @@ impl Expr {
             }
             Expr::Not(x) => x.collect_operands(out),
             Expr::Cmp { lhs, rhs, .. } => {
-                out.push(lhs);
-                out.push(rhs);
+                for o in [lhs, rhs] {
+                    match o {
+                        Operand::Arith(e) => e.collect_operands(out),
+                        leaf => out.push(leaf),
+                    }
+                }
             }
             Expr::Arith { lhs, rhs, .. } => {
                 lhs.collect_operands(out);
@@ -894,7 +974,40 @@ impl Expr {
         }
     }
 
+    /// Whether a comparison compares arithmetic, or arithmetic stands
+    /// where a gate reads a signal: the node is one `Formula` block then.
+    pub fn is_formula(&self) -> bool {
+        match self {
+            Expr::Arith { .. } => true,
+            Expr::Cmp { lhs, rhs, .. } => lhs.is_arith() || rhs.is_arith(),
+            _ => false,
+        }
+    }
+
     /// Binding strength for canonical (minimal-paren) emission.
+    /// The pieces of the top-level `and`/`or` chain, as printed: the
+    /// left-nested operands of the same operator, each with the
+    /// parentheses the whole expression's text gives it.
+    fn chain(&self) -> Vec<String> {
+        let same = |x: &Expr| std::mem::discriminant(x) == std::mem::discriminant(self);
+        let (Expr::Or(a, b) | Expr::And(a, b)) = self else {
+            return vec![self.to_string()];
+        };
+        let mut pieces = if same(a) {
+            a.chain()
+        } else if a.prec() < self.prec() {
+            vec![format!("({a})")]
+        } else {
+            vec![a.to_string()]
+        };
+        pieces.push(if b.prec() <= self.prec() {
+            format!("({b})")
+        } else {
+            b.to_string()
+        });
+        pieces
+    }
+
     pub(crate) fn prec(&self) -> u8 {
         match self {
             Expr::Or(..) => 1,
@@ -1023,9 +1136,9 @@ pub struct LetDecl {
 /// object from bases predating the deployment. Scoped to one slug and
 /// reviewable in the diff (the in-language counterpart of Terraform's
 /// `removed` block). The statement may be deleted right after the compile
-/// that applies it (the tombstone carries the intent from there) and is
-/// tolerated while the tombstone is pending; once the removal has reached
-/// the deployed config, a lingering statement is a compile error.
+/// that applies it (the tombstone carries the intent from there). Once
+/// the removal has reached the deployed config, the compile ignores it
+/// and `loxl lint` reports it (`stale-lifecycle`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemovedDecl {
     pub slug: String,
@@ -1236,29 +1349,49 @@ pub enum TestItem {
     /// of the scenario. On an output connector the injection overrides
     /// the block (how calendar-driven Mode blocks are driven in the sim).
     Inject(SetDecl),
-    /// `tick <n> [dt <seconds>]` — advance the simulation `n` ticks of
-    /// `dt` simulated seconds each (default 1s; a unit value like
-    /// `dt 100ms` scales). `tick <duration>` (`tick 5min`) advances
-    /// that much simulated time, a whole number of ticks.
+    /// `tick <duration> [dt <seconds>]` — advance the simulation by that
+    /// much simulated time, a whole number of program cycles of `dt`
+    /// seconds each (default 1s; a unit value like `dt 100ms` scales).
+    /// `step <n> [dt <seconds>]` advances `n` cycles.
     Tick(TickDecl),
     /// `expect slug.Port <cmp> <value>` — assert a port's value after the
-    /// preceding `tick`.
+    /// preceding `tick` or `step`.
     Expect(ExpectDecl),
     /// `clock HH:MM[:SS]` or `clock YYYY-MM-DD HH:MM[:SS]` — set the
     /// simulated wall-clock (drives DayTimer/astro blocks); it advances
-    /// by `dt` each tick.
+    /// by `dt` each cycle.
     Clock(ClockDecl),
     /// Whole-line `#` comment, verbatim.
     Comment(String),
 }
 
+/// The keyword of a [`TickDecl`]: `tick` advances by a duration, `step`
+/// by a number of program cycles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickKind {
+    Tick,
+    Step,
+}
+
+impl TickKind {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            TickKind::Tick => "tick",
+            TickKind::Step => "step",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TickDecl {
-    /// What `tick` advances, as written: a plain tick count (`Number`), a
-    /// duration (a time `Unit` value, `tick 5min`), or a `let` constant
-    /// naming either. [`TickDecl::count`] turns it into ticks.
+    /// `tick` or `step`.
+    pub kind: TickKind,
+    /// What the statement advances, as written: a duration (a time
+    /// `Unit` value, `tick 5min`), a count of program cycles (`step 3`),
+    /// or a `let` constant holding the one the keyword takes.
+    /// [`TickDecl::count`] turns it into cycles.
     pub amount: Value,
-    /// Simulated seconds per tick; `None` = the default (1s). `Number`,
+    /// Simulated seconds per cycle; `None` = the default (1s). `Number`,
     /// `Unit`, or a `let` constant naming one.
     pub dt: Option<Value>,
     /// Trailing `#` comment on the statement line, verbatim.
@@ -1266,10 +1399,12 @@ pub struct TickDecl {
 }
 
 impl TickDecl {
-    /// The number of ticks, with `let` constants looked up in `lets`: the
-    /// count as written, or the duration divided by dt (which must divide
-    /// it). `None` from `lets` for a constant means it is not known yet
-    /// (the parser checks literals only); that gives `Ok(None)`.
+    /// The number of cycles, with `let` constants looked up in `lets`: a
+    /// `step`'s count as written, or a `tick`'s duration divided by dt
+    /// (which must divide it). `None` from `lets` for a constant means it
+    /// is not known yet (the parser checks literals only); that gives
+    /// `Ok(None)`. A bare number under `tick` and a duration under `step`
+    /// are errors that name the other keyword.
     pub fn count<'v>(
         &'v self,
         lets: impl Fn(&str) -> Option<&'v Value>,
@@ -1281,11 +1416,27 @@ impl TickDecl {
         let Some(amount) = deref(&self.amount) else {
             return Ok(None);
         };
-        let n = match amount {
-            Value::Number(n) => n.parse::<u64>().map_err(|_| {
-                format!("`tick {}`: the tick count is a positive whole number or a duration (`tick 5min`)", self.amount)
+        let kw = self.kind.keyword();
+        let n = match (self.kind, amount) {
+            (TickKind::Tick, Value::Number(_)) => {
+                return Err(format!(
+                    "`tick` takes a duration (`tick 5s`); `step` counts program cycles. \
+                     Write `step {amount}` instead of `tick {amount}`."
+                ));
+            }
+            (TickKind::Step, Value::Unit { unit, .. }) if unit.is_time() => {
+                return Err(format!(
+                    "`step` counts program cycles; `tick` takes a duration. \
+                     Write `tick {amount}` instead of `step {amount}`."
+                ));
+            }
+            (TickKind::Step, Value::Number(n)) => n.parse::<u64>().map_err(|_| {
+                format!(
+                    "`step {}`: the count is a positive whole number",
+                    self.amount
+                )
             })?,
-            Value::Unit { unit, .. } if unit.is_time() => {
+            (TickKind::Tick, Value::Unit { unit, .. }) if unit.is_time() => {
                 let dt_secs = match &self.dt {
                     None => Cow::Borrowed("1"),
                     Some(dt) => match deref(dt) {
@@ -1303,21 +1454,27 @@ impl TickDecl {
                 whole_ratio(&total, &dt_secs).ok_or_else(|| {
                     let dt = self.dt.as_ref().map_or("1s".to_string(), |v| v.to_string());
                     format!(
-                        "`tick {}` is not a whole number of `dt {dt}` ticks. Make the duration a multiple of dt.",
+                        "`tick {}` is not a whole number of `dt {dt}` cycles. Make the duration a multiple of dt.",
                         self.amount
                     )
                 })?
             }
-            _ => {
+            (TickKind::Tick, _) => {
                 return Err(format!(
-                    "`tick {}`: a tick takes a plain tick count or a duration (`tick 90s`, `tick 5min`)",
+                    "`tick {}`: a tick takes a duration (`tick 90s`, `tick 5min`)",
+                    self.amount
+                ));
+            }
+            (TickKind::Step, _) => {
+                return Err(format!(
+                    "`step {}`: a step takes a number of program cycles (`step 3`)",
                     self.amount
                 ));
             }
         };
         if n == 0 {
             return Err(format!(
-                "`tick {}` advances nothing. Use at least 1.",
+                "`{kw} {}` advances nothing. Use at least 1.",
                 self.amount
             ));
         }
@@ -1328,7 +1485,7 @@ impl TickDecl {
 /// The error for a `dt` that is no number of seconds or duration.
 pub(crate) fn dt_error(dt: &Value) -> String {
     format!(
-        "`dt {dt}`: the tick length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
+        "`dt {dt}`: the cycle length is a number of seconds or a duration (`dt 0.1`, `dt 100ms`)"
     )
 }
 
@@ -1407,7 +1564,7 @@ impl fmt::Display for TestItem {
         match self {
             TestItem::Inject(s) => write!(f, "{} = {}{}", s.target, s.value, tail(&s.comment)),
             TestItem::Tick(t) => {
-                write!(f, "tick {}", t.amount)?;
+                write!(f, "{} {}", t.kind.keyword(), t.amount)?;
                 if let Some(dt) = &t.dt {
                     write!(f, " dt {dt}")?;
                 }
@@ -2793,13 +2950,17 @@ impl Module {
         match item {
             Item::FragmentEnd | Item::Owned(_) | Item::Gap => {}
             Item::Extern(e) => {
-                out.push_str(&format!(
-                    "extern {} = {}({}){}\n",
-                    e.slug,
-                    e.block_type,
-                    e.spec(),
-                    tail(&e.comment)
-                ));
+                let mut args = e.matcher_args();
+                args.extend(e.args.iter().cloned());
+                write_call(
+                    &format!("extern {} = {}", e.slug, e.block_type),
+                    None,
+                    &args,
+                    &e.comment,
+                    &e.close_comment,
+                    depth,
+                    out,
+                );
             }
             Item::Block(b) | Item::Instance(b) => {
                 write_call(
@@ -2827,10 +2988,22 @@ impl Module {
                 out.push_str(&format!("{} <- {}{}\n", w.to, w.from, tail(&w.comment)));
             }
             Item::ExprWire(w) => {
-                out.push_str(&format!("{} <- {}{}\n", w.to, w.expr, tail(&w.comment)));
+                out.push_str(&expr_lines(
+                    &format!("{} <- ", w.to),
+                    &w.expr,
+                    depth,
+                    "",
+                    &w.comment,
+                ));
             }
             Item::Signal(x) => {
-                out.push_str(&format!("{} = {}{}\n", x.slug, x.expr, tail(&x.comment)));
+                out.push_str(&expr_lines(
+                    &format!("{} = ", x.slug),
+                    &x.expr,
+                    depth,
+                    "",
+                    &x.comment,
+                ));
             }
             // The statements of one bulk line go back to that line.
             Item::Set(SetDecl {
@@ -3040,15 +3213,143 @@ fn write_call(
     if let Some(t) = title {
         out.push_str(&format!("\t{},\n", quote(t)));
     }
-    for arg in args {
+    for arg in printed_args(args) {
         match arg {
-            ArgItem::Binding(x) => {
-                out.push_str(&format!("\t{}: {},{}\n", x.port, x.kind, tail(&x.comment)))
-            }
-            ArgItem::Comment(text) => out.push_str(&format!("\t#{text}\n")),
+            PrintedArg::Binding {
+                port,
+                expr: Some(e),
+                comment,
+                ..
+            } => out.push_str(&expr_lines(&format!("\t{port}: "), e, depth, ",", comment)),
+            PrintedArg::Binding {
+                port,
+                value,
+                comment,
+                ..
+            } => out.push_str(&format!("\t{port}: {value},{}\n", tail(comment))),
+            PrintedArg::Comment(text) => out.push_str(&format!("\t#{text}\n")),
         }
     }
     out.push_str(&format!("){}\n", tail(close_comment)));
+}
+
+/// One argument as printed: a port with several sources is one list.
+enum PrintedArg<'a> {
+    Binding {
+        port: &'a str,
+        value: String,
+        /// The expression, when the binding is one: it may wrap.
+        expr: Option<&'a Expr>,
+        comment: &'a Option<String>,
+        short: bool,
+    },
+    Comment(&'a str),
+}
+
+/// The arguments as printed. A port bound to several sources (a
+/// repeated key, as `decompile` reads a fan-in) prints once, as a list
+/// `In1: [a, b]`, where no source carries a comment.
+fn printed_args(args: &[ArgItem]) -> Vec<PrintedArg<'_>> {
+    let listable = |b: &Binding| {
+        b.comment.is_none()
+            && b.port.starts_with(|c: char| c.is_ascii_uppercase())
+            && matches!(
+                b.kind,
+                BindingKind::Wire(_) | BindingKind::Expr(_) | BindingKind::Param(Value::Ref(_))
+            )
+    };
+    let mut taken = vec![false; args.len()];
+    let mut out = Vec::with_capacity(args.len());
+    for (i, arg) in args.iter().enumerate() {
+        if taken[i] {
+            continue;
+        }
+        let ArgItem::Binding(b) = arg else {
+            let ArgItem::Comment(text) = arg else {
+                unreachable!()
+            };
+            out.push(PrintedArg::Comment(text));
+            continue;
+        };
+        let group: Vec<&Binding> = if listable(b) {
+            args.iter()
+                .enumerate()
+                .skip(i + 1)
+                .filter_map(|(j, a)| match a {
+                    ArgItem::Binding(x) if x.port == b.port && listable(x) && !taken[j] => {
+                        taken[j] = true;
+                        Some(x)
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if group.is_empty() {
+            out.push(PrintedArg::Binding {
+                port: &b.port,
+                value: b.kind.to_string(),
+                expr: match &b.kind {
+                    BindingKind::Expr(e) => Some(e),
+                    _ => None,
+                },
+                comment: &b.comment,
+                short: is_short(&b.kind),
+            });
+        } else {
+            let sources: Vec<String> = std::iter::once(b)
+                .chain(group)
+                .map(|x| x.kind.to_string())
+                .collect();
+            out.push(PrintedArg::Binding {
+                port: &b.port,
+                value: format!("[{}]", sources.join(", ")),
+                expr: None,
+                comment: &b.comment,
+                short: false,
+            });
+        }
+    }
+    out
+}
+
+/// A statement whose value is an expression, wrapped when it runs past
+/// the line limit: the top-level `and`/`or` chain breaks before each
+/// operator, one level deeper than `prefix`'s line. `prefix` starts
+/// with the line's own tabs (the caller adds `depth` more); `suffix`
+/// follows the expression (`,` in an argument list), the comment the
+/// last line.
+fn expr_lines(
+    prefix: &str,
+    e: &Expr,
+    depth: usize,
+    suffix: &str,
+    comment: &Option<String>,
+) -> String {
+    let one = format!("{prefix}{e}{suffix}{}\n", tail(comment));
+    let tabs = prefix.chars().take_while(|c| *c == '\t').count();
+    let width = (depth + tabs) * TAB_WIDTH + one.trim_end().chars().count() - tabs;
+    if width <= MAX_LINE {
+        return one;
+    }
+    let (kw, pieces) = match e {
+        Expr::Or(..) => ("or", e.chain()),
+        Expr::And(..) => ("and", e.chain()),
+        _ => return one,
+    };
+    let indent = "\t".repeat(tabs + 1);
+    let mut out = format!("{prefix}{}\n", pieces[0]);
+    let last = pieces.len() - 1;
+    for (i, piece) in pieces.iter().enumerate().skip(1) {
+        out.push_str(&format!("{indent}{kw} {piece}"));
+        if i == last {
+            out.push_str(suffix);
+            out.push_str(&tail(comment));
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// The one-line form of a call (see [`write_call`]), when it qualifies.
@@ -3062,11 +3363,17 @@ fn inline_call(
 ) -> Option<String> {
     let mut parts: Vec<String> = title.map(quote).into_iter().collect();
     let mut short = true;
-    for arg in args {
+    for arg in printed_args(args) {
         match arg {
-            ArgItem::Binding(x) if x.comment.is_none() => {
-                parts.push(format!("{}: {}", x.port, x.kind));
-                short &= is_short(&x.kind);
+            PrintedArg::Binding {
+                port,
+                value,
+                comment: None,
+                short: s,
+                ..
+            } => {
+                parts.push(format!("{port}: {value}"));
+                short &= s;
             }
             _ => return None,
         }
@@ -3234,7 +3541,14 @@ mod tests {
         assert!(err.contains("documented in seconds"), "{err}");
         let err = scale_for_port("5", Unit::S, Some(PortUnit::Percent)).unwrap_err();
         assert!(err.contains("`5s` does not fit"), "{err}");
-        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Other("°"))).is_err());
+        assert!(scale_for_port("5", Unit::S, Some(PortUnit::Degrees)).is_err());
+        assert_eq!(
+            scale_for_port("180", Unit::Deg, Some(PortUnit::Degrees)).unwrap(),
+            "180"
+        );
+        let err = scale_for_port("180", Unit::Deg, seconds).unwrap_err();
+        assert!(err.contains("`180°` does not fit"), "{err}");
+        assert!(scale_for_port("5", Unit::Pct, Some(PortUnit::Other("mm"))).is_err());
 
         // Undocumented ports keep the default reading.
         assert_eq!(scale_for_port("45", Unit::Min, None).unwrap(), "2700");

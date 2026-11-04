@@ -1,7 +1,7 @@
+page "Logik"
+
 extern bewegung = VirtualIn(title: "Bewegung Flur")
 extern licht = VirtualOutCmd(title: "Licht Flur")
-
-page "Logik"
 
 nachlauf = OffDelay("Flurlicht Nachlauf", Trigger: bewegung.Q, Time: 2min)
 

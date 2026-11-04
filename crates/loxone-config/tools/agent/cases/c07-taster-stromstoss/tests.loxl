@@ -5,18 +5,18 @@ extern t_taster = VirtualIn(title: "Taster Flur")
 extern t_licht = VirtualOutCmd(title: "Licht Flur")
 
 test "Taster schaltet das Flurlicht um"
-	tick 2
+	step 2
 	expect t_licht.In == 0
 	t_taster.Q = 1
-	tick 1
+	step 1
 	t_taster.Q = 0
-	tick 2
+	step 2
 	expect t_licht.In == 1
-	tick 60
+	step 60
 	expect t_licht.In == 1 # bleibt an
 	t_taster.Q = 1
-	tick 1
+	step 1
 	t_taster.Q = 0
-	tick 2
+	step 2
 	expect t_licht.In == 0
 end

@@ -76,6 +76,7 @@ pub(crate) fn visit_refs(
             if let MatchSpec::Mirrors(target) = &mut e.match_spec {
                 f(target, RefUse::Object)?;
             }
+            visit_args(&mut e.args, f)?;
         }
         Item::Removed(r) => f(&mut r.slug, RefUse::LockKey)?,
         Item::Moved(m) => {
@@ -199,6 +200,7 @@ fn visit_expr(e: &mut Expr, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>
                 match o {
                     Operand::Port(p) => f(&mut p.slug, RefUse::Port(&p.port))?,
                     Operand::Value(Value::Ref(name)) => f(name, RefUse::Bare)?,
+                    Operand::Arith(x) => visit_expr(x, f)?,
                     Operand::Value(_) => {}
                 }
             }
@@ -210,6 +212,7 @@ fn visit_expr(e: &mut Expr, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>
         }
         Expr::Atom(Operand::Port(p)) => f(&mut p.slug, RefUse::Port(&p.port)),
         Expr::Atom(Operand::Value(Value::Ref(name))) => f(name, RefUse::Bare),
+        Expr::Atom(Operand::Arith(x)) => visit_expr(x, f),
         Expr::Atom(Operand::Value(_)) => Ok(()),
     }
 }
@@ -358,6 +361,7 @@ fn map_expr(
         Ok(match o {
             Operand::Port(p) => Operand::Port(map_ref(p)?),
             Operand::Value(v) => Operand::Value(map_value(v)?),
+            Operand::Arith(x) => Operand::Arith(Box::new(map_expr(x, map_ref, map_value)?)),
         })
     };
     Ok(match e {
@@ -392,6 +396,10 @@ impl Module {
     /// resolution of the result is the caller's job ([`Module::validate`])
     /// — expansion only checks what it needs.
     pub fn expand(&self) -> Result<Module> {
+        // An extern's port bindings are the statements they stand for.
+        if self.externs().any(|e| !e.args.is_empty()) {
+            return self.lowered().expand();
+        }
         let mut errors = crate::error::Errors::default();
         let mut templates: BTreeMap<&str, &TemplateDecl> = BTreeMap::new();
         for item in &self.items {
@@ -467,6 +475,8 @@ impl Module {
         errors.finish()?;
         super::defaults::apply(&mut items, &defaults);
         let mut module = Module { items };
+        // `b.In1 <- a` on a managed block is an argument of `b`.
+        module.fold_remote_bindings();
         module.resolve_names()?;
         super::hardware::lower(&mut module.items)?;
         Ok(module)

@@ -1,8 +1,8 @@
+page "Logik"
+
 extern co2 = VirtualIn(title: "CO2 Büro")
 extern fenster = VirtualIn(title: "Fenster Büro offen")
 extern lueftung = VirtualOutCmd(title: "Lüftung Büro")
-
-page "Logik"
 
 co2_hoch = Greater(In1: co2.Q, In2: 1000)
 co2_lange = OnDelay("CO2 5 Minuten hoch", Trigger: co2_hoch.Q, Time: 5min)

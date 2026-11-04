@@ -39,6 +39,8 @@ fn opts() -> CompileOptions {
 }
 
 const DEVICES: &str = r#"
+page "Regeln"
+
 http = VirtualHttpIn("Zähler", Address: "http://192.0.2.10/status", Poll: 600)
 http_power = VirtualHttpInCmd("Leistung", device: http, Check: "\"power\":\\v")
 udp = VirtualUdpIn("Kamera", Port: 45999)
@@ -52,7 +54,6 @@ mb_temp = ModbusASensor("Vorlauf", device: mb_dev, ModbusAddress: 1, ModbusPolli
 mb_alarm = ModbusSensor("Alarm", device: mb_dev, ModbusAddress: 2)
 mb_set = ModbusAActor("Sollwert", device: mb_dev, ModbusAddress: 3, In: plus.AQ)
 
-page "Regeln"
 plus = Formula(Formula: "I1+I2", In1: http_power.AQ, In2: mb_temp.Q)
 "#;
 
@@ -193,10 +194,10 @@ fn adopting_a_device_takes_its_io_and_promotes_externs() {
     let made = compile(&base(), &devices(), &mut lock, &opts()).unwrap();
     let uuid = |s: &str| lock.objects[s].uuid.clone();
     let referencing = Module::parse(
-        "extern leistung = VirtualHttpInCmd(title: \"Leistung\")\n\
+        "page \"Regeln\"\n\
+         extern leistung = VirtualHttpInCmd(title: \"Leistung\")\n\
          extern vorlauf = ModbusASensor(title: \"Vorlauf\")\n\
          extern sollwert = ModbusAActor(title: \"Sollwert\")\n\
-         page \"Regeln\"\n\
          plus = Formula(Formula: \"I1+I2\", In1: leistung.AQ, In2: vorlauf.Q)\n\
          sollwert.In <- plus.AQ\n",
     )

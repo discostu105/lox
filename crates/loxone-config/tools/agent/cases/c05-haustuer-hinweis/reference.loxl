@@ -1,7 +1,7 @@
+page "Logik"
+
 extern tuer = VirtualIn(title: "Haustür offen")
 extern hinweis = VirtualOutCmd(title: "Hinweis Haustür")
-
-page "Logik"
 
 tuer_lange_offen = OnDelay("Haustür 3 Minuten offen", Trigger: tuer.Q, Time: 3min)
 

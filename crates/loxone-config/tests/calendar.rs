@@ -68,7 +68,7 @@ fn a_minted_entry_is_shaped_like_loxone_configs() {
     let out = build(
         "ferien = CalendarEntry(\"Sommerferien\", switches: vacation, from: 2026-07-04, to: 2026-09-05)\n\
          ostern = CalendarEntry(\"Ostermontag\", easter: 1)\n\
-         frei = CalendarEntry(\"Frei\", switches: holiday, on: 05-01)\n",
+         frei = CalendarEntry(\"Frei\", switches: holiday, every: 05-01)\n",
     )
     .unwrap();
     // In the folder, after the heating period, attributes in the save's
@@ -107,19 +107,19 @@ fn a_minted_entry_is_shaped_like_loxone_configs() {
 fn a_user_mode_is_named_by_slug_or_title() {
     // A mode of the config the module does not name: its title.
     let out =
-        build("sued = CalendarEntry(\"Süd\", switches: \"Urlaub Süd\", on: 08-01)\n").unwrap();
+        build("sued = CalendarEntry(\"Süd\", switches: \"Urlaub Süd\", every: 08-01)\n").unwrap();
     assert!(out.contains("Title=\"Süd\" Nio=\"2\" WF=\"16384\" CalType=\"-1\" Month=\"8\""));
     // An extern of it: its slug.
     let out = build(
         "extern urlaub_sued = Mode(title: \"Urlaub Süd\")\n\
-         sued = CalendarEntry(\"Süd\", switches: urlaub_sued, on: 08-01)\n",
+         sued = CalendarEntry(\"Süd\", switches: urlaub_sued, every: 08-01)\n",
     )
     .unwrap();
     assert!(out.contains("CalType=\"-1\" Month=\"8\""));
     // A mode minted in the same compile: the number it gets.
     let out = build(
         "party = Mode(\"Party\")\n\
-         fest = CalendarEntry(\"Fest\", switches: party, on: 06-21)\n",
+         fest = CalendarEntry(\"Fest\", switches: party, every: 06-21)\n",
     )
     .unwrap();
     assert!(
@@ -135,12 +135,12 @@ fn a_user_mode_is_named_by_slug_or_title() {
 #[test]
 fn each_mode_has_one_spelling() {
     // The raw number: check names the day word, compile the slug or title.
-    let err = build("h = CalendarEntry(\"H\", CalType: 10, on: 01-01)\n").unwrap_err();
+    let err = build("h = CalendarEntry(\"H\", CalType: 10, every: 01-01)\n").unwrap_err();
     assert!(
         err.contains("Write `switches: heating` instead of `CalType: 10`"),
         "{err}"
     );
-    let m = Module::parse("s = CalendarEntry(\"S\", CalType: -1, on: 08-01)\n").unwrap();
+    let m = Module::parse("s = CalendarEntry(\"S\", CalType: -1, every: 08-01)\n").unwrap();
     let err = compile(&base(), &m, &mut Lockfile::new(), &opts())
         .unwrap_err()
         .to_string();
@@ -150,7 +150,7 @@ fn each_mode_has_one_spelling() {
     );
     let m = Module::parse(
         "extern urlaub_sued = Mode(title: \"Urlaub Süd\")\n\
-         s = CalendarEntry(\"S\", CalType: -1, on: 08-01)\n",
+         s = CalendarEntry(\"S\", CalType: -1, every: 08-01)\n",
     )
     .unwrap();
     let err = compile(&base(), &m, &mut Lockfile::new(), &opts())
@@ -258,7 +258,7 @@ fn an_entry_is_adopted_and_edited_from_source() {
     // Another kind of date: `Mode=` and the attributes it reads; the
     // others stay, as in a save.
     let edited =
-        Module::parse(&src.replace("\tfrom: 10-01,\n\tto: 04-30,", "\ton: 12-31,")).unwrap();
+        Module::parse(&src.replace("\tfrom: 10-01,\n\tto: 04-30,", "\tevery: 12-31,")).unwrap();
     let out = text(&compile(&base(), &edited, &mut lock.clone(), &opts()).unwrap());
     assert_eq!(
         out,
@@ -345,7 +345,7 @@ fn an_entry_whose_mode_is_gone_is_adopted_without_switches() {
             format!(
                 "e = CalendarEntry(\n\t\"E{n}\",\n\t# Its operating mode (CalType {cal_type}) is not \
                  in the config. Without `switches:` it stays; name a mode to switch that one.\n\
-                 \ton: 05-01,\n)\n"
+                 \tevery: 05-01,\n)\n"
             )
         );
         // The source checks, and compiles to the same bytes.
@@ -354,9 +354,10 @@ fn an_entry_whose_mode_is_gone_is_adopted_without_switches() {
         let same = compile(&base, &parsed, &mut lock.clone(), &opts()).unwrap();
         assert_eq!(text(&same), text(&base));
         // Pointed at a mode the config has.
-        let edited = Module::parse(
-            &src.replace("\ton: 05-01,", "\tswitches: \"Urlaub Süd\",\n\ton: 05-01,"),
-        )
+        let edited = Module::parse(&src.replace(
+            "\tevery: 05-01,",
+            "\tswitches: \"Urlaub Süd\",\n\tevery: 05-01,",
+        ))
         .unwrap();
         let out = text(&compile(&base, &edited, &mut lock, &opts()).unwrap());
         assert_eq!(
@@ -380,7 +381,7 @@ fn check_err(src: &str) -> String {
 #[test]
 fn the_stored_date_is_refused_with_the_date() {
     for (old, new) in [
-        ("Month: 12, Day: 31", "on: 12-31"),
+        ("Month: 12, Day: 31", "every: 12-31"),
         ("Mode: 1, EasterOffset: 1", "easter: 1"),
         ("Mode: 1", "easter: 0"),
         (
@@ -405,7 +406,7 @@ fn the_stored_date_is_refused_with_the_date() {
     assert!(err.contains("no day of the year"), "{err}");
     let err = check_err("h = CalendarEntry(\"H\", Mode: 4, Month: 10)\n");
     assert!(err.contains("it has no `Day`"), "{err}");
-    let err = check_err("h = CalendarEntry(\"H\", on: 01-01, WeekDayInMonth: 1)\n");
+    let err = check_err("h = CalendarEntry(\"H\", every: 01-01, WeekDayInMonth: 1)\n");
     assert!(err.contains("Leave out `WeekDayInMonth: 1`"), "{err}");
     let err = check_err("h = CalendarEntry(\"H\", WeekDayInMonth: 1)\n");
     assert!(err.contains("leave out `WeekDayInMonth: 1`"), "{err}");
@@ -421,7 +422,7 @@ fn a_date_is_one_of_four_kinds() {
             .map_err(|e| e.to_string())
     };
     for args in [
-        "on: 02-29",
+        "every: 02-29",
         "easter: 0",
         "easter: -48",
         "from: 2009-01-01, to: 2009-01-01",
@@ -431,27 +432,33 @@ fn a_date_is_one_of_four_kinds() {
     }
     for (args, msg) in [
         (
-            "on: 2026-12-24",
-            "write `from: 2026-12-24, to: 2026-12-24` instead of `on: 2026-12-24`",
+            "every: 2026-12-24",
+            "write `from: 2026-12-24, to: 2026-12-24` instead of `every: 2026-12-24`",
         ),
         (
-            "on: \"12-24\"",
-            "Write `on: 12-24` instead of `on: \"12-24\"`",
+            "every: \"12-24\"",
+            "Write `every: 12-24` instead of `every: \"12-24\"`",
         ),
-        ("on: 12-32", "is no date"),
-        ("on: 1-5", "is no date"),
-        ("on: 5", "is no date"),
+        ("every: 12-32", "is no date"),
+        ("every: 1-5", "is no date"),
+        ("every: 5", "is no date"),
         ("from: 2026-07-04", "takes both `from:` and `to:`"),
         ("from: 07-04, to: 2026-09-05", "both are dates"),
         ("from: 2008-12-31, to: 2009-01-05", "2009-01-01 or later"),
-        ("on: 01-01, easter: 1", "one date"),
+        ("every: 01-01, easter: 1", "one date"),
         ("easter: \"Montag\"", "no number of days"),
     ] {
         let e = ok(args).unwrap_err();
         assert!(e.contains(msg), "{args}: {e}");
     }
     // Only a calendar entry reads a date there.
-    assert!(build("a = And(on: 12-31)\n").is_err());
+    assert!(build("a = And(every: 12-31)\n").is_err());
+    // v2's `on:` names `every:`.
+    let e = ok("on: 12-31").unwrap_err();
+    assert!(
+        e.contains("Write `every: 12-31` instead of `on: 12-31`"),
+        "{e}"
+    );
 }
 
 #[test]
@@ -459,9 +466,10 @@ fn fmt_writes_the_stored_date_as_a_date() {
     let mut m = Module::parse_fragment(
         "a = CalendarEntry(\"A\", Mode: 1, EasterOffset: 50, Month: 5, Day: 24)\n\
          b = CalendarEntry(\"B\", Mode: 4, Month: 5, Day: 1, Month2: 9, Day2: 30, WeekDayInMonth: 1)\n\
-         c = CalendarEntry(\"C\", on: 01-06, WeekDayInMonth: 1)\n\
+         c = CalendarEntry(\"C\", every: 01-06, WeekDayInMonth: 1)\n\
          e = CalendarEntry(\"E\", WeekDayInMonth: 1)\n\
-         d = CalendarEntry(\"D\", Mode: 2, Day: 1)\n",
+         d = CalendarEntry(\"D\", Mode: 2, Day: 1)\n\
+         f = CalendarEntry(\"F\", on: 12-31)\n",
     )
     .unwrap();
     ModeSpellings::of([&m]).apply(&mut m);
@@ -471,8 +479,9 @@ fn fmt_writes_the_stored_date_as_a_date() {
         m.to_text(),
         "a = CalendarEntry(\"A\", easter: 50)\n\
          b = CalendarEntry(\"B\", from: 05-01, to: 09-30)\n\
-         c = CalendarEntry(\"C\", on: 01-06, WeekDayInMonth: 1)\n\
+         c = CalendarEntry(\"C\", every: 01-06, WeekDayInMonth: 1)\n\
          e = CalendarEntry(\"E\")\n\
-         d = CalendarEntry(\"D\", Mode: 2, Day: 1)\n"
+         d = CalendarEntry(\"D\", Mode: 2, Day: 1)\n\
+         f = CalendarEntry(\"F\", every: 12-31)\n"
     );
 }

@@ -113,6 +113,11 @@ impl Module {
     /// only undeclared names an earlier failing statement already used is
     /// skipped, so one missing declaration is reported once.
     pub fn validate(&self) -> Result<()> {
+        // An extern's port bindings are checked as the statements they
+        // stand for.
+        if self.externs().any(|e| !e.args.is_empty()) {
+            return self.lowered().validate();
+        }
         let mut errors = crate::error::Errors::default();
         let names = self.name_table(&mut errors);
         errors.check(self.check_scoped_names());
@@ -288,6 +293,7 @@ impl Module {
                     ));
                 }
                 Operand::Value(v) => self.operand_refs(names, v)?,
+                Operand::Arith(_) => {} // its leaves are listed on their own
             }
         }
         Ok(())
@@ -485,57 +491,26 @@ impl Module {
         Ok(())
     }
 
-    /// `to <- from` wires an extern port.
+    /// `to <- from` wires a port of an extern or a managed block.
     fn check_wire(&self, names: &Names, w: &WireDecl) -> Result<()> {
         object_ref(names, &w.to)?;
         object_ref(names, &w.from)?;
         not_a_signal(names, &w.to, "<- …")?;
-        if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
-            return compile_err(format!(
-                "`{to} <- {from}` targets managed block `{slug}`, but `<-` is for extern ports only. \
-                             Wire it in the argument list instead: `{port}: {from}` inside \
-                             `{slug} = {ty}(…)`",
-                to = w.to,
-                from = w.from,
-                slug = w.to.slug,
-                port = w.to.port,
-                ty = self.block_type_of(&w.to.slug),
-            ));
-        }
         Ok(())
     }
 
-    /// `to <- expression` drives an extern port.
+    /// `to <- expression` drives a port of an extern or a managed block.
     fn check_expr_wire(&self, names: &Names, w: &ExprWireDecl) -> Result<()> {
         object_ref(names, &w.to)?;
         not_a_signal(names, &w.to, "<- …")?;
-        if names.get(w.to.slug.as_str()) == Some(&NameKind::Block) {
-            return compile_err(format!(
-                "`{to} <- …` targets managed block `{slug}`, but `<-` is for extern ports only. \
-                             Wire the expression's result in the argument list instead",
-                to = w.to,
-                slug = w.to.slug,
-            ));
-        }
         self.check_expr_operands(names, &w.expr, &w.to.to_string())?;
         Ok(())
     }
 
-    /// `target.Port = value` sets an extern port.
+    /// `target.Port = value` sets a port of an extern or a managed block.
     fn check_set(&self, names: &Names, s: &SetDecl) -> Result<()> {
         object_ref(names, &s.target)?;
         not_a_signal(names, &s.target, "= …")?;
-        if names.get(s.target.slug.as_str()) == Some(&NameKind::Block) {
-            return compile_err(format!(
-                "`{target} = …` targets managed block `{slug}`, but port assignment is for extern ports only. \
-                             Bind the parameter in the argument list instead: `{port}: …` inside \
-                             `{slug} = {ty}(…)`",
-                target = s.target,
-                slug = s.target.slug,
-                port = s.target.port,
-                ty = self.block_type_of(&s.target.slug),
-            ));
-        }
         self.value_refs(names, &s.value)?;
         Ok(())
     }

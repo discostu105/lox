@@ -165,11 +165,6 @@ fn refusals_name_the_fix() {
     // The title is the label.
     let e = refusal(&format!("{dev}taster.title = \"X\"\n"));
     assert!(e.contains("label"), "{e}");
-    // A port statement goes into the argument list.
-    let e = refusal(&format!(
-        "{dev}led = TreeActor(\"LED\", device: taster, uuid: \"{LED}\")\nled.I = 1\n"
-    ));
-    assert!(e.contains("argument list"), "{e}");
     // An I/O of another device.
     let e = refusal(
         "tree = LoxTree(\"Tree\", serial: \"13000003\")\nx = TreeSensor(\"T\", device: tree, iname: \"I0\")\n",

@@ -38,7 +38,7 @@ pub(crate) const SOURCE_KEYS: &[(&str, &str)] = &[
         SWITCHES,
         "the operating mode it switches on: `heating`, a slug, a title",
     ),
-    (date::ON, "a day every year: `12-31`"),
+    (date::EVERY, "a day every year: `12-31`"),
     (date::EASTER, "days after Easter Sunday: `1`, `-2`"),
     (
         date::FROM,
