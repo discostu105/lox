@@ -274,6 +274,7 @@ extern jal_sued = AutoJalousie(title: "Beschattung Süd", AutoShade: temp_hoch a
   changes the upload would discard, byte-exact upload, restart, and a download that confirms the Miniserver
   runs the compiled file. It refuses when the rules changed in the app since the last push.
 - `lox config sync` checks that source, lock and the live config agree.
+- `lox config merge` takes over automatic rules edited in the app into the source, so the next push keeps them.
 - `lox logic lsp` is a language server for your editor.
 - `lox logic templates` ships tested templates for common automations, and `lox logic types --search` says what
   each block type is for.

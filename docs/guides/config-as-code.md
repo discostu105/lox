@@ -206,6 +206,7 @@ readable in Loxone Config.
 lox config push              # dry run: download live, drift check, compile, show the changes, stage
 lox config push --force      # … then upload, restart the program, verify, move base forward
 lox config sync              # read-only: source, lock and the Miniserver agree
+lox config merge             # take over rules edited in the app first, so the push loses nothing
 git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 ```
 
@@ -239,6 +240,11 @@ the JSON report:
 | `-o json` | A machine-readable report on stdout |
 
 {: .note }
+Automatic rules edited in the app: `lox config merge` rewrites their `rule` declarations from the live config,
+moves `base` to the download and records the change time. Commit, then push. Details:
+[COMMANDS.md › config merge](https://github.com/discostu105/lox/blob/main/COMMANDS.md#taking-over-app-edits-lox-config-merge).
+
+{: .note }
 To keep custom changes, load the project from the Miniserver in Loxone Config and save it. The live config then
 differs from your `base`: bring the project up to date as below, then push.
 
@@ -258,7 +264,8 @@ lox logic drift live.Loxone              # exit 0: in sync with the last compile
 lox config diff base.Loxone live.Loxone   # what they changed
 ```
 
-If they changed something you don't manage, point `base` in `lox.toml` at `live.Loxone` and compile again. If they
+If they changed something you don't manage, `lox config merge` takes it over: it points `base` at the download
+and compiles again (by hand: point `base` in `lox.toml` at `live.Loxone` and compile). If they
 touched a managed block, bring the module up to date first (or `lox logic adopt --uuid` a block they added).
 
 ## Tests, CI and editors
