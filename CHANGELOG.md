@@ -10,6 +10,13 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.83.0] — 2026-11-04
+
+### Added
+- **`lox config merge`** takes over what changed on the Miniserver since the base, so the next push loses nothing:
+  rules edited or deleted in the app become source, other changes the source doesn't own (a plugin added in
+  Loxone Config) stay as they are, and the download becomes the base.
+
 ## [0.82.0] — 2026-11-04 — lox logic v3, part three
 
 Templates are block types: named like one, called like a block, with declared outputs, typed value
