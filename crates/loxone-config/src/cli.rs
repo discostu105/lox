@@ -730,6 +730,24 @@ pub fn read_module(path: &str) -> Result<Module, AnyError> {
     load_module(path).map_err(|e| placed_text(&e).into())
 }
 
+/// The files of a module — one `.loxl` file, or a directory of fragments in
+/// module order — with their text, for a command that rewrites them in place
+/// (lox's `config merge`).
+pub fn module_sources(path: &std::path::Path) -> Result<Vec<(PathBuf, String)>, AnyError> {
+    let files = if path.is_dir() {
+        module_dir_files(path).map_err(|(p, e)| format!("{p}: {e}"))?
+    } else {
+        vec![path.to_path_buf()]
+    };
+    files
+        .into_iter()
+        .map(|f| {
+            let src = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+            Ok((f, src))
+        })
+        .collect()
+}
+
 /// [`read_module`] without whole-module name resolution: statement-local
 /// checks only. The incremental adopt needs this — the manual fix for a
 /// wire into a managed sink references the new block's slug *before* the

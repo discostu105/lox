@@ -206,6 +206,7 @@ readable in Loxone Config.
 lox config push              # dry run: download live, drift check, compile, show the changes, stage
 lox config push --force      # … then upload, restart the program, verify, move base forward
 lox config sync              # read-only: source, lock and the Miniserver agree
+lox config merge             # take over rules edited in the app first, so the push loses nothing
 git add -A && git commit -m "Beschattung: Süd fährt bei 28° auf 70%"
 ```
 
@@ -237,6 +238,11 @@ the JSON report:
 | `--discard-custom-changes` | Push although the Miniserver holds custom changes, deleting them |
 | `--allow-app-changes` | The rules' change time moved, and `lox autopilot changed --explain` shows no rule change |
 | `-o json` | A machine-readable report on stdout |
+
+{: .note }
+Automatic rules edited in the app: `lox config merge` rewrites their `rule` declarations from the live config,
+moves `base` to the download and records the change time. Commit, then push. Details:
+[COMMANDS.md › config merge](https://github.com/discostu105/lox/blob/main/COMMANDS.md#taking-over-app-edits-lox-config-merge).
 
 {: .note }
 To keep custom changes, load the project from the Miniserver in Loxone Config and save it. The live config then

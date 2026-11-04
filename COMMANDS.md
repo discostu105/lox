@@ -534,6 +534,7 @@ lox config push --backup-dir /tmp/push # downloads and artifacts elsewhere (defa
 lox config push --discard-custom-changes --force  # push although the Miniserver holds custom changes
 lox config push --allow-app-changes --force  # push although the rules changed since the last push
 lox config sync                        # read-only: project, lock and Miniserver agree (exit 1 if not)
+lox config merge                       # take over rules edited in the app, then push loses nothing
 ```
 
 Each step stops the push when it fails:
@@ -586,9 +587,39 @@ push writes the Automatic Designer's change time (`lox autopilot changed`) to `a
 The next `--force` refuses when the time moved, and names the `lox autopilot changed --explain` to run. A staging
 run only warns.
 
-The time also moves on any other program write, a password set in the app for example. When `--explain` shows no
-rule change, pass `--allow-app-changes`. Without `autopilot.changed` the push says so and goes ahead. On a
+To keep the rules, run `lox config merge` (below), commit, and push. The time also moves on any other program
+write, a password set in the app for example. When `--explain` shows no rule change, pass `--allow-app-changes`
+or run `lox config merge`, which records the new time. Without `autopilot.changed` the push says so and goes ahead. On a
 Miniserver without Automatic Designer the check is skipped.
+
+#### Taking over app edits: `lox config merge`
+
+```bash
+lox config merge --dry-run    # show what it would take over, write nothing
+lox config merge              # write the module, the lock, out, base and autopilot.changed
+lox config merge -o json      # JSON report on stdout
+```
+
+`lox config merge` downloads the live config (`backups/<stamp>-merge.*`) and brings the project up to date with
+the Automatic Designer rules changed in the app since the base:
+
+- A `rule` whose live version differs from the base is rewritten from the live config. Comments above it stay.
+- A rule deleted in the app loses its declaration and its lock entry.
+- A rule you also changed in the source since the base is a conflict: the merge stops and names it.
+- Live rules that no declaration owns are listed. A push keeps them as they are.
+
+It then compiles the module against the download, makes the download the new `base`, writes the lock and `out`,
+and records the rules' change time in `autopilot.changed`. Commit those files; the next push loses nothing. If the
+source has changes the Miniserver doesn't run yet, they stay, and the next push uploads them.
+
+The merge refuses, and writes nothing, when:
+
+- The live config changed in more than rules since the base. Review it with `lox logic diff`.
+- The Miniserver holds custom changes the download lacks (rules not saved to the program yet, light moods, users).
+  Load the project from the Miniserver in Loxone Config, save it, and run the merge again.
+
+`-o json` prints `{outcome, live, rules_updated: [{rule, changes}], rules_removed, rules_unmanaged, files, rebased,
+source_ahead, recorded}`; `outcome` is `in-sync`, `merged` or `planned` (dry run).
 
 #### Checking the project: `lox config sync`
 

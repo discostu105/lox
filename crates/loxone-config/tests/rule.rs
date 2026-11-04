@@ -1009,3 +1009,132 @@ fn the_container_watches_the_weather_day_and_daylight() {
     };
     assert_eq!(input(&sun), input(&out));
 }
+
+// `lox config merge`: rules edited in the app become source again.
+
+const MERGE_EXTERNS: &str = "extern pumpe = PushButton(title: \"Pumpe\")\n\
+                             extern abdeckung = PButtonT(title: \"Abdeckung\")\n\
+                             extern licht = Switch(title: \"Licht\")\n\
+                             extern pumpe_ein = AutopilotRule(title: \"Pumpe Ein\")\n";
+
+const MERGE_RULE: &str = "# Abends die Pumpe aus.\n\
+                          rule abend \"Pumpe Aus\" # im Winter aus\n\
+                          \tinactive # erst im Frühling\n\
+                          \twhen time 17:00\n\
+                          \tthen pumpe off\n\
+                          end\n";
+
+/// The module source, compiled once into `base`: the lock that pins the rule.
+fn merge_setup(base: &str) -> (Vec<(std::path::PathBuf, String)>, Lockfile) {
+    let src = format!("{MERGE_EXTERNS}\n{MERGE_RULE}");
+    let m = Module::from_fragments([Module::parse_fragment(&src).unwrap()]);
+    let mut lock = Lockfile::new();
+    let out = compile(&parse(base), &m, &mut lock, &opts()).unwrap();
+    assert_eq!(String::from_utf8(out.to_bytes()).unwrap(), base);
+    (vec![("regeln.loxl".into(), src)], lock)
+}
+
+fn merge(
+    base: &str,
+    live: &str,
+    sources: &[(std::path::PathBuf, String)],
+    lock: &Lockfile,
+) -> loxone_config::Result<loxone_config::logic::RuleMerge> {
+    loxone_config::logic::merge_rules(sources, &parse(base), &parse(live), lock, &opts())
+}
+
+#[test]
+fn merge_takes_over_a_rule_edited_in_the_app() {
+    let base = placed_fixture();
+    let (sources, lock) = merge_setup(&base);
+    // The app moved the rule to 18:30.
+    let live = base.replace(
+        &esc(r#""value":1020,"operator":1"#),
+        &esc(r#""value":1110,"operator":1"#),
+    );
+    assert_ne!(live, base);
+    let m = merge(&base, &live, &sources, &lock).unwrap();
+    assert_eq!(
+        m.updated,
+        vec![(
+            "abend".to_string(),
+            vec![
+                "- when time 17:00".to_string(),
+                "+ when time 18:30".to_string()
+            ]
+        )]
+    );
+    assert!(m.removed.is_empty());
+    assert_eq!(m.unmanaged, vec!["Pumpe Ein".to_string()]);
+    assert_eq!(String::from_utf8(m.out.clone()).unwrap(), live);
+    // Only the rule's line changes; the comments stay.
+    let (path, text) = &m.files[0];
+    assert_eq!(path.to_str(), Some("regeln.loxl"));
+    assert_eq!(
+        *text,
+        format!("{MERGE_EXTERNS}\n{MERGE_RULE}").replace("17:00", "18:30")
+    );
+    assert_eq!(m.lock.rules["abend"], RULE_OFF);
+}
+
+#[test]
+fn merge_without_a_rule_change_writes_nothing() {
+    let base = placed_fixture();
+    let (sources, lock) = merge_setup(&base);
+    let m = merge(&base, &base, &sources, &lock).unwrap();
+    assert!(m.is_empty() && m.updated.is_empty() && m.removed.is_empty());
+    assert_eq!(String::from_utf8(m.out).unwrap(), base);
+}
+
+#[test]
+fn merge_drops_a_rule_deleted_in_the_app() {
+    let base = placed_fixture();
+    let (sources, lock) = merge_setup(&base);
+    let tag = tag_of(&base, RULE_OFF);
+    let at = base.find(&tag).unwrap();
+    let end = at + base[at..].find("</C>\r\n").unwrap() + "</C>\r\n".len();
+    let start = base[..at].rfind('\n').unwrap() + 1;
+    let live = format!("{}{}", &base[..start], &base[end..]);
+    let m = merge(&base, &live, &sources, &lock).unwrap();
+    assert_eq!(m.removed, vec!["abend".to_string()]);
+    assert!(!m.files[0].1.contains("rule abend"), "{}", m.files[0].1);
+    assert!(!m.lock.rules.contains_key("abend"));
+    assert_eq!(String::from_utf8(m.out).unwrap(), live);
+}
+
+#[test]
+fn merge_refuses_other_logic_changes() {
+    let base = placed_fixture();
+    let (sources, lock) = merge_setup(&base);
+    let live = base.replace("Title=\"Licht\"", "Title=\"Lampe\"");
+    let e = merge(&base, &live, &sources, &lock)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("changed in more than rules"), "{e}");
+}
+
+#[test]
+fn merge_takes_over_a_rule_switched_on_in_the_app() {
+    let base = placed_fixture();
+    let (sources, lock) = merge_setup(&base);
+    // What the app's toggle writes: both flags, and `STA="1"` after `APC=`.
+    let off = tag_of(&base, RULE_OFF);
+    let on = off
+        .replace(
+            &esc(r#""active":false,"activeIfValid":false"#),
+            &esc(r#""active":true,"activeIfValid":true"#),
+        )
+        .replacen("\">", "\" STA=\"1\">", 1);
+    let live = base.replace(&off, &on);
+    assert!(tag_of(&live, RULE_OFF).contains("STA=\"1\""), "{live}");
+    let m = merge(&base, &live, &sources, &lock).unwrap();
+    assert_eq!(
+        m.updated,
+        vec![(
+            "abend".to_string(),
+            vec!["- inactive".to_string(), "+ active".to_string()]
+        )]
+    );
+    assert!(m.files[0].1.contains("\tactive\n"), "{}", m.files[0].1);
+    assert_eq!(String::from_utf8(m.out).unwrap(), live);
+}

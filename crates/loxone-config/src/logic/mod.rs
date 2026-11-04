@@ -49,6 +49,7 @@ mod parser;
 mod rename;
 mod resolve;
 mod rule;
+mod rule_merge;
 pub(crate) mod schedule;
 mod simtest;
 mod template;
@@ -84,6 +85,7 @@ pub use lint::{
 };
 pub use migrate::{migrate_port_names, migrate_templates, migrate_test_steps, type_name};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
+pub use rule_merge::{RuleMerge, merge_rules};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,
     plan_tests, read_results, run_tests, trace_tests,

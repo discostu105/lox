@@ -574,6 +574,27 @@ pub(crate) enum ConfigCmd {
         #[arg(default_value = ".")]
         project: String,
     },
+    /// Take over what changed on the Miniserver, so the next push loses nothing
+    ///
+    /// Downloads the live config, rewrites the `rule` declarations of rules
+    /// edited in the app (and drops the ones deleted there), makes the
+    /// download the base and records the rules' change time. Refuses while
+    /// the Miniserver holds custom changes no download carries, and when the
+    /// logic changed in more than rules, or a rule changed both in the app and
+    /// in the source. Source changes not pushed yet stay for the next push;
+    /// `--dry-run` writes nothing.
+    ///
+    /// JSON fields: `outcome` (`in-sync`, `merged`, `planned`), `live`,
+    /// `rules_updated` (`rule`, `changes`), `rules_removed`, `rules_unmanaged`,
+    /// `files`, `rebased`, `source_ahead`, `recorded`.
+    Merge {
+        /// Project directory (holds lox.toml)
+        #[arg(default_value = ".")]
+        project: String,
+        /// Where the download goes (default: PROJECT/backups)
+        #[arg(long, value_name = "DIR")]
+        backup_dir: Option<String>,
+    },
     /// Upload a config to the Miniserver via FTP (dangerous — requires --force)
     ///
     /// The ZIP goes to /prog/sps_new.zip, which the Miniserver loads on its
@@ -753,6 +774,21 @@ pub fn cmd_config(ctx: &RunContext, action: ConfigCmd) -> Result<()> {
             }
             if !report.in_sync {
                 std::process::exit(1);
+            }
+        }
+        ConfigCmd::Merge {
+            project,
+            backup_dir,
+        } => {
+            let ms = config_push::LiveMiniserver::new(Config::load()?);
+            let opts = config_push::MergeOptions {
+                project: project.into(),
+                dry_run: ctx.dry_run,
+                backup_dir: backup_dir.map(Into::into),
+            };
+            let report = config_push::merge(&ms, &opts, ctx.quiet)?;
+            if ctx.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
         ConfigCmd::Upload { file, force } => config_upload(&file, force)?,

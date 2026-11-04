@@ -575,6 +575,244 @@ pub(crate) fn push(ms: &dyn Miniserver, opts: &PushOptions, quiet: bool) -> Resu
     Ok(report)
 }
 
+pub(crate) struct MergeOptions {
+    /// The project directory (holds lox.toml).
+    pub project: PathBuf,
+    /// Show what would change and write nothing.
+    pub dry_run: bool,
+    /// Where the download goes (default: `backups/` in the project).
+    pub backup_dir: Option<PathBuf>,
+}
+
+/// A rule declaration [`merge`] rewrote from the live rule.
+#[derive(Debug, Serialize)]
+pub(crate) struct RuleUpdate {
+    pub rule: String,
+    /// What changed, as source lines (`- …`, `+ …`) or `name "a" → "b"`
+    pub changes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MergeReport {
+    /// `in-sync` (nothing to take over), `merged`, or `planned` (dry run)
+    pub outcome: &'static str,
+    /// The live config, as downloaded
+    pub live: PathBuf,
+    pub rules_updated: Vec<RuleUpdate>,
+    /// Declarations of rules deleted in the app, removed from source
+    pub rules_removed: Vec<String>,
+    /// Live rules that no declaration owns, by name; a push keeps them
+    pub rules_unmanaged: Vec<String>,
+    /// Module files rewritten
+    pub files: Vec<PathBuf>,
+    /// The download became the project's base
+    pub rebased: bool,
+    /// The source has changes of its own the Miniserver does not run yet;
+    /// the next push uploads them
+    pub source_ahead: bool,
+    /// The rules' change time recorded for the next push (unix seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded: Option<i64>,
+}
+
+/// Take over what changed on the Miniserver since the base, so that the next
+/// push loses nothing: rules edited in the app become source, the download
+/// becomes the base, and the rules' change time is recorded.
+///
+/// - Refuses while `/sys/custom` holds changes no download carries (other than
+///   the app-owned ones a push keeps anyway).
+/// - Refuses when base and live differ in more than rules, users and access.
+/// - Writes only once the module compiles to the live config byte for byte.
+pub(crate) fn merge(ms: &dyn Miniserver, opts: &MergeOptions, quiet: bool) -> Result<MergeReport> {
+    let say = |msg: &str| {
+        if !quiet {
+            eprintln!("{msg}");
+        }
+    };
+    let project_file = Project::find(&opts.project).ok_or_else(|| {
+        anyhow!(
+            "No lox.toml in {}. `lox config merge` updates a Lox Logic project: see `lox logic help`.",
+            opts.project.display()
+        )
+    })?;
+    let project = Project::load(&project_file)?;
+    check_target(ms, &project, &project_file)?;
+    let backups = opts
+        .backup_dir
+        .clone()
+        .unwrap_or_else(|| project.root.join("backups"));
+    prepare_backup_dir(&backups)?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+
+    // Read the change time before the download: a later edit moves it past
+    // the recorded one, and the next push sees that.
+    let changed = match ms.rules_changed() {
+        Ok(c) => c,
+        Err(e) => {
+            say(&format!(
+                "Warning: cannot read when the rules last changed ({e:#}); nothing recorded."
+            ));
+            None
+        }
+    };
+
+    say("Downloading the live config...");
+    let (name, live_zip) = ms.download_newest()?;
+    let live_xml = archive::extract_and_decompress(&live_zip)
+        .with_context(|| format!("Cannot extract the live config {name}"))?;
+    let live_path = backups.join(format!("{stamp}-merge.Loxone"));
+    fs::write(backups.join(format!("{stamp}-merge.zip")), &live_zip)?;
+    fs::write(&live_path, &live_xml)?;
+    let live_doc = parse(&live_xml)?;
+
+    // Custom changes are in no download: they cannot be taken over from one.
+    let files = ms.custom_changes().with_context(|| {
+        format!(
+            "Cannot check {} for custom changes, which no download carries",
+            ftp::CUSTOM_CHANGES_DIR
+        )
+    })?;
+    let mut pending = custom_changes::describe(&files, Some(&live_xml));
+    if !pending.is_empty() {
+        let mut scratch = live_doc.clone();
+        let app_owned = custom_changes::fold_app_owned(&mut scratch, &files);
+        pending.retain(|c| !app_owned.iter().any(|u| u.eq_ignore_ascii_case(&c.uuid)));
+    }
+    if !pending.is_empty() {
+        let list: String = pending
+            .iter()
+            .map(|c| format!("\n  {}", c.label()))
+            .collect();
+        bail!(
+            "The Miniserver holds {} custom change(s) that no download carries:{list}\n\
+             Load the project from the Miniserver in Loxone Config and save it, then run \
+             `lox config merge` again.",
+            pending.len()
+        );
+    }
+
+    let base_xml = fs::read(&project.base)
+        .with_context(|| format!("Cannot read the base {}", project.base.display()))?;
+    let lock = if project.lock.exists() {
+        Lockfile::load(&project.lock)?
+    } else {
+        Lockfile::new()
+    };
+    let serial = project
+        .serial
+        .clone()
+        .or_else(|| lock.target.miniserver_serial.clone())
+        .context("No serial in lox.toml and none recorded in the lockfile")?;
+    let compile_opts = CompileOptions {
+        machine: loxone_config::uuid::parse_serial(&serial)?,
+        accept_version: None,
+        mint_time_unix: chrono::Utc::now().timestamp(),
+        page_title: project.page.clone(),
+        allow_removals: false,
+        relayout: Vec::new(),
+    };
+    let sources =
+        loxone_config::cli::module_sources(&project.module).map_err(|e| anyhow!("{e}"))?;
+    let plan = loxone_config::logic::merge_rules(
+        &sources,
+        &parse(&base_xml)?,
+        &live_doc,
+        &lock,
+        &compile_opts,
+    )
+    .map_err(|e| anyhow!("{e}"))
+    .with_context(|| format!("Cannot merge {}", live_path.display()))?;
+
+    let rebased = live_xml != base_xml;
+    let lock_changes = plan.lock.to_json() != fs::read_to_string(&project.lock).unwrap_or_default();
+    let mut report = MergeReport {
+        outcome: "in-sync",
+        live: live_path.clone(),
+        rules_updated: plan
+            .updated
+            .iter()
+            .map(|(rule, changes)| RuleUpdate {
+                rule: rule.clone(),
+                changes: changes.clone(),
+            })
+            .collect(),
+        rules_removed: plan.removed.clone(),
+        rules_unmanaged: plan.unmanaged.clone(),
+        files: plan.files.iter().map(|(p, _)| p.clone()).collect(),
+        rebased,
+        source_ahead: plan.source_ahead,
+        recorded: None,
+    };
+    for u in &report.rules_updated {
+        say(&format!("rule {}:", u.rule));
+        for line in &u.changes {
+            say(&format!("  {line}"));
+        }
+    }
+    for slug in &report.rules_removed {
+        say(&format!(
+            "rule {slug}: deleted in the app, removed from source"
+        ));
+    }
+    if !report.rules_unmanaged.is_empty() {
+        say(&format!(
+            "Not in source (a push keeps them as live; `lox logic adopt` takes one over): {}",
+            report
+                .rules_unmanaged
+                .iter()
+                .map(|t| format!("{t:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let changes = !plan.is_empty() || rebased || lock_changes;
+    if opts.dry_run {
+        report.outcome = if changes { "planned" } else { "in-sync" };
+        say("Dry run: nothing written.");
+        return Ok(report);
+    }
+    if changes {
+        for (path, text) in &plan.files {
+            fs::write(path, text).with_context(|| format!("Cannot write {}", path.display()))?;
+        }
+        plan.lock.save(&project.lock)?;
+        fs::write(&project.out, &plan.out)?;
+        if rebased {
+            let src = fs::read_to_string(&project_file)?;
+            fs::write(
+                &project_file,
+                set_base(&src, &project_path(&live_path, &project.root))?,
+            )?;
+        }
+        report.outcome = "merged";
+    }
+    if let Some(t) = changed {
+        let path = project.root.join(APP_CHANGES_FILE);
+        fs::write(&path, format!("{t}\n"))
+            .with_context(|| format!("Cannot write {}", path.display()))?;
+        report.recorded = Some(t);
+    }
+    let what = match (report.outcome, rebased) {
+        ("in-sync", _) => "Nothing to take over.".to_string(),
+        (_, true) => format!(
+            "Merged. {} now points at {}.",
+            project_file.display(),
+            live_path.display()
+        ),
+        _ => "Merged.".to_string(),
+    };
+    say(&format!(
+        "{what} Recorded the rules' change time; commit the module, the lock, lox.toml and \
+         {APP_CHANGES_FILE}."
+    ));
+    if report.source_ahead {
+        say(
+            "The source has changes the Miniserver does not run yet; `lox config push` uploads them.",
+        );
+    }
+    Ok(report)
+}
+
 /// One check of [`sync`].
 #[derive(Debug, Serialize)]
 pub(crate) struct SyncCheck {
@@ -740,8 +978,9 @@ pub(crate) fn sync(ms: &dyn Miniserver, project_dir: &Path) -> Result<SyncReport
                 "app-changes",
                 false,
                 format!(
-                    "the rules changed at {}, after the last verified push ({}). See \
-                     `lox autopilot changed --explain --since {}`.",
+                    "the rules changed at {}, after the last verified push ({}). Take the \
+                     change over with `lox config merge` (see `lox autopilot changed --explain \
+                     --since {}`).",
                     local_time(changed),
                     local_time(rec),
                     project.base.display()
@@ -860,9 +1099,9 @@ fn check_app_changes(
         Some(rec) if moved => {
             let msg = format!(
                 "The Automatic Designer's rules changed on the Miniserver at {}, after the last \
-                 verified push ({}), and an upload deletes rule changes made in the app. See what \
-                 changed with `lox autopilot changed --explain --since {}`, then push with \
-                 --allow-app-changes.",
+                 verified push ({}), and an upload deletes rule changes made in the app. Take them \
+                 over with `lox config merge` (see what changed with `lox autopilot changed \
+                 --explain --since {}`), or push with --allow-app-changes to discard them.",
                 local_time(changed),
                 local_time(rec),
                 project.base.display()
@@ -1856,8 +2095,125 @@ mod tests {
         );
     }
 
-    /// A Miniserver whose app changed the base's first titled block since the
-    /// last save: one /sys/custom file. Returns it and the block's title.
+    fn merge_options(dir: &Path, dry_run: bool) -> MergeOptions {
+        MergeOptions {
+            project: dir.to_path_buf(),
+            dry_run,
+            backup_dir: None,
+        }
+    }
+
+    /// The module files of the example project with their text.
+    fn module_text(dir: &Path) -> Vec<(PathBuf, String)> {
+        loxone_config::cli::module_sources(&dir.join("pages")).unwrap()
+    }
+
+    #[test]
+    fn merge_with_nothing_to_take_over_records_the_change_time() {
+        let dir = project();
+        let ms = FakeMiniserver::new(config_zip(&base(dir.path())));
+        *ms.rules_changed.borrow_mut() = Ok(Some(2_000));
+        let toml = fs::read_to_string(dir.path().join("lox.toml")).unwrap();
+        let sources = module_text(dir.path());
+
+        let report = merge(&ms, &merge_options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "in-sync");
+        assert!(!report.rebased && report.files.is_empty());
+        assert_eq!(report.recorded, Some(2_000));
+        assert_eq!(recorded(dir.path()).as_deref(), Some("2000\n"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("lox.toml")).unwrap(),
+            toml
+        );
+        assert_eq!(module_text(dir.path()), sources);
+        // The app-changes guard lets the next push through; the example's
+        // source is still ahead of the live config, which only a push resolves.
+        let sync = sync(&ms, dir.path()).unwrap();
+        assert_eq!(failed(&sync), ["source", "drift"], "{}", sync.text());
+    }
+
+    #[test]
+    fn merge_moves_the_base_to_the_live_config() {
+        let dir = project();
+        let live = String::from_utf8(base(dir.path()))
+            .unwrap()
+            .replace("NextNote=\"1\"", "NextNote=\"2\"");
+        let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
+
+        let report = merge(&ms, &merge_options(dir.path(), false), true).unwrap();
+
+        assert_eq!(report.outcome, "merged");
+        assert!(report.rebased && report.source_ahead);
+        let toml = fs::read_to_string(dir.path().join("lox.toml")).unwrap();
+        let rel = project_path(&report.live, dir.path());
+        assert!(toml.contains(&format!("base = \"{rel}\"")), "{toml}");
+        assert_eq!(fs::read(&report.live).unwrap(), live.as_bytes());
+        // The source is ahead of the base, so the output carries the live
+        // config plus the source's own changes, ready for the next push.
+        let out = fs::read_to_string(dir.path().join("out.Loxone")).unwrap();
+        assert!(out.contains("NextNote=\"2\""), "the live change is kept");
+        let sync = sync(&ms, dir.path()).unwrap();
+        assert_eq!(failed(&sync), ["source", "drift"], "{}", sync.text());
+    }
+
+    #[test]
+    fn merge_dry_run_writes_nothing() {
+        let dir = project();
+        let live = String::from_utf8(base(dir.path()))
+            .unwrap()
+            .replace("NextNote=\"1\"", "NextNote=\"2\"");
+        let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
+        let toml = fs::read_to_string(dir.path().join("lox.toml")).unwrap();
+
+        let report = merge(&ms, &merge_options(dir.path(), true), true).unwrap();
+
+        assert_eq!(report.outcome, "planned");
+        assert_eq!(report.recorded, None);
+        assert_eq!(recorded(dir.path()), None);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("lox.toml")).unwrap(),
+            toml
+        );
+        assert!(!dir.path().join("out.Loxone").exists());
+    }
+
+    #[test]
+    fn merge_refuses_while_custom_changes_are_pending() {
+        let dir = project();
+        let (ms, title) = with_custom_change(dir.path());
+        let e = merge(&ms, &merge_options(dir.path(), false), true)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("custom change") && e.contains(&title), "{e}");
+        assert!(e.contains("Loxone Config"), "{e}");
+        assert_eq!(recorded(dir.path()), None);
+    }
+
+    #[test]
+    fn merge_refuses_logic_changed_live() {
+        let dir = project();
+        let xml = String::from_utf8(base(dir.path())).unwrap();
+        let doc = LoxoneDoc::parse(xml.as_bytes()).unwrap();
+        let obj = doc
+            .objects()
+            .into_iter()
+            .find(|o| o.block_type != "Page" && o.title.as_deref().is_some_and(|t| t.len() > 2))
+            .unwrap();
+        let title = obj.title.unwrap();
+        let live = xml.replacen(
+            &format!("Title=\"{title}\""),
+            &format!("Title=\"{title} neu\""),
+            1,
+        );
+        let ms = FakeMiniserver::new(config_zip(live.as_bytes()));
+        let e = format!(
+            "{:#}",
+            merge(&ms, &merge_options(dir.path(), false), true).unwrap_err()
+        );
+        assert!(e.contains("more than rules"), "{e}");
+    }
+
     fn with_custom_change(dir: &Path) -> (FakeMiniserver, String) {
         let xml = base(dir);
         let doc = LoxoneDoc::parse(&xml).unwrap();
