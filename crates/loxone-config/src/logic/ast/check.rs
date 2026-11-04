@@ -665,6 +665,10 @@ impl Module {
             ));
         }
         let mut seen: BTreeSet<&str> = BTreeSet::new();
+        // The label string binds `label`.
+        if call.title.is_some() {
+            seen.insert("label");
+        }
         let constant = |n: &str| self.lets().find(|l| l.name == n).map(|l| &l.value);
         for binding in call.bindings() {
             let Some(p) = t.param(&binding.port) else {
@@ -1562,7 +1566,11 @@ impl Module {
                 | RuleStmtKind::Message { .. } => then += 1,
                 RuleStmtKind::State { target, .. } => {
                     when += 1;
-                    object(target, &st.kind, "a condition watches a block")?;
+                    // An instance's output (`w.Q`) is rewritten to its body
+                    // port by the expansion, which also judges the output.
+                    if names.get(target.as_str()) != Some(&NameKind::Instance) {
+                        object(target, &st.kind, "a condition watches a block")?;
+                    }
                 }
                 RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. } => {
                     if matches!(st.kind, RuleStmtKind::Mode { .. }) {
@@ -1837,6 +1845,13 @@ fn check_template<'a>(t: &'a TemplateDecl) -> Result<()> {
     // Each output names a port of a body block, or of a nested instance.
     for o in &t.outputs {
         let head = o.port.slug.split('.').next().unwrap_or(&o.port.slug);
+        if t.body_slugs().any(|s| s == head) && o.port.slug.contains('.') {
+            return compile_err(format!(
+                "template `{}`: output `{}` names `{}`, but `{head}` is a block of the body, \
+                 not an instance",
+                t.name, o.name, o.port.slug
+            ));
+        }
         let known = t.body_slugs().any(|s| s == head) || t.body_instances().any(|b| b.slug == head);
         if !known {
             return compile_err(format!(

@@ -78,6 +78,12 @@ pub(crate) fn visit_refs(
             }
             visit_args(&mut e.args, f)?;
         }
+        // A `let` alias names a port.
+        Item::Let(l) => {
+            if let Value::Port(r) = &mut l.value {
+                port(r, f)?;
+            }
+        }
         Item::Removed(r) => f(&mut r.slug, RefUse::LockKey)?,
         Item::Moved(m) => {
             f(&mut m.from, RefUse::LockKey)?;
@@ -138,8 +144,7 @@ pub(crate) fn visit_refs(
                 }
             }
         }
-        Item::Let(_)
-        | Item::Defaults(_)
+        Item::Defaults(_)
         | Item::Template(_)
         | Item::Instance(_)
         | Item::Page(_)
@@ -511,6 +516,17 @@ impl<'m> Scopes<'m> {
         };
         let kind = |k: &mut BindingKind, pascal: bool| -> Result<()> {
             match k {
+                // `In: a.m.i`, a nested instance by its path: its first
+                // output (the lexer reads the last segment as a port).
+                BindingKind::Wire(r)
+                    if pascal && r.port.starts_with(|c: char| c.is_ascii_lowercase()) =>
+                {
+                    let name = format!("{}.{}", r.slug, r.port);
+                    if let Some(target) = self.output_target(locals, &name, "")? {
+                        *k = BindingKind::Wire(target);
+                    }
+                    Ok(())
+                }
                 BindingKind::Wire(r) => port(r),
                 BindingKind::Expr(e) => self.rewrite_expr(locals, e),
                 BindingKind::Param(Value::Ref(n)) if pascal => {
@@ -532,7 +548,30 @@ impl<'m> Scopes<'m> {
             Ok(())
         };
         match item {
-            Item::Block(b) | Item::Instance(b) => args(&mut b.args),
+            Item::Block(b) => args(&mut b.args),
+            // A nested instance's input parameter takes a source too: a
+            // bare name there may be an instance's first output.
+            Item::Instance(b) => {
+                let inputs: Vec<String> = self
+                    .templates
+                    .get(b.block_type.as_str())
+                    .map(|t| {
+                        t.params
+                            .iter()
+                            .filter(|p| matches!(p, TemplateParam::Input { .. }))
+                            .map(|p| p.name().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for arg in &mut b.args {
+                    if let ArgItem::Binding(x) = arg {
+                        let source = x.port.starts_with(|c: char| c.is_ascii_uppercase())
+                            || inputs.contains(&x.port);
+                        kind(&mut x.kind, source)?;
+                    }
+                }
+                Ok(())
+            }
             Item::Extern(e) => args(&mut e.args),
             Item::Wire(w) => {
                 port(&mut w.to)?;
@@ -753,7 +792,9 @@ impl Module {
                     let Item::Instance(call) = call else {
                         unreachable!()
                     };
-                    if let Some(x) = errors.check(self.instantiate(&scopes, t, &call, &call.slug)) {
+                    if let Some(x) =
+                        errors.check(self.instantiate(&scopes, t, &call, &call.slug, false))
+                    {
                         items.extend(x);
                     }
                 }
@@ -921,14 +962,16 @@ impl Module {
 
     /// The items of one instance: the body with every body name
     /// prefixed by `prefix` (the instance's expanded slug), the
-    /// parameters substituted. `call` is the call with its argument
-    /// references already in module scope (its outputs rewritten).
+    /// parameters substituted. `call` is the call with its outputs
+    /// rewritten; `expanded` says whether its argument names are
+    /// expanded slugs already (a nested call).
     fn instantiate(
         &self,
         scopes: &Scopes,
         t: &TemplateDecl,
         call: &BlockDecl,
         prefix: &str,
+        expanded: bool,
     ) -> Result<Vec<Item>> {
         let ctx = format!(
             "in `{} = {}(…)`",
@@ -936,6 +979,16 @@ impl Module {
             call.block_type
         );
         let fail = |m: String| Error::Compile(format!("{ctx}: {m}"));
+        // A nested call's argument names are expanded slugs already,
+        // mapped by the enclosing body; a top-level call's are source
+        // spellings to resolve.
+        let resolve = |name: &str, usage: RefUse| -> Result<String> {
+            if expanded {
+                Ok(name.to_string())
+            } else {
+                scopes.resolve(name, usage)
+            }
+        };
 
         // Bind arguments: object parameters to the passed slugs (type
         // annotation checked where the slug's declaration is visible),
@@ -987,6 +1040,11 @@ impl Module {
         }
         let constant = |n: &str| self.lets().find(|l| l.name == n).map(|l| &l.value);
         for binding in call.bindings() {
+            if binding.port == "label" && call.title.is_some() {
+                return Err(fail(
+                    "duplicate argument `label`: the label string binds it".into(),
+                ));
+            }
             let Some(p) = t.param(&binding.port) else {
                 let hint = if binding.port.starts_with(|c: char| c.is_ascii_uppercase()) {
                     format!(
@@ -1021,7 +1079,7 @@ impl Module {
                             "`{s}` is a template, not an object. Pass an extern, a block or an instance."
                         )));
                     }
-                    let s = scopes.resolve(&s, RefUse::Object)?;
+                    let s = resolve(&s, RefUse::Object)?;
                     if let Some(declared) = self.declared_type(&s).or(scopes.block_type(&s))
                         && block_type != "any"
                         && declared != block_type
@@ -1081,11 +1139,11 @@ impl Module {
                 (TemplateParam::Input { name }, _) => {
                     let fed = match &binding.kind {
                         BindingKind::Wire(r) => Fed::Wire(PortRef {
-                            slug: scopes.resolve(&r.slug, RefUse::Port(&r.port))?,
+                            slug: resolve(&r.slug, RefUse::Port(&r.port))?,
                             port: r.port.clone(),
                         }),
                         BindingKind::Param(Value::Ref(s)) if constant(s).is_none() => {
-                            Fed::Object(scopes.resolve(s, RefUse::Bare)?)
+                            Fed::Object(resolve(s, RefUse::Bare)?)
                         }
                         BindingKind::Param(v) => {
                             return Err(fail(format!(
@@ -1096,7 +1154,7 @@ impl Module {
                         BindingKind::Expr(e) => {
                             let mut e = e.clone();
                             visit_expr(&mut e, &mut |n, usage| {
-                                *n = scopes.resolve(n, usage)?;
+                                *n = resolve(n, usage)?;
                                 Ok(())
                             })?;
                             Fed::Expr(e)
@@ -1385,7 +1443,7 @@ impl Module {
                         comment: inner.comment.clone(),
                         close_comment: inner.close_comment.clone(),
                     };
-                    out.extend(self.instantiate(scopes, it, &nested, &nested.slug)?);
+                    out.extend(self.instantiate(scopes, it, &nested, &nested.slug, true)?);
                 }
                 Item::Wire(w) => out.push(Item::Wire(WireDecl {
                     to: map_ref(&w.to)?,

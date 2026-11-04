@@ -244,18 +244,30 @@ fn join_scoped(toks: Vec<Tok>) -> Vec<Tok> {
     let mut out: Vec<Tok> = Vec::with_capacity(toks.len());
     let mut i = 0;
     while i < toks.len() {
-        if lower(&toks[i])
-            && toks.get(i + 1) == Some(&Tok::Dot)
-            && toks.get(i + 2).is_some_and(lower)
-            && toks.get(i + 3) == Some(&Tok::Dot)
-            && out.last() != Some(&Tok::Dot)
-        {
-            let (Tok::Ident(a), Tok::Ident(b)) = (&toks[i], &toks[i + 2]) else {
+        // `a.b.c.Port`: every lowercase segment but the last joins, as
+        // deep as the instances nest.
+        if lower(&toks[i]) && out.last() != Some(&Tok::Dot) {
+            let Tok::Ident(first) = &toks[i] else {
                 unreachable!("guarded")
             };
-            out.push(Tok::Ident(format!("{a}.{b}")));
-            i += 3;
-            continue;
+            let mut name = first.clone();
+            let mut j = i;
+            while toks.get(j + 1) == Some(&Tok::Dot)
+                && toks.get(j + 2).is_some_and(lower)
+                && toks.get(j + 3) == Some(&Tok::Dot)
+            {
+                let Tok::Ident(next) = &toks[j + 2] else {
+                    unreachable!("guarded")
+                };
+                name.push('.');
+                name.push_str(next);
+                j += 2;
+            }
+            if j > i {
+                out.push(Tok::Ident(name));
+                i = j + 1;
+                continue;
+            }
         }
         out.push(toks[i].clone());
         i += 1;
@@ -268,7 +280,7 @@ fn join_scoped(toks: Vec<Tok>) -> Vec<Tok> {
 fn scoped(a: &str, b: &str, lineno: usize) -> Result<String> {
     Ok(format!(
         "{}.{}",
-        check_slug(a, lineno)?,
+        check_ref(a, lineno)?,
         check_slug(b, lineno)?
     ))
 }
@@ -276,7 +288,7 @@ fn scoped(a: &str, b: &str, lineno: usize) -> Result<String> {
 /// A slug or a scoped `instance.block`: a name that may be part of
 /// a reference.
 fn check_ref(s: &str, lineno: usize) -> Result<String> {
-    match s.split_once('.') {
+    match s.rsplit_once('.') {
         Some((a, b)) => scoped(a, b, lineno),
         None => check_slug(s, lineno),
     }
@@ -1335,7 +1347,7 @@ fn parse_template_head(
                     };
                     let port = match rest {
                         [Tok::Ident(p)] => PortRef {
-                            slug: check_slug(a, lineno)?,
+                            slug: check_ref(a, lineno)?,
                             port: p.clone(),
                         },
                         // `inner.block.Port`: a nested instance's block.

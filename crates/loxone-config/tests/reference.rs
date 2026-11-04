@@ -96,3 +96,63 @@ fn templates_list_and_print_the_library() {
     let (ok, _) = loxl(&["templates", "nichts"]);
     assert!(!ok);
 }
+
+#[test]
+fn types_describe_a_project_template() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("types-template");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("lox.toml"),
+        "base = \"base.Loxone\"\nmodule = \"src\"\nlock = \"lock.json\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/a.loxl"),
+        "template Takt(quelle: input, plan: schedule, label: string, dauer: duration = 1min, an: bool = on, zahl: number)\n\
+         \t# Ein Takt.\n\
+         \tm = Monoflop(\"{label}\", Trigger: quelle, Time: dauer)\n\
+         end\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_loxl"))
+        .current_dir(&dir)
+        .args(["types", "Takt"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.starts_with("Takt (template, from src)\n  Ein Takt.\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    plan               schedule  a `schedule` set by name, required\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    label              string    a quoted string, required\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    an                 bool      `on` or `off`, default on\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    zahl               number    a number like `28`, required\n"),
+        "{text}"
+    );
+    assert!(text.contains("  Outputs: none declared\n"), "{text}");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_loxl"))
+        .current_dir(&dir)
+        .args(["types", "--json", "Takt"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\"from\": \"src\""), "{text}");
+    assert!(text.contains("\"kind\": \"input\""), "{text}");
+}

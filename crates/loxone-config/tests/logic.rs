@@ -5144,3 +5144,257 @@ jal.Safety <- sued.halt.Q and melder
         "{e}"
     );
 }
+
+#[test]
+fn template_outputs_inputs_and_values_are_checked_at_the_call() {
+    let head = "\
+extern sonne = VirtualIn(iname: \"VI1\")
+extern wind = VirtualIn(iname: \"VI2\")
+extern jal = AutoJalousie(title: \"J\")
+extern regel = AutopilotRule(title: \"R\")
+let grenze = 25
+let wort = \"x\"
+
+template Waechter(quelle: input, grenze: number = 30, dauer: duration = 2min) -> (Q: alarm.Q, Lang: lang.Q)
+\talarm = AnalogThresholdTrigger(In: quelle, On: grenze, Off: 1)
+\tlang = OnDelay(Trigger: quelle and alarm, Time: dauer)
+end
+";
+    let parse = |tail: &str| Module::parse(&format!("{head}{tail}"));
+    let fails = |tail: &str, needle: &str| {
+        let err = match parse(tail) {
+            Err(e) => e.to_string(),
+            Ok(m) => match m.expand() {
+                Err(e) => e.to_string(),
+                Ok(flat) => match flat.validate() {
+                    Err(e) => e.to_string(),
+                    Ok(()) => panic!("`{tail}` passed"),
+                },
+            },
+        };
+        assert!(err.contains(needle), "`{needle}` not in: {err}");
+    };
+    // An input read by an expression must be given once, as a port.
+    fails(
+        "w = Waechter()\n",
+        "input `quelle` is not given, but an expression reads it",
+    );
+    fails(
+        "w = Waechter(quelle: [sonne, wind])\n",
+        "given several sources, but an expression reads one",
+    );
+    // An expression on an input feeds the port and the body expression.
+    parse("w = Waechter(quelle: sonne and wind)\nx = Not(In: w.Q)\n")
+        .unwrap()
+        .expand()
+        .unwrap();
+    // Values: a constant of the wrong kind, a missing required value, a
+    // port on a value, a value on an input.
+    fails(
+        "w = Waechter(quelle: sonne, grenze: wort)\n",
+        "takes a number like `28`, not a quoted string",
+    );
+    fails(
+        "w = Waechter(quelle: sonne, dauer: grenze)\n",
+        "takes a duration like `3min`",
+    );
+    fails(
+        "w = Waechter(quelle: sonne, grenze: sonne.AQ)\n",
+        "not a port or expression",
+    );
+    fails("w = Waechter(quelle: 5)\n", "takes a source");
+    fails("w = Waechter(quelle: wort)\n", "takes a source");
+    fails(
+        "template Ohne(n: number)\n\tx = Not()\nend\no = Ohne()\n",
+        "value parameter `n` must be given",
+    );
+    // Outputs: an unknown one, a lowercase one, a duplicate, a bad shape.
+    fails(
+        "w = Waechter(quelle: sonne)\nx = Not(In: w.Nix)\n",
+        "has no output `Nix`. Its outputs: Q, Lang",
+    );
+    fails(
+        "template T() -> (q: x.Q)\n\tx = Not()\nend\n",
+        "named like a port, in PascalCase",
+    );
+    fails(
+        "template T() -> (Q: x.Q, Q: x.Q)\n\tx = Not()\nend\n",
+        "duplicate output `Q`",
+    );
+    fails(
+        "template T() -> (Q: x)\n\tx = Not()\nend\n",
+        "each output names a port of the body",
+    );
+    fails(
+        "template T() -> (Q: x.y.z.Q)\n\tx = Not()\nend\n",
+        "is a block of the body, not an instance",
+    );
+    fails(
+        "template T() -> (Q: x.5)\n\tx = Not()\nend\n",
+        "expected `<block>.<Port>` after the colon",
+    );
+    fails(
+        "template T() -> x y\n\tx = Not()\nend\n",
+        "the instance's outputs",
+    );
+    fails(
+        "template T(a: input = sonne)\n\tx = Not()\nend\n",
+        "takes no default",
+    );
+    fails(
+        "template T(n: number = \"x\")\n\tx = Not()\nend\n",
+        "the default is a quoted string, not a number",
+    );
+    fails(
+        "template T(n: number = 1 2)\n\tx = Not()\nend\n",
+        "expected `n: number`",
+    );
+    fails("template Not()\n\tx = Not()\nend\n", "is a block type");
+    // A list on a template parameter that is no input.
+    fails(
+        "w = Waechter(quelle: sonne, grenze: [1, 2])\n",
+        "is a value",
+    );
+
+    // Outputs are read everywhere a port stands: a rule condition, a
+    // `let` alias, an extern binding, an expression wire and a test.
+    let m = parse(
+        "w = Waechter(quelle: sonne)\n\
+         let lang = w.Lang\n\
+         extern s2 = Switch(title: \"S\", On: w)\n\
+         jal.Safety <- w.Q and not lang\n\
+         rule regel\n\
+         \tactive\n\
+         \twhen w.Q == on\n\
+         \tthen jal up\n\
+         end\n\
+         test \"t\"\n\
+         \tsonne.Q = 40\n\
+         \tstep 2\n\
+         \texpect w.Q == 1\n\
+         \texpect w.Lang == 0\n\
+         end\n",
+    )
+    .unwrap();
+    let flat = m.expand().unwrap();
+    let text = flat.to_text();
+    assert!(
+        text.contains("On: w_alarm.Q") || text.contains("s2.On <- w_alarm.Q"),
+        "{text}"
+    );
+    assert!(text.contains("when w_alarm.Q == on"), "{text}");
+    assert!(text.contains("expect w_lang.Q == 0"), "{text}");
+    flat.desugar().unwrap();
+
+    // The text form migrates a v2 header and reports the counts.
+    let mut v2 = Module::parse_fragment(
+        "template alt(x: VirtualIn, n = 1, s = \"a\", b = on, d = 2min) -> y\n\ty = Not(In: x.Q)\nend\n",
+    )
+    .unwrap();
+    let whole = [v2.clone()];
+    loxone_config::logic::migrate_templates(&mut v2, &whole.iter().collect::<Vec<_>>());
+    assert_eq!(
+        v2.to_text(),
+        "template Alt(x: VirtualIn, n: number = 1, s: string = \"a\", b: bool = on, d: duration = 2min) -> (Q: y.Q)\n\ty = Not(In: x.Q)\nend\n"
+    );
+}
+
+#[test]
+fn nested_instances_expand_and_spell_their_blocks() {
+    let src = "\
+extern sonne = VirtualIn(iname: \"VI1\")
+extern jal = AutoJalousie(title: \"J\")
+
+template Innen(q: input, label: string) -> (Q: n.Q)
+\tn = Not(\"{label}\", In: q)
+end
+
+template Mitte(q: input) -> (Q: i.Q, Tief: i.n.Q)
+\ti = Innen(\"Mitte\", q: q)
+\tj = Innen(\"Zwei\", q: i)
+end
+
+template Aussen(q: input) -> (Q: m.Q)
+\tm = Mitte(q: q)
+\tzaehler = Counter(Trigger: m.Tief)
+end
+
+a = Aussen(q: sonne)
+b = Not(In: a.m.i.n.Q)
+c = Not(In: a.m.Tief)
+jal.Safety <- a
+removed a.m.j.n
+";
+    let m = Module::parse(src).unwrap();
+    assert_eq!(Module::parse(&m.to_text()).unwrap(), m);
+    let flat = m.expand().unwrap();
+    let slugs: Vec<&str> = flat.blocks().map(|b| b.slug.as_str()).collect();
+    assert!(slugs.contains(&"a_m_i_n"), "{slugs:?}");
+    assert!(slugs.contains(&"a_m_j_n"), "{slugs:?}");
+    assert!(slugs.contains(&"a_zaehler"), "{slugs:?}");
+    let wire = |slug: &str| {
+        flat.blocks()
+            .find(|b| b.slug == slug)
+            .unwrap()
+            .input_wires()
+            .map(|(_, r)| r.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(wire("b"), ["a_m_i_n.Q"]);
+    assert_eq!(wire("c"), ["a_m_i_n.Q"]);
+    assert_eq!(wire("a_zaehler"), ["a_m_i_n.Q"]);
+    assert_eq!(wire("a_m_j_n"), ["a_m_i_n.Q"]);
+    assert_eq!(
+        flat.blocks()
+            .find(|b| b.slug == "a_m_i_n")
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Mitte")
+    );
+    assert!(
+        flat.items
+            .iter()
+            .any(|i| matches!(i, Item::Removed(r) if r.slug == "a_m_j_n"))
+    );
+    assert_eq!(m.spelling("a_m_i_n"), "a.m.i.n");
+    assert_eq!(m.spelling("a_m"), "a_m");
+
+    let fails = |tail: &str, needle: &str| {
+        let err = match Module::parse(&format!("{src}{tail}")) {
+            Err(e) => e.to_string(),
+            Ok(m) => m.expand().unwrap_err().to_string(),
+        };
+        assert!(err.contains(needle), "`{needle}` not in: {err}");
+    };
+    fails("d = Not(In: a.m.nix.Q)\n", "has no block `nix`");
+    fails(
+        "r = InputRef(mirrors: a.m.i)\n",
+        "is a `Innen` instance inside `a`",
+    );
+    // A nested instance by its path where a port stands: its first output.
+    let deep = Module::parse(&format!("{src}d = Not(In: a.m.i)\n"))
+        .unwrap()
+        .expand()
+        .unwrap();
+    let d = deep.blocks().find(|b| b.slug == "d").unwrap().clone();
+    assert_eq!(
+        d.input_wires()
+            .map(|(_, r)| r.to_string())
+            .collect::<Vec<_>>(),
+        ["a_m_i_n.Q"]
+    );
+    fails("d = Not(In: a.m.Nix)\n", "has no output `Nix`");
+    fails(
+        "d = Not(In: a_m_i_n.Q)\n",
+        "Write `a.m.i.n.Q` instead of `a_m_i_n.Q`",
+    );
+    fails(
+        "d = Innen(q: sonne)\n",
+        "value parameter `label` must be given",
+    );
+    fails(
+        "d = Innen(\"L\", q: sonne, label: \"M\")\n",
+        "duplicate argument `label`",
+    );
+}
