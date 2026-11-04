@@ -217,11 +217,13 @@ inline expression's synthetic slug (`jal_autoshade__and1`) in a test or a second
 a declared block, so deleting the line needs `removed x`. Its top block's label is the expression text;
 `x.title = "Beschatten"` on the next line gives it another.
 
-A template instance names its blocks through the instance. `bad.Q` is the output of its primary block
-(the body's only block, or the one `template t(…) -> <block>` names), and `bad.melder.Q` of any other
-block. The lock keys are `bad_melder`; source never writes those. A `moods`, `schedule`, `tiles`, `access` or `recipients` set
-goes into a template by a set parameter: `template raum(stimmungen: moods = standard)`, called as
-`raum(stimmungen: kueche)`.
+A template is a block type made of blocks: `template Melder(quelle: input, grenze: number = 1) -> (Q:
+alarm.Q) … end`, called like a block (`bad = Melder(quelle: feuchte_bad)`). `bad.Q` is the output the
+header declares, `bad.alarm.Q` the port of a body block; the lock keys are `bad_alarm`, and source
+never writes those. A call binds parameters only: a port of the body is fed through an input
+parameter (`quelle: input`), a value through a typed one (`grenze: number`), a `moods`, `schedule`,
+`tiles`, `access` or `recipients` set through a set parameter (`stimmungen: moods = standard`, called
+as `stimmungen: kueche`).
 
 Removing a block declaration makes the next compile **fail on purpose**. When deletion is intended,
 add `removed <slug>`: it covers that one block and shows the intent in the diff. For a slug rename,
@@ -244,9 +246,8 @@ no-ops once applied. `--allow-removals` authorizes every pending removal at once
 - **Templates first.** Before building a common automation by hand, look in `loxl templates` (motion
   and staircase light, push-button, heating and humidity hysteresis, CO2 ventilation, door and water
   alarms, intrusion alarm, awning protection). `loxl templates <name> > pages/licht.loxl` copies one
-  into the module. One line calls it (`flur = bewegungslicht(bewegung: pir_flur)`), and its result is
-  the instance itself, `flur.Q`, wired to the actuator (`licht_flur.I <- flur.Q`). Sensors are read
-  at `Q`.
+  into the module. One line calls it (`flur = Bewegungslicht(bewegung: pir_flur)`), and its result is
+  its output `flur.Q`, wired to the actuator (`licht_flur.In <- flur`). Sensors are read at `Q`.
 - **Virtual and Modbus devices are blocks:** `wp = ModbusServer("WP", Address: "192.0.2.12:502")`,
   `regler = ModbusDev("Regler", device: wp)`,
   `vorlauf = ModbusASensor("Vorlauf", device: regler, ModbusAddress: 1)`. On a block, `device:` names
@@ -337,8 +338,10 @@ it only when it matches what you intended.
 | `` `Analog:` is `on` or `off` `` | a VirtualIn's `Analog:` got another value | write `Analog: on` (or drop it: digital) |
 | `` Write `X` instead of `Y` `` | an old spelling: `Analog: "true"`, `clock "07:30"`, `when date "2026-12-24"`, a calendar entry's `on: 12-31` (for `every: 12-31`), a mode by title that the module names by slug (`"Party"` for `party`), a built-in mode by title in a schedule (`"Montag"` for `mon`), a calendar entry's mode number (`CalType: 10` for `switches: heating`) or stored date (`Mode: 4, Month: 10, …` for `from: 10-01, to: 04-30`) | write what the message names (the language server offers it as a quick fix; `loxl fmt` on the module directory rewrites declared modes) |
 | `unknown day` | a schedule day that is no day word and no `Mode` of the module | fix the spelling, declare the mode (`extern x = Mode(title: "…")`), or quote its title |
-| `` Write `a.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name; `a.Q` when `b` is the primary block |
-| `has no primary block` | `a.Q` on an instance whose template has several blocks | name the block (`a.<block>.Q`), or mark one with `template t(…) -> <block>` |
+| `` Write `a.b.Q` instead of `a_b.Q` `` | an instance's block named by its lock key | write the scoped name, or the output (`a.Q`) the template declares |
+| `declares no outputs` / `has no output` | `a.Q` on an instance whose template does not declare `Q` | declare it: `template T(…) -> (Q: <block>.Q)`, or name the block (`a.<block>.Q`) |
+| `names no parameter of` | a call binds a port of the body, or misspells a parameter | declare `<name>: input` in the template and bind it there; fix the spelling |
+| `a template is named like a type` / `declares its type` / `` `-> block` declares the outputs now `` | a v2 template: lowercase name, `n = 28`, `-> block` | `loxl fmt --write` rewrites all three |
 | `` is not a `moods` set `` (or `schedule`/`tiles`) | a set parameter got a name that no set of that kind declares | declare the set, or pass one of its kind |
 | `` is on or off `` | a text-boolean attribute (`Analog:`, `Signed:`, `CloseAfterSend:`) got another value | write `on` or `off` |
 | `is not a whole number of … cycles` | `tick <duration>` that `dt` does not divide (`tick 1s dt 300ms`) | make the duration a multiple of `dt`, or write `step <n>` |

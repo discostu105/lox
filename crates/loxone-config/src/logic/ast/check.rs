@@ -629,7 +629,7 @@ impl Module {
     }
 
     /// A template instantiation: a known template, its arguments each once
-    /// and of the parameter's kind, every object parameter given.
+    /// and of the parameter's kind, every required parameter given.
     fn check_instance(&self, names: &Names, call: &BlockDecl) -> Result<()> {
         let Some(t) = self.items.iter().find_map(|i| match i {
             Item::Template(t) if t.name == call.block_type => Some(t),
@@ -648,54 +648,59 @@ impl Module {
                 name = call.block_type
             ));
         };
-        if call.title.is_some() {
+        let ctx = format!("`{} = {}(…)`", call.slug, call.block_type);
+        if call.title.is_some()
+            && !matches!(
+                t.param("label"),
+                Some(TemplateParam::Value {
+                    kind: ValueKind::Str,
+                    ..
+                })
+            )
+        {
             return compile_err(format!(
-                "`{} = {}(…)`: an instantiation takes no label string. \
-                             Titles belong on the template's blocks",
-                call.slug, call.block_type
+                "{ctx}: `{}` takes no label string. Declare `label: string` in the template \
+                 and use `{{label}}` in a block title",
+                t.name
             ));
         }
         let mut seen: BTreeSet<&str> = BTreeSet::new();
-        let body_blocks = t.body_slugs().count();
+        // The label string binds `label`.
+        if call.title.is_some() {
+            seen.insert("label");
+        }
+        let constant = |n: &str| self.lets().find(|l| l.name == n).map(|l| &l.value);
         for binding in call.bindings() {
-            let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
-                // A binding naming no parameter forwards as a port
-                // binding onto the template's primary block;
-                // like a block's feeds it may repeat, and the expanded
-                // module re-validates its refs.
-                if t.primary_block().is_some() {
-                    if let BindingKind::Param(v) = &binding.kind {
-                        self.value_refs(names, v)?;
-                    }
-                    continue;
-                }
-                let hint = crate::logic::validate::suggest(
-                    &binding.port,
-                    t.params.iter().map(|p| p.name()),
-                );
+            let Some(p) = t.param(&binding.port) else {
+                let hint = if binding.port.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    format!(
+                        ". A call binds the template's parameters only; to feed a port of the \
+                         body, declare `<name>: input` in `template {}(…)` and bind it there \
+                         (`{}: <name>`)",
+                        t.name, binding.port
+                    )
+                } else {
+                    crate::logic::validate::suggest(
+                        &binding.port,
+                        t.params.iter().map(|p| p.name()),
+                    )
+                };
                 return compile_err(format!(
-                    "`{} = {}(…)`: `{}` names no parameter of `{}`, and \
-                                 port bindings forward only to a primary block (this \
-                                 body declares {body_blocks} blocks; mark one with \
-                                 `-> <block>`){hint}",
-                    call.slug, call.block_type, binding.port, call.block_type
+                    "{ctx}: `{}` names no parameter of `{}`{hint}",
+                    binding.port, t.name
                 ));
             };
-            if !seen.insert(&binding.port) {
-                return compile_err(format!(
-                    "`{} = {}(…)`: duplicate argument `{}`",
-                    call.slug, call.block_type, binding.port
-                ));
+            // An input takes several sources, like a block's port.
+            if !seen.insert(&binding.port) && !matches!(p, TemplateParam::Input { .. }) {
+                return compile_err(format!("{ctx}: duplicate argument `{}`", binding.port));
             }
             match (p, &binding.kind) {
                 (TemplateParam::Object { .. }, BindingKind::Param(Value::Ref(_))) => {}
                 (TemplateParam::Set { name, kind, .. }, BindingKind::Param(Value::Ref(s))) => {
                     if !self.declares_set(*kind, s) {
                         return compile_err(format!(
-                            "`{} = {}(…)`: `{name}: {s}`: `{s}` is not a `{kw}` set \
+                            "{ctx}: `{name}: {s}`: `{s}` is not a `{kw}` set \
                              (declare it with `{kw} {s}` … `end`)",
-                            call.slug,
-                            call.block_type,
                             kw = kind.keyword()
                         ));
                     }
@@ -705,39 +710,72 @@ impl Module {
                     if r.port.starts_with(|c: char| c.is_ascii_lowercase()) => {}
                 (TemplateParam::Object { name, .. }, _) => {
                     return compile_err(format!(
-                        "`{} = {}(…)`: object parameter `{name}` takes an \
-                                     extern, block or instance (`{name}: <slug>`)",
-                        call.slug, call.block_type
+                        "{ctx}: object parameter `{name}` takes an extern, block or instance \
+                         (`{name}: <slug>`)"
                     ));
                 }
                 (TemplateParam::Set { name, .. }, BindingKind::Param(Value::Str(s))) => {
                     return compile_err(format!(
-                        "`{} = {}(…)`: a set parameter takes the set's bare name. \
-                         Write `{name}: {s}` instead of `{name}: \"{s}\"`.",
-                        call.slug, call.block_type
+                        "{ctx}: a set parameter takes the set's bare name. Write `{name}: {s}` \
+                         instead of `{name}: \"{s}\"`."
                     ));
                 }
                 (TemplateParam::Set { name, kind, .. }, _) => {
                     return compile_err(format!(
-                        "`{} = {}(…)`: set parameter `{name}` takes the name of a \
-                         `{}` set (`{name}: <name>`)",
-                        call.slug,
-                        call.block_type,
+                        "{ctx}: set parameter `{name}` takes the name of a `{}` set \
+                         (`{name}: <name>`)",
                         kind.keyword()
                     ));
                 }
-                (TemplateParam::Value { .. }, BindingKind::Param(v)) => {
+                (TemplateParam::Value { name, kind, .. }, BindingKind::Param(v)) => {
                     self.value_refs(names, v)?;
+                    let given = match v {
+                        Value::Ref(c) => constant(c).and_then(ValueKind::of),
+                        other => ValueKind::of(other),
+                    };
+                    if let Some(k) = given
+                        && k != *kind
+                    {
+                        return compile_err(format!(
+                            "{ctx}: `{name}: {v}`: `{name}` takes {}, not {}",
+                            kind.example(),
+                            k.example()
+                        ));
+                    }
                 }
                 (
-                    TemplateParam::Value { name, .. },
+                    TemplateParam::Value { name, kind, .. },
                     BindingKind::Wire(_) | BindingKind::Expr(_),
                 ) => {
                     return compile_err(format!(
-                        "`{} = {}(…)`: value parameter `{name}` takes a \
-                                     number, string, or constant, not a port or \
-                                     expression",
-                        call.slug, call.block_type
+                        "{ctx}: value parameter `{name}` takes {}, not a port or expression",
+                        kind.example()
+                    ));
+                }
+                (TemplateParam::Input { .. }, BindingKind::Wire(_) | BindingKind::Expr(_)) => {}
+                (TemplateParam::Input { name }, BindingKind::Param(v)) => {
+                    if let Value::Ref(n) = v
+                        && names.get(n.as_str()).is_some_and(|k| {
+                            matches!(
+                                k,
+                                NameKind::Extern
+                                    | NameKind::Block
+                                    | NameKind::Signal
+                                    | NameKind::Instance
+                            )
+                        })
+                    {
+                        continue;
+                    }
+                    if let Value::Ref(n) = v
+                        && names.get(n.as_str()).is_none()
+                    {
+                        // Judged after expansion, like any undeclared name.
+                        continue;
+                    }
+                    return compile_err(format!(
+                        "{ctx}: input `{name}` takes a source (a block, extern, `<slug>.<Port>` \
+                         or an expression), not the value `{v}`"
                     ));
                 }
             }
@@ -746,13 +784,12 @@ impl Module {
             let what = match p {
                 TemplateParam::Object { .. } => "object",
                 TemplateParam::Set { default: None, .. } => "set",
+                TemplateParam::Value { default: None, .. } => "value",
                 _ => continue,
             };
             if !seen.contains(p.name()) {
                 return compile_err(format!(
-                    "`{} = {}(…)`: {what} parameter `{}` must be given",
-                    call.slug,
-                    call.block_type,
+                    "{ctx}: {what} parameter `{}` must be given",
                     p.name()
                 ));
             }
@@ -1529,7 +1566,11 @@ impl Module {
                 | RuleStmtKind::Message { .. } => then += 1,
                 RuleStmtKind::State { target, .. } => {
                     when += 1;
-                    object(target, &st.kind, "a condition watches a block")?;
+                    // An instance's output (`w.Q`) is rewritten to its body
+                    // port by the expansion, which also judges the output.
+                    if names.get(target.as_str()) != Some(&NameKind::Instance) {
+                        object(target, &st.kind, "a condition watches a block")?;
+                    }
                 }
                 RuleStmtKind::Mode { mode, .. } | RuleStmtKind::ThenMode { mode, .. } => {
                     if matches!(st.kind, RuleStmtKind::Mode { .. }) {
@@ -1684,10 +1725,31 @@ impl Module {
     }
 }
 
-/// A template definition: parameters and body slugs share one
-/// template-local namespace; body references are resolved per
-/// instantiation, not here.
-fn check_template(t: &TemplateDecl) -> Result<()> {
+/// A template definition: named like a type, parameters and body slugs
+/// share one template-local namespace, the outputs name body ports.
+/// Body references are resolved per instantiation, not here.
+fn check_template<'a>(t: &'a TemplateDecl) -> Result<()> {
+    if !t.is_type_named() {
+        return compile_err(format!(
+            "template `{}`: a template is named like a type, in PascalCase (`{}`), and an \
+             instance is declared like a block. `loxl fmt --write` renames it.",
+            t.name,
+            crate::logic::migrate::type_name(&t.name)
+        ));
+    }
+    if crate::connectors::builtin(&t.name).is_some() {
+        return compile_err(format!(
+            "template `{}`: `{}` is a block type. Name the template differently.",
+            t.name, t.name
+        ));
+    }
+    if let Some(p) = &t.primary {
+        return compile_err(format!(
+            "template `{}`: `-> {p}` declares the outputs now: `-> (Q: {p}.Q)`. `loxl fmt \
+             --write` rewrites it.",
+            t.name
+        ));
+    }
     let mut local: BTreeSet<&str> = BTreeSet::new();
     for p in &t.params {
         if !local.insert(p.name()) {
@@ -1697,16 +1759,50 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
                 p.name()
             ));
         }
+        if let TemplateParam::Value {
+            name,
+            kind,
+            default: Some(d),
+            typed: false,
+        } = p
+        {
+            // v1's string-named set: the hint names the set parameter.
+            let claimed = t.body.iter().find_map(|i| match i {
+                Item::MoodsClaim(c) if c.moods == *name => Some(SetKind::Moods),
+                Item::ScheduleClaim(c) if c.schedule == *name => Some(SetKind::Schedule),
+                Item::TilesClaim(c) if c.tiles == *name => Some(SetKind::Tiles),
+                Item::AccessClaim(c) if c.set == *name => Some(c.right.set_kind()),
+                _ => None,
+            });
+            if let (Some(kind), Value::Str(set)) = (claimed, d) {
+                return compile_err(format!(
+                    "template `{}`: a `{kw}` set is passed by a set parameter. Write \
+                     `{name}: {kw} = {set}` instead of `{name} = \"{set}\"`.",
+                    t.name,
+                    kw = kind.keyword()
+                ));
+            }
+            return compile_err(format!(
+                "template `{}`: a value parameter declares its type: `{name}: {} = {d}` \
+                 instead of `{name} = {d}`. `loxl fmt --write` rewrites it.",
+                t.name,
+                kind.keyword()
+            ));
+        }
     }
+    let mut declare = |name: &'a str| -> Result<()> {
+        if !local.insert(name) {
+            return compile_err(format!(
+                "template `{}`: duplicate name `{name}` in the body",
+                t.name
+            ));
+        }
+        Ok(())
+    };
     for item in &t.body {
         match item {
             Item::Block(b) => {
-                if !local.insert(&b.slug) {
-                    return compile_err(format!(
-                        "template `{}`: duplicate name `{}` in the body",
-                        t.name, b.slug
-                    ));
-                }
+                declare(&b.slug)?;
                 let mut seen: BTreeSet<&str> = BTreeSet::new();
                 for binding in b.bindings() {
                     if matches!(binding.kind, BindingKind::Param(_)) && !seen.insert(&binding.port)
@@ -1719,14 +1815,9 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
                     }
                 }
             }
-            Item::Signal(x) => {
-                if !local.insert(&x.slug) {
-                    return compile_err(format!(
-                        "template `{}`: duplicate name `{}` in the body",
-                        t.name, x.slug
-                    ));
-                }
-            }
+            Item::Instance(b) => declare(&b.slug)?,
+            Item::Signal(x) => declare(&x.slug)?,
+            Item::Let(l) => declare(&l.name)?,
             Item::Wire(_)
             | Item::ExprWire(_)
             | Item::Set(_)
@@ -1745,10 +1836,32 @@ fn check_template(t: &TemplateDecl) -> Result<()> {
                         .any(|i| matches!(i, Item::Signal(x) if x.slug == a.slug)) => {}
             _ => {
                 return compile_err(format!(
-                    "template `{}`: a body holds only block declarations, named signals and their titles, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
+                    "template `{}`: a body holds only block declarations, instances, named signals and their titles, constants, wires, port assignments and comments. Move attribute assignments like `x.room = …` to the top level.",
                     t.name
                 ));
             }
+        }
+    }
+    // Each output names a port of a body block, or of a nested instance.
+    for o in &t.outputs {
+        let head = o.port.slug.split('.').next().unwrap_or(&o.port.slug);
+        if t.body_slugs().any(|s| s == head) && o.port.slug.contains('.') {
+            return compile_err(format!(
+                "template `{}`: output `{}` names `{}`, but `{head}` is a block of the body, \
+                 not an instance",
+                t.name, o.name, o.port.slug
+            ));
+        }
+        let known = t.body_slugs().any(|s| s == head) || t.body_instances().any(|b| b.slug == head);
+        if !known {
+            return compile_err(format!(
+                "template `{}`: output `{}` names `{}`, which is no block of the body. Its \
+                 blocks: {}",
+                t.name,
+                o.name,
+                o.port.slug,
+                t.body_slugs().collect::<Vec<_>>().join(", ")
+            ));
         }
     }
     Ok(())

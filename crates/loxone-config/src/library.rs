@@ -79,7 +79,7 @@ mod tests {
         for e in &entries {
             assert!(!e.description.is_empty(), "{}", e.name);
         }
-        assert_eq!(source("treppenlicht").unwrap().0, "licht");
+        assert_eq!(source("Treppenlicht").unwrap().0, "licht");
         assert_eq!(source("klima").unwrap().0, "klima");
         assert!(source("nichts").is_none());
     }

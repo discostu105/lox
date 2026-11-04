@@ -149,7 +149,7 @@ fn attribute_misuse_is_refused() {
     );
     fails(&format!("{EXTERNS}klima.title = 5s\n"), "not a unit value");
     fails(
-        "template t(x: LoxAIRDevice)\n\tx.room = \"Pool\"\nend\n",
+        "template T(x: LoxAIRDevice)\n\tx.room = \"Pool\"\nend\n",
         "to the top level",
     );
 

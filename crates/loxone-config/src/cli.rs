@@ -915,6 +915,7 @@ fn cmd_fmt(args: &[&str]) -> Result<ExitCode, AnyError> {
     for (f, (src, mut module)) in targets.iter().zip(parsed) {
         let name = f.display();
         loxone_config::logic::migrate_port_names(&mut module, &whole);
+        loxone_config::logic::migrate_templates(&mut module, &whole);
         spellings.apply(&mut module);
         let canonical = module.to_text();
         match mode {
@@ -2573,6 +2574,120 @@ fn cmd_templates(name: Option<&str>) -> Result<ExitCode, AnyError> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `loxl types <Template>`: a template of the project's module (when
+/// the working directory holds a `lox.toml`) or of the library, described
+/// like a block type: its parameters and outputs.
+fn describe_template(name: &str, json: bool) -> Result<Option<String>, AnyError> {
+    use loxone_config::logic::{Item, TemplateDecl, TemplateParam};
+    let mut found: Option<(String, TemplateDecl)> = None;
+    if let Some(f) = Project::find(Path::new(".")) {
+        let project = Project::load(&f)?;
+        let module = read_module(&project.module.to_string_lossy())?;
+        if let Some(t) = module.items.into_iter().find_map(|i| match i {
+            Item::Template(t) if t.name == name => Some(t),
+            _ => None,
+        }) {
+            found = Some((project.module.display().to_string(), t));
+        }
+    }
+    if found.is_none() {
+        for (file, source) in loxone_config::library::FILES {
+            let module = Module::parse_fragment(source)?;
+            if let Some(t) = module.items.into_iter().find_map(|i| match i {
+                Item::Template(t) if t.name == name => Some(t),
+                _ => None,
+            }) {
+                found = Some((format!("the library ({file}.loxl)"), t));
+                break;
+            }
+        }
+    }
+    let Some((origin, t)) = found else {
+        return Ok(None);
+    };
+    let description: Vec<String> = t
+        .body
+        .iter()
+        .take_while(|i| matches!(i, Item::Comment(_) | Item::Gap))
+        .filter_map(|i| match i {
+            Item::Comment(c) => Some(c.trim().to_string()),
+            _ => None,
+        })
+        .collect();
+    let what = |p: &TemplateParam| -> (String, String) {
+        match p {
+            TemplateParam::Object { block_type, .. } if block_type == "any" => (
+                "object".into(),
+                "an extern, block or instance of any type".into(),
+            ),
+            TemplateParam::Object { block_type, .. } => {
+                ("object".into(), format!("a {block_type}"))
+            }
+            TemplateParam::Input { .. } => (
+                "input".into(),
+                "a source: a block, extern, port, list or expression; open when not given".into(),
+            ),
+            TemplateParam::Value { kind, default, .. } => (
+                kind.keyword().into(),
+                match default {
+                    Some(d) => format!("{}, default {d}", kind.example()),
+                    None => format!("{}, required", kind.example()),
+                },
+            ),
+            TemplateParam::Set { kind, default, .. } => (
+                kind.keyword().into(),
+                match default {
+                    Some(d) => format!("a `{}` set by name, default {d}", kind.keyword()),
+                    None => format!("a `{}` set by name, required", kind.keyword()),
+                },
+            ),
+        }
+    };
+    if json {
+        let params: Vec<serde_json::Value> = t
+            .params
+            .iter()
+            .map(|p| {
+                let (kind, takes) = what(p);
+                serde_json::json!({"name": p.name(), "kind": kind, "takes": takes})
+            })
+            .collect();
+        let outputs: Vec<serde_json::Value> = t
+            .outputs
+            .iter()
+            .map(|o| serde_json::json!({"name": o.name, "port": o.port.to_string()}))
+            .collect();
+        let v = serde_json::json!({
+            "template": t.name,
+            "from": origin,
+            "description": description.join(" "),
+            "params": params,
+            "outputs": outputs,
+        });
+        return Ok(Some(format!("{}\n", serde_json::to_string_pretty(&v)?)));
+    }
+    let mut out = format!("{} (template, from {origin})\n", t.name);
+    for line in &description {
+        out.push_str(&format!("  {line}\n"));
+    }
+    if !t.params.is_empty() {
+        out.push_str("  Parameters:\n");
+        for p in &t.params {
+            let (kind, takes) = what(p);
+            out.push_str(&format!("    {:<18} {:<9} {takes}\n", p.name(), kind));
+        }
+    }
+    if t.outputs.is_empty() {
+        out.push_str("  Outputs: none declared\n");
+    } else {
+        out.push_str("  Outputs:\n");
+        for o in &t.outputs {
+            out.push_str(&format!("    {:<18} {}\n", o.name, o.port));
+        }
+    }
+    Ok(Some(out))
+}
+
 fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
     use loxone_config::connectors;
     let json = args.contains(&"--json");
@@ -2653,13 +2768,20 @@ fn cmd_types(args: &[&str]) -> Result<ExitCode, AnyError> {
         }
         [t] => {
             let Some(desc) = describe(t) else {
+                // A template of the project's module or of the library.
+                if let Some(text) = describe_template(t, json)? {
+                    print!("{text}");
+                    return Ok(ExitCode::SUCCESS);
+                }
                 let hint = connectors::BUILTIN_TYPES
                     .iter()
                     .find(|b| b.eq_ignore_ascii_case(t))
                     .map(|b| format!(" — did you mean `{b}`?"))
                     .unwrap_or_default();
                 return Err(format!(
-                    "`{t}` is not a builtin type{hint}. `{} types` lists them.",
+                    "`{t}` is not a builtin type or a template{hint}. `{} types` lists the \
+                     types, `{} templates` the library.",
+                    prog(),
                     prog()
                 )
                 .into());

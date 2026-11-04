@@ -312,12 +312,12 @@ fn targets_must_be_api_linked_and_of_the_addressed_type() {
 #[test]
 fn managed_and_template_targets_link_through_source_wires() {
     let api = format!("extern flex_api = ApiActor(uuid: \"{KUECHE_API}\")\n");
-    let set = "tiles t\n\ttile 4(click: \"SET(As;Tg;pulse)\", to: ost)\nend\nflex.tiles = t\n";
+    let set = "tiles t\n\ttile 4(click: \"SET(As;Tg;pulse)\", to: ost.jal)\nend\nflex.tiles = t\n";
     let template =
-        "template shade(api: ApiActor)\n\tjal = AutoJalousie(\"Ost\", OutputAPI: api.I)\nend\n";
+        "template Shade(api: ApiActor)\n\tjal = AutoJalousie(\"Ost\", OutputAPI: api.I)\nend\n";
 
     let m = module(&format!(
-        "{api}{template}\nost = shade(api: flex_api)\n\n{set}"
+        "{api}{template}\nost = Shade(api: flex_api)\n\n{set}"
     ));
     let mut lock = Lockfile::new();
     let out = compile(&base(), &m, &mut lock, &opts()).unwrap();
@@ -331,16 +331,19 @@ fn managed_and_template_targets_link_through_source_wires() {
     // The same block without its API wire cannot receive the command.
     let unlinked = template.replace(", OutputAPI: api.I", "");
     let err = compile_err(&format!(
-        "{api}{unlinked}\nost = shade(api: flex_api)\n\n{set}"
+        "{api}{unlinked}\nost = Shade(api: flex_api)\n\n{set}"
     ));
     assert!(err.contains("is not API-linked"), "{err}");
 
     // The expanded name of the block names its replacement.
     let err = parse_err(&format!(
-        "{api}{template}\nost = shade(api: flex_api)\n\n{}",
-        set.replace("to: ost)", "to: ost_jal)")
+        "{api}{template}\nost = Shade(api: flex_api)\n\n{}",
+        set.replace("to: ost.jal)", "to: ost_jal)")
     ));
-    assert!(err.contains("Write `ost` instead of `ost_jal`"), "{err}");
+    assert!(
+        err.contains("Write `ost.jal` instead of `ost_jal`"),
+        "{err}"
+    );
 }
 
 /// A second mirror of Küche's API connector on the page, distributing
@@ -532,7 +535,7 @@ fn statement_level_refusals() {
         ),
         ("flex.tiles <- jal_nord.Q\n", "never a wire"),
         (
-            "template x(d: TreeDevice)\n\ttiles t\nend\n",
+            "template X(d: TreeDevice)\n\ttiles t\nend\n",
             "declared at the top level, not inside a template body",
         ),
     ] {

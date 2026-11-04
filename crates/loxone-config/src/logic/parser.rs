@@ -244,18 +244,30 @@ fn join_scoped(toks: Vec<Tok>) -> Vec<Tok> {
     let mut out: Vec<Tok> = Vec::with_capacity(toks.len());
     let mut i = 0;
     while i < toks.len() {
-        if lower(&toks[i])
-            && toks.get(i + 1) == Some(&Tok::Dot)
-            && toks.get(i + 2).is_some_and(lower)
-            && toks.get(i + 3) == Some(&Tok::Dot)
-            && out.last() != Some(&Tok::Dot)
-        {
-            let (Tok::Ident(a), Tok::Ident(b)) = (&toks[i], &toks[i + 2]) else {
+        // `a.b.c.Port`: every lowercase segment but the last joins, as
+        // deep as the instances nest.
+        if lower(&toks[i]) && out.last() != Some(&Tok::Dot) {
+            let Tok::Ident(first) = &toks[i] else {
                 unreachable!("guarded")
             };
-            out.push(Tok::Ident(format!("{a}.{b}")));
-            i += 3;
-            continue;
+            let mut name = first.clone();
+            let mut j = i;
+            while toks.get(j + 1) == Some(&Tok::Dot)
+                && toks.get(j + 2).is_some_and(lower)
+                && toks.get(j + 3) == Some(&Tok::Dot)
+            {
+                let Tok::Ident(next) = &toks[j + 2] else {
+                    unreachable!("guarded")
+                };
+                name.push('.');
+                name.push_str(next);
+                j += 2;
+            }
+            if j > i {
+                out.push(Tok::Ident(name));
+                i = j + 1;
+                continue;
+            }
         }
         out.push(toks[i].clone());
         i += 1;
@@ -268,7 +280,7 @@ fn join_scoped(toks: Vec<Tok>) -> Vec<Tok> {
 fn scoped(a: &str, b: &str, lineno: usize) -> Result<String> {
     Ok(format!(
         "{}.{}",
-        check_slug(a, lineno)?,
+        check_ref(a, lineno)?,
         check_slug(b, lineno)?
     ))
 }
@@ -276,7 +288,7 @@ fn scoped(a: &str, b: &str, lineno: usize) -> Result<String> {
 /// A slug or a scoped `instance.block`: a name that may be part of
 /// a reference.
 fn check_ref(s: &str, lineno: usize) -> Result<String> {
-    match s.split_once('.') {
+    match s.rsplit_once('.') {
         Some((a, b)) => scoped(a, b, lineno),
         None => check_slug(s, lineno),
     }
@@ -421,9 +433,11 @@ fn finish_defaults(call: BlockDecl, lineno: usize) -> Result<DefaultsDecl> {
     })
 }
 
-/// A closed call becomes a block declaration, or a template instantiation
-/// when the callee is lowercase.
-fn finish_call(mut call: BlockDecl, in_template: bool, lineno: usize) -> Result<Item> {
+/// A closed call becomes a block declaration. A call of a template is
+/// told apart by its callee once the module's templates are known
+/// ([`Module::classify_instances`]); a v2 lowercase callee is an
+/// instance right away.
+fn finish_call(mut call: BlockDecl, _in_template: bool, lineno: usize) -> Result<Item> {
     let lower = call
         .block_type
         .chars()
@@ -442,19 +456,6 @@ fn finish_call(mut call: BlockDecl, in_template: bool, lineno: usize) -> Result<
             }
         }
         return Ok(Item::Block(call));
-    }
-    let err = |msg: String| Error::Parse { line: lineno, msg };
-    if in_template {
-        return Err(err(format!(
-            "`{} = {}(…)`: a template body cannot instantiate another template",
-            call.slug, call.block_type
-        )));
-    }
-    if call.title.is_some() {
-        return Err(err(format!(
-            "`{} = {}(…)`: an instantiation takes no label string. Put titles on the template's blocks.",
-            call.slug, call.block_type
-        )));
     }
     Ok(Item::Instance(call))
 }
@@ -534,13 +535,16 @@ pub fn parse(src: &str) -> Result<Module> {
     }
     let module = errors.check(parser.finish(src.lines().count()));
     errors.finish()?;
-    Ok(module.expect("no errors"))
+    let mut module = module.expect("no errors");
+    module.classify_instances();
+    Ok(module)
 }
 
 /// Whether `next` continues the statement on `line`: the line ends with
 /// an operator or `<-`, or opens a parenthesized expression (`= (`,
 /// `<- (`, `: (` — not a call, whose `(` follows a name) that is still
-/// open, or the next line starts with `and`/`or` and goes on.
+/// open, or the next line starts with `and`/`or` and goes on, or with a
+/// template header's `->`.
 fn continues(line: &[Tok], next: &[Tok]) -> bool {
     if line.is_empty() || next.is_empty() {
         return false;
@@ -550,6 +554,11 @@ fn continues(line: &[Tok], next: &[Tok]) -> bool {
         && next.len() >= 2
         && !matches!(next[1], Tok::Eq | Tok::Dot | Tok::LArrow)
     {
+        return true;
+    }
+    // A template's outputs on a line of their own: `-> (Q: …)` under
+    // a header that closed its parameter list.
+    if next[0] == Tok::Arrow && matches!(line.first(), Some(Tok::Ident(kw)) if kw == "template") {
         return true;
     }
     let last = line.last().expect("non-empty");
@@ -1003,8 +1012,7 @@ impl Parser {
         if let Tok::Ident(kw) = &toks[0]
             && (matches!(
                 kw.as_str(),
-                "let"
-                    | "extern"
+                "extern"
                     | "removed"
                     | "moved"
                     | "page"
@@ -1132,8 +1140,8 @@ impl Parser {
                 ));
             }
             Tok::Ident(kw) if kw == "let" => {
-                self.items
-                    .push(Item::Let(parse_let(toks, comment, lineno)?));
+                let item = Item::Let(parse_let(toks, comment, lineno)?);
+                sink(&mut self.open_template, &mut self.items).push(item);
             }
             Tok::Ident(kw) if kw == "extern" => {
                 let [
@@ -1310,25 +1318,87 @@ fn parse_template_head(
     lineno: usize,
 ) -> Result<TemplateDecl> {
     let err = |msg: String| Error::Parse { line: lineno, msg };
-    let (toks, primary) = match toks {
-        [head @ .., Tok::RParen, Tok::Arrow, Tok::Ident(block)] => {
-            let mut head = head.to_vec();
-            head.push(Tok::RParen);
-            (head, Some(check_slug(block, lineno)?))
-        }
-        [.., Tok::Arrow] | [.., Tok::Arrow, _] => {
-            return Err(err(
-                "expected `-> <block>` after the parameter list: the body block \
-                 `<instance>.<Port>` means"
-                    .into(),
-            ));
-        }
-        _ => (toks.to_vec(), None),
+    // `-> (Q: block.Q, …)` declares the outputs; v2's `-> block` parses
+    // for `fmt --write` to rewrite.
+    let arrow = toks.iter().rposition(|t| *t == Tok::Arrow);
+    let (toks, primary, outputs) = match arrow {
+        Some(at) => match &toks[at + 1..] {
+            [Tok::Ident(block)] => (
+                toks[..at].to_vec(),
+                Some(check_slug(block, lineno)?),
+                vec![],
+            ),
+            [Tok::LParen, list @ .., Tok::RParen] if !list.is_empty() => {
+                let mut outputs = Vec::new();
+                for out in list.split(|t| *t == Tok::Comma) {
+                    let [
+                        Tok::Ident(name),
+                        Tok::Colon,
+                        Tok::Ident(a),
+                        Tok::Dot,
+                        rest @ ..,
+                    ] = out
+                    else {
+                        return Err(err(
+                            "expected `-> (<Name>: <block>.<Port>, …)`: each output names a \
+                             port of the body"
+                                .into(),
+                        ));
+                    };
+                    let port = match rest {
+                        [Tok::Ident(p)] => PortRef {
+                            slug: check_ref(a, lineno)?,
+                            port: p.clone(),
+                        },
+                        // `inner.block.Port`: a nested instance's block.
+                        [Tok::Ident(b), Tok::Dot, Tok::Ident(p)] => PortRef {
+                            slug: scoped(a, b, lineno)?,
+                            port: p.clone(),
+                        },
+                        _ => {
+                            return Err(err(format!(
+                                "output `{name}`: expected `<block>.<Port>` after the colon"
+                            )));
+                        }
+                    };
+                    if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                        return Err(err(format!(
+                            "output `{name}` is named like a port, in PascalCase (`Q`, `Alarm`)"
+                        )));
+                    }
+                    if outputs.iter().any(|o: &TemplateOutput| o.name == *name) {
+                        return Err(err(format!("duplicate output `{name}`")));
+                    }
+                    outputs.push(TemplateOutput {
+                        name: name.clone(),
+                        port,
+                    });
+                }
+                (toks[..at].to_vec(), None, outputs)
+            }
+            _ => {
+                return Err(err(
+                    "expected `-> (<Name>: <block>.<Port>, …)` after the parameter list: the \
+                     instance's outputs"
+                        .into(),
+                ));
+            }
+        },
+        None => (toks.to_vec(), None, vec![]),
     };
     let [_, Tok::Ident(name), Tok::LParen, rest @ .., Tok::RParen] = toks.as_slice() else {
         return Err(err(
-            "expected `template <name>(<param>: <Type> | <param> = <literal>, …)`".into(),
+            "expected `template <Name>(<param>: <Type> | <param>: number|duration|string|bool \
+             [= <literal>] | <param>: input, …)`"
+                .into(),
         ));
+    };
+    // A template is named like a type. A v2 lowercase name parses, so
+    // `fmt --write` can rename it; validation refuses it.
+    let name = if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        check_type(name, lineno)?
+    } else {
+        check_slug(name, lineno)?
     };
     let mut params = Vec::new();
     if !rest.is_empty() {
@@ -1359,6 +1429,54 @@ fn parse_template_head(
                         default,
                     });
                 }
+                // `n: input` — a source the instance feeds in.
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(kind)] if kind == "input" => {
+                    params.push(TemplateParam::Input {
+                        name: check_slug(n, lineno)?,
+                    });
+                }
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(kind), Tok::Eq, ..] if kind == "input" => {
+                    return Err(err(format!(
+                        "`{n}: input` takes no default: an input the instance does not give \
+                         stays open"
+                    )));
+                }
+                // `n: number = 28`, `n: duration` — a typed value.
+                [Tok::Ident(n), Tok::Colon, Tok::Ident(kind), tail @ ..]
+                    if ValueKind::parse(kind).is_some() =>
+                {
+                    let kind = ValueKind::parse(kind).expect("guarded");
+                    let default = match tail {
+                        [] => None,
+                        [Tok::Eq, v] => {
+                            let v = value_of(v, lineno)?;
+                            if let Some(k) = ValueKind::of(&v)
+                                && k != kind
+                            {
+                                return Err(err(format!(
+                                    "`{n}: {} = {v}`: the default is {}, not {}",
+                                    kind.keyword(),
+                                    k.example(),
+                                    kind.example()
+                                )));
+                            }
+                            Some(v)
+                        }
+                        _ => {
+                            return Err(err(format!(
+                                "expected `{n}: {}` or `{n}: {} = <literal>`",
+                                kind.keyword(),
+                                kind.keyword()
+                            )));
+                        }
+                    };
+                    params.push(TemplateParam::Value {
+                        name: check_slug(n, lineno)?,
+                        kind,
+                        default,
+                        typed: true,
+                    });
+                }
                 [Tok::Ident(n), Tok::Colon, Tok::Ident(ty)] => {
                     params.push(TemplateParam::Object {
                         name: check_slug(n, lineno)?,
@@ -1376,22 +1494,27 @@ fn parse_template_head(
                          every call (only set parameters, `{n}: moods = <name>`, have one)"
                     )));
                 }
+                // v2's `n = 28`: the type is the default's. Validation
+                // refuses the form; `fmt --write` writes `n: number = 28`.
                 [Tok::Ident(n), Tok::Eq, v]
                     if matches!(v, Tok::Num(_) | Tok::UnitNum(..) | Tok::Str(_))
                         || matches!(v, Tok::Ident(b) if b == "on" || b == "off") =>
                 {
+                    let default = value_of(v, lineno)?;
                     params.push(TemplateParam::Value {
                         name: check_slug(n, lineno)?,
-                        default: value_of(v, lineno)?,
+                        kind: ValueKind::of(&default).expect("a literal"),
+                        default: Some(default),
+                        typed: false,
                     });
                 }
                 [] => return Err(err("expected a parameter between the commas".into())),
                 _ => {
                     return Err(err(format!(
                         "expected `<name>: <Type>` (object parameter), \
-                         `<name>: {} [= <set>]` (set parameter) or \
-                         `<name> = <literal>` (value parameter with default: a \
-                         number, `on`/`off` or a quoted string)",
+                         `<name>: number|duration|string|bool [= <literal>]` (value parameter), \
+                         `<name>: input` (a source the instance feeds in) or \
+                         `<name>: {} [= <set>]` (set parameter)",
                         SetKind::choices()
                     )));
                 }
@@ -1399,8 +1522,9 @@ fn parse_template_head(
         }
     }
     Ok(TemplateDecl {
-        name: check_slug(name, lineno)?,
+        name,
         params,
+        outputs,
         primary,
         body: Vec::new(),
         comment,
@@ -3466,7 +3590,7 @@ jal.TargetPos = 70
             .unwrap()
             .to_text();
         assert_eq!(top, format!("{call}\n"));
-        let body = format!("template t()\n\t{call}\nend\n");
+        let body = format!("template T()\n\t{call}\nend\n");
         let text = Module::parse_fragment(&body).unwrap().to_text();
         assert!(text.contains("\tg = And(\n\t\t\"lll"), "{text}");
         assert_eq!(Module::parse_fragment(&text).unwrap().to_text(), text);
@@ -3589,8 +3713,10 @@ sonne.Qm = 30 # override
         assert_eq!(ge.title.as_deref(), Some("a.AQ >= 1.5h"));
         let (_, v) = ge.params().next().unwrap();
         assert_eq!(plain.resolve_value(v).unwrap(), "5400");
-        Module::parse("template t(x: VirtualIn, zeit = 5min)\n\ty = Monoflop(Time: zeit)\nend\n")
-            .unwrap();
+        Module::parse(
+            "template T(x: VirtualIn, zeit: duration = 5min)\n\ty = Monoflop(Time: zeit)\nend\n",
+        )
+        .unwrap();
 
         // Unknown or malformed units are refused at parse time.
         let e = Module::parse("t = Monoflop(Time: 5x)\n").unwrap_err();
@@ -3785,7 +3911,7 @@ sonne.Qm = 30 # override
         let e = Module::parse("page Regeln\n").unwrap_err();
         assert!(e.to_string().contains("page \"<Title>\""), "{e}");
         // Placement is per-module, not per-template.
-        let e = Module::parse("template t(a: VirtualIn)\n\tpage \"X\"\nend\n").unwrap_err();
+        let e = Module::parse("template T(a: VirtualIn)\n\tpage \"X\"\nend\n").unwrap_err();
         assert!(
             e.to_string().contains("not allowed inside a template"),
             "{e}"
@@ -3839,7 +3965,7 @@ sonne.Qm = 30 # override
         );
         assert!(Module::parse_fragment("f = Formula(Formula: \"true\")\n").is_ok());
         // Template value parameters take on/off as defaults.
-        let src = "template t(an = on)\n\tg = And(In1: x.Q, In2: an)\nend\n";
+        let src = "template T(an: bool = on) -> (Q: g.Q)\n\tg = And(In1: x.Q, In2: an)\nend\n";
         assert_eq!(Module::parse_fragment(src).unwrap().to_text(), src);
     }
 

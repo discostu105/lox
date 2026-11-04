@@ -41,9 +41,10 @@ what you changed.
 
 ## What the language covers
 
-- **Templates.** `template fassade(jalousie: AutoJalousie, pos = 70) … end` declares a body once;
-  `sued = fassade(jalousie: jal_sued)` creates it per facade. Each instance keeps stable identities,
-  and source names its blocks through it (`sued.hoch.Q`, `sued.Q` for its primary block).
+- **Templates.** `template Fassade(jalousie: AutoJalousie, pos: number = 70) -> (Q: beschatten.Q) … end`
+  declares a block type made of blocks; `sued = Fassade(jalousie: jal_sued)` creates it per facade.
+  Each instance keeps stable identities, and source reads its outputs (`sued.Q`) and names its blocks
+  through it (`sued.hoch.Q`).
 - **Expressions.** `AutoShade: sonne and aussentemp >= temp_schwelle` compiles into gate and
   comparator blocks, each labeled with its sub-expression. Arithmetic such as `verbrauch.AQ / 1000`
   or `verbrauch.AQ / 1000 >= 1.5` becomes one `Formula` block.

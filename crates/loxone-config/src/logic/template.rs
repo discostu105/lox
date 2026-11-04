@@ -78,6 +78,12 @@ pub(crate) fn visit_refs(
             }
             visit_args(&mut e.args, f)?;
         }
+        // A `let` alias names a port.
+        Item::Let(l) => {
+            if let Value::Port(r) = &mut l.value {
+                port(r, f)?;
+            }
+        }
         Item::Removed(r) => f(&mut r.slug, RefUse::LockKey)?,
         Item::Moved(m) => {
             f(&mut m.from, RefUse::LockKey)?;
@@ -138,8 +144,7 @@ pub(crate) fn visit_refs(
                 }
             }
         }
-        Item::Let(_)
-        | Item::Defaults(_)
+        Item::Defaults(_)
         | Item::Template(_)
         | Item::Instance(_)
         | Item::Page(_)
@@ -217,13 +222,31 @@ fn visit_expr(e: &mut Expr, f: &mut dyn FnMut(&mut String, RefUse) -> Result<()>
     }
 }
 
-/// The module's template instances, for resolving scoped names.
-struct Scopes<'m> {
-    /// Instance slug → its template.
+/// The names of a template body being expanded: its nested instances,
+/// and every name the body declares itself (blocks, signals, constants,
+/// parameters), which shadows a module name of the same spelling.
+#[derive(Default)]
+struct Local<'m> {
     instances: BTreeMap<&'m str, &'m TemplateDecl>,
-    /// Expanded slug `<instance>_<block>` → (instance, block): the
-    /// spelling source may no longer use.
-    expanded: BTreeMap<String, (&'m str, &'m str)>,
+    shadowed: std::collections::BTreeSet<&'m str>,
+}
+
+/// What an expanded slug stands for: the spelled instance path
+/// (`a`, `a.inner`), the body block, and its type when it is a block.
+struct Expanded<'m> {
+    path: String,
+    block: &'m str,
+    block_type: Option<&'m str>,
+}
+
+/// The module's templates and instances, for resolving scoped names.
+struct Scopes<'m> {
+    templates: BTreeMap<&'m str, &'m TemplateDecl>,
+    /// Top-level instance slug → its template.
+    instances: BTreeMap<&'m str, &'m TemplateDecl>,
+    /// Expanded slug `<instance>_<block>` (nested: `<a>_<inner>_<block>`)
+    /// → what it stands for: the spelling source may no longer use.
+    expanded: BTreeMap<String, Expanded<'m>>,
 }
 
 impl<'m> Scopes<'m> {
@@ -238,35 +261,144 @@ impl<'m> Scopes<'m> {
             .collect();
         let mut instances = BTreeMap::new();
         let mut expanded = BTreeMap::new();
+        fn register<'m>(
+            prefix: &str,
+            path: &str,
+            t: &'m TemplateDecl,
+            templates: &BTreeMap<&'m str, &'m TemplateDecl>,
+            expanded: &mut BTreeMap<String, Expanded<'m>>,
+            depth: usize,
+        ) {
+            if depth > 8 {
+                return;
+            }
+            for item in &t.body {
+                match item {
+                    Item::Block(b) => {
+                        expanded.insert(
+                            format!("{prefix}_{}", b.slug),
+                            Expanded {
+                                path: path.to_string(),
+                                block: &b.slug,
+                                block_type: Some(&b.block_type),
+                            },
+                        );
+                    }
+                    Item::Signal(x) => {
+                        expanded.insert(
+                            format!("{prefix}_{}", x.slug),
+                            Expanded {
+                                path: path.to_string(),
+                                block: &x.slug,
+                                block_type: None,
+                            },
+                        );
+                    }
+                    Item::Instance(inner) => {
+                        if let Some(it) = templates.get(inner.block_type.as_str()) {
+                            register(
+                                &format!("{prefix}_{}", inner.slug),
+                                &format!("{path}.{}", inner.slug),
+                                it,
+                                templates,
+                                expanded,
+                                depth + 1,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         for item in &module.items {
             if let Item::Instance(call) = item
                 && let Some(t) = templates.get(call.block_type.as_str())
             {
                 instances.insert(call.slug.as_str(), *t);
-                for b in t.body_slugs() {
-                    expanded.insert(format!("{}_{b}", call.slug), (call.slug.as_str(), b));
-                }
+                register(&call.slug, &call.slug, t, &templates, &mut expanded, 0);
             }
         }
         Scopes {
+            templates,
             instances,
             expanded,
         }
     }
 
-    /// How source writes `instance_block`: `instance` for the primary
-    /// block, `instance.block` otherwise.
-    fn spelling(&self, instance: &str, block: &str) -> String {
-        let t = self.instances[instance];
-        if t.primary_block() == Some(block) {
-            instance.to_string()
-        } else {
-            format!("{instance}.{block}")
+    /// How source writes an expanded block: `instance.block`, or
+    /// `a.inner.block` for a block of a nested instance.
+    fn spelling(&self, path: &str, block: &str) -> String {
+        format!("{path}.{block}")
+    }
+
+    /// The template at the end of an instance path (`a`, `a.inner`),
+    /// `locals` naming the instances of the template body being
+    /// expanded. `None` when the path names no instance.
+    fn template_at(&self, locals: &Local<'m>, path: &str) -> Option<&'m TemplateDecl> {
+        let mut parts = path.split('.');
+        let first = parts.next()?;
+        let mut t = match locals.instances.get(first) {
+            Some(t) => *t,
+            None if locals.shadowed.contains(first) => return None,
+            None => *self.instances.get(first)?,
+        };
+        for part in parts {
+            let inner = t.body_instances().find(|b| b.slug == part)?;
+            t = self.templates.get(inner.block_type.as_str())?;
         }
+        Some(t)
+    }
+
+    /// The body port an instance's output stands for: `a.Q` is the
+    /// output `Q` of `a`'s template, written back to `a.<block>.<Port>`;
+    /// an empty port is the first output. `None` when `path` names no
+    /// instance (a block, an extern, a constant).
+    fn output_target(&self, locals: &Local<'m>, path: &str, port: &str) -> Result<Option<PortRef>> {
+        let Some(t) = self.template_at(locals, path) else {
+            return Ok(None);
+        };
+        let out = if port.is_empty() {
+            t.outputs.first().ok_or_else(|| {
+                Error::Compile(format!(
+                    "`{path}` is a `{}` instance, and that template declares no outputs. \
+                     Declare them: `template {}(…) -> (Q: <block>.Q)`",
+                    t.name, t.name
+                ))
+            })?
+        } else if port.starts_with(|c: char| c.is_ascii_lowercase()) {
+            // `a.block`: a block of the instance, not an output.
+            return Ok(None);
+        } else {
+            t.output(port).ok_or_else(|| {
+                let outputs: Vec<&str> = t.outputs.iter().map(|o| o.name.as_str()).collect();
+                Error::Compile(if outputs.is_empty() {
+                    format!(
+                        "`{path}.{port}`: `{}` declares no outputs. Declare them: \
+                         `template {}(…) -> ({port}: <block>.{port})`",
+                        t.name, t.name
+                    )
+                } else {
+                    format!(
+                        "`{path}.{port}`: `{}` has no output `{port}`. Its outputs: {}",
+                        t.name,
+                        outputs.join(", ")
+                    )
+                })
+            })?
+        };
+        let target = PortRef {
+            slug: format!("{path}.{}", out.port.slug),
+            port: out.port.port.clone(),
+        };
+        // An output that reads a nested instance's output: follow it.
+        Ok(Some(
+            self.output_target(locals, &target.slug, &target.port)?
+                .unwrap_or(target),
+        ))
     }
 
     /// The expanded slug a referenced name stands for: `a.b` is body
-    /// block `b` of instance `a`, an instance alone its primary block.
+    /// block `b` of instance `a` (`a.inner.b` one of a nested instance).
     /// The expanded spelling itself (`a_b`) is refused with the one to
     /// write; a lockfile key is only joined (`a.b` → `a_b`) — what it
     /// names may be gone from the source.
@@ -276,64 +408,91 @@ impl<'m> Scopes<'m> {
             _ => n.to_string(),
         };
         let fail = |m: String| Err(Error::Compile(m));
-        if let Some((a, b)) = name.split_once('.') {
+        let blocks = |t: &TemplateDecl| -> String {
+            t.body_slugs()
+                .chain(t.body_instances().map(|b| b.slug.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if let Some((a, rest)) = name.split_once('.') {
             if usage == RefUse::LockKey {
-                return Ok(format!("{a}_{b}"));
+                return Ok(name.replace('.', "_"));
             }
-            let Some(t) = self.instances.get(a) else {
+            let Some(mut t) = self.instances.get(a).copied() else {
                 return fail(format!(
-                    "`{}`: `{a}` is not a template instance, so `{a}.{b}` names no block",
+                    "`{}`: `{a}` is not a template instance, so `{name}` names no block",
                     at(name)
                 ));
             };
-            if b.contains('.') {
+            let parts: Vec<&str> = rest.split('.').collect();
+            for (i, part) in parts.iter().enumerate() {
+                let last = i + 1 == parts.len();
+                if last && t.body_slugs().any(|s| s == *part) {
+                    return Ok(name.replace('.', "_"));
+                }
+                if let Some(inner) = t.body_instances().find(|b| b.slug == *part) {
+                    if last {
+                        return fail(format!(
+                            "`{}`: `{name}` is a `{}` instance inside `{a}`. Name one of its \
+                             blocks (`{name}.<block>`) or one of its outputs (`{name}.<Output>`)",
+                            at(name),
+                            inner.block_type
+                        ));
+                    }
+                    let Some(it) = self.templates.get(inner.block_type.as_str()) else {
+                        return fail(format!(
+                            "`{}`: unknown template `{}`",
+                            at(name),
+                            inner.block_type
+                        ));
+                    };
+                    t = it;
+                    continue;
+                }
                 return fail(format!(
-                    "`{}`: templates do not nest. Name a block as `<instance>.<block>`",
-                    at(name)
-                ));
-            }
-            if !t.body_slugs().any(|s| s == b) {
-                return fail(format!(
-                    "`{}`: `{a}` (a `{}` instance) has no block `{b}`. Its blocks: {}",
+                    "`{}`: `{a}` (a `{}` instance) has no block `{part}`. Its blocks: {}",
                     at(name),
                     t.name,
-                    t.body_slugs().collect::<Vec<_>>().join(", ")
+                    blocks(t)
                 ));
             }
-            if t.primary_block() == Some(b) {
-                return fail(format!(
-                    "`{b}` is the primary block of `{}`, so the instance names it. Write `{}` \
-                     instead of `{}`.",
-                    t.name,
-                    at(a),
-                    at(name)
-                ));
-            }
-            return Ok(format!("{a}_{b}"));
+            return Ok(name.replace('.', "_"));
         }
         if usage == RefUse::LockKey {
             return Ok(name.to_string());
         }
         if let Some(t) = self.instances.get(name) {
-            return match t.primary_block() {
-                Some(p) => Ok(format!("{name}_{p}")),
-                None => fail(format!(
-                    "`{}`: `{name}` is a `{}` instance, and that template has no primary \
-                     block. Name the block (`{}`), or mark one primary with `template {}(…) \
-                     -> <block>`. Its blocks: {}",
-                    at(name),
+            return fail(match usage {
+                RefUse::Port(p) => format!(
+                    "`{name}.{p}`: `{}` has no output `{p}`. Its outputs: {}",
                     t.name,
-                    at(&format!("{name}.<block>")),
+                    t.outputs
+                        .iter()
+                        .map(|o| o.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                _ => format!(
+                    "`{name}` is a `{}` instance. Name one of its blocks (`{name}.<block>`); \
+                     its outputs are {}",
                     t.name,
-                    t.body_slugs().collect::<Vec<_>>().join(", ")
-                )),
-            };
+                    if t.outputs.is_empty() {
+                        "none".to_string()
+                    } else {
+                        t.outputs
+                            .iter()
+                            .map(|o| format!("`{name}.{}`", o.name))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                ),
+            });
         }
-        if let Some((a, b)) = self.expanded.get(name) {
+        if let Some(x) = self.expanded.get(name) {
             return fail(format!(
                 "source names a block of a template instance by its instance. Write `{}` \
                  instead of `{}`.",
-                at(&self.spelling(a, b)),
+                at(&self.spelling(&x.path, x.block)),
                 at(name)
             ));
         }
@@ -342,38 +501,206 @@ impl<'m> Scopes<'m> {
 
     /// The declared type of an instance's body block, by expanded slug.
     fn block_type(&self, expanded: &str) -> Option<&'m str> {
-        let (a, b) = self.expanded.get(expanded)?;
-        self.instances[a].body.iter().find_map(|i| match i {
-            Item::Block(x) if x.slug == *b => Some(x.block_type.as_str()),
-            _ => None,
-        })
+        self.expanded.get(expanded)?.block_type
+    }
+
+    /// Rewrite every reference to an instance's output in `item` to the
+    /// body port it stands for (`a.Q` → `a.<block>.Q`, a bare `a` to its
+    /// first output), so the scoped-name resolution sees blocks only.
+    fn rewrite_outputs(&self, locals: &Local<'m>, item: &mut Item) -> Result<()> {
+        let port = |r: &mut PortRef| -> Result<()> {
+            if let Some(target) = self.output_target(locals, &r.slug, &r.port)? {
+                *r = target;
+            }
+            Ok(())
+        };
+        let kind = |k: &mut BindingKind, pascal: bool| -> Result<()> {
+            match k {
+                // `In: a.m.i`, a nested instance by its path: its first
+                // output (the lexer reads the last segment as a port).
+                BindingKind::Wire(r)
+                    if pascal && r.port.starts_with(|c: char| c.is_ascii_lowercase()) =>
+                {
+                    let name = format!("{}.{}", r.slug, r.port);
+                    if let Some(target) = self.output_target(locals, &name, "")? {
+                        *k = BindingKind::Wire(target);
+                    }
+                    Ok(())
+                }
+                BindingKind::Wire(r) => port(r),
+                BindingKind::Expr(e) => self.rewrite_expr(locals, e),
+                BindingKind::Param(Value::Ref(n)) if pascal => {
+                    if let Some(target) = self.output_target(locals, n, "")? {
+                        *k = BindingKind::Wire(target);
+                    }
+                    Ok(())
+                }
+                BindingKind::Param(_) => Ok(()),
+            }
+        };
+        let args = |args: &mut [ArgItem]| -> Result<()> {
+            for arg in args {
+                if let ArgItem::Binding(b) = arg {
+                    let pascal = b.port.starts_with(|c: char| c.is_ascii_uppercase());
+                    kind(&mut b.kind, pascal)?;
+                }
+            }
+            Ok(())
+        };
+        match item {
+            Item::Block(b) => args(&mut b.args),
+            // A nested instance's input parameter takes a source too: a
+            // bare name there may be an instance's first output.
+            Item::Instance(b) => {
+                let inputs: Vec<String> = self
+                    .templates
+                    .get(b.block_type.as_str())
+                    .map(|t| {
+                        t.params
+                            .iter()
+                            .filter(|p| matches!(p, TemplateParam::Input { .. }))
+                            .map(|p| p.name().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for arg in &mut b.args {
+                    if let ArgItem::Binding(x) = arg {
+                        let source = x.port.starts_with(|c: char| c.is_ascii_uppercase())
+                            || inputs.contains(&x.port);
+                        kind(&mut x.kind, source)?;
+                    }
+                }
+                Ok(())
+            }
+            Item::Extern(e) => args(&mut e.args),
+            Item::Wire(w) => {
+                port(&mut w.to)?;
+                port(&mut w.from)
+            }
+            Item::ExprWire(w) => {
+                port(&mut w.to)?;
+                self.rewrite_expr(locals, &mut w.expr)
+            }
+            Item::Signal(x) => self.rewrite_expr(locals, &mut x.expr),
+            Item::Set(s) => port(&mut s.target),
+            Item::Let(l) => match &mut l.value {
+                Value::Port(r) => port(r),
+                _ => Ok(()),
+            },
+            Item::Test(t) => {
+                for stmt in &mut t.body {
+                    match stmt {
+                        TestItem::Inject(s) => port(&mut s.target)?,
+                        TestItem::Expect(e) => port(&mut e.port)?,
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
+            Item::Rule(r) => {
+                for stmt in &mut r.body {
+                    if let RuleItem::Stmt(st) = stmt
+                        && let RuleStmtKind::State { target, state, .. } = &mut st.kind
+                        && let Some(t) = self.output_target(locals, target, state)?
+                    {
+                        *target = t.slug;
+                        *state = t.port;
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn rewrite_expr(&self, locals: &Local<'m>, e: &mut Expr) -> Result<()> {
+        let operand = |o: &mut Operand| -> Result<()> {
+            match o {
+                Operand::Port(p) => {
+                    if let Some(t) = self.output_target(locals, &p.slug, &p.port)? {
+                        *p = t;
+                    }
+                }
+                Operand::Value(Value::Ref(n)) => {
+                    if let Some(t) = self.output_target(locals, n, "")? {
+                        *o = Operand::Port(t);
+                    }
+                }
+                Operand::Arith(x) => self.rewrite_expr(locals, x)?,
+                Operand::Value(_) => {}
+            }
+            Ok(())
+        };
+        match e {
+            Expr::Or(a, b) | Expr::And(a, b) | Expr::Arith { lhs: a, rhs: b, .. } => {
+                self.rewrite_expr(locals, a)?;
+                self.rewrite_expr(locals, b)
+            }
+            Expr::Not(x) => self.rewrite_expr(locals, x),
+            Expr::Cmp { lhs, rhs, .. } => {
+                operand(lhs)?;
+                operand(rhs)
+            }
+            Expr::Atom(o) => operand(o),
+        }
     }
 }
 
+/// How a template's input parameter is fed at the call: what the body's
+/// binding of it becomes.
+#[derive(Clone)]
+enum Fed {
+    Wire(PortRef),
+    /// A bare object name: its default output.
+    Object(String),
+    Expr(Expr),
+}
+
 /// Rewrite an expression's operands through the instance's slug/value
-/// maps: port operands like wire refs, constant operands like values.
+/// maps: port operands like wire refs, constant operands like values,
+/// and a bare input parameter by what the call feeds it.
 fn map_expr(
     e: &Expr,
     map_ref: &impl Fn(&PortRef) -> Result<PortRef>,
     map_value: &impl Fn(&Value) -> Result<Value>,
+    map_input: &impl Fn(&str) -> Result<Option<Vec<Fed>>>,
 ) -> Result<Expr> {
+    let rec = |x: &Expr| map_expr(x, map_ref, map_value, map_input);
+    let fed_one = |name: &str, what: &str| -> Result<Option<Fed>> {
+        let Some(fed) = map_input(name)? else {
+            return Ok(None);
+        };
+        match fed.as_slice() {
+            [one] => Ok(Some(one.clone())),
+            [] => Err(Error::Compile(format!(
+                "input `{name}` is not given, but {what} reads it"
+            ))),
+            _ => Err(Error::Compile(format!(
+                "input `{name}` is given several sources, but {what} reads one"
+            ))),
+        }
+    };
     let operand = |o: &Operand| -> Result<Operand> {
         Ok(match o {
             Operand::Port(p) => Operand::Port(map_ref(p)?),
+            Operand::Value(Value::Ref(n)) => match fed_one(n, "a comparison")? {
+                Some(Fed::Wire(r)) => Operand::Port(r),
+                Some(Fed::Object(obj)) => Operand::Value(Value::Ref(obj)),
+                Some(Fed::Expr(_)) => {
+                    return Err(Error::Compile(format!(
+                        "input `{n}` is given an expression, but a comparison reads a port"
+                    )));
+                }
+                None => Operand::Value(map_value(&Value::Ref(n.clone()))?),
+            },
             Operand::Value(v) => Operand::Value(map_value(v)?),
-            Operand::Arith(x) => Operand::Arith(Box::new(map_expr(x, map_ref, map_value)?)),
+            Operand::Arith(x) => Operand::Arith(Box::new(rec(x)?)),
         })
     };
     Ok(match e {
-        Expr::Or(a, b) => Expr::Or(
-            Box::new(map_expr(a, map_ref, map_value)?),
-            Box::new(map_expr(b, map_ref, map_value)?),
-        ),
-        Expr::And(a, b) => Expr::And(
-            Box::new(map_expr(a, map_ref, map_value)?),
-            Box::new(map_expr(b, map_ref, map_value)?),
-        ),
-        Expr::Not(x) => Expr::Not(Box::new(map_expr(x, map_ref, map_value)?)),
+        Expr::Or(a, b) => Expr::Or(Box::new(rec(a)?), Box::new(rec(b)?)),
+        Expr::And(a, b) => Expr::And(Box::new(rec(a)?), Box::new(rec(b)?)),
+        Expr::Not(x) => Expr::Not(Box::new(rec(x)?)),
         Expr::Cmp { op, lhs, rhs } => Expr::Cmp {
             op: *op,
             lhs: operand(lhs)?,
@@ -381,8 +708,16 @@ fn map_expr(
         },
         Expr::Arith { op, lhs, rhs } => Expr::Arith {
             op: *op,
-            lhs: Box::new(map_expr(lhs, map_ref, map_value)?),
-            rhs: Box::new(map_expr(rhs, map_ref, map_value)?),
+            lhs: Box::new(rec(lhs)?),
+            rhs: Box::new(rec(rhs)?),
+        },
+        // A bare input parameter as a gate operand: the fed expression
+        // takes its place.
+        Expr::Atom(Operand::Value(Value::Ref(n))) => match fed_one(n, "an expression")? {
+            Some(Fed::Wire(r)) => Expr::Atom(Operand::Port(r)),
+            Some(Fed::Object(obj)) => Expr::Atom(Operand::Value(Value::Ref(obj))),
+            Some(Fed::Expr(x)) => x,
+            None => Expr::Atom(operand(&Operand::Value(Value::Ref(n.clone())))?),
         },
         Expr::Atom(o) => Expr::Atom(operand(o)?),
     })
@@ -392,7 +727,7 @@ impl Module {
     /// The module with every template instantiated: `Template` items drop
     /// (they declare nothing), each `Instance` becomes its expansion, all
     /// other items pass through with their scoped names (`a.b`, an
-    /// instance for its primary block) resolved to expanded slugs. Name
+    /// instance's output `a.Q`) resolved to expanded slugs. Name
     /// resolution of the result is the caller's job ([`Module::validate`])
     /// — expansion only checks what it needs.
     pub fn expand(&self) -> Result<Module> {
@@ -401,22 +736,12 @@ impl Module {
             return self.lowered().expand();
         }
         let mut errors = crate::error::Errors::default();
-        let mut templates: BTreeMap<&str, &TemplateDecl> = BTreeMap::new();
+        let mut seen: BTreeMap<&str, ()> = BTreeMap::new();
         for item in &self.items {
-            if let Item::Template(t) = item {
-                if templates.insert(&t.name, t).is_some() {
-                    errors.push(Error::Compile(format!("duplicate template `{}`", t.name)));
-                    continue;
-                }
-                if let Some(p) = &t.primary
-                    && !t.body_slugs().any(|s| s == p)
-                {
-                    errors.push(Error::Compile(format!(
-                        "template `{}`: `-> {p}` names no block of the body. Its blocks: {}",
-                        t.name,
-                        t.body_slugs().collect::<Vec<_>>().join(", ")
-                    )));
-                }
+            if let Item::Template(t) = item
+                && seen.insert(&t.name, ()).is_some()
+            {
+                errors.push(Error::Compile(format!("duplicate template `{}`", t.name)));
             }
         }
         // An instance's name now names its blocks (`a.b`, `a.Port`), so it
@@ -442,13 +767,14 @@ impl Module {
             .check(super::defaults::by_type(&self.items))
             .unwrap_or_default();
         let scopes = Scopes::of(self);
+        let no_locals = Local::default();
         let mut items = Vec::new();
         for item in &self.items {
             match item {
                 // Applied below, to the expanded blocks.
                 Item::Template(_) | Item::Defaults(_) => {}
                 Item::Instance(call) => {
-                    let Some(t) = templates.get(call.block_type.as_str()) else {
+                    let Some(t) = scopes.templates.get(call.block_type.as_str()) else {
                         errors.push(Error::Compile(format!(
                             "`{} = {name}(…)` instantiates unknown template `{name}`",
                             call.slug,
@@ -456,16 +782,32 @@ impl Module {
                         )));
                         continue;
                     };
-                    if let Some(x) = errors.check(self.instantiate(&scopes, t, call)) {
+                    let mut call = Item::Instance(call.clone());
+                    if errors
+                        .check(scopes.rewrite_outputs(&no_locals, &mut call))
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    let Item::Instance(call) = call else {
+                        unreachable!()
+                    };
+                    if let Some(x) =
+                        errors.check(self.instantiate(&scopes, t, &call, &call.slug, false))
+                    {
                         items.extend(x);
                     }
                 }
                 other => {
                     let mut other = other.clone();
-                    let resolved = visit_refs(&mut other, &mut |name, usage| {
-                        *name = scopes.resolve(name, usage)?;
-                        Ok(())
-                    });
+                    let resolved = scopes
+                        .rewrite_outputs(&no_locals, &mut other)
+                        .and_then(|()| {
+                            visit_refs(&mut other, &mut |name, usage| {
+                                *name = scopes.resolve(name, usage)?;
+                                Ok(())
+                            })
+                        });
                     if errors.check(resolved).is_some() {
                         items.push(other);
                     }
@@ -483,23 +825,32 @@ impl Module {
     }
 
     /// The scoped-name errors [`Module::expand`] would report (`a_b` for
-    /// `a.b`, an unknown block, an instance without a primary block),
-    /// without expanding: the unexpanded module's validation runs it first,
-    /// so those references get their own message, not "undeclared".
+    /// `a.b`, an unknown block, an unknown output), without expanding:
+    /// the unexpanded module's validation runs it first, so those
+    /// references get their own message, not "undeclared".
     pub(crate) fn check_scoped_names(&self) -> Result<()> {
         let scopes = Scopes::of(self);
         if scopes.instances.is_empty() {
             return Ok(());
         }
+        let no_locals = Local::default();
         let mut errors = crate::error::Errors::default();
         for item in &self.items {
             let mut item = match item {
-                Item::Template(_) | Item::Instance(_) => continue,
+                Item::Template(_) => continue,
                 other => other.clone(),
             };
-            errors.check(visit_refs(&mut item, &mut |name, usage| {
-                scopes.resolve(name, usage).map(|_| ())
-            }));
+            let checked = scopes
+                .rewrite_outputs(&no_locals, &mut item)
+                .and_then(|()| {
+                    if matches!(item, Item::Instance(_)) {
+                        return Ok(());
+                    }
+                    visit_refs(&mut item, &mut |name, usage| {
+                        scopes.resolve(name, usage).map(|_| ())
+                    })
+                });
+            errors.check(checked);
         }
         errors.finish()
     }
@@ -515,21 +866,43 @@ impl Module {
         })
     }
 
-    /// How source spells the expanded slug `slug`: `instance.block`, or
-    /// the instance alone for its template's primary block. Any
-    /// other slug is spelled as it is.
+    /// How source spells the expanded slug `slug`: `instance.block`
+    /// (`a.inner.block` under a nested instance). Any other slug is
+    /// spelled as it is.
     pub fn spelling(&self, slug: &str) -> String {
         let scopes = Scopes::of(self);
         match scopes.expanded.get(slug) {
-            Some((a, b)) => scopes.spelling(a, b),
+            Some(x) => scopes.spelling(&x.path, x.block),
             None => slug.to_string(),
+        }
+    }
+
+    /// How source spells an expanded port: an instance's output by its
+    /// name (`hitze.Q` for `hitze_alarm.Q` under `-> (Q: alarm.Q)`),
+    /// any other port by its block (`hitze.alarm.On`).
+    pub fn spell_port(&self, port: &PortRef) -> PortRef {
+        let scopes = Scopes::of(self);
+        let Some(x) = scopes.expanded.get(&port.slug) else {
+            return port.clone();
+        };
+        let by_output = scopes
+            .template_at(&Local::default(), &x.path)
+            .and_then(|t| t.output(&port.port))
+            .is_some_and(|o| o.port.slug == x.block && o.port.port == port.port);
+        PortRef {
+            slug: if by_output {
+                x.path.clone()
+            } else {
+                scopes.spelling(&x.path, x.block)
+            },
+            port: port.port.clone(),
         }
     }
 
     /// [`Module::expand`], then `f` on the expanded module, whose errors
     /// name blocks as the source does ([`Module::respell_error`]). The
     /// expansion's own errors already do, and some name the expanded
-    /// spelling on purpose ("write `kueche` instead of `kueche_lc`").
+    /// spelling on purpose ("write `kueche.lc` instead of `kueche_lc`").
     pub fn with_expanded<T>(&self, f: impl FnOnce(Module) -> Result<T>) -> Result<T> {
         let expanded = self.expand()?;
         f(expanded).map_err(|e| self.respell_error(e))
@@ -537,10 +910,9 @@ impl Module {
 
     /// `e` naming blocks the way this (unexpanded) module's source does:
     /// every expanded slug of a template instance (`kueche_lc`) in a
-    /// compile or lockfile error becomes its spelling (`kueche.lc`, or
-    /// `kueche` for the primary block). The passes after expansion only
-    /// see expanded slugs; this is the one place their messages are
-    /// translated back.
+    /// compile or lockfile error becomes its spelling (`kueche.lc`). The
+    /// passes after expansion only see expanded slugs; this is the one
+    /// place their messages are translated back.
     pub fn respell_error(&self, e: Error) -> Error {
         let scopes = Scopes::of(self);
         if scopes.expanded.is_empty() {
@@ -568,35 +940,72 @@ impl Module {
         for item in items {
             let _ = visit_refs(item, &mut |name, usage| {
                 if usage != RefUse::LockKey
-                    && let Some((a, b)) = scopes.expanded.get(name.as_str())
+                    && let Some(x) = scopes.expanded.get(name.as_str())
                 {
-                    *name = scopes.spelling(a, b);
+                    // `a_alarm.Q` is `a.Q` where the template declares
+                    // the output `Q: alarm.Q`; otherwise `a.alarm.Q`.
+                    let no_locals = Local::default();
+                    if let RefUse::Port(p) = usage
+                        && let Some(t) = scopes.template_at(&no_locals, &x.path)
+                        && t.output(p)
+                            .is_some_and(|o| o.port.slug == x.block && o.port.port == p)
+                    {
+                        *name = x.path.clone();
+                    } else {
+                        *name = scopes.spelling(&x.path, x.block);
+                    }
                 }
                 Ok(())
             });
         }
     }
 
+    /// The items of one instance: the body with every body name
+    /// prefixed by `prefix` (the instance's expanded slug), the
+    /// parameters substituted. `call` is the call with its outputs
+    /// rewritten; `expanded` says whether its argument names are
+    /// expanded slugs already (a nested call).
     fn instantiate(
         &self,
         scopes: &Scopes,
         t: &TemplateDecl,
         call: &BlockDecl,
+        prefix: &str,
+        expanded: bool,
     ) -> Result<Vec<Item>> {
-        let ctx = format!("in `{} = {}(…)`", call.slug, call.block_type);
+        let ctx = format!(
+            "in `{} = {}(…)`",
+            self.spelling(&call.slug),
+            call.block_type
+        );
         let fail = |m: String| Error::Compile(format!("{ctx}: {m}"));
+        // A nested call's argument names are expanded slugs already,
+        // mapped by the enclosing body; a top-level call's are source
+        // spellings to resolve.
+        let resolve = |name: &str, usage: RefUse| -> Result<String> {
+            if expanded {
+                Ok(name.to_string())
+            } else {
+                scopes.resolve(name, usage)
+            }
+        };
 
         // Bind arguments: object parameters to the passed slugs (type
         // annotation checked where the slug's declaration is visible),
         // set parameters to the passed set, value parameters to the given
-        // value or their default.
+        // value or their default, inputs to what the call feeds them.
         let mut objects: BTreeMap<&str, String> = BTreeMap::new();
         let mut sets: BTreeMap<&str, (SetKind, String)> = BTreeMap::new();
         let mut values: BTreeMap<&str, Value> = BTreeMap::new();
+        let mut inputs: BTreeMap<&str, Vec<Fed>> = BTreeMap::new();
         for p in &t.params {
             match p {
-                TemplateParam::Value { name, default } => {
-                    values.insert(name, default.clone());
+                TemplateParam::Value {
+                    name,
+                    default: Some(d),
+                    ..
+                } => {
+                    values.insert(name, d.clone());
                 }
                 TemplateParam::Set {
                     name,
@@ -605,53 +1014,54 @@ impl Module {
                 } => {
                     sets.insert(name, (*kind, d.clone()));
                 }
-                TemplateParam::Set { default: None, .. } | TemplateParam::Object { .. } => {}
+                TemplateParam::Input { name } => {
+                    inputs.insert(name, Vec::new());
+                }
+                _ => {}
             }
         }
-        // A call-site binding that names no template parameter forwards as
-        // a port binding onto the template's primary block — an instance
-        // is a composite block, so its call reads like a block declaration
-        // with the shared parameters factored away (feeds may repeat,
-        // exactly as in a block's argument list).
-        let primary = t.primary_block();
-        let mut forwards: Vec<Binding> = Vec::new();
-        for binding in call.bindings() {
-            let Some(p) = t.params.iter().find(|p| p.name() == binding.port) else {
-                // A named signal takes no port bindings: its inputs are
-                // its expression.
-                if let Some(p) = primary
-                    && t.body
-                        .iter()
-                        .any(|i| matches!(i, Item::Signal(x) if x.slug == p))
-                {
+        // The label string binds the parameter named `label`.
+        if let Some(title) = &call.title {
+            match t.param("label") {
+                Some(TemplateParam::Value {
+                    kind: super::ast::ValueKind::Str,
+                    ..
+                }) => {
+                    values.insert("label", Value::Str(title.clone()));
+                }
+                _ => {
                     return Err(fail(format!(
-                        "`{}` names no parameter of `{}`. Its primary block is the named \
-                         signal `{p}`, which takes no port bindings.",
-                        binding.port, t.name
+                        "`{}` takes no label string: declare `label: string` in the template \
+                         and use `{{label}}` in a block title",
+                        t.name
                     )));
                 }
-                if primary.is_some() {
-                    let mut forward = binding.clone();
-                    let mut args = [ArgItem::Binding(forward.clone())];
-                    visit_args(&mut args, &mut |name, usage| {
-                        *name = scopes.resolve(name, usage)?;
-                        Ok(())
-                    })?;
-                    if let [ArgItem::Binding(b)] = args {
-                        forward = b;
-                    }
-                    forwards.push(forward);
-                    continue;
-                }
+            }
+        }
+        let constant = |n: &str| self.lets().find(|l| l.name == n).map(|l| &l.value);
+        for binding in call.bindings() {
+            if binding.port == "label" && call.title.is_some() {
+                return Err(fail(
+                    "duplicate argument `label`: the label string binds it".into(),
+                ));
+            }
+            let Some(p) = t.param(&binding.port) else {
+                let hint = if binding.port.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    format!(
+                        ". A call binds the template's parameters only; to feed a port of \
+                         the body, declare `<name>: input` in `template {}(…)` and bind it \
+                         there (`{}: <name>`)",
+                        t.name, binding.port
+                    )
+                } else {
+                    crate::logic::validate::suggest(
+                        &binding.port,
+                        t.params.iter().map(|p| p.name()),
+                    )
+                };
                 return Err(fail(format!(
-                    "`{}` names no parameter of `{}`. Port bindings forward to the \
-                     template's primary block, and `{}` has none: its body declares {} \
-                     blocks. Mark one with `template {}(…) -> <block>`.",
-                    binding.port,
-                    t.name,
-                    t.name,
-                    t.body_slugs().count(),
-                    t.name
+                    "`{}` names no parameter of `{}`{hint}",
+                    binding.port, t.name
                 )));
             };
             // An object named like a port reference: `p: licht.lc`.
@@ -664,16 +1074,12 @@ impl Module {
             };
             match (p, object) {
                 (TemplateParam::Object { name, block_type }, Some(s)) => {
-                    if self
-                        .items
-                        .iter()
-                        .any(|i| matches!(i, Item::Template(other) if other.name == s))
-                    {
+                    if scopes.templates.contains_key(s.as_str()) {
                         return Err(fail(format!(
                             "`{s}` is a template, not an object. Pass an extern, a block or an instance."
                         )));
                     }
-                    let s = scopes.resolve(&s, RefUse::Object)?;
+                    let s = resolve(&s, RefUse::Object)?;
                     if let Some(declared) = self.declared_type(&s).or(scopes.block_type(&s))
                         && block_type != "any"
                         && declared != block_type
@@ -706,28 +1112,72 @@ impl Module {
                         ),
                     }));
                 }
-                (TemplateParam::Value { name, .. }, _) => match &binding.kind {
+                (TemplateParam::Value { name, kind, .. }, _) => match &binding.kind {
                     BindingKind::Param(v) => {
+                        let given = match v {
+                            Value::Ref(c) => constant(c).and_then(super::ast::ValueKind::of),
+                            other => super::ast::ValueKind::of(other),
+                        };
+                        if let Some(k) = given
+                            && k != *kind
+                        {
+                            return Err(fail(format!(
+                                "`{name}: {v}`: `{name}` takes {}, not {}",
+                                kind.example(),
+                                k.example()
+                            )));
+                        }
                         values.insert(name, v.clone());
                     }
                     BindingKind::Wire(_) | BindingKind::Expr(_) => {
                         return Err(fail(format!(
-                            "value parameter `{name}` takes a number, string, or constant"
+                            "value parameter `{name}` takes {}, not a port or expression",
+                            kind.example()
                         )));
                     }
                 },
+                (TemplateParam::Input { name }, _) => {
+                    let fed = match &binding.kind {
+                        BindingKind::Wire(r) => Fed::Wire(PortRef {
+                            slug: resolve(&r.slug, RefUse::Port(&r.port))?,
+                            port: r.port.clone(),
+                        }),
+                        BindingKind::Param(Value::Ref(s)) if constant(s).is_none() => {
+                            Fed::Object(resolve(s, RefUse::Bare)?)
+                        }
+                        BindingKind::Param(v) => {
+                            return Err(fail(format!(
+                                "input `{name}` takes a source (a block, extern, `<slug>.<Port>` \
+                                 or an expression), not the value `{v}`"
+                            )));
+                        }
+                        BindingKind::Expr(e) => {
+                            let mut e = e.clone();
+                            visit_expr(&mut e, &mut |n, usage| {
+                                *n = resolve(n, usage)?;
+                                Ok(())
+                            })?;
+                            Fed::Expr(e)
+                        }
+                    };
+                    inputs.entry(name).or_default().push(fed);
+                }
             }
         }
         for p in &t.params {
-            match p {
+            let (name, what) = match p {
                 TemplateParam::Object { name, .. } if !objects.contains_key(name.as_str()) => {
-                    return Err(fail(format!("object parameter `{name}` must be given")));
+                    (name, "object")
                 }
                 TemplateParam::Set { name, .. } if !sets.contains_key(name.as_str()) => {
-                    return Err(fail(format!("set parameter `{name}` must be given")));
+                    (name, "set")
                 }
-                _ => {}
-            }
+                TemplateParam::Value { name, .. } if !values.contains_key(name.as_str()) => {
+                    (name, "value")
+                }
+                _ => continue,
+            };
+            return Err(fail(format!("{what} parameter `{name}` must be given")));
         }
         // A passed or default set must be declared, of the parameter's kind.
         for (name, (kind, s)) in &sets {
@@ -740,19 +1190,75 @@ impl Module {
             }
         }
 
+        // The body's own names: blocks and signals, nested instances,
+        // local constants and aliases.
         let body_slugs: Vec<&str> = t.body_slugs().collect();
+        let locals = Local {
+            instances: t
+                .body_instances()
+                .filter_map(|b| {
+                    scopes
+                        .templates
+                        .get(b.block_type.as_str())
+                        .map(|it| (b.slug.as_str(), *it))
+                })
+                .collect(),
+            shadowed: t
+                .body_slugs()
+                .chain(t.params.iter().map(|p| p.name()))
+                .chain(t.body.iter().filter_map(|i| match i {
+                    Item::Let(l) => Some(l.name.as_str()),
+                    _ => None,
+                }))
+                .collect(),
+        };
+        let mut aliases: BTreeMap<&str, PortRef> = BTreeMap::new();
+        for item in &t.body {
+            if let Item::Let(l) = item {
+                match &l.value {
+                    Value::Port(r) => {
+                        aliases.insert(&l.name, r.clone());
+                    }
+                    v => {
+                        values.insert(&l.name, v.clone());
+                    }
+                }
+            }
+        }
+        let is_local = |s: &str| {
+            let head = s.split('.').next().unwrap_or(s);
+            body_slugs.contains(&head) || locals.instances.contains_key(head)
+        };
         let map_slug = |s: &str| -> Result<String> {
-            if body_slugs.contains(&s) {
-                Ok(format!("{}_{s}", call.slug))
+            if is_local(s) {
+                Ok(format!("{prefix}_{}", s.replace('.', "_")))
             } else if let Some(o) = objects.get(s) {
                 Ok(o.clone())
             } else {
                 scopes.resolve(s, RefUse::Object)
             }
         };
-        let map_ref = |r: &PortRef| -> Result<PortRef> {
-            let slug = if body_slugs.contains(&r.slug.as_str()) || objects.contains_key(&*r.slug) {
-                map_slug(&r.slug)?
+        let map_ref_inner = |r: &PortRef, depth: usize| -> Result<PortRef> {
+            if r.port.is_empty()
+                && let Some(a) = aliases.get(r.slug.as_str())
+                && depth == 0
+            {
+                // A bare alias: the port it names, itself mapped.
+                return Ok(PortRef {
+                    slug: if is_local(&a.slug) {
+                        format!("{prefix}_{}", a.slug.replace('.', "_"))
+                    } else if let Some(o) = objects.get(a.slug.as_str()) {
+                        o.clone()
+                    } else {
+                        scopes.resolve(&a.slug, RefUse::Port(&a.port))?
+                    },
+                    port: a.port.clone(),
+                });
+            }
+            let slug = if is_local(&r.slug) {
+                format!("{prefix}_{}", r.slug.replace('.', "_"))
+            } else if let Some(o) = objects.get(r.slug.as_str()) {
+                o.clone()
             } else {
                 scopes.resolve(&r.slug, RefUse::Port(&r.port))?
             };
@@ -761,6 +1267,7 @@ impl Module {
                 port: r.port.clone(),
             })
         };
+        let map_ref = |r: &PortRef| map_ref_inner(r, 0);
         let map_value = |v: &Value| -> Result<Value> {
             if let Value::Ref(n) = v {
                 if let Some(val) = values.get(n.as_str()) {
@@ -771,9 +1278,17 @@ impl Module {
                 if let Some(o) = objects.get(n.as_str()) {
                     return Ok(Value::Ref(o.clone()));
                 }
+                if let Some(a) = aliases.get(n.as_str()) {
+                    return Ok(Value::Port(map_ref_inner(a, 1)?));
+                }
+                // A body block by its bare name: its default output.
+                if is_local(n) {
+                    return Ok(Value::Ref(format!("{prefix}_{}", n.replace('.', "_"))));
+                }
             }
             Ok(v.clone())
         };
+        let map_input = |n: &str| -> Result<Option<Vec<Fed>>> { Ok(inputs.get(n).cloned()) };
         // A claim in the body names its set directly or by a set parameter
         // of the claim's kind.
         let map_set = |claim: &str, set: &str, kind: SetKind| -> Result<String> {
@@ -787,8 +1302,10 @@ impl Module {
                 }
                 return Ok(bound.clone());
             }
-            if let Some(TemplateParam::Value { default, .. }) =
-                t.params.iter().find(|p| p.name() == set)
+            if let Some(TemplateParam::Value {
+                default: Some(default),
+                ..
+            }) = t.param(set)
             {
                 let default = match default {
                     Value::Str(s) => s.clone(),
@@ -796,7 +1313,7 @@ impl Module {
                 };
                 return Err(Error::Compile(format!(
                     "template `{}`: a `{kw}` set is passed by a set parameter. Write \
-                     `{set}: {kw} = {default}` instead of `{set} = \"{default}\"`.",
+                     `{set}: {kw} = {default}` instead of `{set}: string = \"{default}\"`.",
                     t.name,
                     kw = kind.keyword()
                 )));
@@ -828,17 +1345,15 @@ impl Module {
                 };
                 match values.get(name) {
                     Some(Value::Str(s)) => out.push_str(s),
-                    Some(Value::Ref(r)) => {
-                        match self.lets().find(|l| l.name == *r).map(|l| &l.value) {
-                            Some(Value::Str(s)) => out.push_str(s),
-                            _ => {
-                                return Err(fail(format!(
-                                    "title placeholder `{{{name}}}`: `{r}` is not a \
-                                     string constant"
-                                )));
-                            }
+                    Some(Value::Ref(r)) => match constant(r) {
+                        Some(Value::Str(s)) => out.push_str(s),
+                        _ => {
+                            return Err(fail(format!(
+                                "title placeholder `{{{name}}}`: `{r}` is not a \
+                                 string constant"
+                            )));
                         }
-                    }
+                    },
                     Some(_) => {
                         return Err(fail(format!(
                             "title placeholder `{{{name}}}` needs a string value"
@@ -855,42 +1370,80 @@ impl Module {
             out.push_str(rest);
             Ok(out)
         };
+        // The arguments of a body block or nested instance: an input
+        // parameter on a port becomes what the call feeds it (nothing,
+        // when the input is not given).
+        let map_args = |args: &[ArgItem]| -> Result<Vec<ArgItem>> {
+            let mut out = Vec::with_capacity(args.len());
+            for arg in args {
+                let ArgItem::Binding(x) = arg else {
+                    out.push(arg.clone());
+                    continue;
+                };
+                if let BindingKind::Param(Value::Ref(n)) = &x.kind
+                    && let Some(fed) = inputs.get(n.as_str())
+                {
+                    for f in fed {
+                        out.push(ArgItem::Binding(Binding {
+                            port: x.port.clone(),
+                            kind: match f {
+                                Fed::Wire(r) => BindingKind::Wire(r.clone()),
+                                Fed::Object(o) => BindingKind::Param(Value::Ref(o.clone())),
+                                Fed::Expr(e) => BindingKind::Expr(e.clone()),
+                            },
+                            comment: x.comment.clone(),
+                        }));
+                    }
+                    continue;
+                }
+                out.push(ArgItem::Binding(Binding {
+                    port: x.port.clone(),
+                    kind: match &x.kind {
+                        BindingKind::Param(v) => BindingKind::Param(map_value(v)?),
+                        BindingKind::Wire(r) => BindingKind::Wire(map_ref(r)?),
+                        BindingKind::Expr(e) => {
+                            BindingKind::Expr(map_expr(e, &map_ref, &map_value, &map_input)?)
+                        }
+                    },
+                    comment: x.comment.clone(),
+                }));
+            }
+            Ok(out)
+        };
 
         let mut out = Vec::new();
         for item in &t.body {
-            match item {
+            // A nested instance's outputs read as the body ports they
+            // stand for.
+            let mut item = item.clone();
+            scopes.rewrite_outputs(&locals, &mut item)?;
+            match &item {
                 Item::Block(b) => {
-                    let mut args = Vec::with_capacity(b.args.len());
-                    for arg in &b.args {
-                        match arg {
-                            ArgItem::Binding(x) => args.push(ArgItem::Binding(Binding {
-                                port: x.port.clone(),
-                                kind: match &x.kind {
-                                    BindingKind::Param(v) => BindingKind::Param(map_value(v)?),
-                                    BindingKind::Wire(r) => BindingKind::Wire(map_ref(r)?),
-                                    BindingKind::Expr(e) => {
-                                        BindingKind::Expr(map_expr(e, &map_ref, &map_value)?)
-                                    }
-                                },
-                                comment: x.comment.clone(),
-                            })),
-                            ArgItem::Comment(c) => args.push(ArgItem::Comment(c.clone())),
-                        }
-                    }
-                    // Forwarded port bindings land on the primary block,
-                    // resolved in module scope at the call site — never in
-                    // the template's parameter scope.
-                    if primary == Some(b.slug.as_str()) {
-                        args.extend(forwards.iter().cloned().map(ArgItem::Binding));
-                    }
                     out.push(Item::Block(BlockDecl {
-                        slug: format!("{}_{}", call.slug, b.slug),
+                        slug: format!("{prefix}_{}", b.slug),
                         block_type: b.block_type.clone(),
                         title: b.title.as_deref().map(map_title).transpose()?,
-                        args,
+                        args: map_args(&b.args)?,
                         comment: b.comment.clone(),
                         close_comment: b.close_comment.clone(),
                     }));
+                }
+                Item::Instance(inner) => {
+                    let Some(it) = scopes.templates.get(inner.block_type.as_str()) else {
+                        return Err(fail(format!(
+                            "`{} = {}(…)` instantiates unknown template `{}`",
+                            inner.slug, inner.block_type, inner.block_type
+                        )));
+                    };
+                    let nested = BlockDecl {
+                        slug: format!("{prefix}_{}", inner.slug),
+                        block_type: inner.block_type.clone(),
+                        title: inner.title.as_deref().map(map_title).transpose()?,
+                        args: map_args(&inner.args)?,
+                        comment: inner.comment.clone(),
+                        close_comment: inner.close_comment.clone(),
+                    };
+                    out.extend(self.instantiate(scopes, it, &nested, &nested.slug, true)?);
                 }
                 Item::Wire(w) => out.push(Item::Wire(WireDecl {
                     to: map_ref(&w.to)?,
@@ -899,14 +1452,14 @@ impl Module {
                 })),
                 Item::ExprWire(w) => out.push(Item::ExprWire(ExprWireDecl {
                     to: map_ref(&w.to)?,
-                    expr: map_expr(&w.expr, &map_ref, &map_value)?,
+                    expr: map_expr(&w.expr, &map_ref, &map_value, &map_input)?,
                     comment: w.comment.clone(),
                 })),
                 // A named signal is a body-local name like a block: its
                 // slug (and so its sub-blocks' prefix) is the instance's.
                 Item::Signal(x) => out.push(Item::Signal(SignalDecl {
                     slug: map_slug(&x.slug)?,
-                    expr: map_expr(&x.expr, &map_ref, &map_value)?,
+                    expr: map_expr(&x.expr, &map_ref, &map_value, &map_input)?,
                     comment: x.comment.clone(),
                 })),
                 // A body signal's label, interpolated like a block's.
@@ -924,9 +1477,10 @@ impl Module {
                     comment: s.comment.clone(),
                     bulk: s.bulk,
                 })),
-                // Claims on a body block or an object parameter: the set is named directly, or by a set parameter
-                // so each instance can pass its own (`stimmungen: moods =
-                // standard`, overridden with `stimmungen: kueche`).
+                // Claims on a body block or an object parameter: the set is
+                // named directly, or by a set parameter so each instance
+                // can pass its own (`stimmungen: moods = standard`,
+                // overridden with `stimmungen: kueche`).
                 Item::MoodsClaim(c) => out.push(Item::MoodsClaim(MoodsClaim {
                     slug: map_slug(&c.slug)?,
                     moods: map_set(&c.to_string(), &c.moods, SetKind::Moods)?,
@@ -957,8 +1511,9 @@ impl Module {
                     set: map_set(&c.to_string(), &c.set, c.right.set_kind())?,
                     comment: c.comment.clone(),
                 })),
-                // Template-source commentary, not per-instance content.
-                Item::Comment(_) | Item::Gap => {}
+                // Template-source commentary and the body's own constants,
+                // not per-instance content.
+                Item::Comment(_) | Item::Gap | Item::Let(_) => {}
                 other => {
                     return Err(fail(format!(
                         "template `{}` carries an unexpected {other:?} in its body",
@@ -1006,7 +1561,7 @@ fn respell_text(msg: &str, scopes: &Scopes) -> String {
                     .unwrap_or(bytes.len());
                 let word = &part[k..end];
                 match scopes.expanded.get(word) {
-                    Some((a, b)) => out.push_str(&scopes.spelling(a, b)),
+                    Some(x) => out.push_str(&scopes.spelling(&x.path, x.block)),
                     None => out.push_str(word),
                 }
                 k = end;

@@ -534,13 +534,13 @@ sonne_ref.AI <- sonne.AQ
         let src = "\
 extern takt = VirtualIn(iname: \"VI1\")
 
-template blinker(takt: VirtualIn)
+template Blinker(takt: VirtualIn) -> (Q: gate.Q)
 \tgate = And(
 \t\tIn1: takt.Q,
 \t)
 end
 
-b1 = blinker(takt: takt)
+b1 = Blinker(takt: takt)
 ";
         let mut m = Module::parse(src).unwrap();
         rename_slug(&mut m, "takt", "sekundentakt");
@@ -548,10 +548,10 @@ b1 = blinker(takt: takt)
         // The template parameter and its body use stay `takt`; the module
         // extern and the instance ARGUMENT are renamed.
         assert!(text.contains("extern sekundentakt = VirtualIn"));
-        assert!(text.contains("template blinker(takt: VirtualIn)"));
+        assert!(text.contains("template Blinker(takt: VirtualIn)"));
         assert!(text.contains("In1: takt.Q"));
         assert!(
-            text.contains("b1 = blinker(takt: sekundentakt)"),
+            text.contains("b1 = Blinker(takt: sekundentakt)"),
             "instance arg:\n{text}"
         );
     }

@@ -65,9 +65,9 @@ pub use ast::{
     ModeSpellings, Module, MoodLine, MoodSetting, MoodsClaim, MoodsDecl, MoodsItem, MovedDecl,
     Operand, PageDecl, PortRef, RULE_BLOCK_TYPE, RemovedDecl, RightKind, RuleDecl, RuleItem,
     RuleStmt, RuleStmtKind, ScheduleClaim, ScheduleDecl, ScheduleItem, ScheduleLine, SetDecl,
-    SetKind, SignalDecl, TemplateDecl, TemplateParam, TestCmp, TestDecl, TestItem, TickDecl,
-    TickKind, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, WireDecl, clock_seconds,
-    clock_text,
+    SetKind, SignalDecl, TemplateDecl, TemplateOutput, TemplateParam, TestCmp, TestDecl, TestItem,
+    TickDecl, TickKind, TileDecl, TilesClaim, TilesDecl, TilesItem, Value, ValueKind, WireDecl,
+    clock_seconds, clock_text,
 };
 pub use compile::{CompileOptions, compile, resolve_extern_uuids, unpaired_created};
 pub use decompile::{
@@ -82,7 +82,7 @@ pub use lint::{
     fix_unit_suffixes_in, fix_unit_suffixes_text, implicit_zeros, lint_circuits, lint_dead_outputs,
     lint_implicit_zero, lint_source, lint_stale_lifecycle,
 };
-pub use migrate::{migrate_port_names, migrate_test_steps};
+pub use migrate::{migrate_port_names, migrate_templates, migrate_test_steps, type_name};
 pub use rename::{Rekey, RekeyKind, apply_rekeys, lock_rekeys, rename_slug, valid_slug};
 pub use simtest::{
     LoxSpecs, PlannedExpect, PlannedStep, Signal, TestPlan, TestResult, TestRun, lox_specs,

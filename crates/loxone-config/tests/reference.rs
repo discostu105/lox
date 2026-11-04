@@ -56,16 +56,103 @@ fn types_describe_each_documented_port() {
 }
 
 #[test]
+fn types_describe_a_library_template() {
+    let (ok, out) = loxl(&["types", "Treppenlicht"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.starts_with("Treppenlicht (template, from the library (licht.loxl))\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("    taster             object    an extern, block or instance of any type\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("    dauer              duration  a duration like `3min`, default 3min\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  Outputs:\n    Q                  ausgang.Q\n"),
+        "{out}"
+    );
+    let (ok, out) = loxl(&["types", "--json", "Treppenlicht"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("\"template\": \"Treppenlicht\""), "{out}");
+    let (ok, _) = loxl(&["types", "Nirgends"]);
+    assert!(!ok);
+}
+
+#[test]
 fn templates_list_and_print_the_library() {
     let (ok, out) = loxl(&["templates"]);
     assert!(ok);
     assert!(
-        out.contains("licht.loxl") && out.contains("  bewegungslicht(bewegung: any"),
+        out.contains("licht.loxl") && out.contains("  Bewegungslicht(bewegung: any"),
         "{out}"
     );
-    let (ok, out) = loxl(&["templates", "markise_schutz"]);
+    let (ok, out) = loxl(&["templates", "MarkiseSchutz"]);
     assert!(ok);
     assert!(out.starts_with("# Beschattung"), "{out}");
     let (ok, _) = loxl(&["templates", "nichts"]);
     assert!(!ok);
+}
+
+#[test]
+fn types_describe_a_project_template() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("types-template");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("lox.toml"),
+        "base = \"base.Loxone\"\nmodule = \"src\"\nlock = \"lock.json\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/a.loxl"),
+        "template Takt(quelle: input, plan: schedule, label: string, dauer: duration = 1min, an: bool = on, zahl: number)\n\
+         \t# Ein Takt.\n\
+         \tm = Monoflop(\"{label}\", Trigger: quelle, Time: dauer)\n\
+         end\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_loxl"))
+        .current_dir(&dir)
+        .args(["types", "Takt"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.starts_with("Takt (template, from src)\n  Ein Takt.\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    plan               schedule  a `schedule` set by name, required\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    label              string    a quoted string, required\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    an                 bool      `on` or `off`, default on\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    zahl               number    a number like `28`, required\n"),
+        "{text}"
+    );
+    assert!(text.contains("  Outputs: none declared\n"), "{text}");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_loxl"))
+        .current_dir(&dir)
+        .args(["types", "--json", "Takt"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\"from\": \"src\""), "{text}");
+    assert!(text.contains("\"kind\": \"input\""), "{text}");
 }

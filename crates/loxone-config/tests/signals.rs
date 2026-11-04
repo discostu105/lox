@@ -212,12 +212,12 @@ fn an_arithmetic_signal_is_a_formula_its_aq_feeds_a_comparison() {
 #[test]
 fn named_signals_expand_per_template_instance() {
     let m = module(
-        "template fassade(jalousie: AutoJalousie, grenze = 28)\n\
+        "template Fassade(jalousie: AutoJalousie, grenze: number = 28)\n\
          \twarm = sonne.Q and aussentemp.Q >= grenze\n\
          \tjalousie.AutoShade <- warm.Q\n\
          end\n\
          \n\
-         sued = fassade(jalousie: jal_sued, grenze: 30)\n",
+         sued = Fassade(jalousie: jal_sued, grenze: 30)\n",
     );
     // The canonical text keeps the body's signal.
     let text = m.to_text();
@@ -319,10 +319,10 @@ fn named_signal_misuse_is_reported() {
         "claimed by the expression",
     );
     fails("warm = nix.Q and sonne.Q", "undeclared slug `nix`");
-    // Nothing forwards onto a template's only signal.
+    // A call binds parameters, never a port of the body.
     fails(
-        "template t()\n\twarm = sonne.Q and wind_alarm.Q\nend\nx = t(I1: sonne.Q)",
-        "named signal `warm`",
+        "template T()\n\twarm = sonne.Q and wind_alarm.Q\nend\nx = T(I1: sonne.Q)",
+        "names no parameter of `T`",
     );
 }
 
@@ -381,19 +381,19 @@ fn a_signal_title_labels_its_top_block() {
 #[test]
 fn a_template_body_signal_takes_a_title() {
     let m = module(
-        "template fassade(jalousie: AutoJalousie, name = \"Süd\")\n\
+        "template Fassade(jalousie: AutoJalousie, name: string = \"Süd\")\n\
          \twarm = sonne.Q and aussentemp.Q >= 28\n\
          \twarm.title = \"Warm {name}\"\n\
          \tjalousie.AutoShade <- warm.Q\n\
          end\n\
          \n\
-         sued = fassade(jalousie: jal_sued)\n",
+         sued = Fassade(jalousie: jal_sued)\n",
     );
     let (plain, _) = m.expand().unwrap().desugar().unwrap();
     let top = plain.blocks().find(|b| b.slug == "sued_warm").unwrap();
     assert_eq!(top.title.as_deref(), Some("Warm Süd"));
     // Only a body signal takes one.
-    let err = Module::parse("template t()\n\tx = Or()\n\tx.title = \"X\"\nend\n")
+    let err = Module::parse("template T()\n\tx = Or()\n\tx.title = \"X\"\nend\n")
         .unwrap_err()
         .to_string();
     assert!(err.contains("named signals and their titles"), "{err}");

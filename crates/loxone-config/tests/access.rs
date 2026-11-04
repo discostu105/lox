@@ -778,8 +778,8 @@ fn a_template_claims_an_access_set_through_a_parameter() {
     let direct =
         Module::parse(&format!("{DOOR}\n{sets}\nfront_door.access = residents\n")).unwrap();
     let via = Module::parse(&format!(
-        "{DOOR}\n{sets}\ntemplate tuer(ct: NfcCodeTouch, rechte: access)\n\
-         \tct.access = rechte\nend\n\neingang = tuer(ct: front_door, rechte: residents)\n"
+        "{DOOR}\n{sets}\ntemplate Tuer(ct: NfcCodeTouch, rechte: access)\n\
+         \tct.access = rechte\nend\n\neingang = Tuer(ct: front_door, rechte: residents)\n"
     ))
     .unwrap();
     let out = |m: &Module| {
@@ -790,8 +790,8 @@ fn a_template_claims_an_access_set_through_a_parameter() {
     assert_eq!(out(&via), out(&direct));
     // A set of the wrong kind is refused.
     let e = Module::parse(&format!(
-        "{DOOR}\nrecipients familie\nend\n\ntemplate tuer(ct: NfcCodeTouch, rechte: access)\n\
-         \tct.access = rechte\nend\n\neingang = tuer(ct: front_door, rechte: familie)\n"
+        "{DOOR}\nrecipients familie\nend\n\ntemplate Tuer(ct: NfcCodeTouch, rechte: access)\n\
+         \tct.access = rechte\nend\n\neingang = Tuer(ct: front_door, rechte: familie)\n"
     ))
     .unwrap_err()
     .to_string();
@@ -807,7 +807,7 @@ fn access_declarations_are_checked() {
     assert!(err("access rights\n").contains("unclosed `access rights`"));
     assert!(err("access\n").contains("expected `access <name>`"));
     assert!(
-        err("template t(x: Switch)\naccess rights\nend\nend\n")
+        err("template T(x: Switch)\naccess rights\nend\nend\n")
             .contains("declared at the top level, not inside a template body")
     );
     let claim = "access rights\nend\nfront_door.access = rights\n";

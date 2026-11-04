@@ -324,15 +324,15 @@ fn an_allow_reaches_template_blocks() {
     let src = "\
 quelle = VirtualIn(\"Quelle\")
 
-template paar()
+template Paar()
 \t# lint: allow dead-outputs
 \ta = And(In1: quelle.Q)
 \tb = Or(In1: quelle.Q)
 end
 
 # lint: allow dead-outputs
-eins = paar()
-zwei = paar()
+eins = Paar()
+zwei = Paar()
 ";
     let dead = of(&lint(src), LintKind::DeadOutputs);
     // `eins` is covered whole; in `zwei` only the body's allow on `a`.

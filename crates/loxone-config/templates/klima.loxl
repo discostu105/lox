@@ -2,12 +2,12 @@
 #
 # Kopiere die Datei in das Modulverzeichnis des Projekts und rufe eine
 # Vorlage mit einer Zeile auf. Sensoren werden an ihrem Ausgang `Q`
-# gelesen; das Ergebnis jeder Vorlage ist ihr Hauptblock `ausgang`, die Instanz selbst:
+# gelesen; das Ergebnis jeder Vorlage ist ihr Ausgang `Q`:
 #
-#   bad = heizung_hysterese(temperatur: raumtemp_bad, ein: 20, aus: 22)
+#   bad = HeizungHysterese(temperatur: raumtemp_bad, ein: 20, aus: 22)
 #   heizung_bad.I <- bad.Q
 
-template heizung_hysterese(temperatur: any, ein = 20, aus = 22, titel = "Heizung")
+template HeizungHysterese(temperatur: any, ein: number = 20, aus: number = 22, titel: string = "Heizung") -> (Q: ausgang.Q)
 	# Heizen unter `ein` °C, aufhören ab `aus` °C (ein < aus).
 
 	ausgang = AnalogThresholdTrigger(
@@ -18,13 +18,13 @@ template heizung_hysterese(temperatur: any, ein = 20, aus = 22, titel = "Heizung
 	)
 end
 
-template frostschutz(temperatur: any, grenze = 5)
+template Frostschutz(temperatur: any, grenze: number = 5) -> (Q: ausgang.Q)
 	# Frostschutz: ein unter `grenze` °C.
 
 	ausgang = Less(In1: temperatur.Q, In2: grenze)
 end
 
-template lueftung_co2(co2: any, fenster: any, grenze = 1000, verzoegerung = 5min, titel = "CO2 hoch") -> ausgang
+template LueftungCo2(co2: any, fenster: any, grenze: number = 1000, verzoegerung: duration = 5min, titel: string = "CO2 hoch") -> (Q: ausgang.Q)
 	# Lüften, wenn CO2 `verzoegerung` lang über `grenze` ppm liegt und das
 	# Fenster zu ist.
 
@@ -34,7 +34,7 @@ template lueftung_co2(co2: any, fenster: any, grenze = 1000, verzoegerung = 5min
 	ausgang = And(In1: lange.Q, In2: zu.Q)
 end
 
-template entfeuchter(feuchte: any, ein = 65, aus = 55, titel = "Entfeuchter")
+template Entfeuchter(feuchte: any, ein: number = 65, aus: number = 55, titel: string = "Entfeuchter") -> (Q: ausgang.Q)
 	# Entfeuchten ab `ein` % relativer Feuchte, bis sie unter `aus` % fällt
 	# (ein > aus).
 

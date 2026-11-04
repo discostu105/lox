@@ -58,11 +58,15 @@ fn section_kinds_are_names_outside_their_section_head() {
         let e = parse_err(&format!("{word} = Not()\n"));
         assert!(e.contains("reserved word"), "{word}: {e}");
         // The same error inside a template body, not "not allowed in a body".
-        let e = parse_err(&format!("template t()\n\t{word} = Not()\nend\n"));
+        let e = parse_err(&format!(
+            "template T() -> (Q: nach.Q)\n\t{word} = Not()\nend\n"
+        ));
         assert!(e.contains("reserved word"), "{word} in a body: {e}");
     }
     for word in ["test", "let", "extern"] {
-        let e = parse_err(&format!("template t()\n\t{word} = Not()\nend\n"));
+        let e = parse_err(&format!(
+            "template T() -> (Q: nach.Q)\n\t{word} = Not()\nend\n"
+        ));
         assert!(e.contains("reserved word"), "{word} in a body: {e}");
     }
 }
@@ -202,19 +206,19 @@ fn tick_and_dt_take_let_constants() {
 }
 
 const PAAR: &str = "extern vi = VirtualIn(iname: \"VI1\")\n\n\
-                    template paar(x: VirtualIn) -> ein\n\
+                    template Paar(x: VirtualIn) -> (Q: ein.Q)\n\
                     \tein = Not(In: x.Q)\n\
                     \taus = Not(In: ein.Q)\n\
                     end\n\n\
-                    a = paar(x: vi)\n";
+                    a = Paar(x: vi)\n";
 
 #[test]
 fn scoped_names_work_in_bulk_statements_and_mirrors() {
     let src = format!(
         "{PAAR}\n\
          ref_aus = InputRef(mirrors: a.aus, AI: a.aus.Q)\n\
-         ref_ein = InputRef(mirrors: a, AI: a.Q)\n\n\
-         (a.aus, a).room = \"Pool\"\n"
+         ref_ein = InputRef(mirrors: a.ein, AI: a.Q)\n\n\
+         (a.aus, a.ein).room = \"Pool\"\n"
     );
     let m = Module::parse(&src).unwrap();
     assert_eq!(m.to_text(), src);
@@ -249,8 +253,11 @@ fn errors_spell_instance_blocks_like_the_source() {
     let e = compile_err(&format!("{PAAR}\nb = Not(In: a.aus.Nope)\n"));
     assert!(e.contains("`a.aus`"), "{e}");
     assert!(!e.contains("a_aus"), "{e}");
-    let e = compile_err(&format!("{PAAR}\nb = Not(In: a.Nope)\n"));
-    assert!(e.contains("block `a`"), "{e}");
+    // An unknown output of the instance, found before expansion.
+    let e = Module::parse(&format!("{PAAR}\nb = Not(In: a.Nope)\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("`Paar` has no output `Nope`"), "{e}");
     assert!(!e.contains("a_ein"), "{e}");
 }
 

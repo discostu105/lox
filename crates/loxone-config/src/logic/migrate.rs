@@ -13,9 +13,110 @@
 //! `step <n>`. A calendar entry's `on:` becomes `every:` in
 //! [`crate::logic::ModeSpellings::apply`], which `fmt` runs too.
 
-use super::ast::{ArgItem, BindingKind, Expr, Item, Module, Operand, PortRef, TestItem};
-use crate::port_names::renamed;
+use super::ast::{
+    ArgItem, BindingKind, Expr, Item, Module, Operand, PortRef, TemplateOutput, TestItem,
+};
+use crate::port_names::{default_output, renamed};
 use std::collections::BTreeMap;
+
+/// The PascalCase type name of a v2 template name: `markise_schutz` →
+/// `MarkiseSchutz`.
+pub fn type_name(slug: &str) -> String {
+    slug.split('_')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut c = p.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Rewrite the v2 template forms of `module` to v3, looking the
+/// templates up in `whole`: a lowercase template name becomes its type
+/// name (on the declaration and on every call), `-> block` becomes the
+/// declared outputs (`-> (Q: block.Q)`, the block's default output), a
+/// template without an arrow and with one body block declares that
+/// block's default output, and `n = 28` prints as `n: number = 28` by
+/// itself. Returns how many templates and calls changed.
+pub fn migrate_templates(module: &mut Module, whole: &[&Module]) -> usize {
+    let mut renames: BTreeMap<String, String> = BTreeMap::new();
+    for m in whole {
+        for item in &m.items {
+            if let Item::Template(t) = item
+                && !t.is_type_named()
+            {
+                renames.insert(t.name.clone(), type_name(&t.name));
+            }
+        }
+    }
+    let mut n = 0;
+    for item in &mut module.items {
+        match item {
+            Item::Template(t) => {
+                if let Some(new) = renames.get(&t.name) {
+                    t.name = new.clone();
+                    n += 1;
+                }
+                let block_type = |slug: &str| {
+                    t.body.iter().find_map(|i| match i {
+                        Item::Block(b) if b.slug == slug => Some(b.block_type.clone()),
+                        Item::Signal(x) if x.slug == slug => {
+                            x.expr.top_block_type().map(str::to_string)
+                        }
+                        _ => None,
+                    })
+                };
+                let primary = t.primary.take().or_else(|| {
+                    let mut it = t.body_slugs();
+                    match (it.next(), it.next()) {
+                        (Some(only), None) if t.outputs.is_empty() => Some(only.to_string()),
+                        _ => None,
+                    }
+                });
+                if let Some(p) = primary
+                    && t.outputs.is_empty()
+                {
+                    let port = block_type(&p)
+                        .and_then(|ty| default_output(&ty))
+                        .unwrap_or("Q")
+                        .to_string();
+                    t.outputs.push(TemplateOutput {
+                        name: port.clone(),
+                        port: PortRef { slug: p, port },
+                    });
+                    n += 1;
+                }
+                for p in &mut t.params {
+                    if let super::ast::TemplateParam::Value { typed, .. } = p
+                        && !*typed
+                    {
+                        *typed = true;
+                        n += 1;
+                    }
+                }
+                for body in &mut t.body {
+                    if let Item::Instance(call) = body
+                        && let Some(new) = renames.get(&call.block_type)
+                    {
+                        call.block_type = new.clone();
+                        n += 1;
+                    }
+                }
+            }
+            Item::Instance(call) => {
+                if let Some(new) = renames.get(&call.block_type) {
+                    call.block_type = new.clone();
+                    n += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    n
+}
 
 /// Rename every v2 port key of `module` whose port the table knows,
 /// looking up types in `whole` (the module's fragments, `module` among
@@ -255,5 +356,47 @@ mod tests {
         assert_eq!(n, 8, "{text}");
         // A second run changes nothing.
         assert_eq!(migrate_port_names(&mut m, &[]), 0);
+    }
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    #[test]
+    fn v2_templates_become_block_types() {
+        let mut m = Module::parse_fragment(
+            "extern a = VirtualIn(iname: \"VI1\")\n\
+             template waechter(quelle: VirtualIn, grenze = 3, titel = \"W\") -> alarm\n\
+             \talarm = Less(\"{titel}\", In1: quelle.Q, In2: grenze)\n\
+             \tzwei = Not(In: alarm.Q)\n\
+             end\n\
+             template einer(quelle: VirtualIn)\n\
+             \tnur = Formula(Formula: \"I1\", In1: quelle.Q)\n\
+             end\n\
+             f = waechter(quelle: a)\n\
+             g = einer(quelle: a)\n",
+        )
+        .unwrap();
+        let whole = [m.clone()];
+        let n = migrate_templates(&mut m, &whole.iter().collect::<Vec<_>>());
+        let text = m.to_text();
+        assert!(
+            text.contains(
+                "template Waechter(quelle: VirtualIn, grenze: number = 3, titel: string = \"W\") \
+                 -> (Q: alarm.Q)\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("template Einer(quelle: VirtualIn) -> (AQ: nur.AQ)\n"),
+            "{text}"
+        );
+        assert!(text.contains("f = Waechter(quelle: a)\n"), "{text}");
+        assert!(text.contains("g = Einer(quelle: a)\n"), "{text}");
+        assert_eq!(n, 8, "{text}");
+        assert_eq!(type_name("markise_schutz"), "MarkiseSchutz");
+        // A second run changes nothing.
+        assert_eq!(migrate_templates(&mut m, &[]), 0);
     }
 }

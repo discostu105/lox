@@ -86,22 +86,27 @@ page       = "page" string [ "(" page_arg { "," page_arg } ")" ] [ comment ] ;
                                                      before every other statement *)
 page_arg   = ( "room" | "category" ) ":" string ;  (* room: required in the list *)
 
-template   = "template" slug "(" [ params ] ")" [ "->" slug ] [ comment ]
-                                    (* "-> block": the primary block *)
-             { comment | block-head | arg-line | signal | wire | set
-             | tiles-claim | schedule-claim | moods-claim | access-claim
-             | recipients-claim | members-claim }
+template   = "template" type "(" [ params ] ")" [ "->" "(" outputs ")" ] [ comment ]
+                                    (* named like a type; the outputs an
+                                       instance has *)
+             { comment | let | block-head | arg-line | instance | signal
+             | wire | set | tiles-claim | schedule-claim | moods-claim
+             | access-claim | recipients-claim | members-claim }
              "end" [ comment ] ;
+outputs    = port ":" ref "." port { "," port ":" ref "." port } ;
 params     = param { "," param } ;
 param      = slug ":" ( type | "any" )             (* object parameter *)
            | slug ":" set-kind [ "=" slug ]        (* set parameter, default *)
-           | slug "=" ( number [ unit ] | string | bool ) ;  (* value parameter, default *)
+           | slug ":" value-kind [ "=" ( number [ unit ] | string | bool ) ]
+                                                   (* value parameter, default *)
+           | slug ":" "input" ;                    (* a source the instance feeds *)
+value-kind = "number" | "duration" | "string" | "bool" ;
 set-kind   = "moods" | "schedule" | "tiles" | "access" | "recipients" ;
-instance   = slug "=" slug "(" [ inst-args ] ")" [ comment ] ;
-inst-args  = param-name ":" ( ref | value ) { "," … } [ "," ] ;
-ref        = slug                                  (* a name; an instance stands
-                                                      for its primary block *)
-           | slug "." slug ;                       (* instance.block *)
+instance   = block-head ;                          (* the callee is a template:
+                                                      `sued = Fassade("Süd", …)` *)
+ref        = slug                                  (* a name *)
+           | slug "." slug { "." slug } ;          (* instance.block; a nested
+                                                      instance's: a.inner.block *)
 
 test       = "test" string [ comment ]
              { comment | inject | tick | step | expect | test-clock }
@@ -301,7 +306,7 @@ Notes:
   (`when mode.Q == 1`) and take a block of any name. `decompile` and `adopt` never pick a
   contextual word as a slug.
 - An instantiation is distinguished from a block declaration by the case
-  of the callee: `sued = fassade(…)` (lowercase = template name) vs
+  of the callee: `sued = Fassade(…)` (lowercase = template name) vs
   `hoch = GreaterEqual(…)` (PascalCase = block type).
 
 ## Statements
@@ -1111,97 +1116,107 @@ config with one page of content is also one file (`adopt --out-module`, `decompi
 output), the page line first. `decompile` without `--out-dir` prints a config with several pages as
 the files `--out-dir` would write, each under a `# ---- <file>.loxl` line.
 
-### `template` — a reusable, parameterized body
+### `template` — a block type made of blocks
 
 ```text
-template fassade(jalousie: AutoJalousie, schwelle = 28, pos = 70)
+template Fassade(jalousie: AutoJalousie, sonne: input, schwelle: number = 28, pos: number = 70)
+	-> (Q: beschatten.Q, Hoch: hoch.Q)
 	hoch = GreaterEqual(In1: temp_aussen.AQ, In2: schwelle)
-	beschatten = And(In1: hoch, In2: jalousie.Sd)
+	beschatten = And(In1: hoch, In2: sonne)
+	jalousie.AutoShade <- beschatten
 	jalousie.TargetPos = pos
 end
 
-sued = fassade(jalousie: jal_sued)
-west = fassade(jalousie: jal_west, pos: 55)
+sued = Fassade(jalousie: jal_sued, sonne: sonne_sued)
+west = Fassade(jalousie: jal_west, sonne: sonne_west, pos: 55)
 ```
 
-A `template` declares a body of blocks, wires and sets once; each
-instantiation stamps out an independent copy. The lowercase callee is what
-distinguishes an instantiation from a block declaration: `sued =
-fassade(…)` calls the template `fassade`, while `hoch = GreaterEqual(…)`
-declares a `GreaterEqual` block (block types are PascalCase).
+A `template` declares a body of blocks, wires and sets once; each instance stamps out an independent
+copy. A template is named like a type, and an instance is declared like a block: `sued = Fassade(…)`
+reads exactly like `hoch = GreaterEqual(…)`, and the callee decides which it is. A template may not
+take the name of a block type.
 
-Parameters come in three forms:
+**Parameters** come in four forms:
 
-- An **object parameter** (`jalousie: AutoJalousie`) is required at every call site and passes a name:
-  an extern, a block, or a block of an instance (`jalousie: sued`, `jalousie: sued.hoch`). The
-  annotation is checked against the argument's declared type when it is known. It takes no default.
-  `any` (`bewegung: any`) takes an object of any type, for a template over a sensor that may be virtual
-  or physical; the ports the body uses are checked after expansion, against the type passed.
-- A **value parameter** (`pos = 70`) has a default and may be overridden with a literal or a `let`
-  reference.
-- A **set parameter** (`stimmungen: moods = standard`) passes a `moods`, `schedule`, `tiles`, `access` or `recipients` set by
-  its bare name (`stimmungen: kueche`) to a claim in the body (`lc.moods = stimmungen`). The set must
-  be declared and of that kind. Without a default, the set must be given.
+- An **object parameter** (`jalousie: AutoJalousie`) is required at every call and passes a name: an
+  extern, a block, or a block of an instance (`jalousie: sued.hoch`). The annotation is checked
+  against the argument's declared type when it is known. `any` (`bewegung: any`) takes an object of
+  any type, for a template over a sensor that may be virtual or physical; the ports the body uses are
+  checked after expansion, against the type passed.
+- An **input parameter** (`sonne: input`) is a source the instance feeds in: a block or extern (its
+  default output), a port (`sonne: sensor.AQ`), a list of sources (`sonne: [a, b]`) or an
+  expression. The body binds it to a port (`In2: sonne`) or reads it in an expression. An input the
+  call does not give leaves the port open; an expression that reads it is then an error.
+- A **value parameter** declares its type: `schwelle: number = 28`, `nachlauf: duration = 3min`,
+  `titel: string = "Wächter"`, `aktiv: bool = on`. Without a default the call must give it. The
+  argument is a literal of that kind or a `let` constant holding one; a number for a duration is an
+  error naming the unit. `number` also takes `%`, `K` and `°` values.
+- A **set parameter** (`stimmungen: moods = standard`) passes a `moods`, `schedule`, `tiles`,
+  `access` or `recipients` set by its bare name (`stimmungen: kueche`) to a claim in the body
+  (`lc.moods = stimmungen`). The set must be declared and of that kind. Without a default, the set
+  must be given.
+
+A call binds parameters only. A port of the body is fed through an input parameter, never by a
+binding at the call; `sued = Fassade(In2: x)` is an error naming the rule.
+
+**The label.** An instance takes a label string like a block: `sued = Fassade("Süd", jalousie: …)`
+binds the parameter named `label`, which the template declares as `label: string` (with or without
+a default) and interpolates in a block title (`"{label}: Beschattung"`). A template without that
+parameter takes no label.
+
+**Outputs.** The header declares what an instance exposes: `-> (Q: beschatten.Q, Hoch: hoch.Q)`
+names each output in PascalCase and the body port it reads (a body block's, or a nested instance's
+output or block port). `sued.Q` and `sued.Hoch` read them; a bare `sued` stands for the first output
+listed, so `In1: sued` and `jal.AutoShade <- sued` read as for a block. An output the template does
+not declare is an error listing the ones it has; a template without outputs has no `sued.Q`.
+
+**Body names.** Source names a block of an instance through the instance: `sued.hoch.Q` is the output
+`Q` of body block `hoch` in instance `sued`, and `sued.hoch` the block itself where an object stands
+(an object parameter, a tile's `to:`, a claim, `removed sued.hoch`, `moved sued.alt -> sued.hoch`).
+`loxl rename` of an instance renames them all. A bare instance is no object: `to: sued` is an error
+naming the block to write.
 
 Free identifiers in the body that are not parameters refer to the module's names (externs, lets,
-blocks), like any other reference.
+blocks), like any other reference. A body name shadows a module name of the same spelling.
 
-**Instance names.** Source names a block of an instance through the instance: `sued.hoch.Q` is the
-output `Q` of body block `hoch` in instance `sued`.
-
-- An instance stands for its **primary block**: the body's only block, or the one the header names
-  with `-> <block>` (`template fassade(…) -> beschatten`). `sued.Q` reads the primary block's output.
-- The primary block has one spelling: write `sued.Q`, not `sued.beschatten.Q`.
-- An instance whose body has several blocks and no primary block must name the block.
-- These names work everywhere a block is referenced: arguments, `<-`, `=`, tests, a tile's `to:`,
-  rules, claims, `removed sued.hoch` and `moved sued.alt -> sued.hoch`. `loxl rename` of an instance
-  renames them all.
-
-Expansion is pure macro substitution before compile: body slug `hoch` in
-instance `sued` becomes `sued_hoch`, and that **expanded slug is the
-lockfile key**. Re-instantiating therefore never re-mints; editing the
-body mints only what is new in each instance; `removed` and `moved` apply
-per expanded slug. Source never writes the expanded slug:
-`sued_hoch.Q` is an error that names its replacement, `sued.hoch.Q`.
-Compile errors name blocks by their lock keys; `loxl test` reports them
-as source spells them.
-
-A call-site binding that names no template parameter forwards as a
-**port binding** onto the primary block — an instance is a
-composite block, so its call reads exactly like a block declaration
-with the shared parameters factored away:
+**The body** holds block declarations, instances of other templates, named signals and their
+titles, `let` constants and aliases, wires, port assignments and claims. A body `let` is local to
+the body:
 
 ```text
-fenster = jalousie(
-	titel: "Fenster Jalousie Bastian",
-	zeit_hoch: 20,
-	EndUp: touch_bastian_i2.Q,
-	EndUp: touch_bastian_tuer_i2.Q,
-	EndDown: touch_bastian_i5.Q,
-)
+template Takt(quelle: input) -> (Q: puls.Q, Aus: aus.Q)
+	let dauer = 500ms
+	let ein = puls.Q
+	puls = Monoflop(Trigger: quelle, Time: dauer)
+	aus = Not(In: ein)
+end
 ```
 
-Forwarded feeds may repeat, exactly as in a block's argument list, and
-resolve in module scope (never against the template's parameters). The
-expanded block re-validates them, so a typo surfaces as an unknown
-port with the block's known ports listed. A template without a primary block takes no forwards.
-Mark one with `-> <block>`.
+**Nesting.** A body may instantiate another template: `hitze = Waechter("Hitze", quelle: sonne)`
+inside `Fassade` is the instance `sued.hitze` of `sued`, its blocks `sued.hitze.alarm`, its outputs
+`hitze.Q` in the body and `sued.hitze.Q` outside. An output of the outer template may read one
+(`-> (Hitze: hitze.Q)`). A template may not instantiate itself.
 
-A block title in the body may interpolate value parameters:
-`"{titel} (scharf)"` substitutes the parameter's string at expansion, so
-each instance carries its own app-visible title. The placeholder must
-name a value parameter whose value is a string (a `let` reference to a
-string constant also works); a brace-wrapped slug naming no value
-parameter is an error (typo guard), and braces around anything not
-slug-shaped pass through verbatim.
+Expansion is pure macro substitution before compile: body slug `hoch` in instance `sued` becomes
+`sued_hoch` (`sued_hitze_alarm` under a nested instance), and that **expanded slug is the lockfile
+key**. Re-instantiating therefore never re-mints; editing the body mints only what is new in each
+instance; `removed` and `moved` apply per expanded slug. Source never writes the expanded slug:
+`sued_hoch.Q` is an error that names its replacement, `sued.hoch.Q`. Compile errors name blocks by
+their lock keys; `loxl test` reports them as source spells them (`sued.Q` for an output).
 
-The template library (`templates/`, listed by `loxl templates`)
-ships tested templates for common automations; copy a file into the
-module directory to call them.
+A block title in the body may interpolate string parameters: `"{titel} (scharf)"` substitutes the
+parameter's string at expansion, so each instance carries its own app-visible title. The placeholder
+must name a string parameter (a `let` reference to a string constant also works); a brace-wrapped
+slug naming no value parameter is an error (typo guard), and braces around anything not slug-shaped
+pass through verbatim.
 
-The body may contain only block declarations, named signals, wires, sets, claims (`.moods`, `.schedule`,
-`.tiles`, `.access`, `.recipients`, through a set parameter, and `.members`) and comments. No nesting, no template-local
-`let`/`extern`. `template` and `end` are reserved words; `use` is reserved for the old-syntax error.
+`loxl types <Template>` describes a template of the project's module or of the library like a block
+type: its parameters, what each takes, and its outputs. `check` validates a call before expansion: an
+unknown parameter, a missing one, a value of the wrong kind and a label without a `label` parameter
+are errors at the call.
+
+The template library (`templates/`, listed by `loxl templates`) ships tested templates for common
+automations; copy a file into the module directory to call them.
 
 ### `defaults` — the parameters every block of a type shares
 
@@ -1853,7 +1868,7 @@ relais.I <- licht.AQ2
 - Removing a claim leaves the moods as last written.
 - One claim per controller.
 - Claims are allowed in a template body, so a room template can give every room the same moods:
-  `<lc>.moods = <param>` with a set parameter (`template raum(stimmungen: moods = standard)`, called
+  `<lc>.moods = <param>` with a set parameter (`template Raum(stimmungen: moods = standard)`, called
   as `raum(stimmungen: kueche)`).
 
 `loxl decompile` and `loxl adopt` lift a controller's own moods into a set and a claim, with the
@@ -2158,10 +2173,10 @@ replacement. The compile output of a migrated file is byte-identical.
   a named signal compiled to come back as that expression, signal and `let`, where they compile to
   the same blocks again. The rest stays declared blocks.
 - **Instance names**: a block of a template instance is `inst.block.Port`, its primary block (the
-  body's only block, or the one `template t(…) -> block` names) is `inst.Port`. The expanded name
+  body's only block, or the one `template t(…) -> (Q: block.Q)` names) is `inst.Port`. The expanded name
   `inst_block.Port` is an error naming the scoped one. The lock keys stay `inst_block`. Call-site
   forwards go to the primary block.
-- **Set parameters**: `template raum(stimmungen: moods = standard)` passes a set by its bare name
+- **Set parameters**: `template Raum(stimmungen: moods = standard)` passes a set by its bare name
   (`raum(stimmungen: kueche)`). The string forms `stimmungen = "standard"` and
   `stimmungen: "kueche"` are errors naming that spelling. `.schedule` and `.tiles` claims work in
   template bodies too. An object parameter takes no default.
@@ -2272,9 +2287,26 @@ Part two:
   `decompile` without `--out-dir` prints several pages as several files; `adopt --out-module` refuses
   a config with blocks on several pages.
 
+Part three, templates ([`template`](#template--a-block-type-made-of-blocks)):
+
+- **A template is named like a type** (`template Fassade(…)`, `sued = Fassade(…)`); the lowercase
+  callee rule is gone. A lowercase template name is an error naming the type name; `loxl fmt --write`
+  renames the template and its calls across the module's files.
+- **Outputs are declared** in the header, `-> (Q: beschatten.Q)`, and `sued.Q` reads one. The primary
+  block, the "only block" rule and `-> block` are gone: `-> block` is an error, and `fmt --write`
+  rewrites it and a one-block body to the block's default output. A bare instance where an object
+  stands (`to: sued`, a claim, an object argument) names the block instead (`sued.hoch`).
+- **A call binds parameters only.** A call-site port binding is an error; the body's port is fed
+  through an input parameter (`sonne: input`, bound as `In2: sonne`).
+- **Value parameters declare a type**: `n: number = 28`, `t: duration = 3min`, `s: string`,
+  `b: bool`. `n = 28` is an error naming the typed form; `fmt --write` rewrites it. A value of
+  another kind at the call is an error.
+- **New**: an instance's label string (bound to `label: string`), nested instances, body-local
+  `let`, `loxl types <Template>`.
+
 ## Versioning
 
-This is v3, part one (see [Changes from v2](#changes-from-v2) and [Changes from v1](#changes-from-v1)).
-v0 was a pre-release revision; no v0 files are in use. Anything not specified here, such as template
-nesting and template-local declarations, is not part of the language. A future version keeps v3 files
-parsing unchanged, or every spelling it drops is an error that names the replacement.
+This is v3 (see [Changes from v2](#changes-from-v2) and [Changes from v1](#changes-from-v1)). v0 was
+a pre-release revision; no v0 files are in use. Anything not specified here is not part of the
+language. A future version keeps v3 files parsing unchanged, or every spelling it drops is an error
+that names the replacement.
