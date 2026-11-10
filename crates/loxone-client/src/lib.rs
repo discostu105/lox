@@ -4,6 +4,7 @@ pub mod client;
 pub mod connection;
 mod error;
 pub mod ftp;
+pub mod private_file;
 pub mod sdtest;
 pub mod stats;
 pub mod statv2;

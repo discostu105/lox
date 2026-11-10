@@ -264,10 +264,11 @@ pub fn download(cfg: &Config, version: Option<&str>) -> Result<Snapshot> {
     let zip = loxone_client::ftp::download_backup(&cfg.connection(), &newest.filename)?;
     let xml = loxone_config::archive::extract_and_decompress(&zip)?;
     let cache = cache_path(cfg);
+    // The program file names the users and their access: owner-only.
     if let Some(p) = cache.parent() {
-        let _ = std::fs::create_dir_all(p);
+        let _ = loxone_client::private_file::create_dir_all(p);
     }
-    let _ = std::fs::write(&cache, &xml);
+    let _ = loxone_client::private_file::write(&cache, &xml);
     let ver = version
         .map(str::to_string)
         .or_else(|| structure_version(cfg))

@@ -56,7 +56,8 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             no_verify_ssl,
             visu_password_file,
         } => {
-            let mut cfg = Config::load().unwrap_or_default();
+            let mut cfg = Config::load_or_new()?;
+            let before = (cfg.host.clone(), cfg.user.clone());
             if let Some(h) = host {
                 cfg.host = if h.starts_with("http://") || h.starts_with("https://") {
                     h
@@ -67,6 +68,7 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             if let Some(u) = user {
                 cfg.user = u;
             }
+            forget_other_miniserver(&cfg, &before.0, &before.1);
             if let Some(p) = pass {
                 cfg.pass = p;
             }
@@ -90,6 +92,20 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
         SetupCmd::Show => print!("{}", setup_text(&Config::load()?)),
     }
     Ok(())
+}
+
+/// After `lox setup set` changed the host or the user: drop the structure
+/// cache and the token, which belong to the Miniserver and user before.
+fn forget_other_miniserver(cfg: &Config, host_before: &str, user_before: &str) {
+    if cfg.data_dir.as_os_str().is_empty() {
+        return; // a new config has nothing cached
+    }
+    if cfg.host != host_before {
+        let _ = fs::remove_file(cfg.structure_cache_path());
+    }
+    if cfg.host != host_before || cfg.user != user_before {
+        let _ = fs::remove_file(cfg.token_path());
+    }
 }
 
 /// `lox setup show`: the connection settings, the password redacted.
@@ -462,7 +478,8 @@ fn unix_now() -> u64 {
 fn token_info_text(ts: &token::TokenStore, now: u64) -> String {
     let mut out = String::new();
     let days_left = ts.valid_until.saturating_sub(now) / 86400;
-    if ts.token.len() >= 12 {
+    // Tokens are hex; anything else (a damaged file) is shown as it is
+    if ts.token.len() >= 12 && ts.token.is_ascii() {
         let _ = writeln!(
             out,
             "Token: {}...{}",
@@ -1183,7 +1200,7 @@ fn config_init(path: &str) -> Result<()> {
         std::env::current_dir()?.join(path)
     };
     let repo = gitops::init(&abs_path, &cfg)?;
-    let mut cfg = Config::load().unwrap_or_default();
+    let mut cfg = Config::load_or_new()?;
     cfg.config_repo = Some(repo.to_string_lossy().to_string());
     let saved = cfg.save()?;
     println!("Config repo initialized at {}", repo.display());

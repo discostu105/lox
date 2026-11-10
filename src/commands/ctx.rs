@@ -1,8 +1,6 @@
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 use crate::commands::RunContext;
 use crate::config::{Config, ContextEntry, GlobalConfig, validate_context_name};
@@ -114,7 +112,7 @@ fn ctx_add(
     serial: Option<String>,
 ) -> Result<()> {
     validate_context_name(&name)?;
-    let mut global = GlobalConfig::load_or_default();
+    let mut global = GlobalConfig::load_for_update()?;
 
     if global.contexts.contains_key(&name) {
         bail!(
@@ -170,7 +168,7 @@ fn ctx_add(
 }
 
 fn ctx_use(ctx: &RunContext, name: String) -> Result<()> {
-    let mut global = GlobalConfig::load_or_default();
+    let mut global = GlobalConfig::load_for_update()?;
 
     if !global.contexts.contains_key(&name) {
         bail!(
@@ -288,7 +286,7 @@ fn ctx_current(ctx: &RunContext) -> Result<()> {
 }
 
 fn ctx_remove(ctx: &RunContext, name: String) -> Result<()> {
-    let mut global = GlobalConfig::load_or_default();
+    let mut global = GlobalConfig::load_for_update()?;
 
     if global.contexts.remove(&name).is_none() {
         bail!("Context '{}' not found", name);
@@ -315,7 +313,7 @@ fn ctx_remove(ctx: &RunContext, name: String) -> Result<()> {
 
 fn ctx_rename(ctx: &RunContext, old: String, new: String) -> Result<()> {
     validate_context_name(&new)?;
-    let mut global = GlobalConfig::load_or_default();
+    let mut global = GlobalConfig::load_for_update()?;
 
     let entry = global
         .contexts
@@ -377,10 +375,7 @@ fn ctx_init(
         serial: serial.unwrap_or_default(),
         ..Default::default()
     };
-    let config_path = lox_dir.join("config.yaml");
-    fs::write(&config_path, serde_yaml::to_string(&cfg)?)?;
-    #[cfg(unix)]
-    let _ = fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600));
+    crate::config::write_config(&lox_dir.join("config.yaml"), &serde_yaml::to_string(&cfg)?)?;
 
     let gitignore = "# Secrets — never commit\nconfig.yaml\ntoken.json\n\n# Cache — regenerated automatically\ncache/\n";
     fs::write(lox_dir.join(".gitignore"), gitignore)?;

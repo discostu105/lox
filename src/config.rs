@@ -1,10 +1,9 @@
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
+use loxone_client::private_file;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -288,6 +287,26 @@ impl Config {
         }
     }
 
+    /// The config to change with `lox setup set`: the loaded one, or an
+    /// empty one when there is no config file yet. A file that exists but
+    /// does not load is an error, so saving never replaces it.
+    pub fn load_or_new() -> Result<Self> {
+        let err = match Self::load() {
+            Ok(cfg) => return Ok(cfg),
+            Err(e) => e,
+        };
+        let path = std::env::var_os("LOX_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(Self::path);
+        match fs::read_to_string(&path) {
+            Ok(content) if !content.trim().is_empty() => Err(err.context(format!(
+                "{} exists but cannot be used. Fix or remove it first",
+                path.display()
+            ))),
+            _ => Ok(Self::default()),
+        }
+    }
+
     /// Save this config as a flat file (for project-local or legacy configs),
     /// to the file [`load`](Self::load) reads: `LOX_CONFIG` when it is set,
     /// never the global config behind its back.
@@ -296,7 +315,7 @@ impl Config {
         if let Some(ref ctx_name) = self.context_name
             && !self.is_local
         {
-            let mut global = GlobalConfig::load_or_default();
+            let mut global = GlobalConfig::load_for_update()?;
             global
                 .contexts
                 .insert(ctx_name.clone(), ContextEntry::from(self));
@@ -312,62 +331,68 @@ impl Config {
         } else {
             Self::path()
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&path, serde_yaml::to_string(self)?)?;
-        #[cfg(unix)]
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        write_config(&path, &serde_yaml::to_string(self)?)?;
         Ok(path)
     }
+}
+
+/// Write a config file: it holds the password, so owner-only, and in one
+/// step, so a crash never leaves half a config.
+pub(crate) fn write_config(path: &Path, yaml: &str) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        private_file::create_dir_all(parent)
+            .with_context(|| format!("Cannot create {}", parent.display()))?;
+    }
+    private_file::write(path, yaml.as_bytes())
+        .with_context(|| format!("Cannot write {}", path.display()))
 }
 
 // ── GlobalConfig implementation ──────────────────────────────────────────────
 
 impl GlobalConfig {
-    /// Load the global config file, returning Default if it doesn't exist or is flat format.
+    /// The contexts for reading: none when the file is missing, flat or
+    /// broken. Never save what this returns; see [`Self::load_for_update`].
     pub fn load_or_default() -> Self {
-        let path = Config::path();
-        let Ok(content) = fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        // Only parse as GlobalConfig if it has a contexts key
-        let Ok(value): Result<serde_yaml::Value, _> = serde_yaml::from_str(&content) else {
-            return Self::default();
-        };
-        if value.get("contexts").is_some() {
-            serde_yaml::from_str(&content).unwrap_or_default()
-        } else {
-            Self::default()
-        }
+        Self::load_for_update_from(&Config::path()).unwrap_or_default()
     }
 
-    /// Load the global config, returning an error if the file doesn't exist.
-    #[allow(dead_code)]
-    pub fn load() -> Result<Self> {
-        let path = Config::path();
-        let content = fs::read_to_string(&path).with_context(
-            || "Config not found. Run: lox setup set --host ... --user ... --pass ...",
-        )?;
-        let value: serde_yaml::Value = serde_yaml::from_str(&content)?;
-        if value.get("contexts").is_some() {
-            Ok(serde_yaml::from_str(&content)?)
-        } else {
-            // Flat format — no contexts
-            Ok(Self::default())
+    /// The contexts, to change and save back. Empty only when there is no
+    /// config yet. A file that holds anything else is an error: saving over
+    /// it would drop its credentials.
+    pub fn load_for_update() -> Result<Self> {
+        Self::load_for_update_from(&Config::path())
+    }
+
+    pub(crate) fn load_for_update_from(path: &Path) -> Result<Self> {
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(e).with_context(|| format!("Cannot read {}", path.display())),
+        };
+        if content.trim().is_empty() {
+            return Ok(Self::default());
         }
+        let value: serde_yaml::Value = serde_yaml::from_str(&content)
+            .with_context(|| format!("{} is not valid YAML", path.display()))?;
+        if value.get("contexts").is_none() {
+            bail!(
+                "{} holds one Miniserver without a context name. Run `lox ctx migrate` first.",
+                path.display()
+            );
+        }
+        serde_yaml::from_value(value)
+            .with_context(|| format!("{} has a context that cannot be read", path.display()))
     }
 
     /// Save the global config to `~/.lox/config.yaml`.
     pub fn save(&self) -> Result<PathBuf> {
         let path = Config::path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&path, serde_yaml::to_string(self)?)?;
-        #[cfg(unix)]
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        self.save_to(&path)?;
         Ok(path)
+    }
+
+    pub(crate) fn save_to(&self, path: &Path) -> Result<()> {
+        write_config(path, &serde_yaml::to_string(self)?)
     }
 
     /// Check if the global config file uses the multi-context format.

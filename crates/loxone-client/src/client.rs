@@ -428,10 +428,11 @@ impl LoxClient {
         }
         let v: Value = serde_json::from_slice(&resp)?;
         if let Some(cache) = &conn.structure_cache {
+            // The structure names every room, control and user of the house.
             if let Some(parent) = cache.parent() {
-                let _ = fs::create_dir_all(parent);
+                let _ = crate::private_file::create_dir_all(parent);
             }
-            let _ = fs::write(cache, &resp);
+            let _ = crate::private_file::write(cache, &resp);
         }
         Ok(v)
     }
