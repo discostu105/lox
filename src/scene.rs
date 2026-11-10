@@ -41,10 +41,41 @@ impl Scene {
 
     /// Load a scene by name from the given directory.
     pub(crate) fn load_from(name: &str, dir: &std::path::Path) -> Result<Self> {
-        let path = dir.join(format!("{}.yaml", name));
-        let content =
-            fs::read_to_string(&path).with_context(|| format!("Scene '{}' not found", name))?;
-        Ok(serde_yaml::from_str(&content)?)
+        let path = Self::path_in(name, dir)?;
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!("Scene '{}' not found", name)
+            }
+            Err(e) => {
+                return Err(e).with_context(|| format!("Could not read {}", path.display()));
+            }
+        };
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("Scene '{}' is not valid ({})", name, path.display()))
+    }
+
+    /// The file of the scene `name` for this config.
+    pub fn path_with_config(name: &str, cfg: &Config) -> Result<PathBuf> {
+        Self::path_in(name, &Self::scenes_dir_for(cfg))
+    }
+
+    /// The file of the scene `name` in `dir`. A scene is a file in the
+    /// scenes directory, never a path: its steps run without the checks a
+    /// single command gets.
+    pub(crate) fn path_in(name: &str, dir: &std::path::Path) -> Result<PathBuf> {
+        let mut parts = std::path::Path::new(name).components();
+        let is_plain_name = matches!(
+            (parts.next(), parts.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) && !name.contains(['/', '\\']);
+        if !is_plain_name {
+            anyhow::bail!(
+                "Scene '{}' is not a scene name. `lox scene ls` lists the scenes.",
+                name
+            );
+        }
+        Ok(dir.join(format!("{}.yaml", name)))
     }
 
     /// List all scene names (without extension) from the given directory.
@@ -121,6 +152,43 @@ steps:
             "Error should mention scene name, got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn a_scene_name_is_never_a_path() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let yaml = "steps:\n  - control: Door\n    cmd: open\n";
+        fs::write(outside.path().join("evil.yaml"), yaml).unwrap();
+        fs::write(dir.path().join("ok.yaml"), yaml).unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub").join("inner.yaml"), yaml).unwrap();
+
+        let absolute = outside.path().join("evil");
+        for name in [
+            absolute.to_str().unwrap(),
+            "../evil",
+            "sub/inner",
+            "sub\\inner",
+            "..",
+            ".",
+            "",
+        ] {
+            let err = Scene::load_from(name, dir.path()).unwrap_err().to_string();
+            assert!(err.contains("is not a scene name"), "{name:?}: {err}");
+        }
+        assert!(Scene::load_from("ok", dir.path()).is_ok());
+        // Dots inside a name are fine.
+        assert!(Scene::path_in("good.night", dir.path()).is_ok());
+    }
+
+    #[test]
+    fn a_broken_scene_file_is_not_reported_as_missing() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("broken.yaml"), "steps: [unclosed").unwrap();
+        let err = format!("{:#}", Scene::load_from("broken", dir.path()).unwrap_err());
+        assert!(err.contains("is not valid"), "{err}");
+        assert!(!err.contains("not found"), "{err}");
     }
 
     #[test]

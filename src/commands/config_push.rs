@@ -100,7 +100,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn restart_program(&self) -> Result<()> {
-        self.cfg.client()?.get_text("/jdev/sps/restart")?;
+        self.cfg.client()?.restart_program()?;
         Ok(())
     }
 
@@ -131,7 +131,7 @@ impl Miniserver for LiveMiniserver {
     }
 
     fn reboot(&self) -> Result<()> {
-        self.cfg.client()?.get_text("/jdev/sys/reboot")?;
+        self.cfg.client()?.reboot()?;
         Ok(())
     }
 

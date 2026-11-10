@@ -777,7 +777,7 @@ pub fn cmd_send(
         print_dry_run(ctx.json, ctx.quiet, &uuid, &command, name, room);
     } else {
         let resp = if let Some(hash) = secured {
-            lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
+            lox.send_secured_cmd(&hash, &uuid, &command)?
         } else {
             lox.send_cmd(&uuid, &command)?
         };

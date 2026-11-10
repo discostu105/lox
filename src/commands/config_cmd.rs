@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs;
@@ -13,7 +12,7 @@ use crate::config::Config;
 use crate::scene::Scene;
 use crate::util::json_val_str;
 use crate::{custom_changes, ftp, gitops, loxone_xml};
-use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
+use loxone_client::client::LOXONE_EPOCH_SECS;
 use loxone_client::system::{check_ll, code_of};
 use loxone_client::token;
 use loxone_config::archive;
@@ -207,14 +206,13 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
         SceneCmd::Show { name } => {
             println!(
                 "{}",
-                fs::read_to_string(Scene::scenes_dir_for(&cfg).join(format!("{}.yaml", name)))
+                fs::read_to_string(Scene::path_with_config(&name, &cfg)?)
                     .with_context(|| format!("Scene '{}' not found", name))?
             );
         }
         SceneCmd::New { name } => {
-            let dir = Scene::scenes_dir_for(&cfg);
-            fs::create_dir_all(&dir)?;
-            let path = dir.join(format!("{}.yaml", name));
+            let path = Scene::path_with_config(&name, &cfg)?;
+            fs::create_dir_all(Scene::scenes_dir_for(&cfg))?;
             if path.exists() {
                 bail!("Already exists");
             }
@@ -291,16 +289,8 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
             }
         }
         CacheCmd::Refresh => {
-            let client = Client::builder()
-                .user_agent(USER_AGENT)
-                .danger_accept_invalid_certs(true)
-                .redirect(LoxClient::same_origin_redirect_policy(&cfg.host))
-                .timeout(Duration::from_secs(15))
-                .build()?;
-            if cache.exists() {
-                let _ = fs::remove_file(&cache);
-            }
-            LoxClient::load_or_fetch_structure(&cfg.connection(), &client)?;
+            // Through the configured client, so `verify_ssl` holds here too
+            cfg.client()?.refresh_structure()?;
             println!("✓ Structure cache refreshed ({:?})", cache);
         }
     }

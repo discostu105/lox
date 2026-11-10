@@ -15,10 +15,9 @@ use crate::connection::Connection;
 
 fn make_tls_config() -> Arc<ClientConfig> {
     let _ = ring::default_provider().install_default();
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    // No roots: the verifier below accepts every certificate.
     let mut tls = ClientConfig::builder()
-        .with_root_certificates(root_store)
+        .with_root_certificates(rustls::RootCertStore::empty())
         .with_no_client_auth();
     tls.dangerous()
         .set_certificate_verifier(Arc::new(NoCertVerifier));

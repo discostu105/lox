@@ -810,56 +810,40 @@ pub(crate) enum UpdateCmd {
 pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
     match action {
         UpdateCmd::Check => {
-            let lox = Config::load()?.client()?;
-            let version = lox.get_text("/dev/cfg/version")?;
-            let ver = xml_attr(&version, "value").unwrap_or("?");
-            println!("Current firmware: {}", ver);
             let cfg = Config::load()?;
-            if !cfg.serial.is_empty() {
-                let url = format!(
-                    "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
-                    cfg.serial, ver
-                );
-                match reqwest::blocking::get(&url) {
-                    Ok(resp) => {
-                        let body = resp.text().unwrap_or_default();
-                        let new_ver = xml_attr(&body, "Firmware")
-                            .or_else(|| xml_attr(&body, "version"))
-                            .or_else(|| xml_attr(&body, "Version").filter(|v| v.contains('.')));
-                        let update_available = xml_attr(&body, "Version")
-                            .or_else(|| xml_attr(&body, "update"))
-                            .map(|v| v != "0" && v != ver)
-                            .unwrap_or(false);
-                        let is_update_available =
-                            update_available || new_ver.map(|v| v != ver).unwrap_or(false);
-                        if ctx.json {
-                            println!(
-                                "{}",
-                                serde_json::json!({
-                                    "current": ver,
-                                    "available": new_ver.unwrap_or(if is_update_available { "yes" } else { ver }),
-                                    "update_available": is_update_available,
-                                })
-                            );
-                        } else if let Some(nv) = new_ver {
-                            if nv != ver {
-                                println!("Update available: {}", nv);
-                            } else {
-                                println!("✓ Firmware is up to date");
-                            }
-                        } else if is_update_available {
-                            println!("Update available (check Loxone Config for details)");
-                        } else {
-                            println!("✓ Firmware is up to date");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Could not check for updates: {}", e);
-                        println!("Current firmware: {}", ver);
-                    }
+            let version = cfg.client()?.get_text("/dev/cfg/version")?;
+            let ver = xml_attr(&version, "value").unwrap_or("?");
+            if !ctx.json {
+                println!("Current firmware: {}", ver);
+            }
+            if cfg.serial.is_empty() {
+                if ctx.json {
+                    println!("{}", serde_json::json!({ "current": ver }));
                 }
+                eprintln!(
+                    "Set the serial number for update checks: lox setup set --serial <serial>"
+                );
+                return Ok(());
+            }
+            let url = format!(
+                "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
+                cfg.serial, ver
+            );
+            let body = match reqwest::blocking::get(&url).and_then(|r| r.text()) {
+                Ok(body) => body,
+                Err(e) => {
+                    if ctx.json {
+                        println!("{}", serde_json::json!({ "current": ver }));
+                    }
+                    eprintln!("Could not check for updates: {}", e);
+                    return Ok(());
+                }
+            };
+            let check = UpdateCheck::parse(&body, ver);
+            if ctx.json {
+                println!("{}", check.json(ver));
             } else {
-                println!("Set serial number for update checks: lox config set --serial <serial>");
+                println!("{}", check.text(ver));
             }
         }
         UpdateCmd::Install { yes } => {
@@ -867,23 +851,97 @@ pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
                 bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
             }
             let lox = Config::load()?.client()?;
-            let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
-            let val = xml_attr(&resp, "value").unwrap_or("?");
-            println!("Update triggered: {}", val);
+            if ctx.dry_run {
+                print_system_dry_run(ctx, "firmware update", "/jdev/sys/updatetolatestrelease");
+                return Ok(());
+            }
+            let val = lox.update_firmware()?;
+            println!(
+                "Update triggered: {}",
+                if val.is_empty() { "ok" } else { &val }
+            );
             println!("The Miniserver will reboot during the update process.");
         }
     }
     Ok(())
 }
 
-pub fn cmd_reboot(_ctx: &RunContext, yes: bool) -> Result<()> {
+/// The answer of Loxone's update server for one Miniserver.
+#[derive(Debug, PartialEq)]
+struct UpdateCheck {
+    /// The firmware version on offer, when the answer names one.
+    available: Option<String>,
+    update_available: bool,
+}
+
+impl UpdateCheck {
+    fn parse(body: &str, current: &str) -> Self {
+        let available = xml_attr(body, "Firmware")
+            .or_else(|| xml_attr(body, "version"))
+            .or_else(|| xml_attr(body, "Version").filter(|v| v.contains('.')));
+        let flagged = xml_attr(body, "Version")
+            .or_else(|| xml_attr(body, "update"))
+            .is_some_and(|v| v != "0" && v != current);
+        UpdateCheck {
+            update_available: flagged || available.is_some_and(|v| v != current),
+            available: available.map(str::to_string),
+        }
+    }
+
+    fn json(&self, current: &str) -> serde_json::Value {
+        let available = match &self.available {
+            Some(v) => v.as_str(),
+            None if self.update_available => "yes",
+            None => current,
+        };
+        serde_json::json!({
+            "current": current,
+            "available": available,
+            "update_available": self.update_available,
+        })
+    }
+
+    fn text(&self, current: &str) -> String {
+        match &self.available {
+            Some(v) if v != current => format!("Update available: {}", v),
+            None if self.update_available => {
+                "Update available (check Loxone Config for details)".to_string()
+            }
+            _ => "✓ Firmware is up to date".to_string(),
+        }
+    }
+}
+
+/// `--dry-run` for a system command: what would be requested.
+fn print_system_dry_run(ctx: &RunContext, what: &str, path: &str) {
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "dry_run": true,
+                "would_execute": { "action": what, "request": path },
+            })
+        );
+    } else if !ctx.quiet {
+        println!("[dry-run] {} → {}", what, path);
+    }
+}
+
+pub fn cmd_reboot(ctx: &RunContext, yes: bool) -> Result<()> {
     if !yes {
         bail!("Reboot requires --yes flag. This will restart your Miniserver!");
     }
     let lox = Config::load()?.client()?;
-    let resp = lox.get_text("/jdev/sys/reboot")?;
-    let val = xml_attr(&resp, "value").unwrap_or("ok");
-    println!("Reboot initiated: {}", val);
+    if ctx.dry_run {
+        print_system_dry_run(ctx, "reboot", "/jdev/sys/reboot");
+        return Ok(());
+    }
+    let val = lox.reboot()?;
+    println!(
+        "Reboot initiated: {}",
+        if val.is_empty() { "ok" } else { &val }
+    );
     Ok(())
 }
 
@@ -1108,6 +1166,33 @@ fn print_sd_table(sd: &SdTestResult) {
 mod tests {
     use super::*;
     use crate::hardware::{HwEntry, HwStatus, counts};
+
+    #[test]
+    fn update_check_reads_the_offered_version() {
+        let newer = UpdateCheck::parse(r#"<Miniserver Firmware="16.1.2.3"/>"#, "15.3.1.2");
+        assert!(newer.update_available);
+        assert_eq!(newer.text("15.3.1.2"), "Update available: 16.1.2.3");
+        assert_eq!(
+            newer.json("15.3.1.2"),
+            serde_json::json!({"current": "15.3.1.2", "available": "16.1.2.3", "update_available": true})
+        );
+
+        let same = UpdateCheck::parse(r#"<Miniserver Firmware="15.3.1.2"/>"#, "15.3.1.2");
+        assert!(!same.update_available);
+        assert_eq!(same.text("15.3.1.2"), "✓ Firmware is up to date");
+
+        let flag_only = UpdateCheck::parse(r#"<Miniserver update="1"/>"#, "15.3.1.2");
+        assert_eq!(flag_only.available, None);
+        assert_eq!(
+            flag_only.text("15.3.1.2"),
+            "Update available (check Loxone Config for details)"
+        );
+        assert_eq!(flag_only.json("15.3.1.2")["available"], "yes");
+
+        let nothing = UpdateCheck::parse("<html/>", "15.3.1.2");
+        assert!(!nothing.update_available);
+        assert_eq!(nothing.json("15.3.1.2")["available"], "15.3.1.2");
+    }
 
     fn entry(status: HwStatus, name: &str, serial: Option<&str>, program: Option<&str>) -> HwEntry {
         HwEntry {
