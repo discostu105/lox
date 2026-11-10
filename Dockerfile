@@ -6,8 +6,10 @@ RUN apt-get update && \
 RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 
 WORKDIR /src
+# The workspace: the lox package and the two library crates it builds from
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
+COPY crates/ crates/
 
 ARG TARGETARCH
 RUN case "${TARGETARCH}" in \
