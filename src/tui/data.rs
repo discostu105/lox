@@ -368,8 +368,11 @@ pub fn parse_status_xml(xml: &str) -> Vec<Device> {
 /// (unix time, first output value) points.
 pub fn parse_stats(data: &[u8], num_outputs: usize, lox_epoch_unix: i64) -> Series {
     let entry = 8 + num_outputs.max(1) * 8;
-    let off = loxone_client::stats::stats_data_offset(data, entry).unwrap_or(0);
     let mut points = Vec::new();
+    // No header, or not a statistics file: no points
+    let Some(off) = loxone_client::stats::stats_data_offset(data, entry) else {
+        return Series { points };
+    };
     let mut i = off;
     while i + entry <= data.len() {
         let ts = u32::from_le_bytes([data[i + 4], data[i + 5], data[i + 6], data[i + 7]]);

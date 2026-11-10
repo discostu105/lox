@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use crate::commands::RunContext;
 use crate::config::Config;
-use crate::otel;
 use crate::util::{abs_path, bar, kb_fmt, xml_attr};
 
 pub fn cmd_status(
@@ -1022,108 +1021,6 @@ fn write_stdout(data: &[u8]) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         r => r.context("Cannot write to stdout"),
     }
-}
-
-#[derive(Subcommand)]
-pub(crate) enum OtelCmd {
-    /// Continuously push metrics, logs & traces to an OTLP endpoint
-    Serve {
-        /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
-        #[arg(long, default_value = "http://localhost:4318")]
-        endpoint: String,
-        /// Push interval (e.g. 30s, 1m, 5m)
-        #[arg(long, short = 'i', default_value = "30s")]
-        interval: String,
-        /// Filter by control type
-        #[arg(long, short = 't')]
-        r#type: Option<String>,
-        /// Filter by room
-        #[arg(long, short = 'r')]
-        room: Option<String>,
-        /// Additional header for auth (e.g. "Authorization=Bearer xxx")
-        #[arg(long)]
-        header: Vec<String>,
-        /// Use delta temporality (required by Dynatrace and some backends)
-        #[arg(long)]
-        delta: bool,
-        /// Disable log export (metrics and traces only)
-        #[arg(long)]
-        no_logs: bool,
-        /// Disable trace export (metrics and logs only)
-        #[arg(long)]
-        no_traces: bool,
-    },
-    /// One-shot: push current state and exit
-    Push {
-        /// OTLP HTTP endpoint URL
-        #[arg(long, default_value = "http://localhost:4318")]
-        endpoint: String,
-        /// Filter by control type
-        #[arg(long, short = 't')]
-        r#type: Option<String>,
-        /// Filter by room
-        #[arg(long, short = 'r')]
-        room: Option<String>,
-        /// Additional header for auth
-        #[arg(long)]
-        header: Vec<String>,
-        /// Use delta temporality (required by Dynatrace and some backends)
-        #[arg(long)]
-        delta: bool,
-        /// Disable log export (metrics only)
-        #[arg(long)]
-        no_logs: bool,
-    },
-}
-
-pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {
-    let cfg = Config::load()?;
-    match action {
-        OtelCmd::Serve {
-            endpoint,
-            interval,
-            r#type,
-            room,
-            header,
-            delta,
-            no_logs,
-            no_traces,
-        } => {
-            let interval = otel::parse_interval(&interval)?;
-            otel::serve(
-                &cfg,
-                &endpoint,
-                interval,
-                r#type.as_deref(),
-                room.as_deref(),
-                &header,
-                ctx.quiet,
-                delta,
-                no_logs,
-                no_traces,
-            )?;
-        }
-        OtelCmd::Push {
-            endpoint,
-            r#type,
-            room,
-            header,
-            delta,
-            no_logs,
-        } => {
-            otel::push(
-                &cfg,
-                &endpoint,
-                r#type.as_deref(),
-                room.as_deref(),
-                &header,
-                ctx.quiet,
-                delta,
-                no_logs,
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn print_sd_table(sd: &SdTestResult) {

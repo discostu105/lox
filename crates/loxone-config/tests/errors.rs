@@ -246,3 +246,21 @@ fn check_lists_every_error_by_file_and_line() {
         .collect();
     assert_eq!(lines, vec![1, 2], "{v}");
 }
+
+/// `loxl types | head -1`: a reader that went away ends loxl quietly, with
+/// no panic about a broken pipe.
+#[cfg(unix)]
+#[test]
+fn closed_stdout_exits_quietly() {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader); // every write fails from the first one
+    let out = Command::new(env!("CARGO_BIN_EXE_loxl"))
+        .arg("types")
+        .stdout(writer)
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{:?}: {stderr}", out.status);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}

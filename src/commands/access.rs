@@ -326,7 +326,7 @@ struct LearnOutput {
 }
 
 fn learn_timeout(s: &str) -> Result<Duration> {
-    let t = crate::otel::parse_interval(s)
+    let t = crate::util::parse_duration(s)
         .map_err(|_| anyhow::anyhow!("--timeout '{}': expected e.g. 60s or 2m", s))?;
     if t.is_zero() || t > nfc_learn::MAX_TIMEOUT {
         bail!("--timeout must be between 1s and 5m");

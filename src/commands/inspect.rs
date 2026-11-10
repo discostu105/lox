@@ -1186,8 +1186,16 @@ fn read_history(
         });
     }
     let entry_size = 4 + 4 + num_outputs * 8;
-    let offset = stats_data_offset(&data, entry_size).unwrap_or(0);
-    let entries = parse_stats_entries(&data[offset..], num_outputs);
+    let entries = match stats_data_offset(&data, entry_size) {
+        Some(offset) => parse_stats_entries(&data[offset..], num_outputs),
+        // Too short for a header: a file without entries
+        None if data.len() <= 12 => Vec::new(),
+        None => anyhow::bail!(
+            "The Miniserver's answer for {} in period {} is not a statistics file",
+            ctrl.uuid,
+            period
+        ),
+    };
     Ok(History { names, entries })
 }
 

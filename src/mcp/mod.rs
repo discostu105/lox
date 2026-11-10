@@ -14,7 +14,7 @@ use clap::{Args, Subcommand};
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
 
-use crate::commands::RunContext;
+use crate::run_context::RunContext;
 
 pub use server::LoxMcp;
 

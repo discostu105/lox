@@ -14,6 +14,7 @@
 //! between `futures_executor::block_on` and async HTTP clients.
 
 use anyhow::{Result, bail};
+use clap::Subcommand;
 use opentelemetry::KeyValue;
 use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _, Severity};
 use opentelemetry::metrics::MeterProvider as _;
@@ -30,28 +31,143 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::config::Config;
+use crate::run_context::RunContext;
 use loxone_client::client::LoxClient;
 use loxone_client::stream::{self, StateEvent, StateUuidInfo, WeatherEntry};
 
 /// `otel serve` WebSocket reconnect backoff bounds.
 const RECONNECT_MIN_SECS: u64 = 1;
 const RECONNECT_MAX_SECS: u64 = 60;
+/// Connecting and logging in must finish in this time. A Miniserver that
+/// accepts the connection while it starts up would hold the daemon forever.
+const STREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// The SD card test reads and writes the card, so it runs at most this
+/// often, whatever the export interval.
+const SD_TEST_EVERY: Duration = Duration::from_secs(600);
 
-// ── Interval parsing ────────────────────────────────────────────────────────
+// ── Commands ────────────────────────────────────────────────────────────────
 
-/// Parse a human-friendly duration string (e.g. "30s", "5m", "1h").
-pub fn parse_interval(s: &str) -> Result<Duration> {
-    let s = s.trim();
-    if let Some(n) = s.strip_suffix('s') {
-        Ok(Duration::from_secs(n.parse()?))
-    } else if let Some(n) = s.strip_suffix('m') {
-        Ok(Duration::from_secs(n.parse::<u64>()? * 60))
-    } else if let Some(n) = s.strip_suffix('h') {
-        Ok(Duration::from_secs(n.parse::<u64>()? * 3600))
-    } else {
-        // Assume seconds if no suffix
-        Ok(Duration::from_secs(s.parse()?))
+#[derive(Subcommand)]
+pub(crate) enum OtelCmd {
+    /// Continuously push metrics, logs & traces to an OTLP endpoint
+    Serve {
+        /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
+        #[arg(long, default_value = "http://localhost:4318")]
+        endpoint: String,
+        /// Push interval (e.g. 30s, 1m, 5m)
+        #[arg(long, short = 'i', default_value = "30s")]
+        interval: String,
+        /// Filter by control type
+        #[arg(long, short = 't')]
+        r#type: Option<String>,
+        /// Filter by room
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Additional header for auth (e.g. "Authorization=Bearer xxx")
+        #[arg(long)]
+        header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
+        /// Disable log export (metrics and traces only)
+        #[arg(long)]
+        no_logs: bool,
+        /// Disable trace export (metrics and logs only)
+        #[arg(long)]
+        no_traces: bool,
+    },
+    /// One-shot: push current state and exit
+    Push {
+        /// OTLP HTTP endpoint URL
+        #[arg(long, default_value = "http://localhost:4318")]
+        endpoint: String,
+        /// Filter by control type
+        #[arg(long, short = 't')]
+        r#type: Option<String>,
+        /// Filter by room
+        #[arg(long, short = 'r')]
+        room: Option<String>,
+        /// Additional header for auth
+        #[arg(long)]
+        header: Vec<String>,
+        /// Use delta temporality (required by Dynatrace and some backends)
+        #[arg(long)]
+        delta: bool,
+        /// Disable log export (metrics only)
+        #[arg(long)]
+        no_logs: bool,
+    },
+}
+
+/// `lox otel serve` and `lox otel push`.
+pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {
+    let cfg = Config::load()?;
+    match action {
+        OtelCmd::Serve {
+            endpoint,
+            interval,
+            r#type,
+            room,
+            header,
+            delta,
+            no_logs,
+            no_traces,
+        } => {
+            let interval = crate::util::parse_duration(&interval).map_err(|_| {
+                anyhow::anyhow!("--interval '{}': expected e.g. 30s or 5m", interval)
+            })?;
+            if interval.is_zero() {
+                bail!("--interval must be at least 1s");
+            }
+            let export = Export {
+                endpoint: &endpoint,
+                type_filter: r#type.as_deref(),
+                room_filter: room.as_deref(),
+                headers: &header,
+                quiet: ctx.quiet,
+                delta,
+                no_logs,
+                no_traces,
+            };
+            serve(&cfg, interval, &export)
+        }
+        OtelCmd::Push {
+            endpoint,
+            r#type,
+            room,
+            header,
+            delta,
+            no_logs,
+        } => {
+            let export = Export {
+                endpoint: &endpoint,
+                type_filter: r#type.as_deref(),
+                room_filter: room.as_deref(),
+                headers: &header,
+                quiet: ctx.quiet,
+                delta,
+                no_logs,
+                no_traces: true,
+            };
+            push(&cfg, &export)
+        }
     }
+}
+
+/// What `serve` and `push` export, and where to.
+#[derive(Clone, Copy)]
+pub struct Export<'a> {
+    /// OTLP HTTP endpoint URL
+    pub endpoint: &'a str,
+    pub type_filter: Option<&'a str>,
+    pub room_filter: Option<&'a str>,
+    /// `Key=Value` headers for the endpoint
+    pub headers: &'a [String],
+    pub quiet: bool,
+    /// Delta temporality instead of cumulative
+    pub delta: bool,
+    pub no_logs: bool,
+    pub no_traces: bool,
 }
 
 // ── OTLP exporter setup ────────────────────────────────────────────────────
@@ -327,10 +443,16 @@ fn record_network_metrics(
     Ok(())
 }
 
+/// Whether `otel serve` runs the SD card test now: on the first export, then
+/// every [`SD_TEST_EVERY`].
+fn sd_test_due(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.is_none_or(|t| now.duration_since(t) >= SD_TEST_EVERY)
+}
+
 /// Record SD card health metrics from `/jdev/sys/sdtest`.
 ///
-/// This endpoint performs a live read/write benchmark, so it's heavier than
-/// other diagnostic endpoints. Call it at a lower frequency if needed.
+/// The endpoint runs a live read/write benchmark on the card; see
+/// [`sd_test_due`].
 fn record_sdtest_metrics(lox: &LoxClient, meter: &opentelemetry::metrics::Meter) {
     let Ok(sd) = lox.sdtest() else { return };
     let gauges = [
@@ -649,19 +771,17 @@ fn emit_automation_trace(
 /// - Connect to Miniserver WebSocket for real-time state changes
 /// - Push metrics, logs, and traces via OTLP at the configured interval
 /// - Also fetch system/network diagnostics and system logs on each interval
-#[allow(clippy::too_many_arguments)]
-pub fn serve(
-    cfg: &Config,
-    endpoint: &str,
-    interval: Duration,
-    type_filter: Option<&str>,
-    room_filter: Option<&str>,
-    headers: &[String],
-    quiet: bool,
-    delta: bool,
-    no_logs: bool,
-    no_traces: bool,
-) -> Result<()> {
+pub fn serve(cfg: &Config, interval: Duration, export: &Export) -> Result<()> {
+    let Export {
+        endpoint,
+        type_filter,
+        room_filter,
+        headers,
+        quiet,
+        delta,
+        no_logs,
+        no_traces,
+    } = *export;
     let mut lox = cfg.client()?;
     let structure = lox.get_structure()?.clone();
     let state_map = stream::build_state_uuid_map(&structure);
@@ -737,13 +857,17 @@ pub fn serve(
         };
         let mut prev = PrevValues::new();
         let mut last_log_lines: usize = 0;
+        let mut last_sd_test = None;
         loop {
             // Record system & network diagnostics
             let _ = record_system_metrics(&lox, &meter_sys);
             let _ = record_network_metrics(&lox, &meter_sys, &mut prev, delta);
 
             // Record SD card health metrics
-            record_sdtest_metrics(&lox, &meter_sys);
+            if sd_test_due(last_sd_test, std::time::Instant::now()) {
+                last_sd_test = Some(std::time::Instant::now());
+                record_sdtest_metrics(&lox, &meter_sys);
+            }
 
             // Record control state gauges from the shared store
             let control_count = store_sys.lock().unwrap().len();
@@ -776,7 +900,7 @@ pub fn serve(
 
     // WebSocket streaming keeps the runtime alive. The PeriodicReader's
     // tokio task runs in the background, exporting metrics at each interval.
-    let mut handler = |events: Vec<StateEvent>| -> Result<()> {
+    let handler = |events: Vec<StateEvent>| -> Result<()> {
         // Process value states (update store + emit logs)
         {
             let mut state = store_ws.lock().unwrap();
@@ -836,15 +960,21 @@ pub fn serve(
     };
 
     // A daemon: reconnect with backoff when the Miniserver drops the socket
-    // (reboot, network blip) instead of exiting. Ctrl+C stops it and flushes.
+    // (reboot, network blip) instead of exiting. Ctrl+C or SIGTERM (docker
+    // stop, Kubernetes, systemd) stops it and flushes.
     let conn = cfg.connection();
     rt.block_on(async {
         let mut backoff = RECONNECT_MIN_SECS;
+        let stop = shutdown_signal();
+        tokio::pin!(stop);
         loop {
             let started = std::time::Instant::now();
+            let session = stream::stream_events_while(&conn, STREAM_CONNECT_TIMEOUT, |events| {
+                handler(events).map(|()| true)
+            });
             let result = tokio::select! {
-                r = stream::stream_events(&conn, &mut handler) => r,
-                _ = tokio::signal::ctrl_c() => return,
+                r = session => r,
+                _ = &mut stop => return,
             };
             if started.elapsed() > Duration::from_secs(60) {
                 backoff = RECONNECT_MIN_SECS;
@@ -861,7 +991,7 @@ pub fn serve(
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
-                _ = tokio::signal::ctrl_c() => return,
+                _ = &mut stop => return,
             }
             backoff = (backoff * 2).min(RECONNECT_MAX_SECS);
         }
@@ -881,21 +1011,39 @@ pub fn serve(
     Ok(())
 }
 
+/// Resolves on Ctrl+C or, on Unix, SIGTERM. As PID 1 of a container the
+/// process gets no default SIGTERM action, so without this `docker stop`
+/// waits out its grace period and kills it before the last export.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 // ── Push (one-shot) ─────────────────────────────────────────────────────────
 
 /// Push current state once and exit. Connects to WebSocket, collects the
 /// initial state dump, fetches system metrics, pushes everything, and exits.
-#[allow(clippy::too_many_arguments)]
-pub fn push(
-    cfg: &Config,
-    endpoint: &str,
-    type_filter: Option<&str>,
-    room_filter: Option<&str>,
-    headers: &[String],
-    quiet: bool,
-    delta: bool,
-    no_logs: bool,
-) -> Result<()> {
+pub fn push(cfg: &Config, export: &Export) -> Result<()> {
+    let Export {
+        endpoint,
+        type_filter,
+        room_filter,
+        headers,
+        quiet,
+        delta,
+        no_logs,
+        no_traces: _,
+    } = *export;
     // Verify the OTLP endpoint is reachable before starting
     check_endpoint(endpoint, headers)?;
 
@@ -1065,36 +1213,12 @@ mod tests {
     use opentelemetry::logs::Severity;
 
     #[test]
-    fn test_parse_interval_seconds() {
-        assert_eq!(parse_interval("30s").unwrap(), Duration::from_secs(30));
-        assert_eq!(parse_interval("1s").unwrap(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn test_parse_interval_minutes() {
-        assert_eq!(parse_interval("5m").unwrap(), Duration::from_secs(300));
-        assert_eq!(parse_interval("1m").unwrap(), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn test_parse_interval_hours() {
-        assert_eq!(parse_interval("2h").unwrap(), Duration::from_secs(7200));
-    }
-
-    #[test]
-    fn test_parse_interval_no_suffix() {
-        assert_eq!(parse_interval("60").unwrap(), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn test_parse_interval_whitespace() {
-        assert_eq!(parse_interval(" 30s ").unwrap(), Duration::from_secs(30));
-    }
-
-    #[test]
-    fn test_parse_interval_invalid() {
-        assert!(parse_interval("abc").is_err());
-        assert!(parse_interval("").is_err());
+    fn the_sd_card_test_runs_first_and_then_every_ten_minutes() {
+        let start = std::time::Instant::now();
+        assert!(sd_test_due(None, start));
+        assert!(!sd_test_due(Some(start), start + Duration::from_secs(30)));
+        assert!(!sd_test_due(Some(start), start + Duration::from_secs(599)));
+        assert!(sd_test_due(Some(start), start + SD_TEST_EVERY));
     }
 
     #[test]

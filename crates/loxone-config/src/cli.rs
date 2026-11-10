@@ -5,6 +5,30 @@
 //! Every subcommand is a thin wrapper over one public library entry point;
 //! nothing here has semantics of its own.
 
+// `print!`/`println!` for this module: like std's, except that a closed
+// stdout (`loxl decompile … | head`) ends the process quietly instead of
+// panicking. Tests keep std's macros so libtest still captures their output.
+#[cfg(not(test))]
+macro_rules! print {
+    ($($arg:tt)*) => { print_stdout(format_args!($($arg)*)) };
+}
+#[cfg(not(test))]
+macro_rules! println {
+    () => { print_stdout(format_args!("\n")) };
+    ($($arg:tt)*) => { print_stdout(format_args!("{}\n", format_args!($($arg)*))) };
+}
+
+#[cfg(not(test))]
+fn print_stdout(args: std::fmt::Arguments) {
+    use std::io::Write;
+    if let Err(e) = std::io::stdout().write_fmt(args) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        panic!("failed printing to stdout: {e}");
+    }
+}
+
 use loxone_config::logic::{
     CompileOptions, DecompileOptions, DecompileScope, Item, LintFinding, LintKind, Module,
     TestPlan, TestResult, adopt, adopt_one, adopt_pages, apply_rekeys, compile, decompile,

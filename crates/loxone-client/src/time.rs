@@ -13,20 +13,31 @@ pub fn lox_epoch() -> chrono::DateTime<chrono::Local> {
         .and_hms_opt(0, 0, 0)
         .unwrap()
         .and_local_timezone(chrono::Local)
-        .unwrap()
+        .earliest()
+        // A zone without that midnight (a clock change on New Year)
+        .unwrap_or_else(|| {
+            chrono::DateTime::from_timestamp(LOXONE_EPOCH_SECS as i64, 0)
+                .unwrap_or_default()
+                .with_timezone(&chrono::Local)
+        })
 }
 
-/// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted string.
+/// Convert a Loxone timestamp (seconds since 2009-01-01) to a formatted
+/// string. A value too large for a date comes back as the number.
 pub fn lox_timestamp_to_string(ts: i64) -> String {
-    let dt = lox_epoch() + chrono::Duration::seconds(ts);
-    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    chrono::TimeDelta::try_seconds(ts)
+        .and_then(|elapsed| lox_epoch().checked_add_signed(elapsed))
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| ts.to_string())
 }
 
 /// Convert a Loxone timestamp counted from 2009-01-01 **UTC** (a user's
 /// `lastEdit`) to local time.
 pub fn lox_utc_timestamp_to_string(ts: i64) -> String {
-    let unix = LOXONE_EPOCH_SECS as i64 + ts;
-    match chrono::DateTime::from_timestamp(unix, 0) {
+    let utc = (LOXONE_EPOCH_SECS as i64)
+        .checked_add(ts)
+        .and_then(|unix| chrono::DateTime::from_timestamp(unix, 0));
+    match utc {
         Some(dt) => dt
             .with_timezone(&chrono::Local)
             .format("%Y-%m-%d %H:%M:%S")
@@ -50,6 +61,19 @@ mod tests {
         // 0 seconds = epoch itself
         let s = lox_timestamp_to_string(0);
         assert!(s.starts_with("2009-01-01"));
+    }
+
+    #[test]
+    fn a_timestamp_beyond_any_date_is_shown_as_its_number() {
+        assert_eq!(lox_timestamp_to_string(i64::MAX), i64::MAX.to_string());
+        assert_eq!(lox_timestamp_to_string(i64::MIN), i64::MIN.to_string());
+        assert_eq!(
+            lox_utc_timestamp_to_string(i64::MAX / 2),
+            (i64::MAX / 2).to_string()
+        );
+        // One day after the epoch, in every time zone without a clock
+        // change on New Year's Day 2009
+        assert!(lox_timestamp_to_string(86_400).starts_with("2009-01-02 00:00"));
     }
 
     #[test]

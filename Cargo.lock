@@ -2066,7 +2066,7 @@ dependencies = [
 
 [[package]]
 name = "loxone-config"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "crc32fast",
  "lz4_flex",
