@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs;
@@ -13,7 +12,7 @@ use crate::config::Config;
 use crate::scene::Scene;
 use crate::util::json_val_str;
 use crate::{custom_changes, ftp, gitops, loxone_xml};
-use loxone_client::client::{LOXONE_EPOCH_SECS, LoxClient, USER_AGENT};
+use loxone_client::client::LOXONE_EPOCH_SECS;
 use loxone_client::system::{check_ll, code_of};
 use loxone_client::token;
 use loxone_config::archive;
@@ -57,7 +56,8 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             no_verify_ssl,
             visu_password_file,
         } => {
-            let mut cfg = Config::load().unwrap_or_default();
+            let mut cfg = Config::load_or_new()?;
+            let before = (cfg.host.clone(), cfg.user.clone());
             if let Some(h) = host {
                 cfg.host = if h.starts_with("http://") || h.starts_with("https://") {
                     h
@@ -68,6 +68,7 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
             if let Some(u) = user {
                 cfg.user = u;
             }
+            forget_other_miniserver(&cfg, &before.0, &before.1);
             if let Some(p) = pass {
                 cfg.pass = p;
             }
@@ -91,6 +92,20 @@ pub fn cmd_setup(ctx: &RunContext, action: SetupCmd) -> Result<()> {
         SetupCmd::Show => print!("{}", setup_text(&Config::load()?)),
     }
     Ok(())
+}
+
+/// After `lox setup set` changed the host or the user: drop the structure
+/// cache and the token, which belong to the Miniserver and user before.
+fn forget_other_miniserver(cfg: &Config, host_before: &str, user_before: &str) {
+    if cfg.data_dir.as_os_str().is_empty() {
+        return; // a new config has nothing cached
+    }
+    if cfg.host != host_before {
+        let _ = fs::remove_file(cfg.structure_cache_path());
+    }
+    if cfg.host != host_before || cfg.user != user_before {
+        let _ = fs::remove_file(cfg.token_path());
+    }
 }
 
 /// `lox setup show`: the connection settings, the password redacted.
@@ -138,7 +153,8 @@ pub(crate) enum AliasCmd {
 }
 
 pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
-    let mut cfg = Config::load()?;
+    // Saved back: without the LOX_* overrides, which belong to this shell only
+    let mut cfg = Config::load_stored()?;
     match action {
         AliasCmd::Add { name, uuid } => {
             cfg.aliases.insert(name.clone(), uuid.clone());
@@ -207,14 +223,13 @@ pub fn cmd_scene(_ctx: &RunContext, action: SceneCmd) -> Result<()> {
         SceneCmd::Show { name } => {
             println!(
                 "{}",
-                fs::read_to_string(Scene::scenes_dir_for(&cfg).join(format!("{}.yaml", name)))
+                fs::read_to_string(Scene::path_with_config(&name, &cfg)?)
                     .with_context(|| format!("Scene '{}' not found", name))?
             );
         }
         SceneCmd::New { name } => {
-            let dir = Scene::scenes_dir_for(&cfg);
-            fs::create_dir_all(&dir)?;
-            let path = dir.join(format!("{}.yaml", name));
+            let path = Scene::path_with_config(&name, &cfg)?;
+            fs::create_dir_all(Scene::scenes_dir_for(&cfg))?;
             if path.exists() {
                 bail!("Already exists");
             }
@@ -291,16 +306,8 @@ pub fn cmd_cache(ctx: &RunContext, action: CacheCmd) -> Result<()> {
             }
         }
         CacheCmd::Refresh => {
-            let client = Client::builder()
-                .user_agent(USER_AGENT)
-                .danger_accept_invalid_certs(true)
-                .redirect(LoxClient::same_origin_redirect_policy(&cfg.host))
-                .timeout(Duration::from_secs(15))
-                .build()?;
-            if cache.exists() {
-                let _ = fs::remove_file(&cache);
-            }
-            LoxClient::load_or_fetch_structure(&cfg.connection(), &client)?;
+            // Through the configured client, so `verify_ssl` holds here too
+            cfg.client()?.refresh_structure()?;
             println!("✓ Structure cache refreshed ({:?})", cache);
         }
     }
@@ -472,7 +479,8 @@ fn unix_now() -> u64 {
 fn token_info_text(ts: &token::TokenStore, now: u64) -> String {
     let mut out = String::new();
     let days_left = ts.valid_until.saturating_sub(now) / 86400;
-    if ts.token.len() >= 12 {
+    // Tokens are hex; anything else (a damaged file) is shown as it is
+    if ts.token.len() >= 12 && ts.token.is_ascii() {
         let _ = writeln!(
             out,
             "Token: {}...{}",
@@ -1193,7 +1201,7 @@ fn config_init(path: &str) -> Result<()> {
         std::env::current_dir()?.join(path)
     };
     let repo = gitops::init(&abs_path, &cfg)?;
-    let mut cfg = Config::load().unwrap_or_default();
+    let mut cfg = Config::load_or_new()?;
     cfg.config_repo = Some(repo.to_string_lossy().to_string());
     let saved = cfg.save()?;
     println!("Config repo initialized at {}", repo.display());

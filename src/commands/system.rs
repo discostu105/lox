@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use crate::commands::RunContext;
 use crate::config::Config;
-use crate::otel;
 use crate::util::{abs_path, bar, kb_fmt, xml_attr};
 
 pub fn cmd_status(
@@ -292,12 +291,8 @@ pub fn cmd_extensions(ctx: &RunContext) -> Result<()> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
-    fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| String::from_utf8_lossy(&a.value).to_string())
-            .unwrap_or_default()
+    fn xattr(e: &quick_xml::events::BytesStart, name: &str) -> String {
+        crate::xml::raw_attr(e, name).unwrap_or_default()
     }
 
     let mut reader = Reader::from_str(&status_xml);
@@ -307,72 +302,72 @@ pub fn cmd_extensions(ctx: &RunContext) -> Result<()> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let tag = crate::xml::tag(e);
                 match tag.as_str() {
                     "TreeBranch" => {
-                        let name = xattr(e, b"Name");
+                        let name = xattr(e, "Name");
                         extensions.push(serde_json::json!({
                             "name": name,
                             "type": "Tree",
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
                             "online": true,
-                            "devices": xattr(e, b"Devices").parse::<u32>().unwrap_or(0),
-                            "errors": xattr(e, b"Errors").parse::<u32>().unwrap_or(0),
+                            "devices": xattr(e, "Devices").parse::<u32>().unwrap_or(0),
+                            "errors": xattr(e, "Errors").parse::<u32>().unwrap_or(0),
                         }));
                         parent_name = Some(name);
                     }
                     "Extension" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
+                            "name": xattr(e, "Name"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
                         }));
                     }
                     "GenericNetworkDevice" => {
-                        let name = xattr(e, b"Name");
+                        let name = xattr(e, "Name");
                         extensions.push(serde_json::json!({
                             "name": name,
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"MAC"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "MAC"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
                         }));
                         parent_name = Some(name);
                     }
                     "TreeDevice" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
+                            "name": xattr(e, "Name"),
                             "type": "Tree Device",
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
                             "parent": parent_name,
                         }));
                     }
                     "AirDevice" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
-                            "battery": xattr(e, b"Battery").parse::<u32>().ok(),
+                            "name": xattr(e, "Name"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
+                            "battery": xattr(e, "Battery").parse::<u32>().ok(),
                             "parent": parent_name,
                         }));
                     }
                     "Plugin" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": format!("Plugin ({})", xattr(e, b"Type")),
+                            "name": xattr(e, "Name"),
+                            "type": format!("Plugin ({})", xattr(e, "Type")),
                             "serial": "",
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
                         }));
                     }
                     _ => {}
@@ -456,12 +451,8 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
-    fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| String::from_utf8_lossy(&a.value).to_string())
-            .unwrap_or_default()
+    fn xattr(e: &quick_xml::events::BytesStart, name: &str) -> String {
+        crate::xml::raw_attr(e, name).unwrap_or_default()
     }
 
     #[derive(Clone)]
@@ -480,11 +471,11 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let tag = crate::xml::tag(e);
                 match tag.as_str() {
                     "TreeBranch" => {
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
+                            name: xattr(e, "Name"),
                             device_type: "Tree".to_string(),
                             place: None,
                             online: true,
@@ -493,41 +484,41 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
                     }
                     "Extension" => {
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: None,
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "GenericNetworkDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "TreeDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
+                            name: xattr(e, "Name"),
                             device_type: "Tree Device".to_string(),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "AirDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
-                            battery: xattr(e, b"Battery").parse::<u32>().ok(),
+                            online: xattr(e, "Online") == "true",
+                            battery: xattr(e, "Battery").parse::<u32>().ok(),
                         });
                     }
                     _ => {}
@@ -810,56 +801,40 @@ pub(crate) enum UpdateCmd {
 pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
     match action {
         UpdateCmd::Check => {
-            let lox = Config::load()?.client()?;
-            let version = lox.get_text("/dev/cfg/version")?;
-            let ver = xml_attr(&version, "value").unwrap_or("?");
-            println!("Current firmware: {}", ver);
             let cfg = Config::load()?;
-            if !cfg.serial.is_empty() {
-                let url = format!(
-                    "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
-                    cfg.serial, ver
-                );
-                match reqwest::blocking::get(&url) {
-                    Ok(resp) => {
-                        let body = resp.text().unwrap_or_default();
-                        let new_ver = xml_attr(&body, "Firmware")
-                            .or_else(|| xml_attr(&body, "version"))
-                            .or_else(|| xml_attr(&body, "Version").filter(|v| v.contains('.')));
-                        let update_available = xml_attr(&body, "Version")
-                            .or_else(|| xml_attr(&body, "update"))
-                            .map(|v| v != "0" && v != ver)
-                            .unwrap_or(false);
-                        let is_update_available =
-                            update_available || new_ver.map(|v| v != ver).unwrap_or(false);
-                        if ctx.json {
-                            println!(
-                                "{}",
-                                serde_json::json!({
-                                    "current": ver,
-                                    "available": new_ver.unwrap_or(if is_update_available { "yes" } else { ver }),
-                                    "update_available": is_update_available,
-                                })
-                            );
-                        } else if let Some(nv) = new_ver {
-                            if nv != ver {
-                                println!("Update available: {}", nv);
-                            } else {
-                                println!("✓ Firmware is up to date");
-                            }
-                        } else if is_update_available {
-                            println!("Update available (check Loxone Config for details)");
-                        } else {
-                            println!("✓ Firmware is up to date");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Could not check for updates: {}", e);
-                        println!("Current firmware: {}", ver);
-                    }
+            let version = cfg.client()?.get_text("/dev/cfg/version")?;
+            let ver = xml_attr(&version, "value").unwrap_or("?");
+            if !ctx.json {
+                println!("Current firmware: {}", ver);
+            }
+            if cfg.serial.is_empty() {
+                if ctx.json {
+                    println!("{}", serde_json::json!({ "current": ver }));
                 }
+                eprintln!(
+                    "Set the serial number for update checks: lox setup set --serial <serial>"
+                );
+                return Ok(());
+            }
+            let url = format!(
+                "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
+                cfg.serial, ver
+            );
+            let body = match reqwest::blocking::get(&url).and_then(|r| r.text()) {
+                Ok(body) => body,
+                Err(e) => {
+                    if ctx.json {
+                        println!("{}", serde_json::json!({ "current": ver }));
+                    }
+                    eprintln!("Could not check for updates: {}", e);
+                    return Ok(());
+                }
+            };
+            let check = UpdateCheck::parse(&body, ver);
+            if ctx.json {
+                println!("{}", check.json(ver));
             } else {
-                println!("Set serial number for update checks: lox config set --serial <serial>");
+                println!("{}", check.text(ver));
             }
         }
         UpdateCmd::Install { yes } => {
@@ -867,23 +842,97 @@ pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
                 bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
             }
             let lox = Config::load()?.client()?;
-            let resp = lox.get_text("/jdev/sys/updatetolatestrelease")?;
-            let val = xml_attr(&resp, "value").unwrap_or("?");
-            println!("Update triggered: {}", val);
+            if ctx.dry_run {
+                print_system_dry_run(ctx, "firmware update", "/jdev/sys/updatetolatestrelease");
+                return Ok(());
+            }
+            let val = lox.update_firmware()?;
+            println!(
+                "Update triggered: {}",
+                if val.is_empty() { "ok" } else { &val }
+            );
             println!("The Miniserver will reboot during the update process.");
         }
     }
     Ok(())
 }
 
-pub fn cmd_reboot(_ctx: &RunContext, yes: bool) -> Result<()> {
+/// The answer of Loxone's update server for one Miniserver.
+#[derive(Debug, PartialEq)]
+struct UpdateCheck {
+    /// The firmware version on offer, when the answer names one.
+    available: Option<String>,
+    update_available: bool,
+}
+
+impl UpdateCheck {
+    fn parse(body: &str, current: &str) -> Self {
+        let available = xml_attr(body, "Firmware")
+            .or_else(|| xml_attr(body, "version"))
+            .or_else(|| xml_attr(body, "Version").filter(|v| v.contains('.')));
+        let flagged = xml_attr(body, "Version")
+            .or_else(|| xml_attr(body, "update"))
+            .is_some_and(|v| v != "0" && v != current);
+        UpdateCheck {
+            update_available: flagged || available.is_some_and(|v| v != current),
+            available: available.map(str::to_string),
+        }
+    }
+
+    fn json(&self, current: &str) -> serde_json::Value {
+        let available = match &self.available {
+            Some(v) => v.as_str(),
+            None if self.update_available => "yes",
+            None => current,
+        };
+        serde_json::json!({
+            "current": current,
+            "available": available,
+            "update_available": self.update_available,
+        })
+    }
+
+    fn text(&self, current: &str) -> String {
+        match &self.available {
+            Some(v) if v != current => format!("Update available: {}", v),
+            None if self.update_available => {
+                "Update available (check Loxone Config for details)".to_string()
+            }
+            _ => "✓ Firmware is up to date".to_string(),
+        }
+    }
+}
+
+/// `--dry-run` for a system command: what would be requested.
+fn print_system_dry_run(ctx: &RunContext, what: &str, path: &str) {
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "dry_run": true,
+                "would_execute": { "action": what, "request": path },
+            })
+        );
+    } else if !ctx.quiet {
+        println!("[dry-run] {} → {}", what, path);
+    }
+}
+
+pub fn cmd_reboot(ctx: &RunContext, yes: bool) -> Result<()> {
     if !yes {
         bail!("Reboot requires --yes flag. This will restart your Miniserver!");
     }
     let lox = Config::load()?.client()?;
-    let resp = lox.get_text("/jdev/sys/reboot")?;
-    let val = xml_attr(&resp, "value").unwrap_or("ok");
-    println!("Reboot initiated: {}", val);
+    if ctx.dry_run {
+        print_system_dry_run(ctx, "reboot", "/jdev/sys/reboot");
+        return Ok(());
+    }
+    let val = lox.reboot()?;
+    println!(
+        "Reboot initiated: {}",
+        if val.is_empty() { "ok" } else { &val }
+    );
     Ok(())
 }
 
@@ -966,108 +1015,6 @@ fn write_stdout(data: &[u8]) -> Result<()> {
     }
 }
 
-#[derive(Subcommand)]
-pub(crate) enum OtelCmd {
-    /// Continuously push metrics, logs & traces to an OTLP endpoint
-    Serve {
-        /// OTLP HTTP endpoint URL (e.g. http://localhost:4318)
-        #[arg(long, default_value = "http://localhost:4318")]
-        endpoint: String,
-        /// Push interval (e.g. 30s, 1m, 5m)
-        #[arg(long, short = 'i', default_value = "30s")]
-        interval: String,
-        /// Filter by control type
-        #[arg(long, short = 't')]
-        r#type: Option<String>,
-        /// Filter by room
-        #[arg(long, short = 'r')]
-        room: Option<String>,
-        /// Additional header for auth (e.g. "Authorization=Bearer xxx")
-        #[arg(long)]
-        header: Vec<String>,
-        /// Use delta temporality (required by Dynatrace and some backends)
-        #[arg(long)]
-        delta: bool,
-        /// Disable log export (metrics and traces only)
-        #[arg(long)]
-        no_logs: bool,
-        /// Disable trace export (metrics and logs only)
-        #[arg(long)]
-        no_traces: bool,
-    },
-    /// One-shot: push current state and exit
-    Push {
-        /// OTLP HTTP endpoint URL
-        #[arg(long, default_value = "http://localhost:4318")]
-        endpoint: String,
-        /// Filter by control type
-        #[arg(long, short = 't')]
-        r#type: Option<String>,
-        /// Filter by room
-        #[arg(long, short = 'r')]
-        room: Option<String>,
-        /// Additional header for auth
-        #[arg(long)]
-        header: Vec<String>,
-        /// Use delta temporality (required by Dynatrace and some backends)
-        #[arg(long)]
-        delta: bool,
-        /// Disable log export (metrics only)
-        #[arg(long)]
-        no_logs: bool,
-    },
-}
-
-pub fn cmd_otel(ctx: &RunContext, action: OtelCmd) -> Result<()> {
-    let cfg = Config::load()?;
-    match action {
-        OtelCmd::Serve {
-            endpoint,
-            interval,
-            r#type,
-            room,
-            header,
-            delta,
-            no_logs,
-            no_traces,
-        } => {
-            let interval = otel::parse_interval(&interval)?;
-            otel::serve(
-                &cfg,
-                &endpoint,
-                interval,
-                r#type.as_deref(),
-                room.as_deref(),
-                &header,
-                ctx.quiet,
-                delta,
-                no_logs,
-                no_traces,
-            )?;
-        }
-        OtelCmd::Push {
-            endpoint,
-            r#type,
-            room,
-            header,
-            delta,
-            no_logs,
-        } => {
-            otel::push(
-                &cfg,
-                &endpoint,
-                r#type.as_deref(),
-                room.as_deref(),
-                &header,
-                ctx.quiet,
-                delta,
-                no_logs,
-            )?;
-        }
-    }
-    Ok(())
-}
-
 fn print_sd_table(sd: &SdTestResult) {
     if sd.read_speed_kb.is_some() || sd.write_speed_kb.is_some() {
         let read = sd
@@ -1108,6 +1055,33 @@ fn print_sd_table(sd: &SdTestResult) {
 mod tests {
     use super::*;
     use crate::hardware::{HwEntry, HwStatus, counts};
+
+    #[test]
+    fn update_check_reads_the_offered_version() {
+        let newer = UpdateCheck::parse(r#"<Miniserver Firmware="16.1.2.3"/>"#, "15.3.1.2");
+        assert!(newer.update_available);
+        assert_eq!(newer.text("15.3.1.2"), "Update available: 16.1.2.3");
+        assert_eq!(
+            newer.json("15.3.1.2"),
+            serde_json::json!({"current": "15.3.1.2", "available": "16.1.2.3", "update_available": true})
+        );
+
+        let same = UpdateCheck::parse(r#"<Miniserver Firmware="15.3.1.2"/>"#, "15.3.1.2");
+        assert!(!same.update_available);
+        assert_eq!(same.text("15.3.1.2"), "✓ Firmware is up to date");
+
+        let flag_only = UpdateCheck::parse(r#"<Miniserver update="1"/>"#, "15.3.1.2");
+        assert_eq!(flag_only.available, None);
+        assert_eq!(
+            flag_only.text("15.3.1.2"),
+            "Update available (check Loxone Config for details)"
+        );
+        assert_eq!(flag_only.json("15.3.1.2")["available"], "yes");
+
+        let nothing = UpdateCheck::parse("<html/>", "15.3.1.2");
+        assert!(!nothing.update_available);
+        assert_eq!(nothing.json("15.3.1.2")["available"], "15.3.1.2");
+    }
 
     fn entry(status: HwStatus, name: &str, serial: Option<&str>, program: Option<&str>) -> HwEntry {
         HwEntry {

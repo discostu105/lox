@@ -1,0 +1,17 @@
+# Advisories that `cargo audit` reports and that do not apply to lox, each
+# with the reason. Remove an entry when its dependency is updated.
+[advisories]
+ignore = [
+    # rsa, timing side channel in private-key operations (no fixed 0.9
+    # release). lox only encrypts with the Miniserver's public key.
+    "RUSTSEC-2023-0071",
+    # zip 2, all four in `ZipArchive::extract()` (symlinks, permissions).
+    # lox never extracts to disk: it reads entries by name into memory.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
+    # unsafe-libyaml (under serde_yaml) is unmaintained. No vulnerability is
+    # known; lox reads only its own config and scene files with it.
+    "RUSTSEC-2024-0449",
+]

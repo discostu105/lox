@@ -9,7 +9,7 @@ nav_order: 1
     <span class="hero-badge">Single binary</span>
     <span class="hero-badge">No cloud</span>
     <span class="hero-badge">MCP server</span>
-    <span class="hero-badge">~4MB</span>
+    <span class="hero-badge">One binary</span>
   </div>
 
   <h1 class="hero-title"><span class="hero-prompt">❯</span>lox</h1>

@@ -1,7 +1,7 @@
 //! Loxone HTTP client, control resolution, and structure cache
 
 pub use crate::error::HttpStatusError;
-use crate::error::{Context, Result, bail};
+use crate::error::{Context, Error, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -209,11 +209,15 @@ impl LoxClient {
     }
 
     pub fn get_text(&self, path: &str) -> Result<String> {
+        self.get_text_with(Retry::Read, path)
+    }
+
+    pub(crate) fn get_text_with(&self, policy: Retry, path: &str) -> Result<String> {
         let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
-        self.request_with_retry(|| {
+        self.retry(policy, || {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
             let status = resp.status();
             if verbose() >= 1 {
@@ -239,11 +243,15 @@ impl LoxClient {
     }
 
     pub fn get_json(&self, path: &str) -> Result<Value> {
+        self.get_json_with(Retry::Read, path)
+    }
+
+    fn get_json_with(&self, policy: Retry, path: &str) -> Result<Value> {
         let url = self.conn.url(path);
         if verbose() >= 1 {
             eprintln!("GET {}", redact_url(&url));
         }
-        self.request_with_retry(|| {
+        self.retry(policy, || {
             let resp = self.apply_auth(self.client.get(&url)).send()?;
             let status = resp.status();
             if verbose() >= 1 {
@@ -334,9 +342,16 @@ impl LoxClient {
         Ok((status.as_u16(), body))
     }
 
-    /// Retry a request up to 3 times with exponential backoff on network errors.
+    /// Retry a read up to 3 times with exponential backoff on network errors.
     /// Does not retry on 4xx client errors (only on connection/timeout/5xx).
     fn request_with_retry<T, F>(&self, f: F) -> Result<T>
+    where
+        F: Fn() -> Result<T>,
+    {
+        self.retry(Retry::Read, f)
+    }
+
+    fn retry<T, F>(&self, policy: Retry, f: F) -> Result<T>
     where
         F: Fn() -> Result<T>,
     {
@@ -349,10 +364,7 @@ impl LoxClient {
             match f() {
                 Ok(val) => return Ok(val),
                 Err(e) => {
-                    // Don't retry on 4xx client errors
-                    if let Some(http_err) = e.http_status()
-                        && (400..500).contains(&http_err.status)
-                    {
+                    if !policy.allows(&e) {
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -416,17 +428,46 @@ impl LoxClient {
         }
         let v: Value = serde_json::from_slice(&resp)?;
         if let Some(cache) = &conn.structure_cache {
+            // The structure names every room, control and user of the house.
             if let Some(parent) = cache.parent() {
-                let _ = fs::create_dir_all(parent);
+                let _ = crate::private_file::create_dir_all(parent);
             }
-            let _ = fs::write(cache, &resp);
+            let _ = crate::private_file::write(cache, &resp);
         }
         Ok(v)
     }
 
+    /// Send `cmd` to the control `uuid`. Sent once: after a lost answer the
+    /// Miniserver may have run the command, and a second `pulse` or `toggle`
+    /// would undo it. Only a failed connect is retried.
     pub fn send_cmd(&self, uuid: &str, cmd: &str) -> Result<Value> {
         validate_uuid(uuid)?;
-        self.get_json(&format!("/jdev/sps/io/{}/{}", uuid, cmd))
+        validate_cmd(cmd)?;
+        self.get_json_with(Retry::Command, &format!("/jdev/sps/io/{}/{}", uuid, cmd))
+    }
+
+    /// Send `cmd` to the control `uuid` as a secured command. `hash` is the
+    /// visualization password hashed with a salt from the Miniserver
+    /// ([`crate::token::visu_hash`]).
+    pub fn send_secured_cmd(&self, hash: &str, uuid: &str, cmd: &str) -> Result<Value> {
+        if hash.is_empty() || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            bail!("Invalid hash for a secured command: it must be hex digits");
+        }
+        validate_uuid(uuid)?;
+        validate_cmd(cmd)?;
+        self.get_json_with(
+            Retry::Command,
+            &format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, cmd),
+        )
+    }
+
+    /// Drop the cached structure file and fetch it again.
+    pub fn refresh_structure(&mut self) -> Result<&Value> {
+        if let Some(cache) = &self.conn.structure_cache {
+            let _ = fs::remove_file(cache);
+        }
+        self.structure = None;
+        self.get_structure()
     }
 
     pub fn get_all(&self, uuid: &str) -> Result<String> {
@@ -764,6 +805,80 @@ pub fn is_uuid(s: &str) -> bool {
         && sub.is_none_or(|sub| !sub.is_empty() && sub.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
+/// Which failed requests are sent again.
+#[derive(Clone, Copy)]
+pub(crate) enum Retry {
+    /// A read: anything but a 4xx answer.
+    Read,
+    /// A command that changes something: only when it never reached the
+    /// Miniserver. After a timeout or a 5xx it may have run.
+    Command,
+}
+
+impl Retry {
+    fn allows(self, e: &Error) -> bool {
+        match self {
+            Retry::Read => !e
+                .http_status()
+                .is_some_and(|s| (400..500).contains(&s.status)),
+            Retry::Command => matches!(e, Error::Http(e) if e.is_connect()),
+        }
+    }
+}
+
+/// Validate that a command stays inside its control's URL path.
+///
+/// The HTTP client resolves `.` and `..` path segments before it sends, so
+/// `../<other uuid>/on` would reach another control and `../../../sys/reboot`
+/// another endpoint. `?` and `#` would cut the command short.
+pub fn validate_cmd(cmd: &str) -> Result<()> {
+    if cmd.is_empty() {
+        bail!("Empty command");
+    }
+    if cmd
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\\' | '?' | '#'))
+    {
+        bail!(
+            "Invalid characters in command '{}': no '\\', '?', '#' or control characters",
+            cmd.escape_debug()
+        );
+    }
+    // `%2e` counts as a dot for the HTTP client; the Miniserver may read
+    // `%2f` as a slash.
+    let decoded = percent_decode(cmd);
+    if decoded
+        .split(['/', '\\'])
+        .any(|segment| segment == "." || segment == "..")
+    {
+        bail!("Invalid command '{}': no '.' or '..' path segments", cmd);
+    }
+    Ok(())
+}
+
+/// `s` with its `%XX` escapes resolved; malformed escapes stay as they are.
+fn percent_decode(s: &str) -> String {
+    let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push(hi << 4 | lo);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Validate that a UUID is safe to embed in a URL path.
 /// Rejects path traversal attempts and non-hex characters; allows a single
 /// alphanumeric sub-control suffix (`<uuid>/masterColor`).
@@ -904,7 +1019,7 @@ mod tests {
         let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let _ = client.list_controls(None, None).unwrap();
         let _ = client.list_controls(None, None).unwrap();
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     // ── resolve_with_room ─────────────────────────────────────────────────────
@@ -1234,25 +1349,212 @@ mod tests {
 
     // ── retry logic ─────────────────────────────────────────────────────────
 
+    const UUID: &str = "0f1e2d3c-a1b2-c3d4-e5f6a7b8c9d0e1f2";
+
     #[test]
-    fn test_retry_on_server_error() {
+    fn a_read_is_retried_after_a_server_error() {
         let server = MockServer::start();
-        let test_uuid = "0f1e2d3c-a1b2-c3d4-e5f6a7b8c9d0e1f2";
         let mock = server.mock(|when, then| {
-            when.method(GET)
-                .path(format!("/jdev/sps/io/{}/on", test_uuid));
-            then.status(200).json_body(serde_json::json!({
-                "LL": { "Code": "200", "value": "1" }
-            }));
+            when.method(GET).path("/jdev/cfg/version");
+            then.status(503);
         });
         let client = LoxClient::new(mock_config(&server)).unwrap();
-        let resp = client.send_cmd(test_uuid, "on").unwrap();
-        assert_eq!(
-            resp.pointer("/LL/Code").and_then(|v| v.as_str()),
-            Some("200")
+        let err = client.get_json("/jdev/cfg/version").unwrap_err();
+        assert_eq!(err.http_status().map(|s| s.status), Some(503));
+        mock.assert_calls(1 + RETRY_DELAYS_MS.len());
+    }
+
+    #[test]
+    fn a_read_is_not_retried_after_a_client_error() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/jdev/cfg/version");
+            then.status(404);
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        assert!(client.get_json("/jdev/cfg/version").is_err());
+        mock.assert_calls(1);
+    }
+
+    // A second `pulse` after a lost answer would switch the output twice.
+    #[test]
+    fn a_command_is_sent_once_even_when_the_answer_is_an_error() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/jdev/sps/io/{}/pulse", UUID));
+            then.status(500);
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        let err = client.send_cmd(UUID, "pulse").unwrap_err();
+        assert_eq!(err.http_status().map(|s| s.status), Some(500));
+        mock.assert_calls(1);
+    }
+
+    #[test]
+    fn a_command_is_sent_once_when_the_answer_is_not_json() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/jdev/sps/io/{}/pulse", UUID));
+            then.status(200).body("<html>busy</html>");
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        assert!(client.send_cmd(UUID, "pulse").is_err());
+        mock.assert_calls(1);
+    }
+
+    #[test]
+    fn a_command_that_cannot_connect_is_retried() {
+        // Nothing listens on the port, so no attempt reaches a Miniserver.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let conn = Connection::new(format!("http://127.0.0.1:{port}"), "test", "test");
+        let client = LoxClient::new(conn).unwrap();
+        let started = std::time::Instant::now();
+        let err = client.send_cmd(UUID, "on").unwrap_err();
+        assert!(
+            matches!(err, Error::Http(ref e) if e.is_connect()),
+            "{err:?}"
         );
-        // Verify it was called (at least once; retries only on failure)
-        mock.assert_hits(1);
+        let backoff: u64 = RETRY_DELAYS_MS.iter().sum();
+        assert!(started.elapsed() >= Duration::from_millis(backoff));
+    }
+
+    // ── command validation ──────────────────────────────────────────────────
+
+    #[test]
+    fn commands_stay_inside_their_control() {
+        for ok in [
+            "on",
+            "FullUp",
+            "manualPosition/50",
+            "override/22.5/60",
+            "hsv(120,50,80)",
+            "temp(80,2700)",
+            "Guten%20Morgen",
+            "changeTo/778",
+            "1.5",
+            "-3",
+            "..5",
+            "a..b",
+        ] {
+            assert!(validate_cmd(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "..",
+            ".",
+            "../1fbc668c-005c-7471-ffffed57184a04d2/open",
+            "on/..",
+            "on/../../../sys/reboot",
+            "on/./x",
+            "%2e%2e/x",
+            "%2E./x",
+            ".%2e/x",
+            "..%2fx",
+            "..%5cx",
+            "..\\x",
+            "on?x=1",
+            "on#x",
+            "o\tn",
+            "on\r\nHost: x",
+        ] {
+            assert!(validate_cmd(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    // Why validate_cmd exists: the request for `<uuid>/../<other>/open` goes
+    // to `<other>/open`.
+    #[test]
+    fn the_http_client_resolves_dot_segments() {
+        let server = MockServer::start();
+        let other = "1fbc668c-005c-7471-ffffed57184a04d2";
+        let mock = server.mock(|when, then| {
+            when.method(GET).path(format!("/jdev/sps/io/{other}/open"));
+            then.status(200).json_body(serde_json::json!({"LL": {}}));
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        for dots in ["..", "%2e%2e"] {
+            client
+                .get_json(&format!("/jdev/sps/io/{UUID}/{dots}/{other}/open"))
+                .unwrap();
+        }
+        mock.assert_calls(2);
+    }
+
+    #[test]
+    fn a_command_with_dot_segments_is_never_sent() {
+        let server = MockServer::start();
+        let other = "1fbc668c-005c-7471-ffffed57184a04d2";
+        let reached = server.mock(|when, then| {
+            when.method(GET);
+            then.status(200)
+                .json_body(serde_json::json!({"LL": {"Code": "200", "value": "1"}}));
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        for cmd in [
+            format!("../{other}/open"),
+            "../../../sys/reboot".to_string(),
+            format!("%2e%2e/{other}/open"),
+        ] {
+            assert!(client.send_cmd(UUID, &cmd).is_err(), "{cmd}");
+            assert!(
+                client.send_secured_cmd("abc123", UUID, &cmd).is_err(),
+                "{cmd}"
+            );
+        }
+        reached.assert_calls(0);
+    }
+
+    #[test]
+    fn a_secured_command_carries_the_hash_and_needs_a_hex_one() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/jdev/sps/ios/abc123/{}/open", UUID));
+            then.status(200)
+                .json_body(serde_json::json!({"LL": {"Code": "200", "value": "1"}}));
+        });
+        let client = LoxClient::new(mock_config(&server)).unwrap();
+        client.send_secured_cmd("abc123", UUID, "open").unwrap();
+        mock.assert_calls(1);
+        assert!(client.send_secured_cmd("../x", UUID, "open").is_err());
+        assert!(client.send_secured_cmd("", UUID, "open").is_err());
+    }
+
+    #[test]
+    fn refresh_structure_drops_the_cache_and_fetches() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("structure.json");
+        fs::write(&cache, r#"{"controls":{},"msInfo":{"msName":"old"}}"#).unwrap();
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/data/LoxApp3.json");
+            then.status(200)
+                .json_body(serde_json::json!({"controls": {}, "msInfo": {"msName": "new"}}));
+        });
+        let mut conn = mock_config(&server);
+        conn.structure_cache = Some(cache.clone());
+        let mut client = LoxClient::new(conn).unwrap();
+        let name = |v: &Value| {
+            v.pointer("/msInfo/msName")
+                .and_then(Value::as_str)
+                .map(String::from)
+        };
+        assert_eq!(
+            name(client.get_structure().unwrap()).as_deref(),
+            Some("old")
+        );
+        assert_eq!(
+            name(client.refresh_structure().unwrap()).as_deref(),
+            Some("new")
+        );
+        mock.assert_calls(1);
+        assert!(fs::read_to_string(&cache).unwrap().contains("new"));
     }
 
     // ── cross-origin redirect blocking ──────────────────────────────────────

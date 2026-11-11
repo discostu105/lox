@@ -88,7 +88,7 @@ async fn command<'a>(ms: &'a MockServer, uuid: &str, cmd: &str) -> httpmock::Moc
 /// Mock every command endpoint (to prove nothing was sent).
 async fn any_command(ms: &MockServer) -> httpmock::Mock<'_> {
     ms.mock_async(|when, then| {
-        when.method(GET).path_contains("/jdev/sps/io/");
+        when.method(GET).path_includes("/jdev/sps/io/");
         then.status(200)
             .json_body(json!({ "LL": { "Code": "200" } }));
     })
@@ -554,7 +554,7 @@ async fn dim_on_a_lighting_controller_is_refused() {
     assert!(err, "{}", out);
     assert_eq!(out["error"], "invalid_arguments");
     assert!(out["message"].as_str().unwrap().contains("mood"), "{}", out);
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -777,7 +777,7 @@ async fn blind_position_dry_run_sends_nothing() {
     assert!(!err, "{}", out);
     assert_eq!(out["dry_run"], true);
     assert_eq!(out["commands"], json!(["manualPosition/40.0000"]));
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -796,7 +796,7 @@ async fn global_dry_run_forces_dry_run() {
     )
     .await;
     assert_eq!(out["dry_run"], true);
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -974,7 +974,7 @@ async fn controls_on_the_confirm_list_need_confirmation() {
     let (client, _) = confirm_session(&ms, Lifecycle::Modern, UserAnswer::CannotAsk).await;
     let (out, err) = call(&client, "switch", pulse.clone()).await;
     assert!(!err, "{}", out);
-    m.assert_hits_async(1).await;
+    m.assert_calls_async(1).await;
 
     for lifecycle in BOTH {
         // listed, and the client cannot ask: refused, nothing sent
@@ -995,7 +995,7 @@ async fn controls_on_the_confirm_list_need_confirmation() {
         let (out, err) = call(&client, "switch", dry).await;
         assert!(!err, "{}", out);
         assert_eq!(out["needs_confirmation"], true);
-        m.assert_hits_async(0).await;
+        m.assert_calls_async(0).await;
 
         // listed, and the user confirms: sent once
         let ms = miniserver().await;
@@ -1005,7 +1005,7 @@ async fn controls_on_the_confirm_list_need_confirmation() {
         let (out, err) = call(&client, "switch", pulse.clone()).await;
         assert!(!err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["confirmed"], true);
-        m.assert_hits_async(1).await;
+        m.assert_calls_async(1).await;
         assert_eq!(tc.questions.lock().unwrap().len(), 1);
     }
 
@@ -1020,7 +1020,7 @@ async fn controls_on_the_confirm_list_need_confirmation() {
     let client = confirm_list_session(&ms, opts, tc).await;
     let (out, err) = call(&client, "switch", pulse).await;
     assert!(!err, "{}", out);
-    m.assert_hits_async(1).await;
+    m.assert_calls_async(1).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1037,7 +1037,7 @@ async fn declined_risky_action_sends_nothing() {
         .await;
         assert!(err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["error"], "declined_by_user");
-        m.assert_hits_async(0).await;
+        m.assert_calls_async(0).await;
     }
 }
 
@@ -1056,7 +1056,7 @@ async fn risky_action_is_refused_when_the_client_cannot_ask() {
         assert!(err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["error"], "action_not_allowed");
         assert!(out["message"].as_str().unwrap().contains("--allow-risky"));
-        m.assert_hits_async(0).await;
+        m.assert_calls_async(0).await;
     }
 }
 
@@ -1074,7 +1074,7 @@ async fn generic_actions_on_risky_controls_need_confirmation_too() {
     .await;
     assert!(err, "{}", out);
     assert_eq!(out["error"], "action_not_allowed");
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1092,7 +1092,7 @@ async fn door_opener_push_buttons_need_confirmation() {
         .await;
         assert!(err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["error"], "action_not_allowed");
-        m.assert_hits_async(0).await;
+        m.assert_calls_async(0).await;
 
         // and once the user confirms, it is sent (2026-07-28: the retry carries requestState)
         let ms = miniserver().await;
@@ -1106,7 +1106,7 @@ async fn door_opener_push_buttons_need_confirmation() {
         .await;
         assert!(!err, "{:?}: {}", lifecycle, out);
         assert_eq!(out["confirmed"], true);
-        m.assert_hits_async(1).await;
+        m.assert_calls_async(1).await;
         assert_eq!(tc.questions.lock().unwrap().len(), 1);
     }
     // an ordinary switch is not gated
@@ -1120,7 +1120,7 @@ async fn door_opener_push_buttons_need_confirmation() {
     )
     .await;
     assert!(!err, "{}", out);
-    m.assert_hits_async(1).await;
+    m.assert_calls_async(1).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1161,7 +1161,7 @@ async fn dry_run_of_a_risky_action_reports_the_confirmation() {
         tc.questions.lock().unwrap().is_empty(),
         "dry runs never ask"
     );
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1210,7 +1210,7 @@ async fn forged_request_state_is_rejected() {
     .await;
     assert!(err, "{}", out);
     assert_eq!(out["error"], "confirmation_expired");
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 // ── Scenes: progress and cancellation ─────────────────────────────────────────
@@ -1297,7 +1297,7 @@ async fn cancelling_a_scene_stops_the_remaining_steps() {
         .expect("request sent");
     // wait until the first step went out, then cancel during the 3 s delay
     for _ in 0..100 {
-        if on.hits_async().await == 1 {
+        if on.calls_async().await == 1 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -1309,7 +1309,7 @@ async fn cancelling_a_scene_stops_the_remaining_steps() {
         .expect("cancel");
     // without the cancellation the second step would go out after 3 s
     tokio::time::sleep(std::time::Duration::from_millis(3500)).await;
-    down.assert_hits_async(0).await;
+    down.assert_calls_async(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1375,7 +1375,7 @@ async fn modern_confirmation_is_a_multi_round_trip_bound_to_the_action() {
     .await;
     assert!(err, "{}", out);
     assert_eq!(out["error"], "confirmation_expired");
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
@@ -1882,7 +1882,7 @@ async fn assign_nfc_tag_pairs_after_the_user_confirms() {
                 .unwrap()
                 .contains("Loxone Config saves")
         );
-        m.assert_hits_async(1).await;
+        m.assert_calls_async(1).await;
         let questions = tc.questions.lock().unwrap().clone();
         assert_eq!(questions.len(), 1);
         assert!(questions[0].contains("bob card"), "{}", questions[0]);
@@ -1905,7 +1905,7 @@ async fn user_changes_without_a_yes_send_nothing() {
             let ms = access_miniserver().await;
             let m = ms
                 .mock_async(|when, then| {
-                    when.method(GET).path_contains("usernfc");
+                    when.method(GET).path_includes("usernfc");
                     then.status(200);
                 })
                 .await;
@@ -1921,7 +1921,7 @@ async fn user_changes_without_a_yes_send_nothing() {
             .await;
             assert!(err, "{:?}: {}", lifecycle, out);
             assert_eq!(out["error"], error);
-            m.assert_hits_async(0).await;
+            m.assert_calls_async(0).await;
         }
     }
     // dry run: the request, nothing sent, nobody asked
@@ -1966,7 +1966,7 @@ async fn remove_nfc_tag_finds_the_tag_by_name() {
     .await;
     assert!(!err, "{}", out);
     assert_eq!(out["tag"]["name"], "alice phone");
-    m.assert_hits_async(1).await;
+    m.assert_calls_async(1).await;
     let (out, err) = call(
         &client,
         "remove_nfc_tag",
@@ -2006,13 +2006,13 @@ async fn set_access_code_never_shows_the_code() {
         );
         let questions = tc.questions.lock().unwrap().clone();
         assert!(!questions[0].contains(code), "{}", questions[0]);
-        m.assert_hits_async(1).await;
+        m.assert_calls_async(1).await;
     }
     // dry run and a malformed code: nothing sent, nothing echoed
     let ms = access_miniserver().await;
     let m = ms
         .mock_async(|when, then| {
-            when.method(GET).path_contains("updateuseraccesscode");
+            when.method(GET).path_includes("updateuseraccesscode");
             then.status(200);
         })
         .await;
@@ -2039,7 +2039,7 @@ async fn set_access_code_never_shows_the_code() {
     assert!(err);
     assert_eq!(out["error"], "invalid_arguments");
     assert!(!out.to_string().contains("12a45"), "{}", out);
-    m.assert_hits_async(0).await;
+    m.assert_calls_async(0).await;
 }
 
 /// A server whose NFC learn sessions run on `io`; counts the sessions.

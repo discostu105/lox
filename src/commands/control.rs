@@ -14,7 +14,16 @@ use crate::scene::Scene;
 use crate::util::{bar, encode_path_value, json_val_str, xml_attr};
 use loxone_client::client::{LoxClient, USER_AGENT};
 
-fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
+/// Print a command's answer. A `Code` other than 200 is an error: the
+/// Miniserver refused the command, and the exit code must say so.
+fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) -> Result<()> {
+    if let Some(code) = code_of(resp).filter(|code| *code != 200) {
+        return Err(crate::usermgmt::LlCodeError {
+            code: code.to_string(),
+            control: format!("{} → {}", name, cmd),
+        }
+        .into());
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(resp).unwrap());
     } else if !quiet {
@@ -22,18 +31,9 @@ fn print_resp(resp: &Value, json: bool, quiet: bool, name: &str, cmd: &str) {
             .pointer("/LL/value")
             .and_then(json_val_str)
             .unwrap_or_else(|| "?".to_string());
-        println!(
-            "{}  {} → {} = {}",
-            if code_of(resp) == Some(200) {
-                "✓"
-            } else {
-                "✗"
-            },
-            name,
-            cmd,
-            val
-        );
+        println!("✓  {} → {} = {}", name, cmd, val);
     }
+    Ok(())
 }
 
 /// The answer to setting a value: `✓  name = value`, or an error with the
@@ -112,40 +112,7 @@ pub fn cmd_on(
     room: Option<String>,
     all_in_room: Option<String>,
 ) -> Result<()> {
-    let mut lox = Config::load()?.client()?;
-    if let Some(room_name) = all_in_room {
-        let controls = lox.resolve_all_in_room(&room_name, None)?;
-        for ctrl in &controls {
-            if ctx.dry_run {
-                print_dry_run(
-                    ctx.json,
-                    ctx.quiet,
-                    &ctrl.uuid,
-                    "on",
-                    &ctrl.name,
-                    ctrl.room.as_deref(),
-                );
-            } else {
-                match lox.send_cmd(&ctrl.uuid, "on") {
-                    Ok(resp) => print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "on"),
-                    Err(e) => eprintln!("  {} — {}", ctrl.name, e),
-                }
-            }
-        }
-    } else {
-        let name = name_or_uuid
-            .ok_or_else(|| anyhow::anyhow!("Provide a control name or --all-in-room"))?;
-        let uuid = lox.resolve_with_room(&name, room.as_deref())?;
-        if ctx.dry_run {
-            let ctrl = lox.find_control(&uuid).ok();
-            let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-            print_dry_run(ctx.json, ctx.quiet, &uuid, "on", &name, room);
-        } else {
-            let resp = lox.send_cmd(&uuid, "on")?;
-            print_resp(&resp, ctx.json, ctx.quiet, &name, "on");
-        }
-    }
-    Ok(())
+    switch(ctx, "on", name_or_uuid, room, all_in_room)
 }
 
 pub fn cmd_off(
@@ -154,25 +121,51 @@ pub fn cmd_off(
     room: Option<String>,
     all_in_room: Option<String>,
 ) -> Result<()> {
+    switch(ctx, "off", name_or_uuid, room, all_in_room)
+}
+
+/// `lox on` and `lox off`: one control, or every control of a room.
+fn switch(
+    ctx: &RunContext,
+    cmd: &str,
+    name_or_uuid: Option<String>,
+    room: Option<String>,
+    all_in_room: Option<String>,
+) -> Result<()> {
     let mut lox = Config::load()?.client()?;
     if let Some(room_name) = all_in_room {
         let controls = lox.resolve_all_in_room(&room_name, None)?;
+        let mut failed = 0;
         for ctrl in &controls {
             if ctx.dry_run {
                 print_dry_run(
                     ctx.json,
                     ctx.quiet,
                     &ctrl.uuid,
-                    "off",
+                    cmd,
                     &ctrl.name,
                     ctrl.room.as_deref(),
                 );
-            } else {
-                match lox.send_cmd(&ctrl.uuid, "off") {
-                    Ok(resp) => print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "off"),
-                    Err(e) => eprintln!("  {} — {}", ctrl.name, e),
-                }
+                continue;
             }
+            // One control that fails does not stop the others
+            let sent = lox
+                .send_cmd(&ctrl.uuid, cmd)
+                .map_err(anyhow::Error::from)
+                .and_then(|resp| print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, cmd));
+            if let Err(e) = sent {
+                eprintln!("  {} — {:#}", ctrl.name, e);
+                failed += 1;
+            }
+        }
+        if failed > 0 {
+            bail!(
+                "{} of {} controls in {} did not switch {}",
+                failed,
+                controls.len(),
+                room_name,
+                cmd
+            );
         }
     } else {
         let name = name_or_uuid
@@ -181,10 +174,10 @@ pub fn cmd_off(
         if ctx.dry_run {
             let ctrl = lox.find_control(&uuid).ok();
             let room = ctrl.as_ref().and_then(|c| c.room.as_deref());
-            print_dry_run(ctx.json, ctx.quiet, &uuid, "off", &name, room);
+            print_dry_run(ctx.json, ctx.quiet, &uuid, cmd, &name, room);
         } else {
-            let resp = lox.send_cmd(&uuid, "off")?;
-            print_resp(&resp, ctx.json, ctx.quiet, &name, "off");
+            let resp = lox.send_cmd(&uuid, cmd)?;
+            print_resp(&resp, ctx.json, ctx.quiet, &name, cmd)?;
         }
     }
     Ok(())
@@ -199,7 +192,7 @@ pub fn cmd_pulse(ctx: &RunContext, name_or_uuid: String, room: Option<String>) -
         print_dry_run(ctx.json, ctx.quiet, &uuid, "pulse", &name_or_uuid, room);
     } else {
         let resp = lox.send_cmd(&uuid, "pulse")?;
-        print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, "pulse");
+        print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, "pulse")?;
     }
     Ok(())
 }
@@ -216,7 +209,7 @@ pub fn cmd_blind(
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     let Some(resp) = resp else { return Ok(()) };
     let cmd = act.main_command();
-    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &cmd);
+    print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &cmd)?;
     if !ctx.json {
         if cmd.starts_with("manualLamella") {
             thread::sleep(Duration::from_millis(800));
@@ -389,7 +382,7 @@ pub fn cmd_light(ctx: &RunContext, action: LightCmd) -> Result<()> {
             let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
             if let Some(resp) = resp {
                 if ctx.json {
-                    print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command());
+                    print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command())?;
                 } else if !ctx.quiet {
                     println!("✓  {} → mood {}", ctrl.name, action);
                 }
@@ -460,7 +453,7 @@ pub fn cmd_input(ctx: &RunContext, action: InputCmd) -> Result<()> {
                 ctx.json,
                 ctx.quiet,
             )? {
-                print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, "pulse");
+                print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, "pulse")?;
             }
         }
     }
@@ -514,7 +507,7 @@ pub fn cmd_mood(
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
         if ctx.json {
-            print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command());
+            print_resp(&resp, true, ctx.quiet, &ctrl.name, &act.main_command())?;
         } else {
             println!("✓  {} → mood {}", ctrl.name, action);
             thread::sleep(Duration::from_millis(400));
@@ -547,7 +540,7 @@ pub fn cmd_dimmer(
             ctx.quiet,
             &ctrl.name,
             &format!("dim={}", level),
-        );
+        )?;
     }
     Ok(())
 }
@@ -562,7 +555,7 @@ pub fn cmd_gate(
     let act = actions::parse_gate(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command())?;
     }
     Ok(())
 }
@@ -577,7 +570,7 @@ pub fn cmd_color(
     let act = actions::parse_color(&value)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command())?;
     }
     Ok(())
 }
@@ -626,7 +619,7 @@ pub fn cmd_thermostat(
             ctx.json,
             ctx.quiet,
         )? {
-            print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &label);
+            print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &label)?;
         }
     } else {
         let xml = lox.get_all(&ctrl.uuid)?;
@@ -673,7 +666,7 @@ pub fn cmd_alarm(
     let act = actions::parse_alarm(&action, no_motion, code)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command());
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &act.main_command())?;
     }
     Ok(())
 }
@@ -688,7 +681,7 @@ pub fn cmd_door(
     let act = actions::parse_door(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action)?;
     }
     Ok(())
 }
@@ -703,7 +696,7 @@ pub fn cmd_intercom(
     let act = actions::parse_intercom(&action)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action)?;
     }
     Ok(())
 }
@@ -719,7 +712,7 @@ pub fn cmd_charger(
     let act = actions::parse_charger(&action, limit)?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action);
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, &action)?;
     }
     Ok(())
 }
@@ -734,7 +727,7 @@ pub fn cmd_lock(
     let act = Ok::<_, anyhow::Error>(Action::LockControl(reason))?;
     let (ctrl, resp) = run_action(ctx, &mut lox, &name_or_uuid, room.as_deref(), &act)?;
     if let Some(resp) = resp {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "lock");
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "lock")?;
     }
     Ok(())
 }
@@ -753,7 +746,7 @@ pub fn cmd_unlock(ctx: &RunContext, name_or_uuid: String, room: Option<String>) 
         ctx.json,
         ctx.quiet,
     )? {
-        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "unlock");
+        print_resp(&resp, ctx.json, ctx.quiet, &ctrl.name, "unlock")?;
     }
     Ok(())
 }
@@ -777,11 +770,11 @@ pub fn cmd_send(
         print_dry_run(ctx.json, ctx.quiet, &uuid, &command, name, room);
     } else {
         let resp = if let Some(hash) = secured {
-            lox.get_json(&format!("/jdev/sps/ios/{}/{}/{}", hash, uuid, command))?
+            lox.send_secured_cmd(&hash, &uuid, &command)?
         } else {
             lox.send_cmd(&uuid, &command)?
         };
-        print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, &command);
+        print_resp(&resp, ctx.json, ctx.quiet, &name_or_uuid, &command)?;
     }
     Ok(())
 }
@@ -861,7 +854,7 @@ pub fn cmd_run(ctx: &RunContext, scene: String, scene_dry_run: bool) -> Result<(
                 ctx.json,
                 ctx.quiet,
             )? {
-                print_resp(&resp, ctx.json, ctx.quiet, &step.control, &step.cmd);
+                print_resp(&resp, ctx.json, ctx.quiet, &step.control, &step.cmd)?;
             }
             if step.delay_ms > 0 && !ctx.dry_run {
                 thread::sleep(Duration::from_millis(step.delay_ms));
@@ -954,8 +947,26 @@ pub fn cmd_music(ctx: &RunContext, action: MusicCmd) -> Result<()> {
         MusicCmd::Unmute { zone } => (zone, "unmute".to_string()),
     };
     let url = format!("{}/zone/{}/{}", music_base, zone, cmd_path);
+    if ctx.dry_run {
+        if ctx.json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "ok": true,
+                    "dry_run": true,
+                    "would_execute": { "zone": zone, "command": cmd_path },
+                })
+            );
+        } else if !ctx.quiet {
+            println!("[dry-run] Zone {} → {}", zone, cmd_path);
+        }
+        return Ok(());
+    }
     match client.get(&url).send() {
         Ok(resp) => {
+            if !resp.status().is_success() {
+                bail!("The music server answered HTTP {}", resp.status().as_u16());
+            }
             let body = resp.text().unwrap_or_default();
             if ctx.json {
                 println!(
@@ -989,10 +1000,22 @@ mod tests {
     // ── json_val_str (Gen2 numeric value handling) ─────────────────────────
 
     #[test]
-    fn test_print_resp_numeric_code() {
-        // Gen2 Miniservers return numeric Code values
-        let resp = serde_json::json!({"LL": {"Code": 200, "value": 1}});
-        // Should not panic and should show ✓ (code 200)
-        print_resp(&resp, false, false, "test", "on");
+    fn a_refused_command_is_an_error_with_its_code() {
+        use serde_json::json;
+        // The Code is text on a Gen 1 Miniserver and a number on a Gen 2.
+        for ok in [
+            json!({"LL": {"Code": "200", "value": "1"}}),
+            json!({"LL": {"Code": 200, "value": 1}}),
+            json!({"LL": {"value": "1"}}),
+        ] {
+            assert!(print_resp(&ok, false, true, "Lamp", "on").is_ok(), "{ok}");
+        }
+        let refused = json!({"LL": {"Code": "403", "value": ""}});
+        let e = print_resp(&refused, true, true, "Lamp", "on").unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "the Miniserver answered Lamp → on with code 403"
+        );
+        assert_eq!(crate::categorize_error(&e), "forbidden");
     }
 }

@@ -131,11 +131,9 @@ fn normalize(serial: &str) -> String {
 pub fn parse_status(xml: &str) -> Vec<LiveDevice> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
-    fn attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| String::from_utf8_lossy(&a.value).trim().to_string())
+    fn attr(e: &quick_xml::events::BytesStart, name: &str) -> Option<String> {
+        crate::xml::raw_attr(e, name)
+            .map(|v| v.trim().to_string())
             .filter(|s| !s.is_empty())
     }
     let mut out = Vec::new();
@@ -144,12 +142,12 @@ pub fn parse_status(xml: &str) -> Vec<LiveDevice> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let tag = crate::xml::tag(e);
                 // The Miniserver and network devices are known by their MAC.
                 let id = match tag.as_str() {
-                    "Miniserver" | "GenericNetworkDevice" => b"MAC".as_slice(),
+                    "Miniserver" | "GenericNetworkDevice" => "MAC",
                     "TreeBranch" | "TreeDevice" | "AirDevice" | "Extension" | "OneWireDevice" => {
-                        b"Serial".as_slice()
+                        "Serial"
                     }
                     _ => {
                         buf.clear();
@@ -162,19 +160,19 @@ pub fn parse_status(xml: &str) -> Vec<LiveDevice> {
                     continue;
                 }
                 let online = match tag.as_str() {
-                    "Miniserver" => attr(e, b"Offline").is_none_or(|o| o != "true"),
-                    _ => attr(e, b"Online").is_none_or(|o| o == "true"),
+                    "Miniserver" => attr(e, "Offline").is_none_or(|o| o != "true"),
+                    _ => attr(e, "Online").is_none_or(|o| o == "true"),
                 };
-                let kind = attr(e, b"Type")
+                let kind = attr(e, "Type")
                     .filter(|t| !t.chars().all(|c| c.is_ascii_digit()))
                     .unwrap_or_else(|| tag.clone());
                 out.push(LiveDevice {
-                    name: attr(e, b"Name").unwrap_or_else(|| kind.clone()),
+                    name: attr(e, "Name").unwrap_or_else(|| kind.clone()),
                     kind,
-                    place: attr(e, b"Place"),
+                    place: attr(e, "Place"),
                     serial,
                     online,
-                    firmware: attr(e, b"Version").filter(|v| v != "0.0.0.0"),
+                    firmware: attr(e, "Version").filter(|v| v != "0.0.0.0"),
                     tag,
                 });
             }

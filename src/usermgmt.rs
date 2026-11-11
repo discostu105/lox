@@ -1850,7 +1850,7 @@ mod tests {
                 .body(r#"{"LL":{"control":"dev/sps/addusernfc","value":"","Code":"200"}}"#);
         });
         add_user_nfc(&fake(&server), ALICE, "AA BB CC DD", "spare card").unwrap();
-        add.assert_hits(1);
+        add.assert_calls(1);
 
         // refused: one attempt, no retry, the fix in the message
         let server = httpmock::MockServer::start();
@@ -1863,12 +1863,12 @@ mod tests {
         });
         let e = remove_user_nfc(&fake(&server), ALICE, "AA BB CC DD").unwrap_err();
         assert!(format!("{:#}", e).contains("code 500"), "{:#}", e);
-        rm.assert_hits(1);
+        rm.assert_calls(1);
 
         let server = httpmock::MockServer::start();
         server.mock(|when, then| {
             when.method(httpmock::Method::GET)
-                .path_contains("removeusernfc");
+                .path_includes("removeusernfc");
             then.status(401).body("");
         });
         let e = remove_user_nfc(&fake(&server), ALICE, "AA BB CC DD").unwrap_err();

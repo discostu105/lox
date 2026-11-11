@@ -570,17 +570,32 @@ pub fn parse_dim(level: f64) -> Result<Action> {
 /// `lox light color <name> <#RRGGBB|hsv(h,s,v)|temp(b,k)>`
 pub fn parse_color(value: &str) -> Result<Action> {
     if let Some(hex) = value.strip_prefix('#') {
-        if hex.len() != 6 {
-            bail!("Hex color must be 6 digits: #RRGGBB");
+        if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            bail!("Hex color must be 6 hex digits: #RRGGBB");
         }
-        let r = u8::from_str_radix(&hex[0..2], 16).context("Invalid red component")?;
-        let g = u8::from_str_radix(&hex[2..4], 16).context("Invalid green component")?;
-        let b = u8::from_str_radix(&hex[4..6], 16).context("Invalid blue component")?;
+        let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16);
+        let (r, g, b) = (channel(0)?, channel(2)?, channel(4)?);
         let (h, s, v) = crate::util::rgb_to_hsv(r, g, b);
-        Ok(Action::Color(format!("hsv({},{},{})", h, s, v)))
-    } else {
-        Ok(Action::Color(value.to_string()))
+        return Ok(Action::Color(format!("hsv({},{},{})", h, s, v)));
     }
+    // The Miniserver's own color commands: a name and numbers, as in
+    // `hsv(120,50,80)`. Anything else would be sent as a different command.
+    let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+    let is_color_command = compact
+        .strip_suffix(')')
+        .and_then(|rest| rest.split_once('('))
+        .is_some_and(|(name, args)| {
+            !name.is_empty()
+                && name.chars().all(|c| c.is_ascii_alphabetic())
+                && !args.is_empty()
+                && args
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, ',' | '.'))
+        });
+    if !is_color_command {
+        bail!("Color must be #RRGGBB, hsv(h,s,v) or temp(brightness,kelvin)");
+    }
+    Ok(Action::Color(compact))
 }
 
 /// `lox gate <name> <open|close|stop>`
@@ -815,6 +830,25 @@ mod tests {
         );
         assert!(parse_color("#FFF").is_err());
         assert!(parse_color("#GG0000").is_err());
+        assert_eq!(cmds(&parse_color("#00ff00").unwrap()), ["hsv(120,100,100)"]);
+        assert_eq!(
+            cmds(&parse_color("hsv(120, 50, 80)").unwrap()),
+            ["hsv(120,50,80)"]
+        );
+        // Six bytes, but not six hex digits: a multi-byte letter, signs.
+        assert!(parse_color("#1ä234").is_err());
+        assert!(parse_color("#+f+f+f").is_err());
+        // A color is never another command, on this control or elsewhere.
+        for other in [
+            "on",
+            "hsv(1,2,3)/extra",
+            "../1fbc668c-005c-7471-ffffed57184a04d2/open",
+            "hsv()",
+            "(1,2,3)",
+            "",
+        ] {
+            assert!(parse_color(other).is_err(), "{other:?}");
+        }
     }
 
     #[test]

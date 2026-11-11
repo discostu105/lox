@@ -49,30 +49,11 @@ impl TokenStore {
     /// Write the token to `path` (mode 0600 on Unix), creating its directory.
     pub fn save(&self, path: &std::path::Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            crate::private_file::create_dir_all(parent)?;
         }
-        self.write_to(path)
-    }
-    fn write_to(&self, path: &std::path::Path) -> Result<()> {
         // The token grants Miniserver access for weeks: keep it owner-only.
         let json = serde_json::to_string_pretty(self)?;
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(path)?;
-            // mode() only applies on create, so an existing file is tightened here
-            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-            f.write_all(json.as_bytes())?;
-        }
-        #[cfg(not(unix))]
-        std::fs::write(path, json)?;
-        Ok(())
+        Ok(crate::private_file::write(path, json.as_bytes())?)
     }
     pub fn is_valid(&self) -> bool {
         let now = std::time::SystemTime::now()
@@ -333,8 +314,9 @@ async fn auth_with_token(
     }
 }
 
-/// Set once a stored token was rejected in this process, so reconnect loops
-/// (TUI, `otel serve`) don't repeat a failing login against the Miniserver.
+/// Set while the stored token is one the Miniserver rejected, so reconnect
+/// loops (TUI, `otel serve`) don't repeat a failing login. Cleared when a new
+/// token is stored.
 static TOKEN_REUSE_REJECTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -378,7 +360,10 @@ pub async fn authenticate_ws(ws: &mut WsStream, conn: &Connection) -> Result<()>
     }
 
     let ts = request_token(ws, conn).await?;
-    let _ = ts.save_for(conn);
+    // With the new token stored, the next session can reuse a token again.
+    if ts.save_for(conn).is_ok() {
+        TOKEN_REUSE_REJECTED.store(false, Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -453,9 +438,13 @@ async fn ws_reply(ws: &mut WsStream, label: &str) -> Result<WsReply> {
                     )));
                 }
             }
-            Ok(Some(Ok(Message::Binary(_)))) => continue,
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) => {
+                bail!("The Miniserver closed the connection during {}", label)
+            }
+            // Binary headers, pings and pongs are not the answer
+            Ok(Some(Ok(_))) => continue,
             Ok(Some(Err(e))) => bail!("WS error during {}: {}", label, e),
-            _ => bail!("WS timeout during {}", label),
+            Err(_) => bail!("WS timeout during {}", label),
         }
     }
     bail!("{}: no response after 10 messages", label)
@@ -624,7 +613,7 @@ mod tests {
         let path = dir.path().join("token.json");
         std::fs::write(&path, "{}").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        make_store(1).write_to(&path).unwrap();
+        make_store(1).save(&path).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         let back: TokenStore =

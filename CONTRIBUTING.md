@@ -1,57 +1,35 @@
 # Contributing to lox
 
-## Development Setup
+The full guide is [docs/contributing.md](docs/contributing.md): setup, build commands, references and manual
+testing. [AGENTS.md](AGENTS.md) describes the architecture and the release flow.
+
+## Quick start
 
 ```bash
-# Clone
 git clone https://github.com/discostu105/lox
 cd lox
-
-# Build (debug)
 cargo build
-
-# Build (release)
-cargo build --release
-
-# Run tests (no Miniserver required)
-cargo test
-
-# Lint
-cargo clippy -- -D warnings
-cargo fmt --check
+cargo test          # no Miniserver needed
 ```
 
-No live Miniserver is needed for development. All unit tests use pure functions
-or mocked data. Integration tests (if added) use `wiremock`/`httpmock`.
+## Before you push
 
-## Issue Tracking
-
-Bugs and feature requests are tracked in [GitHub Issues](https://github.com/discostu105/lox/issues).
-
-## Manual Testing
-
-To test against a real Miniserver you need:
-
-- A Loxone Miniserver (Gen 1 or Gen 2) on your local network
-- Host, username, and password in `~/.lox/config.yaml` (run `lox config set`)
+All four checks must pass. They mirror CI:
 
 ```bash
-lox ls                   # list all controls
-lox status               # Miniserver health
-lox token fetch          # acquire auth token
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo build --release
+cargo test
 ```
 
-## PR Process
+## Pull requests
 
-- Contributions are licensed under the project's [Apache-2.0 license](LICENSE)
-- One feature or fix per PR
-- Tests expected for new logic (pure functions are easy to unit-test)
-- Run `cargo fmt` and `cargo clippy` before submitting
-- Add a changelog entry as a new file in [`changelog.d/`](changelog.d/README.md) (don't edit `CHANGELOG.md`) —
-  merged PRs are released automatically, and the entries become the release notes
-- Label the PR `release:major`, `release:minor`, `release:patch` or `no-release` to steer the version bump
-  (default: minor when there is an `added` entry, patch otherwise; see [CLAUDE.md](CLAUDE.md#releases))
+- One feature or fix per PR, with tests for new logic.
+- Add a changelog entry as a new file in [`changelog.d/`](changelog.d/README.md). Don't edit `CHANGELOG.md`.
+- Merged PRs are released automatically. Label the PR `release:major`, `release:minor`, `release:patch` or
+  `no-release` to steer the version bump. The default is minor with an `added` entry, patch otherwise.
+- Contributions are licensed under the project's [Apache-2.0 license](LICENSE).
 
-## Architecture
-
-See [`CLAUDE.md`](CLAUDE.md) for a full architectural overview of the source files.
+Bugs and feature requests live in [GitHub Issues](https://github.com/discostu105/lox/issues). Report security
+problems as described in [SECURITY.md](SECURITY.md).

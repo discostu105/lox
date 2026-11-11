@@ -1159,9 +1159,9 @@ pub const VERIFIED_BLOCK_VERSIONS: &[&str] = &["175", "178"];
 /// Element-attribute parameters per block type: logic and settings Loxone
 /// stores as an attribute on the `<C>` element rather than as `Def=` on a
 /// connector. In the source they bind like any parameter (`Formula: "I1+I2"`
-/// in the argument list). Every observed `Formula=` attribute is accompanied
-/// by `Valid="false"` (the GUI revalidates on load); the compiler emits that
-/// pair together.
+/// in the argument list). `Formula=` comes with `Valid=`: the compiler keeps
+/// the base's flag while the formula text is unchanged, and writes
+/// `Valid="false"` for a new or changed one.
 ///
 /// An attribute parameter that is also GUI-owned (`Code=` on Code16, see
 /// [`crate::doc::GUI_OWNED_ATTRS`] and [`carried_attrs`]) is a *claim*:

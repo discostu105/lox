@@ -348,13 +348,13 @@ impl Live {
                 let reboot = matches!(e, Effect::Reboot);
                 let client = self.client.clone();
                 self.rt.spawn_blocking(move || {
-                    let path = if reboot {
-                        "/jdev/sys/reboot"
+                    let sent = if reboot {
+                        client.reboot()
                     } else {
-                        "/jdev/sys/updatetolatestrelease"
+                        client.update_firmware()
                     };
                     let what = if reboot { "reboot" } else { "firmware update" };
-                    match client.value(path).map_err(anyhow::Error::from) {
+                    match sent.map_err(anyhow::Error::from) {
                         Ok(_) => {
                             let _ = tx.send(Msg::Toast(
                                 ToastKind::Ok,

@@ -222,8 +222,12 @@ rendered inline (`<Key>2B35</Key>`).
       save adds*).
 
     Source: corpus (26 DayTimers in 145 configs); oracle session 18.
-  - `Formula` keeps its formula in an attribute, `Formula="I1+I2"`,
-    written with a companion `Valid="false"`.
+  - `Formula` keeps its formula in an attribute, `Formula="I1+I2"`, with a
+    companion `Valid=`. Loxone Config 17.2 sets `Valid="true"` when the
+    formula text is edited and confirmed. It does not check the formula on
+    load or save, so a file with `Valid="false"` keeps showing the formula
+    as invalid until its text is edited again. Source: a user's report on
+    Loxone Config 17.2.10.21, November 2026.
 - Blocks created in the GUI carry display attributes (`Tp=`, `Sun=`,
   `SpStates=`) and child elements (`<IoData>`, `<Display>`, `<PSD>`,
   `<COHist>`). Loxone Config adds missing children to a block on every

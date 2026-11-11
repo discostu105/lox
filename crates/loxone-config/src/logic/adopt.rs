@@ -469,6 +469,19 @@ fn adopt_one_expanded(
             .iter()
             .map(|(u, s)| (s.as_str(), u.as_str()))
             .collect();
+        let keys_of_object = |uuid: &str| -> Vec<&str> {
+            port_owner
+                .values()
+                .filter(|(owner, _)| owner == uuid)
+                .map(|(_, key)| key.as_str())
+                .collect()
+        };
+        let own_keys: Vec<&str> = el_ports.iter().map(|p| p.key.as_str()).collect();
+        let sink_key = |port: &str| -> String {
+            crate::port_names::key_among(&block.block_type, port, &own_keys)
+                .unwrap_or(crate::port_names::key_or_raw(&block.block_type, port))
+                .to_string()
+        };
         // A source port as the config stores it: `(object uuid, key)`.
         let source_key = |slug: &str, port: &str| -> (String, String) {
             let from = uuid_of_lift.get(slug).copied().unwrap_or("");
@@ -482,29 +495,37 @@ fn adopt_one_expanded(
             } else {
                 port
             };
-            (
-                from.to_string(),
-                crate::port_names::key_or_raw(ty, name).to_string(),
-            )
+            let key = crate::port_names::key_among(ty, name, &keys_of_object(from))
+                .unwrap_or(crate::port_names::key_or_raw(ty, name));
+            (from.to_string(), key.to_string())
         };
-        let block_type = block.block_type.clone();
-        block.args.retain(|a| match a {
-            ArgItem::Binding(b) => match &b.kind {
-                BindingKind::Wire(r) => {
-                    let (from, key) = source_key(&r.slug, &r.port);
-                    let to = crate::port_names::key_or_raw(&block_type, &b.port).to_string();
-                    !owned_wires.contains(&(to, from, key))
-                }
-                // A bare name is the object's default output.
-                BindingKind::Param(Value::Ref(s)) if uuid_of_lift.contains_key(s.as_str()) => {
-                    let (from, key) = source_key(s, "");
-                    let to = crate::port_names::key_or_raw(&block_type, &b.port).to_string();
-                    !owned_wires.contains(&(to, from, key))
-                }
-                BindingKind::Param(_) => !owned_sets.contains(&b.port),
-                BindingKind::Expr(_) => true,
-            },
-            _ => true,
+        let sink_keys: Vec<String> = block
+            .args
+            .iter()
+            .map(|a| match a {
+                ArgItem::Binding(b) => sink_key(&b.port),
+                _ => String::new(),
+            })
+            .collect();
+        let mut sink_keys = sink_keys.into_iter();
+        block.args.retain(|a| {
+            let to = sink_keys.next().unwrap_or_default();
+            match a {
+                ArgItem::Binding(b) => match &b.kind {
+                    BindingKind::Wire(r) => {
+                        let (from, key) = source_key(&r.slug, &r.port);
+                        !owned_wires.contains(&(to, from, key))
+                    }
+                    // A bare name is the object's default output.
+                    BindingKind::Param(Value::Ref(s)) if uuid_of_lift.contains_key(s.as_str()) => {
+                        let (from, key) = source_key(s, "");
+                        !owned_wires.contains(&(to, from, key))
+                    }
+                    BindingKind::Param(_) => !owned_sets.contains(&to),
+                    BindingKind::Expr(_) => true,
+                },
+                _ => true,
+            }
         });
         for item in &raw.items {
             // The extern's own port bindings come along as they are.
@@ -779,8 +800,8 @@ fn verify_rebuildable(el: &Element, o: &ObjectSummary) -> std::result::Result<()
             || GUI_OWNED_ATTRS.contains(&a.name.as_str())
             || attr_param(&o.block_type, &a.name).is_some()
             || carried_attrs(&o.block_type).contains(&a.name.as_str())
-            // Validity state travels with the formula (observed:
-            // Valid="false" on every Formula=); the rebuild re-emits it.
+            // Validity travels with the formula; the rebuild keeps it
+            // while the text is unchanged.
             || (a.name == "Valid" && o.block_type == "Formula")
             // A message ref's target: the rebuild writes it from `mirrors:`.
             || (a.name == "Ref" && o.block_type == "OutputRefLM");

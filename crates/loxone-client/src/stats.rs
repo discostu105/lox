@@ -37,17 +37,22 @@ pub fn parse_stats_entries(data: &[u8], num_outputs: usize) -> Vec<StatsEntry> {
 
 /// Skip the binary stats file header and return the offset where entries begin.
 /// Header format: u32 valueCount | u32 controlType | u32 nameLength | name bytes
-/// Returns None if data is too short.
+/// The offset is never past the end of `data`. `None` if the data is too
+/// short for a header, or the header names more bytes than there are (not a
+/// statistics file).
 pub fn stats_data_offset(data: &[u8], entry_size: usize) -> Option<usize> {
-    if data.len() <= 12 {
+    if data.len() <= 12 || entry_size == 0 {
         return None;
     }
     let mut cursor = Cursor::new(data);
     let _value_count = cursor.read_u32::<LittleEndian>().ok()?;
     let _control_type = cursor.read_u32::<LittleEndian>().ok()?;
     let name_length = cursor.read_u32::<LittleEndian>().ok()?;
-    let header_end = 12 + name_length as usize;
-    Some(header_end.div_ceil(entry_size) * entry_size)
+    let header_end = 12usize.checked_add(usize::try_from(name_length).ok()?)?;
+    if header_end > data.len() {
+        return None;
+    }
+    Some((header_end.div_ceil(entry_size) * entry_size).min(data.len()))
 }
 
 /// Determine the stats period string from day/month flags.
@@ -265,6 +270,28 @@ mod tests {
     fn test_stats_data_offset_too_short() {
         let data = vec![0u8; 10]; // Less than 12 bytes
         assert_eq!(stats_data_offset(&data, 16), None);
+    }
+
+    // An XML error body read as a header names a ~1.8 GB control name.
+    #[test]
+    fn an_answer_that_is_not_a_statistics_file_has_no_offset() {
+        let xml = br#"<?xml version="1.0" encoding="utf-8"?><errorcode>404</errorcode>"#;
+        assert_eq!(stats_data_offset(xml, 16), None);
+        let mut huge = vec![0u8; 12];
+        huge[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+        huge.extend_from_slice(&[0; 20]);
+        assert_eq!(stats_data_offset(&huge, 16), None);
+        assert_eq!(stats_data_offset(&[0u8; 32], 0), None);
+    }
+
+    // Two outputs make 24-byte entries; a 16-byte header rounds up to 24.
+    #[test]
+    fn the_offset_of_a_header_without_entries_stays_inside_the_file() {
+        let mut data = vec![0u8; 16];
+        data[8..12].copy_from_slice(&3u32.to_le_bytes());
+        let offset = stats_data_offset(&data, 24).unwrap();
+        assert_eq!(offset, 16);
+        assert!(parse_stats_entries(&data[offset..], 2).is_empty());
     }
 
     #[test]

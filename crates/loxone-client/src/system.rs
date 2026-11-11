@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 
-use crate::client::LoxClient;
+use crate::client::{LoxClient, Retry};
 use crate::error::{Error, Result};
 
 /// The `value` of an `LL` response, from either form the Miniserver sends:
@@ -311,13 +311,39 @@ impl LoxClient {
     /// Miniserver answers with a `Code` other than 200. Empty when the
     /// response has no value.
     pub fn value(&self, path: &str) -> Result<String> {
-        let text = self.get_text(path)?;
-        if let Some(code) = ll_code(&text)
+        Self::value_of(path, &self.get_text(path)?)
+    }
+
+    fn value_of(path: &str, text: &str) -> Result<String> {
+        if let Some(code) = ll_code(text)
             && code != 200
         {
             return Err(code_error(path, code));
         }
-        Ok(ll_value(&text).unwrap_or_default())
+        Ok(ll_value(text).unwrap_or_default())
+    }
+
+    /// [`Self::value`] of a request that changes something. Sent once, like
+    /// [`LoxClient::send_cmd`]: after a lost answer the Miniserver may be
+    /// rebooting already.
+    fn command_value(&self, path: &str) -> Result<String> {
+        Self::value_of(path, &self.get_text_with(Retry::Command, path)?)
+    }
+
+    /// Reboot the Miniserver.
+    pub fn reboot(&self) -> Result<String> {
+        self.command_value("/jdev/sys/reboot")
+    }
+
+    /// Restart the program without a reboot. The Miniserver loads an
+    /// uploaded program file on this.
+    pub fn restart_program(&self) -> Result<String> {
+        self.command_value("/jdev/sps/restart")
+    }
+
+    /// Install the latest firmware release. The Miniserver reboots.
+    pub fn update_firmware(&self) -> Result<String> {
+        self.command_value("/jdev/sys/updatetolatestrelease")
     }
 
     /// Firmware, PLC state and heap (three requests).
@@ -430,6 +456,39 @@ impl LoxClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::prelude::*;
+
+    fn client(server: &MockServer) -> LoxClient {
+        LoxClient::new(crate::Connection::new(server.base_url(), "u", "p")).unwrap()
+    }
+
+    #[test]
+    fn reboot_restart_and_update_are_sent_once() {
+        let server = MockServer::start();
+        let failing = server.mock(|when, then| {
+            when.method(GET).path("/jdev/sys/reboot");
+            then.status(503);
+        });
+        assert!(client(&server).reboot().is_err());
+        failing.assert_calls(1);
+
+        let restart = server.mock(|when, then| {
+            when.method(GET).path("/jdev/sps/restart");
+            then.status(200)
+                .body(r#"{"LL": {"control": "dev/sps/restart", "value": "1", "Code": "200"}}"#);
+        });
+        assert_eq!(client(&server).restart_program().unwrap(), "1");
+        restart.assert_calls(1);
+
+        let refused = server.mock(|when, then| {
+            when.method(GET).path("/jdev/sys/updatetolatestrelease");
+            then.status(200).body(
+                r#"{"LL": {"control": "dev/sys/updatetolatestrelease", "value": "", "Code": "403"}}"#,
+            );
+        });
+        assert!(client(&server).update_firmware().is_err());
+        refused.assert_calls(1);
+    }
 
     #[test]
     fn ll_value_reads_xml_and_json() {

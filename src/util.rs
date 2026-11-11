@@ -120,6 +120,25 @@ pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u16, u16) {
     (h.round() as u16, s.round() as u16, v.round() as u16)
 }
 
+/// Parse a duration such as `30s`, `5m` or `1h`. A bare number is seconds.
+pub fn parse_duration(s: &str) -> anyhow::Result<std::time::Duration> {
+    let s = s.trim();
+    let (number, factor) = if let Some(n) = s.strip_suffix('s') {
+        (n, 1)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 60)
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, 3600)
+    } else {
+        (s, 1)
+    };
+    let secs = number
+        .parse::<u64>()?
+        .checked_mul(factor)
+        .ok_or_else(|| anyhow::anyhow!("duration is too long"))?;
+    Ok(std::time::Duration::from_secs(secs))
+}
+
 /// Percent-encode characters that would corrupt an HTTP path segment.
 /// Does NOT encode '/' so that Loxone command separators (e.g. "manualPosition/50") pass through.
 pub(crate) fn encode_path_value(s: &str) -> String {
@@ -226,6 +245,23 @@ pub fn state_text(format: Option<&str>, state: &str, v: f64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durations_with_and_without_a_unit() {
+        let secs = |s: &str| parse_duration(s).map(|d| d.as_secs()).ok();
+        assert_eq!(secs("30s"), Some(30));
+        assert_eq!(secs("5m"), Some(300));
+        assert_eq!(secs("2h"), Some(7200));
+        assert_eq!(secs("60"), Some(60));
+        assert_eq!(secs(" 30s "), Some(30));
+        assert_eq!(secs("0s"), Some(0));
+        for bad in ["", "abc", "s", "-5s", "1.5m", "5 m"] {
+            assert_eq!(secs(bad), None, "{bad:?}");
+        }
+        // Too long to count in seconds: an error, not a wrapped number
+        assert_eq!(secs(&format!("{}h", u64::MAX)), None);
+        assert_eq!(secs(&format!("{}m", u64::MAX / 2)), None);
+    }
 
     #[test]
     fn loxone_formats() {

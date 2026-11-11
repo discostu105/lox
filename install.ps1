@@ -36,6 +36,12 @@ if (-not $asset) {
 
 $downloadUrl = $asset.browser_download_url
 
+$sumAsset = $release.assets | Where-Object { $_.name -eq "$artifactName.exe.sha256" }
+if (-not $sumAsset) {
+    Write-Error "Release $tag has no checksum file for $artifactName.exe."
+    exit 1
+}
+
 # Install directory
 $installDir = Join-Path $env:LOCALAPPDATA 'lox'
 if (-not (Test-Path $installDir)) {
@@ -44,10 +50,25 @@ if (-not (Test-Path $installDir)) {
 
 $exePath = Join-Path $installDir 'lox.exe'
 
-# Download
+# Download next to the target, so a failed download leaves an installed lox.exe alone
+$tmpPath = "$exePath.download"
 Write-Host "Downloading $artifactName.exe..." -ForegroundColor Cyan
-Invoke-WebRequest -Uri $downloadUrl -OutFile $exePath -UseBasicParsing
-Write-Host "Installed to $exePath" -ForegroundColor Green
+Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpPath -UseBasicParsing
+
+# Check the download against the release's SHA256 file
+$sumPath = "$tmpPath.sha256"
+Invoke-WebRequest -Uri $sumAsset.browser_download_url -OutFile $sumPath -UseBasicParsing
+$expected = ((Get-Content $sumPath -Raw).Trim() -split '\s+')[0].ToLower()
+Remove-Item $sumPath -Force
+$actual = (Get-FileHash $tmpPath -Algorithm SHA256).Hash.ToLower()
+if ($actual -ne $expected) {
+    Remove-Item $tmpPath -Force
+    Write-Error "Checksum mismatch for $artifactName.exe (expected $expected, got $actual). Nothing was installed."
+    exit 1
+}
+
+Move-Item -Path $tmpPath -Destination $exePath -Force
+Write-Host "Checksum OK. Installed to $exePath" -ForegroundColor Green
 
 # Add to PATH if not already present
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

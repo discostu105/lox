@@ -25,6 +25,7 @@ mod loxone_xml;
 mod mcp;
 mod nfc_learn;
 mod otel;
+mod run_context;
 mod scene;
 mod snapshot;
 #[cfg(feature = "tui")]
@@ -32,6 +33,7 @@ mod tui;
 mod usermgmt;
 mod util;
 mod visu;
+mod xml;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -42,9 +44,10 @@ use commands::control::{InputCmd, LightCmd, MusicCmd};
 use commands::ctx::CtxCmd;
 use commands::energy::EnergyCmd;
 use commands::inspect::AutopilotCmd;
-use commands::system::{FilesCmd, OtelCmd, UpdateCmd};
+use commands::system::{FilesCmd, UpdateCmd};
 use loxone_client::{client, ftp};
 use mcp::McpCmd;
+use otel::OtelCmd;
 use std::fs;
 
 /// Load config XML from a .Loxone file or extract from a .zip backup.
@@ -59,14 +62,12 @@ pub(crate) fn load_config_xml(path: &str) -> Result<Vec<u8>> {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
-#[derive(Parser)]
-#[command(
-    name = "lox",
-    about = "Loxone Miniserver CLI",
-    version,
-    infer_subcommands = true,
-    disable_help_subcommand = true,
-    help_template = "\
+/// The `lox --help` overview. `$tui` is the line for `lox tui`, empty in a
+/// build without the `tui` feature.
+macro_rules! help_template {
+    ($tui:literal) => {
+        concat!(
+            "\
 {about-with-newline}
 {usage-heading} {usage}
 
@@ -82,7 +83,9 @@ Control:
   run, send                    Run scenes, send raw commands
 
 Inspect:
-  ls, get, info, watch, stream  List, query, monitor, stream controls
+",
+            $tui,
+            "  ls, get, info, watch, stream  List, query, monitor, stream controls
   if                            Conditional state check
   rooms, categories, modes     Structure metadata
   globals, sensors, energy     Global states, sensor & energy readings
@@ -110,6 +113,25 @@ Configuration:
   mcp                          MCP server for AI assistants (Claude, ChatGPT, …)
 
 {options}{after-help}"
+        )
+    };
+}
+
+#[cfg(feature = "tui")]
+const HELP_TEMPLATE: &str = help_template!(
+    "  tui                          Interactive terminal UI: rooms, events, energy, health\n"
+);
+#[cfg(not(feature = "tui"))]
+const HELP_TEMPLATE: &str = help_template!("");
+
+#[derive(Parser)]
+#[command(
+    name = "lox",
+    about = "Loxone Miniserver CLI",
+    version,
+    infer_subcommands = true,
+    disable_help_subcommand = true,
+    help_template = HELP_TEMPLATE
 )]
 pub(crate) struct Cli {
     /// Output format: json, csv, or table (default)
@@ -389,6 +411,7 @@ pub(crate) enum Cmd {
             long,
             short = 'i',
             default_value = "2",
+            value_parser = clap::value_parser!(u64).range(1..),
             help = "Poll interval in seconds"
         )]
         interval: u64,
@@ -719,7 +742,11 @@ pub(crate) fn categorize_error(e: &anyhow::Error) -> &'static str {
             "404" => "not_found",
             _ => "http_error",
         }
-    } else if lower.contains("connection") || lower.contains("timeout") {
+    } else if !lower.starts_with("--")
+        && (lower.contains("connection") || lower.contains("timeout"))
+    {
+        // A message that starts with a flag is about the flag's value
+        // (`--timeout must be between 1s and 5m`), not the network.
         "connection_error"
     } else {
         "error"
@@ -970,7 +997,7 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Files { action } => commands::system::cmd_files(&ctx, action),
         Cmd::User { action } => commands::access::cmd_user(&ctx, action),
         Cmd::Access { action } => commands::access::cmd_access(&ctx, action),
-        Cmd::Otel { action } => commands::system::cmd_otel(&ctx, action),
+        Cmd::Otel { action } => otel::cmd_otel(&ctx, action),
 
         // ── Configuration commands ────────────────────────────────────
         Cmd::Setup { action } => commands::config_cmd::cmd_setup(&ctx, action),
@@ -1014,60 +1041,6 @@ mod tests {
         assert!(!is_uuid("short-str"));
     }
 
-    // ── binary stats parsing ────────────────────────────────────────────────
-
-    #[test]
-    fn test_parse_binary_stats_data() {
-        use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-        use std::io::Cursor;
-        // Build a small binary stats payload: 2 entries, 1 output each
-        let mut data = Vec::new();
-        // Entry 1: ts=1000, value=23.5
-        data.write_u32::<LittleEndian>(1000).unwrap();
-        data.write_f64::<LittleEndian>(23.5).unwrap();
-        // Entry 2: ts=2000, value=24.1
-        data.write_u32::<LittleEndian>(2000).unwrap();
-        data.write_f64::<LittleEndian>(24.1).unwrap();
-
-        let num_outputs = 1;
-        let entry_size = 4 + num_outputs * 8;
-        let mut cursor = Cursor::new(&data);
-        let mut entries = Vec::new();
-        while cursor.position() as usize + entry_size <= data.len() {
-            let ts = cursor.read_u32::<LittleEndian>().unwrap();
-            let val = cursor.read_f64::<LittleEndian>().unwrap();
-            entries.push((ts, val));
-        }
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0], (1000, 23.5));
-        assert_eq!(entries[1], (2000, 24.1));
-    }
-
-    #[test]
-    fn test_parse_binary_stats_multi_output() {
-        use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-        use std::io::Cursor;
-        // 1 entry with 3 outputs
-        let mut data = Vec::new();
-        data.write_u32::<LittleEndian>(5000).unwrap();
-        data.write_f64::<LittleEndian>(100.0).unwrap();
-        data.write_f64::<LittleEndian>(200.0).unwrap();
-        data.write_f64::<LittleEndian>(300.0).unwrap();
-
-        let num_outputs = 3;
-        let entry_size = 4 + num_outputs * 8;
-        let mut cursor = Cursor::new(&data);
-        assert!(cursor.position() as usize + entry_size <= data.len());
-        let ts = cursor.read_u32::<LittleEndian>().unwrap();
-        let v1 = cursor.read_f64::<LittleEndian>().unwrap();
-        let v2 = cursor.read_f64::<LittleEndian>().unwrap();
-        let v3 = cursor.read_f64::<LittleEndian>().unwrap();
-        assert_eq!(ts, 5000);
-        assert_eq!(v1, 100.0);
-        assert_eq!(v2, 200.0);
-        assert_eq!(v3, 300.0);
-    }
-
     // ── CLI definition (flag conflicts, etc.) ─────────────────────────────
 
     /// Clap's debug_assert runs all internal consistency checks: duplicate
@@ -1080,38 +1053,102 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    // ── binary stats header alignment ─────────────────────────────────────
-
-    /// Stats files have a header (12 bytes + variable-length name) followed
-    /// by entries aligned to entry_size boundaries.  Verify the alignment
-    /// calculation for short and long names.
+    /// `lox --help` is written by hand; a command missing from it is one
+    /// users do not find.
     #[test]
-    fn test_stats_header_alignment_short_name() {
-        // "CO2" → 3 bytes, header_end = 15, entry_size = 16 → aligned = 16
-        let name = b"CO2";
-        let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 8; // uuid(4) + ts(4) + 1×f64
-        let aligned = header_end.div_ceil(entry_size) * entry_size;
-        assert_eq!(aligned, 16);
+    fn the_help_overview_names_every_command() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let help = cmd.render_help().to_string();
+        let listed: std::collections::HashSet<&str> = help
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .collect();
+        for sub in Cli::command().get_subcommands() {
+            if !sub.is_hide_set() {
+                assert!(
+                    listed.contains(sub.get_name()),
+                    "`{}` is missing",
+                    sub.get_name()
+                );
+            }
+        }
     }
 
-    #[test]
-    fn test_stats_header_alignment_long_name() {
-        // 21-byte UTF-8 name, header_end = 33, entry_size = 16 → aligned = 48
-        let name = "Zähler Licht Vorraum"; // 21 UTF-8 bytes (ä = 2 bytes)
-        assert_eq!(name.len(), 21);
-        let header_end = 12 + name.len();
-        let entry_size: usize = 4 + 4 + 8;
-        let aligned = header_end.div_ceil(entry_size) * entry_size;
-        assert_eq!(aligned, 48);
-    }
+    // ── JSON error codes ──────────────────────────────────────────────────
 
     #[test]
-    fn test_stats_header_alignment_exact_boundary() {
-        // Name exactly fills to a boundary: header_end = 32, entry_size = 16 → 32
-        let header_end = 32usize;
-        let entry_size: usize = 16;
-        let aligned = header_end.div_ceil(entry_size) * entry_size;
-        assert_eq!(aligned, 32);
+    fn errors_get_their_code() {
+        use loxone_client::HttpStatusError;
+        let http = |status| {
+            anyhow::Error::from(HttpStatusError {
+                status,
+                path: "/jdev/sps/io/x/on".into(),
+            })
+            .context("Sending the command")
+        };
+        let ll = |code: &str| {
+            anyhow::Error::from(usermgmt::LlCodeError {
+                code: code.into(),
+                control: "Lamp → on".into(),
+            })
+        };
+        let cases = [
+            (
+                anyhow::anyhow!("No control matching 'Lamp'"),
+                "control_not_found",
+            ),
+            // The name of a control must not pick the code.
+            (
+                anyhow::anyhow!("No control matching 'Connection'"),
+                "control_not_found",
+            ),
+            (anyhow::anyhow!("No user matching 'bob'"), "user_not_found"),
+            (
+                anyhow::anyhow!("Ambiguous user 'a': alice, anna"),
+                "ambiguous_user",
+            ),
+            (
+                anyhow::anyhow!("Ambiguous name 'Light'"),
+                "ambiguous_control",
+            ),
+            (anyhow::anyhow!("Aborted."), "declined_by_user"),
+            (
+                anyhow::anyhow!("Reboot requires --yes flag."),
+                "confirmation_required",
+            ),
+            (
+                anyhow::anyhow!("Config not found. Run: lox setup set --host ..."),
+                "config_not_found",
+            ),
+            (http(401), "unauthorized"),
+            (http(403), "forbidden"),
+            (http(404), "not_found"),
+            (http(500), "http_error"),
+            (ll("401"), "unauthorized"),
+            (ll("403"), "forbidden"),
+            (ll("404"), "not_found"),
+            (ll("500"), "http_error"),
+            (
+                anyhow::anyhow!("No NFC tag was read within 60s"),
+                "learn_timeout",
+            ),
+            (
+                anyhow::anyhow!("WS timeout during getkey2"),
+                "connection_error",
+            ),
+            (
+                anyhow::anyhow!("error sending request: connection refused"),
+                "connection_error",
+            ),
+            // About a flag's value, not the network
+            (
+                anyhow::anyhow!("--timeout must be between 1s and 5m"),
+                "error",
+            ),
+            (anyhow::anyhow!("Volume must be 0-100"), "error"),
+        ];
+        for (error, code) in cases {
+            assert_eq!(categorize_error(&error), code, "{error:#}");
+        }
     }
 }

@@ -79,7 +79,7 @@ fn code_set_reads_stdin_and_keeps_the_code_out_of_the_log() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{:?}", out);
-    m.assert_hits(1);
+    m.assert_calls(1);
     let (stdout, stderr) = (text(&out.stdout), text(&out.stderr));
     assert!(
         stdout.contains("Set a new access code for bob"),
@@ -108,7 +108,7 @@ fn code_set_without_yes_and_without_a_terminal_changes_nothing() {
     assert!(!out.status.success());
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["error"], "confirmation_required", "{}", v);
-    m.assert_hits(0);
+    m.assert_calls(0);
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn a_code_in_use_is_named_and_not_shown() {
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["error"], "code_in_use", "{}", v);
     assert!(!v.to_string().contains(CODE), "{}", v);
-    m.assert_hits(1);
+    m.assert_calls(1);
     // a malformed code is refused before anything is sent
     let out = lox(&dir)
         .args(["user", "code", "set", "bob", "--yes"])
@@ -133,14 +133,14 @@ fn a_code_in_use_is_named_and_not_shown() {
         .unwrap();
     assert!(!out.status.success());
     assert!(text(&out.stderr).contains("2 to 8 digits"));
-    m.assert_hits(1);
+    m.assert_calls(1);
 }
 
 #[test]
 fn nfc_add_dry_run_shows_the_request_and_sends_nothing() {
     let (server, dir) = setup();
     let m = server.mock(|when, then| {
-        when.method(GET).path_contains("addusernfc");
+        when.method(GET).path_includes("addusernfc");
         then.status(200);
     });
     let out = lox(&dir)
@@ -168,7 +168,7 @@ fn nfc_add_dry_run_shows_the_request_and_sends_nothing() {
             BOB
         )
     );
-    m.assert_hits(0);
+    m.assert_calls(0);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn nfc_rm_by_name_sends_the_tag_id() {
         .unwrap();
     assert!(out.status.success(), "{:?}", out);
     assert!(text(&out.stdout).contains("Removed the NFC tag 'alice phone'"));
-    m.assert_hits(1);
+    m.assert_calls(1);
     // unknown tag: the tags she has
     let out = lox(&dir)
         .args(["-o", "json", "user", "nfc", "rm", "alice", "spare", "--yes"])
@@ -197,5 +197,5 @@ fn nfc_rm_by_name_sends_the_tag_id() {
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["error"], "tag_not_found");
     assert!(v["message"].as_str().unwrap().contains("alice phone"));
-    m.assert_hits(1);
+    m.assert_calls(1);
 }

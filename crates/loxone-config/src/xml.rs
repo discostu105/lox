@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
         if !trailing.chars().all(|c| c.is_ascii_whitespace()) {
             return Err(self.err(format!(
                 "trailing content after root element: {:?}…",
-                &trailing[..trailing.len().min(40)]
+                trailing.chars().take(40).collect::<String>()
             )));
         }
         Ok(XmlDocument {
@@ -480,6 +480,18 @@ mod tests {
         \t\t<Key>2B35</Key>\r\n\
         \t</C>\r\n\
         </ControlList>\r\n";
+
+    // The error quotes 40 characters of what follows the root; byte 40 of
+    // this text is inside an umlaut.
+    #[test]
+    fn trailing_content_with_umlauts_is_an_error_not_a_panic() {
+        let doc = format!("<A/>{}", "ä".repeat(30));
+        assert_eq!(doc.len() - 4, 60);
+        let err = XmlDocument::parse(doc.as_bytes()).unwrap_err().to_string();
+        assert!(err.contains("trailing content"), "{err}");
+        let odd = format!("<A/>x{}", "ä".repeat(30));
+        assert!(XmlDocument::parse(odd.as_bytes()).is_err());
+    }
 
     #[test]
     fn roundtrip_sample() {

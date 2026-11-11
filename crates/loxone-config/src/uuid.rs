@@ -61,6 +61,10 @@ impl LoxUuid {
         if a.len() != 8 || b.len() != 4 || c.len() != 4 || d.len() != 16 {
             return Err(err("expected segment lengths 8-4-4-16"));
         }
+        // Slicing `d` by byte below needs single-byte characters.
+        if !d.is_ascii() {
+            return Err(err("segment 4 is not hex"));
+        }
         let time = u32::from_str_radix(a, 16).map_err(|_| err("segment 1 is not hex"))?;
         let mid = u16::from_str_radix(b, 16).map_err(|_| err("segment 2 is not hex"))?;
         let seq = u16::from_str_radix(c, 16).map_err(|_| err("segment 3 is not hex"))?;
@@ -123,7 +127,7 @@ pub fn parse_serial(s: &str) -> Result<[u8; 6]> {
         value: s.to_string(),
         msg: "expected 12 hex digits (Miniserver serial)".to_string(),
     };
-    if s.len() != 12 {
+    if s.len() != 12 || !s.is_ascii() {
         return Err(err());
     }
     let mut out = [0u8; 6];
@@ -217,6 +221,15 @@ impl Minter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Right length in bytes, but a two-byte letter where slicing would cut.
+    #[test]
+    fn multi_byte_input_is_an_error_not_a_panic() {
+        assert!(LoxUuid::parse("1d844a67-0333-5301-fäffed57184a04d").is_err());
+        assert!(LoxUuid::parse("1d844a6ä-0333-5301-ffffed57184a04d2").is_err());
+        assert!(parse_serial("504F94A262ä").is_err());
+        assert!(parse_serial("5ä4F94A2623").is_err());
+    }
 
     #[test]
     fn parse_and_display_roundtrip() {
