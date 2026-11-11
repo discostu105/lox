@@ -26,16 +26,17 @@ cargo test
 
 No live Miniserver is needed for development. All unit tests use pure functions or mocked data.
 
-The repository is a Cargo workspace: the `lox` CLI at the root and the network-free
-[`loxl`](https://github.com/discostu105/lox/tree/main/crates/loxone-config) crate in `crates/loxone-config`. Read
-`crates/loxone-config/AGENTS.md` before changing loxone-config: format facts are documented, never guessed, and real configs are never
-committed.
+The repository is a Cargo workspace: the `lox` CLI at the root and two library crates.
+[`loxone-client`](https://github.com/discostu105/lox/tree/main/crates/loxone-client) talks to the Miniserver, and
+the network-free [`loxone-config`](https://github.com/discostu105/lox/tree/main/crates/loxone-config) reads and
+writes program files and runs `loxl`. Read `crates/loxone-config/AGENTS.md` before changing loxone-config: format
+facts are documented, never guessed, and real configs are never committed.
 
 ## Build commands
 
 ```bash
 cargo build              # debug build
-cargo build --release    # production binary (~4MB)
+cargo build --release    # production binary
 cargo test               # run all tests (lox and both library crates)
 cargo test -p loxone-config       # only the loxone-config crate
 cargo run -- ls          # run lox from source

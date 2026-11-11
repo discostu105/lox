@@ -12,7 +12,7 @@ Guidance for Claude Code and other AI agents working in this repository.
 
 ```bash
 cargo build                   # debug
-cargo build --release         # production binary (~4MB)
+cargo build --release         # production binary
 cargo run -- <args>           # run lox, e.g. cargo run -- ls -o json
 cargo run --bin loxl -- help  # run loxl, the Lox Logic CLI
 cargo check
@@ -27,8 +27,8 @@ These cover the whole workspace (`default-members`): the `lox` package at the ro
 
 ## Pre-push CI checklist
 
-**Always run these four checks before committing or pushing.** They mirror `.github/workflows/ci.yml` (ubuntu and
-macOS):
+**Always run these four checks before committing or pushing.** They mirror `.github/workflows/ci.yml` (Linux,
+macOS and Windows):
 
 ```bash
 cargo fmt --check            # formatting
@@ -100,7 +100,8 @@ lox builds a `Connection` (host, credentials, `verify_ssl`, token and structure 
 - Modules: `client.rs` (`LoxClient`: control resolution, structure cache, categories, global states, operating
   modes, retries), `connection.rs`, `error.rs`, `ws.rs`, `token.rs` (`TokenStore`), `stream.rs` (event tables,
   `StateEvent`, sessions), `ftp.rs`, `statv2.rs` (Statistics V2), `stats.rs` (statistics and weather files),
-  `sdtest.rs`, `time.rs`.
+  `system.rs` (`system_status()`, `diagnostics()`, reboot and restart), `private_file.rs` (owner-only, atomic
+  writes of config, token and caches), `sdtest.rs`, `time.rs`.
 
 ### loxone-config
 
@@ -133,7 +134,16 @@ language: "lxir" became Lox Logic, `.lxir` became `.loxl`). It came from github.
 | `src/logic.rs` | Adapter over loxone-config: program blocks, wires, `WiringView`, lint, block history, the logic diff |
 | `src/snapshot.rs` | Where a `.Loxone` comes from: config repo commits (hash, `v273`, date, `<hash>^`), working copy, cache, FTP, files |
 | `src/gitops.rs` | Config repo: init, pull (FTP → LoxCC → diff → commit), log, restore |
-| `src/scene.rs` | Scenes from YAML |
+| `src/scene.rs` | Scenes from YAML. A scene is named, never given as a path |
+| `src/usermgmt.rs` | User management: users, groups, NFC tags, access codes, the Code Touch access log |
+| `src/nfc_learn.rs` | `lox access learn`: a Code Touch's learn mode over the WebSocket |
+| `src/visu.rs` | The visualization password and secured commands |
+| `src/loxone_xml.rs` | Users, access rights and devices of a program file, as lox lists them |
+| `src/custom_changes.rs` | The Miniserver's custom changes (`/sys/custom/*.LoxCC`): what the app changed |
+| `src/app_catalogue.rs` | `LoxAPP3.json` in a config ZIP, updated by `lox config push` |
+| `src/otel.rs` | `lox otel serve/push`: the OTLP exporter and its command |
+| `src/xml.rs` | Tag and attribute reading for the Miniserver's XML answers |
+| `src/run_context.rs` | `RunContext`: the global flags every front-end reads |
 | `src/mcp/` | `lox mcp` on rmcp. Config-as-code tools run the CLI as a child process (`config_tools.rs`). Design: `docs/design-mcp.md` |
 | `src/tui/` | `lox tui` (feature `tui`), Elm-style `update()` over `App`. Design: `docs/design-tui.md` |
 

@@ -86,6 +86,11 @@ insta = "1"
 zip = "2"
 portable-pty = "0.9"
 
+[profile.release]
+# Release binaries without symbols: a quarter smaller (34 MB to 26 MB on
+# Linux x86_64). A panic backtrace then shows addresses, not names.
+strip = "symbols"
+
 [features]
 default = ["tui"]
 # Interactive terminal UI (`lox tui`). Disable with --no-default-features for a minimal build.

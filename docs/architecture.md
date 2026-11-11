@@ -17,7 +17,7 @@ nav_order: 5
 
 ## Overview
 
-`lox` is a single static Rust binary (~4MB), built from a Cargo workspace:
+`lox` is a single static Rust binary, built from a Cargo workspace:
 
 - **`lox`** (the root package): the CLI, the TUI, the MCP server, contexts and config, risk levels and
   confirmations, scenes, output formatting.

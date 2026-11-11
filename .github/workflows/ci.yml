@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
+# A new push to a PR replaces its running checks. Runs on main each get their
+# own group, so they neither queue nor cancel: auto-release.yml waits for them.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -81,6 +90,11 @@ jobs:
       - name: test
         run: cargo test --release
 
+      # The build without the TUI is a supported configuration
+      - name: test (no default features)
+        if: runner.os == 'Linux'
+        run: cargo test --release -p lox --no-default-features
+
       # Lox Logic's CI check path (crates/loxone-config/examples/ci.sh) on the shipped
       # examples: validate, canonical format, lock currency, determinism,
       # byte-identical expected output.
@@ -109,6 +123,29 @@ jobs:
       - name: no personal data in committed configs
         if: runner.os == 'Linux'
         run: git ls-files -z '*.Loxone' | xargs -0 -r target/release/loxl scan
+
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # rust-version in Cargo.toml; keep the two in step
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@1.91
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-msrv-
+
+      - name: check
+        run: cargo check --workspace --all-targets
 
   coverage:
     name: Coverage

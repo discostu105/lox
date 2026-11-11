@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/discostu105/lox/branch/main/graph/badge.svg)](https://codecov.io/gh/discostu105/lox)
 
 `lox` controls, monitors and manages a [Loxone](https://www.loxone.com) Miniserver from the terminal.
-It talks to the Miniserver directly over your local network, without a cloud service. It is one ~4 MB binary for
+It talks to the Miniserver directly over your local network, without a cloud service. It is one binary for
 Windows, macOS and Linux.
 
 The Loxone app is made for tapping on a phone. `lox` covers what it can't: scripts, cron jobs, headless
