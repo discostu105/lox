@@ -213,7 +213,45 @@ impl Config {
     /// 2. Project-local `.lox/` (walk up from cwd) — flat format
     /// 3. Global `~/.lox/config.yaml` — flat or multi-context
     /// 4. `--ctx` flag overrides context selection within global config
+    ///
+    /// `LOX_HOST`, `LOX_USER`, `LOX_PASS` and `LOX_SERIAL` override the
+    /// stored fields. Without any config file, the first three are enough.
     pub fn load() -> Result<Self> {
+        Self::load_with_env(|name| std::env::var(name).ok())
+    }
+
+    fn load_with_env(env: impl Fn(&str) -> Option<String>) -> Result<Self> {
+        let var = |name: &str| env(name).filter(|v| !v.is_empty());
+        let mut cfg = match Self::load_stored() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                let no_file = std::env::var_os("LOX_CONFIG").is_none() && !Self::path().exists();
+                match (var("LOX_HOST"), var("LOX_USER"), var("LOX_PASS")) {
+                    (Some(_), Some(_), Some(_)) if no_file => Config {
+                        data_dir: Self::dir(),
+                        ..Default::default()
+                    },
+                    _ => return Err(e),
+                }
+            }
+        };
+        for (name, field) in [
+            ("LOX_HOST", &mut cfg.host),
+            ("LOX_USER", &mut cfg.user),
+            ("LOX_PASS", &mut cfg.pass),
+            ("LOX_SERIAL", &mut cfg.serial),
+        ] {
+            if let Some(v) = var(name) {
+                *field = v;
+            }
+        }
+        cfg.normalize_host();
+        Ok(cfg)
+    }
+
+    /// The config as stored, without the `LOX_*` overrides of [`Self::load`]:
+    /// what a command that saves the config back starts from.
+    pub fn load_stored() -> Result<Self> {
         // 1. LOX_CONFIG env var takes absolute priority
         if let Ok(env_path) = std::env::var("LOX_CONFIG") {
             let path = PathBuf::from(&env_path);
@@ -291,7 +329,7 @@ impl Config {
     /// empty one when there is no config file yet. A file that exists but
     /// does not load is an error, so saving never replaces it.
     pub fn load_or_new() -> Result<Self> {
-        let err = match Self::load() {
+        let err = match Self::load_stored() {
             Ok(cfg) => return Ok(cfg),
             Err(e) => e,
         };
@@ -479,6 +517,50 @@ mod tests {
     /// `std::env::set_var` is unsafe because it's not thread-safe;
     /// without this lock, parallel tests race on the shared env.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn lox_variables_override_the_stored_fields() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("cfg.yaml");
+        fs::write(&cfg_path, "host: ms.local\nuser: u\npass: p\nserial: S1\n").unwrap();
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        unsafe { std::env::set_var("LOX_CONFIG", &cfg_path) };
+        let overridden = Config::load_with_env(env(&[
+            ("LOX_PASS", "from-env"),
+            ("LOX_HOST", "other.local"),
+        ]));
+        // An empty variable is no override.
+        let empty = Config::load_with_env(env(&[("LOX_PASS", "")]));
+        unsafe { std::env::remove_var("LOX_CONFIG") };
+
+        let cfg = overridden.unwrap();
+        assert_eq!(cfg.host, "https://other.local");
+        assert_eq!(cfg.pass, "from-env");
+        assert_eq!((cfg.user.as_str(), cfg.serial.as_str()), ("u", "S1"));
+        assert_eq!(empty.unwrap().pass, "p");
+    }
+
+    #[test]
+    fn a_broken_config_file_is_not_replaced_by_the_variables() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let cfg_path = dir.path().join("cfg.yaml");
+        fs::write(&cfg_path, "host: [unclosed").unwrap();
+        let all = |name: &str| {
+            matches!(name, "LOX_HOST" | "LOX_USER" | "LOX_PASS").then(|| "x".to_string())
+        };
+        unsafe { std::env::set_var("LOX_CONFIG", &cfg_path) };
+        let loaded = Config::load_with_env(all);
+        unsafe { std::env::remove_var("LOX_CONFIG") };
+        assert!(loaded.is_err());
+    }
 
     #[test]
     fn load_from_lox_config_env_var() {

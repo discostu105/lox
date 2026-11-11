@@ -26,3 +26,6 @@
   named `In`.
 - **`lox logic compile`** keeps `Valid="true"` on a formula whose text did not change. Loxone Config checks a
   formula only when its text is edited, so every compiled formula showed as invalid.
+- **`LOX_HOST`, `LOX_USER`, `LOX_PASS` and `LOX_SERIAL`** work for every command, as documented. They were read
+  by `lox setup set` only. Without a config file the first three are enough, for containers and CI. Commands that
+  save the config never write them into it.

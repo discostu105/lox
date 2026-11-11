@@ -153,7 +153,8 @@ pub(crate) enum AliasCmd {
 }
 
 pub fn cmd_alias(ctx: &RunContext, action: AliasCmd) -> Result<()> {
-    let mut cfg = Config::load()?;
+    // Saved back: without the LOX_* overrides, which belong to this shell only
+    let mut cfg = Config::load_stored()?;
     match action {
         AliasCmd::Add { name, uuid } => {
             cfg.aliases.insert(name.clone(), uuid.clone());

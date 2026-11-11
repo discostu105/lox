@@ -231,3 +231,59 @@ fn a_scene_is_named_not_given_as_a_path() {
     assert!(err.contains("is not a scene name"), "{err}");
     assert!(!home.0.path().join(".lox").join("planted.yaml").exists());
 }
+
+#[test]
+fn lox_variables_work_without_a_config_file_and_are_never_saved() {
+    let home = Home::new();
+    let out = home
+        .lox()
+        .env("LOX_HOST", "house.example")
+        .env("LOX_USER", "admin")
+        .env("LOX_PASS", "s3cret")
+        .args(["setup", "show"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        shown.contains("https://house.example") && shown.contains("admin"),
+        "{shown}"
+    );
+    assert!(!shown.contains("s3cret"), "{shown}");
+    assert!(!home.config().exists());
+
+    // A stored config: the variable wins for this run, the file keeps its own.
+    let home = Home::with_config(FLAT);
+    let out = home
+        .lox()
+        .env("LOX_USER", "guest")
+        .args([
+            "alias",
+            "add",
+            "pump",
+            "1a2b3c4d-0001-0002-ffff000000000002",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let saved = home.read();
+    assert!(
+        saved.contains("user: admin") && saved.contains("pump"),
+        "{saved}"
+    );
+    let shown = home
+        .lox()
+        .env("LOX_USER", "guest")
+        .args(["setup", "show"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("guest"));
+}
