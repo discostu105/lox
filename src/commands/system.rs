@@ -291,12 +291,8 @@ pub fn cmd_extensions(ctx: &RunContext) -> Result<()> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
-    fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| String::from_utf8_lossy(&a.value).to_string())
-            .unwrap_or_default()
+    fn xattr(e: &quick_xml::events::BytesStart, name: &str) -> String {
+        crate::xml::raw_attr(e, name).unwrap_or_default()
     }
 
     let mut reader = Reader::from_str(&status_xml);
@@ -306,72 +302,72 @@ pub fn cmd_extensions(ctx: &RunContext) -> Result<()> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let tag = crate::xml::tag(e);
                 match tag.as_str() {
                     "TreeBranch" => {
-                        let name = xattr(e, b"Name");
+                        let name = xattr(e, "Name");
                         extensions.push(serde_json::json!({
                             "name": name,
                             "type": "Tree",
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
                             "online": true,
-                            "devices": xattr(e, b"Devices").parse::<u32>().unwrap_or(0),
-                            "errors": xattr(e, b"Errors").parse::<u32>().unwrap_or(0),
+                            "devices": xattr(e, "Devices").parse::<u32>().unwrap_or(0),
+                            "errors": xattr(e, "Errors").parse::<u32>().unwrap_or(0),
                         }));
                         parent_name = Some(name);
                     }
                     "Extension" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
+                            "name": xattr(e, "Name"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
                         }));
                     }
                     "GenericNetworkDevice" => {
-                        let name = xattr(e, b"Name");
+                        let name = xattr(e, "Name");
                         extensions.push(serde_json::json!({
                             "name": name,
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"MAC"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "MAC"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
                         }));
                         parent_name = Some(name);
                     }
                     "TreeDevice" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
+                            "name": xattr(e, "Name"),
                             "type": "Tree Device",
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
                             "parent": parent_name,
                         }));
                     }
                     "AirDevice" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": xattr(e, b"Type"),
-                            "serial": xattr(e, b"Serial"),
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
-                            "place": xattr(e, b"Place"),
-                            "battery": xattr(e, b"Battery").parse::<u32>().ok(),
+                            "name": xattr(e, "Name"),
+                            "type": xattr(e, "Type"),
+                            "serial": xattr(e, "Serial"),
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
+                            "place": xattr(e, "Place"),
+                            "battery": xattr(e, "Battery").parse::<u32>().ok(),
                             "parent": parent_name,
                         }));
                     }
                     "Plugin" => {
                         extensions.push(serde_json::json!({
-                            "name": xattr(e, b"Name"),
-                            "type": format!("Plugin ({})", xattr(e, b"Type")),
+                            "name": xattr(e, "Name"),
+                            "type": format!("Plugin ({})", xattr(e, "Type")),
                             "serial": "",
-                            "version": xattr(e, b"Version"),
-                            "online": xattr(e, b"Online") == "true",
+                            "version": xattr(e, "Version"),
+                            "online": xattr(e, "Online") == "true",
                         }));
                     }
                     _ => {}
@@ -455,12 +451,8 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
-    fn xattr(e: &quick_xml::events::BytesStart, name: &[u8]) -> String {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| String::from_utf8_lossy(&a.value).to_string())
-            .unwrap_or_default()
+    fn xattr(e: &quick_xml::events::BytesStart, name: &str) -> String {
+        crate::xml::raw_attr(e, name).unwrap_or_default()
     }
 
     #[derive(Clone)]
@@ -479,11 +471,11 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let tag = crate::xml::tag(e);
                 match tag.as_str() {
                     "TreeBranch" => {
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
+                            name: xattr(e, "Name"),
                             device_type: "Tree".to_string(),
                             place: None,
                             online: true,
@@ -492,41 +484,41 @@ pub fn cmd_health(ctx: &RunContext, device_type: Option<String>, problems: bool)
                     }
                     "Extension" => {
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: None,
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "GenericNetworkDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "TreeDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
+                            name: xattr(e, "Name"),
                             device_type: "Tree Device".to_string(),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
+                            online: xattr(e, "Online") == "true",
                             battery: None,
                         });
                     }
                     "AirDevice" => {
-                        let place = xattr(e, b"Place");
+                        let place = xattr(e, "Place");
                         devices.push(DeviceInfo {
-                            name: xattr(e, b"Name"),
-                            device_type: xattr(e, b"Type"),
+                            name: xattr(e, "Name"),
+                            device_type: xattr(e, "Type"),
                             place: if place.is_empty() { None } else { Some(place) },
-                            online: xattr(e, b"Online") == "true",
-                            battery: xattr(e, b"Battery").parse::<u32>().ok(),
+                            online: xattr(e, "Online") == "true",
+                            battery: xattr(e, "Battery").parse::<u32>().ok(),
                         });
                     }
                     _ => {}

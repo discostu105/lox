@@ -309,11 +309,9 @@ impl Series {
 pub fn parse_status_xml(xml: &str) -> Vec<Device> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
-    fn attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
-        e.attributes()
-            .flatten()
-            .find(|a| a.key.as_ref() == name)
-            .map(|a| clean(&String::from_utf8_lossy(&a.value)))
+    fn attr(e: &quick_xml::events::BytesStart, name: &str) -> Option<String> {
+        crate::xml::raw_attr(e, name)
+            .map(|v| clean(&v))
             .filter(|s| !s.is_empty())
     }
     let mut out = Vec::new();
@@ -322,38 +320,38 @@ pub fn parse_status_xml(xml: &str) -> Vec<Device> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let tag = e.name().as_ref().to_vec();
-                let kind = match tag.as_slice() {
-                    b"Extension" | b"GenericNetworkDevice" | b"AirDevice" => {
-                        attr(e, b"Type").unwrap_or_else(|| String::from_utf8_lossy(&tag).into())
+                let tag = crate::xml::tag(e);
+                let kind = match tag.as_str() {
+                    "Extension" | "GenericNetworkDevice" | "AirDevice" => {
+                        attr(e, "Type").unwrap_or_else(|| tag.clone())
                     }
-                    b"TreeDevice" => attr(e, b"Type").unwrap_or_else(|| "Tree device".into()),
-                    b"TreeBranch" => "Tree branch".into(),
+                    "TreeDevice" => attr(e, "Type").unwrap_or_else(|| "Tree device".into()),
+                    "TreeBranch" => "Tree branch".into(),
                     _ => {
                         buf.clear();
                         continue;
                     }
                 };
-                if tag == b"TreeBranch" {
+                if tag == "TreeBranch" {
                     buf.clear();
                     continue;
                 }
-                let online = attr(e, b"Online").is_none_or(|o| o == "true");
-                let battery = attr(e, b"Battery")
+                let online = attr(e, "Online").is_none_or(|o| o == "true");
+                let battery = attr(e, "Battery")
                     .and_then(|b| b.parse::<u32>().ok())
                     .filter(|b| *b <= 100);
-                let signal = attr(e, b"QualityDev")
-                    .or_else(|| attr(e, b"QualityExt"))
+                let signal = attr(e, "QualityDev")
+                    .or_else(|| attr(e, "QualityExt"))
                     .and_then(|q| q.parse::<u8>().ok());
                 out.push(Device {
-                    name: attr(e, b"Name").unwrap_or_else(|| kind.clone()),
+                    name: attr(e, "Name").unwrap_or_else(|| kind.clone()),
                     kind,
-                    place: attr(e, b"Place").or_else(|| attr(e, b"Room")),
+                    place: attr(e, "Place").or_else(|| attr(e, "Room")),
                     online,
                     battery,
                     signal,
-                    last_seen: attr(e, b"LastReceived"),
-                    firmware: attr(e, b"Version"),
+                    last_seen: attr(e, "LastReceived"),
+                    firmware: attr(e, "Version"),
                 });
             }
             Ok(Event::Eof) | Err(_) => break,

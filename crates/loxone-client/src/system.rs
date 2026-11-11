@@ -470,7 +470,7 @@ mod tests {
             then.status(503);
         });
         assert!(client(&server).reboot().is_err());
-        failing.assert_hits(1);
+        failing.assert_calls(1);
 
         let restart = server.mock(|when, then| {
             when.method(GET).path("/jdev/sps/restart");
@@ -478,7 +478,7 @@ mod tests {
                 .body(r#"{"LL": {"control": "dev/sps/restart", "value": "1", "Code": "200"}}"#);
         });
         assert_eq!(client(&server).restart_program().unwrap(), "1");
-        restart.assert_hits(1);
+        restart.assert_calls(1);
 
         let refused = server.mock(|when, then| {
             when.method(GET).path("/jdev/sys/updatetolatestrelease");
@@ -487,7 +487,7 @@ mod tests {
             );
         });
         assert!(client(&server).update_firmware().is_err());
-        refused.assert_hits(1);
+        refused.assert_calls(1);
     }
 
     #[test]

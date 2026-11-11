@@ -33,6 +33,7 @@ mod tui;
 mod usermgmt;
 mod util;
 mod visu;
+mod xml;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};

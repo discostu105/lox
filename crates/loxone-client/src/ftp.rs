@@ -253,7 +253,10 @@ pub const CONFIG_UPLOAD_NAME: &str = "sps_new.zip";
 /// Upload a config ZIP as `/prog/sps_new.zip`, the config the Miniserver
 /// starts from after its next reboot.
 pub fn upload_config(conn: &Connection, data: &[u8]) -> Result<()> {
-    let server = Server::of(conn);
+    upload_config_on(&Server::of(conn), conn, data)
+}
+
+fn upload_config_on(server: &Server, conn: &Connection, data: &[u8]) -> Result<()> {
     let path = format!("/prog/{}", CONFIG_UPLOAD_NAME);
     ftp_with_retry(|| {
         let mut ftp = server.open(conn)?;
@@ -274,7 +277,13 @@ pub const CUSTOM_CHANGES_DIR: &str = "/sys/custom";
 /// Download every `*.LoxCC` in /sys/custom: file name and bytes. A directory
 /// that does not exist (FTP 550) holds none.
 pub fn download_custom_changes(conn: &Connection) -> Result<Vec<(String, Vec<u8>)>> {
-    let server = Server::of(conn);
+    download_custom_changes_on(&Server::of(conn), conn)
+}
+
+fn download_custom_changes_on(
+    server: &Server,
+    conn: &Connection,
+) -> Result<Vec<(String, Vec<u8>)>> {
     ftp_with_retry(|| {
         let mut ftp = server.open(conn)?;
         let names = match ftp.nlst(Some(CUSTOM_CHANGES_DIR)) {
@@ -363,6 +372,9 @@ mod tests {
                            -rw-r--r-- 1 0 0 2222 Jan 02 00:00 sps_2_20260102000000.zip\r\n\
                            -rw-r--r-- 1 0 0 9 Jan 02 00:00 notes.txt\r\n";
 
+    /// What a client uploaded with STOR, as (path, bytes).
+    static UPLOADS: std::sync::Mutex<Vec<(String, Vec<u8>)>> = std::sync::Mutex::new(Vec::new());
+
     /// A small FTP server on localhost; returns its port and a login counter.
     fn fake_ftp(fake: Fake) -> (Server, Arc<AtomicUsize>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -397,7 +409,7 @@ mod tests {
         control.write_all(b"220 ready\r\n")?;
         let mut data: Option<TcpListener> = None;
         while let Some(Ok(line)) = lines.next() {
-            let (verb, _) = line.split_once(' ').unwrap_or((line.as_str(), ""));
+            let (verb, arg) = line.split_once(' ').unwrap_or((line.as_str(), ""));
             match verb {
                 "USER" => control.write_all(b"331 password please\r\n")?,
                 "PASS" => {
@@ -420,20 +432,34 @@ mod tests {
                     );
                     control.write_all(reply.as_bytes())?;
                 }
-                "LIST" | "RETR" => {
+                "LIST" | "NLST" | "RETR" => {
+                    let missing = verb == "NLST" && arg != CUSTOM_CHANGES_DIR;
                     if matches!(fake, Fake::CannotList) {
                         control.write_all(b"451 local error\r\n")?;
                         continue;
                     }
+                    if missing {
+                        control.write_all(b"550 no such directory\r\n")?;
+                        continue;
+                    }
                     control.write_all(b"150 here it comes\r\n")?;
                     let (mut stream, _) = data.take().expect("PASV first").accept()?;
-                    stream.write_all(if verb == "LIST" {
-                        LISTING.as_bytes()
-                    } else {
-                        b"zip-bytes"
-                    })?;
+                    let body: Vec<u8> = match verb {
+                        "LIST" => LISTING.into(),
+                        "NLST" => b"/sys/custom/1a2b.LoxCC\r\n/sys/custom/notes.txt\r\n".to_vec(),
+                        _ => format!("bytes of {arg}").into_bytes(),
+                    };
+                    stream.write_all(&body)?;
                     drop(stream);
                     control.write_all(b"226 done\r\n")?;
+                }
+                "STOR" => {
+                    control.write_all(b"150 send it\r\n")?;
+                    let (mut stream, _) = data.take().expect("PASV first").accept()?;
+                    let mut bytes = Vec::new();
+                    std::io::Read::read_to_end(&mut stream, &mut bytes)?;
+                    UPLOADS.lock().unwrap().push((arg.to_string(), bytes));
+                    control.write_all(b"226 stored\r\n")?;
                 }
                 "QUIT" => {
                     control.write_all(b"221 bye\r\n")?;
@@ -460,8 +486,30 @@ mod tests {
         );
         assert_eq!(backups[0].size, 2222);
         let zip = download_backup_on(&server, &user(), names[0]).unwrap();
-        assert_eq!(zip, b"zip-bytes");
+        assert_eq!(zip, b"bytes of /prog/sps_2_20260102000000.zip");
         assert_eq!(logins.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn uploads_the_config_under_the_name_the_miniserver_loads() {
+        let (server, _) = fake_ftp(Fake::Serves);
+        let zip = vec![0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0x0d, 0x0a];
+        upload_config_on(&server, &user(), &zip).unwrap();
+        let uploads = UPLOADS.lock().unwrap();
+        assert_eq!(*uploads, [("/prog/sps_new.zip".to_string(), zip)]);
+    }
+
+    #[test]
+    fn downloads_the_custom_changes_and_skips_other_files() {
+        let (server, _) = fake_ftp(Fake::Serves);
+        let files = download_custom_changes_on(&server, &user()).unwrap();
+        assert_eq!(
+            files,
+            [(
+                "1a2b.LoxCC".to_string(),
+                b"bytes of /sys/custom/1a2b.LoxCC".to_vec()
+            )]
+        );
     }
 
     #[test]

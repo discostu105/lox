@@ -1019,7 +1019,7 @@ mod tests {
         let mut client = LoxClient::new(mock_config(&server)).unwrap();
         let _ = client.list_controls(None, None).unwrap();
         let _ = client.list_controls(None, None).unwrap();
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     // ── resolve_with_room ─────────────────────────────────────────────────────
@@ -1361,7 +1361,7 @@ mod tests {
         let client = LoxClient::new(mock_config(&server)).unwrap();
         let err = client.get_json("/jdev/cfg/version").unwrap_err();
         assert_eq!(err.http_status().map(|s| s.status), Some(503));
-        mock.assert_hits(1 + RETRY_DELAYS_MS.len());
+        mock.assert_calls(1 + RETRY_DELAYS_MS.len());
     }
 
     #[test]
@@ -1373,7 +1373,7 @@ mod tests {
         });
         let client = LoxClient::new(mock_config(&server)).unwrap();
         assert!(client.get_json("/jdev/cfg/version").is_err());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     // A second `pulse` after a lost answer would switch the output twice.
@@ -1388,7 +1388,7 @@ mod tests {
         let client = LoxClient::new(mock_config(&server)).unwrap();
         let err = client.send_cmd(UUID, "pulse").unwrap_err();
         assert_eq!(err.http_status().map(|s| s.status), Some(500));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[test]
@@ -1401,7 +1401,7 @@ mod tests {
         });
         let client = LoxClient::new(mock_config(&server)).unwrap();
         assert!(client.send_cmd(UUID, "pulse").is_err());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[test]
@@ -1483,7 +1483,7 @@ mod tests {
                 .get_json(&format!("/jdev/sps/io/{UUID}/{dots}/{other}/open"))
                 .unwrap();
         }
-        mock.assert_hits(2);
+        mock.assert_calls(2);
     }
 
     #[test]
@@ -1507,7 +1507,7 @@ mod tests {
                 "{cmd}"
             );
         }
-        reached.assert_hits(0);
+        reached.assert_calls(0);
     }
 
     #[test]
@@ -1521,7 +1521,7 @@ mod tests {
         });
         let client = LoxClient::new(mock_config(&server)).unwrap();
         client.send_secured_cmd("abc123", UUID, "open").unwrap();
-        mock.assert_hits(1);
+        mock.assert_calls(1);
         assert!(client.send_secured_cmd("../x", UUID, "open").is_err());
         assert!(client.send_secured_cmd("", UUID, "open").is_err());
     }
@@ -1553,7 +1553,7 @@ mod tests {
             name(client.refresh_structure().unwrap()).as_deref(),
             Some("new")
         );
-        mock.assert_hits(1);
+        mock.assert_calls(1);
         assert!(fs::read_to_string(&cache).unwrap().contains("new"));
     }
 

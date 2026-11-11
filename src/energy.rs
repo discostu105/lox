@@ -406,24 +406,19 @@ pub fn parse_all(xml: &str) -> AllValues {
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let attr = |k: &str| {
-                    e.attributes()
-                        .flatten()
-                        .find(|a| a.key.as_ref() == k.as_bytes())
-                        .and_then(|a| a.unescape_value().ok().map(|v| v.to_string()))
-                };
+                let attr = |k: &str| crate::xml::attr(&e, k);
                 let num = |k: &str| attr(k).and_then(|v| v.trim().parse::<f64>().ok());
                 if root {
                     out.value = num("value");
                     root = false;
                 } else {
-                    match e.name().as_ref() {
-                        b"output" => {
+                    match crate::xml::tag(&e).as_str() {
+                        "output" => {
                             if let (Some(n), Some(v)) = (attr("name"), num("value")) {
                                 out.outputs.insert(n, v);
                             }
                         }
-                        b"SpecialState" => {
+                        "SpecialState" => {
                             if let (Some(u), Some(v)) = (attr("uuid"), num("value")) {
                                 out.special.insert(u, v);
                             }

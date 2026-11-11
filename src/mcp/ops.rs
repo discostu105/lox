@@ -324,19 +324,7 @@ pub fn parse_all_xml(xml: &str) -> (Option<Value>, ValueMap, ValueMap) {
     use quick_xml::Reader;
     use quick_xml::events::{BytesStart, Event};
 
-    let attrs_of = |e: &BytesStart| -> Vec<(String, String)> {
-        e.attributes()
-            .flatten()
-            .map(|a| {
-                let key = String::from_utf8_lossy(a.key.as_ref()).to_string();
-                let val = a
-                    .unescape_value()
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|_| String::from_utf8_lossy(&a.value).to_string());
-                (key, val)
-            })
-            .collect()
-    };
+    let attrs_of = |e: &BytesStart| crate::xml::attrs(e);
     let mut root: Option<Vec<(String, String)>> = None;
     let mut children: Vec<Vec<(String, String)>> = Vec::new();
     let mut reader = Reader::from_str(xml);
@@ -345,7 +333,7 @@ pub fn parse_all_xml(xml: &str) -> (Option<Value>, ValueMap, ValueMap) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 if root.is_none() {
                     root = Some(attrs_of(&e));
-                } else if e.name().as_ref() == b"output" {
+                } else if crate::xml::tag(&e) == "output" {
                     children.push(attrs_of(&e));
                 }
             }
