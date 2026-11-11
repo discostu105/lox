@@ -1613,7 +1613,7 @@ version = "0.83.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "base64 0.22.1",
+ "base64 0.23.1",
  "byteorder",
  "chrono",
  "clap",
@@ -1659,7 +1659,7 @@ dependencies = [
 name = "loxone-client"
 version = "0.1.4"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "byteorder",
  "chrono",
  "futures-util",
