@@ -132,7 +132,7 @@ jobs:
 
       # rust-version in Cargo.toml; keep the two in step
       - name: Install Rust 1.91
-        uses: dtolnay/rust-toolchain@1.91
+        uses: dtolnay/rust-toolchain@1.120
 
       - name: Cache cargo
         uses: actions/cache@v6
