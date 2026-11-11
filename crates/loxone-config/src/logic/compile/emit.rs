@@ -308,12 +308,18 @@ fn element_attrs(
             el.set_attr(name, v);
         }
     }
-    // Every observed Formula= attribute travels with Valid="false"
-    // (the GUI revalidates the expression on load).
+    // A formula travels with its `Valid=`. Loxone Config checks a formula
+    // only when its text is edited, not on load or save: an unchanged text
+    // keeps the base's flag, and a new or changed one is `Valid="false"`
+    // for Loxone Config to check.
     if block.block_type == "Formula"
-        && managed_attrs.contains_key(&(block.slug.clone(), "Formula".to_string()))
+        && let Some(text) = claimed("Formula")
     {
-        el.set_attr("Valid", "false");
+        let valid = res
+            .and_then(|r| r.formula_valid.as_ref())
+            .filter(|(base_text, _)| base_text == text)
+            .map_or("false", |(_, valid)| valid.as_str());
+        el.set_attr_raw("Valid", valid);
     }
     if let Some(r) = res {
         for (n, v) in &r.attrs {

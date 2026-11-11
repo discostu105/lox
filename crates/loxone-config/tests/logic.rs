@@ -5398,3 +5398,114 @@ removed a.m.j.n
         "duplicate argument `label`",
     );
 }
+
+/// Blocks outside the connector table store a port under a key that differs
+/// from its source name: an AnalogScaler's `In` is `Input`, an RSFlipFlop's
+/// `Set`/`Reset` are `InputS`/`InputR`. Adopt names them, compile must find
+/// them again, and the round trip changes nothing.
+#[test]
+fn adopted_extern_port_names_compile_back_to_their_keys() {
+    let base = LoxoneDoc::parse(
+        "<ControlList Version=\"1\" NextObj=\"60\">\r\n\
+         \t<C Type=\"Document\" U=\"00000001-0000-0000-ffff000000000001\" ConfigVersion=\"17010727\">\r\n\
+         \t\t<C Type=\"VirtualInCaption\" U=\"00000002-0000-0000-ffff000000000001\">\r\n\
+         \t\t\t<C Type=\"VirtualIn\" U=\"00000010-0000-0000-ffff000000000001\" Title=\"Sensor A\">\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"00000010-0000-0001-01ff000000000001\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"VirtualIn\" U=\"00000011-0000-0000-ffff000000000001\" Title=\"Sensor B\">\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"00000011-0000-0001-01ff000000000001\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\
+         \t\t<C Type=\"Page\" U=\"00000005-0000-0000-ffff000000000001\" Title=\"Heizung\">\r\n\
+         \t\t\t<C Type=\"AnalogScaler\" V=\"175\" U=\"00000040-0000-0000-ffff000000000001\" Title=\"Ventil\" \
+         Px=\"100\" Py=\"300\" Px2=\"154\" Py2=\"336\">\r\n\
+         \t\t\t\t<Co K=\"Input\" U=\"00000040-0000-0001-01ff000000000001\" Nc=\"1\">\r\n\
+         \t\t\t\t\t<In Input=\"00000020-0000-0003-01ff000000000001\"/>\r\n\
+         \t\t\t\t</Co>\r\n\
+         \t\t\t\t<Co K=\"AQ\" U=\"00000040-0000-0002-01ff000000000001\" Nc=\"0\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"RSFlipFlop\" V=\"175\" U=\"00000041-0000-0000-ffff000000000001\" Title=\"Merker\" \
+         Px=\"100\" Py=\"400\" Px2=\"154\" Py2=\"436\">\r\n\
+         \t\t\t\t<Co K=\"InputS\" U=\"00000041-0000-0001-01ff000000000001\" Nc=\"1\">\r\n\
+         \t\t\t\t\t<In Input=\"00000020-0000-0003-01ff000000000001\"/>\r\n\
+         \t\t\t\t</Co>\r\n\
+         \t\t\t\t<Co K=\"InputR\" U=\"00000041-0000-0002-01ff000000000001\" Nc=\"1\">\r\n\
+         \t\t\t\t\t<In Input=\"00000011-0000-0001-01ff000000000001\"/>\r\n\
+         \t\t\t\t</Co>\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"00000041-0000-0003-01ff000000000001\" Nc=\"0\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t\t<C Type=\"And\" V=\"175\" U=\"00000020-0000-0000-ffff000000000001\" Title=\"Beide\" \
+         Px=\"300\" Py=\"300\" Px2=\"354\" Py2=\"336\" Nio=\"3\">\r\n\
+         \t\t\t\t<Co K=\"I1\" U=\"00000020-0000-0001-01ff000000000001\" Nc=\"1\">\r\n\
+         \t\t\t\t\t<In Input=\"00000010-0000-0001-01ff000000000001\"/>\r\n\
+         \t\t\t\t</Co>\r\n\
+         \t\t\t\t<Co K=\"I2\" U=\"00000020-0000-0002-01ff000000000001\" Nc=\"1\">\r\n\
+         \t\t\t\t\t<In Input=\"00000011-0000-0001-01ff000000000001\"/>\r\n\
+         \t\t\t\t</Co>\r\n\
+         \t\t\t\t<Co K=\"Q\" U=\"00000020-0000-0003-01ff000000000001\" Nc=\"0\"/>\r\n\
+         \t\t\t</C>\r\n\
+         \t\t</C>\r\n\
+         \t</C>\r\n\
+         </ControlList>\r\n"
+            .as_bytes(),
+    )
+    .unwrap();
+    let (module, mut lock, report) = adopt(&base).unwrap();
+    let text = module.to_text();
+    assert!(report.refused.is_empty(), "{:?}", report.refused);
+    assert!(lock.objects.contains_key("beide"), "{text}");
+    // The externs are bound by the names a source uses.
+    assert!(
+        text.contains("AnalogScaler(title: \"Ventil\", In: beide"),
+        "{text}"
+    );
+    assert!(text.contains("Set: beide"), "{text}");
+    let out = compile(&base, &module, &mut lock, &opts()).unwrap_or_else(|e| panic!("{e}\n{text}"));
+    assert!(loxone_config::diff::diff(&base, &out).is_empty(), "{text}");
+}
+
+/// Loxone Config marks a formula valid when its text is edited and never
+/// checks it again on load or save. A compile that leaves the text as it is
+/// keeps that flag; a changed text goes back to `Valid="false"`.
+#[test]
+fn an_unchanged_formula_keeps_its_validity() {
+    // `>` is stored as `&gt;`: the comparison is on the decoded text.
+    let src = ADOPT_SRC.replace("I1+I2", "IF(I1>I2;I1;I2)");
+    let compiled = compile(
+        &base(),
+        &Module::parse(&src).unwrap(),
+        &mut Lockfile::new(),
+        &opts(),
+    )
+    .unwrap();
+    let raw = String::from_utf8(compiled.to_bytes()).unwrap();
+    assert!(
+        raw.contains("Formula=\"IF(I1&gt;I2;I1;I2)\" Valid=\"false\""),
+        "{raw}"
+    );
+    // The user confirms the formula in Loxone Config and saves.
+    let validated =
+        LoxoneDoc::parse(raw.replace("Valid=\"false\"", "Valid=\"true\"").as_bytes()).unwrap();
+    let (module, mut lock, _) = adopt(&validated).unwrap();
+
+    let out = compile(&validated, &module, &mut lock, &opts()).unwrap();
+    let text = |d: &LoxoneDoc| String::from_utf8(d.to_bytes()).unwrap();
+    assert_eq!(
+        text(&out),
+        text(&validated),
+        "a compile without a change changes nothing"
+    );
+
+    let edited = Module::parse(
+        &module
+            .to_text()
+            .replace("IF(I1>I2;I1;I2)", "IF(I1<I2;I1;I2)"),
+    )
+    .unwrap();
+    let out = compile(&validated, &edited, &mut lock, &opts()).unwrap();
+    let raw = String::from_utf8(out.to_bytes()).unwrap();
+    assert!(
+        raw.contains("Formula=\"IF(I1&lt;I2;I1;I2)\" Valid=\"false\""),
+        "{raw}"
+    );
+}

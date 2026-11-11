@@ -99,6 +99,10 @@ pub struct CompileOptions {
 struct Residue {
     /// `Cl`/`LtE`/`WF` and [`GUI_OWNED_ATTRS`], raw values in element order.
     attrs: Vec<(String, String)>,
+    /// A Formula's text (decoded) and its raw `Valid=`: Loxone Config
+    /// checks a formula only when its text is edited, so an unchanged text
+    /// keeps the validity it has.
+    formula_valid: Option<(String, String)>,
     /// [`GUI_OWNED_CHILDREN`] subtrees in element order.
     children: Vec<Element>,
     /// GUI-owned connectors: the whole `<Co>` of
@@ -158,6 +162,14 @@ fn harvest_residue(el: &Element) -> Residue {
     // the rest of the element is the GUI's.
     let periphery = crate::periphery::periphery(el.attr("Type").unwrap_or("")).is_some();
     Residue {
+        formula_valid: (el.attr("Type") == Some("Formula"))
+            .then(|| {
+                Some((
+                    el.attr_decoded("Formula")?.into_owned(),
+                    el.attr("Valid")?.to_string(),
+                ))
+            })
+            .flatten(),
         layout: Layout::of_element(el),
         page: None,
         attr_order: el.attrs.iter().map(|a| a.name.clone()).collect(),
@@ -1144,8 +1156,9 @@ fn resolve_port(
     // Source names the port; the config stores the connector key. A port
     // the table does not know is named by its key.
     let ty = el.attr("Type").unwrap_or("");
-    let key = crate::port_names::key_or_raw(ty, port);
-    match known.iter().find(|p| p.key == key) {
+    let keys: Vec<&str> = known.iter().map(|p| p.key.as_str()).collect();
+    let key = crate::port_names::key_among(ty, port, &keys);
+    match known.iter().find(|p| Some(p.key.as_str()) == key) {
         Some(p) => Ok(ResolvedPort {
             owner_uuid: owner_uuid.clone(),
             port_uuid: p.uuid.clone(),
@@ -1156,6 +1169,17 @@ fn resolve_port(
                 .iter()
                 .map(|p| crate::port_names::name_of(ty, &p.key))
                 .collect();
+            if names.contains(&port) {
+                let keys: Vec<&str> = known
+                    .iter()
+                    .filter(|p| crate::port_names::name_of(ty, &p.key) == port)
+                    .map(|p| p.key.as_str())
+                    .collect();
+                return Err(Error::Compile(format!(
+                    "extern `{slug}`: `{port}` names several ports in the base config ({}). Write the one you mean by its key.",
+                    keys.join(", ")
+                )));
+            }
             let renamed = crate::port_names::renamed(ty, port)
                 .map(|n| format!(" `{port}` is the connector key of port `{n}`; write `{n}`."))
                 .unwrap_or_default();

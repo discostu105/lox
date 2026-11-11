@@ -49,6 +49,21 @@ pub fn key_or_raw<'a>(block_type: &str, name: &'a str) -> &'a str {
     name
 }
 
+/// The key among `keys`, a block's connector keys as the config stores
+/// them, of the port a source names `name`. This is the reverse of
+/// [`name_of`] for any block type, including types outside the table,
+/// whose keys differ (`In` is `I` on one type and `Input` on another).
+/// `None` when no key reads as `name`, or more than one does.
+pub fn key_among<'k>(block_type: &str, name: &str, keys: &[&'k str]) -> Option<&'k str> {
+    let direct = key_or_raw(block_type, name);
+    if let Some(key) = keys.iter().find(|k| **k == direct) {
+        return Some(key);
+    }
+    let mut named = keys.iter().filter(|k| name_of(block_type, k) == name);
+    let key = named.next()?;
+    named.next().is_none().then_some(*key)
+}
+
 /// The key a family name reads back to on a type outside the table.
 fn generic_key(name: &str) -> Option<&'static str> {
     Some(match name {
@@ -552,6 +567,50 @@ fn intern(s: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Types outside the connector table store the same port under
+    // different keys; the source names it the same way on all of them.
+    #[test]
+    fn key_among_reverses_name_of_on_any_type() {
+        let cases: &[(&str, &[&str], &str, &str)] = &[
+            (
+                "AnalogScaler",
+                &["Input", "Src1", "Dst1", "AQ"],
+                "In",
+                "Input",
+            ),
+            (
+                "RSFlipFlop",
+                &["InputS", "InputTrigger", "InputR", "Q"],
+                "Set",
+                "InputS",
+            ),
+            (
+                "RSFlipFlop",
+                &["InputS", "InputTrigger", "InputR", "Q"],
+                "Reset",
+                "InputR",
+            ),
+            (
+                "RSFlipFlop",
+                &["InputS", "InputTrigger", "InputR", "Q"],
+                "Trigger",
+                "InputTrigger",
+            ),
+            ("SomeActuator", &["I", "Q"], "In", "I"),
+            ("SomeLogic", &["Input1", "Input2", "Q"], "In2", "Input2"),
+            // A key is its own name when it has no other.
+            ("AnalogScaler", &["Input", "Src1"], "Src1", "Src1"),
+        ];
+        for (ty, keys, name, key) in cases {
+            assert_eq!(key_among(ty, name, keys), Some(*key), "{ty}.{name}");
+            assert_eq!(name_of(ty, key), *name, "{ty}.{key}");
+        }
+        assert_eq!(key_among("AnalogScaler", "Nope", &["Input"]), None);
+        // Two keys that read the same: neither is picked.
+        assert_eq!(key_among("Odd", "In", &["Input", "I0x"]), Some("Input"));
+        assert_eq!(key_among("Odd", "In3", &["I3", "Input3"]), None);
+    }
     use crate::connectors::{BUILTIN_TYPES, builtin};
     use std::collections::BTreeSet;
 

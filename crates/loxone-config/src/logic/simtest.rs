@@ -127,10 +127,18 @@ pub fn plan_tests(
     for (slug, e) in &lock.externals {
         uuid_of.insert(slug.as_str(), e.uuid.as_str());
     }
-    let types: BTreeMap<String, String> = compiled
-        .objects()
-        .into_iter()
-        .map(|o| (o.uuid, o.block_type))
+    let objects = compiled.objects();
+    let keys_of: BTreeMap<&str, Vec<String>> = objects
+        .iter()
+        .filter_map(|o| {
+            let el = compiled.element_at(&o.path)?;
+            let keys = crate::doc::ports(el).into_iter().map(|p| p.key).collect();
+            Some((o.uuid.as_str(), keys))
+        })
+        .collect();
+    let types: BTreeMap<String, String> = objects
+        .iter()
+        .map(|o| (o.uuid.clone(), o.block_type.clone()))
         .collect();
     let resolve = |port: &PortRef, test: &str| -> Result<Signal> {
         let compile_err = |msg: String| Error::Compile(format!("test \"{test}\": {msg}"));
@@ -145,10 +153,16 @@ pub fn plan_tests(
                 "`{port}`: object {uuid} is not in the compiled config"
             )));
         };
+        // The object's own keys decide: on a type outside the table the
+        // same name stands for different keys (`In` is `I` or `Input`).
+        let keys = keys_of.get(*uuid).map(Vec::as_slice).unwrap_or_default();
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let key = crate::port_names::key_among(ty, &port.port, &keys)
+            .unwrap_or(crate::port_names::key_or_raw(ty, &port.port));
         Ok(Signal {
             port: port.clone(),
             object: uuid.to_string(),
-            key: crate::port_names::key_or_raw(ty, &port.port).to_string(),
+            key: key.to_string(),
         })
     };
     let mut runs = Vec::new();

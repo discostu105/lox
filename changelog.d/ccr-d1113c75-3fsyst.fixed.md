@@ -21,3 +21,8 @@
 - **`lox --help`** lists `tui`.
 - **`lox logic … | head`** and `loxl … | head` end quietly instead of panicking.
 - **`lox watch -i 0`** is rejected instead of polling without a pause.
+- **`lox logic compile`** finds the ports of an extern by the names `lox logic adopt` writes. On block types
+  such as AnalogScaler, RSFlipFlop or Memory it failed with "has no port `In`", although the list it printed
+  named `In`.
+- **`lox logic compile`** keeps `Valid="true"` on a formula whose text did not change. Loxone Config checks a
+  formula only when its text is edited, so every compiled formula showed as invalid.
