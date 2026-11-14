@@ -915,7 +915,11 @@ fn update_serial(cfg: &Config, client: &loxone_client::LoxClient) -> Option<Stri
     if let Some(s) = project().and_then(|p| p.serial) {
         return Some(s);
     }
-    let mac = client.value("/dev/cfg/mac").ok()?;
+    mac_serial(&client.value("/dev/cfg/mac").ok()?)
+}
+
+/// The serial in a MAC address: `50:4F:94:A2:62:36` → `504F94A26236`.
+fn mac_serial(mac: &str) -> Option<String> {
     let serial: String = mac.chars().filter(char::is_ascii_hexdigit).collect();
     (serial.len() == 12).then(|| serial.to_ascii_uppercase())
 }
@@ -958,12 +962,10 @@ fn wait_for_new_firmware(
     cfg: &Config,
     before: &str,
     timeout: Duration,
-    mut progress: impl FnMut(&str),
+    progress: impl FnMut(&str),
 ) -> Result<String> {
     let started = std::time::Instant::now();
-    let deadline = started + timeout;
-    let mut last = String::new();
-    loop {
+    watch_firmware(before, timeout, progress, || {
         std::thread::sleep(Duration::from_secs(10));
         // A fresh client per poll: the reboot drops connections and tokens.
         let state = cfg
@@ -971,10 +973,25 @@ fn wait_for_new_firmware(
             .ok()
             .and_then(|c| c.system_status().ok())
             .map(|s| (s.firmware, s.plc));
-        let stuck = started.elapsed() > STUCK_AFTER;
+        (started.elapsed(), state)
+    })
+}
+
+/// The wait of [`wait_for_new_firmware`]: `poll` returns the time since the
+/// start and the firmware and program state, `None` while the Miniserver is
+/// offline. `progress` gets each new status line once.
+fn watch_firmware(
+    before: &str,
+    timeout: Duration,
+    mut progress: impl FnMut(&str),
+    mut poll: impl FnMut() -> (Duration, Option<(String, PlcState)>),
+) -> Result<String> {
+    let mut last = String::new();
+    loop {
+        let (elapsed, state) = poll();
         let line = match &state {
             None => "Miniserver offline (rebooting)…".to_string(),
-            Some((v, _)) if v == before && stuck => format!(
+            Some((v, _)) if v == before && elapsed > STUCK_AFTER => format!(
                 "Still on {v} after {} minutes. The Miniserver may have ignored the request: \
                  stop with Ctrl+C and run `lox update install --yes` again.",
                 STUCK_AFTER.as_secs() / 60
@@ -992,7 +1009,7 @@ fn wait_for_new_firmware(
         {
             return Ok(v);
         }
-        if std::time::Instant::now() > deadline {
+        if elapsed > timeout {
             bail!(
                 "The Miniserver still runs {before} after {} minutes. Check `lox log` for an \
                  update error, or run `lox update install --yes` again.",
@@ -1339,6 +1356,82 @@ mod tests {
             current
                 .notes("17.3.11.12", Some("17.2.8.28"), "2026-11-14".into())
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn mac_serial_strips_the_separators() {
+        assert_eq!(
+            mac_serial("50:4f:94:a2:62:36").as_deref(),
+            Some("504F94A26236")
+        );
+        assert_eq!(mac_serial("50:4F:94"), None);
+    }
+
+    /// Runs the wait over scripted polls: (minutes since start, state).
+    fn watch(
+        polls: Vec<(u64, Option<(&str, PlcState)>)>,
+        timeout_min: u64,
+    ) -> (Result<String>, Vec<String>) {
+        let mut polls = polls.into_iter();
+        let mut lines = Vec::new();
+        let result = watch_firmware(
+            "17.2.8.28",
+            Duration::from_secs(timeout_min * 60),
+            |l| lines.push(l.to_string()),
+            || {
+                let (min, state) = polls.next().expect("polled past the script");
+                (
+                    Duration::from_secs(min * 60),
+                    state.map(|(v, p)| (v.to_string(), p)),
+                )
+            },
+        );
+        (result, lines)
+    }
+
+    #[test]
+    fn firmware_wait_returns_once_the_new_version_runs() {
+        let (result, lines) = watch(
+            vec![
+                (1, Some(("17.2.8.28", PlcState::Running))),
+                (2, Some(("17.2.8.28", PlcState::Running))),
+                (3, None),
+                (4, Some(("17.3.11.12", PlcState::Booting))),
+                (5, Some(("17.3.11.12", PlcState::Running))),
+            ],
+            30,
+        );
+        assert_eq!(result.unwrap(), "17.3.11.12");
+        assert_eq!(
+            lines,
+            [
+                "Still on 17.2.8.28, downloading…",
+                "Miniserver offline (rebooting)…",
+                "Firmware 17.3.11.12, program Booting…",
+                "Firmware 17.3.11.12, program Running…",
+            ]
+        );
+    }
+
+    #[test]
+    fn firmware_wait_says_when_nothing_happens_and_gives_up() {
+        let (result, lines) = watch(
+            vec![
+                (5, Some(("17.2.8.28", PlcState::Running))),
+                (11, Some(("17.2.8.28", PlcState::Running))),
+                (16, Some(("17.2.8.28", PlcState::Running))),
+            ],
+            15,
+        );
+        assert!(
+            lines[1].starts_with("Still on 17.2.8.28 after 10 minutes"),
+            "{lines:?}"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("still runs 17.2.8.28 after 15 minutes"),
+            "{err}"
         );
     }
 
