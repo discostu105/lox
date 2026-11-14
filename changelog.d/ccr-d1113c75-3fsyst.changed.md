@@ -1,1 +1,0 @@
-- **Release binaries** are a quarter smaller: they ship without symbols.
